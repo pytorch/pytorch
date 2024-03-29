@@ -5931,6 +5931,16 @@ def while_loop(cond_fn, body_fn, operands):
     return list(map(TensorBox.create, result))
 
 
+# @register_lowering(torch.ops.aten._make_dep_token.default)
+# def _make_dep_token():
+#     return TensorBox.create()
+
+
+@register_lowering(torch.ops.aten._sink_tokens.default)
+def _sink_tokens(tokens):
+    return ir.SinkTokens()
+
+
 @register_lowering(torch.ops.higher_order.with_effects)
 def with_effects(token, op, *args, **kwargs):
     result = ir.EffectfulKernel.create(op, *args, **kwargs)

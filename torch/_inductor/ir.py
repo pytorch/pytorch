@@ -139,6 +139,7 @@ def validate_ir(node_or_nodes):
                     sympy.logic.boolalg.Boolean,
                     Expr,
                     EffectfulKernel,
+                    SinkTokens,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -7321,6 +7322,21 @@ class EffectfulKernel(FallbackKernel):
 
     def has_side_effects(self):
         return True
+
+
+class SinkTokens(ExternKernel):
+    def __init__(self):
+        super().__init__(
+            None,
+            NoneLayout(torch.device("cpu")),  # type: ignore[arg-type]
+            [],
+        )  # type: ignore[arg-type]
+
+    # def has_side_effects(self):
+    #     return True
+
+    def codegen(self, wrapper):
+        pass
 
 
 class InterpreterShim(torch.fx.Interpreter):
