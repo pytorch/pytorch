@@ -3983,8 +3983,8 @@ class ExternKernel(InputsKernel):
         for r in reads:
             if r.name in V.graph.name_to_buffer.keys():
                 reads_bufs.append(V.graph.name_to_buffer[r.name])
-            elif r.name in V.graph.graph_inputs.keys():
-                reads_bufs.append(V.graph.graph_inputs[r.name])
+            elif r.name in V.graph.graph_inputs_original.keys():
+                reads_bufs.append(V.graph.graph_inputs_original[r.name])
         if any(buf.layout.is_channels_last_contiguous() for buf in reads_bufs):
             x.unwrap_view().freeze_layout_with_same_order(make_channels_last_strides_for(x.unwrap_view().get_size()))
         else:
