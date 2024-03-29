@@ -179,6 +179,8 @@ def foreach_all_gather_copy_out(
                 unsharded_param = unsharded_param.to_local()
             with torch.no_grad():
                 if inductor_config.use_fsdp_custom_op:
+                    # TODO(yf225): find a way to merge `contiguous_view_as_strided` and `copy_`
+                    # (currently throws "'NoneType' object has no attribute 'name'" in `and kwargs["out"] in tx.output.graphargs` line in _dynamo/variables/torch.py)
                     split_unpadded = torch.ops.fsdp.contiguous_view_as_strided(
                         splits[i],
                         fsdp_param._orig_size,

@@ -327,7 +327,7 @@ def replace_foreach_all_gather_copy_out_pattern(mod):
                     mod.graph.erase_node(clone_node)
                 foreach_copy_start_index = block_seq_start_index + num_blocks * 4
                 foreach_copy_node = node_list[foreach_copy_start_index]
-                assert foreach_copy_node.target is torch.ops.aten._foreach_copy_.default
+                assert foreach_copy_node.target is torch.ops.aten._foreach_copy_.default, f"got: {foreach_copy_node.target}, from {foreach_copy_node}"
                 for copy_into_node, copy_from_node in zip(foreach_copy_node.args[0], foreach_copy_node.args[1]):
                     assert copy_into_node in primal_inputs_tensor_only
                     # TODO(yf225): since we don't know from the graph that primals are size-0 in graph output,
@@ -653,244 +653,130 @@ def _find_next_block_of_inplace_copy_nodes(node_list, start_index, expected_bloc
     return inplace_copy_nodes_start_index, inplace_copy_nodes
 
 
-def _create_new_node_and_replace(mod, node):
+def _create_new_node_and_replace(mod, node, *, propagate_meta=False):
     new_node = mod.graph.call_function(node.target, node.args, node.kwargs)
-    node.replace_all_uses_with(new_node)
+    node.replace_all_uses_with(new_node, propagate_meta=propagate_meta)
     mod.graph.erase_node(node)
     return new_node
 
 
-def raise_all_gather_to_overlap_with_prev_layer_compute_no_custom_op(mod):
+def raise_all_gather_to_overlap_with_prev_layer_compute(mod):
     """
-    ======== [Case 1] no `aten.empty` reuse ========
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_common.py:140 in _to_dtype_if_needed, code: return tensor.to(dtype)
+    convert_element_type: "bf16[8192000]" = torch.ops.prims.convert_element_type.default(primals_2, torch.bfloat16);  primals_2 = None
+    convert_element_type_1: "bf16[256]" = torch.ops.prims.convert_element_type.default(primals_3, torch.bfloat16);  primals_3 = None
+    convert_element_type_2: "bf16[8192000]" = torch.ops.prims.convert_element_type.default(primals_4, torch.bfloat16);  primals_4 = None
 
-    empty: "f32[8352]" = torch.ops.aten.empty.memory_format([8352], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
-    slice_1: "f32[4176]" = torch.ops.aten.slice.Tensor(empty, 0, 0, 4176);  empty = None
-    split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_1, [2048, 64, 2048, 16])
-    getitem: "f32[2048]" = split_with_sizes[0]
-    getitem_1: "f32[64]" = split_with_sizes[1]
-    getitem_2: "f32[2048]" = split_with_sizes[2]
-    getitem_3: "f32[16]" = split_with_sizes[3];  split_with_sizes = None
-    copy__default = torch.ops.aten.copy_.default(getitem, desc_of_primals_2);
-    copy__default_1 = torch.ops.aten.copy_.default(getitem_1, desc_of_primals_3);
-    copy__default_2 = torch.ops.aten.copy_.default(getitem_2, desc_of_primals_4);
-    copy__default_3 = torch.ops.aten.copy_.default(getitem_3, desc_of_primals_5);
-    all_gather_into_tensor: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_1, 2, '0')
-    wait_tensor: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:80 in foreach_all_gather, code: all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(all_gather_input_numel, world_size, rank, dtype, device, inp_split_sizes, param_all_gather_inputs)
+    all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(16384256, 8, 0, torch.bfloat16, device(type='cuda', index=0), [8192000, 256, 8192000], [convert_element_type, convert_element_type_1, convert_element_type_2]);  convert_element_type = convert_element_type_1 = convert_element_type_2 = None
+    getitem: "bf16[16384256]" = all_gather_copy_in[0]
+    getitem_1: "bf16[131074048]" = all_gather_copy_in[1];  all_gather_copy_in = None
 
-    ... (uses `wait_tensor` in compute)
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:229 in all_gather_tensor, code: tensor = torch.ops._c10d_functional.all_gather_into_tensor(
+    all_gather_into_tensor: "bf16[131074048]" = torch.ops._c10d_functional.all_gather_into_tensor.default(getitem, 8, '0');  getitem = None
 
-    empty_A: "f32[...]" = torch.ops.aten.empty.memory_format([...], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
-    slice_X: "f32[...]" = torch.ops.aten.slice.Tensor(empty_A, 0, 0, ...);  empty = None
-    split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_X, [2048, 64, 2048, 16])
-    getitem_Y: "f32[2048]" = split_with_sizes[0]
-    getitem_Z: "f32[64]" = split_with_sizes[1]
-    getitem_K: "f32[2048]" = split_with_sizes[2]
-    getitem_L: "f32[16]" = split_with_sizes[3];  split_with_sizes = None
-    copy__default_4 = torch.ops.aten.copy_.default(getitem_Y, desc_of_primals_11);
-    copy__default_5 = torch.ops.aten.copy_.default(getitem_Z, desc_of_primals_12);
-    copy__default_6 = torch.ops.aten.copy_.default(getitem_K, desc_of_primals_13);
-    copy__default_7 = torch.ops.aten.copy_.default(getitem_L, desc_of_primals_14);
-    all_gather_into_tensor_1: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_X, 2, '0')
-    wait_tensor_1: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor_1);  all_gather_into_tensor_1 = None
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:144 in wait_tensor, code: return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
+    wait_tensor: "bf16[131074048]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
 
-    ... (uses `wait_tensor_1` in compute)
+    ... (uses wait_tensor in compute)
 
-    ->
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_common.py:140 in _to_dtype_if_needed, code: return tensor.to(dtype)
+    convert_element_type_3: "bf16[524288]" = torch.ops.prims.convert_element_type.default(primals_9, torch.bfloat16);  primals_9 = None
+    convert_element_type_4: "bf16[524288]" = torch.ops.prims.convert_element_type.default(primals_10, torch.bfloat16);  primals_10 = None
+    convert_element_type_5: "bf16[524288]" = torch.ops.prims.convert_element_type.default(primals_11, torch.bfloat16);  primals_11 = None
+    convert_element_type_6: "bf16[524288]" = torch.ops.prims.convert_element_type.default(primals_12, torch.bfloat16);  primals_12 = None
+    convert_element_type_7: "bf16[1441792]" = torch.ops.prims.convert_element_type.default(primals_13, torch.bfloat16);  primals_13 = None
+    convert_element_type_8: "bf16[1441792]" = torch.ops.prims.convert_element_type.default(primals_14, torch.bfloat16);  primals_14 = None
+    convert_element_type_9: "bf16[1441792]" = torch.ops.prims.convert_element_type.default(primals_15, torch.bfloat16);  primals_15 = None
+    convert_element_type_10: "bf16[256]" = torch.ops.prims.convert_element_type.default(primals_16, torch.bfloat16);  primals_16 = None
+    convert_element_type_11: "bf16[256]" = torch.ops.prims.convert_element_type.default(primals_17, torch.bfloat16);  primals_17 = None
 
-    empty: "f32[8352]" = torch.ops.aten.empty.memory_format([8352], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
-    slice_1: "f32[4176]" = torch.ops.aten.slice.Tensor(empty, 0, 0, 4176);  empty = None
-    split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_1, [2048, 64, 2048, 16])
-    getitem: "f32[2048]" = split_with_sizes[0]
-    getitem_1: "f32[64]" = split_with_sizes[1]
-    getitem_2: "f32[2048]" = split_with_sizes[2]
-    getitem_3: "f32[16]" = split_with_sizes[3];  split_with_sizes = None
-    copy__default = torch.ops.aten.copy_.default(getitem, desc_of_primals_2);
-    copy__default_1 = torch.ops.aten.copy_.default(getitem_1, desc_of_primals_3);
-    copy__default_2 = torch.ops.aten.copy_.default(getitem_2, desc_of_primals_4);
-    copy__default_3 = torch.ops.aten.copy_.default(getitem_3, desc_of_primals_5);
-    all_gather_into_tensor: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_1, 2, '0')
-    wait_tensor: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
-    empty_A: "f32[...]" = torch.ops.aten.empty.memory_format([...], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
-    slice_X: "f32[...]" = torch.ops.aten.slice.Tensor(empty_A, 0, 0, ...);  empty = None
-    split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_X, [2048, 64, 2048, 16])
-    getitem_Y: "f32[2048]" = split_with_sizes[0]
-    getitem_Z: "f32[64]" = split_with_sizes[1]
-    getitem_K: "f32[2048]" = split_with_sizes[2]
-    getitem_L: "f32[16]" = split_with_sizes[3];  split_with_sizes = None
-    copy__default_4 = torch.ops.aten.copy_.default(getitem_Y, desc_of_primals_11);
-    copy__default_5 = torch.ops.aten.copy_.default(getitem_Z, desc_of_primals_12);
-    copy__default_6 = torch.ops.aten.copy_.default(getitem_K, desc_of_primals_13);
-    copy__default_7 = torch.ops.aten.copy_.default(getitem_L, desc_of_primals_14);
-    all_gather_into_tensor_1: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_X, 2, '0')
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_composable/fsdp/_fsdp_collectives.py:80 in foreach_all_gather, code: all_gather_input, all_gather_output = torch.ops.fsdp.all_gather_copy_in(all_gather_input_numel, world_size, rank, dtype, device, inp_split_sizes, param_all_gather_inputs)
+    all_gather_copy_in_1 = torch.ops.fsdp.all_gather_copy_in.default(6423040, 8, 0, torch.bfloat16, device(type='cuda', index=0), [524288, 524288, 524288, 524288, 1441792, 1441792, 1441792, 256, 256], [convert_element_type_3, convert_element_type_4, convert_element_type_5, convert_element_type_6, convert_element_type_7, convert_element_type_8, convert_element_type_9, convert_element_type_10, convert_element_type_11]);  convert_element_type_3 = convert_element_type_4 = convert_element_type_5 = convert_element_type_6 = convert_element_type_7 = convert_element_type_8 = convert_element_type_9 = convert_element_type_10 = convert_element_type_11 = None
+    getitem_14: "bf16[6423040]" = all_gather_copy_in_1[0]
+    getitem_15: "bf16[51384320]" = all_gather_copy_in_1[1];  all_gather_copy_in_1 = None
 
-    ... (uses `wait_tensor` in compute, which overlaps with `all_gather_into_tensor_1` comm op)
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:229 in all_gather_tensor, code: tensor = torch.ops._c10d_functional.all_gather_into_tensor(
+    all_gather_into_tensor_1: "bf16[51384320]" = torch.ops._c10d_functional.all_gather_into_tensor.default(getitem_14, 8, '0');  getitem_14 = None
 
-    wait_tensor_1: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor_1);  all_gather_into_tensor_1 = None
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:144 in wait_tensor, code: return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
+    wait_tensor_1: "bf16[51384320]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor_1);  all_gather_into_tensor_1 = None
 
-    ... (uses `wait_tensor_1` in compute)
-
-    ======== [Case 2] has `aten.empty` reuse ========
-
-    empty: "f32[8352]" = torch.ops.aten.empty.memory_format([8352], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
-    slice_1: "f32[4176]" = torch.ops.aten.slice.Tensor(empty, 0, 0, 4176);  empty = None
-    split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_1, [2048, 64, 2048, 16])
-    getitem: "f32[2048]" = split_with_sizes[0]
-    getitem_1: "f32[64]" = split_with_sizes[1]
-    getitem_2: "f32[2048]" = split_with_sizes[2]
-    getitem_3: "f32[16]" = split_with_sizes[3];  split_with_sizes = None
-    copy__default = torch.ops.aten.copy_.default(getitem, primals_2);  primals_2 = None
-    copy__default_1 = torch.ops.aten.copy_.default(getitem_1, primals_3);  primals_3 = None
-    copy__default_2 = torch.ops.aten.copy_.default(getitem_2, primals_4);  primals_4 = None
-    copy__default_3 = torch.ops.aten.copy_.default(getitem_3, primals_5);  primals_5 = None
-    all_gather_into_tensor: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_1, 2, '0')
-    wait_tensor: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
-
-    ... (uses `wait_tensor` in compute)
-
-    copy__default_4 = torch.ops.aten.copy_.default(getitem, primals_11);  primals_11 = None
-    copy__default_5 = torch.ops.aten.copy_.default(getitem_1, primals_12);  primals_12 = None
-    copy__default_6 = torch.ops.aten.copy_.default(getitem_2, primals_13);  primals_13 = None
-    copy__default_7 = torch.ops.aten.copy_.default(getitem_3, primals_14);  primals_14 = None
-    all_gather_into_tensor_1: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_1, 2, '0')
-    wait_tensor_1: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor_1);  all_gather_into_tensor_1 = None
-
-    ... (uses `wait_tensor_1` in compute)
+    ... (uses wait_tensor_1 in compute)
 
     ->
 
-    empty: "f32[8352]" = torch.ops.aten.empty.memory_format([8352], dtype = torch.float32, device = device(type='cuda', index=0), pin_memory = False)
-    slice_1: "f32[4176]" = torch.ops.aten.slice.Tensor(empty, 0, 0, 4176);  empty = None
-    split_with_sizes = torch.ops.aten.split_with_sizes.default(slice_1, [2048, 64, 2048, 16])
-    getitem: "f32[2048]" = split_with_sizes[0]
-    getitem_1: "f32[64]" = split_with_sizes[1]
-    getitem_2: "f32[2048]" = split_with_sizes[2]
-    getitem_3: "f32[16]" = split_with_sizes[3];  split_with_sizes = None
-    copy__default = torch.ops.aten.copy_.default(getitem, primals_2);  primals_2 = None
-    copy__default_1 = torch.ops.aten.copy_.default(getitem_1, primals_3);  primals_3 = None
-    copy__default_2 = torch.ops.aten.copy_.default(getitem_2, primals_4);  primals_4 = None
-    copy__default_3 = torch.ops.aten.copy_.default(getitem_3, primals_5);  primals_5 = None
-    all_gather_into_tensor: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_1, 2, '0')
+    convert_element_type: "bf16[8192000]" = torch.ops.prims.convert_element_type.default(primals_2, torch.bfloat16);  primals_2 = None
+    convert_element_type_1: "bf16[256]" = torch.ops.prims.convert_element_type.default(primals_3, torch.bfloat16);  primals_3 = None
+    convert_element_type_2: "bf16[8192000]" = torch.ops.prims.convert_element_type.default(primals_4, torch.bfloat16);  primals_4 = None
+    all_gather_copy_in = torch.ops.fsdp.all_gather_copy_in.default(16384256, 8, 0, torch.bfloat16, device(type='cuda', index=0), [8192000, 256, 8192000], [convert_element_type, convert_element_type_1, convert_element_type_2]);  convert_element_type = convert_element_type_1 = convert_element_type_2 = None
+    getitem: "bf16[16384256]" = all_gather_copy_in[0]
+    getitem_1: "bf16[131074048]" = all_gather_copy_in[1];  all_gather_copy_in = None
+    all_gather_into_tensor: "bf16[131074048]" = torch.ops._c10d_functional.all_gather_into_tensor.default(getitem, 8, '0');  getitem = None
+    wait_tensor: "bf16[131074048]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+    convert_element_type_3: "bf16[524288]" = torch.ops.prims.convert_element_type.default(primals_9, torch.bfloat16);  primals_9 = None
+    convert_element_type_4: "bf16[524288]" = torch.ops.prims.convert_element_type.default(primals_10, torch.bfloat16);  primals_10 = None
+    convert_element_type_5: "bf16[524288]" = torch.ops.prims.convert_element_type.default(primals_11, torch.bfloat16);  primals_11 = None
+    convert_element_type_6: "bf16[524288]" = torch.ops.prims.convert_element_type.default(primals_12, torch.bfloat16);  primals_12 = None
+    convert_element_type_7: "bf16[1441792]" = torch.ops.prims.convert_element_type.default(primals_13, torch.bfloat16);  primals_13 = None
+    convert_element_type_8: "bf16[1441792]" = torch.ops.prims.convert_element_type.default(primals_14, torch.bfloat16);  primals_14 = None
+    convert_element_type_9: "bf16[1441792]" = torch.ops.prims.convert_element_type.default(primals_15, torch.bfloat16);  primals_15 = None
+    convert_element_type_10: "bf16[256]" = torch.ops.prims.convert_element_type.default(primals_16, torch.bfloat16);  primals_16 = None
+    convert_element_type_11: "bf16[256]" = torch.ops.prims.convert_element_type.default(primals_17, torch.bfloat16);  primals_17 = None
+    all_gather_copy_in_1 = torch.ops.fsdp.all_gather_copy_in.default(6423040, 8, 0, torch.bfloat16, device(type='cuda', index=0), [524288, 524288, 524288, 524288, 1441792, 1441792, 1441792, 256, 256], [convert_element_type_3, convert_element_type_4, convert_element_type_5, convert_element_type_6, convert_element_type_7, convert_element_type_8, convert_element_type_9, convert_element_type_10, convert_element_type_11]);  convert_element_type_3 = convert_element_type_4 = convert_element_type_5 = convert_element_type_6 = convert_element_type_7 = convert_element_type_8 = convert_element_type_9 = convert_element_type_10 = convert_element_type_11 = None
+    getitem_14: "bf16[6423040]" = all_gather_copy_in_1[0]
+    getitem_15: "bf16[51384320]" = all_gather_copy_in_1[1];  all_gather_copy_in_1 = None
+    all_gather_into_tensor_1: "bf16[51384320]" = torch.ops._c10d_functional.all_gather_into_tensor.default(getitem_14, 8, '0');  getitem_14 = None
 
-    wait_tensor: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
-    copy__default_4 = torch.ops.aten.copy_.default(getitem, primals_11);  primals_11 = None
-    copy__default_5 = torch.ops.aten.copy_.default(getitem_1, primals_12);  primals_12 = None
-    copy__default_6 = torch.ops.aten.copy_.default(getitem_2, primals_13);  primals_13 = None
-    copy__default_7 = torch.ops.aten.copy_.default(getitem_3, primals_14);  primals_14 = None
-    all_gather_into_tensor_1: "f32[8352]" = torch.ops._c10d_functional.all_gather_into_tensor.default(slice_1, 2, '0')
-    ... (uses `wait_tensor` in compute, which overlaps with `all_gather_into_tensor_1` comm op
+    ... (uses wait_tensor in compute)
 
-    wait_tensor_1: "f32[8352]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor_1);  all_gather_into_tensor_1 = None
+    wait_tensor_1: "bf16[51384320]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor_1);  all_gather_into_tensor_1 = None
 
-    ... (uses `wait_tensor_1` in compute)
+    ... (uses wait_tensor_1 in compute)
     """
     primal_inputs_tensor_only = [x for x in list(filter(torch._functorch.partitioners._is_primal, mod.graph.nodes)) if isinstance(x.meta.get('val', None), torch.Tensor)]
     node_list = list(mod.graph.nodes)
-    prev_all_gather_wait_node = None
     # First step: identify all nodes that need to be moved.
     all_gather_blocks = []
-    known_getitem_nodes = set()
     j = 0
-    prev_all_gather_wait_node_idx = -1
     while j < len(node_list):
         nj = node_list[j]
         if (
-            nj.target is torch.ops.aten.empty.memory_format
-            and (node_list[j+1].target is torch.ops.aten.slice.Tensor and node_list[j+1].args[0] == nj)
-            and (node_list[j+2].target is torch.ops.aten.split_with_sizes.default and node_list[j+2].args[0] == node_list[j+1])
+            nj.target is torch.ops.fsdp.all_gather_copy_in.default
+            and (node_list[j+1].target is operator.getitem and node_list[j+1].args[0] == nj)
+            and (node_list[j+2].target is operator.getitem and node_list[j+2].args[0] == nj)
         ):
-            # Handle Case 1
-            empty_node = nj
-            slice_after_empty_node = node_list[j+1]
-            split_with_sizes_node_idx = j+2
-            split_with_sizes_node = node_list[split_with_sizes_node_idx]
-            num_blocks = len(split_with_sizes_node.args[1])
-            getitem_start_index = split_with_sizes_node_idx + 1
-            if not all(
-                node.target is operator.getitem and node.args[0] == split_with_sizes_node
-                for node in node_list[getitem_start_index:getitem_start_index+num_blocks]
-            ):
-                j += 1
-                continue
-            getitem_nodes = node_list[getitem_start_index:getitem_start_index+num_blocks]
+            all_gather_copy_in_node = nj
+            getitem_0_node = node_list[j+1]
+            getitem_1_node = node_list[j+2]
 
-            inplace_copy_nodes_start_index, inplace_copy_nodes = _find_next_block_of_inplace_copy_nodes(
-                node_list, getitem_start_index+num_blocks, num_blocks, getitem_nodes
-            )
-            if not (inplace_copy_nodes_start_index is not None and len(inplace_copy_nodes) == num_blocks):
-                j += 1
-                continue
-
-            end_nodes = []
-            for copy_node in inplace_copy_nodes:
-                copy_from = copy_node.args[1]
-                end_nodes.append(copy_from)
-            op_chains_from_primals = _get_op_chains_from_primals(end_nodes, primal_inputs_tensor_only, node_list)
-            if len(op_chains_from_primals) != num_blocks:
-                j += 1
-                continue
-
-            for k in range(inplace_copy_nodes_start_index+num_blocks, len(node_list)):
-                if node_list[k].target is torch.ops._c10d_functional.all_gather_into_tensor.default and node_list[k].args[0] == slice_after_empty_node:
+            all_gather_node_start_index = None
+            for k in range(j+3, len(node_list)):
+                if node_list[k].target is torch.ops._c10d_functional.all_gather_into_tensor.default and node_list[k].args[0] == getitem_0_node:
                     all_gather_node_start_index = k
                     break
+            if all_gather_node_start_index is None:
+                j += 1
+                continue
             all_gather_node = node_list[all_gather_node_start_index]
-            assert all_gather_node.target is torch.ops._c10d_functional.all_gather_into_tensor.default, f"got: {all_gather_node}. Full graph: {mod.graph}"
+            assert all_gather_node.target is torch.ops._c10d_functional.all_gather_into_tensor.default
             all_gather_wait_node = node_list[all_gather_node_start_index+1]
             assert all_gather_wait_node.target is torch.ops._c10d_functional.wait_tensor.default
+
+            end_nodes = all_gather_copy_in_node.args[6]
+            op_chains_from_primals = _get_op_chains_from_primals(end_nodes, primal_inputs_tensor_only, node_list)
+            if len(op_chains_from_primals) != len(end_nodes):
+                j += 1
+                continue
             all_gather_blocks.append({
-                "empty_node": empty_node,
-                "slice_after_empty_node": slice_after_empty_node,
-                "split_with_sizes_node": split_with_sizes_node,
-                "getitem_nodes": getitem_nodes,
                 "op_chains_from_primals": op_chains_from_primals,
-                "inplace_copy_nodes": inplace_copy_nodes,
+                "all_gather_copy_in_node": all_gather_copy_in_node,
+                "getitem_0_node": getitem_0_node,
+                "getitem_1_node": getitem_1_node,
                 "all_gather_node": all_gather_node,
                 "all_gather_wait_node": all_gather_wait_node,
             })
-            known_getitem_nodes.update(getitem_nodes)
-            prev_all_gather_wait_node_idx = all_gather_node_start_index + 1
-            j = prev_all_gather_wait_node_idx + 1
-        elif nj.target == torch.ops._c10d_functional.all_gather_into_tensor.default:
-            # Handle Case 2
-            all_gather_node = nj
-            all_gather_wait_node = node_list[j+1]
-            inplace_copy_nodes = []
-            k = j - 1
-            while k > prev_all_gather_wait_node_idx:
-                if (
-                    node_list[k].target is torch.ops.aten.copy_.default
-                    and node_list[k].args[0] in known_getitem_nodes
-                ):
-                    inplace_copy_nodes.append(node_list[k])
-                else:
-                    break
-                k -= 1
-            if len(inplace_copy_nodes) > 0:
-                end_nodes = []
-                for copy_node in inplace_copy_nodes:
-                    copy_from = copy_node.args[1]
-                    end_nodes.append(copy_from)
-                op_chains_from_primals = _get_op_chains_from_primals(end_nodes, primal_inputs_tensor_only, node_list)
-                if len(op_chains_from_primals) != num_blocks:
-                    j += 1
-                    continue
-                all_gather_blocks.append({
-                    "empty_node": None,
-                    "slice_after_empty_node": None,
-                    "split_with_sizes_node": None,
-                    "getitem_nodes": None,
-                    "op_chains_from_primals": op_chains_from_primals,
-                    "inplace_copy_nodes": inplace_copy_nodes,
-                    "all_gather_node": all_gather_node,
-                    "all_gather_wait_node": all_gather_wait_node,
-                })
-                prev_all_gather_wait_node_idx = j + 1
-                j += 2
-                continue
-            else:
-                j += 1
-                continue
+            j = all_gather_node_start_index + 2
         else:
             j += 1
             continue
@@ -898,37 +784,99 @@ def raise_all_gather_to_overlap_with_prev_layer_compute_no_custom_op(mod):
     for block in all_gather_blocks:
         torch_log.warning(f"block: {block}")
     # Second step: move the nodes (starting with the last block in graph)
+    prev_all_gather_wait_node = None
     for i in range(len(all_gather_blocks)-1, 0, -1):  # range ends at 0 (exclusive), because we don't move the first block in graph
         prev_all_gather_wait_node = all_gather_blocks[i-1]["all_gather_wait_node"]
         torch_log.warning(f"prev_all_gather_wait_node: {prev_all_gather_wait_node}")
         block = all_gather_blocks[i]
         torch_log.warning(f"block to move: {block}")
-        empty_node = block["empty_node"]
-        slice_after_empty_node = block["slice_after_empty_node"]
-        split_with_sizes_node = block["split_with_sizes_node"]
-        getitem_nodes = block["getitem_nodes"]
         op_chains_from_primals = block["op_chains_from_primals"]
-        inplace_copy_nodes = block["inplace_copy_nodes"]
+        all_gather_copy_in_node = block["all_gather_copy_in_node"]
+        getitem_0_node = block["getitem_0_node"]
+        getitem_1_node = block["getitem_1_node"]
         all_gather_node = block["all_gather_node"]
         all_gather_wait_node = block["all_gather_wait_node"]
 
         with mod.graph.inserting_after(prev_all_gather_wait_node):
             # NOTE: the last inserted op within `mod.graph.inserting_after` ctx appears *first* in graph.
-            new_all_gather_node = _create_new_node_and_replace(mod, all_gather_node)
-            for copy_node in inplace_copy_nodes:
-                new_copy_node = _create_new_node_and_replace(mod, copy_node)
+            new_all_gather_node = _create_new_node_and_replace(mod, all_gather_node, propagate_meta=True)
+            new_getitem_1_node = _create_new_node_and_replace(mod, getitem_1_node, propagate_meta=True)
+            new_getitem_0_node = _create_new_node_and_replace(mod, getitem_0_node, propagate_meta=True)
+            new_all_gather_copy_in_node = _create_new_node_and_replace(mod, all_gather_copy_in_node, propagate_meta=True)
             for op_chain in op_chains_from_primals:
                 for op in op_chain[:-1]:  # the last op is just the primal input node, we don't need to move it as it's already at the top of graph.
-                    new_op = _create_new_node_and_replace(mod, op)
-            if getitem_nodes is not None:
-                for getitem_node in reversed(getitem_nodes):
-                    new_getitem_node = _create_new_node_and_replace(mod, getitem_node)
-            if split_with_sizes_node is not None:
-                new_split_with_sizes_node = _create_new_node_and_replace(mod, split_with_sizes_node)
-            if slice_after_empty_node is not None:
-                new_slice_after_empty_node = _create_new_node_and_replace(mod, slice_after_empty_node)
-            if empty_node is not None:
-                new_empty_node = _create_new_node_and_replace(mod, empty_node)
+                    new_op = _create_new_node_and_replace(mod, op, propagate_meta=True)
 
+    mod.graph.lint()
+    mod.recompile()
+
+def sink_reduce_scatter_wait_to_end_of_graph(mod):
+    """
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:287 in reduce_scatter_tensor, code: tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
+    reduce_scatter_tensor_1: "f32[6423040]" = torch.ops._c10d_functional.reduce_scatter_tensor.default(view_390, 'avg', 8, '0');  view_390 = None
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:144 in wait_tensor, code: return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
+    wait_tensor_20: "f32[6423040]" = torch.ops._c10d_functional.wait_tensor.default(reduce_scatter_tensor_1);  reduce_scatter_tensor_1 = None
+
+    # No stacktrace found for following nodes
+    as_strided_321: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 0)
+    as_strided_322: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 524288)
+    as_strided_323: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 1048576)
+    as_strided_324: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 1572864)
+    as_strided_325: "f32[704, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [704, 2048], [2048, 1], 2097152)
+    as_strided_326: "f32[256, 5632]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 5632], [5632, 1], 3538944)
+    as_strided_327: "f32[704, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [704, 2048], [2048, 1], 4980736)
+    as_strided_328: "f32[256]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256], [1], 6422528)
+    as_strided_329: "f32[256]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256], [1], 6422784);  wait_tensor_20 = None
+
+    ... (some other nodes)
+
+    return [as_strided_321, as_strided_322, as_strided_323, as_strided_324, as_strided_325, as_strided_326, as_strided_327, as_strided_328, as_strided_329]
+
+    ->
+
+    reduce_scatter_tensor_1: "f32[6423040]" = torch.ops._c10d_functional.reduce_scatter_tensor.default(view_390, 'avg', 8, '0');  view_390 = None
+
+    ... (some other nodes)
+
+    wait_tensor_20: "f32[6423040]" = torch.ops._c10d_functional.wait_tensor.default(reduce_scatter_tensor_1);  reduce_scatter_tensor_1 = None
+    as_strided_321: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 0)
+    as_strided_322: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 524288)
+    as_strided_323: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 1048576)
+    as_strided_324: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 1572864)
+    as_strided_325: "f32[704, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [704, 2048], [2048, 1], 2097152)
+    as_strided_326: "f32[256, 5632]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 5632], [5632, 1], 3538944)
+    as_strided_327: "f32[704, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [704, 2048], [2048, 1], 4980736)
+    as_strided_328: "f32[256]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256], [1], 6422528)
+    as_strided_329: "f32[256]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256], [1], 6422784);  wait_tensor_20 = None
+    return [as_strided_321, as_strided_322, as_strided_323, as_strided_324, as_strided_325, as_strided_326, as_strided_327, as_strided_328, as_strided_329]
+    """
+    node_list = list(mod.graph.nodes)
+    return_op = None
+    for node in node_list:
+        if node.target == "output":
+            return_op = node
+            break
+    reduce_scatter_wait_blocks = []
+    for i, n in enumerate(node_list):
+        if n.target == torch.ops._c10d_functional.wait_tensor.default and n.args[0].target == torch.ops._c10d_functional.reduce_scatter_tensor.default:
+            reduce_scatter_wait_node = n
+            as_strided_nodes = []
+            for j in range(i + 1, len(node_list)):
+                if node_list[j].target == torch.ops.aten.as_strided.default and node_list[j].args[0] == reduce_scatter_wait_node:
+                    as_strided_nodes.append(node_list[j])
+                else:
+                    break
+            reduce_scatter_wait_blocks.append({
+                "reduce_scatter_wait_node": reduce_scatter_wait_node,
+                "as_strided_nodes": as_strided_nodes,
+            })
+    for block in reduce_scatter_wait_blocks:
+        reduce_scatter_wait_node = block["reduce_scatter_wait_node"]
+        as_strided_nodes = block["as_strided_nodes"]
+        with mod.graph.inserting_before(return_op):
+            new_reduce_scatter_wait_node = _create_new_node_and_replace(mod, reduce_scatter_wait_node, propagate_meta=True)
+            for as_strided_node in as_strided_nodes:
+                new_as_strided_node = _create_new_node_and_replace(mod, as_strided_node, propagate_meta=True)
     mod.graph.lint()
     mod.recompile()
