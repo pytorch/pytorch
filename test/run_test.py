@@ -1513,6 +1513,7 @@ def run_test_module(
         maybe_set_hip_visible_devies()
 
         test_name = test.name
+        start = time.time()
 
         # Printing the date here can help diagnose which tests are slow
         print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
@@ -1521,6 +1522,7 @@ def run_test_module(
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool
         ), f"While running {str(test)} got non integer return code {return_code}"
+        print(f"TIME INFO: Took {time.time() - start:.2f}s to run {str(test)}, expected time {test.time}s")
         if return_code == 0:
             return None
 
@@ -1589,6 +1591,11 @@ def run_tests(
         ):
             pool.terminate()
 
+    keep_going_message = (
+        "Tip: You can keep running tests even on failure by passing --keep-going to run_test.py.\n"
+        "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
+    )
+
     try:
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
@@ -1603,10 +1610,7 @@ def run_tests(
             ):
                 raise RuntimeError(
                     failure.message
-                    + "\n\nTip: You can keep running tests even on failure by "
-                    "passing --keep-going to run_test.py.\n"
-                    "If running on CI, add the 'keep-going' label to "
-                    "your PR and rerun your jobs."
+                    + keep_going_message
                 )
 
         for test in selected_tests_parallel:
@@ -1623,10 +1627,7 @@ def run_tests(
             ):
                 raise RuntimeError(
                     failure.message
-                    + "\n\nTip: You can keep running tests even on failure by "
-                    "passing --keep-going to run_test.py.\n"
-                    "If running on CI, add the 'keep-going' label to "
-                    "your PR and rerun your jobs."
+                    + keep_going_message
                 )
 
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
