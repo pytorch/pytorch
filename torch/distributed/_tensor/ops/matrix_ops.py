@@ -4,21 +4,14 @@ import itertools
 from typing import List, Optional
 
 import torch
-from torch.distributed._tensor.op_schema import (
-    OpSchema,
-    OpStrategy,
-    OutputSharding,
-    PlacementStrategy,
-)
+from torch.distributed._tensor.op_schema import OpSchema, OpStrategy, PlacementStrategy
 from torch.distributed._tensor.ops.basic_strategy import gen_einsum_strategies
-from torch.distributed._tensor.ops.common_rules import einop_rule
 from torch.distributed._tensor.ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
     is_tensor_shardable,
     map_placements_after_broadcast,
     register_op_strategy,
-    register_prop_rule,
 )
 from torch.distributed._tensor.placement_types import (
     DTensorSpec,
@@ -32,9 +25,29 @@ from torch.distributed.device_mesh import DeviceMesh
 aten = torch.ops.aten
 
 
-@register_prop_rule(aten.t.default)
-def transpose_rule(op_schema: OpSchema) -> OutputSharding:
-    return einop_rule("ij->ji", op_schema, linearity=True)
+@register_op_strategy(aten.t.default)
+def transpose_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> OpStrategy:
+    self_strategy = op_schema.args_schema[0]
+    assert isinstance(self_strategy, OpStrategy)
+
+    transpose_strategies = []
+    for input_strategy in self_strategy.strategies:
+        input_spec = input_strategy.output_spec
+        # follow the input spec but transpose the Shard placements
+        output_placements = [
+            Shard(1 - p.dim) if isinstance(p, Shard) else p
+            for p in input_spec.placements
+        ]
+        transpose_strategy = PlacementStrategy(
+            output_specs=DTensorSpec(
+                mesh=input_strategy.output_spec.mesh,
+                placements=tuple(output_placements),
+            ),
+            input_specs=(input_strategy.output_spec,),
+        )
+        transpose_strategies.append(transpose_strategy)
+
+    return OpStrategy(strategies=transpose_strategies)
 
 
 def _mm_like_strategy(
