@@ -26,7 +26,7 @@ import weakref
 import operator
 from torch.utils._stats import count
 import logging
-from torch._library.abstract_impl_class import FakeScriptObject
+from torch._library.fake_class_registry import FakeScriptObject
 
 from torch.overrides import TorchFunctionMode
 
@@ -1160,8 +1160,9 @@ def make_fx(f,
             elif type(x) is int and tracing_mode == "symbolic":
                 return shape_env.create_symintnode(shape_env.create_symbol(x, source, positive=None), hint=x, source=source)
             elif isinstance(x, torch.ScriptObject):
-                return torch._library.abstract_impl_class.create_fake_obj(fake_tensor_mode, x)
+                return torch._library.fake_class_registry.to_fake_obj(fake_tensor_mode, x)
 
+            assert not isinstance(x, FakeScriptObject), f"ScriptObject {x} has been fakified. Cannot wrap_fake it again."
             return x
 
         sym_mode = proxy_mode.sym_mode
