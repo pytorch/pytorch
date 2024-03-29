@@ -2622,6 +2622,8 @@ def nn_module_proxy(mod):
     if isinstance(mod, torch.fx.GraphModule):
         # Dynamo-generated GM's shouldn't contain user-created GM's
         return mod
+    if torch.distributed.is_available() and isinstance(mod, torch.distributed._composable.fsdp.FSDP):
+        return mod
     proxy = mod.__class__.__new__(mod.__class__)
     proxy.__dict__ = mod.__dict__
     return proxy
