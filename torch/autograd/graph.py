@@ -536,11 +536,33 @@ _allow_mutation_on_saved_tensors_enabled = False
 
 
 def _get_tid(t) -> Tuple[int, int, int]:
-    return (id(t), t.data_ptr(), t._version)
+    # FIXME: This is almost definitely a bug.
+    if isinstance(
+        t,
+        (
+            torch._subclasses.fake_tensor.FakeTensor,
+            torch._subclasses.functional_tensor.FunctionalTensor,
+        ),
+    ):
+        data_ptr = 0
+    else:
+        data_ptr = t.data_ptr()
+    return (id(t), data_ptr, t._version)
 
 
 def _get_sid(t) -> Tuple[int, int]:
-    return (t.data_ptr(), t._version)
+    # FIXME: This is almost definitely a bug.
+    if isinstance(
+        t,
+        (
+            torch._subclasses.fake_tensor.FakeTensor,
+            torch._subclasses.functional_tensor.FunctionalTensor,
+        ),
+    ):
+        data_ptr = 0
+    else:
+        data_ptr = t.data_ptr()
+    return (data_ptr, t._version)
 
 
 class _Handle:
