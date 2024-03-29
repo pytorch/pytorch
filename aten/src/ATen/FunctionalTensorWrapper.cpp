@@ -231,10 +231,13 @@ void FunctionalTensorWrapper::replace_(const Tensor& other, bool from_lazy_regen
     value_ = at::_to_copy(value_, c10::TensorOptions().dtype(dtype()).layout(layout()));
     TORCH_INTERNAL_ASSERT(!value_.key_set().has(c10::DispatchKey::Functionalize));
   }
-  // if a mutation happens to a view under a no_grad,
-  // we won't call replace_() on the other alias until the alias is later used, which
   // might not be until after the no_grad region is exited.
   // Therefore, replace_() is not unconditionally safe to check the current no_grad state.
+  // If this is a lazy regeneration, then it is guaranteed that we have already
+  // done the mutation for the storage alias (when we originally performed the mutation),
+  // so no counter update may be needed.
+  // Example: if a mutation happens to a view under a no_grad,
+  // we won't call replace_() on the other alias until the alias is later used, which
   if (!from_lazy_regenerate) {
     mark_mutation();
     if (!at::GradMode::is_enabled() || InferenceMode::is_enabled()) {

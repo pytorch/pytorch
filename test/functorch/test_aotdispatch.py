@@ -738,6 +738,9 @@ def forward(self, arg0_1, arg1_1):
                 a_alias.mul_(2)
             return a + 1
         inp = [torch.ones(4, requires_grad=True)]
+        # The important bit: we detected that the input mutation is safe
+        # to include **inside** the graph, since it was under no_grad
+        # (so all we need to do is use mark_dirty() on the input to bump the VC)
         fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, only_keep_inference_mutations=True)
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1):

@@ -147,6 +147,24 @@ struct TORCH_API FunctionalStorageImpl : public c10::StorageImpl {
   // storage cannot be unfrozen.
   bool frozen_ = false;
 
+  // These mutation counters are bumped on the storage
+  // whenever a FunctionalTensorWrapper experiences a mutation.
+  // When the mutation is under no_grad, or comes from a triton kernel, we also
+  // bump the corresponding during_no_grad or hidden_from_autograd counters. Why
+  // do we need to detect these two situations separately from "normal" input
+  // mutations? (1) "normal" input mutations can mutate autograd metadata like
+  // .grad_fn,
+  //     in which case they need to be replayed outside of the compiled graph
+  // (2) "no_grad" input mutations are generally safe to keep in the graph (and
+  // compile),
+  //     but they bump the tensor's VC, so we need to mark_dirty() on the inputs
+  //     in torch.compile
+  // (3) mutations that are fully hidden from autograd (e.g. from a triton
+  // kernel)
+  //     do not mutate any autograd state, and be fully kept in the graph
+  // When we detect that an input was mutated, we need to be able to tell if:
+  // (1) all of the mutations were from triton kernels
+  // (2) all of the mutations were under no_grad
   uint64_t mutation_counter_during_no_grad_or_inference_mode_ = 0;
   uint64_t mutation_counter_ = 0;
   uint64_t mutation_counter_hidden_from_autograd_ = 0;
