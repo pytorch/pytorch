@@ -180,6 +180,30 @@ def define_custom_op_for_test(id_, fn_cpu, fn_cuda, fn_meta, tags=()):
         ids.add(id_)
 
 
+def define_custom_op_2_for_test(id_, fn_cpu, fn_cuda, fn_meta, tags=()):
+    global libtest
+    global ids
+    if id_ not in ids:
+        libtest.define(
+            f"{id_}(Tensor self, float scale) -> (Tensor, Tensor)", tags=tags
+        )
+        libtest.impl(id_, fn_cpu, "CPU")
+        libtest.impl(id_, fn_cuda, "CUDA")
+        libtest.impl(id_, fn_meta, "Meta")
+        ids.add(id_)
+
+
+def define_custom_op_3_for_test(id_, fn_cpu, fn_cuda, fn_meta, tags=()):
+    global libtest
+    global ids
+    if id_ not in ids:
+        libtest.define(f"{id_}(Tensor[] x) -> Tensor", tags=tags)
+        libtest.impl(id_, fn_cpu, "CPU")
+        libtest.impl(id_, fn_cuda, "CUDA")
+        libtest.impl(id_, fn_meta, "Meta")
+        ids.add(id_)
+
+
 f32 = torch.float32
 
 
@@ -1007,9 +1031,8 @@ class CommonTemplate:
                 if self.device == "cpu":
                     _, code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
-                    # match ternary operator
-                    pattern = r"\?.*:"
-                    if re.findall(pattern, code):
+                    # match ternary operator for scalar or blendv for vector
+                    if re.findall(r"\?.*:", code) or re.findall("blendv", code):
                         found = True
                     self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
@@ -4318,6 +4341,56 @@ class CommonTemplate:
                 torch.randn([1, 3, 3, 16]),
             ),
         )
+
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_nonzero_unbacked_refinement(self):
+        def fn(x):
+            z = x.nonzero()
+            torch._check(z.size(0) == 4)
+            return z + 3
+
+        self.common(
+            fn,
+            (torch.tensor([0, 1, 3, 4, 2, 0, 0]),),
+        )
+
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(torch.tensor([0, 0, 0, 0]))
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_floordiv_simplify(self):
+        def fn(x, y):
+            z = y.item()
+            torch._check(z // 2 == 3)
+            return x + x.new_zeros(z)
+
+        self.common(
+            fn,
+            (
+                torch.randn(6),
+                torch.tensor([6]),
+            ),
+        )
+
+        self.common(
+            fn,
+            (
+                torch.randn(7),
+                torch.tensor([7]),
+            ),
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_floordiv_simplify_errors(self):
+        def fn(x, y):
+            z = y.item()
+            torch._check(z // 2 == 3)
+            return x + x.new_zeros(z)
+
+        # This is a little suboptimal: we actually fail /in the compiler/ but
+        # not in a way that causes Dynamo to graph break
+        with self.assertRaises(RuntimeError):
+            torch.compile(fn)(torch.randn(8), torch.tensor(8))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cat_unbacked_legacy_empty(self):
@@ -8447,6 +8520,13 @@ class CommonTemplate:
         x = torch.rand(48, 3, 512, 512)
         self.common(fn, (x,))
 
+    def test_pad_cast(self):
+        def fn(x):
+            return torch.nn.functional.pad(x.to(torch.float32), (0, 3, 0, 0))
+
+        for dtype in [torch.int32, torch.int64]:
+            self.common(fn, (torch.ones(1, 1, 13, dtype=dtype),))
+
     @unittest.skipIf(not HAS_CPU or not RUN_CPU, "requires C++ compiler")
     def test_data_type_propogation(self):
         from torch._dynamo.utils import detect_fake_mode
@@ -8771,7 +8851,7 @@ class CommonTemplate:
         self.common(fn, (inp, offsets), check_lowp=False)
 
     @config.patch(implicit_fallbacks=True)
-    def test_custom_op(self):
+    def test_custom_op_1(self):
         import torch.library
 
         def foo_cpu(x):
@@ -8792,6 +8872,57 @@ class CommonTemplate:
             return c
 
         self.common(fn, (torch.randn((16, 32)),), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_2(self):
+        import torch.library
+
+        def foo_cpu(x, scale: float):
+            return scale * x, torch.cos(x)
+
+        def foo_cuda(x, scale: float):
+            return scale * x, torch.cos(x)
+
+        def foo_meta(x, scale: float):
+            return torch.empty_like(x), torch.empty_like(x)
+
+        define_custom_op_2_for_test("foo2", foo_cpu, foo_cuda, foo_meta)
+
+        def fn(x, scale: float):
+            a = torch.nn.functional.relu(x)
+            return torch.ops.test.foo2(a, scale)
+
+        self.common(fn, (torch.randn((16, 32)), 2.0), check_lowp=False)
+
+    @config.patch(implicit_fallbacks=True)
+    def test_custom_op_3(self):
+        import torch.library
+
+        def foo_cpu(x):
+            result = torch.zeros_like(x[0])
+            for t in x:
+                result += t
+            return result
+
+        def foo_cuda(x):
+            result = torch.zeros_like(x[0])
+            for t in x:
+                result += t
+            return result
+
+        def foo_meta(x):
+            return torch.empty_like(x[0])
+
+        define_custom_op_3_for_test("foo3", foo_cpu, foo_cuda, foo_meta)
+
+        def fn(x):
+            return torch.ops.test.foo3(x)
+
+        self.common(
+            fn,
+            ([torch.randn((16, 32)), torch.randn((16, 32)), torch.randn((16, 32))],),
+            check_lowp=False,
+        )
 
     @requires_gpu()
     @torch._inductor.config.patch("layout_optimization", True)
@@ -9969,6 +10100,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
 
         @patch("torch._inductor.config.comment_origin", True)
+        @patch("torch._functorch.config.max_dist_from_bw", 0)
         def test_inductor_sequence_nr(self):
             class Model(torch.nn.Module):
                 def __init__(self):
@@ -10021,7 +10153,6 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                         res = re.search(r"seq_nr:(\d+)", line)
                         if res:
                             seq_nr_set.add(int(res.group(1)))
-
             self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
 
     class RNNTest(TestCase):
