@@ -1816,11 +1816,13 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=No
         return buffer, x.layout
     raise NotImplementedError
 
+
 def is_pointwise_with_channels_last_inputs(x):
     if isinstance(x, TensorBox):
         return is_pointwise_with_channels_last_inputs(x.data)
     if isinstance(x, StorageBox) and isinstance(x.data, Pointwise):
         all_reads = x.data.get_reads()
+
         def is_channel_last_index(read):
             if len(read.size) != 4:
                 return False
@@ -1831,8 +1833,13 @@ def is_pointwise_with_channels_last_inputs(x):
                 + read.var_names[3] * read.size[1]
             )
             return expected_channel_last_index == read.index
-        return any(type(read) is dependencies.MemoryDep and is_channel_last_index(read) for read in all_reads)
+
+        return any(
+            type(read) is dependencies.MemoryDep and is_channel_last_index(read)
+            for read in all_reads
+        )
     return False
+
 
 as_contiguous_storage_and_layout = functools.partial(
     as_storage_and_layout, want_contiguous=True
