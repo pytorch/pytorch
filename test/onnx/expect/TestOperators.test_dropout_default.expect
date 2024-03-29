@@ -1,0 +1,81 @@
+ir_version: 8
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    output: "onnx::Dropout_1"
+    name: "Constant_2"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 1
+        raw_data: "\000\000\000?"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    output: "onnx::Dropout_2"
+    name: "Constant_3"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: 9
+        raw_data: "\001"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "x"
+    input: "onnx::Dropout_1"
+    input: "onnx::Dropout_2"
+    output: "onnx::ReduceMax_3"
+    output: "4"
+    name: "Dropout_4"
+    op_type: "Dropout"
+  }
+  node {
+    input: "onnx::ReduceMax_3"
+    output: "5"
+    name: "ReduceMax_5"
+    op_type: "ReduceMax"
+    attribute {
+      name: "keepdims"
+      i: 0
+      type: INT
+    }
+  }
+  name: "main_graph"
+  input {
+    name: "x"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "5"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 17
+}

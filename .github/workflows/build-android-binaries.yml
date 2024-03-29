@@ -1,0 +1,48 @@
+name: Build Android binaries
+
+on:
+  push:
+    branches:
+      - nightly
+    tags:
+      # NOTE: Binary build pipelines should only get triggered on release candidate builds
+      # Release candidate tags look like: v1.11.0-rc1
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+    paths:
+      - .github/workflows/build-android-binaries.yml
+      - .github/workflows/_run_android_tests.yml
+      - android/**
+  pull_request:
+    paths:
+      - .github/workflows/build-android-binaries.yml
+      - .github/workflows/_run_android_tests.yml
+      - android/**
+  # NB: We can use this workflow dispatch to test and build the binaries manually
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  android-build-test:
+    name: android-build-test
+    uses: ./.github/workflows/_run_android_tests.yml
+    with:
+      test-matrix: |
+        { include: [
+          { config: 'default',
+            shard: 1,
+            num_shards: 1,
+            runner: 'ubuntu-20.04-16x',
+            use_lite_interpreter: 1,
+            support_abi: 'armeabi-v7a,arm64-v8a,x86,x86_64',
+          },
+          { config: 'default',
+            shard: 1,
+            num_shards: 1,
+            runner: 'ubuntu-20.04-16x',
+            use_lite_interpreter: 0,
+            support_abi: 'armeabi-v7a,arm64-v8a,x86,x86_64',
+          },
+        ]}
