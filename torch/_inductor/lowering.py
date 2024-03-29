@@ -73,6 +73,7 @@ foreach_ops: Set[torch._ops.OpOverload] = set()
 inplace_foreach_ops: Set[torch._ops.OpOverload] = set()
 inplaceable_foreach_ops: Dict[torch._ops.OpOverload, torch._ops.OpOverload] = dict()
 quantized_decomposed = torch.ops.quantized_decomposed
+_quantized = torch.ops._quantized
 
 
 def assert_nyi(cond, msg):
