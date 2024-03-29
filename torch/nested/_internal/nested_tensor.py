@@ -114,7 +114,7 @@ class NestedTensor(torch.Tensor):
 
     def values(self):
         # dispatch to get proper view relationship
-        return torch._nested_get_values(self)  # type: ignore[return-value]
+        return torch._nested_get_values(self)  # type: ignore[attr-defined]
 
     def offsets(self):
         return self._offsets
@@ -427,12 +427,12 @@ def _nt_view_dummy() -> torch.Tensor:
 
 
 def nested_view_from_values_offsets(values, offsets, ragged_idx=1):
-    return torch._nested_view_from_jagged(
+    return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
         values, offsets, _nt_view_dummy(), None, ragged_idx
-    )  # type: ignore[return-value]
+    )
 
 
 def nested_view_from_values_offsets_lengths(values, offsets, lengths, ragged_idx=1):
-    return torch._nested_view_from_jagged(
+    return torch._nested_view_from_jagged(  # type: ignore[attr-defined]
         values, offsets, _nt_view_dummy(), lengths, ragged_idx
-    )  # type: ignore[return-value]
+    )

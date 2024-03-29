@@ -58,7 +58,7 @@ __all__ = [
     "HandleShardingStrategy",
 ]
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 
 """
@@ -511,21 +511,21 @@ class FlatParamHandle:
         self._use_fake_reduce = os.environ.get(_FSDP_USE_FAKE_REDUCE, "") == "1"
         if self._skip_writeback_check:
             _warn_skip_writeback_check(
-                log,
+                logger,
                 f"Since {_FSDP_SKIP_WRITEBACK_CHECK}=1, FSDP will not check "
                 "for parameter or gradient writeback. Changing parameter or "
                 "gradient storages may lead to silent correctness errors.",
             )
         if self._use_fake_all_gather:
             _warn_use_fake_all_gather(
-                log,
+                logger,
                 f"Since {_FSDP_USE_FAKE_ALL_GATHER}=1, FSDP will not execute "
                 "all-gather ops. Your training will be incorrect, but "
                 "can reveal how much time spent on all-gather ops.",
             )
         if self._use_fake_reduce:
             _warn_use_fake_reduce(
-                log,
+                logger,
                 f"Since {_FSDP_USE_FAKE_REDUCE}=1, FSDP will not execute "
                 "reduce-scatter ops. Your training will be incorrect, but "
                 "can reveal how much time spent on reduce-scatter ops.",
@@ -708,7 +708,7 @@ class FlatParamHandle:
             and aligned_numel > 0
             and total_numel != total_numel_without_padding
         ):
-            log.info(
+            logger.debug(
                 "FSDP FlatParameter address alignment created "
                 "%s numel of padding (%s vs. %s)",
                 total_numel - total_numel_without_padding,
@@ -721,7 +721,7 @@ class FlatParamHandle:
             numel_to_pad = self.world_size - (total_numel % self.world_size)
             if numel_to_pad > 0 and numel_to_pad < self.world_size:
                 if self.rank == 0:
-                    log.info(
+                    logger.info(
                         "FSDP FlatParameter world size divisibility created "
                         "%s numel of padding",
                         numel_to_pad,
@@ -2695,19 +2695,19 @@ def _construct_padding_tensor(
 # messasge is passed in)
 @functools.lru_cache(1)
 def _warn_skip_writeback_check(log: logging.Logger, warning: str):
-    log.warning(warning)
+    logger.warning(warning)
 
 
 # Use `lru_cache(1)` to only log the warning once
 @functools.lru_cache(1)
 def _warn_use_fake_all_gather(log: logging.Logger, warning: str):
-    log.warning(warning)
+    logger.warning(warning)
 
 
 # Use `lru_cache(1)` to only log the warning once
 @functools.lru_cache(1)
 def _warn_use_fake_reduce(log: logging.Logger, warning: str):
-    log.warning(warning)
+    logger.warning(warning)
 
 
 def _same_storage(a, b):
