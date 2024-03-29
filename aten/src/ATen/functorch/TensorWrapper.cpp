@@ -50,7 +50,7 @@ void TensorWrapper::refreshMetadata() {
 void dumpTensorCout(const Tensor& tensor) {
   dumpTensor(std::cout, tensor);
 
-  std::cout << std::endl;
+  std::cout << '\n';
 }
 
 static c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int64_t level, const std::shared_ptr<bool>& life_handle) {
