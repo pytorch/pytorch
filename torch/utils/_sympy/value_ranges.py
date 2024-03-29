@@ -13,7 +13,7 @@ from typing_extensions import TypeGuard
 
 from torch._prims_common import dtype_to_type
 from .interp import sympy_interp
-from .functions import Round, RoundDecimal
+from .functions import Round, RoundDecimal, OpaqueUnaryFn_sqrt
 
 log = logging.getLogger(__name__)
 
@@ -564,7 +564,7 @@ class SymPyValueRangeAnalysis:
         x = ValueRanges.wrap(x)
         if x.lower < 0:
             return ValueRanges.unknown()
-        return ValueRanges.increasing_map(x, sympy.sqrt)
+        return ValueRanges.increasing_map(x, OpaqueUnaryFn_sqrt)
 
     @staticmethod
     def where(a, b, c):

@@ -428,12 +428,15 @@ class PythonPrinter(ExprPrinter):
     def _print_Pow(self, expr):
         # Pow() confuses triton
         base, exp = expr.args
-        if exp == 0.5 or exp == -0.5:
-            raise AssertionError(
-                "Direct use of sympy.sqrt is not allowed as its numerics differ "
-                "from floating point sqrt; use OpaqueUnaryFn_sqrt "
-                "instead which ensures accurate floating point behavior."
-            )
+        # NB: Remember this is sizevar computation!  You don't typically
+        # expect to have to do floating point computation including exponents
+        # in sizevar compute.  Instead of adding support for floating
+        # point pow, you should make upstream retranslate the Sympy expression
+        # into Tensor expressions earlier and do that instead.
+        if exp == 0.5:
+            return self._helper_sqrt(base)
+        elif exp == -0.5:
+            return "1/" + self._helper_sqrt(base)
         base = self._print(base)
         assert exp == int(exp), exp
         exp = int(exp)
