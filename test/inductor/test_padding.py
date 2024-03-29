@@ -15,6 +15,20 @@ from torch._dynamo.utils import maybe_cprofile
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 DO_ACC_TEST = os.environ.get("DO_ACC_TEST", "1") == "1"
 
+def create_timm_model(model_name):
+    from timm.models import create_model
+    model = create_model(
+        model_name,
+        in_chans=3,
+        scriptable=False,
+        num_classes=None,
+        drop_rate=0.0,
+        drop_path_rate=None,
+        drop_block_rate=None,
+        # pretrained=True,
+    )
+    return model
+
 
 class LinearAndSoftmax(nn.Module):
     """
@@ -58,20 +72,19 @@ def forward_and_backward_pass(m, inputs):
     }
 )
 class PaddingTest(TestCase):
-    def check_close(self, ref, act):
+    def check_close(self, ref, act, tol=1e-3):
         if "LongformerMaskedLMOutput" in str(type(ref)):
             ref = ref.loss
             act = act.loss
-        tol = 1e-3
         self.assertTrue(
             torch.allclose(ref, act, atol=tol, rtol=tol), f"ref:\n{ref}\nact:\n{act}"
         )
 
-    def common_numeric_check(self, f, *args, **kwargs):
+    def common_numeric_check(self, f, *args, tol=1e-3, **kwargs):
         opt_f = torch.compile(f)
         ref = f(*args, **kwargs)
         act = opt_f(*args, **kwargs)
-        self.check_close(ref, act)
+        self.check_close(ref, act, tol)
 
     def test_mm_perf(self):
         def naive_mm(a, b):
@@ -240,7 +253,7 @@ class PaddingTest(TestCase):
         self.common_numeric_check(f, x, y)
 
     @maybe_cprofile
-    def run_acc_and_perf_test(self, model, inputs, perf_inputs=None):
+    def run_acc_and_perf_test(self, model, inputs, perf_inputs=None, tol=1e-3):
         if perf_inputs is None:
             perf_inputs = inputs
 
@@ -261,7 +274,7 @@ class PaddingTest(TestCase):
 
         if DO_ACC_TEST:
             model.eval()
-            self.common_numeric_check(model, *args, **kwargs)
+            self.common_numeric_check(model, *args, **kwargs, tol=tol)
         else:
             print("Accuracy test skipped")
 
@@ -346,6 +359,7 @@ class PaddingTest(TestCase):
        profile_path = "/tmp/chrome.json"
        p.export_chrome_trace(profile_path)
        print(f"Chrome trace is written to {profile_path}")
+       # breakpoint()
 
     def test_pytorch_unet(self):
         """
@@ -393,6 +407,11 @@ class PaddingTest(TestCase):
         The model exists in both HF and TB. In TB it uses a samller batch size.
         """
         self.test_longformer(bs=2)
+
+    def test_rexnet(self):
+        inputs = torch.randn([128, 3, 224, 224])
+        model = create_timm_model("rexnet_100")
+        self.run_acc_and_perf_test(model, inputs, tol=1e-2)
         
     def test_nvidia_deeprecommender(self):
         # SELU

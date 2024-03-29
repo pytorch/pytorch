@@ -2597,6 +2597,9 @@ class Layout(IRNode):
         if len(in_strides) == 0:
             return in_strides
 
+        if not config.pad_channels_last and len(in_strides) == 4 and in_strides[1] == 1: # a loose check for channels last
+            return in_strides
+
         current_fx_node = V.get_current_node()
         if hasattr(current_fx_node, "meta") and current_fx_node.meta.get("dislike_padding", False):
             return in_strides
