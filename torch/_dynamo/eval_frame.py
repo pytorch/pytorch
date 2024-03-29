@@ -125,6 +125,7 @@ class OptimizedModule(torch.nn.Module):
         "forward",
         "_forward",
         "__dict__",
+        "named_children_walk",
     }
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx):
