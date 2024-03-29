@@ -17,7 +17,6 @@ from torch.onnx import (
     symbolic_opset9 as opset9,
     utils,
 )
-from torch.onnx._globals import GLOBALS
 from torch.onnx._internal import _beartype, jit_utils, registration
 
 # EDITING THIS FILE? READ THIS FIRST!
@@ -86,15 +85,6 @@ __all__ = [
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=11)
 
 
-def _apply_params(*args, **kwargs):
-    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
-
-    def _apply(fn):
-        return fn(*args, **kwargs)
-
-    return _apply
-
-
 @_onnx_symbolic("aten::hardtanh")
 @symbolic_helper.quantized_args(True)
 @symbolic_helper.parse_args("v", "f", "f")
@@ -111,7 +101,7 @@ def hardtanh(g: jit_utils.GraphContext, self: _C.Value, min_val: float, max_val:
         "Constant",
         value_t=torch.tensor(max_val, dtype=scalar_type.dtype()),
     )
-    return opset9._op_with_optional_float_cast(
+    return symbolic_helper._op_with_optional_float_cast(
         g, "Clip", self, min_val, max_val, opset_before=12
     )
 
@@ -146,7 +136,7 @@ def clamp(g: jit_utils.GraphContext, self, min, max):
             symbolic_helper._get_tensor_rank(min) == 0
             and symbolic_helper._get_tensor_rank(max) == 0
         ):
-            return opset9._op_with_optional_float_cast(
+            return symbolic_helper._op_with_optional_float_cast(
                 g, "Clip", self, min, max, opset_before=12
             )
         else:
@@ -160,11 +150,13 @@ def clamp_min(g: jit_utils.GraphContext, self, min):
     min = g.op("Cast", min, to_i=_type_utils.JitScalarType.from_value(self).onnx_type())
     if symbolic_helper._get_tensor_rank(min) == 0:
         max = opset9.unused(g)
-        return opset9._op_with_optional_float_cast(
+        return symbolic_helper._op_with_optional_float_cast(
             g, "Clip", self, min, max, opset_before=12
         )
     else:
-        return opset9._op_with_optional_float_cast(g, "Max", self, min, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(
+            g, "Max", self, min, opset_before=12
+        )
 
 
 @_onnx_symbolic("aten::clamp_max")
@@ -174,11 +166,13 @@ def clamp_max(g: jit_utils.GraphContext, self, max):
     max = g.op("Cast", max, to_i=_type_utils.JitScalarType.from_value(self).onnx_type())
     if symbolic_helper._get_tensor_rank(max) == 0:
         min = opset9.unused(g)
-        return opset9._op_with_optional_float_cast(
+        return symbolic_helper._op_with_optional_float_cast(
             g, "Clip", self, min, max, opset_before=12
         )
     else:
-        return opset9._op_with_optional_float_cast(g, "Min", self, max, opset_before=12)
+        return symbolic_helper._op_with_optional_float_cast(
+            g, "Min", self, max, opset_before=12
+        )
 
 
 @_onnx_symbolic("aten::relu6")
@@ -348,31 +342,31 @@ def pixel_shuffle(g: jit_utils.GraphContext, self, upscale_factor):
 
 @_onnx_symbolic(
     "aten::upsample_nearest1d",
-    decorate=[_apply_params("upsample_nearest1d", 3, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest1d", 3, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest2d",
-    decorate=[_apply_params("upsample_nearest2d", 4, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest2d", 4, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_nearest3d",
-    decorate=[_apply_params("upsample_nearest3d", 5, "nearest")],
+    decorate=[symbolic_helper._apply_params("upsample_nearest3d", 5, "nearest")],
 )
 @_onnx_symbolic(
     "aten::upsample_linear1d",
-    decorate=[_apply_params("upsample_linear1d", 3, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_linear1d", 3, "linear")],
 )
 @_onnx_symbolic(
     "aten::upsample_bilinear2d",
-    decorate=[_apply_params("upsample_bilinear2d", 4, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_bilinear2d", 4, "linear")],
 )
 @_onnx_symbolic(
     "aten::upsample_trilinear3d",
-    decorate=[_apply_params("upsample_trilinear3d", 5, "linear")],
+    decorate=[symbolic_helper._apply_params("upsample_trilinear3d", 5, "linear")],
 )
 @_onnx_symbolic(
     "aten::upsample_bicubic2d",
-    decorate=[_apply_params("upsample_bicubic2d", 4, "cubic")],
+    decorate=[symbolic_helper._apply_params("upsample_bicubic2d", 4, "cubic")],
 )
 @_beartype.beartype
 def _interpolate(name: str, dim: int, interpolate_mode: str):
@@ -1281,26 +1275,7 @@ def linalg_vector_norm(
     keepdim: bool,
     dtype,
 ):
-    if ord == 0:
-        if dim is None:
-            self = symbolic_helper._reshape_helper(
-                g, self, g.op("Constant", value_t=torch.tensor([-1], dtype=torch.int64))
-            )
-            keepdim = False
-
-        cond_op = g.op(
-            "Not", g.op("Equal", self, g.op("Constant", value_t=torch.LongTensor([0])))
-        )
-        cond_op = g.op(
-            "Cast",
-            cond_op,
-            to_i=_type_utils.JitScalarType.from_value(self).onnx_type(),
-        )
-        return symbolic_helper._reducesum_helper(
-            g, cond_op, axes_i=dim, keepdims_i=keepdim
-        )
-    else:
-        return opset9.linalg_vector_norm(g, self, ord, dim, keepdim, dtype)
+    return symbolic_helper._linalg_vector_norm_helper(g, self, ord, dim, keepdim, dtype)
 
 
 @_onnx_symbolic("aten::embedding_bag")
@@ -1318,86 +1293,18 @@ def embedding_bag(
     include_last_offset,
     padding_idx,
 ):
-    if scale_grad_by_freq and GLOBALS.export_training:
-        return symbolic_helper._onnx_unsupported(
-            "embedding_bag with scale_grad_by_freq for training mode"
-        )
-    if padding_idx is not None and padding_idx >= 0:
-        raise RuntimeError("embedding_bag with padding_idx")
-
-    loop_condition = g.op("Constant", value_t=torch.tensor(1))
-    loop_condition = g.op("Cast", loop_condition, to_i=_C_onnx.TensorProtoDataType.BOOL)
-    zero = g.op("Constant", value_t=torch.tensor([0]))
-
-    indices_len = symbolic_helper._unsqueeze_helper(
+    return symbolic_helper._embedding_bag_helper(
         g,
-        symbolic_helper._size_helper(
-            g, indices, g.op("Constant", value_t=torch.tensor(0))
-        ),
-        [0],
+        embedding_matrix,
+        indices,
+        offsets,
+        scale_grad_by_freq,
+        mode,
+        sparse,
+        per_sample_weights,
+        include_last_offset,
+        padding_idx,
     )
-    if not include_last_offset:
-        offsets = [offsets, indices_len]
-        offsets = g.op("Concat", *offsets, axis_i=0)
-
-    # Offsets holds the starting index position of each bag. So we create a list of the indices slices (determined by
-    # offsets) and gather those indices in indices_row. Then we use this subset of indices to gather from embeddings.
-    # The embeddings output is a loop scan output, so we can avoid creating a sequence and inserting elements in.
-    offsets_starts = symbolic_helper._slice_helper(
-        g, offsets, axes=[0], starts=[0], ends=[sys.maxsize], steps=[1]
-    )
-    offsets_ends = symbolic_helper._slice_helper(
-        g, offsets, axes=[0], starts=[1], ends=[sys.maxsize], steps=[1]
-    )
-
-    loop_len = symbolic_helper._size_helper(
-        g, offsets_ends, g.op("Constant", value_t=torch.tensor(0))
-    )
-
-    loop, (loop_context,), _ = jit_utils.add_op_with_blocks(
-        g, "Loop", loop_len, loop_condition, n_blocks=1
-    )
-    loop_block = loop_context.block
-
-    # FIXME(justinchuby): We need to handle what happens when we call b.op on a node return
-    block_input_iter = utils._add_input_to_block(loop_block)
-    cond = utils._add_input_to_block(loop_block)
-
-    indices_start = loop_context.op(
-        "Gather", offsets_starts, block_input_iter, axis_i=0
-    )
-    indices_end = loop_context.op("Gather", offsets_ends, block_input_iter, axis_i=0)
-    indices_start = symbolic_helper._unsqueeze_helper(loop_context, indices_start, [0])
-    indices_end = symbolic_helper._unsqueeze_helper(loop_context, indices_end, [0])
-
-    indices_row = loop_context.op("Slice", indices, indices_start, indices_end, zero)
-    embeddings = loop_context.op("Gather", embedding_matrix, indices_row, axis_i=0)
-    if not symbolic_helper._is_none(per_sample_weights):
-        per_sample_weights_row = loop_context.op(
-            "Slice", per_sample_weights, indices_start, indices_end, zero
-        )
-        per_sample_weights_row = symbolic_helper._unsqueeze_helper(
-            loop_context, per_sample_weights_row, [1]
-        )
-        embeddings = loop_context.op("Mul", embeddings, per_sample_weights_row)
-    if mode == 0:
-        embeddings = symbolic_helper._reducesum_helper(
-            loop_context, embeddings, axes_i=[0], keepdims_i=0
-        )
-    elif mode == 1:
-        embeddings = loop_context.op("ReduceMean", embeddings, axes_i=[0], keepdims_i=0)
-    else:
-        embeddings = loop_context.op("ReduceMax", embeddings, axes_i=[0], keepdims_i=0)
-
-    cond_out = loop_context.op(
-        "Cast", loop_condition, to_i=_C_onnx.TensorProtoDataType.BOOL
-    )
-    utils._add_output_to_block(loop_block, cond_out)
-    utils._add_output_to_block(loop_block, embeddings)
-
-    # aten::embedding_bag returns a tuple of 4 elements: output, offset2bag, bag_size, max_indices.
-    # But the last three outputs are not used in torch.nn.EmbeddingBag or torch.nn.functional.embedding_bag.
-    return loop.node().output(), None, None, None
 
 
 @_onnx_symbolic("aten::embedding_renorm")
