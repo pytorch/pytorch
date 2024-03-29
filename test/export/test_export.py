@@ -114,6 +114,11 @@ def foo_functional(x):
     a, b, c = torch.ops.testlib.foo(x.cos(), x.cos())
     return a.cos()
 
+NON_STRICT_SUFFIX = "_non_strict"
+
+def is_non_strict_test(test_name):
+    return test_name.endswith(NON_STRICT_SUFFIX)
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestDynamismExpression(TestCase):
@@ -220,6 +225,7 @@ class TestExport(TestCase):
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183702824
     def test_conv_dynamic(self):
         # Simple module for demonstration
         class M(torch.nn.Module):
@@ -442,6 +448,7 @@ class TestExport(TestCase):
 
         self.assertEqual(ep.module()(torch.randn(4), torch.randn(5)).size()[0], 4)
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_nested(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -507,6 +514,7 @@ class TestExport(TestCase):
 
         self.assertEqual(ep.module()(torch.randn(5), torch.randn(9)).size()[0], 4)
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_integer(self):
         class Foo(torch.nn.Module):
             def forward(self, w):
@@ -749,6 +757,7 @@ class TestExport(TestCase):
             6,
         )
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183704046
     def test_static_dim_constraints(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -798,6 +807,7 @@ class TestExport(TestCase):
         ):
             _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703911
     def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -820,6 +830,7 @@ class TestExport(TestCase):
         self.assertEquals(vr.lower, 1)
         self.assertEquals(vr.upper, 2)
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_1_2(self):
         class Bar(torch.nn.Module):
             def forward(self, x, y):
@@ -1429,7 +1440,6 @@ class TestExport(TestCase):
         self.assertEqual(len(input_shapes), 9)
         self.assertTrue(all(shape == "torch.Size([s0])" for shape in input_shapes))
 
-    @testing.expectedFailureNonStrict
     def test_error_does_not_reference_eager_fallback(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -1441,9 +1451,13 @@ class TestExport(TestCase):
                     return x.sin()
 
         fn_ddo = Module()
-        with self.assertRaisesRegex(
-            torchdynamo.exc.UserError, r"^(?!.*fall back to eager).*"
-        ):
+        if is_non_strict_test(self._testMethodName):
+            error = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+            error_msg = r"Could not guard on data-dependent expression"
+        else:
+            error = torchdynamo.exc.UserError
+            error_msg = r"^(?!.*fall back to eager).*"
+        with self.assertRaisesRegex(error, error_msg):
             _ = export(fn_ddo, (torch.tensor([2, 3, 5]),))
 
     def test_pytree_register_data_class(self):
@@ -1794,7 +1808,6 @@ def forward(self, arg_0):
     return pytree.tree_unflatten((getitem,), self._out_spec)""",
         )
 
-    @testing.expectedFailureNonStrict
     def test_constrain_value_with_symfloat(self):
         class Module(torch.nn.Module):
             def forward(self, x, y):
@@ -1803,8 +1816,9 @@ def forward(self, arg_0):
                 return y + n
 
         fn = Module()
+        error = ValueError if is_non_strict_test(self._testMethodName) else torch._dynamo.exc.TorchRuntimeError
         with self.assertRaisesRegex(
-            torch._dynamo.exc.TorchRuntimeError,
+            error,
             "Constraining SymFloat or Symbool is nyi",
         ):
             _ = export(fn, (torch.rand(2, 2), torch.rand(2, 3)))
@@ -1955,6 +1969,7 @@ def forward(self, arg_0):
 
     @testing.expectedFailureNonStrict  # non-strict does not add deferred runtime assertions
     @testing.expectedFailureSerDerPreDispatch  # .item call becomes aten.item in predispatch IR
+    @testing.expectedFailurePreDispatchRunDecomp # assert name is still referring to item
     def test_automatic_constrain_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -2011,6 +2026,7 @@ def forward(self, arg_0):
 
     @testing.expectedFailureNonStrict
     @testing.expectedFailureSerDerPreDispatch  # .item() becomes aten.item in predispatch IR
+    @testing.expectedFailurePreDispatchRunDecomp # Assert message is still using the old node name, so it shoudl fail
     def test_export_with_inline_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2408,7 +2424,6 @@ def forward(self, arg_0):
             torch.allclose(exported.module()(torch.ones(7, 5)), re_exported_v2.module()(torch.ones(7, 5)))
         )
 
-    @testing.expectedFailureNonStrict
     def test_constrain_as_size_error(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2418,10 +2433,13 @@ def forward(self, arg_0):
                 return torch.randn(24).view(a, 4)
 
         f = Module()
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.UserError,
-            "Tried to use data-dependent value in the subsequent computation",
-        ):
+        if is_non_strict_test(self._testMethodName):
+            error = torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
+            error_msg = r"Could not guard on data-dependent expression"
+        else:
+            error = torch._dynamo.exc.UserError
+            error_msg = r"Tried to use data-dependent value in the subsequent computation"
+        with self.assertRaisesRegex(error, error_msg):
             _ = export(f, (torch.tensor(6),))
 
     def test_train_eval_on_exported_preautograd_module(self):
@@ -2604,6 +2622,7 @@ def forward(self, arg_0):
             exported_program.module()(torch.rand(2, 3), torch.rand(2, 3))
 
     @testing.expectedFailureSerDerPreDispatch  # linear shouldn't decompose
+    @testing.expectedFailurePreDispatchRunDecomp  # no action needed here
     def test_export_decomps_simple(self):
         class M(torch.nn.Module):
             def __init__(self):
