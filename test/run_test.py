@@ -537,14 +537,13 @@ def run_test(
                 timeout=timeout,
             )
 
-            # Pytest return code 5 means no test is collected. This is needed
-            # here as we use pytest directly when running C++ tests. Return
-            # code 4 is ok too as this happens when the binary is not a C++
-            # test executable. All binary files under build/bin that are not
-            # C++ test at the time of this writing have been excluded, but we
-            # can accept code 4 too just in case a new non-test binary file
-            # comes up in the future.
-            ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
+            # Pytest return code 5 means no test is collected. Exit code 4 is
+            # returned when the binary is not a C++ test executable, but 4 can
+            # also be returned if the file fails before running any tests. All
+            # binary files under build/bin that are not C++ test at the time of
+            # this writing have been excluded and new ones should be added to
+            # the list of exclusions in tools/testing/discover_tests.py
+            ret_code = 0 if ret_code == 5 else ret_code
 
     if options.pipe_logs and print_log:
         handle_log_file(
@@ -591,7 +590,7 @@ def run_test_retries(
             timeout=timeout,
             retries=0,  # no retries here, we do it ourselves, this is because it handles timeout exceptions well
         )
-        ret_code = 0 if ret_code == 5 or ret_code == 4 else ret_code
+        ret_code = 0 if ret_code == 5 else ret_code
         if ret_code == 0:
             break  # Got to the end of the test suite successfully
         signal_name = f" ({SIGNALS_TO_NAMES_DICT[-ret_code]})" if ret_code < 0 else ""
@@ -1552,17 +1551,22 @@ def run_tests(
         NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
     )
 
-    # NB: This is a hack to make conftest.py available on CPP_TESTS_DIR. We should
-    # see if the file could be turned into a full-fledge ptest plugin instead
-    cpp_conftest_file = os.path.join(CPP_TESTS_DIR, "conftest.py")
-    if (
-        options.cpp
-        and os.path.exists(CPP_TESTS_DIR)
-        and os.path.isdir(CPP_TESTS_DIR)
-        and not os.path.exists(cpp_conftest_file)
-    ):
-        # Take the conftest file from the test directory
-        shutil.copy(os.path.join(test_directory, "conftest.py"), cpp_conftest_file)
+    # NB: This is a hack to make conftest.py and files it depends on available
+    # on CPP_TESTS_DIR. We should see if the file could be turned into a
+    # full-fledge ptest plugin instead
+    conftest_files = [
+        "conftest.py",
+        "pytest_shard_custom.py",
+    ]
+    for conftest_file in conftest_files:
+        cpp_file = os.path.join(CPP_TESTS_DIR, conftest_file)
+        if (
+            options.cpp
+            and os.path.exists(CPP_TESTS_DIR)
+            and os.path.isdir(CPP_TESTS_DIR)
+            and not os.path.exists(cpp_file)
+        ):
+            shutil.copy(os.path.join(test_directory, conftest_file), cpp_file)
 
     def handle_error_messages(failure: Optional[TestFailure]):
         if failure is None:
