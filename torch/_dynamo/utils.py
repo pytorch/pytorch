@@ -2612,6 +2612,16 @@ def invalid_removeable_handle():
     return RemovableHandle(Invalid())
 
 
+@functools.lru_cache(None)
+def get_fsdp_module_class():
+    if torch.distributed.is_available():
+        from torch.distributed._composable.fsdp import FSDP
+
+        return FSDP
+    else:
+        return None
+
+
 # Returns a "proxy" (new object with the same class and dict) for (non-GraphModule) nn.Module's.
 # Attribute changes to the original object/proxy will be reflected in the other.
 # This is useful for cases where we want a keep-alive reference to a module without increasing
@@ -2622,8 +2632,9 @@ def nn_module_proxy(mod):
     if isinstance(mod, torch.fx.GraphModule):
         # Dynamo-generated GM's shouldn't contain user-created GM's
         return mod
-    if torch.distributed.is_available() and isinstance(mod, torch.distributed._composable.fsdp.FSDP):
-        return mod
+    if fsdp := get_fsdp_module_class():
+        if isinstance(mod, fsdp):
+            return mod
     proxy = mod.__class__.__new__(mod.__class__)
     proxy.__dict__ = mod.__dict__
     return proxy
