@@ -5,5 +5,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch docs"
 
+env
 cd docs
 make doctest
