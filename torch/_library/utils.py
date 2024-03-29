@@ -54,7 +54,7 @@ def parse_namespace(qualname: str) -> Tuple[str, str]:
     return splits[0], splits[1]
 
 
-def lookup_op(qualname: str) -> torch._ops.OpOverloadPacket:
+def lookup_op(qualname: str) -> torch._ops.OpOverload:
     namespace, name = parse_namespace(qualname)
     if "." in name:
         name, overload = name.split(".")
@@ -164,7 +164,7 @@ def mangle(value: str) -> str:
 
     https://docs.python.org/3/reference/lexical_analysis.html#identifiers
 
-    The string may consist of letters, numbers, underscores and [.<>@]
+    The string may consist of letters, numbers, underscores and [.<>]
 
     We optimize for readability in the general case (strings with letters,
     numbers, periods, and underscore).
@@ -175,22 +175,19 @@ def mangle(value: str) -> str:
     - X -> ZX
     - < -> Z0
     - > -> Z1
-    - @ -> Z2
 
     Examples:
     - foo.bar.baz -> fooXbarXbaz
     - foo_bar.baz -> foo_barXbaz
     - X.Z -> ZXXZZ
     - ZQ.ZQ -> ZZQXZZQ
-    - <lambda> -> Z0lambdaZ1
     """
-    assert re.match(r"^[A-z0-9.<>@_]+$", value), "invalid value"
+    assert re.match(r"^[A-z0-9.<>_]+$", value), "invalid value"
     value = value.replace("Z", "ZZ")
     value = value.replace("X", "ZX")
     value = value.replace(".", "X")
     value = value.replace("<", "Z0")
     value = value.replace(">", "Z1")
-    value = value.replace("@", "Z2")
     return value
 
 
@@ -200,24 +197,7 @@ def demangle(value: str) -> str:
     value = value.replace("ZX", "?")
     value = value.replace("Z0", "<")
     value = value.replace("Z1", ">")
-    value = value.replace("Z2", "@")
     value = value.replace("X", ".")
     value = value.replace("?", "X")
     value = value.replace("!", "Z")
     return value
-
-
-def unique_name(fn: Callable) -> str:
-    """Given a callable, return a name that uniquely identifies it.
-
-    Some cases:
-    - a function is identified by its __module__ and __qualname__
-    - lambda requires the object's id to distinguish
-    """
-    is_lambda = fn.__name__ == "<lambda>"
-    suffix = ""
-    if is_lambda:
-        suffix = "@" + hex(id(fn))
-
-    identifier = f"{fn.__module__}.{fn.__qualname__}{suffix}"
-    return identifier
