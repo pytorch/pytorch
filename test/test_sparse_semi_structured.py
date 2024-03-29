@@ -757,7 +757,7 @@ class TestSparseSemiStructuredTraining(TestCase):
         )
         (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(b)
         b_s = SparseSemiStructuredTensorCUTLASS(
-            a.shape,
+            b.shape,
             packed=packed,
             meta=meta,
             packed_t=packed_t,
