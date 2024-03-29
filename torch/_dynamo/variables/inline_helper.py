@@ -1,10 +1,4 @@
-import warnings
-
 import torch.fx
-import torch.fx.traceback as fx_traceback
-import torch.utils._pytree as pytree
-from torch.fx import Interpreter
-from torch.nn.utils import stateless
 from .constant import ConstantVariable
 
 
@@ -21,41 +15,6 @@ def dummy_accumulate_grad_(t1, t2):
         t1.grad = t2
     else:
         t1.grad += t2
-
-
-# copy from torch/_functorch/_aot_autograd/traced_function_transforms.py
-# and remove the restriction that output has to be a tuple.
-def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
-    # Redundant with dynamo, but worth having in case this gets invoked elsewhere.
-    # https://github.com/pytorch/pytorch/issues/103569
-
-    def functional_call(*args, **kwargs):
-        with stateless._reparametrize_module(
-            mod, pytree.tree_unflatten(args[:params_len], params_spec)
-        ):
-            if isinstance(mod, torch.fx.GraphModule):
-                with fx_traceback.preserve_node_meta(), warnings.catch_warnings():
-                    warnings.filterwarnings(
-                        "ignore", "Anomaly Detection has been enabled."
-                    )
-                    with torch.autograd.detect_anomaly(check_nan=False):
-                        out = Interpreter(mod).run(*args[params_len:], **kwargs)
-            else:
-                out = mod(*args[params_len:], **kwargs)
-        return out
-
-    # Note [Preserving the nn module stack metadata during export non-strict mode]
-    # This path is currently only used by the non-strict export flow,
-    # where we cannot rely on dynamo to preserve nn stack metadata in our captured graph.
-    # Instead, we stash the original user nn module here, and rely on `make_fx` to grab
-    # this stashed module and use it to track nn module stack metadata
-    if store_orig_mod and not hasattr(functional_call, "_orig_mod"):
-        functional_call._orig_mod = mod  # type: ignore[attr-defined]
-
-    return functional_call
-
-
-code_to_Fx = {}
 
 
 def vt_to_fake_helper(vt, tx):
@@ -75,6 +34,9 @@ def vt_to_fake_helper(vt, tx):
             return p
 
     return proxy_to_fake_helper(proxy_)
+
+
+code_to_Fx = {}
 
 
 def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs, function_key=None):
@@ -117,11 +79,6 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs, function_key
                 fake_value_args, fake_value_kwargs
             )
 
-    # Perform a dead code elimination
-    # fx_g.graph.eliminate_dead_code()
-    # fx_g.recompile()
-
-    # print("\nfx code")
     # this is a hack, we want to access `.code` here to trigger the `real_recompile`
     # in case this is `_lazy_graph_module`. This will aovid us trying to inline the
     # `_LazyGraphModule._lazy_forward`(in the skip list) below.

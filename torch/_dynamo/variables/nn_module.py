@@ -401,11 +401,9 @@ class NNModuleVariable(VariableTracker):
         elif name == "forward":
             if config.use_single_step_graph:
                 import torch.utils._pytree as pytree
+                from torch._functorch.aot_autograd import create_functional_call
                 from .builtin import BuiltinVariable
-                from .inline_helper import (
-                    create_functional_call,
-                    decompose_and_inline_function_with_makefx,
-                )
+                from .inline_helper import decompose_and_inline_function_with_makefx
 
                 start_node_code = len(tx.output.graph.nodes)
 
@@ -429,7 +427,9 @@ class NNModuleVariable(VariableTracker):
                 params_flat, params_spec = pytree.tree_flatten(params)
                 params_flat = list(params_flat)
                 params_len = len(params_flat)
-                functional_call = create_functional_call(mod, params_spec, params_len)
+                functional_call = create_functional_call(
+                    mod, params_spec, params_len, check_tuple_output=False
+                )
 
                 # Create VariableTrackers for this module's named_parameters and named_buffers.
                 self_params_as_vt = []
