@@ -445,10 +445,8 @@ class TestExport(TestCase):
                 actual_result.append(node.meta.get("torch_fn"))
         self.assertEqual(actual_result, expected_result)
 
-    # torch_fn within submodule is not restored correctly because the
-    # fx_traceback.set_current_meta points to the cond node rather than the fx
-    # node in the graph.
-    @testing.expectedFailureRetraceability
+    # TODO(yidi)
+    @unittest.expectedFailure
     def test_export_cond_preserve_torch_fn_for_subgraphs(self):
         class MySubModule(torch.nn.Module):
             def foo(self, x):

@@ -157,9 +157,10 @@ while_loop_op.py_impl(DispatchKey.Autograd)(
 @while_loop_op.py_impl(ProxyTorchDispatchMode)
 def while_loop_tracing(mode, cond_fn, body_fn, operands):
     def _trace_while_loop(proxy_mode, while_loop_op, cond_fn, body_fn, operands):
+        pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
         with disable_proxy_modes_tracing():
-            cond_graph = reenter_make_fx(proxy_mode, cond_fn)(*operands)
-            body_graph = reenter_make_fx(proxy_mode, body_fn)(*operands)
+            cond_graph = reenter_make_fx(cond_fn, pre_dispatch)(*operands)
+            body_graph = reenter_make_fx(body_fn, pre_dispatch)(*operands)
 
         next_name = None
         i = 0
