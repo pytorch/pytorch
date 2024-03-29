@@ -122,7 +122,7 @@ def register_fake_class(qualname, fake_class=None):
             @classmethod
             def from_real(cls, real_tq):
                 ctx = torch.library.get_ctx()
-                fake_queue = [ctx.create_fake_tensor(t) for t in real_tq.get_raw_queue()]
+                fake_queue = [ctx.create_fake_tensor(t) for t in real_tq.clone_queue()]
                 return cls(fake_queue)
 
             def push(self, x):
