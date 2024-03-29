@@ -314,8 +314,11 @@ class NNModuleVariable(VariableTracker):
 
                 from .builder import wrap_fx_proxy
 
-                # skip inling into LSTM
-                if not config.use_single_step_graph or type(mod) is torch.nn.modules.rnn.LSTM:
+                # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs, don't try to make_fx and
+                # inline into these modules
+                if not config.use_single_step_graph or isinstance(
+                    mod, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM)
+                ):
                     return wrap_fx_proxy(
                         tx=tx,
                         proxy=tx.output.create_proxy(
