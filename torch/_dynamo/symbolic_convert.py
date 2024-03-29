@@ -2553,14 +2553,19 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             ):
                 try:
                     val, next_iter = tos.next_variables(self)
+
+                    # Collect the value
+                    # TODO(anijain2305,jansel) - The last pop is because
+                    # YIELD_FROM. If we remove it from there, we don't need to
+                    # pop it here.
                     self.push(val)
-                    # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
                     self.YIELD_VALUE(inst)
+                    self.pop()
+
+                    # Pop the old iter and push the new iter
                     self.pop()
                     self.push(next_iter)
                 except StopIteration:
-                    # Pop the last pushed next_iter
-                    self.pop()
                     return
             else:
                 unimplemented(f"YIELD_FROM {typestr(tos)}")
@@ -2570,6 +2575,12 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         val = self.pop()
         tos = self.stack[-1]
         if isinstance(tos, ListIteratorVariable):
+            # This will might always be exhausted, because we don't exactly
+            # follow Python call stack when it comes to yied.  Instead we
+            # eagerly collect all the generated items during
+            # GET_YIELD_FROM_ITER.
+            if tos.is_exhausted():
+                self.pop()
             if isinstance(val, ConstantVariable) and val.value is None:
                 self.push(val)
                 self.instruction_pointer = self.indexof[inst.target]
