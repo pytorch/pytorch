@@ -1150,22 +1150,98 @@ def _register_woq_lowering(pattern, computation_woq, computation_reshape):
     return woq
 
 
-def _register_woq_mm_int8():
-    # torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+def _register_woq_mm_int8_pattern1():
     _woq_pattern = CallFunction(
         aten.mul.Tensor,
         CallFunction(
             aten.reshape.default,
             CallFunction(
-                aten.mm.default,
-                CallFunction(aten.reshape.default, KeywordArg("x"), Arg()),
+                prims.convert_element_type.default,
                 CallFunction(
-                    aten.permute.default,
+                    aten.sum.dim_IntList,
                     CallFunction(
-                        prims.convert_element_type.default, KeywordArg("weight"), Arg()
+                        aten.mul.Tensor,
+                        CallFunction(
+                            aten.unsqueeze.default,
+                            CallFunction(
+                                prims.convert_element_type.default,
+                                CallFunction(
+                                    aten.reshape.default, KeywordArg("x"), Arg()
+                                ),
+                                Arg(),
+                            ),
+                            Arg(),
+                        ),
+                        CallFunction(
+                            aten.unsqueeze.default,
+                            CallFunction(
+                                prims.convert_element_type.default,
+                                CallFunction(
+                                    aten.permute.default,
+                                    CallFunction(
+                                        prims.convert_element_type.default,
+                                        KeywordArg("weight"),
+                                        Arg(),
+                                    ),
+                                    Arg(),
+                                ),
+                                Arg(),
+                            ),
+                            Arg(),
+                        ),
                     ),
                     Arg(),
                 ),
+                Arg(),
+            ),
+            Arg(),
+        ),
+        KeywordArg("scales"),
+    )
+    _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
+
+
+def _register_woq_mm_int8_pattern2():
+    _woq_pattern = CallFunction(
+        aten.mul.Tensor,
+        CallFunction(
+            prims.convert_element_type.default,
+            CallFunction(
+                aten.sum.dim_IntList,
+                CallFunction(
+                    aten.mul.Tensor,
+                    CallFunction(
+                        aten.unsqueeze.default,
+                        CallFunction(
+                            prims.convert_element_type.default,
+                            CallFunction(aten.expand.default, KeywordArg("x"), Arg()),
+                            Arg(),
+                        ),
+                        Arg(),
+                    ),
+                    CallFunction(
+                        aten.unsqueeze.default,
+                        CallFunction(
+                            prims.convert_element_type.default,
+                            CallFunction(
+                                aten.expand.default,
+                                CallFunction(
+                                    aten.permute.default,
+                                    CallFunction(
+                                        prims.convert_element_type.default,
+                                        KeywordArg("weight"),
+                                        Arg(),
+                                    ),
+                                    Arg(),
+                                ),
+                                Arg(),
+                            ),
+                            Arg(),
+                        ),
+                        Arg(),
+                    ),
+                ),
+                Arg(),
             ),
             Arg(),
         ),
@@ -1183,18 +1259,17 @@ def _register_quantization_lowerings():
 
 
 def _register_woq_lowerings():
-    _register_woq_mm_int8()
+    _register_woq_mm_int8_pattern1()
+    _register_woq_mm_int8_pattern2()
 
 
-def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
+def _is_valid_general_dequant_promotion_pattern(
+    end_node_target_candidates, dtype=torch.float32
+):
     def _inner(match):
         assert dtype in [torch.float32, torch.bfloat16]
         dequant_pattern_end_node = match.output_node()
-        if dequant_pattern_end_node.target not in [
-            aten.mul.Tensor,
-            prims.convert_element_type.default,
-            aten.reshape.default,
-        ]:
+        if dequant_pattern_end_node.target not in end_node_target_candidates:
             return False
 
         if dequant_pattern_end_node.target is aten.reshape.default:
@@ -1229,10 +1304,43 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
     return _inner
 
 
-def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
+def _is_valid_woq_mm_dequant_promotion_pattern(
+    end_node_target_candidates, dtype=torch.bfloat16
+):
+    def _inner(match):
+        assert dtype == torch.bfloat16
+        dequant_pattern_end_node = match.output_node()
+        if dequant_pattern_end_node.target not in end_node_target_candidates:
+            return False
+
+        unsqueeze_node = dequant_pattern_end_node
+        convert_node = unsqueeze_node.args[0]
+        reshape_node = convert_node.args[0]
+        if (
+            unsqueeze_node.target is aten.unsqueeze.default
+            and convert_node.target is prims.convert_element_type.default
+            and convert_node.args[1] == torch.float32
+            and reshape_node.target is aten.reshape.default
+            and len(list(dequant_pattern_end_node.users)) > 1
+        ):
+            # If dequant pattern has more than 1 users, then do dequant promoted
+            return True
+        return False
+
+    return _inner
+
+
+def _register_dequant_promotion_pass(
+    pattern,
+    pass_number,
+    extra_check_fn,
+    find_first_node_fn,
+    end_node_target_candidates,
+    dtype=torch.float32,
+):
     @register_freezing_graph_pattern(
         pattern,
-        extra_check=_is_valid_dequant_promotion_pattern(dtype),
+        extra_check=extra_check_fn(end_node_target_candidates, dtype),
         pass_number=pass_number,
     )
     def dequant_promotion(match: Match, *args, **kwargs):
@@ -1260,8 +1368,6 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         # After this transformation, the graph 2 could hit the int8
         # fusion pattern: dequant-node-quant, respectively for
         # node1 and node2.
-        assert dtype in [torch.float32, torch.bfloat16]
-
         def clone_to_new_node(graph, source_node, user_node):
             # Clone the source_node to a new node
             # Replace user_node's input from source_node to new_node
@@ -1282,34 +1388,9 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         # * End node should be the match.output_node()
         # * Start node should be the node of dtype convert to float32
         dequant_pattern_end_node = match.output_node()
-        assert dequant_pattern_end_node.target in [
-            aten.mul.Tensor,
-            prims.convert_element_type.default,
-            aten.reshape.default,
-        ]
+        assert dequant_pattern_end_node.target in end_node_target_candidates
 
-        # For a dequant pattern, we should expect see the node list as:
-        # * OPT(aten.reshape.default)
-        # * OPT(prims.convert_element_type.default) (to_bf16)
-        # * aten.mul
-        # * aten.sub
-        # * prims.convert_element_type.default (to_fp32)
-        def _find_first_node_in_dequant_pattern(_node):
-            if (
-                _node.target is prims.convert_element_type.default
-                and _node.args[1] == torch.float32
-            ):
-                # For a dequant pattern, we expect the start node is a to_fp32 node
-                return _node
-            else:
-                assert (
-                    len(_node.args) >= 1
-                ), "In in dequant pattern, each node should have more than 1 arg."
-                return _find_first_node_in_dequant_pattern(_node.args[0])
-
-        dequant_pattern_start_node = _find_first_node_in_dequant_pattern(
-            dequant_pattern_end_node
-        )
+        dequant_pattern_start_node = find_first_node_fn(dequant_pattern_end_node)
 
         # Clone the dequant pattern for each user node
         graph = match.graph
@@ -1971,7 +2052,26 @@ def _generate_qlinear_weight_prepack_patterns(
         )
 
 
-def _register_dequant_promotion():
+def _register_general_dequant_promotion():
+    # For a dequant pattern, we should expect see the node list as:
+    # * OPT(aten.reshape.default)
+    # * OPT(prims.convert_element_type.default) (to_bf16)
+    # * aten.mul
+    # * aten.sub
+    # * prims.convert_element_type.default (to_fp32)
+    def _find_first_node_in_dequant_pattern(_node):
+        if (
+            _node.target is prims.convert_element_type.default
+            and _node.args[1] == torch.float32
+        ):
+            # For a dequant pattern, we expect the start node is a to_fp32 node
+            return _node
+        else:
+            assert (
+                len(_node.args) >= 1
+            ), "In in dequant pattern, each node should have more than 1 arg."
+            return _find_first_node_in_dequant_pattern(_node.args[0])
+
     dequant_pattern_cases = itertools.product(
         [torch.float32, torch.bfloat16], [True, False]
     )
@@ -2007,8 +2107,47 @@ def _register_dequant_promotion():
                 with_reshape=input_dim_exceeds_two,
             ),
             pass_number=0,
+            extra_check_fn=_is_valid_general_dequant_promotion_pattern,
+            find_first_node_fn=_find_first_node_in_dequant_pattern,
+            end_node_target_candidates=[
+                aten.mul.Tensor,
+                prims.convert_element_type.default,
+                aten.reshape.default,
+            ],
             dtype=dtype,
         )  # pass_number=0 to run before weight prepack
+
+
+def _register_woq_mm_dequant_promotion():
+    # For a woq mm int8-mixed-bf16 dequant pattern, we should expect see the node list as:
+    # * aten.unsqueeze.default
+    # * prims.convert_element_type.default (to_fp32)
+    # * aten.reshape.default
+    def _find_first_node_in_dequant_pattern(_node):
+        if _node.target is aten.reshape.default:
+            return _node
+        else:
+            assert (
+                len(_node.args) >= 1
+            ), "In in dequant pattern, each node should have more than 1 arg."
+            return _find_first_node_in_dequant_pattern(_node.args[0])
+
+    _register_dequant_promotion_pass(
+        CallFunction(
+            aten.unsqueeze.default,
+            CallFunction(
+                prims.convert_element_type.default,
+                CallFunction(aten.reshape.default, KeywordArg("x"), Arg()),
+                Arg(),
+            ),
+            Arg(),
+        ),
+        pass_number=0,
+        extra_check_fn=_is_valid_woq_mm_dequant_promotion_pattern,
+        find_first_node_fn=_find_first_node_in_dequant_pattern,
+        end_node_target_candidates=[aten.unsqueeze.default],
+        dtype=torch.bfloat16,
+    )
 
 
 def _register_qconv_weight_prepack():
@@ -2103,7 +2242,8 @@ def _register_qlinear_weight_prepack():
 @functools.lru_cache(None)
 def _register_quantization_weight_pack_pass():
     # Step 1: Dequant promotion for int8-mixed-fp32/bf16
-    _register_dequant_promotion()
+    _register_general_dequant_promotion()
+    _register_woq_mm_dequant_promotion()
 
     # Step 2: QConv weight prepack
     _register_qconv_weight_prepack()

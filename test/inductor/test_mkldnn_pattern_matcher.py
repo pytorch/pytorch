@@ -2249,12 +2249,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfRocm
+    @config.patch({"coordinate_descent_tuning": True})
     def test_woq_int8(self):
         class M(torch.nn.Module):
             def forward(self, x, weight, scales):
                 return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
 
-        torch.manual_seed(1234)
         mod = M().eval()
         x_shape = (1, 1, 256)
         w_shape = (12, 256)
@@ -2271,6 +2271,47 @@ class TestPatternMatcher(TestPatternMatcherBase):
             (x, w, s),
             matcher_check_fn=matcher_check_fn,
             check_quantization=False,
+            atol=0.001,
+            rtol=0.07,
+        )
+
+    @skipIfNoDynamoSupport
+    @skipIfRocm
+    @config.patch({"coordinate_descent_tuning": True})
+    def test_woq_dequant_promotion_int8_mixed_bf16(self):
+        r"""
+        Test with int8_mixed_bf16 woq.
+        This testcase test if dequant node before mul is promoted correctly:
+                  X
+                /   \
+         Linear(X)   Linear(X)
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x, weight1, scales1, weight2, scales2):
+                y1 = torch.nn.functional.linear(x, weight1.to(dtype=x.dtype)) * scales1
+                y2 = torch.nn.functional.linear(x, weight2.to(dtype=x.dtype)) * scales2
+                return y1, y2
+
+        mod = M().eval()
+
+        def matcher_check_fn():
+            self.assertEqual(counters["inductor"]["dequant_promotion_matcher_count"], 1)
+
+        x_shape = (1, 1, 4096)
+        w_shape = (11008, 4096)
+        s_shape = 11008
+        x = torch.randn(x_shape, dtype=torch.bfloat16)
+        w1 = torch.randint(-128, 127, w_shape, dtype=torch.int8)
+        s1 = torch.randn(s_shape, dtype=torch.bfloat16)
+        w2 = torch.randint(-128, 127, w_shape, dtype=torch.int8)
+        s2 = torch.randn(s_shape, dtype=torch.bfloat16)
+
+        self._test_common(
+            mod,
+            (x, w1, s1, w2, s2),
+            check_quantization=False,
+            matcher_check_fn=matcher_check_fn,
             atol=0.001,
             rtol=0.07,
         )
