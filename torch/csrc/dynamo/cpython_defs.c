@@ -555,6 +555,7 @@ allocate_chunk(int size_in_bytes, _PyStackChunk* previous)
     // DYNAMO: _PyStackChunk is a regular C struct, so
     // it should be safe to use system malloc over Python malloc, e.g. _PyObject_VirtualAlloc
     _PyStackChunk *res = malloc(size_in_bytes);
+    // _PyStackChunk *res = _PyObject_VirtualAlloc(size_in_bytes);
     if (res == NULL) {
         return NULL;
     }
@@ -636,7 +637,8 @@ THP_PyThreadState_PopFrame(PyThreadState *tstate, _PyInterpreterFrame * frame)
         tstate->datastack_top = &previous->data[previous->top];
         tstate->datastack_chunk = previous;
         // DYNAMO: free instead of _PyObject_VirtualFree
-        free(chunk);
+        // free(chunk);
+        // _PyObject_VirtualFree(chunk, chunk->size);
         tstate->datastack_limit = (PyObject **)(((char *)previous) + previous->size);
     }
     else {
