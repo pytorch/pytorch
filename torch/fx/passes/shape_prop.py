@@ -28,7 +28,7 @@ class TensorMetadata(NamedTuple):
     is_quantized : bool
     qparams: Dict[str, Any]
 
-def _extract_tensor_metadata(result : torch.Tensor, include_contiguity=True) -> TensorMetadata:
+def _extract_tensor_metadata(result : torch.Tensor, include_contiguity=False) -> TensorMetadata:
     """
     Extract a TensorMetadata NamedTuple describing `result`.
     """
