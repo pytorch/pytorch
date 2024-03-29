@@ -148,7 +148,7 @@ def numpy_take_backward(ctx, saved, grad_out):
         'ind_inv': None,
     }
 
-@torch.library.custom_op(mutated_args=())
+@torch.library.custom_op("_torch_testing::numpy_nonzero", mutated_args=())
 def numpy_nonzero(x: Tensor) -> Tensor:
     x_np = to_numpy(x)
     res = np.stack(np.nonzero(x_np), axis=1)
@@ -364,25 +364,6 @@ def sample_inputs_numpy_nms(opinfo, device, dtype, requires_grad, **kwargs):
     iou_threshold = make_arg([], low=0, high=1).item()
 
     yield SampleInput(boxes, args=(scores, iou_threshold))
-
-
-def fn0():
-    pass
-
-
-def get_fn1():
-    def fn1():
-        pass
-    return fn1
-
-fn1 = get_fn1()
-
-
-def get_fn2():
-    return lambda x: x
-
-fn2 = get_fn2()
-
 
 custom_op_db = [
     OpInfo(

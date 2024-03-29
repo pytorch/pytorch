@@ -1,19 +1,18 @@
-import contextlib
 import inspect
-import threading
 from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple, Union
 
 from .. import _C, _library, library, Tensor
-from . import utils
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
 
 
 def custom_op(
+    name: str,
+    /,
     *,
     mutated_args: Sequence[str],
-    types: device_types_t = None,
+    device_types: device_types_t = None,
     qualname: Optional[str] = None,
 ) -> Callable:
     """Wraps a function into custom operator.
@@ -28,14 +27,16 @@ def custom_op(
     with PyTorch's various subsystems.
 
     Args:
+        name (str): A name for the custom op that looks like "{namespace}::{name}",
+            e.g. "mylib::my_linear". The name is used as a stable identifier for
+            if you wish to serialize the custom op, e.g., via torch.save/torch.export.
+            To avoid name collisions, please use your project name as the namespace.
         mutated_args (Sequence[str]): The names of args that the function mutates.
             This MUST be accurate, otherwise, the behavior is undefined.
-        types (None | str | Sequence[str]): The device type(s) the function
+        device_types (None | str | Sequence[str]): The device type(s) the function
             is valid for. If no device type is provided, then the function
             is used as the default implementation for all device types.
             Examples: "cpu", "cuda".
-        qualname (None | str): An optional name for the operator. If provided,
-            must look like "{namespace}::{name}", e.g. "mylib::my_linear"
 
     Examples::
         >>> import torch
@@ -43,7 +44,7 @@ def custom_op(
         >>> from torch.library import custom_op
         >>> import numpy as np
         >>>
-        >>> @custom_op(mutated_args=())
+        >>> @custom_op("mylib::numpy_sin", mutated_args=())
         >>> def numpy_sin(x: Tensor) -> Tensor:
         >>>     x_np = x.cpu().numpy()
         >>>     y_np = np.sin(x_np)
@@ -54,7 +55,7 @@ def custom_op(
         >>> assert torch.allclose(y, x.sin())
         >>>
         >>> # Example of a custom op that only works for one device type.
-        >>> @custom_op(mutated_args=(), types="cpu")
+        >>> @custom_op("mylib::numpy_sin_cpu", mutated_args=(), device_types="cpu")
         >>> def numpy_sin_cpu(x: Tensor) -> Tensor:
         >>>     x_np = x.numpy()
         >>>     y_np = np.sin(x_np)
@@ -66,15 +67,29 @@ def custom_op(
 
     """
     assert len(mutated_args) == 0, "NYI"
-    assert qualname is None, "NYI"
 
     def inner(fn):
-        return CustomOpDef._from_fn(fn, types, mutated_args)
+        import torch
+
+        schema = torch._custom_op.impl.infer_schema(fn, mutated_args)
+        namespace, opname = name.split("::")
+        result = CustomOpDef(namespace, opname, schema, fn)
+        result.register_impl(device_types)(fn)
+        return result
 
     return inner
 
 
 class CustomOpDef:
+    """CustomOpDef is a wrapper around a function that turns it into a custom op.
+
+    It has various methods for registering additional behavior for this
+    custom op.
+
+    You should not instantiate CustomOpDef directly; instead, use the
+    :func:`torch.library.custom_op` API.
+    """
+
     def __init__(self, namespace: str, name: str, schema: str, fn: Callable) -> None:
         # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
@@ -88,37 +103,21 @@ class CustomOpDef:
         self._abstract_fn: Optional[Callable] = None
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
-        self._build()
-
-    @classmethod
-    def _from_fn(
-        cls,
-        fn: Callable,
-        types: device_types_t,
-        mutated_args: Sequence[str],
-    ) -> "CustomOpDef":
-        import torch
-
-        schema = torch._custom_op.impl.infer_schema(fn, mutated_args)
-        namespace = reserved_namespace()
-        name = utils.mangle(utils.unique_name(fn))
-        result = cls(namespace, name, schema, fn)
-        result.register_impl(types)(fn)
-        return result
+        self._register_to_dispatcher()
 
     def __repr__(self) -> str:
-        return f"<CustomOpDef({self._init_fn})>"
+        return f"<CustomOpDef({self._qualname})>"
 
     def register_impl(
-        self, types: device_types_t, fn: Optional[Callable] = None
+        self, device_types: device_types_t, fn: Optional[Callable] = None
     ) -> Callable:
         """Register an implementation for a device type for this operator.
 
-        Some valid types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
+        Some valid device_types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
         This API may be used as a decorator.
 
         Args:
-            types (str | Sequence[str]): The device types to register an impl to.
+            device_types (str | Sequence[str]): The device device_types to register an impl to.
 
         Examples::
             >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
@@ -128,7 +127,7 @@ class CustomOpDef:
             >>> import numpy as np
             >>>
             >>> # Example of split cpu and cuda definitions
-            >>> @custom_op(mutated_args=(), types="cpu")
+            >>> @custom_op("mylib::numpy_sin", mutated_args=(), device_types="cpu")
             >>> def numpy_sin(x: Tensor) -> Tensor:
             >>>     x_np = x.numpy()
             >>>     y_np = np.sin(x_np)
@@ -149,10 +148,10 @@ class CustomOpDef:
         """
 
         def inner(fn):
-            if types is None or isinstance(types, str):
-                dtypes: List[Union[str, None]] = [types]
+            if device_types is None or isinstance(device_types, str):
+                dtypes: List[Union[str, None]] = [device_types]
             else:
-                dtypes = list(types)
+                dtypes = list(device_types)
             for device_type in dtypes:
                 if device_type not in self._backend_fns:
 
@@ -197,6 +196,7 @@ class CustomOpDef:
                 self._backend_fns[device_type] = fn
             return fn
 
+        # See NOTE: [Supporting decorator and non-decorator usage]
         if fn is None:
             return inner
         return inner(fn)
@@ -220,7 +220,7 @@ class CustomOpDef:
             >>> from torch import Tensor
             >>>
             >>> # Example 1: an operator without data-dependent output shape
-            >>> @torch.library.custom_op(mutated_args=())
+            >>> @torch.library.custom_op("mylib::custom_linear", mutated_args=())
             >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
             >>>     return (x @ weight.t()) + bias
             >>>
@@ -242,7 +242,7 @@ class CustomOpDef:
             >>> assert torch.allclose(out, torch.nn.functional.linear(x, weight, bias))
             >>>
             >>> # Example 2: an operator with data-dependent output shape
-            >>> @torch.library.custom_op(mutated_args=())
+            >>> @torch.library.custom_op("mylib::custom_nonzero", mutated_args=())
             >>> def custom_nonzero(x: Tensor) -> Tensor:
             >>>     x_np = x.cpu().numpy()
             >>>     res = np.stack(np.nonzero(x_np), axis=1)
@@ -269,7 +269,7 @@ class CustomOpDef:
         self._abstract_fn = fn
         return fn
 
-    def _build(self) -> None:
+    def _register_to_dispatcher(self) -> None:
         lib = self._lib
         lib.define(f"{self._name}{self._schema}")
         self._opoverload = _library.utils.lookup_op(self._qualname)
@@ -284,13 +284,33 @@ class CustomOpDef:
                 )
             return self._abstract_fn(*args, **kwargs)
 
-        # TODO(rzou): I'm not sure why this needs to create a new library when
-        # we pass one in?
-        with allow_reserved_namespace_access():
-            library.impl_abstract(self._qualname, lib=lib)(fake_impl)
+        library.impl_abstract(self._qualname, lib=lib)(fake_impl)
 
     def __call__(self, *args, **kwargs):
         return self._opoverload(*args, **kwargs)
+
+
+# NOTE: [Supporting decorator and non-decorator usage]
+#
+# Some APIs may be both used as a decorator and not as a decorator.
+# For example:
+#
+# >>> def fn(x):
+# >>>     return x.sin()
+# >>>
+# >>> # Usage 1: not as a decorator
+# >>> numpy_sin.register_impl("cuda", fn)
+# >>>
+# >>> # Usage 2: as a decorator
+# >>> @numpy_sin.register_impl("cuda")
+# >>> def fn2(x):
+# >>>     return x.sin
+#
+# The way we support this is that `register_impl` accepts an optional `fn`.
+# If `fn` is provided (Usage 1), then we know that the user is using it not
+# as a decorator.
+# If `fn` is not provided (Usage 2), then `register_impl` needs to return a
+# decorator.
 
 
 OPDEF_TO_LIB: Dict[str, "library.Library"] = {}
@@ -303,8 +323,7 @@ def get_library_allowing_overwrite(namespace: str, name: str) -> "library.Librar
         OPDEF_TO_LIB[qualname]._destroy()
         del OPDEF_TO_LIB[qualname]
 
-    with allow_reserved_namespace_access():
-        lib = library.Library(namespace, "FRAGMENT")
+    lib = library.Library(namespace, "FRAGMENT")
     OPDEF_TO_LIB[qualname] = lib
     return lib
 
@@ -322,42 +341,3 @@ def iter_tensors(
         yield from check(arg)
     for kwarg in kwargs.values():
         yield from check(kwarg)
-
-
-# NOTE: [custom_op's automatic naming]
-# If the user does not provide a manual qualname (e.g. mylib::linear) for the
-# custom op, we will autogenerate one from the function passed to
-# custom_op.
-#
-# The autogenerated namespace is {reserved_namespace()}; the autogenerated
-# name is mangle(unique_name(fn)).
-#
-# The user should not depend on the details of the automatic naming (it is
-# not robust to moving code around, among other things). To prevent this,
-# we try our best to error out if we think the user is depending on it:
-# - we disallow the user from creating a new Library object using the namespace
-# - TODO(rzou): we disallow torch.export with custom ops with automatic names.
-#
-# Some of our custom ops infra need to access these though, so we provide
-# some sidechannels (allow_reserved_namespace_access) to do so.
-
-tls = threading.local()
-tls.can_access_reserved_namespace = False
-
-
-def reserved_namespace() -> str:
-    return "DONT_USE_THIS_GIVE_EXPLICIT_NAMESPACE_IF_NEEDED"
-
-
-def can_access_reserved_namespace() -> bool:
-    return tls.can_access_reserved_namespace
-
-
-@contextlib.contextmanager
-def allow_reserved_namespace_access(allowed: bool = True) -> Iterator[None]:
-    prev = tls.can_access_reserved_namespace
-    try:
-        tls.can_access_reserved_namespace = allowed
-        yield
-    finally:
-        tls.can_access_reserved_namespace = prev

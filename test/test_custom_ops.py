@@ -11,7 +11,6 @@ import sys
 import typing
 
 import torch._custom_ops as custom_ops
-import torch._library.utils as utils
 
 import torch.testing._internal.custom_op_db
 import torch.testing._internal.optests as optests
@@ -20,9 +19,8 @@ from functorch import make_fx
 from torch import Tensor
 from torch._custom_op.impl import custom_op, CustomOp, infer_schema
 from torch._utils_internal import get_file_path_2
-from torch.testing._internal import custom_op_db
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.custom_op_db import numpy_nonzero
+from torch.testing._internal.custom_op_db import custom_op_db, numpy_nonzero
 from typing import *  # noqa: F403
 import numpy as np
 
@@ -326,7 +324,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             optests.opcheck(op, (x,), {})
 
-    @ops(custom_op_db.custom_op_db, dtypes=OpDTypes.any_one)
+    @ops(custom_op_db, dtypes=OpDTypes.any_one)
     def test_opcheck_opinfo(self, device, dtype, op):
         for sample_input in op.sample_inputs(
             device, dtype, requires_grad=op.supports_autograd
@@ -722,40 +720,6 @@ class TestCustomOp(CustomOpTestCaseBase):
             return list(itertools.product(examples, examples)) + []
         raise NotImplementedError(
             f"testrunner cannot generate instanstance of type {typ}"
-        )
-
-    def test_mangle_demangle(self):
-        examples = [
-            "__main__",
-            "__main__.foo",
-            "foo.bar.baz",
-            "X.Z.XZ.ZX.ZZ",
-            "Z0ZZ1ZZZ2",
-            "torch.testing._internal.custom_op_db.fn0",
-            "torch.testing._internal.custom_op_db.get_fn1.<locals>.fn1",
-            "torch.testing._internal.custom_op_db.get_fn2.<locals>.<lambda>@0xDEADBEEF",
-        ]
-
-        for value in examples:
-            mangled = utils.mangle(value)
-            self.assertTrue(mangled.isidentifier())
-            demangled = utils.demangle(mangled)
-            self.assertEqual(demangled, value)
-
-    def test_unique_name(self):
-        name = utils.unique_name(custom_op_db.fn0)
-        self.assertExpectedInline(name, """torch.testing._internal.custom_op_db.fn0""")
-
-        name = utils.unique_name(custom_op_db.fn1)
-        self.assertExpectedInline(
-            name, """torch.testing._internal.custom_op_db.get_fn1.<locals>.fn1"""
-        )
-
-        name = utils.unique_name(custom_op_db.fn2)
-        name = re.sub(r"0x.*", "0xDEADBEEF", name)
-        self.assertExpectedInline(
-            name,
-            """torch.testing._internal.custom_op_db.get_fn2.<locals>.<lambda>@0xDEADBEEF""",
         )
 
     def test_supported_return_types_single_return(self):
@@ -2082,10 +2046,11 @@ class MiniOpTest(CustomOpTestCaseBase):
 
 
 class TestCustomOpAPI(TestCase):
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_basic(self):
-        @torch.library.custom_op(mutated_args=())
+        @torch.library.custom_op("_torch_testing::add", mutated_args=())
         def add(x: Tensor, y: float) -> Tensor:
-            x_np = x.cpu().numpy()
+            x_np = x.numpy(force=True)
             out_np = x_np + y
             return torch.from_numpy(out_np).to(x.device)
 
@@ -2108,8 +2073,9 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(z, x + y)
         self.assertTrue(cpu_called)
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_fake(self):
-        @torch.library.custom_op(mutated_args=())
+        @torch.library.custom_op("_torch_testing::add", mutated_args=())
         def add(x: Tensor, y: float) -> Tensor:
             x_np = x.cpu().numpy()
             out_np = x_np + y
@@ -2133,7 +2099,7 @@ class TestCustomOpAPI(TestCase):
         self.assertExpectedInline(
             abstract_impl_error_msg,
             """\
-There was no fake impl registered for <CustomOpDef(<function TestCustomOpAPI.test_fake.<locals>.add at 0xDEADBEEF>)>.
+There was no fake impl registered for <CustomOpDef(_torch_testing::add)>.
 This is necessary for torch.compile/export/fx tracing to work.
 Please use `add.register_fake` to add an fake impl.""",
         )
@@ -2171,7 +2137,7 @@ Please use `add.register_fake` to add an fake impl.""",
         called_impl = False
         called_abstract = False
 
-        @torch.library.custom_op(mutated_args=())
+        @torch.library.custom_op("_torch_testing::linear", mutated_args=())
         def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
             nonlocal called_impl
             called_impl = True
@@ -2203,8 +2169,9 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(called_impl)
         self.assertTrue(called_abstract)
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_replacement(self):
-        @torch.library.custom_op(mutated_args=())
+        @torch.library.custom_op("_torch_testing::f", mutated_args=())
         def f(x: Tensor) -> Tensor:
             return x.sin()
 
@@ -2212,19 +2179,20 @@ Please use `add.register_fake` to add an fake impl.""",
         y = f(x)
         self.assertEqual(y, x.sin())
 
-        @torch.library.custom_op(mutated_args=())
+        @torch.library.custom_op("_torch_testing::f", mutated_args=())
         def f(x: Tensor) -> Tensor:
             return x.cos()
 
         y = f(x)
         self.assertEqual(y, x.cos())
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_split_device(self):
         cpu_call_count = 0
         cuda_call_count = 0
 
-        @torch.library.custom_op(mutated_args=(), types="cpu")
+        @torch.library.custom_op("_torch_testing::f", mutated_args=(), types="cpu")
         def f(x: Tensor) -> Tensor:
             nonlocal cpu_call_count
             cpu_call_count += 1
@@ -2252,9 +2220,12 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(cpu_call_count, 1)
         self.assertEqual(cuda_call_count, 1)
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_multi_types(self):
-        @torch.library.custom_op(mutated_args=(), types=("cpu", "cuda"))
+        @torch.library.custom_op(
+            "_torch_testing::f", mutated_args=(), types=("cpu", "cuda")
+        )
         def f(x: Tensor) -> Tensor:
             x_np = x.cpu().numpy()
             out_np = np.sin(x_np)
@@ -2268,7 +2239,7 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(y, x.sin())
 
     def test_disallows_output_aliasing(self):
-        @torch.library.custom_op(mutated_args=())
+        @torch.library.custom_op("_torch_testing::f", mutated_args=())
         def f(x: Tensor) -> Tensor:
             return x.view(-1)
 
@@ -2276,23 +2247,13 @@ Please use `add.register_fake` to add an fake impl.""",
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             f(x)
 
-        @torch.library.custom_op(mutated_args=())
+        @torch.library.custom_op("_torch_testing::f", mutated_args=())
         def f(x: Tensor) -> Tensor:
             return x
 
         x = torch.randn(3)
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             f(x)
-
-    def test_name_inference(self):
-        self.assertExpectedInline(
-            numpy_nonzero._namespace,
-            """DONT_USE_THIS_GIVE_EXPLICIT_NAMESPACE_IF_NEEDED""",
-        )
-        self.assertExpectedInline(
-            numpy_nonzero._name,
-            """torchXtestingX_internalXcustom_op_dbXnumpy_nonzero""",
-        )
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):

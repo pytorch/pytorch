@@ -9,7 +9,6 @@ import re
 import contextlib
 import sys
 from ._library.custom_ops import custom_op
-from ._library import custom_ops
 
 
 __all__ = [
@@ -61,9 +60,6 @@ class Library:
             raise ValueError("Unsupported kind: ", kind)
 
         if ns in _reserved_namespaces and (kind == "DEF" or kind == 'FRAGMENT'):
-            raise ValueError(ns, " is a reserved namespace. Please try creating a library with another name.")
-
-        if ns == custom_ops.reserved_namespace() and not custom_ops.can_access_reserved_namespace():
             raise ValueError(ns, " is a reserved namespace. Please try creating a library with another name.")
 
         frame = traceback.extract_stack(limit=3)[0]
