@@ -5,7 +5,7 @@ import re
 import sys
 import tempfile
 from os.path import abspath, dirname
-from typing import Any, Dict, Optional, Set, Type, TYPE_CHECKING, Union
+from typing import Any, Callable, Dict, Optional, Set, Type, TYPE_CHECKING, Union
 
 import torch
 
@@ -39,8 +39,8 @@ dead_code_elimination = True
 # [@compile_ignored: runtime_behaviour]
 cache_size_limit = 8
 
-# [@compile_ignored: runtime_behaviour] controls the maximum number of entries for a code object.
-accumulated_cache_size_limit = 64
+# [@compile_ignored: runtime_behaviour] safeguarding to prevent horrible recomps
+accumulated_cache_size_limit = 256
 
 # whether or not to specialize on int inputs.  This only has an effect with
 # dynamic_shapes; when dynamic_shapes is False, we ALWAYS specialize on int
@@ -241,6 +241,15 @@ enforce_cond_guards_match = True
 # no optimization.
 optimize_ddp: Union[bool, str] = True
 
+# By default, Dynamo emits runtime asserts (e.g. torch._check, torch._check_is_size) in the graph.
+# In some cases those asserts could be performance costly
+# E.g. torch._check(tensor[0].item() > 2) for tensor on cuda will require cuda sync.
+# Setting this to True keeps them hinting to symbolic shapes engine,
+# but not be emitted in the graph.
+do_not_emit_runtime_asserts: bool = (
+    os.environ.get("TORCH_DYNAMO_DO_NOT_EMIT_RUNTIME_ASSERTS", "0") == "1"
+)
+
 _ddp_optimization_mode = [
     "ddp_optimizer",
     "python_reducer",  # experimental mode
@@ -322,6 +331,14 @@ numpy_default_int = "int64"
 # use numpy's PRNG if True, pytorch otherwise
 use_numpy_random_stream = False
 
+# Use C++ guard manager
+enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "0") == "1"
+
+# Inline inbuilt nn modules
+inline_inbuilt_nn_modules = (
+    os.environ.get("TORCHDYNAMO_INLINE_INBUILT_NN_MODULES", "0") == "1"
+)
+
 
 def is_fbcode():
     return not hasattr(torch.version, "git_version")
@@ -370,6 +387,12 @@ optimize_user_defined_triton_kernels = True
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 
+# A set of logging functions which will be reordered to the end of graph breaks,
+# allowing dynamo to construct larget graph. Note that there are some
+# limitations to this, such as how it does not correctly print objects that were
+# mutated after the print statement.
+reorderable_logging_functions: Set[Callable[[Any], None]] = set()
+
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
 inject_BUILD_SET_unimplemented_TESTING_ONLY = False
@@ -399,11 +422,6 @@ fake_tensor_cache_crosscheck_enabled = (
 # support `context_fn` in torch.utils.checkpoint.checkpoint API under torch.compile().
 # WARNING: this is an experimental flag and is subject to change.
 _experimental_support_context_fn_in_torch_utils_checkpoint = False
-
-# Approximate maximum number of nodes to unroll loops into. A value of 0 will
-# unroll fully but could result in very large graphs that take an inordinate
-# amount of time to process.
-max_loop_unroll_nodes = int(os.environ.get("TORCHDYNAMO_MAX_LOOP_UNROLL_NODES", 5000))
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

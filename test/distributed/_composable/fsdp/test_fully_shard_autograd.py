@@ -13,7 +13,7 @@ from torch.distributed._composable.fsdp import fully_shard
 from torch.nn.parallel.scatter_gather import _is_namedtuple
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
-    check_1d_sharded_parity,
+    check_sharded_parity,
     DoubleLinear,
     FSDPTest,
 )
@@ -77,7 +77,7 @@ class TestFullyShardAutograd(FSDPTest):
             self.assertEqual(loss, ref_loss)
             optim.zero_grad(set_to_none=(iter_idx % 2))
             ref_optim.zero_grad(set_to_none=(iter_idx % 2))
-            check_1d_sharded_parity(self, ref_model, model)
+            check_sharded_parity(self, ref_model, model)
 
     @skip_if_lt_x_gpu(2)
     def test_unused_forward_module(self):
@@ -116,7 +116,7 @@ class TestFullyShardAutograd(FSDPTest):
             self._reduce_1d_partial_grads(ref_model)
             dist.all_reduce(losses[1])  # partial -> replicated
             self.assertEqual(losses[0], losses[1])
-            check_1d_sharded_parity(self, ref_model, model)
+            check_sharded_parity(self, ref_model, model)
             for _optim in (optim, ref_optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
@@ -226,7 +226,7 @@ class TestFullyShardAutograd(FSDPTest):
             self._reduce_1d_partial_grads(ref_model)
             dist.all_reduce(losses[1])  # partial -> replicated
             self.assertEqual(losses[0], losses[1])
-            check_1d_sharded_parity(self, ref_model, model)
+            check_sharded_parity(self, ref_model, model)
             for _optim in (optim, ref_optim):
                 _optim.step()
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
