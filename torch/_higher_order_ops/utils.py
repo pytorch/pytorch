@@ -142,7 +142,7 @@ def trace_subgraph(proxy_mode, func, args):
                 # They're not tracked by parent graph yet so just give them a name manually.
                 # Note this won't affect the correctness of the sub_graph.
                 new_proxy_arg = subgraph_tracer.create_proxy(
-                    "placeholder", f"_input{i}", (), {}, name=f"_input{i}"
+                    "placeholder", f"_input{i}", (), {}, name=f"_constant_input{i}"
                 )
             else:
                 new_proxy_arg = subgraph_tracer.create_proxy(

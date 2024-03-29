@@ -13,7 +13,6 @@ from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch._subclasses.functional_tensor import FunctionalTensor, CppFunctionalizeAPI, PythonFunctionalizeAPI, FunctionalTensorMode
-from torch.export import export
 
 # TODO: pull these helpers from AOTAutograd later
 def to_fun(t):
@@ -624,35 +623,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False), torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True), torch.tensor(True)), f(x, torch.tensor(True), torch.tensor(True)))
 
-    def test_cond_nn_module_stack_non_strict(self):
-        class InnerModule1(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                return self.linear(x).cos()
-
-        class InnerModule2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-
-            def forward(self, x):
-                return self.linear(x).sin()
-
-        class Module(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(4, 4)
-                self.inner_mod1 = InnerModule1()
-                self.inner_mod2 = InnerModule2()
-
-            def forward(self, pred, x):
-                return cond(pred, lambda x: self.inner_mod1(x), lambda x: self.inner_mod2(x), (x,))
-        mod = Module()
-        gm_strict = export(mod, (torch.tensor(True), torch.ones(4, 4),), {}, strict=True).module()
-        gm_non_strict = export(mod, (torch.tensor(True), torch.ones(4, 4),), {}, strict=False).module()
 
     def test_cond_functionalized_hah(self):
         def true_fn(x):

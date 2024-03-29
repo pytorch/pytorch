@@ -689,7 +689,6 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
         self.tracer = tracer
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
-        print("PreDispatchTorchFunctionMode")
         kwargs = kwargs or {}
         if func in _side_effectful_need_to_be_preserved_pre_dispatch:
             # It's for passing the export verifier which needs to verify the meta['val']
