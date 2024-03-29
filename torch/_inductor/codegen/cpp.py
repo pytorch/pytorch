@@ -18,11 +18,10 @@ from torch._inductor import dependencies
 from torch._prims_common import is_float_dtype
 from torch.utils import _pytree as pytree
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
-from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
+from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import codecache, config, ir, metrics
 from ..codegen.wrapper import WrapperCodeGen
-from ..optimize_indexing import range_expressable_in_32_bits
 from ..scheduler import (
     BaseScheduling,
     ForeachKernelSchedulerNode,
@@ -1047,6 +1046,20 @@ class CppVecOverrides(CppOverrides):
                         else:
                             new_args.append(arg)
                 if vectors:
+
+                    def promote_int32_to_int64(arg):
+                        if isinstance(arg, CppCSEVariable) and arg.dtype == torch.int32:
+                            arg = ops.to_dtype(arg, torch.int64, torch.int32)
+                            arg = arg.value if isinstance(arg, OpsValue) else arg
+                            arg.dtype = torch.int64
+                        return arg
+
+                    if any(
+                        arg.dtype == torch.int64
+                        for arg in new_args
+                        if isinstance(arg, CppCSEVariable)
+                    ):
+                        new_args = list(map(promote_int32_to_int64, new_args))
                     return func(*new_args, **kwargs)
                 else:
                     # fallback to scalar ops
@@ -1384,14 +1397,14 @@ class CppVecOverrides(CppOverrides):
         assert opt_ctx_x
         assert opt_ctx_x.dtype is not None
         assert isinstance(V.kernel, CppVecKernel)
-        src_dtype = opt_ctx_x.dtype
+        src_dtype = opt_ctx_x.dtype if src_dtype is None else src_dtype
         src_cpp_type = DTYPE_TO_CPP[src_dtype]
         src_num_vectors = V.kernel._get_num_vectors(src_dtype)
         dst_cpp_type = DTYPE_TO_CPP[dtype]
         dst_num_vectors = V.kernel._get_num_vectors(dtype)
         if src_dtype != torch.bool and dtype == torch.bool:
             return f"{V.kernel._get_mask_type(src_dtype)}::from<{src_cpp_type},{src_num_vectors}>({x})"
-        if opt_ctx_x.dtype == torch.bool and dtype != torch.bool:
+        if src_dtype == torch.bool and dtype != torch.bool:
             return f"{x}.to<{dst_cpp_type},{dst_num_vectors}>()"
         if src_dtype != dtype:
             if src_num_vectors == dst_num_vectors == 1:
