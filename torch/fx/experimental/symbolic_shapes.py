@@ -3806,8 +3806,12 @@ class ShapeEnv:
                 "Maybe you need to add guard_size_oblivious to framework code, see doc below for more guidance.\n\n"
             )
         fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
+        if expr.is_integer:
+            msg = "Could extract specialized integer from data-dependent expression"
+        else:
+            msg = "Could not guard on data-dependent expression"
         return GuardOnDataDependentSymNode(
-            f"Could not guard on data-dependent expression {expr} (unhinted: {unhinted_expr}).  "
+            f"{msg} {expr} (unhinted: {unhinted_expr}).  "
             f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
             f"{size_oblivious_result_msg}"
             "Potential framework code culprit (scroll up for full backtrace):\n"
