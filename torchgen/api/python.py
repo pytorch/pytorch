@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple, Union
 
 from torchgen.api import cpp
-
 from torchgen.api.types import Binding, CppSignature, CppSignatureGroup
 from torchgen.gen import pythonify_default
 from torchgen.model import (
@@ -725,11 +724,11 @@ def argument(a: Argument) -> PythonArgument:
         name=a.name,
         type=a.type,
         # TODO: directly translate a.default to python default
-        default=str(
-            pythonify_default(cpp.default_expr(a.default, a.type, symint=False))
-        )
-        if a.default is not None
-        else None,
+        default=(
+            str(pythonify_default(cpp.default_expr(a.default, a.type, symint=False)))
+            if a.default is not None
+            else None
+        ),
         default_init=None,
     )
 
@@ -1006,7 +1005,6 @@ def returns_structseq_pyi(signature: PythonSignature) -> Optional[Tuple[str, str
         # These types are structseq objects which act like named NamedTuples, but
         # the constructor acts like the constructor of tuple. Using typing.NamedTuple
         # does not allow us to override __init__.
-        field_names_str = ", ".join(repr(name) for name in field_names)
         seq_type = f"Tuple[{', '.join(python_returns)}]"
         structseq_def_lines = [
             f"class {structseq_name}({seq_type}):",
@@ -1466,9 +1464,7 @@ def dispatch_lambda_exprs(
                 raise RuntimeError(
                     f"{f.func}: unrecognized type '{str(a.type)}' for tensor options field '{a.name}'"
                 )
-        if not all(
-            a in tensor_options_args_names for a in TENSOR_OPTIONS_FIELDS.keys()
-        ):
+        if not all(a in tensor_options_args_names for a in TENSOR_OPTIONS_FIELDS):
             raise RuntimeError(
                 f"{f.func}: incomplete tensor options args: {tensor_options_args_names}"
             )

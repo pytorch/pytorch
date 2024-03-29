@@ -103,7 +103,7 @@ def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str
         j = 0  # index for names
         new_aten_types = []
         new_callsite_exprs = []
-        for i, aten_type in enumerate(aten_types):
+        for aten_type in aten_types:
             # Use pointer to denote optional type
             c_types[j] = c_types[j] + "*"
             if aten_type.startswith("c10::ArrayRef<"):
