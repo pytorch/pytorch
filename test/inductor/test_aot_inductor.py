@@ -683,22 +683,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    def test_quantized_linear(self):
-        class Model(torch.nn.Module):
-            def __init__(self, device):
-                super().__init__()
-                self.weight = torch.randn(10, 10, device=device)
-                self.bias = torch.randn(10, device=device)
-
-            def forward(self, x):
-                return torch.ops.quantized.linear_dynamic_fp16_unpacked_weight(
-                    x, self.weight, self.bias
-                )
-
-        example_inputs = (torch.randn(10, 10, device=self.device),)
-        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
-            self.check_model(Model(self.device), example_inputs)
-
     def test_foreach_multiple_dynamic(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -772,6 +756,22 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device=self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    def test_quantized_linear(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+                self.bias = torch.randn(10, device=device)
+
+            def forward(self, x):
+                return torch.ops.quantized.linear_dynamic_fp16_unpacked_weight(
+                    x, self.weight, self.bias
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
 
     def test_zero_grid_with_unbacked_symbols(self):
         class Repro(torch.nn.Module):
