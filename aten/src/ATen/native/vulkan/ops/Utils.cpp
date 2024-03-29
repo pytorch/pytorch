@@ -198,18 +198,16 @@ void pack_buffer_to_vtensor(
   api::Context* const context = api::context();
 
   if (v_self.storage_type() == api::StorageType::BUFFER) {
-    packing::record_nchw_to_buffer_op(
-        context, buffer, v_self, pipeline_barrier, VK_NULL_HANDLE);
-  } else {
-    api::ShaderInfo compute_shader = packing::get_nchw_to_image_shader(v_self);
-    packing::record_nchw_to_image_op(
-        context,
-        compute_shader,
-        buffer,
-        v_self,
-        pipeline_barrier,
-        VK_NULL_HANDLE);
+    VK_THROW("Not supported!");
   }
+  api::ShaderInfo compute_shader = packing::get_nchw_to_image_shader(v_self);
+  packing::record_nchw_to_image_op(
+      context,
+      compute_shader,
+      buffer,
+      v_self,
+      pipeline_barrier,
+      VK_NULL_HANDLE);
 }
 
 void pack_staging_to_vtensor(api::VulkanBuffer& staging, vTensor& v_self) {
@@ -225,18 +223,11 @@ bool pack_vtensor_to_staging(
   api::PipelineBarrier pipeline_barrier{};
 
   if (v_self.storage_type() == api::StorageType::BUFFER) {
-    return packing::record_buffer_to_nchw_op(
-        context, v_self, staging, pipeline_barrier, fence_handle);
-  } else {
-    api::ShaderInfo compute_shader = packing::get_image_to_nchw_shader(v_self);
-    return packing::record_image_to_nchw_op(
-        context,
-        compute_shader,
-        v_self,
-        staging,
-        pipeline_barrier,
-        fence_handle);
+    VK_THROW("Not supported!");
   }
+  api::ShaderInfo compute_shader = packing::get_image_to_nchw_shader(v_self);
+  return packing::record_image_to_nchw_op(
+      context, compute_shader, v_self, staging, pipeline_barrier, fence_handle);
 }
 
 /*

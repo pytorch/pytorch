@@ -191,25 +191,6 @@ api::utils::uvec3 create_image_extents(
   }
 }
 
-api::UniformParamsBuffer make_metadata_uniform(
-    api::Context* const context,
-    const std::vector<int64_t>& sizes,
-    const std::vector<int64_t>& strides,
-    const api::StorageType storage_type) {
-  if (storage_type != api::StorageType::BUFFER) {
-    return api::UniformParamsBuffer();
-  }
-
-  vTensor::BufferMetadata metadata{
-      api::utils::make_whcn_uvec4(sizes),
-      api::utils::make_whcn_uvec4(strides),
-      api::utils::safe_downcast<uint32_t>(sizes.size()),
-      api::utils::safe_downcast<uint32_t>(api::utils::multiply_integers(sizes)),
-  };
-
-  return api::UniformParamsBuffer(context, metadata);
-}
-
 } // namespace
 
 //
@@ -233,7 +214,6 @@ vTensor::vTensor(
       virtual_extents_(
           create_image_extents(gpu_sizes_, storage_type, memory_layout)),
       // Utility Uniform Buffers that can be passed to shaders as arguments
-      metadata_uniform_(),
       cpu_sizes_uniform_(nullptr),
       gpu_sizes_uniform_(nullptr),
       extents_uniform_(nullptr),
@@ -264,7 +244,6 @@ vTensor::vTensor(
       virtual_extents_(
           create_image_extents(gpu_sizes_, storage_type, memory_layout)),
       // Vulkan uniform buffer containing sizes and stride info
-      metadata_uniform_(),
       cpu_sizes_uniform_(nullptr),
       gpu_sizes_uniform_(nullptr),
       extents_uniform_(nullptr),
@@ -310,14 +289,6 @@ api::VulkanBuffer& vTensor::buffer(
   return view_->buffer_;
 }
 
-api::VulkanBuffer& vTensor::buffer_metadata() {
-  if (!metadata_uniform_.buffer()) {
-    metadata_uniform_ = make_metadata_uniform(
-        view_->context_, gpu_sizes_, gpu_strides_, storage_type());
-  }
-  return metadata_uniform_.buffer();
-}
-
 std::shared_ptr<api::UniformParamsBuffer> vTensor::cpu_sizes_ubo() {
   if (!cpu_sizes_uniform_) {
     cpu_sizes_uniform_.reset(new api::UniformParamsBuffer(
@@ -345,16 +316,6 @@ std::shared_ptr<api::UniformParamsBuffer> vTensor::extents_ubo() {
              1u})));
   }
   return extents_uniform_;
-}
-
-vTensor::BufferMetadata vTensor::get_cpu_buffer_metadata() const {
-  return {
-      api::utils::make_whcn_uvec4(sizes_),
-      api::utils::make_whcn_uvec4(strides_),
-      api::utils::safe_downcast<uint32_t>(sizes_.size()),
-      api::utils::safe_downcast<uint32_t>(
-          api::utils::multiply_integers(sizes_)),
-  };
 }
 
 VmaAllocationCreateInfo vTensor::get_allocation_create_info() const {
