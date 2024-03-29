@@ -370,6 +370,18 @@ def getitem_on_dict_manager(
     )
 
 
+def is_grad_source(source):
+    if isinstance(source, AttrSource):
+        return source.member == "grad"
+    return False
+
+
+def match_on_id_for_tensor(guard):
+    return guard.originating_source.is_dict_key() and not is_grad_source(
+        guard.originating_source
+    )
+
+
 # The ready to eval generated code (possibly multiple parts) for a guard, plus
 # the original guard object that created it for provenance
 @dataclasses.dataclass
@@ -730,8 +742,9 @@ class GuardBuilder(GuardBuilderBase):
             if val:
                 # Just install a getattr manager. GetAttrGuardAccessor itself
                 # acts as hasattr guard.
+                example_value = self.get(guard.originating_source.name())
                 base_manager.getattr_manager(
-                    attr=attr, source=guard.name, example_value=val
+                    attr=attr, source=guard.name, example_value=example_value
                 )
             else:
                 base_manager.add_no_hasattr_guard(
@@ -1294,7 +1307,7 @@ class GuardBuilder(GuardBuilderBase):
                 self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        if guard.is_nn_module() or guard.originating_source.is_dict_key():
+        if guard.is_nn_module() or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
@@ -1354,12 +1367,11 @@ class GuardBuilder(GuardBuilderBase):
                     self.tensor_check_guard_managers.append(guard_manager)
 
                     output_graph = self.check_fn_manager.output_graph
-                    size = convert_to_concrete_values(
-                        output_graph.tensor_weakref_to_sizes_strides[value]["size"]
-                    )
-                    stride = convert_to_concrete_values(
-                        output_graph.tensor_weakref_to_sizes_strides[value]["stride"]
-                    )
+                    metadata = output_graph.input_source_to_sizes_strides[
+                        guard.originating_source
+                    ]
+                    size = convert_to_concrete_values(metadata["size"])
+                    stride = convert_to_concrete_values(metadata["stride"])
 
                     verbose_code_parts = get_verbose_code_parts(
                         get_tensor_guard_code_part(value, tensor_name, size, stride),
