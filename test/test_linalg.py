@@ -8026,6 +8026,15 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
             a_strided.cpu().numpy() @ b_strided.cpu().numpy()).to(device=device, dtype=dtype)
         self.assertEqual(expect, res)
 
+# NB: Create TestLinalgWrapper as a nested class.
+# This prevents test runners from picking it up and running it.
+# In addition, the nested class can be inherited by other classes to reuse the cases.
+# Otherwise, instantiate_device_type_tests will change the class meta information,
+# so that, it cannot be inherited by other test classes for reusing.
+class Namespace:
+    class TestLinalgWrapper(TestLinalg):
+        pass
+
 instantiate_device_type_tests(TestLinalg, globals())
 
 if __name__ == '__main__':
