@@ -11,6 +11,7 @@ import os
 import os.path
 import re
 import threading
+import time
 from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
@@ -31,6 +32,7 @@ from .utils import (
     conditional_product,
     create_bandwidth_info_str,
     do_bench,
+    get_max_y_grid,
     get_num_bytes,
     next_power_of_2,
     triton_config_to_hashable,
@@ -157,6 +159,7 @@ class CachingAutotuner(KernelInterface):
         self.configs = configs
         self.heuristic_type = heuristic_type
         self.custom_kernel = custom_kernel
+        self.cuda_kernel_saved = False
 
         # Align the default design that default as cuda
         self.device_type = (
@@ -357,7 +360,16 @@ class CachingAutotuner(KernelInterface):
             # need to initialize context
             self.gpu_device.synchronize(self.gpu_device.current_device())
 
-            binary = triton.compile(*compile_args, **compile_kwargs)
+            try:
+                binary = triton.compile(*compile_args, **compile_kwargs)
+            except Exception:
+                log.exception(
+                    "Triton compilation failed: %s\n%s\nmetadata: %s",
+                    self.inductor_meta.get("kernel_name", "triton_"),
+                    self.fn.src,
+                    compile_meta,
+                )
+                raise
             binary._init_handles()
 
         call_args = [
@@ -505,7 +517,7 @@ class CachingAutotuner(KernelInterface):
             log.debug("Benchmark all input configs for %s, get:", self.fn.__name__)
             for k, v in timings.items():
                 log.debug(
-                    "%s: %f, nreg %d, nspill %d, #shared-mem %d",
+                    "%s: %f, nreg %d, nspill %d, #shared-mem %s",
                     k.config,
                     v,
                     k.n_regs,
@@ -517,10 +529,12 @@ class CachingAutotuner(KernelInterface):
 
     def autotune_to_one_config(self, *args, **kwargs):
         """Do the actual autotuning"""
+        start_time = time.time_ns()
         timings = self.benchmark_all_configs(*args, **kwargs)
+        time_taken_ns = time.time_ns() - start_time
         self.launchers = [builtins.min(timings, key=timings.get)]
         if self.save_cache_hook:
-            self.save_cache_hook(self.launchers[0].config)
+            self.save_cache_hook(self.launchers[0].config, time_taken_ns)
 
     def save_cuda_kernel(self, grid, stream, launcher):
         if callable(grid):
@@ -564,6 +578,8 @@ class CachingAutotuner(KernelInterface):
             ).read_bytes()
             CudaKernelParamCache.set(key, params, launcher.bin.asm["hsaco"])
 
+        self.cuda_kernel_saved = True
+
     def coordinate_descent_tuning(self, launcher, *args, **kwargs):
         """
         Coordinate descent tuning can be run with or without max-autotune.
@@ -605,13 +621,15 @@ class CachingAutotuner(KernelInterface):
             self.heuristic_type == HeuristicType.PERSISTENT_REDUCTION
             and "RBLOCK" in launcher.config.kwargs
         ), "Coordinate descent tuner relies on the assumption that persistent reduction's triton config does not have RBLOCK"
+        start_time = time.time_ns()
         best_config = self.coordesc_tuner.autotune(
             benchmark_one_config, launcher.config, None
         )
+        time_taken_ns = time.time_ns() - start_time
         best_config.found_by_coordesc = True
 
         if self.save_cache_hook:
-            self.save_cache_hook(best_config, found_by_coordesc=True)
+            self.save_cache_hook(best_config, time_taken_ns, found_by_coordesc=True)
         return config2launcher.get(best_config)
 
     def run(self, *args, grid, stream, **kwargs):
@@ -778,18 +796,17 @@ def hash_configs(configs: List[Config]):
 
 
 def load_cached_autotuning(
-    cache_filename: str, configs_hash: str, configs: List[Config]
+    best_config,
+    configs_hash: str,
+    configs: List[Config],
 ):
-    """
-    Read a cached autotuning result from disk
-    """
-    if not os.path.exists(cache_filename):
+    if best_config is None:
         return None
-
-    with open(cache_filename) as fd:
-        best_config = json.loads(fd.read())
     if best_config.pop("configs_hash", None) != configs_hash:
         return None
+
+    # Remove time taken for comparison
+    best_config.pop("time_taken_ms", None)
 
     if config.coordinate_descent_tuning and best_config.pop("found_by_coordesc", False):
         num_warps = best_config.pop("num_warps")
@@ -811,6 +828,23 @@ def load_cached_autotuning(
     return matching_configs[0]
 
 
+def should_use_remote_autotune_cache():
+    if config.use_autotune_remote_cache:
+        return True
+    if not config.is_fbcode():
+        return False
+    if torch.version.hip is not None:
+        return False
+
+    from triton.runtime.fb_memcache import MEMCACHE_VERSION
+
+    return torch._utils_internal.justknobs_check(
+        "pytorch/autotune_remote_cache:enable"
+    ) or MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/autotune_remote_cache:memcache_version"
+    )
+
+
 def cached_autotune(
     size_hints: Optional[List[int]],
     configs: List[Config],
@@ -826,30 +860,68 @@ def cached_autotune(
     """
     configs = unique_configs(configs)
     assert len(configs) == 1 or filename
-    save_cache_hook: Optional[Callable[[Any, Any], Any]]
+    save_cache_hook: Optional[Callable[[Any, Any, Any], Any]]
     inductor_meta = {} if inductor_meta is None else inductor_meta
 
-    # on disk caching logic
+    # on disk caching logic and/or remote caching
     if filename is not None and (len(configs) > 1 or config.coordinate_descent_tuning):
-        cache_filename = os.path.splitext(filename)[0] + ".best_config"
         configs_hash = hash_configs(configs)
-        best_config = load_cached_autotuning(cache_filename, configs_hash, configs)
+
+        cache_filename = None
+        remote_cache = None
+        remote_cache_key = None
+        if config.use_autotune_local_cache:
+            cache_filename = os.path.splitext(filename)[0] + ".best_config"
+        if should_use_remote_autotune_cache():
+            backend_hash = inductor_meta.get("backend_hash", None)
+            if backend_hash is not None:
+                key = backend_hash + configs_hash + "autotune-best-config-v2"
+                key = hashlib.sha256(key.encode("utf-8")).hexdigest()
+
+                try:
+                    if config.is_fbcode():
+                        remote_cache = triton.runtime.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend(
+                            key
+                        )
+                    else:
+                        remote_cache = triton.runtime.cache.RedisRemoteCacheBackend(key)
+                except Exception:
+                    remote_cache = None
+                    log.warning("Unable to create a remote cache", exc_info=True)
+                # we already sha256 hash the source contents
+                remote_cache_key = os.path.basename(filename)
+            else:
+                log.debug(
+                    "backend_hash is not passed on the inductor_meta, unable to use autotune remote cache"
+                )
+
+        best_config = None
+        if cache_filename is not None and os.path.exists(cache_filename):
+            with open(cache_filename) as fd:
+                best_config = json.loads(fd.read())
+        elif remote_cache is not None and remote_cache_key is not None:
+            cache_outs = remote_cache.get([remote_cache_key])
+            best_config = cache_outs.get(remote_cache_key, None)
+
+        best_config = load_cached_autotuning(best_config, configs_hash, configs)
         if best_config:
             configs = [best_config]
 
-        def save_cache_hook(cfg, found_by_coordesc=False):
-            with open(cache_filename, "w") as fd:
-                fd.write(
-                    json.dumps(
-                        {
-                            **cfg.kwargs,
-                            "num_warps": cfg.num_warps,
-                            "num_stages": cfg.num_stages,
-                            "configs_hash": configs_hash,
-                            "found_by_coordesc": found_by_coordesc,
-                        }
-                    )
-                )
+        def save_cache_hook(cfg, time_taken_ns, found_by_coordesc=False):
+            data = {
+                **cfg.kwargs,
+                "num_warps": cfg.num_warps,
+                "num_stages": cfg.num_stages,
+                "configs_hash": configs_hash,
+                "found_by_coordesc": found_by_coordesc,
+                "time_taken_ms": time_taken_ns // 1000000,  # Convert from NS to MS
+            }
+            if cache_filename is not None:
+                with open(cache_filename, "w") as fd:
+                    fd.write(json.dumps(data))
+            if remote_cache is not None and remote_cache_key is not None:
+                remote_cache.put(remote_cache_key, data)
+
             if log.isEnabledFor(logging.DEBUG):
                 type_str = "coordesc" if found_by_coordesc else "heuristic"
                 log.debug("Save %s tuning result to %s", type_str, cache_filename)
@@ -1436,11 +1508,28 @@ def grid(*numels):
             return numel
         return ceildiv(numel, block)
 
+    max_grid_dims = config.triton.max_tiles
+
     def grid_fn(meta):
+        x_grid = get_grid_dim(xnumel, meta.get("XBLOCK", 1))
+        y_grid = get_grid_dim(ynumel, meta.get("YBLOCK", None))
+
+        MAX_Y_GRID = get_max_y_grid()
+        if znumel is None and max_grid_dims <= 2:
+            div = ceildiv(y_grid, MAX_Y_GRID)
+            y_grid = y_grid // div
+            z_grid = div
+        else:
+            z_grid = get_grid_dim(znumel, meta.get("ZBLOCK", None))
+            torch._check(
+                y_grid <= MAX_Y_GRID,
+                lambda: f"Generated y grid beyond 2^16 ({y_grid}) not supported with z dimension present. File issue",
+            )
+
         return (
-            get_grid_dim(xnumel, meta.get("XBLOCK", 1)),
-            get_grid_dim(ynumel, meta.get("YBLOCK", None)),
-            get_grid_dim(znumel, meta.get("ZBLOCK", None)),
+            x_grid,
+            y_grid,
+            z_grid,
         )
 
     return grid_fn

@@ -66,8 +66,9 @@ class ForeachFuncWrapper:
             assert mta_called == (expect_fastpath and (not zero_size))
         else:
             actual = self.func(*inputs, **kwargs)
-        # note(mkozuki): inplace foreach functions are void functions.
-        return inputs[0] if self.is_inplace else actual
+        if self.is_inplace:
+            assert id(inputs[0]) == id(actual)
+        return actual
 
 
 class InplaceForeachVersionBumpCheck:
@@ -630,7 +631,7 @@ class TestForeach(TestCase):
         scaler = torch.tensor([max_value]).sqrt().to(device=device, dtype=dtype)
         inputs = ([
             t * scaler for t in next(iter(op.sample_inputs(device, dtype, requries_grad=True, num_input_tensors=[N], low=1))).input
-        ],)
+        ][:-1],)
         # make sure that the min. of squared L2 norm value per tensor is greater than the max value of `dtype`.
         self.assertTrue(scaler * scaler * N > max_value)
         fn, ref_fn, *_ = self._get_funcs(op)

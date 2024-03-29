@@ -497,13 +497,11 @@ class XPUAllocator : public Allocator {
     device_allocators[block->device]->recordStream(block, stream);
   }
 
-  DataPtr allocate(size_t size) const override {
+  DataPtr allocate(size_t size) override {
     auto device = c10::xpu::current_device();
     void* r = nullptr;
     if (size != 0) {
-      // Allocator declares allocate const!
-      const_cast<XPUAllocator*>(this)->malloc(
-          &r, device, size, xpu::getCurrentXPUStream(device));
+      this->malloc(&r, device, size, xpu::getCurrentXPUStream(device));
     }
     return {r, r, &local_raw_delete, Device(DeviceType::XPU, device)};
   }
