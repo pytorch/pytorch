@@ -197,20 +197,6 @@ def run_functionalized_fw_and_collect_metadata(
                 and are_all_mutations_under_no_grad_or_inference_mode(f_arg)
             )
 
-            # Here, we're saying that if an input experienced a set call, inp.set_(other),
-            # then we can effectively not have to worry about whether its data was mutated.
-            # There are 3 cases:
-            # (1) We mutate inp *after* the set_() call. other is a graph intermediate.
-            #     In this case, we're not really mutating the input storage of "inp";
-            #     we're mutating the storage of an intermdiate value (other),
-            #     and slamming that storage into the input tensor. So no data mutation is necessary.
-            # (2) We mutate inp *after* the set_() call. other is a graph *input*.
-            #     In this case, the data mutation will be properly handled in the runtime
-            #     epilogue during the processing of "other"
-            # (3) We mutate inp *before* the set_() call.
-            #     This case is *not* currently handled.
-            #     TODO: discuss this in the PR. Both supporting this, and detecting + erroring out,
-            #     seem painful to get working.
             if mutates_storage_metadata:
                 mutates_data = False
 
