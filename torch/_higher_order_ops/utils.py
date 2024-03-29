@@ -141,8 +141,9 @@ def trace_subgraph(proxy_mode, func, args):
                 # Sometimes we can have inputs that are not proxies e.g. tensor closures.
                 # They're not tracked by parent graph yet so just give them a name manually.
                 # Note this won't affect the correctness of the sub_graph.
+                const_name = "_constant_input"
                 new_proxy_arg = subgraph_tracer.create_proxy(
-                    "placeholder", f"_input{i}", (), {}, name=f"_constant_input{i}"
+                    "placeholder", f"{const_name}{i}", (), {}, name=f"{const_name}{i}"
                 )
             else:
                 new_proxy_arg = subgraph_tracer.create_proxy(

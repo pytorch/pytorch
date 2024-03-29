@@ -1650,8 +1650,8 @@ def forward(self, x_1):
     getitem = conditional[0];  conditional = None
     return getitem""")  # noqa: B950
         self.assertExpectedInline(gm.true_graph_0.code.strip(), """\
-def forward(self, x_1, _input1, _input2):
-    add = torch.ops.aten.add.Tensor(x_1, _input1);  x_1 = _input1 = None
+def forward(self, x_1, _constant_input1, _constant_input2):
+    add = torch.ops.aten.add.Tensor(x_1, _constant_input1);  x_1 = _constant_input1 = None
     return (add,)""")
 
     def test_cond_with_module_param_closure(self):
@@ -1766,10 +1766,10 @@ def forward(self, pred_1, x_1):
     getitem = map_impl[0];  map_impl = None
     return getitem""")
         self.assertExpectedInline(gm.body_graph_0.code.strip(), """\
-def forward(self, _input0, pred_1):
+def forward(self, _constant_input0, pred_1):
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
-    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [_input0]);  pred_1 = true_graph_0 = false_graph_0 = _input0 = None
+    conditional = torch.ops.higher_order.cond(pred_1, true_graph_0, false_graph_0, [_constant_input0]);  pred_1 = true_graph_0 = false_graph_0 = _constant_input0 = None
     getitem = conditional[0];  conditional = None
     return [getitem]""")  # noqa: B950
 
