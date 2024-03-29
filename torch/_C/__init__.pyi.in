@@ -1912,6 +1912,9 @@ def _xpu_emptyCache() -> None: ...
 class _XpuDeviceProperties:
     name: str
     platform_name: str
+    vendor: str
+    driver_version: str
+    version: str
     total_memory: _int
     max_compute_units: _int
     gpu_eu_count: _int
@@ -1919,6 +1922,9 @@ class _XpuDeviceProperties:
     max_work_group_size: _int
     max_num_sub_groups: _int
     sub_group_sizes: List[_int]
+    has_fp16: _bool
+    has_fp64: _bool
+    has_atomic64: _bool
     type: str
 
 # Defined in torch/csrc/xpu/Stream.cpp
