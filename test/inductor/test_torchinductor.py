@@ -8697,10 +8697,7 @@ class CommonTemplate:
         x_opt_arg = x.clone()
         x_numel = x.numel()
         torch._dynamo.reset_code_caches()
-        if not inplace:
-            opt_fn = torch._dynamo.optimize_assert("inductor")(fn)
-        else:
-            opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
+        opt_fn = torch._dynamo.optimize_assert(compile_fx)(fn)
         correct = fn(x_ref_arg, size_or_y, memory_format)
         actual = opt_fn(x_opt_arg, size_or_y, memory_format)
 
@@ -8712,8 +8709,10 @@ class CommonTemplate:
                 return functools.reduce(lambda x, y: x * y, size_or_y, 1)
 
         nele_check = min(x_numel, get_numel(size_or_y))
-        correct_values = correct.flatten()[:nele_check]
-        actual_values = correct.flatten()[:nele_check]
+        correct_values = correct.as_strided((nele_check,), (1,))
+        # sanity check
+        self.assertTrue(same(x.as_strided((nele_check,), (1,)), correct_values))
+        actual_values = actual.as_strided((nele_check,), (1,))
         self.assertTrue(same(correct_values, actual_values))
         correct_strides = correct.stride()
         actual_strides = actual.stride()
@@ -8722,10 +8721,10 @@ class CommonTemplate:
     @staticmethod
     def _cases_resize_common():
         sizes = [
-            ((1,), (1, 3, 2, 3)),
+            ((2,), (1, 3, 2, 3)),
             ((100,), (1, 3, 2, 3)),
             ((1, 3, 2, 3), (1, 3, 2, 3)),
-            ((1,), (1, 3, 2, 3, 1)),
+            ((2,), (1, 3, 2, 3, 1)),
             ((100,), (1, 3, 2, 3, 1)),
             ((1, 3, 2, 3, 1), (1, 3, 2, 3, 1)),
         ]
@@ -8744,10 +8743,14 @@ class CommonTemplate:
             # NOTE: Tensor.resize() =/= aten::resize()
             return torch.ops.aten.resize(x, size, memory_format=memory_format)
 
-        for x, y_size, memory_format in CommonTemplate._cases_resize_common():
-            CommonTemplate._check_resize_common(
-                self, fn, x, y_size, memory_format, inplace=False
-            )
+        for deterministic in [True, False]:
+            with DeterministicGuard(
+                deterministic, fill_uninitialized_memory=deterministic
+            ):
+                for x, y_size, memory_format in CommonTemplate._cases_resize_common():
+                    CommonTemplate._check_resize_common(
+                        self, fn, x, y_size, memory_format, inplace=False
+                    )
 
     @staticmethod
     def _cases_resize_as_common():
@@ -8768,10 +8771,14 @@ class CommonTemplate:
         def fn(x, y, memory_format):
             return torch.ops.aten.resize_as(x, y, memory_format=memory_format)
 
-        for x, y, memory_format in CommonTemplate._cases_resize_as_common():
-            CommonTemplate._check_resize_common(
-                self, fn, x, y, memory_format, inplace=False
-            )
+        for deterministic in [True, False]:
+            with DeterministicGuard(
+                deterministic, fill_uninitialized_memory=deterministic
+            ):
+                for x, y, memory_format in CommonTemplate._cases_resize_as_common():
+                    CommonTemplate._check_resize_common(
+                        self, fn, x, y, memory_format, inplace=False
+                    )
 
     def test_inplace_resize_as(self):
         def fn(x, y):
