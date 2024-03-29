@@ -47,9 +47,7 @@ class TestExportTorchbind(TestCase):
             @classmethod
             def from_real(cls, real_tq):
                 ctx = torch.library.get_ctx()
-                fake_queue = [
-                    ctx.create_fake_tensor(t) for t in real_tq.get_raw_queue()
-                ]
+                fake_queue = [ctx.to_fake_tensor(t) for t in real_tq.get_raw_queue()]
                 return cls(fake_queue)
 
             def push(self, x):
