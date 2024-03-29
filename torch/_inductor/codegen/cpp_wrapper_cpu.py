@@ -3,7 +3,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import sympy
 from sympy import Expr
@@ -886,7 +886,7 @@ class CppWrapperCpu(WrapperCodeGen):
             for x in V.graph.graph_outputs
         ]
 
-    def generate_return(self, output_refs):
+    def generate_return(self, output_refs: List[str]):
         cst_names = V.graph.constants.keys()
         arr_iface = (
             not V.graph.is_const_graph and config.use_minimal_arrayref_interface
@@ -924,6 +924,8 @@ class CppWrapperCpu(WrapperCodeGen):
             self.wrapper_call.writeline(
                 "AOTInductorModelOutputs output_arrayref_tensors;"
             )
+
+        output2idx: Dict[str, int] = {}
         for idx, output in enumerate(output_refs):
             if config.abi_compatible:
                 output_buffer = V.graph.graph_outputs[idx]
@@ -987,9 +989,15 @@ class CppWrapperCpu(WrapperCodeGen):
                                 f"aoti_torch_clone({output}, &output_handles[{idx}]);"
                             )
                         else:
-                            self.wrapper_call.writeline(
-                                f"output_handles[{idx}] = {output}.release();"
-                            )
+                            if output in output2idx:
+                                src_idx = output2idx[output]
+                                self.wrapper_call.writeline(
+                                    f"output_handles[{idx}] = output_handles[{src_idx}];"
+                                )
+                            else:
+                                self.wrapper_call.writeline(
+                                    f"output_handles[{idx}] = {output}.release();"
+                                )
                 self.wrapper_call.writeline("} else {")
                 with self.wrapper_call.indent():
                     use_thread_local_cached_output_tensor(idx, output)
@@ -1008,6 +1016,9 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
                     + f"new at::Tensor({output_expr}));"
                 )
+
+            if output not in output2idx:
+                output2idx[output] = idx
         if arr_iface:
             self.wrapper_call.writeline("return output_arrayref_tensors;")
 
