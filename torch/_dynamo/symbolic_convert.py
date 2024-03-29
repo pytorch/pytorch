@@ -2559,6 +2559,8 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                     self.pop()
                     self.push(next_iter)
                 except StopIteration:
+                    # Pop the last pushed next_iter
+                    self.pop()
                     return
             else:
                 unimplemented(f"YIELD_FROM {typestr(tos)}")
