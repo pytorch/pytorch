@@ -95,6 +95,14 @@ class TestXpu(TestCase):
         device_capability = torch.xpu.get_device_capability(current_device)
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
+        self.assertEqual(
+            device_properties.driver_version, device_capability["driver_version"]
+        )
+        self.assertEqual(device_properties.has_fp16, device_capability["has_fp16"])
+        self.assertEqual(device_properties.has_fp64, device_capability["has_fp64"])
+        self.assertEqual(
+            device_properties.has_atomic64, device_capability["has_atomic64"]
+        )
 
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
