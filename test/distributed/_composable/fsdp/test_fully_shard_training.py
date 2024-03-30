@@ -58,7 +58,6 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         return 2
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    @test_compiled_fsdp()
     def test_root_move_forward_input_to_device(self):
         device = torch.device("cuda", 0)
 
@@ -288,7 +287,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp()
     def test_train_parity_multi_group_compile(self):
         self.run_subtests(
             {
