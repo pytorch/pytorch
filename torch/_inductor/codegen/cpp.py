@@ -1031,15 +1031,10 @@ class CppVecOverrides(CppOverrides):
                     vec_dtype = vectors[0].dtype
                     for arg in args:
                         if isinstance(arg, (int, sympy.Expr)):
-                            arg_dtype = torch.int64
-                            opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-                            assert opt_ctx
-                            if opt_ctx.dtype is not None:
-                                arg_dtype = opt_ctx.dtype
                             if isinstance(arg, sympy.Expr) and not arg.is_number:
-                                arg = ops.index_expr(arg, arg_dtype)
+                                arg = ops.index_expr(arg, torch.int64)
                             else:
-                                arg = ops.constant(arg, arg_dtype)
+                                arg = ops.constant(arg, torch.int64)
                             arg = arg.value if isinstance(arg, OpsValue) else arg
                         if isinstance(arg, CppCSEVariable) and not arg.is_vec:
                             assert isinstance(V.kernel, CppVecKernel)
