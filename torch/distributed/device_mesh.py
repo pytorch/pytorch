@@ -60,6 +60,7 @@ else:
         def __init__(self) -> None:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
+            self.parent_to_child_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -69,6 +70,13 @@ else:
         def create_child_mesh(
             self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
         ) -> "DeviceMesh":
+            # Directly return the child mesh if it is already created.
+            child_mesh_mappings = self.parent_to_child_mapping.get(device_mesh)
+            if child_mesh_mappings:
+                sub_mesh = child_mesh_mappings.get(mesh_dim_name)
+                if sub_mesh:
+                    return sub_mesh
+
             # swap the current dim to the last dim then reshape to flatten out other
             # dims, so we can just extract the list of ranks which contains cur_rank.
             cur_rank = device_mesh.get_rank()
@@ -88,6 +96,9 @@ else:
             res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
             # Assign the current DeviceMesh as the parent of the child DeviceMesh.
             self.child_to_parent_mapping[res_sub_mesh] = device_mesh
+            self.parent_to_child_mapping.setdefault(device_mesh, {})[
+                mesh_dim_name
+            ] = res_sub_mesh
             return res_sub_mesh
 
         def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
@@ -378,7 +389,6 @@ else:
 
             mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim_name)
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
-
             return submesh
 
         def get_group(
