@@ -84,7 +84,9 @@ def create_runtime_wrapper(
         stashed_args = {}
         for output_info in runtime_metadata.output_info:
             if output_info.base_idx is not None:
-                stashed_args[output_info.base_idx + num_tokens] = args[output_info.base_idx + num_tokens]
+                stashed_args[output_info.base_idx + num_tokens] = args[
+                    output_info.base_idx + num_tokens
+                ]
 
         if trace_joint:
             args_ = list(args)

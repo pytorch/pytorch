@@ -3,7 +3,6 @@ Contains various utils for AOTAutograd, including those for handling collections
 """
 
 import dataclasses
-import warnings
 from contextlib import nullcontext
 from functools import wraps
 from typing import Any, Callable, List, Optional, Tuple
@@ -86,6 +85,7 @@ def _get_autocast_states():
 
 def make_boxed_func(f):
     assert False
+
     def g(args):
         return f(*args)
 
