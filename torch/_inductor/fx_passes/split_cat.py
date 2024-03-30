@@ -136,7 +136,11 @@ def normalize_split_base(
 
     new_args = (split_input, split_sections)
     new_kwargs = {"dim": split_dim}
-    if split_node.args == new_args and split_node.kwargs == new_kwargs:
+    if (
+        split_node.args == new_args
+        and split_node.kwargs == new_kwargs
+        and split_node.op == "call_function"
+    ):
         return
 
     with graph.inserting_after(split_node):
@@ -290,7 +294,11 @@ def normalize_cat_default(match: Match, *args, **kwargs):
 
     new_args = (tensors,)
     new_kwargs = {"dim": cat_dim}
-    if cat_node.args == new_args and cat_node.kwargs == new_kwargs:
+    if (
+        cat_node.args == new_args
+        and cat_node.kwargs == new_kwargs
+        and cat_node.op == "call_function"
+    ):
         return
 
     with graph.inserting_after(cat_node):
