@@ -108,30 +108,22 @@ def foreach_all_gather(
             all_gather_output, all_gather_event, all_gather_work, inp_split_sizes
         )
 
-lib.define("contiguous_view_as_strided(Tensor a, SymInt[] size, SymInt[] stride) -> Tensor")
+lib.define("contiguous_view_as_strided(Tensor tensor, SymInt[] size, SymInt[] stride) -> Tensor")
 
 @torch.library.impl(lib, "contiguous_view_as_strided", "Meta")
-def contiguous_view_as_strided_meta(a, size, stride):
-    split_unpadded = torch.as_strided(
-        a.contiguous().view(a.numel()),
-        size,
-        stride,
-        storage_offset=0,
-    )
+def contiguous_view_as_strided_meta(tensor, size, stride):
+    t = tensor.contiguous().view(tensor.numel())
+    split_unpadded = torch.as_strided(t, size, stride, storage_offset=0)
     return split_unpadded
 
-def contiguous_view_as_strided_impl(a, size, stride):
-    split_unpadded = torch.as_strided(
-        a.contiguous().view(a.numel()),
-        size,
-        stride,
-        storage_offset=0,
-    )
+def contiguous_view_as_strided_impl(tensor, size, stride):
+    t = tensor.contiguous().view(tensor.numel())
+    split_unpadded = torch.as_strided(t, size, stride, storage_offset=0)
     return split_unpadded
 
 @torch.library.impl(lib, "contiguous_view_as_strided", "CUDA")
-def contiguous_view_as_strided(a, size, stride):
-    return contiguous_view_as_strided_impl(a, size, stride)
+def contiguous_view_as_strided(tensor, size, stride):
+    return contiguous_view_as_strided_impl(tensor, size, stride)
 
 
 @torch.no_grad()
