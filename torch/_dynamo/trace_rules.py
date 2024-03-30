@@ -45,6 +45,7 @@ import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
 from ..utils import _config_module
+from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 
 from .variables import (
@@ -252,8 +253,11 @@ manual_torch_name_rule_map = {
     "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
     # avoid skipping user defined modules in distributed unit tests
     "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
+    f"torch/testing/_internal/common_fsdp.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch/testing/_internal/distributed/_tensor/common_dtensor.py#forward": UserFunctionVariable,
+    f"torch/testing/_internal/distributed/_tensor/common_dtensor.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
+    f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
 }
 
 
@@ -3481,7 +3485,12 @@ def lookup_inner(obj, name=None, filename=None, is_direct_call=True):
         if rule is not None:
             return rule
     elif name is not None and filename is not None and not is_direct_call:
-        rule = get_torch_obj_rule_map().get(filename + "#" + name, None)
+        if name.startswith(TORCH_DYNAMO_RESUME_IN_PREFIX):
+            rule = get_torch_obj_rule_map().get(
+                filename + "#" + TORCH_DYNAMO_RESUME_IN_PREFIX, None
+            )
+        else:
+            rule = get_torch_obj_rule_map().get(filename + "#" + name, None)
         if rule is not None:
             return rule
 
