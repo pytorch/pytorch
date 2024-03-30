@@ -587,7 +587,7 @@ class CppCSEVariable(CSEVariable):
         # TODO(jgong5): A more accurate way of deciding the dtype of the variables is to
         # propagate the dtypes here inside `update_on_args`.
         if (
-            hasattr(V.interpreter, "current_node")
+            getattr(V.interpreter, "current_node", None) is not None
             and get_current_node_opt_ctx() is not None
         ):
             self.dtype = get_current_node_opt_ctx().dtype
@@ -877,9 +877,6 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def constant(val, dtype):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None
-        dtype = opt_ctx.dtype
         if dtype in DTYPE_LOWP_FP:
             # Since load promotes all half-precision inputs to float, constants
             # must be promoted as well
@@ -888,9 +885,6 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None
-        dtype = opt_ctx.dtype
         return ops.to_dtype(cexpr(V.kernel.rename_indexing(expr)), dtype)
 
     @staticmethod
@@ -989,6 +983,21 @@ class CppVecOverrides(CppOverrides):
     def __new__(cls, *args, **kargs):
         self = super().__new__(cls)
 
+        def unset_current_node(func):
+            @contextlib.contextmanager
+            def unset():
+                assert V.interpreter
+                current_node = V.interpreter.current_node
+                V.interpreter.current_node = None
+                yield
+                V.interpreter.current_node = current_node
+
+            def wrapper(*args, **kwargs):
+                with unset():
+                    return func(*args, **kwargs)
+
+            return wrapper
+
         def wrap(func):
             # `CppVecKernel` generates both scalar ops and vector ops according to
             # whether the inputs are scalars or vectors while all ops in `CppVecOverrides`
@@ -1002,6 +1011,7 @@ class CppVecOverrides(CppOverrides):
             # `ops.index_expr`:
             #     needs to further analyze the dependency of the index expression on
             #     the tiling itervar.
+            @unset_current_node
             def wrapper(*args, **kwargs):
                 scalars = [
                     arg
@@ -1049,7 +1059,7 @@ class CppVecOverrides(CppOverrides):
 
                     def promote_int32_to_int64(arg):
                         if isinstance(arg, CppCSEVariable) and arg.dtype == torch.int32:
-                            arg = ops.to_dtype(arg, torch.int64, torch.int32)
+                            arg = ops.to_dtype(arg, torch.int64)
                             arg = arg.value if isinstance(arg, OpsValue) else arg
                             arg.dtype = torch.int64
                         return arg
@@ -1391,13 +1401,8 @@ class CppVecOverrides(CppOverrides):
             torch.int32,
             torch.int64,
         ], f"{__name__} does not support {dtype}"
-        node: torch.fx.Node = V.interpreter.current_node
-        assert node and isinstance(node, torch.fx.Node)
-        opt_ctx_x = get_opt_ctx(node.args[1])
-        assert opt_ctx_x
-        assert opt_ctx_x.dtype is not None
-        assert isinstance(V.kernel, CppVecKernel)
-        src_dtype = opt_ctx_x.dtype if src_dtype is None else src_dtype
+        assert isinstance(x, CppCSEVariable)
+        src_dtype = x.dtype
         src_cpp_type = DTYPE_TO_CPP[src_dtype]
         src_num_vectors = V.kernel._get_num_vectors(src_dtype)
         dst_cpp_type = DTYPE_TO_CPP[dtype]
@@ -1481,9 +1486,6 @@ class CppVecOverrides(CppOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None
-        dtype = opt_ctx.dtype
         assert isinstance(V.kernel, CppVecKernel)
         index = V.kernel.rename_indexing(expr)
         tiling_var = V.kernel.itervars[V.kernel.tiling_idx]
@@ -2063,8 +2065,6 @@ class CppVecKernel(CppKernel):
            vector lanes for 8-bit data types.
         2. `torch.bool` and `torch.uint8` could mean masks and we load them as float mask vectors.
         """
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx is not None
         cpp_type = DTYPE_TO_CPP[dtype]
         num_vectors = self._get_num_vectors(dtype)
         load_mask_str = None
@@ -2141,8 +2141,6 @@ class CppVecKernel(CppKernel):
             assert isinstance(csevar, CppCSEVariable)
             return csevar
 
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx is not None
         code = BracesBuffer()
         code.writeline("[&]")
         with self.swap_buffers(code), code.indent():
@@ -2215,7 +2213,6 @@ class CppVecKernel(CppKernel):
             return csevar
 
     def load(self, name: str, index: sympy.Expr):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
         index = self.rename_indexing(index)
         dtype = V.graph.get_dtype(name)
@@ -2276,7 +2273,6 @@ class CppVecKernel(CppKernel):
         if not value.is_vec:
             # this happens when we store a scalar into a vectorized buffer like "fill"
             value = self.broadcast(value)
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
         self.cache_fp32_cse_var_before_lowp_store(value)
         index = self.rename_indexing(index)
@@ -2583,7 +2579,6 @@ class CppTile2DKernel(CppVecKernel):
         return tile_var
 
     def load(self, name: str, index: sympy.Expr):
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.input(name)
         index = self.rename_indexing(index)
 
@@ -2607,7 +2602,6 @@ class CppTile2DKernel(CppVecKernel):
 
     def store(self, name, index, value, mode=None):
         assert "buf" in name
-        opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         var = self.args.output(name)
 
         inner = self.inner_itervar()
