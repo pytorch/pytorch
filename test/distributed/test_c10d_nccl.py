@@ -4667,6 +4667,107 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 # getting the global signal to dump the debugging info.
                 time.sleep(600)
 
+class NcclErrorDumpTest(MultiProcessTestCase):
+    def setUp(self):
+        super().setUp()
+        # Need to skip return code checking for these tests since the child
+        # processes don't exit cleanly.
+        self.skip_return_code_checks = [
+            self.test_nccl_errors_dump.__wrapped__,
+        ]
+        self.tempdir = tempfile.TemporaryDirectory()
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '1000'
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = '1'
+        # need rank0 to crash quicker after detecting error
+        os.environ['TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC'] = '5'
+        os.environ["TORCH_NCCL_DEBUG_INFO_TEMP_FILE"] = self._trace_basename()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @classmethod
+    def _run(cls, parent_conn, rank: int, test_name: str, file_name: str, parent_pipe) -> None:
+        cls.parent = parent_conn
+        super()._run(rank, test_name, file_name, parent_pipe)
+
+    def _join_processes(self, fn):
+        fn()
+        super()._join_processes(fn)
+
+    def _spawn_processes(self) -> None:
+        proc = torch.multiprocessing.get_context("spawn").Process
+        self.children_pipes = []
+        parent_pipes = []
+        for i in range(self.world_size):
+            parent_conn, child_conn = torch.multiprocessing.Pipe()
+            self.children_pipes.append(child_conn)
+            parent_pipes.append(parent_conn)
+        piter = iter(parent_pipes)
+
+        def wrap(*positional, args, **kwargs):
+            args = (next(piter), *args)
+            return proc(*positional, args=args, **kwargs)
+        self._start_processes(wrap)
+
+    @property
+    def world_size(self):
+        return 2
+
+    def _trace_basename(self):
+        # we pass the base to the env, and the dump util will append rank
+        return os.path.join(self.tempdir.name, "trace_")
+
+    def _trace_name(self, rank):
+        return self._trace_basename() + str(rank)
+
+    def _wait_process(self, rank, timeout):
+        try:
+            self.processes[rank].join(timeout)
+            return self.processes[rank].exitcode
+        except TimeoutError:
+            return None
+
+    @requires_nccl()
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_nccl_errors_dump(self):
+        if self.rank == self.MAIN_PROCESS_RANK:
+            # wait for both rank0 and 1 to crash before looking for both ranks' output
+            # file, and we rely on rank1 to sleep long enough to dump the debug info.
+            self.assertEqual(self._wait_process(0, timeout=90), -6)
+            self.assertEqual(self._wait_process(1, timeout=90), 1)
+            # verify that the trace file exists for rank0
+            self.assertTrue(os.path.exists(self._trace_name(rank=0)))
+            return
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(
+            store,
+            self.rank,
+            self.world_size,
+            timeout=timedelta(seconds=10),
+        )
+        process_group.allreduce(torch.rand(10).cuda(self.rank))
+        if self.rank == 0:
+            work = process_group.allreduce(torch.rand(10).cuda(self.rank))
+            # expect an error to be raised
+            with self.assertRaisesRegex(dist.DistBackendError, ""):
+                # Block the current stream on the NCCL stream
+                work.wait()
+                # Run some GPU operations
+                a = torch.rand(10).cuda(self.rank)
+        elif self.rank == 1:
+            # Clean up structures (ex: files for FileStore before going down)
+            del process_group
+            sys.exit(1)
+
 
 if __name__ == "__main__":
     assert (
