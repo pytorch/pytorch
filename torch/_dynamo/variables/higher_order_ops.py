@@ -12,6 +12,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
+from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
@@ -1321,7 +1322,13 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         tx: InstructionTranslator = tx
 
-        score = args[0].call_method(tx, "new_empty", (TupleVariable([]),), {})
+        scores_require_grad: bool = args[0].requires_grad
+        score = args[0].call_method(
+            tx,
+            "new_empty",
+            (TupleVariable([]),),
+            {"requires_grad": ConstantVariable(scores_require_grad)},
+        )
 
         def create_scalar():
             return args[0].call_method(tx, "new_empty", (TupleVariable([]),), {})

@@ -6,7 +6,6 @@ import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
-    autograd_not_implemented,
     UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
@@ -104,7 +103,7 @@ def sdpa_dense(
 
 # TODO For now lets disable but we need to figure this out
 # TODO DOUBLE TODO I should be able to call autograd_not_implemented with sdpa, not sure why this fails functional tensor mode
-sdpa.py_impl(DispatchKey.Autograd)(autograd_not_implemented(sdpa, deferred_error=False))
+# sdpa.py_impl(DispatchKey.Autograd)(autograd_not_implemented(sdpa, deferred_error=False))
 
 
 def trace_sdpa(
@@ -121,10 +120,11 @@ def trace_sdpa(
 
     with disable_proxy_modes_tracing():
         example_out = F.scaled_dot_product_attention(query, key, value)
-    example_vals = [torch.zeros((), dtype=query.dtype)] + [
-        torch.zeros((), dtype=torch.int) for _ in range(4)
-    ]
+    example_vals = [
+        torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
+    ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
     score_graph = make_fx(score_mod)(*example_vals, *other_buffers)
+    breakpoint()
     proxy_mode.tracer.root.register_module("sdpa_score", score_graph)
     node_args = (query, key, value, score_graph, *other_buffers)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
@@ -205,5 +205,9 @@ def sdpa_fake_tensor_mode(
     *other_buffers: torch.Tensor,
 ):
     with mode:
+        return math_attention_2(query, key, value, score_mod, *other_buffers)
         return torch.empty_like(query, memory_format=torch.contiguous_format)
     # return sdpa_dense(query, key, value, score_mod, *other_buffers)
+
+
+sdpa.fallthrough(DispatchKey.AutogradCUDA)
