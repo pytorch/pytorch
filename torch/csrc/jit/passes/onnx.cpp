@@ -430,10 +430,6 @@ void NodeToONNX(
     }
 
     Graph* g = new_block->owningGraph();
-    std::unordered_set<Node*> nodes_before;
-    for (auto node : g->nodes()) {
-      nodes_before.emplace(node);
-    }
 
     WithInsertPoint insert_point_guard(new_block);
     WithCurrentScope scope_guard(*g, n->scope());
@@ -447,14 +443,6 @@ void NodeToONNX(
         py_inputs,
         env,
         operator_export_type);
-
-    // Find new nodes that have been created by _run_symbolic_function and
-    // propagate metadata
-    for (auto node : g->nodes()) {
-      if (nodes_before.find(node) == nodes_before.end()) {
-        node->copyMetadata(n);
-      }
-    }
 
     // TODO: Assert it's an ATen identifier???
     // (Sometimes it's not...)
