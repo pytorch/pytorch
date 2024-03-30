@@ -167,7 +167,6 @@ log = logging.getLogger(__name__)
 
 
 DimList = List
-BYPASS = []
 
 
 class _missing:
@@ -849,7 +848,6 @@ class VariableBuilder:
         # have a stricter match.
         self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
 
-        all_tensors = True
         for item in value:
             if item is value:
                 unimplemented("list elements are pointing to the list itself")
@@ -865,11 +863,6 @@ class VariableBuilder:
             locals_to_steal = maybe_gm.meta.get("locals_to_steal", [])
             local_name = getattr(self.source, "local_name", None)
             if local_name in locals_to_steal:
-                use_boxed_call = True
-
-        # TODO: remove, only for my script
-        if BYPASS:
-            if self.source.local_name in BYPASS:
                 use_boxed_call = True
 
         if use_boxed_call:
