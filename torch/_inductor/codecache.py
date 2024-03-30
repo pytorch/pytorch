@@ -93,6 +93,8 @@ else:
         return False
 
 
+output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+
 LOCK_TIMEOUT = 600
 
 # timing metrics for time spent in the compilation
@@ -1665,6 +1667,7 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+        output_code_log.info("Output code written to: %s", input_path)
 
         def _compile_consts_linux(consts: bytes) -> str:
             _, consts_path = write(
