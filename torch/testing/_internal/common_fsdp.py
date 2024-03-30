@@ -9,7 +9,7 @@ from abc import ABC, abstractmethod
 from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
-from functools import partial, wraps
+from functools import wraps
 from typing import Any, Callable, Dict, no_type_check, Optional, Tuple, Type, Union
 from unittest import mock
 
@@ -1333,52 +1333,30 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
             args[0], compile_compute_on_module
         ):
             torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
-            for handle_id, hook in args[0]._forward_pre_hooks.items():
-                if (
-                    hook.__module__ == "torch.distributed._composable.fsdp._fsdp_state"
-                    and hook.__name__ == "_pre_forward"
-                ):
-                    args[0]._forward_pre_hooks[handle_id] = torch.compiler.disable(hook)
-
-            for handle_id, hook in args[0]._forward_hooks.items():
-                if (
-                    hook.__module__ == "torch.distributed._composable.fsdp._fsdp_state"
-                    and hook.__name__ == "_post_forward"
-                ):
-                    args[0]._forward_hooks[handle_id] = torch.compiler.disable(hook)
-
-            # avoid mapping module to FSDPManagedNNModuleVariable
-            # since we are skipping FSDP hooks
-            for module in args[0].modules():
-                for fsdp_dynamo_attr in [
-                    "_is_fsdp_managed_module",
-                    "_fsdp_use_orig_params",
-                ]:
-                    if hasattr(module, fsdp_dynamo_attr):
-                        delattr(module, fsdp_dynamo_attr)
-
             args[0].compile()
 
-    class FullyShardPatch(Enum):
-        # apply ``partial`` in order to use ``Enum.value``
-        EAGER = partial(torch.distributed._composable.fsdp.fully_shard)  # type: ignore[var-annotated, arg-type]
-        COMPILED_COMPUTE = partial(fully_shard_with_compiled_compute)  # type: ignore[arg-type]
+    class FullyShardMode(Enum):
+        EAGER = auto()
+        COMPILED_COMPUTE = auto()
         # add FULL for tracing FSDP
 
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
             original_fully_shard = torch.distributed._composable.fsdp.fully_shard
-            for fully_shard_patch in FullyShardPatch:
-                if fully_shard_patch != FullyShardPatch.EAGER and not has_triton():
+            for mode in FullyShardMode:
+                if mode != FullyShardMode.EAGER and not has_triton():
                     warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
                     continue
 
+                if mode == FullyShardMode.EAGER:
+                    fully_shard_patch = original_fully_shard
+                else:
+                    fully_shard_patch = fully_shard_with_compiled_compute
+
                 # fully_shard is imported as a global
                 # through `from ... import fully_shard`
-                func.__globals__[
-                    original_fully_shard.__name__
-                ] = fully_shard_patch.value
+                func.__globals__[original_fully_shard.__name__] = fully_shard_patch
                 func(*args, **kwargs)
                 # other threads use patched func before this thread restores
                 torch.distributed.barrier()

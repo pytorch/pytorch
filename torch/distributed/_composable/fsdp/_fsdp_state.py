@@ -142,6 +142,7 @@ class FSDPState(_State):
             if module in module_to_fsdp_param_group:
                 module_to_fsdp_param_group[module]._module_fqn = module_name
 
+    @torch.compiler.disable
     def _pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
@@ -161,6 +162,7 @@ class FSDPState(_State):
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
         return args, kwargs
 
+    @torch.compiler.disable
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
         # When composing with module-hook-based activation checkpointing, the
         # post-backward hook is responsible for the reshard
