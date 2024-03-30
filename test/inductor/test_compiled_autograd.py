@@ -24,7 +24,6 @@ def compiler_fn(gm):
     def inner_compiler(gm_, example_inputs_):
         counters["compiled_autograd"]["compiles"] += 1
         return inductor.compile(gm_, example_inputs_)
-        # return torch._dynamo.backends.debugging.eager(gm_, example_inputs_)
 
     return torch.compile(gm, backend=inner_compiler, fullgraph=True, dynamic=True)
 
@@ -222,7 +221,7 @@ main()
                 placeholders = get_placeholders(gm_)
                 if is_bwd:
                     # should be boxed inputs
-                    # assert len(placeholders) == 1
+                    assert len(placeholders) == 1
                     pass
                 else:
                     assert len(placeholders) > 1
@@ -248,7 +247,8 @@ main()
         inputs = [
             torch.randn([1, 2], requires_grad=True),
             torch.randn([2, 3], requires_grad=True),
-            torch.randn([3, 4], requires_grad=True)]
+            torch.randn([3, 4], requires_grad=True),
+        ]
 
         compiled_fn = eager_with_check(fn, is_bwd=False)
         grads = list(compiled_fn(inputs))
