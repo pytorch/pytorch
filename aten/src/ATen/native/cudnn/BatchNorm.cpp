@@ -284,7 +284,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
     double epsilon) {
   auto output_t = at::empty_like(
       input_t, input_t.options(), input_t.suggest_memory_format());
-  Tensor save_mean, save_var, revserse;
+  Tensor save_mean, save_var, reserve;
 
   if (training) {
     int64_t num_features = input_t.size(1);
@@ -308,7 +308,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
       output_t,
       save_mean,
       save_var,
-      revserse);
+      reserve);
 }
 
 // NB: CuDNN only implements the backward algorithm for batchnorm
