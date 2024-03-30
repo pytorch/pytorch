@@ -17,6 +17,7 @@ from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
 from torch._dynamo.variables.tensor import SymNodeVariable
 from torch._guards import Source
+from torch._ops import HigherOrderOperator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 
@@ -316,10 +317,10 @@ def speculate_subgraph(
     enable_grad=None,
     # NOTE [argument `set_subgraph_inputs`]
     # set_subgraph_inputs controls what how to construct subgraphs' placeholders from sub_args.
-    # 1. if your HOP supports arbitrary inputs, use set_subtraph_inputs="automatic" (most recommended).
+    # 1. if your HOP supports arbitrary inputs, use set_subgraph_inputs="automatic" (most recommended).
     # 2. if your HOP supports only Tensor and symnode inputs, use set_subgraph_inputs="flatten_manual" (recommended).
     # If sub_args contain Pytree structure (e.g. dict/list/tuple/set), the sub_args will be flattened first.
-    # Then the flattend args are manually set as subgraph's placeholders.
+    # Then the flattened args are manually set as subgraph's placeholders.
     # 3. if your HOP must preserve inputs that are not tensor or symnode as placeholders e.g. AutogradFunctionContextVariable
     # use set_subgraph_inputs="manual" (not recommended). We do not recommend it in general because it has the
     # restriction that user need to manually control how to create placeholders and VariableTrackers for the args.
@@ -492,7 +493,9 @@ def add_subgraph(tx, source, name, gm):
 
 
 class TorchHigherOrderOperatorVariable(VariableTracker):
-    def __init__(self, value, source: Optional[Source] = None, **kwargs):
+    def __init__(
+        self, value: HigherOrderOperator, source: Optional[Source] = None, **kwargs
+    ):
         super().__init__(**kwargs)
         self.value = value
         self.source = source
