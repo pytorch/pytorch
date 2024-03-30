@@ -27,7 +27,7 @@ from torch.testing._internal.common_fsdp import (
     MLP,
     test_compiled_fsdp,
 )
-from torch.testing._internal.common_utils import run_tests, wrapSwapTensorsTest
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestFullyShardDeviceTensor(FSDPTestMultiThread):
@@ -462,7 +462,6 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
         return 4
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    @wrapSwapTensorsTest(True)
     @test_compiled_fsdp()
     def test_meta_device_1d_init(self):
         default_pg = torch.distributed.distributed_c10d._get_default_group()

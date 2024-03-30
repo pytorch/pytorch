@@ -89,7 +89,7 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
 class TestFullyShardRegisteredParams(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
-        return min(4, torch.cuda.device_count())
+        return 4
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     @test_compiled_fsdp()
