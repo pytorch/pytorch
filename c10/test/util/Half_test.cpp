@@ -112,10 +112,10 @@ TEST(HalfConversion, TestNativeConversionToFloat) {
     auto h = c10::Half(x, c10::Half::from_bits());
     auto f = halfbits2float(x);
     // NaNs are not equal to each other
-    if (std::isnan(f) && std::isnan(h.operator float())) {
+    if (std::isnan(f) && std::isnan(static_cast<float>(h))) {
       continue;
     }
-    EXPECT_EQ(f, h.operator float()) << "Conversion error using " << x;
+    EXPECT_EQ(f, static_cast<float>(h)) << "Conversion error using " << x;
   }
 }
 
@@ -125,7 +125,7 @@ TEST(HalfConversion, TestNativeConversionToHalf) {
     auto h_bits = float2halfbits(f);
     // NaNs are not equal to each other, just check that half is NaN
     if (std::isnan(f)) {
-      EXPECT_TRUE(std::isnan(h.operator float()));
+      EXPECT_TRUE(std::isnan(static_cast<float>(h)));
     } else {
       EXPECT_EQ(h.x, h_bits) << "Conversion error using " << f;
     }

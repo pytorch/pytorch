@@ -847,10 +847,10 @@ class Softplus(Module):
     """
 
     __constants__ = ['beta', 'threshold']
-    beta: int
-    threshold: int
+    beta: float
+    threshold: float
 
-    def __init__(self, beta: int = 1, threshold: int = 20) -> None:
+    def __init__(self, beta: float = 1.0, threshold: float = 20.0) -> None:
         super().__init__()
         self.beta = beta
         self.threshold = threshold

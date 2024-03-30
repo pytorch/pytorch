@@ -1350,7 +1350,13 @@ def check_compiler_is_gcc(compiler):
 
     env = os.environ.copy()
     env['LC_ALL'] = 'C'  # Don't localize output
-    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+    try:
+        version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+    except Exception as e:
+        try:
+            version_string = subprocess.check_output([compiler, '--version'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+        except Exception as e:
+            return False
     # Check for 'gcc' or 'g++' for sccache wrapper
     pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
     results = re.findall(pattern, version_string)
@@ -1847,8 +1853,7 @@ def verify_ninja_availability():
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
     if IS_WINDOWS:
-        python_path = os.path.dirname(sys.executable)
-        python_lib_path = os.path.join(python_path, 'libs')
+        python_lib_path = os.path.join(sys.base_exec_prefix, 'libs')
 
         extra_ldflags.append('c10.lib')
         if with_cuda:

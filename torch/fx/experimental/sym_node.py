@@ -128,7 +128,8 @@ class SymNode:
 
     @property
     def expr(self):
-        return self.shape_env.replace(self._expr)
+        # NB: must NOT resolve unbacked SymInts
+        return self.shape_env.replace(self._expr, resolve_unbacked=False)
 
     # Recompute the hint and see if we've got it now
     # Precondition: self._hint is None
@@ -172,6 +173,14 @@ class SymNode:
 
     def is_bool(self):
         return self.pytype is bool
+
+    def is_nested_int(self):
+        # Unbacked SymInts cannot be nested int today
+        return (
+            self._hint is not None
+            and isinstance(self._hint, SymInt)
+            and self._hint.node.is_nested_int()
+        )
 
     def wrap_int(self, num):
         assert type(num) is int
@@ -373,7 +382,11 @@ class SymNode:
     def expect_true(self, file, line):
         from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
-        if self.has_hint() and not free_unbacked_symbols(self.expr):
+        if (
+            self.has_hint()
+            and not free_unbacked_symbols(self.expr)
+            and not self.shape_env.prefer_deferred_runtime_asserts_over_guards
+        ):
             # OK to generate guards
             return self.guard_bool(file, line)
         # Generate a deferred runtime assert (this might actually end up doing
@@ -426,7 +439,7 @@ class SymNode:
     def is_symbolic(self):
         return True
 
-    def singleton_int(self):
+    def nested_int(self):
         return None
 
     def is_constant(self):
@@ -706,9 +719,9 @@ current_module = sys.modules[__name__]
 
 def _get_sym_math_fn(name):
     def fn(a):
-        import sympy
+        import torch.utils._sympy.functions
 
-        return getattr(sympy, name)(a)
+        return getattr(torch.utils._sympy.functions, f"OpaqueUnaryFn_{name}")(a)
 
     return fn
 

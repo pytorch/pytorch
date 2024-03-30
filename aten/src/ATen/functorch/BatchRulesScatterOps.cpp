@@ -11,11 +11,10 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
-#include <iostream>
 #include <torch/library.h>
 
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 namespace {
 static bool any_has_value(ArrayRef<optional<int64_t>> bdims) {
@@ -810,7 +809,7 @@ Tensor get_expanded_index(const Tensor& index, IntArrayRef self_size, int64_t di
   if (index.dim() == 0) {
     return index.expand(self_size);
   }
-  dim = maybe_wrap_dim(dim, self_size.size());
+  dim = maybe_wrap_dim(dim, static_cast<int64_t>(self_size.size()));
 
   // setup new_index_shape as [BS, 1, ..., idx_size, ..., 1]
   // to reshape index_
@@ -1245,4 +1244,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("as_strided_scatter", torch::CppFunction::makeFromBoxedFunction<&vmapErrorFallback>());
 }
 
-}}
+} // namespace at::functorch

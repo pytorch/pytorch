@@ -183,8 +183,7 @@ inline void norm_two_reduce_step(Vectorized<acc_t>& acc_vec, Vectorized<scalar_t
 
 template <>
 inline void norm_two_reduce_step(Vectorized<float>& acc_fvec, Vectorized<BFloat16>& data_bvec) {
-  Vectorized<float> data_fvec0, data_fvec1;
-  std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+  auto [data_fvec0, data_fvec1] = convert_bfloat16_float(data_bvec);
   acc_fvec += data_fvec0 * data_fvec0;
   acc_fvec += data_fvec1 * data_fvec1;
 }
@@ -196,7 +195,7 @@ template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>
 void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   if (val == 0.0) {
     binary_kernel_reduce(iter, NormZeroOps<scalar_t, acc_t, out_t>(), acc_t(0));
-  } else if (val == 0.0) {
+  } else if (val == 1.0) {
     binary_kernel_reduce(iter, NormOneOps<scalar_t, acc_t, out_t>(), acc_t(0));
   } else if (val == 2.0) {
     binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t>(), acc_t(0));

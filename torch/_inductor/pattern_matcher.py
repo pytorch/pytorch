@@ -1214,12 +1214,15 @@ def compute_mutation_region_ids(graph: torch.fx.GraphModule):
 
 
 class PatternMatcherPass:
-    def __init__(self, prevent_match_across_mutations=False):
+    def __init__(
+        self, prevent_match_across_mutations=False, pass_name: Optional[str] = None
+    ):
         super().__init__()
         self.patterns: DefaultDict[
             torch.fx.node.Target, List[PatternEntry]
         ] = defaultdict(list)
         self.prevent_match_across_mutations = prevent_match_across_mutations
+        self.pass_name = pass_name
 
     def __getitem__(self, item: torch.fx.node.Target) -> List[PatternEntry]:
         return self.patterns[item]
@@ -1236,7 +1239,9 @@ class PatternMatcherPass:
                 get_mutation_region_id, graph
             )
         count = 0
-        for node in reversed(graph.nodes):
+        # Copy the graph nodes so that modifications to the graph are not observed
+        # during the pass
+        for node in reversed(list(graph.nodes)):
             target = extract_target(node)
             if (
                 node.op in ["call_function", "call_method", "call_module"]
@@ -1353,10 +1358,7 @@ def fwd_only(fn, args, *, run_dce=True) -> torch.fx.GraphModule:
     """Build a normalized inference graph, for use with fx_to_pattern"""
     # TODO - look into using aot autograd, asserting no mutating ops here
     with enable_python_dispatcher():
-        mode = (
-            "real" if not torch._inductor.utils.any_is_symbolic(*args) else "symbolic"
-        )
-        gm = make_fx(fn, select_decomp_table(), tracing_mode=mode)(*args)
+        gm = make_fx(fn, select_decomp_table(), tracing_mode="real")(*args)
     if run_dce:
         gm.graph.eliminate_dead_code()
     gm.recompile()

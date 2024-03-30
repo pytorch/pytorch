@@ -64,18 +64,32 @@ AOTIRuntimeError AOTInductorModelContainerGetNumConstants(
     size_t* num_constants);
 
 // Retrieves a constant's name.
+// idx is the index of the internal's constants.
+// Need idx < num_constants from AOTInductorModelContainerGetNumConstants
 AOTIRuntimeError AOTInductorModelContainerGetConstantName(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     const char** name);
 
 // Retrieves a constant's original FQN.
+// idx is the index of the internal's constants.
+// Need idx < num_constants from AOTInductorModelContainerGetNumConstants
 AOTIRuntimeError AOTInductorModelContainerGetConstantOriginalFQN(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,
     const char** original_fqn);
 
+// Retrieves whether a constant is from folded.
+// idx is the index of the internal's constants.
+// Need idx < num_constants from AOTInductorModelContainerGetNumConstants
+AOTIRuntimeError AOTInductorModelContainerGetConstantFromFolded(
+    AOTInductorModelContainerHandle container_handle,
+    size_t idx,
+    bool* from_folded);
+
 // Retrieves a constant's dtype.
+// idx is the index of the internal's constants.
+// Need idx < num_constants from AOTInductorModelContainerGetNumConstants
 AOTIRuntimeError AOTInductorModelContainerGetConstantDtype(
     AOTInductorModelContainerHandle container_handle,
     size_t idx,

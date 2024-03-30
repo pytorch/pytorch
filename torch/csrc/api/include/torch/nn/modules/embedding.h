@@ -16,7 +16,7 @@ namespace nn {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 /// Performs a lookup in a fixed size embedding table.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.Embedding to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.Embedding to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::EmbeddingOptions` class to learn what
@@ -92,7 +92,7 @@ class Embedding : public torch::nn::ModuleHolder<EmbeddingImpl> {
 
 /// Computes sums or means of 'bags' of embeddings, without instantiating the
 /// intermediate embeddings.
-/// See https://pytorch.org/docs/master/nn.html#torch.nn.EmbeddingBag to learn
+/// See https://pytorch.org/docs/main/nn.html#torch.nn.EmbeddingBag to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::EmbeddingBagOptions` class to learn
