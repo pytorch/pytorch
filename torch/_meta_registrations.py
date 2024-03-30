@@ -6162,12 +6162,16 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
 
 @register_meta(aten.channel_shuffle)
 def meta_channel_shuffle(input, groups):
-    # Assume the input shape is (N, C, H, W), where groups is the number of groups
-    N, C, H, W = input.size()
+    # Assume the input shape is (*, C, H, W), where * represents any number of leading dimensions
+    *leading_dims, C, H, W = input.size()
     # Check the validity of the input
-    assert C % groups == 0, "The number of channels must be divisible by the number of groups"
+    assert (
+        C % groups == 0
+    ), "The number of channels must be divisible by the number of groups"
     # The output shape is the same as the input
-    return torch.empty(N, C, H, W, dtype=input.dtype, layout=input.layout, device=input.device)
+    return torch.empty(
+        *leading_dims, C, H, W, dtype=input.dtype, layout=input.layout, device=input.device
+    )
 
 def _create_unary_float_meta_func(func):
     @register_meta(func)
