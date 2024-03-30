@@ -962,8 +962,6 @@ static at::Tensor linear_int8_with_onednn_weight(
     */
     TORCH_CHECK(other.has_value(), "onednn qlinear: the extra input is missing for post op ", binary_post_op);
     if (fp32_output || bf16_output) {
-      TORCH_CHECK(binary_post_op != "add", "onednn qlinear: use post op sum instead of binary add ",
-          "when output dtype is float or bfloat16.");
       TORCH_CHECK(
           other_scale == 1.0f && other_zero_point == 0,
           "onednn qlinear: expect extra input scale = 1.0 and zero point = 0 when output dtype is ", output_dtype.value(),
