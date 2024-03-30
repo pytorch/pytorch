@@ -310,14 +310,18 @@ void NodeToONNX(
         if (old->hasDebugName() && !exist_in_env) {
           auto old_name = outputs[i]->debugName();
           auto new_name = old->debugNameBase();
-          auto debug_names = new_block->owningGraph()->debugNames();
+          const auto& debug_names = new_block->owningGraph()->debugNames();
           auto exist_name = debug_names.find(new_name);
+          Value* found_value;
+          bool exists = exist_name != debug_names.end();
+          if (exists) {
+            found_value = exist_name->second;
+          }
+          // Note: calls to setDebugName will change debug_names and corrupt
+          // exist_name
           outputs[i]->setDebugName(new_name);
-          if (exist_name != debug_names.end()) {
-            // setDebugName changes name of existing value with same name.
-            // Set again to revert the changes, but update name for new value
-            // with suffix.
-            exist_name->second->setDebugName(new_name);
+          if (exists) {
+            found_value->setDebugName(new_name);
           }
           ConstantValueMap::UpdateValueName(old_name, outputs[i]->debugName());
         }
