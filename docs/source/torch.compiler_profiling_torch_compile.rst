@@ -125,12 +125,20 @@ Note a few things:
 * The first invocation should occur *during* profiling in order to capture compilation
 * Add a warm-up compilation in order to initialize any systems that need to be lazily initialized.
 
-Finding graph breaks
---------------------
+Finding graph breaks: "Torch-Compiled Region" and "CompiledFunction"
+--------------------------------------------------------------------
 
-Although there are logging tools for identifying graph breaks, the profiler provides a quick visual method of identifying graph breaks.
+Although there are logging tools for identifying graph breaks, the profiler provides a quick visual method of identifying :ref:`graph breaks <torch.compiler_graph_breaks>`. There are two profiler events to look for: **Torch-Compiled Region** and **CompiledFunction**.
 
-When gradients are required for any inputs, graph breaks are easy to identify: each graph break will interrupt a CompiledFunction block, splitting it in two.
+**Torch-Compiled Region** - which was introduced in PyTorch 2.2 - is a profiler event that covers the entire compiled region. Graph breaks almost always look the same: nested “Torch-Compiled Region” events.
+
+If you run two separate functions with torch.compile() applied independently on each of them, you should generally expect to see two adjacent (i.e NOT stacked/nested) Torch-Compiled regions. Meanwhile, if you encounter graph breaks (or disable()'ed/skipped regions), expect nested “Torch-Compiled Region” events.
+
+**CompiledFunction** - introduced in PyTorch 2.0 - is a profiler event that appears when gradients are required for any inputs.  Each graph break will interrupt a CompiledFunction block, splitting it in two. CompiledFunction events only appear when Autograd is involved, i.e. some of the input tensors to the graph have requires_grad=True.
+
+When a CompiledFunction appears in a trace, it is typically paired with a CompiledFunctionBackward event in the backward pass. A “fwd-bwd link” should appear in the trace connecting the two, if the backward function is called.
+
+If your use case includes a graph that doesn't require grad and doesn't include "Torch-Compiled Region" events, it can be more difficult to identify whether torch.compile is being applied correctly. One clue can be the existence of Inductor-generated Triton kernels.
 
 See the synthetic example below for a demonstration:
 
@@ -184,8 +192,43 @@ See the synthetic example below for a demonstration:
 
     prof.export_chrome_trace("trace_break.json")
 
-.. figure:: _static/img/profiling_torch_compile/graph_breaks.png
-    :alt: Visualization in the chrome://trace viewer, showing multiple CompiledFunction events - indicating graph breaks.
+.. figure:: _static/img/profiling_torch_compile/graph_breaks_with_torch_compiled_region.png
+    :alt: Visualization in the chrome://trace viewer, showing nested Torch-Compiled Region events and multiple CompiledFunction events - indicating graph breaks.
+
+Operator Kernels
+----------------
+
+When an operator is launched, we expect to see a few events:
+
+1. CPU-side event
+2. Kernel launch (if dealing with a GPU kernel)
+3. GPU-side event
+
+.. figure:: _static/img/profiling_torch_compile/kernel_launch_labeled.png
+    :alt: Visualization in the chrome://trace viewer, showing the three types of events: CPU-side event, kernel launch, and GPU-side event
+
+**Inductor-generated Triton kernels:**
+1. The **CPU-side event** should appear as an event prefixed with "triton\_". The events currently have minimal information - the kernel name and a launch, but less information than typical aten kernel launches (which contain input shapes, types, etc.).
+2. The **kernel launch** should appear as cuLaunchKernel instead of cudaLaunchKernel (cudaLaunchKernel is typical for aten ops)
+3. The **GPU-side event** should appear, and how descriptive the name will be depends on the inductor config for unique_kernel_names
+
+.. figure:: _static/img/profiling_torch_compile/triton_kernel_launch.png
+
+**Non-Inductor generated Triton kernels:**
+
+1. The **CPU-side** event may not appear in traces; the machinery for automatically inserting a profiler event is currently implemented at the Inductor level, so Triton kernels that bypass Inductor may not appear in traces, unless users have annotated them manually
+2. The **kernel launch** should appear s cuLaunchKernel instead of cudaLaunchKernel (cudaLaunchKernel is typical for aten ops)
+3. The **GPU-side** event should appear, named similarly to the triton kernel that was authored.
+
+.. figure:: _static/img/profiling_torch_compile/noninductor_triton_kernel.png
+
+**Inductor-generated CPU kernels:**
+
+1. The **CPU-side event** will not appear in traces; we haven't added profiling for this yet.
+2. The **kernel launch** and **GPU-side events** don't exist
+
+**Non-Triton kernels** (i.e. aten kernels or custom ops) should also be expected to sometimes appear in traces. Sometimes, Inductor will fall back to the original op implementation, in which case you will see a call to the aten op.
+
 
 Launch overhead
 ---------------
