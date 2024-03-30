@@ -457,12 +457,6 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
 
 
 class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
-    """
-    Set ``torch.__future__.set_swap_module_params_on_conversion(True)`` using
-    ``@wrapSwapTensorsTest(True)`` until ``_apply`` swaps wrapper subclasses by
-    default in the future.
-    """
-
     @property
     def world_size(self) -> int:
         return 4
@@ -488,7 +482,6 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
             self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    @wrapSwapTensorsTest(True)
     def test_meta_device_2d_init(self):
         assert self.world_size >= 4, f"{self.world_size}"
         dp_size = 2
