@@ -52,6 +52,7 @@ from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularInd
 from . import config
 
 log = logging.getLogger(__name__)
+torch_log = logging.getLogger("torch")
 
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
@@ -505,11 +506,11 @@ def get_fused_kernel_name(node_schedule, descriptive_names):
     sources = sources
     return "_".join(["fused"] + sources)
 
-# def cuda_sync_and_print(msg):
-#     torch.cuda.synchronize()
-#     import time
-#     time.sleep(0.5)
-#     print(msg)
+def cuda_sync_and_print(msg):
+    torch.cuda.synchronize()
+    import time
+    time.sleep(0.5)
+    torch_log.warning(msg)
 
 def get_kernel_metadata(node_schedule, wrapper):
     global yf225_debug_comment_count
