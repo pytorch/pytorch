@@ -6987,7 +6987,8 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
         )
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             codegen_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
