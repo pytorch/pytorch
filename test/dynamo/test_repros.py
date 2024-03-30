@@ -401,7 +401,7 @@ class ListConfig:
     def _iter_ex(self, resolve: bool) -> Iterator[Any]:
         try:
             return ListConfig.ListIterator(self, resolve)
-        except Exception as e:
+        except Exception:
             raise AssertionError()
 
     def __init__(self):
