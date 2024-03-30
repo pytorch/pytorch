@@ -186,7 +186,7 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
-    def next_variables(self, tx):
+    def next_variable(self, tx):
         unimplemented("abstract method, must implement")
 
 
@@ -196,8 +196,8 @@ class RepeatIteratorVariable(IteratorVariable):
         self.item = item
 
     # Repeat needs no mutation, clone self
-    def next_variables(self, tx):
-        return self.item, self
+    def next_variable(self, tx):
+        return self.item
 
 
 class CountIteratorVariable(IteratorVariable):
@@ -210,12 +210,12 @@ class CountIteratorVariable(IteratorVariable):
         self.item = item
         self.step = step
 
-    def next_variables(self, tx):
+    def next_variable(self, tx):
         assert self.mutable_local
         tx.output.side_effects.mutation(self)
         next_item = self.item.call_method(tx, "__add__", [self.step], {})
         self.item = next_item
-        return self.item, self
+        return self.item
 
 
 class CycleIteratorVariable(IteratorVariable):
@@ -235,12 +235,12 @@ class CycleIteratorVariable(IteratorVariable):
         self.saved_index = saved_index
         self.item = item
 
-    def next_variables(self, tx):
+    def next_variable(self, tx):
         assert self.mutable_local
 
         if self.iterator is not None:
             try:
-                new_item, _ = self.iterator.next_variables(tx)
+                new_item = self.iterator.next_variable(tx)
                 if len(self.saved) > MAX_CYCLE:
                     unimplemented(
                         "input iterator to itertools.cycle has too many items"
@@ -249,14 +249,14 @@ class CycleIteratorVariable(IteratorVariable):
                 self.saved.append(new_item)
                 self.item = new_item
                 if self.item is None:
-                    return self.next_variables(tx)
-                return self.item, self
+                    return self.next_variable(tx)
+                return self.item
             except StopIteration:
                 self.iterator = None
-                return self.next_variables(tx)
+                return self.next_variable(tx)
         elif len(self.saved) > 0:
             tx.output.side_effects.mutation(self)
             self.saved_index = (self.saved_index + 1) % len(self.saved)
-            return self.item, self
+            return self.item
         else:
             raise StopIteration
