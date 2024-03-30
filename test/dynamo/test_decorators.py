@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
-import os
 import functools
+import os
 import unittest.mock as mock
 from unittest.mock import patch
 

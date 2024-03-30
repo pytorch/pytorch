@@ -859,10 +859,11 @@ class VariableBuilder:
 
         use_boxed_call = False
         maybe_gm = self.tx.output.local_scope.get("self")
-        if maybe_gm and isinstance(maybe_gm, torch.fx.GraphModule):
+        if isinstance(self.source, LocalSource) and isinstance(
+            maybe_gm, torch.fx.GraphModule
+        ):
             locals_to_steal = maybe_gm.meta.get("locals_to_steal", [])
-            local_name = getattr(self.source, "local_name", None)
-            if local_name in locals_to_steal:
+            if self.source.local_name in locals_to_steal:
                 use_boxed_call = True
 
         if use_boxed_call:
