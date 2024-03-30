@@ -289,7 +289,7 @@ class CppWrapperCpu(WrapperCodeGen):
                     if ({name}_expected_dtype != {name}_dtype) {{
                         std::stringstream ss;
                         ss << "{handle_kind}[{idx}]: unmatched dtype, "
-                           << "expected: {name}_expected_dtype ({expected_dtype_name=}, "
+                           << "expected: " << {name}_expected_dtype << "({expected_dtype_name}), "
                            << "but got: " << {name}_dtype << "\\n";
                         throw std::runtime_error(ss.str());
                     }}
