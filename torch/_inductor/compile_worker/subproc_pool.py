@@ -128,8 +128,8 @@ class SubprocPool:
                 self.write_pipe.write(_pack_msg(-1, -1))
                 self.write_pipe.close()
             self.process.wait(300)
-        except OSError:
-            pass
+        except OSError as e:
+            log.warning("Ignored OSError in pool shutdown:  %s", e)
         finally:
             with self.futures_lock:
                 for future in self.pending_futures.values():
