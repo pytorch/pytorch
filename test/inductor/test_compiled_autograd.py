@@ -248,7 +248,8 @@ main()
         inputs = [
             torch.randn([1, 2], requires_grad=True),
             torch.randn([2, 3], requires_grad=True),
-            torch.randn([3, 4], requires_grad=True)]
+            torch.randn([3, 4], requires_grad=True),
+        ]
 
         compiled_fn = eager_with_check(fn, is_bwd=False)
         grads = list(compiled_fn(inputs))
