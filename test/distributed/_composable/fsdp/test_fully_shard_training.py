@@ -33,6 +33,7 @@ from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
     FSDPTest,
+    FSDPTestMultiThread,
     MLP,
     patch_all_gather,
     patch_reduce_scatter,
@@ -51,7 +52,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
-class TestFullyShardForwardInputs(FSDPTest):
+class TestFullyShardForwardInputs(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
         return 2
@@ -59,7 +60,7 @@ class TestFullyShardForwardInputs(FSDPTest):
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     @test_compiled_fsdp()
     def test_root_move_forward_input_to_device(self):
-        device = torch.device("cuda", self.rank)
+        device = torch.device("cuda", 0)
 
         class ParamlessModule(nn.Module):
             def forward(self, x: torch.Tensor, ys: Tuple[torch.Tensor, ...]):
@@ -85,7 +86,7 @@ class TestFullyShardForwardInputs(FSDPTest):
         model(x, ys)
 
 
-class TestFullyShardRegisteredParams(FSDPTest):
+class TestFullyShardRegisteredParams(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
         return min(4, torch.cuda.device_count())
@@ -94,7 +95,7 @@ class TestFullyShardRegisteredParams(FSDPTest):
     @test_compiled_fsdp()
     def test_param_registration_after_forward(self):
         """Tests the parameter registration after forward."""
-        device = torch.device("cuda", self.rank)
+        device = torch.device("cuda", 0)
         # Single FSDP group
         for reshard_after_forward in (True, False, 2):
             torch.manual_seed(42)
@@ -149,7 +150,7 @@ class TestFullyShardRegisteredParams(FSDPTest):
     @test_compiled_fsdp()
     def test_param_registration_after_backward(self):
         """Tests the parameter registration after backward."""
-        device = torch.device("cuda", self.rank)
+        device = torch.device("cuda", 0)
         # Single FSDP group
         for reshard_after_forward in (True, False, 2):
             model = MLP(8, device)
@@ -192,7 +193,7 @@ class TestFullyShardRegisteredParams(FSDPTest):
             self.assertEqual(param, ref_param)
 
 
-class TestFullyShardCastAfterInit(FSDPTest):
+class TestFullyShardCastAfterInit(FSDPTestMultiThread):
     @property
     def world_size(self) -> int:
         return 2
