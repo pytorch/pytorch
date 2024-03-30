@@ -1652,19 +1652,22 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 #   - If fq_x2=False, convert_before_quant = 1
                 if use_relu:
                     convert_before_quant = (
-                        0
-                        if fq_x2 and add_fn != add_fn_list[2]
-                        else int8_mixed_bf16
+                        0 if fq_x2 and add_fn != add_fn_list[2] else int8_mixed_bf16
                     )
                     to_bf16_after_binary = 2 * (add_fn == add_fn_list[2] and fq_x2)
                 else:
                     convert_before_quant = int8_mixed_bf16 and not fq_x2
-                    to_bf16_after_binary = (add_fn == add_fn_list[2] and fq_x2) * (2 if is_dynamic else 1)
+                    to_bf16_after_binary = (add_fn == add_fn_list[2] and fq_x2) * (
+                        2 if is_dynamic else 1
+                    )
                 self.assertEqual(
                     counters["inductor"]["qlinear_binary_matcher_nodes"],
                     4 + 2 * use_relu + to_bf16_after_binary
-                    if is_dynamic else
-                    10 + 2 * use_relu + to_bf16_after_binary + convert_before_quant,
+                    if is_dynamic
+                    else 10
+                    + 2 * use_relu
+                    + to_bf16_after_binary
+                    + convert_before_quant,
                 )
 
             is_qat_list = [False, True]
