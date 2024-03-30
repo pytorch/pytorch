@@ -331,7 +331,7 @@ developer_warnings = is_fbcode() or is_nightly_or_source
 
 # The multiprocessing start method to use for inductor workers in the codecache.
 # "subprocess", "fork", or "spawn"
-worker_start_method = "fork"
+worker_start_method = "subprocess"
 
 # Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
 # on by DDP and should not be set by the users.
@@ -379,7 +379,7 @@ def decide_compile_threads():
         return min(32, cpu_count)
 
 
-compile_threads = decide_compile_threads()
+compile_threads = 1
 
 # gemm autotuning global cache dir
 if is_fbcode():
