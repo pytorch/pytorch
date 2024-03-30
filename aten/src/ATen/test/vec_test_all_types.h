@@ -192,34 +192,34 @@ constexpr size_t size(T(&)[N]) {
 }
 
 template <typename Filter, typename T>
-typename std::enable_if_t<std::is_same<Filter, std::nullptr_t>::value, void>
+typename std::enable_if_t<std::is_same_v<Filter, std::nullptr_t>, void>
 call_filter(Filter filter, T& val) {}
 
 template <typename Filter, typename T>
-typename std::enable_if_t< std::is_same<Filter, std::nullptr_t>::value, void>
+typename std::enable_if_t< std::is_same_v<Filter, std::nullptr_t>, void>
 call_filter(Filter filter, T& first, T& second) { }
 
 template <typename Filter, typename T>
-typename std::enable_if_t< std::is_same<Filter, std::nullptr_t>::value, void>
+typename std::enable_if_t< std::is_same_v<Filter, std::nullptr_t>, void>
 call_filter(Filter filter, T& first, T& second, T& third) {  }
 
 template <typename Filter, typename T>
 typename std::enable_if_t<
-    !std::is_same<Filter, std::nullptr_t>::value, void>
+    !std::is_same_v<Filter, std::nullptr_t>, void>
     call_filter(Filter filter, T& val) {
     return filter(val);
 }
 
 template <typename Filter, typename T>
 typename std::enable_if_t<
-    !std::is_same<Filter, std::nullptr_t>::value, void>
+    !std::is_same_v<Filter, std::nullptr_t>, void>
     call_filter(Filter filter, T& first, T& second) {
     return filter(first, second);
 }
 
 template <typename Filter, typename T>
 typename std::enable_if_t<
-    !std::is_same<Filter, std::nullptr_t>::value, void>
+    !std::is_same_v<Filter, std::nullptr_t>, void>
     call_filter(Filter filter, T& first, T& second, T& third) {
     return filter(first, second, third);
 }
@@ -268,38 +268,30 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, bool> check_both_nan(T x,
-    T y) {
-    return std::isnan(x) && std::isnan(y);
-}
-
-template <typename T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_nan(T x,
-    T y) {
+bool check_both_nan(T x, T y) {
+    if constexpr (std::is_floating_point_v<T>) {
+        return std::isnan(x) && std::isnan(y);
+    }
     return false;
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, bool> check_both_inf(T x,
-    T y) {
-    return std::isinf(x) && std::isinf(y);
-}
-
-template <typename T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_inf(T x,
-    T y) {
+bool check_both_inf(T x, T y) {
+    if constexpr (std::is_floating_point_v<T>) {
+        return std::isinf(x) && std::isinf(y);
+    }
     return false;
 }
 
 template<typename T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool> check_both_big(T x, T y) {
+std::enable_if_t<!std::is_floating_point_v<T>, bool> check_both_big(T x, T y) {
     return false;
 }
 
 template<typename T>
-std::enable_if_t<std::is_floating_point<T>::value, bool> check_both_big(T x, T y) {
-    T cmax = std::is_same<T, float>::value ? static_cast<T>(1e+30) : static_cast<T>(1e+300);
-    T cmin = std::is_same<T, float>::value ? static_cast<T>(-1e+30) : static_cast<T>(-1e+300);
+std::enable_if_t<std::is_floating_point_v<T>, bool> check_both_big(T x, T y) {
+    T cmax = std::is_same_v<T, float> ? static_cast<T>(1e+30) : static_cast<T>(1e+300);
+    T cmin = std::is_same_v<T, float> ? static_cast<T>(-1e+30) : static_cast<T>(-1e+300);
     //only allow when one is inf
     bool x_inf = std::isinf(x);
     bool y_inf = std::isinf(y);
@@ -330,7 +322,7 @@ T safe_fpt_division(T f1, T f2)
 }
 
 template<class T>
-std::enable_if_t<std::is_floating_point<T>::value, bool>
+std::enable_if_t<std::is_floating_point_v<T>, bool>
 nearlyEqual(T a, T b, T tolerance) {
     if (check_both_nan<T>(a, b)) return true;
     if (check_both_big(a, b)) return true;
@@ -346,7 +338,7 @@ nearlyEqual(T a, T b, T tolerance) {
 }
 
 template<class T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool>
+std::enable_if_t<!std::is_floating_point_v<T>, bool>
 nearlyEqual(T a, T b, T tolerance) {
     return a == b;
 }
@@ -403,13 +395,12 @@ void copy_interleave(VT(&vals)[N], VT(&interleaved)[N]) {
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point<T>::value, bool> is_zero(T val) {
-    return std::fpclassify(val) == FP_ZERO;
-}
-
-template <typename T>
-std::enable_if_t<!std::is_floating_point<T>::value, bool> is_zero(T val) {
-    return val == 0;
+bool is_zero(T val) {
+    if constexpr (std::is_floating_point_v<T>) {
+        return std::fpclassify(val) == FP_ZERO;
+    } else {
+        return val == 0;
+    }
 }
 
 template <typename T>
