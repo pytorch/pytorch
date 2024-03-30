@@ -1544,21 +1544,30 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_while_loop(self, while_loop):
         name = while_loop.get_name()
-        outer_inputs = [buf.codegen_reference() for buf in while_loop.operands]
+        outer_carried_inputs = [
+            buf.codegen_reference() for buf in while_loop.carried_inputs
+        ]
+        outer_additional_inputs = [
+            buf.codegen_reference() for buf in while_loop.additional_inputs
+        ]
+        outer_inputs = outer_carried_inputs + outer_additional_inputs
 
-        self.writeline(f"{name} = [None] * {len(while_loop.operands)}")
+        outer_input_len = len(while_loop.carried_inputs) + len(
+            while_loop.additional_inputs
+        )
+        self.writeline(f"{name} = [None] * {outer_input_len}")
         for i, inp in enumerate(outer_inputs):
             # set the initial state before the loop
             self.writeline(f"{name}[{i}] = {inp}")
 
-        cond_outer_inputs = [f"{name}[{i}]" for i in range(len(while_loop.operands))]
+        cond_outer_inputs = [f"{name}[{i}]" for i in range(outer_input_len)]
         cond_outer_outputs = [f"{name}_cond_result"]
         body_outer_inputs = list(
             cond_outer_inputs
         )  # same inputs for cond_fn and body_fn
-        body_outer_outputs = list(
-            body_outer_inputs
-        )  # carry over the state from body_fn
+
+        # carry over the state from body_fn
+        body_outer_outputs = [f"{name}[{i}]" for i in range(len(outer_carried_inputs))]
 
         self.writeline("while True:")
         self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
