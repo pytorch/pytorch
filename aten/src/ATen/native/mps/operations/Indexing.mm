@@ -369,13 +369,45 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
         maskedIndicesTensor = [mpsGraph concatTensors:maskedIndicesTensorArray dimension:0 interleave:YES name:nil];
         coordinatesTensor = [mpsGraph concatTensors:coordinatesTensorArray dimension:0 interleave:YES name:nil];
       }
+    
+    MPSGraphTensor* outputTensor;
 
-      MPSGraphTensor* outputTensor = [mpsGraph scatterWithDataTensor:scatterDataTensor
+    // mpsGraph's scatter seems to be, as of this commit, casting int32's (like coordinatesTensor) to float32's and then back,
+    // and therefore if coordinatesTensor contains integers larger than 2^(24) they will get rounded.
+    // solution: just split the 32 bits (coordinatesTensor has entries of type MPSDataTypeInt32) up, scatter both, and then reassemble
+    if (_apparentInputShape > (1 << 24)) {
+      MPSGraphTensor* twoToTheTwentyFourthCoordinateCast = [mpsGraph constantWithScalar:(1 << 24) dataType:[coordinatesTensor dataType]];
+      MPSGraphTensor* twoToTheTwentyFourthOutputCast = [mpsGraph castTensor:twoToTheTwentyFourthCoordinateCast toType:getMPSDataType(out.scalar_type()) name:nil];
+
+      MPSGraphTensor* highestBits = [mpsGraph divisionWithPrimaryTensor:coordinatesTensor secondaryTensor:twoToTheTwentyFourthCoordinateCast name:nil];
+      MPSGraphTensor* highestBitsShiftedCorrectly = [mpsGraph multiplicationWithPrimaryTensor:highestBits secondaryTensor:twoToTheTwentyFourthCoordinateCast name:nil];
+      MPSGraphTensor* lowestBits = [mpsGraph subtractionWithPrimaryTensor:coordinatesTensor secondaryTensor:highestBitsShiftedCorrectly name:nil];
+
+      MPSGraphTensor* highestBitsScatteredIn = [mpsGraph scatterWithDataTensor:scatterDataTensor
+                                                                             updatesTensor:highestBits
+                                                                             indicesTensor:maskedIndicesTensor
+                                                                                      axis:0
+                                                                                      mode:MPSGraphScatterModeSet
+                                                                                      name:nil];
+      MPSGraphTensor* highestBitsScatteredInAndShiftedCorrectly = [mpsGraph multiplicationWithPrimaryTensor:highestBitsScatteredIn secondaryTensor:twoToTheTwentyFourthOutputCast name:nil];
+
+      MPSGraphTensor* lowestBitsScatteredIn = [mpsGraph scatterWithDataTensor:scatterDataTensor
+                                                                              updatesTensor:lowestBits
+                                                                              indicesTensor:maskedIndicesTensor
+                                                                                       axis:0
+                                                                                       mode:MPSGraphScatterModeSet
+                                                                                       name:nil];
+
+      outputTensor = [mpsGraph additionWithPrimaryTensor:highestBitsScatteredInAndShiftedCorrectly secondaryTensor:lowestBitsScatteredIn name:nil];
+    }
+    else {
+      outputTensor = [mpsGraph scatterWithDataTensor:scatterDataTensor
                                                        updatesTensor:coordinatesTensor
                                                        indicesTensor:maskedIndicesTensor
                                                                 axis:0
                                                                 mode:MPSGraphScatterModeSet
                                                                 name:nil];
+    }
 
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->scatterDataTensor_ = scatterDataTensor;
