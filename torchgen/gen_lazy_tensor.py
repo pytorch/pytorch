@@ -153,19 +153,19 @@ at::Tensor to_meta(const at::Tensor& tensor) {
   // undefined tensors can't be converted to the meta device, since they don't have sizes/strides
   if (!tensor.defined()) return tensor;
   auto out = at::native::empty_strided_meta_symint(tensor.sym_sizes(), tensor.sym_strides(), \
-/*dtype=*/c10::make_optional(tensor.scalar_type()), /*layout=*/c10::make_optional(tensor.layout()), \
-/*device=*/c10::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/c10::nullopt);
+/*dtype=*/std::make_optional(tensor.scalar_type()), /*layout=*/std::make_optional(tensor.layout()), \
+/*device=*/std::make_optional(c10::Device(c10::kMeta)), /*pin_memory=*/std::nullopt);
   // needs to handle wrapped numbers, so dtype promotion works properly.
   if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
     out.unsafeGetTensorImpl()->set_wrapped_number(true);
   }
   return out;
 }
-c10::optional<at::Tensor> to_meta(const c10::optional<at::Tensor>& tensor) {
+std::optional<at::Tensor> to_meta(const std::optional<at::Tensor>& tensor) {
   if (tensor.has_value()) {
     return to_meta(*tensor);
   }
-  return c10::nullopt;
+  return std::nullopt;
 }
 
 std::vector<at::Tensor> to_meta(at::ITensorListRef t_list) {
