@@ -171,7 +171,7 @@ class Unboxing:
                 )
             )
         # pytorch codegen:
-        # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<c10::optional<at::Tensor>>
+        # we have to use c10::List for optional element. e.g., Tensor?[] -> c10::List<::std::optional<at::Tensor>>
         elif (
             isinstance(t.elem, OptionalType)
             and isinstance(t.elem.elem, BaseType)
@@ -180,8 +180,8 @@ class Unboxing:
             code.extend(
                 f"""
 #ifdef USE_ATEN_LIB
-at::ArrayRef<c10::optional<at::Tensor>> {in_name} = {arg_name}.toListOptionalTensor();
-c10::List<c10::optional<at::Tensor>> {out_name};
+auto {in_name} = {arg_name}.toListOptionalTensor();
+c10::List<::std::optional<at::Tensor>> {out_name};
 for (auto {elem_name}: {in_name}) {{
     {out_name}.push_back({elem_name});
 }}
