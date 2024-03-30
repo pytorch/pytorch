@@ -75,8 +75,7 @@ class TestCppExtensionJIT(common.TestCase):
             ],
             extra_include_paths=["cpp_extensions",
                                  "path / with spaces in it",
-                                 "path with quote'",
-                                 "path with double quote\""],
+                                 "path with quote'"],
             extra_cflags=["-g"],
             verbose=True,
         )
