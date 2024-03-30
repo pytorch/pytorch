@@ -388,7 +388,7 @@ Tensor& nonzero_out_mps(const Tensor& self, Tensor& out_) {
                                                                           axis:0
                                                                           mode:MPSGraphScatterModeSet
                                                                           name:nil];
-      twentyFour = [mpsGraph castTensor:twentyFour toType:[outputTensor dataType] name:nil];
+      twentyFour = [mpsGraph castTensor:twentyFour toType:getMPSDataType(out.scalar_type()) name:nil];
       MPSGraphTensor* highestBitsScatteredInAndShiftedCorrectly = [mpsGraph bitwiseLeftShiftWithPrimaryTensor:highestBitsScatteredIn secondaryTensor:twentyFour name:nil];
 
       MPSGraphTensor* lowestBitsScatteredIn = [mpsGraph scatterWithDataTensor:scatterDataTensor
