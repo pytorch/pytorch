@@ -723,7 +723,7 @@ class TestFullyShard2DTraining(FSDPTest):
             "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
         )
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_train_parity_2d_mlp(self):
         global_mesh = self.init_global_mesh()
         self.run_subtests(
@@ -791,7 +791,7 @@ class TestFullyShard2DTraining(FSDPTest):
                 _optim.step()
             self.assertEqual(losses[0], losses[1])
 
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     @with_temp_dir
     def test_train_parity_2d_transformer_checkpoint_resume(self):
         """
