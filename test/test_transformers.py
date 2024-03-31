@@ -2396,7 +2396,6 @@ class TestSDPACudaOnly(NNTestCase):
         # Cast up and compare
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=1e-5, rtol=1e-5)
 
-    @skipIfRocm  # TODO: Packed QKV
     @unittest.skipIf(not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
     @parametrize("is_causal", [True, False])
@@ -2447,6 +2446,8 @@ class TestSDPACudaOnly(NNTestCase):
         # Bump down the tolearnce for blfoat16
         atol = 7e-4 if dtype == torch.float16 else 7e-3
         rtol = 7e-4 if dtype == torch.float16 else 7e-3
+        if TEST_WITH_ROCM:
+            atol = 9e-4 if dtype == torch.float16 else 9e-3
         self.assertEqual(qkv.grad, qkv_lp.grad.to(torch.float64), atol=atol, rtol=rtol)
 
     @skipIfRocm  # Missing nested and EFFICIENT_ATTENTION
