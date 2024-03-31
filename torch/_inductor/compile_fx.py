@@ -458,9 +458,11 @@ def compile_fx_inner(
 
     # check cudagraph disabling reasons from inductor lowering
     if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
-        perf_hint_log.warning(
-            "skipping cudagraphs due to %s", compiled_graph.disabled_cudagraphs_reason
-        )
+        if "cuda" in compiled_graph.device_types:
+            perf_hint_log.warning(
+                "skipping cudagraphs due to %s",
+                compiled_graph.disabled_cudagraphs_reason,
+            )
         BoxedBool.disable(cudagraphs)
 
     # Return the output strides to the caller via TracingContext
@@ -657,7 +659,7 @@ def fx_codegen_and_compile(
             "inductor_post_grad_graph",
             payload_fn=lambda: gm.print_readable(print_output=False),
         )
-        optimus_scuba_log["inductor_post_grad"] = counters["inductor"]
+        optimus_scuba_log["inductor"] = counters["inductor"]
         signpost_event(
             "optimus",
             "compile_fx.post_grad_passes",
@@ -1209,12 +1211,6 @@ def compile_fx(
             )
 
         model_ = _recursive_pre_grad_passes(model_, example_inputs_)
-        optimus_scuba_log["inductor_pre_grad"] = counters["inductor"]
-        signpost_event(
-            "optimus",
-            "compile_fx.pre_grad_passes",
-            optimus_scuba_log,
-        )
 
     if any(isinstance(x, (list, tuple, dict)) for x in example_inputs_):
         return flatten_graph_inputs(

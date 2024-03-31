@@ -546,6 +546,12 @@ class PythonKeyTracer(Tracer):
         self.symnode_tracker = _SymNodeDict()  # type: ignore[var-annotated]
         self.script_object_tracker = WeakIdKeyDictionary(dict=None, ref_type=_WeakHashRef)
 
+        # Stores the torch function that was called during tracing
+        self.torch_fn_metadata = None
+        # Stores the counts for every torch function called. This is to help
+        # distinguish between different calls to the same torch function.
+        self.torch_fn_counts = {}
+
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
     # modules into leaves in the traced graph.
@@ -589,7 +595,6 @@ class PythonKeyTracer(Tracer):
             return get_proxy_slot(e, self, e)
         else:
             return e
-
 
 @contextmanager
 def _temp_remove_pre_dispatch_torch_function_mode():
@@ -678,6 +683,17 @@ def set_original_aten_op(func):
     else:
         yield
 
+
+class TorchFunctionMetadataMode(TorchFunctionMode):
+
+    def __init__(self, tracer):
+        self.tracer = tracer
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        self.tracer.torch_fn_metadata = func
+        self.tracer.torch_fn_counts[func] = self.tracer.torch_fn_counts.get(func, 0) + 1
+        return func(*args, **kwargs)
 
 
 # This mode is **only** used for pre_dispatch tracing.
@@ -840,6 +856,12 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         if self.decomposition_table is None:
             self.decomposition_table = {}
         self.mode = ProxyTorchDispatchMode(self.tracer, tracing_mode="real")
+
+        # Stores the torch function that was called during tracing
+        self.tracer.torch_fn_metadata = None
+        # Stores the counts for every torch function called. This is to help
+        # distinguish between different calls to the same torch function.
+        self.tracer.torch_fn_counts = {}
 
     def placeholder(self, target, args, kwargs):
         out = super().placeholder(target, args, kwargs)
@@ -1054,6 +1076,11 @@ class _ModuleStackTracer(PythonKeyTracer):
         node = super().create_node(*args, **kwargs)
         if "nn_module_stack" not in node.meta and node.op not in ["placeholder", "output"]:
             node.meta["nn_module_stack"] = self.module_stack
+        if node.op == "call_function" and self.torch_fn_metadata is not None and "torch_fn" not in node.meta:
+            node.meta["torch_fn"] = (
+                f"{self.torch_fn_metadata.__name__}_{self.torch_fn_counts[self.torch_fn_metadata]}",
+                f"{self.torch_fn_metadata.__class__.__name__}.{self.torch_fn_metadata.__name__}"
+            )
         return node
 
 
@@ -1174,6 +1201,8 @@ def make_fx(f,
         else:
             func = f
 
+        torch_fn_metadata_mode = TorchFunctionMetadataMode(fx_tracer)
+
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
         #
@@ -1181,7 +1210,7 @@ def make_fx(f,
         # purpose of `make_fx` is to produce graphmodules as a side effect; its internal execution is
         # thus irrelevant to any external functional trace.
         with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, pre_dispatch_mode, proxy_function_mode, \
-             sym_mode, proxy_mode, disable_autocast_cache():
+             sym_mode, torch_fn_metadata_mode, proxy_mode, disable_autocast_cache():
             t = dispatch_trace(wrap_key(func, args, fx_tracer, pre_dispatch), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
