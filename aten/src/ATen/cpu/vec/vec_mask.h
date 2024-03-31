@@ -17,6 +17,7 @@ inline namespace CPU_CAPABILITY {
  * 3. `all_zero`: Checks if all mask elements are zero.
  * 4. `is_masked`: Checks if a specific element is masked.
  * 5. `loadu`: Loads data from memory using the mask.
+ * 6. `all_masked`: Checks if all mask elements are masked.
  *
  * Some helper template classes are provided to simplify the specialization of
  * the `VecMask` for the specific CPU arch:
@@ -106,6 +107,9 @@ class VecMask {
     __at_align__ U b_buf[size()];
     if constexpr (size() >= VectorizedN<U, L>::size()) {
       b_vec.store(b_buf);
+      for (int i = VectorizedN<U, L>::size(); i < size(); i++) {
+        b_buf[i] = static_cast<U>(0);
+      }
     } else {
       b_vec.store(b_buf, size());
     }
@@ -115,7 +119,7 @@ class VecMask {
   template <typename U>
   static VecMask<T, N> from(U b) {
     using int_t = int_same_size_t<T>;
-    T mask = b ? c10::bit_cast<T>(~(int_t)0) : (T)0;
+    T mask = b ? c10::bit_cast<T>((int_t)(~(int_t)0)) : (T)0;
     return VectorizedN<T, N>(mask);
   }
 
@@ -150,6 +154,13 @@ class VecMask {
     mask_.store(mask);
     return std::all_of(
         mask, mask + size(), [](T m) { return m == static_cast<T>(0); });
+  }
+
+  inline bool all_masked() const {
+    __at_align__ T mask[size()];
+    mask_.store(mask);
+    return std::all_of(
+        mask, mask + size(), [](T m) { return m != static_cast<T>(0); });
   }
 
   inline bool is_masked(int i) const {
@@ -207,13 +218,31 @@ class VecMask {
         VectorizedN<T, N>(a), VectorizedN<T, N>(b.template cast<T, N>()));    \
   }
 
+#define VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(op, EXPR)                  \
+  template <                                                                  \
+      typename T,                                                             \
+      int N,                                                                  \
+      typename V,                                                             \
+      int M,                                                                  \
+      std::enable_if_t<VecMask<T, N>::size() == VecMask<V, M>::size(), int> = \
+          0>                                                                  \
+  inline VecMask<T, N> op(const VecMask<T, N>& a, const VecMask<V, M>& b) {   \
+    return EXPR;                                                              \
+  }
+
 VEC_MASK_DEFINE_UNARY_OP_GLOBAL(operator~)
 VEC_MASK_DEFINE_BINARY_OP_GLOBAL(operator&)
 VEC_MASK_DEFINE_BINARY_OP_GLOBAL(operator|)
 VEC_MASK_DEFINE_BINARY_OP_GLOBAL(operator^)
+VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator>, a & ~b)
+VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator<, ~a& b)
+VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator==, ~(a ^ b))
+VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator>=, (a == b) | (a > b))
+VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL(operator<=, (a == b) | (a < b))
 
 #undef VEC_MASK_DEFINE_UNARY_OP_GLOBAL
 #undef VEC_MASK_DEFINE_BINARY_OP_GLOBAL
+#undef VEC_MASK_DEFINE_BINARY_OP_WITH_EXPR_GLOBAL
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec
