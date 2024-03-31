@@ -1,10 +1,13 @@
 # Owner(s): ["module: inductor"]
+import os
+import sys
+
 import torch
 
-try:
-    from .test_torchinductor import check_model_gpu, TestCase
-except ImportError:
-    from test_torchinductor import check_model_gpu, TestCase
+pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
+sys.path.append(pytorch_test_dir)
+from inductor.test_torchinductor import check_model_gpu, TestCase
+
 
 # TODO: Remove this file.
 # This is a temporary test case to test the base functionality of first Intel GPU Inductor integration.
