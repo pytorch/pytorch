@@ -375,10 +375,9 @@ def aot_compile(
             # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
             restore_fqn=False,
         )
-    flat_example_inputs = pytree.arg_tree_leaves(*args, **(kwargs or {}))
 
     with torch.no_grad():
-        so_path = torch._inductor.aot_compile(gm, flat_example_inputs, options)  # type: ignore[arg-type]
+        so_path = torch._inductor.aot_compile(gm, args, kwargs, options=options)  # type: ignore[arg-type]
 
     return so_path
 
