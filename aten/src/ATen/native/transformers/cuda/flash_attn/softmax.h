@@ -17,6 +17,7 @@ namespace pytorch_flash {
 
 using namespace cute;
 
+#define UNFUSE_FMA
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
 template<bool zero_init=true, typename Engine0, typename Layout0, typename Engine1, typename Layout1, typename Operator>
@@ -78,7 +79,11 @@ __forceinline__ __device__ void scale_apply_exp2(Tensor<Engine0, Layout0> &tenso
             // Instead of computing exp(x - max), we compute exp2(x * log_2(e) -
             // max * log_2(e)) This allows the compiler to use the ffma
             // instruction instead of fadd and fmul separately.
-            tensor(mi, ni) = exp2f(tensor(mi, ni) * scale - max_scaled);
+            #ifdef UNFUSE_FMA
+                tensor(mi, ni) = exp2f(__fmul_rn(tensor(mi, ni), scale) - max_scaled);
+            #else
+                tensor(mi, ni) = exp2f(tensor(mi, ni) * scale - max_scaled);
+            #endif
         }
     }
 }
