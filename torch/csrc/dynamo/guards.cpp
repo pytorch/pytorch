@@ -1246,25 +1246,26 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   }
 
   GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
-    _counter += 1;
     bool result = check_nopybind(value);
 
     if (!result) {
       std::stringstream fail_reason;
       fail_reason << "Duplicate tensor found where not expected! ";
       fail_reason << py::cast<std::string>(_tensor_names[_counter])
-                  << " should not alias to anything, but is aliased";
+                  << " should not alias to anything, but is aliased."
+                  << " Total number of tensors are " << _num_tensors;
       return GuardDebugInfo(false, fail_reason.str(), 0);
     }
+    _counter += 1;
     return GuardDebugInfo(true, 1);
   }
 
   void reset_state() final {
+    _counter = 0;
     for (auto item : _unique_tensors) {
       Py_DECREF(item.first);
     }
     _unique_tensors.clear();
-    _counter = 0;
   }
 
  private:
