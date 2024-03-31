@@ -111,11 +111,8 @@ struct VecMaskCast<int, 1, float, 1> {
 template <typename dst_t>
 struct VecMaskCast<dst_t, 1, int64_t, 2> {
   static inline VecMask<dst_t, 1> apply(const VecMask<int64_t, 2>& vec_mask) {
-    auto low = _mm512_cvtepi64_epi32(vec_mask[0]);
-    auto high = _mm512_cvtepi64_epi32(vec_mask[1]);
-    return VecMask<int, 1>(Vectorized<int>(_mm512_inserti32x8(
-                               _mm512_castsi256_si512(low), high, 1)))
-        .cast<dst_t, 1>();
+    auto int_vec = convert<int, 1, int64_t, 2>(VectorizedN<int64_t, 2>(vec_mask));
+    return VecMask<int, 1>(int_vec).cast<dst_t, 1>();
   }
 };
 
@@ -130,6 +127,12 @@ inline bool VecMask<int, 1>::is_masked(int i) const {
   return _mm512_movepi32_mask(mask_[0]) & (1 << i);
 }
 
+template <>
+inline bool VecMask<int, 1>::all_masked() const {
+  __mmask16 mask = _mm512_movepi32_mask(mask_[0]);
+  return mask == 0xffff;
+}
+
 #define VEC_MASK_METHOD_WITH_CAST_TO_INT(                   \
     T, N, return_type, method, args_def, args)              \
   template <>                                               \
@@ -141,6 +144,8 @@ VEC_MASK_METHOD_WITH_CAST_TO_INT(float, 1, bool, all_zero, (), ())
 VEC_MASK_METHOD_WITH_CAST_TO_INT(int64_t, 2, bool, all_zero, (), ())
 VEC_MASK_METHOD_WITH_CAST_TO_INT(float, 1, bool, is_masked, (int i), (i))
 VEC_MASK_METHOD_WITH_CAST_TO_INT(int64_t, 2, bool, is_masked, (int i), (i))
+VEC_MASK_METHOD_WITH_CAST_TO_INT(float, 1, bool, all_masked, (), ())
+VEC_MASK_METHOD_WITH_CAST_TO_INT(int64_t, 2, bool, all_masked, (), ())
 
 #undef VEC_MASK_DEFINE_METHOD_WITH_CAST_TO_INT
 

@@ -187,8 +187,8 @@ void masked_scale_kernel(at::Tensor& ret, const at::Tensor& src, const at::Tenso
    auto iter = at::TensorIteratorConfig()
      .check_all_same_dtype(false)
      .add_output(ret)
-     .add_input(src)
-     .add_input(mask)
+     .add_const_input(src)
+     .add_const_input(mask)
      .build();
 
    at::native::gpu_kernel(
