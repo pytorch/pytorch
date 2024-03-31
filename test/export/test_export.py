@@ -225,6 +225,7 @@ class TestExport(TestCase):
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183702824
     def test_conv_dynamic(self):
         # Simple module for demonstration
         class M(torch.nn.Module):
@@ -396,6 +397,97 @@ class TestExport(TestCase):
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    # Predispatch has different expected results
+    @testing.expectedFailureSerDerPreDispatch
+    def test_torch_fn(self):
+        class M1(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                x = self.linear(x)
+                x = self.linear(x)
+                x = self.relu(x)
+                x = x + x
+                return x
+
+        ep1 = export(M1(), (torch.randn(3, 3), ))
+        expected_result = [
+            ("linear_1", "builtin_function_or_method.linear"),
+            ("linear_1", "builtin_function_or_method.linear"),
+            ("linear_2", "builtin_function_or_method.linear"),
+            ("linear_2", "builtin_function_or_method.linear"),
+            ("relu_1", "function.relu"),
+            ("add_1", "method_descriptor.add"),
+        ]
+        actual_result = []
+        for i, node in enumerate(ep1.graph.nodes):
+            if node.op == "call_function":
+                actual_result.append(node.meta.get("torch_fn"))
+        self.assertEqual(actual_result, expected_result)
+
+        class M2(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, weight, bias):
+                x = torch.nn.functional.linear(x, weight, bias)
+                x = torch.nn.functional.relu(x)
+                x = torch.add(x, x)
+                return x
+
+        ep2 = export(M2(), (torch.randn(3, 3), torch.randn(3, 3), torch.randn(3)))
+        expected_result = [
+            ("linear_1", "builtin_function_or_method.linear"),
+            ("linear_1", "builtin_function_or_method.linear"),
+            ("relu_1", "function.relu"),
+            ("add_1", "builtin_function_or_method.add"),
+        ]
+        actual_result = []
+        for i, node in enumerate(ep2.graph.nodes):
+            if node.op == "call_function":
+                actual_result.append(node.meta.get("torch_fn"))
+        self.assertEqual(actual_result, expected_result)
+
+    # TODO(yidi)
+    @unittest.expectedFailure
+    def test_export_cond_preserve_torch_fn_for_subgraphs(self):
+        class MySubModule(torch.nn.Module):
+            def foo(self, x):
+                return x.cos()
+
+            def forward(self, x):
+                return self.foo(x)
+
+        class CondBranchClassMethod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.subm = MySubModule()
+
+            def bar(self, x):
+                return x.sin()
+
+            def forward(self, x):
+                return cond(x.shape[0] <= 2, self.subm.forward, self.bar, [x])
+
+
+        example_inputs = (torch.randn(1, 3, 3, 3),)
+        m = CondBranchClassMethod()
+        m.eval()
+        gm = export(m, example_inputs).module()
+
+        actual_torch_fns = []
+        for mod in gm.modules():
+            for node in mod.graph.nodes:
+                if node.name in {"sin", "cos"}:
+                    torch_fn = node.meta.get("torch_fn")
+                    print(torch_fn)
+                    actual_torch_fns.append(torch_fn)
+        exp_torch_fns = [("cos_1", "method_descriptor.cos"), ("sin_1", "method_descriptor.sin")]
+        self.assertEqual(actual_torch_fns, exp_torch_fns)
+
     def test_derived_dim_basic(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -447,6 +539,7 @@ class TestExport(TestCase):
 
         self.assertEqual(ep.module()(torch.randn(4), torch.randn(5)).size()[0], 4)
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_nested(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -512,6 +605,7 @@ class TestExport(TestCase):
 
         self.assertEqual(ep.module()(torch.randn(5), torch.randn(9)).size()[0], 4)
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_integer(self):
         class Foo(torch.nn.Module):
             def forward(self, w):
@@ -754,6 +848,7 @@ class TestExport(TestCase):
             6,
         )
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183704046
     def test_static_dim_constraints(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -803,6 +898,7 @@ class TestExport(TestCase):
         ):
             _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703911
     def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -825,6 +921,7 @@ class TestExport(TestCase):
         self.assertEquals(vr.lower, 1)
         self.assertEquals(vr.upper, 2)
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_1_2(self):
         class Bar(torch.nn.Module):
             def forward(self, x, y):
@@ -1963,6 +2060,7 @@ def forward(self, arg_0):
 
     @testing.expectedFailureNonStrict  # non-strict does not add deferred runtime assertions
     @testing.expectedFailureSerDerPreDispatch  # .item call becomes aten.item in predispatch IR
+    @testing.expectedFailurePreDispatchRunDecomp # assert name is still referring to item
     def test_automatic_constrain_size(self):
         class M(torch.nn.Module):
             def forward(self, x, y):
@@ -2019,6 +2117,7 @@ def forward(self, arg_0):
 
     @testing.expectedFailureNonStrict
     @testing.expectedFailureSerDerPreDispatch  # .item() becomes aten.item in predispatch IR
+    @testing.expectedFailurePreDispatchRunDecomp # Assert message is still using the old node name, so it shoudl fail
     def test_export_with_inline_constraints(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -2455,51 +2554,6 @@ def forward(self, arg_0):
         ):
             graph_module.eval()
 
-
-    # TODO (tmanlaibaatar) We currently can't preserve
-    # source_fn inside HOO in export. Since no one needs
-    # it rn, it is ok to xfail it and revisit later.
-    @unittest.expectedFailure
-    def test_export_cond_preserve_stack_trace_for_subgraphs(self):
-        class MySubModule(torch.nn.Module):
-            def foo(self, x):
-                return x.cos()
-
-            def forward(self, x):
-                return self.foo(x)
-
-        class CondBranchClassMethod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.subm = MySubModule()
-
-            def bar(self, x):
-                return x.sin()
-
-            def forward(self, x):
-                return cond(x.shape[0] <= 2, self.subm.forward, self.bar, [x])
-
-
-        example_inputs = (torch.randn(1, 3, 3, 3),)
-        m = CondBranchClassMethod()
-        m.eval()
-        # TODO (tmanlaibaatar) Setting functional IR doesn't work on aot_export yet
-        # as the branch source_fn is not captured.
-        gm = torch.export._trace._export(m, example_inputs, pre_dispatch=True).module()
-
-        actual_source_fns = []
-        for mod in gm.modules():
-            for node in mod.graph.nodes:
-                if node.name in {"sin", "cos"}:
-                    source_fn_st = node.meta.get("source_fn_stack", None)
-                    if source_fn_st is not None:
-                        source_names = []
-                        for source_fn in source_fn_st:
-                            source_names.append(source_fn[0])
-                        actual_source_fns.append(source_names)
-        exp_source_fns = [["cond", "cos"], ["cond", "sin"]]
-        self.assertEqual(actual_source_fns, exp_source_fns)
-
     @testing.expectedFailureRetraceability  # T183144788
     def test_lifted_constants(self) -> None:
         class Module(torch.nn.Module):
@@ -2614,6 +2668,7 @@ def forward(self, arg_0):
             exported_program.module()(torch.rand(2, 3), torch.rand(2, 3))
 
     @testing.expectedFailureSerDerPreDispatch  # linear shouldn't decompose
+    @testing.expectedFailurePreDispatchRunDecomp  # no action needed here
     def test_export_decomps_simple(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -4180,6 +4235,7 @@ class TestExportCustomClass(TorchTestCase):
                     custom_node.meta["val"] = torch.ones(4, 4)
                     # Copy over an nn_module_stack as they are required.
                     custom_node.meta["nn_module_stack"] = node.meta["nn_module_stack"]
+                    custom_node.meta["torch_fn"] = ("custom_op", "torch.ops._TorchScriptTesting.take_an_instance.default")
                     arg0, _ = node.args
                     node.args = (arg0, custom_node)
 

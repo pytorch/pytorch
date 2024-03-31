@@ -2,7 +2,8 @@
 
 import sys
 
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm, skipIfXpu
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -23,9 +24,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.export import Dim
 from torch.utils._triton import has_triton
 
-
 @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-@skipIfXpu
 @config.patch(memory_planning=True)
 class TestMemoryPlanning(TestCase):
     def _generate(self, *, device):
@@ -117,4 +116,5 @@ class TestMemoryPlanning(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if HAS_CUDA:
+        run_tests()
