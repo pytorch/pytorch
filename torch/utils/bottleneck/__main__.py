@@ -1,8 +1,8 @@
 import argparse
 import cProfile
+import os
 import pstats
 import sys
-import os
 from typing import Dict
 
 import torch
@@ -16,8 +16,8 @@ def redirect_argv(new_argv):
 
 def compiled_with_cuda(sysinfo):
     if sysinfo.cuda_compiled_version:
-        return f'compiled w/ CUDA {sysinfo.cuda_compiled_version}'
-    return 'not compiled w/ CUDA'
+        return f"compiled w/ CUDA {sysinfo.cuda_compiled_version}"
+    return "not compiled w/ CUDA"
 
 
 env_summary = """
@@ -33,43 +33,43 @@ Running with Python {py_version} and {cuda_runtime}
 
 
 def run_env_analysis():
-    print('Running environment analysis...')
+    print("Running environment analysis...")
     info = get_env_info()
 
     result: Dict[str, str] = {}
 
-    debug_str = ''
+    debug_str = ""
     if info.is_debug_build:
-        debug_str = ' DEBUG'
+        debug_str = " DEBUG"
 
-    cuda_avail = ''
+    cuda_avail = ""
     if info.is_cuda_available:
         cuda = info.cuda_runtime_version
         if cuda is not None:
-            cuda_avail = 'CUDA ' + cuda
+            cuda_avail = "CUDA " + cuda
     else:
-        cuda = 'CUDA unavailable'
+        cuda = "CUDA unavailable"
 
     pip_version = info.pip_version
     pip_list_output = info.pip_packages
     if pip_list_output is None:
-        pip_list_output = 'Unable to fetch'
+        pip_list_output = "Unable to fetch"
 
     result = {
-        'debug_str': debug_str,
-        'pytorch_version': info.torch_version,
-        'cuda_compiled': compiled_with_cuda(info),
-        'py_version': f'{sys.version_info[0]}.{sys.version_info[1]}',
-        'cuda_runtime': cuda_avail,
-        'pip_version': pip_version,
-        'pip_list_output': pip_list_output,
+        "debug_str": debug_str,
+        "pytorch_version": info.torch_version,
+        "cuda_compiled": compiled_with_cuda(info),
+        "py_version": f"{sys.version_info[0]}.{sys.version_info[1]}",
+        "cuda_runtime": cuda_avail,
+        "pip_version": pip_version,
+        "pip_list_output": pip_list_output,
     }
 
     return env_summary.format(**result)
 
 
 def run_cprofile(code, globs, launch_blocking=False):
-    print('Running your script with cProfile')
+    print("Running your script with cProfile")
     prof = cProfile.Profile()
     prof.enable()
     exec(code, globs, None)
@@ -84,7 +84,7 @@ cprof_summary = """
 """.strip()
 
 
-def print_cprofile_summary(prof, sortby='tottime', topk=15):
+def print_cprofile_summary(prof, sortby="tottime", topk=15):
     print(cprof_summary)
     cprofile_stats = pstats.Stats(prof).sort_stats(sortby)
     cprofile_stats.print_stats(topk)
@@ -96,7 +96,7 @@ def run_autograd_prof(code, globs):
             exec(code, globs, None)
         return prof
 
-    print('Running your script with the autograd profiler...')
+    print("Running your script with the autograd profiler...")
     result = [run_prof(use_cuda=False)]
     if torch.cuda.is_available():
         result.append(run_prof(use_cuda=True))
@@ -116,31 +116,42 @@ autograd_prof_summary = """
 """.strip()
 
 
-def print_autograd_prof_summary(prof, mode, sortby='cpu_time', topk=15):
-    valid_sortby = ['cpu_time', 'cuda_time', 'cpu_time_total', 'cuda_time_total', 'count']
+def print_autograd_prof_summary(prof, mode, sortby="cpu_time", topk=15):
+    valid_sortby = [
+        "cpu_time",
+        "cuda_time",
+        "cpu_time_total",
+        "cuda_time_total",
+        "count",
+    ]
     if sortby not in valid_sortby:
-        warn = ('WARNING: invalid sorting option for autograd profiler results: {}\n'
-                'Expected `cpu_time`, `cpu_time_total`, or `count`. '
-                'Defaulting to `cpu_time`.')
+        warn = (
+            "WARNING: invalid sorting option for autograd profiler results: {}\n"
+            "Expected `cpu_time`, `cpu_time_total`, or `count`. "
+            "Defaulting to `cpu_time`."
+        )
         print(warn.format(sortby))
-        sortby = 'cpu_time'
+        sortby = "cpu_time"
 
-    if mode == 'CUDA':
-        cuda_warning = ('\n\tBecause the autograd profiler uses the CUDA event API,\n'
-                        '\tthe CUDA time column reports approximately max(cuda_time, cpu_time).\n'
-                        '\tPlease ignore this output if your code does not use CUDA.\n')
+    if mode == "CUDA":
+        cuda_warning = (
+            "\n\tBecause the autograd profiler uses the CUDA event API,\n"
+            "\tthe CUDA time column reports approximately max(cuda_time, cpu_time).\n"
+            "\tPlease ignore this output if your code does not use CUDA.\n"
+        )
     else:
-        cuda_warning = ''
+        cuda_warning = ""
 
-    sorted_events = sorted(prof.function_events,
-                           key=lambda x: getattr(x, sortby), reverse=True)
+    sorted_events = sorted(
+        prof.function_events, key=lambda x: getattr(x, sortby), reverse=True
+    )
     topk_events = sorted_events[:topk]
 
     result = {
-        'mode': mode,
-        'description': f'top {topk} events sorted by {sortby}',
-        'output': torch.autograd.profiler_util._build_table(topk_events),
-        'cuda_warning': cuda_warning
+        "mode": mode,
+        "description": f"top {topk} events sorted by {sortby}",
+        "output": torch.autograd.profiler_util._build_table(topk_events),
+        "cuda_warning": cuda_warning,
     }
 
     print(autograd_prof_summary.format(**result))
@@ -162,11 +173,18 @@ https://pytorch.org/docs/main/autograd.html#profiler for more information.
 
 def parse_args():
     parser = argparse.ArgumentParser(description=descript)
-    parser.add_argument('scriptfile', type=str,
-                        help='Path to the script to be run. '
-                        'Usually run with `python path/to/script`.')
-    parser.add_argument('args', type=str, nargs=argparse.REMAINDER,
-                        help='Command-line arguments to be passed to the script.')
+    parser.add_argument(
+        "scriptfile",
+        type=str,
+        help="Path to the script to be run. "
+        "Usually run with `python path/to/script`.",
+    )
+    parser.add_argument(
+        "args",
+        type=str,
+        nargs=argparse.REMAINDER,
+        help="Command-line arguments to be passed to the script.",
+    )
     return parser.parse_args()
 
 
@@ -181,21 +199,21 @@ def main():
     scriptfile = args.scriptfile
     scriptargs = [] if args.args is None else args.args
     scriptargs.insert(0, scriptfile)
-    cprofile_sortby = 'tottime'
+    cprofile_sortby = "tottime"
     cprofile_topk = 15
-    autograd_prof_sortby = 'cpu_time_total'
+    autograd_prof_sortby = "cpu_time_total"
     autograd_prof_topk = 15
 
     redirect_argv(scriptargs)
 
     sys.path.insert(0, os.path.dirname(scriptfile))
-    with open(scriptfile, 'rb') as stream:
-        code = compile(stream.read(), scriptfile, 'exec')
+    with open(scriptfile, "rb") as stream:
+        code = compile(stream.read(), scriptfile, "exec")
     globs = {
-        '__file__': scriptfile,
-        '__name__': '__main__',
-        '__package__': None,
-        '__cached__': None,
+        "__file__": scriptfile,
+        "__name__": "__main__",
+        "__package__": None,
+        "__cached__": None,
     }
 
     print(descript)
@@ -211,7 +229,9 @@ def main():
     print_cprofile_summary(cprofile_prof, cprofile_sortby, cprofile_topk)
 
     if not torch.cuda.is_available():
-        print_autograd_prof_summary(autograd_prof_cpu, 'CPU', autograd_prof_sortby, autograd_prof_topk)
+        print_autograd_prof_summary(
+            autograd_prof_cpu, "CPU", autograd_prof_sortby, autograd_prof_topk
+        )
         return
 
     # Print both the result of the CPU-mode and CUDA-mode autograd profilers
@@ -221,9 +241,14 @@ def main():
         cpu_prof_exec_time = cpu_time_total(autograd_prof_cpu)
         pct_diff = (cuda_prof_exec_time - cpu_prof_exec_time) / cuda_prof_exec_time
         if abs(pct_diff) > 0.05:
-            print_autograd_prof_summary(autograd_prof_cpu, 'CPU', autograd_prof_sortby, autograd_prof_topk)
+            print_autograd_prof_summary(
+                autograd_prof_cpu, "CPU", autograd_prof_sortby, autograd_prof_topk
+            )
 
-    print_autograd_prof_summary(autograd_prof_cuda, 'CUDA', autograd_prof_sortby, autograd_prof_topk)
+    print_autograd_prof_summary(
+        autograd_prof_cuda, "CUDA", autograd_prof_sortby, autograd_prof_topk
+    )
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     main()

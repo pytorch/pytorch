@@ -1,4 +1,5 @@
 import tensorboard
+
 from torch._vendor.packaging.version import Version
 
 if not hasattr(tensorboard, "__version__") or Version(
@@ -9,5 +10,6 @@ if not hasattr(tensorboard, "__version__") or Version(
 del Version
 del tensorboard
 
-from .writer import FileWriter, SummaryWriter  # noqa: F401
 from tensorboard.summary.writer.record_writer import RecordWriter  # noqa: F401
+
+from .writer import FileWriter, SummaryWriter  # noqa: F401

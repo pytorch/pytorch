@@ -2,7 +2,7 @@
 
 import os
 import time
-from typing import List, Optional, Union, TYPE_CHECKING
+from typing import List, Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -301,7 +301,12 @@ class SummaryWriter:
         return self.log_dir
 
     def add_hparams(
-        self, hparam_dict, metric_dict, hparam_domain_discrete=None, run_name=None, global_step=None
+        self,
+        hparam_dict,
+        metric_dict,
+        hparam_domain_discrete=None,
+        run_name=None,
+        global_step=None,
     ):
         """Add a set of hyperparameters to be compared in TensorBoard.
 
@@ -769,7 +774,7 @@ class SummaryWriter:
         figure: Union["Figure", List["Figure"]],
         global_step: Optional[int] = None,
         close: bool = True,
-        walltime: Optional[float] = None
+        walltime: Optional[float] = None,
     ) -> None:
         """Render matplotlib figure into an image and add it to summary.
 

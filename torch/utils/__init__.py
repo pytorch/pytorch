@@ -1,13 +1,17 @@
+import copyreg
 import os.path as _osp
+import weakref
+
 import torch
+from . import collect_env, deterministic
+from .backend_registration import (
+    generate_methods_for_privateuse1_backend,
+    rename_privateuse1_backend,
+)
+from .cpp_backtrace import get_cpp_backtrace
 
 from .throughput_benchmark import ThroughputBenchmark
-from .cpp_backtrace import get_cpp_backtrace
-from .backend_registration import rename_privateuse1_backend, generate_methods_for_privateuse1_backend
-from . import deterministic
-from . import collect_env
-import weakref
-import copyreg
+
 
 def set_module(obj, mod):
     """
@@ -17,11 +21,15 @@ def set_module(obj, mod):
         raise TypeError("The mod argument should be a string")
     obj.__module__ = mod
 
+
 if torch._running_with_deploy():
     # not valid inside torch_deploy interpreter, no paths exists for frozen modules
     cmake_prefix_path = None
 else:
-    cmake_prefix_path = _osp.join(_osp.dirname(_osp.dirname(__file__)), 'share', 'cmake')
+    cmake_prefix_path = _osp.join(
+        _osp.dirname(_osp.dirname(__file__)), "share", "cmake"
+    )
+
 
 def swap_tensors(t1, t2):
     """

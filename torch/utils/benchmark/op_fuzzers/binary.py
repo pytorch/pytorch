@@ -1,15 +1,19 @@
 import numpy as np
+
 import torch
 
-from torch.utils.benchmark import Fuzzer, FuzzedParameter, ParameterAlias, FuzzedTensor
+from torch.utils.benchmark import FuzzedParameter, FuzzedTensor, Fuzzer, ParameterAlias
 
 
 _MIN_DIM_SIZE = 16
-_MAX_DIM_SIZE = 16 * 1024 ** 2
-_POW_TWO_SIZES = tuple(2 ** i for i in range(
-    int(np.log2(_MIN_DIM_SIZE)),
-    int(np.log2(_MAX_DIM_SIZE)) + 1,
-))
+_MAX_DIM_SIZE = 16 * 1024**2
+_POW_TWO_SIZES = tuple(
+    2**i
+    for i in range(
+        int(np.log2(_MIN_DIM_SIZE)),
+        int(np.log2(_MAX_DIM_SIZE)) + 1,
+    )
+)
 
 
 class BinaryOpFuzzer(Fuzzer):
@@ -17,8 +21,9 @@ class BinaryOpFuzzer(Fuzzer):
         super().__init__(
             parameters=[
                 # Dimensionality of x and y. (e.g. 1D, 2D, or 3D.)
-                FuzzedParameter("dim", distribution={1: 0.3, 2: 0.4, 3: 0.3}, strict=True),
-
+                FuzzedParameter(
+                    "dim", distribution={1: 0.3, 2: 0.4, 3: 0.3}, strict=True
+                ),
                 # Shapes for `x` and `y`.
                 #       It is important to test all shapes, however
                 #   powers of two are especially important and therefore
@@ -35,13 +40,17 @@ class BinaryOpFuzzer(Fuzzer):
                         minval=_MIN_DIM_SIZE,
                         maxval=_MAX_DIM_SIZE,
                         distribution="loguniform",
-                    ) for i in range(3)
+                    )
+                    for i in range(3)
                 ],
                 [
                     FuzzedParameter(
                         name=f"k_pow2_{i}",
-                        distribution={size: 1. / len(_POW_TWO_SIZES) for size in _POW_TWO_SIZES}
-                    ) for i in range(3)
+                        distribution={
+                            size: 1.0 / len(_POW_TWO_SIZES) for size in _POW_TWO_SIZES
+                        },
+                    )
+                    for i in range(3)
                 ],
                 [
                     FuzzedParameter(
@@ -51,9 +60,9 @@ class BinaryOpFuzzer(Fuzzer):
                             ParameterAlias(f"k_pow2_{i}"): 0.2,
                         },
                         strict=True,
-                    ) for i in range(3)
+                    )
+                    for i in range(3)
                 ],
-
                 [
                     FuzzedParameter(
                         name=f"y_k{i}",
@@ -62,9 +71,9 @@ class BinaryOpFuzzer(Fuzzer):
                             1: 0.2,
                         },
                         strict=True,
-                    ) for i in range(3)
+                    )
+                    for i in range(3)
                 ],
-
                 # Steps for `x` and `y`. (Benchmarks strided memory access.)
                 [
                     FuzzedParameter(
@@ -74,9 +83,13 @@ class BinaryOpFuzzer(Fuzzer):
                     for i in range(3)
                     for name in ("x", "y")
                 ],
-
                 # Repeatable entropy for downstream applications.
-                FuzzedParameter(name="random_value", minval=0, maxval=2 ** 32 - 1, distribution="uniform"),
+                FuzzedParameter(
+                    name="random_value",
+                    minval=0,
+                    maxval=2**32 - 1,
+                    distribution="uniform",
+                ),
             ],
             tensors=[
                 FuzzedTensor(
@@ -85,7 +98,7 @@ class BinaryOpFuzzer(Fuzzer):
                     steps=("x_step_0", "x_step_1", "x_step_2"),
                     probability_contiguous=0.75,
                     min_elements=4 * 1024,
-                    max_elements=32 * 1024 ** 2,
+                    max_elements=32 * 1024**2,
                     max_allocation_bytes=2 * 1024**3,  # 2 GB
                     dim_parameter="dim",
                     dtype=dtype,

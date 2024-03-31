@@ -5,7 +5,6 @@ import struct
 
 from typing import Any, List, Optional
 
-import torch
 import numpy as np
 
 from google.protobuf import struct_pb2
@@ -20,6 +19,8 @@ from tensorboard.compat.proto.tensor_shape_pb2 import TensorShapeProto
 from tensorboard.plugins.custom_scalar import layout_pb2
 from tensorboard.plugins.pr_curve.plugin_data_pb2 import PrCurvePluginData
 from tensorboard.plugins.text.plugin_data_pb2 import TextPluginData
+
+import torch
 
 from ._convert_np import make_np
 from ._utils import _prepare_video, convert_to_HWC
@@ -50,6 +51,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+
 def half_to_int(f: float) -> int:
     """Casts a half-precision float value into an integer.
 
@@ -63,6 +65,7 @@ def half_to_int(f: float) -> int:
     buf = struct.pack("f", f)
     return struct.unpack("i", buf)[0]
 
+
 def int_to_half(i: int) -> float:
     """Casts an integer value to a half-precision float.
 
@@ -73,14 +76,18 @@ def int_to_half(i: int) -> float:
     buf = struct.pack("i", i)
     return struct.unpack("f", buf)[0]
 
+
 def _tensor_to_half_val(t: torch.Tensor) -> List[int]:
     return [half_to_int(x) for x in t.flatten().tolist()]
+
 
 def _tensor_to_complex_val(t: torch.Tensor) -> List[float]:
     return torch.view_as_real(t).flatten().tolist()
 
+
 def _tensor_to_list(t: torch.Tensor) -> List[Any]:
     return t.flatten().tolist()
+
 
 # type maps: torch.Tensor type -> (protobuf type, protobuf val field)
 _TENSOR_TYPE_MAP = {
@@ -180,7 +187,6 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
       The `Summary` protobufs for Experiment, SessionStartInfo and
         SessionEndInfo
     """
-    import torch
     from tensorboard.plugins.hparams.api_pb2 import (
         DataType,
         Experiment,
@@ -201,6 +207,8 @@ def hparams(hparam_dict=None, metric_dict=None, hparam_domain_discrete=None):
         SessionEndInfo,
         SessionStartInfo,
     )
+
+    import torch
 
     # TODO: expose other parameters in the future.
     # hp = HParamInfo(name='lr',display_name='learning rate',
@@ -884,8 +892,9 @@ def _get_tensor_summary(
     Returns:
       Tensor summary with metadata.
     """
-    import torch
     from tensorboard.plugins.mesh import metadata
+
+    import torch
 
     tensor = torch.as_tensor(tensor)
 

@@ -7,9 +7,11 @@ from typing import OrderedDict
 
 simple_call_counter: OrderedDict[str, int] = collections.OrderedDict()
 
+
 def count_label(label):
     prev = simple_call_counter.setdefault(label, 0)
     simple_call_counter[label] = prev + 1
+
 
 def count(fn):
     @functools.wraps(fn)
@@ -18,4 +20,5 @@ def count(fn):
             simple_call_counter[fn.__qualname__] = 0
         simple_call_counter[fn.__qualname__] = simple_call_counter[fn.__qualname__] + 1
         return fn(*args, **kwargs)
+
     return wrapper

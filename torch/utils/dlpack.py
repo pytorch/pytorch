@@ -1,27 +1,28 @@
+import enum
 from typing import Any
 
 import torch
-import enum
 
-from torch._C import _from_dlpack
-from torch._C import _to_dlpack as to_dlpack
+from torch._C import _from_dlpack, _to_dlpack as to_dlpack
 
 
 class DLDeviceType(enum.IntEnum):
     # Enums as in DLPack specification (aten/src/ATen/dlpack.h)
-    kDLCPU = 1,
-    kDLGPU = 2,
-    kDLCPUPinned = 3,
-    kDLOpenCL = 4,
-    kDLVulkan = 7,
-    kDLMetal = 8,
-    kDLVPI = 9,
-    kDLROCM = 10,
-    kDLExtDev = 12,
-    kDLOneAPI = 14,
+    kDLCPU = (1,)
+    kDLGPU = (2,)
+    kDLCPUPinned = (3,)
+    kDLOpenCL = (4,)
+    kDLVulkan = (7,)
+    kDLMetal = (8,)
+    kDLVPI = (9,)
+    kDLROCM = (10,)
+    kDLExtDev = (12,)
+    kDLOneAPI = (14,)
 
 
-torch._C._add_docstr(to_dlpack, r"""to_dlpack(tensor) -> PyCapsule
+torch._C._add_docstr(
+    to_dlpack,
+    r"""to_dlpack(tensor) -> PyCapsule
 
 Returns an opaque object (a "DLPack capsule") representing the tensor.
 
@@ -41,12 +42,13 @@ Args:
     tensor: a tensor to be exported
 
 The DLPack capsule shares the tensor's memory.
-""")
+""",
+)
 
 
 # TODO: add a typing.Protocol to be able to tell Mypy that only objects with
 # __dlpack__ and __dlpack_device__ methods are accepted.
-def from_dlpack(ext_tensor: Any) -> 'torch.Tensor':
+def from_dlpack(ext_tensor: Any) -> "torch.Tensor":
     """from_dlpack(ext_tensor) -> Tensor
 
     Converts a tensor from an external library into a ``torch.Tensor``.
@@ -97,12 +99,12 @@ def from_dlpack(ext_tensor: Any) -> 'torch.Tensor':
         tensor([-9, -1,  2,  3])
 
     """
-    if hasattr(ext_tensor, '__dlpack__'):
+    if hasattr(ext_tensor, "__dlpack__"):
         device = ext_tensor.__dlpack_device__()
         # device is either CUDA or ROCm, we need to pass the current
         # stream
         if device[0] in (DLDeviceType.kDLGPU, DLDeviceType.kDLROCM):
-            stream = torch.cuda.current_stream(f'cuda:{device[1]}')
+            stream = torch.cuda.current_stream(f"cuda:{device[1]}")
             # cuda_stream is the pointer to the stream and it is a public
             # attribute, but it is not documented
             # The array API specify that the default legacy stream must be passed
@@ -111,7 +113,9 @@ def from_dlpack(ext_tensor: Any) -> 'torch.Tensor':
             is_cuda = device[0] == DLDeviceType.kDLGPU
             # Since pytorch is not using PTDS by default, lets directly pass
             # the legacy stream
-            stream_ptr = 1 if is_cuda and stream.cuda_stream == 0 else stream.cuda_stream
+            stream_ptr = (
+                1 if is_cuda and stream.cuda_stream == 0 else stream.cuda_stream
+            )
             dlpack = ext_tensor.__dlpack__(stream=stream_ptr)
         else:
             dlpack = ext_tensor.__dlpack__()

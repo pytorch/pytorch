@@ -7,10 +7,11 @@ import numpy as np
 import torch
 
 from torch.utils.benchmark import Timer
-from torch.utils.benchmark.op_fuzzers.sparse_unary import UnaryOpSparseFuzzer
 from torch.utils.benchmark.op_fuzzers.sparse_binary import BinaryOpSparseFuzzer
+from torch.utils.benchmark.op_fuzzers.sparse_unary import UnaryOpSparseFuzzer
 
 _MEASURE_TIME = 1.0
+
 
 def assert_dicts_equal(dict_0, dict_1):
     """Builtin dict comparison will not compare numpy arrays.
@@ -20,6 +21,7 @@ def assert_dicts_equal(dict_0, dict_1):
     """
     assert set(dict_0.keys()) == set(dict_0.keys())
     assert all(np.all(v == dict_1[k]) for k, v in dict_0.items() if k != "dtype")
+
 
 def run(n, stmt, fuzzer_cls):
     float_iter = fuzzer_cls(seed=0, dtype=torch.float32).take(n)
@@ -42,12 +44,18 @@ def run(n, stmt, fuzzer_cls):
 
         descriptions = []
         for name in float_tensors:
-            shape_str = "(" + ", ".join([
-                f"2 ** {int(np.log2(i))}"
-                if 2 ** int(np.log2(i)) == i and i > 1
-                else str(i)
-                for i in float_tensors[name].shape
-            ]) + ")"
+            shape_str = (
+                "("
+                + ", ".join(
+                    [
+                        f"2 ** {int(np.log2(i))}"
+                        if 2 ** int(np.log2(i)) == i and i > 1
+                        else str(i)
+                        for i in float_tensors[name].shape
+                    ]
+                )
+                + ")"
+            )
             sparse_dim = float_tensor_params[name]["sparse_dim"]
             sparse_dim_str = str(sparse_dim)
             is_coalesced = float_tensor_params[name]["is_coalesced"]
@@ -58,7 +66,13 @@ def run(n, stmt, fuzzer_cls):
         print(f"\r{i + 1} / {n}", end="")
     print()
 
-    parsed_results, name_len, shape_len, sparse_dim_len, is_coalesced_len = [], 0, 0, 0, 0
+    parsed_results, name_len, shape_len, sparse_dim_len, is_coalesced_len = (
+        [],
+        0,
+        0,
+        0,
+        0,
+    )
     for float_measurement, int_measurement, descriptions in raw_results:
         t_float = float_measurement.median * 1e6
         t_int = int_measurement.median * 1e6
@@ -74,17 +88,26 @@ def run(n, stmt, fuzzer_cls):
 
     print(f"stmt: {stmt}")
     print(f" diff    faster{'':>17}{' ' * name_len} ", end="")
-    print(f"{'shape'.ljust(shape_len)}{'':>12}{'sparse_dim'.ljust(sparse_dim_len)}", end="")
+    print(
+        f"{'shape'.ljust(shape_len)}{'':>12}{'sparse_dim'.ljust(sparse_dim_len)}",
+        end="",
+    )
     print(f"          is_coalesced\n{'-' * 100}")
     for results, spacer in [(parsed_results[:10], "..."), (parsed_results[-10:], "")]:
         for t_float, t_int, rel_diff, descriptions in results:
-            time_str = [f"{rel_diff * 100:>4.1f}%    {'int' if t_int < t_float else 'float':<20}"]
+            time_str = [
+                f"{rel_diff * 100:>4.1f}%    {'int' if t_int < t_float else 'float':<20}"
+            ]
             time_str.extend(["".ljust(len(time_str[0])) for _ in descriptions[:-1]])
-            for t_str, (name, shape, sparse_dim, is_coalesced) in zip(time_str, descriptions):
+            for t_str, (name, shape, sparse_dim, is_coalesced) in zip(
+                time_str, descriptions
+            ):
                 name = f"{name}:".ljust(name_len + 1)
                 shape = shape.ljust(shape_len + 10)
                 sparse_dim = sparse_dim.ljust(sparse_dim_len)
-                print(f"{t_str} {name}  {shape}|     {sparse_dim}      |   {is_coalesced}")
+                print(
+                    f"{t_str} {name}  {shape}|     {sparse_dim}      |   {is_coalesced}"
+                )
         print(spacer)
 
 

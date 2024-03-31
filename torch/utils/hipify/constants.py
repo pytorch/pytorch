@@ -7,7 +7,7 @@ and fall in three categories: 1) type of mapping, 2) API of mapping, 3) unsuppor
 mapping.
 """
 
-CONV_VERSION = 0,
+CONV_VERSION = (0,)
 CONV_INIT = 1
 CONV_DEVICE = 2
 CONV_MEM = 3
