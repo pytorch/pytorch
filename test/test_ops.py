@@ -2407,30 +2407,6 @@ class TestFakeTensor(TestCase):
             strided_result = op(sample.input, *sample.args, **kwargs)
             self.assertEqual(strided_result.layout, torch.strided)
 
-# NB: Create Wrapper for all the test cases as a nested class.
-# This prevents test runners from picking it up and running it.
-# In addition, the nested class can be inherited by other classes to reuse the cases.
-# Otherwise, instantiate_device_type_tests will change the class meta information,
-# so that, it cannot be inherited by other test classes for reusing.
-class Namespace:
-    class TestCommonWrapper(TestCommon):
-        pass
-
-    class TestCompositeComplianceWrapper(TestCompositeCompliance):
-        pass
-
-    class TestMathBitsWrapper(TestMathBits):
-        pass
-
-    class TestRefsOpsInfoWrapper(TestRefsOpsInfo):
-        pass
-
-    class TestFakeTensorWrapper(TestFakeTensor):
-        pass
-
-    class TestTagsWrapper(TestTags):
-        pass
-
 
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestCompositeCompliance, globals())
