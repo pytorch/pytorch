@@ -879,7 +879,20 @@ class GuardBuilder(GuardBuilderBase):
         # in the fx graph
         dual_level = torch.autograd.forward_ad._current_level
         code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
-        self._produce_guard_code(guard, code)
+        self._set_guard_export_info(guard, [code])
+        if config.enable_cpp_guard_manager:
+            # TODO(anijain2305) - Consider this moving this guard to C++
+            forward_ad = torch.autograd.forward_ad
+
+            def fn(x):
+                return forward_ad._current_level == dual_level
+
+            assert self.guard_manager  # to make mypy happy
+            self.guard_manager.root.add_lambda_guard(
+                fn, get_verbose_code_parts(code, guard)
+            )
+        else:
+            self._produce_guard_code(guard, code)
 
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
