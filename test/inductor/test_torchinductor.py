@@ -1031,9 +1031,8 @@ class CommonTemplate:
                 if self.device == "cpu":
                     _, code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
-                    # match ternary operator
-                    pattern = r"\?.*:"
-                    if re.findall(pattern, code):
+                    # match ternary operator for scalar or blendv for vector
+                    if re.findall(r"\?.*:", code) or re.findall("blendv", code):
                         found = True
                     self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
@@ -1363,11 +1362,6 @@ class CommonTemplate:
         self.common(fn, [packed])
 
     def test_expanded_reduction(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest(
-                "https://github.com/pytorch/torchdynamo/issues/1697"
-            )
-
         def fn(x, y):
             z = x * y
             return z.sum((0, 1))
@@ -6442,19 +6436,24 @@ class CommonTemplate:
                 ],
             )
 
-    # issue #1150
     def test_dense_mask_index(self):
+        r"""
+        There will be a little difference for reduce order between aten and inductor
+        https://github.com/pytorch/pytorch/pull/122289
+        Absolute difference: 0.00067138671875 (up to 1e-05 allowed)
+        Relative difference: 3.1747371732500974e-06 (up to 1.3e-06 allowed)
+        """
+        kwargs = {}
         if self.device == "cpu":
-            raise unittest.SkipTest(
-                "https://github.com/pytorch/torchdynamo/issues/1697"
-            )
+            kwargs["atol"] = 1e-4
+            kwargs["rtol"] = 1.3e-5
 
         def fn(x, y):
             y = torch.ops.aten.select.int(y, 0, 2)
             z = x * y
             return z.sum()
 
-        self.common(fn, [torch.randn(102400), torch.randn(3)])
+        self.common(fn, [torch.randn(102400), torch.randn(3)], **kwargs)
 
     def test_empty1(self):
         def fn():
@@ -10101,6 +10100,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
 
         @patch("torch._inductor.config.comment_origin", True)
+        @patch("torch._functorch.config.max_dist_from_bw", 0)
         def test_inductor_sequence_nr(self):
             class Model(torch.nn.Module):
                 def __init__(self):
@@ -10153,7 +10153,6 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                         res = re.search(r"seq_nr:(\d+)", line)
                         if res:
                             seq_nr_set.add(int(res.group(1)))
-
             self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
 
     class RNNTest(TestCase):
