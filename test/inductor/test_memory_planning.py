@@ -24,6 +24,7 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.export import Dim
 from torch.utils._triton import has_triton
 
+
 @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
 @config.patch(memory_planning=True)
 class TestMemoryPlanning(TestCase):
