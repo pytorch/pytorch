@@ -1248,7 +1248,7 @@ TEST_OPT_EINSUM = _check_module_exists('opt_einsum')
 
 TEST_Z3 = _check_module_exists('z3')
 
-BUILD_WITH_CAFFE2 = torch.onnx._CAFFE2_ATEN_FALLBACK
+BUILD_WITH_CAFFE2 = False
 
 def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
