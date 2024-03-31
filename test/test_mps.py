@@ -1491,9 +1491,9 @@ class MPSLeakyReluTest(TestCaseMPS):
         # test backward pass
         cpu_grad = torch.ones_like(cpu_leaky_relu)
         mps_grad = cpu_grad.to('mps')
-        cpu_leaky_relu.backward(gradient=cpu_grad)
         mps_leaky_relu.backward(gradient=mps_grad)
-        torch.testing.assert_close(cpu_x.grad, mps_x.grad.to('cpu'))
+        cpu_leaky_relu.backward(gradient=cpu_grad)
+        self.assertEqual(cpu_x.grad, mps_x.grad)
 
     def testNumbersCPU(self):
         for t in [np.float32]:
@@ -6688,8 +6688,7 @@ class TestMPS(TestCaseMPS):
                 assert not x.is_contiguous()
 
             mish_result = torch.nn.Mish()(x)
-            # GELU is not supported on CPU, so cast it to float
-            mish_result_cpu = torch.nn.GELU()(cpu_x)
+            mish_result_cpu = torch.nn.Mish()(cpu_x)
 
             cpu_grad = torch.ones_like(mish_result_cpu)
             grad = cpu_grad.to('mps')
