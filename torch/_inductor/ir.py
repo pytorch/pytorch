@@ -4170,6 +4170,9 @@ class ExternKernel(InputsKernel):
 
     def codegen_size_asserts(self, wrapper):
         if config.size_asserts and not V.graph.cpp_wrapper:
+            # comparing strides for 0 size tensor is tricky. Ignore them for now.
+            if sympy_product(self.get_size()) == 0:
+                return
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
             wrapper.writeline(
@@ -7070,6 +7073,12 @@ class QLinearPointwiseBinaryPT2E(ExternKernelAlloc):
             mark_node_as_mutating(packed, other)
             # Return other since it has been inplace changed.
             return packed.inputs[-1]
+
+        if output_dtype is not None:
+            assert output_dtype in [torch.float32, torch.bfloat16]
+            # in _prepare_linear_fusion_create, we use x.dtype (uint8) to create kernel_layout
+            # if we set fp32_output, the output buf should be dtype float32 instead of uint8.
+            kernel_layout.dtype = output_dtype
 
         return QLinearPointwiseBinaryPT2E(
             layout=kernel_layout,
