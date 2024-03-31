@@ -5674,6 +5674,8 @@ register_foreach_pointwise(aten._foreach_clamp_max.Scalar, minimum)
 register_foreach_pointwise(aten._foreach_reciprocal, reciprocal)
 register_foreach_pointwise(aten._foreach_sign, sign)
 register_foreach_pointwise(aten._foreach_copy, copy)
+register_foreach_pointwise(aten._foreach_copy, norm)
+register_foreach_pointwise(aten._foreach_copy, norm)
 
 
 # these are only encountered as outputs of the graph
