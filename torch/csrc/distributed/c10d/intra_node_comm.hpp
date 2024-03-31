@@ -6,8 +6,7 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
-namespace c10d {
-namespace intra_node_comm {
+namespace c10d::intra_node_comm {
 
 constexpr size_t kMaxDevices = 8;
 constexpr size_t kDefaultBufferSize = 10 * 1024 * 1024;
@@ -27,7 +26,7 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
       size_t worldSize,
       c10::optional<size_t> bufferSize = c10::nullopt);
 
-  ~IntraNodeComm();
+  ~IntraNodeComm() override;
 
   static bool isEnabled();
 
@@ -69,11 +68,11 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
    */
   bool isInitialized_ = false;
   Topology topology_ = Topology::UNKNOWN;
-  std::array<void*, kMaxDevices> p2pStates_;
-  std::array<void*, kMaxDevices> buffers_;
-  void* p2pStatesDev_;
-  void* buffersDev_;
-  void* topoInfo_;
+  std::array<void*, kMaxDevices> p2pStates_{};
+  std::array<void*, kMaxDevices> buffers_{};
+  void* p2pStatesDev_{};
+  void* buffersDev_{};
+  void* topoInfo_{};
 };
 
 /**
@@ -115,5 +114,4 @@ class IntraNodeCommWork : public c10d::Work {
 
 TORCH_API int64_t getIntraNodeCommUsageCounter();
 
-} // namespace intra_node_comm
-} // namespace c10d
+} // namespace c10d::intra_node_comm
