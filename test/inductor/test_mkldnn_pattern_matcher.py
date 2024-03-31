@@ -1636,28 +1636,28 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.assertEqual(
                     counters["inductor"]["qlinear_binary_matcher_count"], 2
                 )
+                # Two linear-binary patterns are matched
                 # matched patter1 = [qlinear, add, (convert dtype), (relu), (convert dtype), [quant patten]]
-                # matched patter2 = [qlinear, add, (convert dtype), (relu), (convert dtype)]
+                # matched patter2 = [qlinear, add, (convert dtype), (relu)]
                 # len(quant pattern) = 6
-                # If add_fn is x.add_(y), x is bf16 and y is fp32, there is a to_bf16 node at the end
-                to_bf16_at_end = add_fn == add_fn_list[2] and fq_x2
-                # int8_mixed_bf16 with relu
-                # If fq_x2=True and add_fn != x.add_(y), there is no convert dtype node before quant
-                # If fq_x2=True and add_fn == x.add_(y), there are 2 convert nodes
-                # int8_mixed_bf16 without relu
-                # If fq_x2=True, convert_before_quant = 0
-                # If fq_x2=False, convert_before_quant = 1
+                # If add_fn is x.add_(y), x is bf16 and y is fp32, there is a to_bf16 node after binary
+                # - int8_mixed_bf16 with relu
+                #   - If fq_x2=True and add_fn != x.add_(y), there is no convert dtype node
+                #   - If fq_x2=True and add_fn == x.add_(y), there are 2 convert nodes: after binary and before quant
+                # - int8_mixed_bf16 without relu
+                #   - If fq_x2=True, convert_before_quant = 0
+                #   - If fq_x2=False, convert_before_quant = 1 before quant
                 if use_relu:
                     convert_before_quant = (
-                        0
-                        if fq_x2 and add_fn != add_fn_list[2]
-                        else (2 if fq_x2 else int8_mixed_bf16)
+                        0 if fq_x2 and add_fn != add_fn_list[2] else int8_mixed_bf16
                     )
+                    to_bf16_after_binary = 2 * (add_fn == add_fn_list[2] and fq_x2)
                 else:
                     convert_before_quant = int8_mixed_bf16 and not fq_x2
+                    to_bf16_after_binary = (add_fn == add_fn_list[2] and fq_x2)
                 self.assertEqual(
                     counters["inductor"]["qlinear_binary_matcher_nodes"],
-                    10 + convert_before_quant + 2 * use_relu + to_bf16_at_end,
+                    10 + 2 * use_relu + to_bf16_after_binary + convert_before_quant,
                 )
 
             for is_qat in [False, True]:
