@@ -1474,12 +1474,13 @@ class MPSLeakyReluTest(TestCaseMPS):
 
     def _testLeakyRelu(self, np_features, negative_slope, contiguous, device):
         cpu_x = torch.from_numpy(np_features).requires_grad_()
-        mps_x = torch.from_numpy(np_features).to('mps').requires_grad_()
+        mps_x = cpu_x.detach().clone().to('mps').requires_grad_()
 
         if not contiguous:
             # Tranposing will make the tensor non-contiguous
             cpu_x = cpu_x.transpose(0, 1)
             mps_x = mps_x.transpose(0, 1)
+            assert not mps_x.is_contiguous()
 
         relu_op = torch.nn.LeakyReLU(negative_slope)
 
@@ -6643,10 +6644,13 @@ class TestMPS(TestCaseMPS):
     def test_gelu_simple(self):
         def helper(shape, dtype=torch.float, contiguous=True):
             cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
             if not contiguous and (0 not in shape and len(shape) >= 2):
                 # Tranposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
+                x = x.transpose(0, 1)
+                assert not x.is_contiguous()
 
             gelu_result = torch.nn.GELU()(x)
             # GELU is not supported on CPU, so cast it to float
@@ -6675,10 +6679,13 @@ class TestMPS(TestCaseMPS):
     def test_mish_simple(self):
         def helper(shape, dtype=torch.float, contiguous=True):
             cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
             if not contiguous and (0 not in shape and len(shape) >= 2):
                 # Tranposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
+                x = x.transpose(0, 1)
+                assert not x.is_contiguous()
 
             mish_result = torch.nn.Mish()(x)
             # GELU is not supported on CPU, so cast it to float
@@ -6700,9 +6707,6 @@ class TestMPS(TestCaseMPS):
             for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
                 for contiguous in [True, False]:
                     helper(shape, dtype, contiguous)
-        # Test that gelu would raise an assert for integral types
-        for dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
-            self.assertRaises(RuntimeError, lambda: torch.nn.GELU()(torch.randint(100, (2,), dtype=dtype, device="mps")))
 
     def test_gelu(self):
         def _test_gelu(n, m, dtype, contiguous, atol=None, rtol=None):
