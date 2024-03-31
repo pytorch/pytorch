@@ -702,7 +702,7 @@ inline std::vector<double> PythonArgs::getDoublelist(int i) {
         tuple ? PyTuple_GET_ITEM(arg, idx) : PyList_GET_ITEM(arg, idx);
     try {
       res[idx] = THPUtils_unpackDouble(obj);
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
       throw TypeError(
           "%s(): argument '%s' must be %s, but found element of type %s at pos %zu",
           signature.name.c_str(),

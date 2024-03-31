@@ -110,7 +110,7 @@ class ManagerServerSocket : public Socket {
       SYSCHECK_ERR_RETURN_NEG1(
           bind(socket_fd, (struct sockaddr*)&address, len));
       SYSCHECK_ERR_RETURN_NEG1(listen(socket_fd, 10));
-    } catch (std::exception& e) {
+    } catch (std::exception&) {
       SYSCHECK_ERR_RETURN_NEG1(close(socket_fd));
       throw;
     }
@@ -146,7 +146,7 @@ class ClientSocket : public Socket {
       size_t len = address_length(address);
       SYSCHECK_ERR_RETURN_NEG1(
           connect(socket_fd, (struct sockaddr*)&address, len));
-    } catch (std::exception& e) {
+    } catch (std::exception&) {
       SYSCHECK_ERR_RETURN_NEG1(close(socket_fd));
       throw;
     }
