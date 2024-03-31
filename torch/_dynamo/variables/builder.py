@@ -58,6 +58,7 @@ from ..source import (
     is_from_defaults,
     LocalSource,
     NumpyTensorSource,
+    OptimizerSource,
     RandomValueSource,
     Source,
     TupleIteratorGetItemSource,
@@ -664,6 +665,7 @@ class VariableBuilder:
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, torch.optim.Optimizer):
             self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.source = OptimizerSource(self.source)
             return OptimizerVariable(value, source=self.source)
         elif WorldMetaClassVariable.is_group_member_type(value):
             return WorldMetaClassVariable(value, source=self.source)
