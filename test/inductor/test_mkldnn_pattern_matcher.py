@@ -1636,20 +1636,21 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 self.assertEqual(
                     counters["inductor"]["qlinear_binary_matcher_count"], 2
                 )
+                # Two linear-binary patterns are matched
                 # For static quantization
                 # - matched pattern1 = [qlinear, add, (convert dtype), (relu), (convert dtype), [quant patten]]
-                # - matched pattern2 = [qlinear, add, (convert dtype), (relu), (convert dtype)]
+                # - matched pattern2 = [qlinear, add, (convert dtype), (relu)]
                 # For dynamic quantization
                 # - matched pattern1 = [qlinear, add, (relu)]
                 # - matched pattern2 = [qlinear, add, (convert dtype), (relu)]
                 # len(quant pattern) = 6
                 # If add_fn is x.add_(y), x is bf16 and y is fp32, there is a to_bf16 node after binary
                 # - int8_mixed_bf16 with relu
-                #   - If fq_x2=True and add_fn != x.add_(y), there is no convert dtype node before quant
-                #   - If fq_x2=True and add_fn == x.add_(y), there are 2 convert nodes before and after relu
+                #   - If fq_x2=True and add_fn != x.add_(y), there is no convert dtype node
+                #   - If fq_x2=True and add_fn == x.add_(y), there are 2 convert nodes: after binary and before quant
                 # - int8_mixed_bf16 without relu
                 #   - If fq_x2=True, convert_before_quant = 0
-                #   - If fq_x2=False, convert_before_quant = 1
+                #   - If fq_x2=False, convert_before_quant = 1 before quant
                 if use_relu:
                     convert_before_quant = (
                         0 if fq_x2 and add_fn != add_fn_list[2] else int8_mixed_bf16
