@@ -742,7 +742,7 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
 # This function provides an auto mechanism by replacing manual copy-paste w/
 # automatically copying the test member functions from the base class to the dest test
 # class.
-def instantiate_device_type_tests_copy_from(
+def instantiate_device_type_tests_copy(
         generic_test_class,
         generic_base_class,
         applicable_list=None,
