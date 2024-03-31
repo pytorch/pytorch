@@ -1472,9 +1472,15 @@ class MPSLeakyReluTest(TestCaseMPS):
                                                          0.9]]),
                 negative_slope=0.1))
 
-    def _testLeakyRelu(self, np_features, negative_slope, device):
+    def _testLeakyRelu(self, np_features, negative_slope, contiguous, device):
         cpu_x = torch.from_numpy(np_features).requires_grad_()
         mps_x = torch.from_numpy(np_features).to('mps').requires_grad_()
+
+        if not contiguous:
+            # Tranposing will make the tensor non-contiguous
+            cpu_x = cpu_x.transpose(0, 1)
+            mps_x = mps_x.transpose(0, 1)
+
         relu_op = torch.nn.LeakyReLU(negative_slope)
 
         cpu_leaky_relu = relu_op(cpu_x)
@@ -1490,10 +1496,12 @@ class MPSLeakyReluTest(TestCaseMPS):
 
     def testNumbersCPU(self):
         for t in [np.float32]:
-            self._testLeakyRelu(
-                np.array([[-9, 7, -5, 3, -1], [1, -3, 5, -7, 9]]).astype(t),
-                negative_slope=0.2,
-                device="cpu")
+            for contiguous in [True, False]:
+                self._testLeakyRelu(
+                    np.array([[-9, 7, -5, 3, -1], [1, -3, 5, -7, 9]]).astype(t),
+                    negative_slope=0.2,
+                    contiguous=contiguous,
+                    device="cpu")
 
 
 class TestAvgPool(TestCaseMPS):
@@ -6633,8 +6641,11 @@ class TestMPS(TestCaseMPS):
                 helper((2, 16, 16), (4, 4), return_indices, dtype)
 
     def test_gelu_simple(self):
-        def helper(shape, dtype=torch.float):
+        def helper(shape, dtype=torch.float, contiguous=True):
             cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
+            if not contiguous and (0 not in shape and len(shape) >= 2):
+                # Tranposing will make the tensor non-contiguous
+                cpu_x = cpu_x.transpose(0, 1)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
             gelu_result = torch.nn.GELU()(x)
@@ -6655,7 +6666,40 @@ class TestMPS(TestCaseMPS):
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
             for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
-                helper(shape, dtype)
+                for contiguous in [True, False]:
+                    helper(shape, dtype, contiguous)
+        # Test that gelu would raise an assert for integral types
+        for dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
+            self.assertRaises(RuntimeError, lambda: torch.nn.GELU()(torch.randint(100, (2,), dtype=dtype, device="mps")))
+
+    def test_mish_simple(self):
+        def helper(shape, dtype=torch.float, contiguous=True):
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
+            if not contiguous and (0 not in shape and len(shape) >= 2):
+                # Tranposing will make the tensor non-contiguous
+                cpu_x = cpu_x.transpose(0, 1)
+            x = cpu_x.detach().clone().to('mps').requires_grad_()
+
+            mish_result = torch.nn.Mish()(x)
+            # GELU is not supported on CPU, so cast it to float
+            mish_result_cpu = torch.nn.GELU()(cpu_x)
+
+            cpu_grad = torch.ones_like(mish_result_cpu)
+            grad = cpu_grad.to('mps')
+
+            mish_result.backward(gradient=grad)
+            mish_result_cpu.backward(gradient=cpu_grad)
+
+            atol = 1e-5 if dtype == torch.float else 1e-2
+            rtol = 1e-3 if dtype == torch.float else 1e-2
+            self.assertEqual(mish_result, mish_result_cpu.to(dtype), atol=atol, rtol=rtol)
+            self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
+
+        # Test empty shape too
+        for dtype in [torch.float, torch.half]:
+            for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
+                for contiguous in [True, False]:
+                    helper(shape, dtype, contiguous)
         # Test that gelu would raise an assert for integral types
         for dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
             self.assertRaises(RuntimeError, lambda: torch.nn.GELU()(torch.randint(100, (2,), dtype=dtype, device="mps")))
