@@ -2231,6 +2231,8 @@ class Scheduler:
         return sum(dep.numbytes_hint() for dep in common_memory_deps)
 
     def filter_possible_fusions_by_priority(self, possible_fusions):
+        # Group the possible_fusions based on backend fusion priority.
+        # Return the group of possible_fusions with highest priority.
         if len(possible_fusions) == 0:
             return possible_fusions
         possible_fusions_group_by_priority: List[

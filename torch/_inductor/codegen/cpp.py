@@ -3635,13 +3635,9 @@ class CppScheduling(BaseScheduling):
                 _, (vars2, _) = node2.group
                 assert vars1 == vars2, (vars1, vars2)
                 return FusedSchedulerNode.fuse(node1, node2)
-            elif (
-                outer_loop_fusion_depth := self._get_outer_loop_fusion_depth(
-                    node1, node2
-                )
-            ) >= 1:
+            elif self.is_outer_loop_fusion(node1, node2):
                 return OuterLoopFusedSchedulerNode.fuse(
-                    node1, node2, outer_loop_fusion_depth
+                    node1, node2, self._get_outer_loop_fusion_depth(node1, node2)
                 )
             else:
                 return FusedSchedulerNode.fuse(node1, node2)
@@ -3783,12 +3779,18 @@ class CppScheduling(BaseScheduling):
                 return outer_loop_fusion_depth
         return DISABLE_OUTER_LOOP_FUSION
 
-    def get_fusion_pair_priority(self, node1, node2):
-        if (
+    def is_outer_loop_fusion(self, node1, node2):
+        return (
             node1.get_names() & node2.ancestors
-            and self.can_fuse_vertical(node1, node2)
+            and not (
+                self._can_fuse_horizontal_impl(node1, node2)
+                and not node1.is_reduction()
+            )
             and self._get_outer_loop_fusion_depth(node1, node2) >= 1
-        ):
+        )
+
+    def get_fusion_pair_priority(self, node1, node2):
+        if self.is_outer_loop_fusion(node1, node2):
             # Outer loop fusion with lower priority
             return FusedNodesPriority.Two
         else:
@@ -3797,7 +3799,7 @@ class CppScheduling(BaseScheduling):
     def can_fuse_vertical(self, node1, node2):
         return (
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
-        ) or self._get_outer_loop_fusion_depth(node1, node2) >= 1
+        ) or self.is_outer_loop_fusion(node1, node2)
 
     def codegen_node(
         self,
