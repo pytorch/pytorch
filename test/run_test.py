@@ -185,7 +185,7 @@ XPU_BLOCKLIST = [
 XPU_TEST = [
     "test_xpu",
     "xpu/test_tensor_creation_ops_xpu",
-    "xpu/test_ops_xpu.py",
+    "xpu/test_ops_xpu",
 ]
 
 # The tests inside these files should never be run in parallel with each other
