@@ -1,0 +1,6 @@
+load("@fbcode//compilers/amd:ci.bzl", "amd_build_only")
+load("@fbcode//target_determinator/macros:ci.bzl", "ci")
+
+ci.package(
+    ci.remove(amd_build_only()),
+)
