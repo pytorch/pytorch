@@ -3552,11 +3552,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     return (getitem,)""")  # noqa: B950
 
         self.assertExpectedInline(str(exported_program.graph_module.true_graph_0.code.strip()), """\
-def forward(self, arg0_1, arg1_1, arg2_1):
+def forward(self, arg1_1, arg2_1, arg3_1):
     _set_grad_enabled = torch._C._set_grad_enabled(True)
-    sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(sub, arg0_1);  sub = arg0_1 = None
-    add_1 = torch.ops.aten.add.Tensor(add, arg2_1);  add = arg2_1 = None
+    sub = torch.ops.aten.sub.Tensor(arg2_1, 1);  arg2_1 = None
+    add = torch.ops.aten.add.Tensor(sub, arg1_1);  sub = arg1_1 = None
+    add_1 = torch.ops.aten.add.Tensor(add, arg3_1);  add = arg3_1 = None
     _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
     return (add_1,)""")
 

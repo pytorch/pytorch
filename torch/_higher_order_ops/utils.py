@@ -1,4 +1,4 @@
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from typing import Any, Callable
 
@@ -78,7 +78,7 @@ def _maybe_run_with_interpreter(fn):
 
 
 @contextmanager
-def _reset_tracer_states_temporarily(tracer):
+def _reset_tracer_states_temporarily(proxy_mode):
     """_reset_tracer_states_temporarily temporarily resets the tracer states that are critical
     to sub-graph construction. The purpose is to use the current tracer to trace the subgraph.
     It creates an isolated tracing environment for the subgraph. Specifically, we reset the following:
@@ -89,14 +89,15 @@ def _reset_tracer_states_temporarily(tracer):
     5. script_object_tracker: it associates script_object with their proxies.
 
     Args:
-        tracer: the current tracer.
+        proxy_mode: the current proxy_mode.
     """
+    tracer = proxy_mode.tracer
     prev_graph = tracer.graph
     prev_root = tracer.root
     prev_symnode_tracker = tracer.symnode_tracker
     prev_tensor_tracker = tracer.tensor_tracker
     prev_script_object_tracker = tracer.script_object_tracker
-
+    proxy_function_mode: Any = nullcontext()
     try:
         tracer.graph = torch.fx.Graph(
             prev_graph.owning_module, prev_graph._tracer_cls, prev_graph._tracer_extras
@@ -107,6 +108,13 @@ def _reset_tracer_states_temporarily(tracer):
         tracer.script_object_tracker = WeakIdKeyDictionary(
             dict=None, ref_type=_WeakHashRef
         )
+        if proxy_mode.pre_dispatch:
+            # We need to enter proxy_function_mode in order to preserve certain operators
+            # in the pre-dispatch graph.
+            proxy_function_mode = (
+                torch.fx.experimental.proxy_tensor.PreDispatchTorchFunctionMode(tracer)
+            )
+            proxy_function_mode.__enter__()
         yield tracer
     finally:
         tracer.graph = prev_graph
@@ -114,6 +122,8 @@ def _reset_tracer_states_temporarily(tracer):
         tracer.symnode_tracker = prev_symnode_tracker
         tracer.tensor_tracker = prev_tensor_tracker
         tracer.script_object_tracker = tracer.script_object_tracker
+        if proxy_mode.pre_dispatch:
+            proxy_function_mode.__exit__(None, None, None)
 
 
 def trace_subgraph(proxy_mode, func, args):
@@ -134,7 +144,7 @@ def trace_subgraph(proxy_mode, func, args):
     """
     graph_tracer = proxy_mode.tracer
     proxy_args = pytree.tree_map(graph_tracer.unwrap_proxy, args)
-    with _reset_tracer_states_temporarily(graph_tracer) as subgraph_tracer:
+    with _reset_tracer_states_temporarily(proxy_mode) as subgraph_tracer:
         # create the placeholders for sub_graph.
         for i, (arg, parg) in enumerate(zip(args, proxy_args)):
             if not isinstance(parg, torch.fx.Proxy):
