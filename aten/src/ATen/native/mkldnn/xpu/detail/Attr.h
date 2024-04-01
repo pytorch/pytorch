@@ -4,6 +4,7 @@
 #include <oneapi/dnnl/dnnl.hpp>
 #include <oneapi/dnnl/dnnl_types.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
+#include <ATen/native/mkldnn/xpu/detail/oneDNNContext.h>
 
 namespace at::native::onednn {
 /* oneDNN quantization usage:
