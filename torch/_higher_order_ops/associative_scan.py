@@ -72,6 +72,12 @@ def associative_scan(
 
     """
 
+    if not torch._dynamo.is_compiling():
+        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
+            return torch.compile(associative_scan, fullgraph=True)(
+                input, dim, combine_fn
+            )
+
     leaves, spec = pytree.tree_flatten(input)
 
     torch._check(len(leaves) >= 1, "expected at least 1 input leaf")
@@ -92,15 +98,7 @@ def associative_scan(
         wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
     )
 
-    if torch._dynamo.is_compiling():
-        result_flat = associative_scan_op(input, dim, combine_fn)
-    elif not torch._dynamo.is_dynamo_supported():
-        raise RuntimeError("associative_scan requires dynamo support.")
-    else:
-        with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
-            result_flat = torch.compile(associative_scan_op, fullgraph=True)(
-                leaves, dim, combine_fn
-            )
+    result_flat = associative_scan_op(leaves, dim, combine_fn)
 
     return pytree.tree_unflatten(result_flat, spec)
 
@@ -200,20 +198,18 @@ def associative_scan_functionalize(ctx, input, dim, combine_fn):
 @associative_scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
 def associative_scan_batch_rule(interpreter, input, dim, combine_fn):
     input_ = [get_unwrapped(x) for x in input]
-    bdim = [maybe_get_bdim(x) for x in input]
+    input_bdims = [maybe_get_bdim(x) for x in input]
 
     batch_size = None
-    for x in input:
-        bdim = maybe_get_bdim(x)
+    for inp, bdim in zip(input, input_bdims):
         if bdim is not None:
-            batch_size = get_unwrapped(x).shape[bdim]
+            batch_size = get_unwrapped(inp).shape[bdim]
 
     assert batch_size
     input_unwrapped = []
-    for x in input:
+    for x, bdim in zip(input, input_bdims):
         unwrap = get_unwrapped(x)
-        bdim = maybe_get_bdim(x)
-        if bdim is None:
+        if dim is None:
             unwrap = unwrap.unsqueeze(0).expand(batch_size, *x.shape)
         else:
             unwrap = unwrap.movedim(bdim, 0)

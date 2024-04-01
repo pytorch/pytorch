@@ -4,9 +4,10 @@
 import copy
 import itertools
 import numpy as np
-import unittest
 import operator
 import random
+import sys
+import unittest
 from typing import NamedTuple, List
 
 import torch
@@ -32,6 +33,7 @@ from torch.testing._internal.common_quantized import (
 )
 from torch.ao.quantization import PerChannelMinMaxObserver
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_CUDA
+from torch.testing._internal.optests import opcheck
 import torch.backends.xnnpack
 
 from typing import Optional
@@ -3341,6 +3343,91 @@ class TestDynamicQuantizedOps(TestCase):
 
             self.assertEqual(out, ref)
 
+    @skipIfNoFBGEMM
+    def test_unpacked_qlinear_dynamic_fp16(self):
+
+        options = itertools.product(
+            (2, 4),         # batch_size
+            (4, 5, 12),     # input_channels
+            (4, 7, 8),      # output_channels
+        )
+        for batch_size, input_channels, output_channels in options:
+            qlinear_dynamic = torch.ops.quantized.linear_dynamic_fp16_unpacked_weight
+
+            x = torch.randn(batch_size, input_channels)
+            w = torch.randn(output_channels, input_channels)
+            bias = torch.randn(output_channels)
+
+            out = qlinear_dynamic(x, w, bias)
+
+            # qlinear_dynamic_fp16 uses FP32 activation tensors and FP16 weight tensors
+            # output is FP32
+            w_fp16 = w.to(torch.float16).to(torch.float32)
+            ref = F.linear(x, w_fp16, bias)
+
+            self.assertEqual(out, ref)
+
+
+    @skipIfNoFBGEMM
+    def test_unpacked_qlinear_dynamic_fp16_opcheck(self):
+        qlinear_dynamic = torch.ops.quantized.linear_dynamic_fp16_unpacked_weight.default
+
+        x = torch.randn(4, 4, device='cpu')
+        w = torch.randn(4, 4, device='cpu')
+        bias = torch.randn(4, device='cpu')
+
+        opcheck(qlinear_dynamic, (x, w, bias))
+
+    @skipIfNoFBGEMM
+    def test_wrapped_fbgemm_linear_fp16(self):
+        options = itertools.product(
+            (2, 4),         # batch_size
+            (4, 5),     # input_channels
+            (4, 7),      # output_channels
+        )
+        for batch_size, input_channels, output_channels in options:
+            pack_op = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16
+            linear_op = torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight
+
+            x = torch.randn(batch_size, input_channels)
+            w = torch.randn(output_channels, input_channels)
+            bias = torch.randn(output_channels)
+
+            w_packed = pack_op(w)
+            out = linear_op(x, w_packed, bias, output_channels)
+
+            w_fp16 = w.to(torch.float16).to(torch.float32)
+            ref = F.linear(x, w_fp16, bias)
+
+            self.assertEqual(out, ref)
+
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
+    @skipIfNoFBGEMM
+    def test_wrapped_fbgemm_pack_gemm_matrix_fp16_pt2_compliant(self):
+        # We are not using opcheck over here because the output for the op we're testing
+        # (_quantized.wrapped_fbgemm_pack_gemm_matrix_fp16) is not deterministic
+        # due to the C-struct it's procuding. This would fail the check when we're trying
+        # to match the result between compiled and eager version.
+        #
+        # This is only a temporary solution, long term, we should be able to support PT2
+        # with torchbind natively.
+        def func(X, W, B):
+            packed_W = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16(W)
+            return torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight(X, packed_W, B, W.size(0))
+
+        x = torch.randn(1, 4, device="cpu")
+        w = torch.randn(4, 4, device="cpu")
+        b = torch.zeros(4, device="cpu")
+
+        ref_out = func(x, w, b)
+
+        compiled = torch.compile(func)
+        compiled_out = compiled(x, w, b)
+
+        self.assertEqual(ref_out, compiled_out)
+
     """Tests the correctness of the dynamic quantized lstm/gru."""
 
     def _get_rnn_inputs(self, seq_len, num_batches, input_size, hidden_size, num_directions, reduce_range):
@@ -6578,6 +6665,10 @@ class TestQuantizedConv(TestCase):
             assert not use_transpose, "Cannot fuse hardswish with ConvTranspose"
             hardswish = torch.nn.Hardswish()
             result_ref = hardswish(result_ref)
+        elif post_op.unary_attr == "swish":
+            assert not use_transpose, "Cannot fuse silu with ConvTranspose"
+            silu = torch.nn.SiLU()
+            result_ref = silu(result_ref)
 
         # Quantize reference results for comparison
         result_ref_q = torch.quantize_per_tensor(
@@ -6952,6 +7043,56 @@ class TestQuantizedConv(TestCase):
                 groups,
             )
             pointwise_post_op = PointwisePostOp(unary_attr="hardtanh", scalars=[0.0, 6.0])
+            self._test_qconv_impl_cpu_tensor(
+                qconv,
+                qconv_prepack,
+                conv_op,
+                input_channels_per_group=input_channels_per_group,
+                input_feature_map_shape=input_feature_map_shape,
+                output_channels_per_group=output_channels_per_group,
+                groups=groups,
+                kernels=kernels,
+                strides=strides,
+                pads=pads,
+                dilations=dilations,
+                W_scale=W_scale,
+                W_zero_point=W_zero_point,
+                use_bias=use_bias,
+                post_op=pointwise_post_op,
+                use_channelwise=use_channelwise,
+                qconv_output_dtype=output_dtype,
+            )
+
+    # Test qconv with post op silu
+    @skipIfNoONEDNN
+    def test_qconv2d_silu_pt2e(self):
+        input_channels_per_group = 2
+        output_channels_per_group = 2
+        groups_list = [1, 10]
+        input_feature_map_shape = (10, 10)
+        kernels = (3, 3)
+        strides = (2, 2)
+        pads = (1, 1)
+        dilations = (1, 1)
+        W_scale = [1.5]
+        W_zero_point = [0]
+        use_bias_list = [False, True]
+        use_channelwise_list = [False, True]
+        output_dtype_list = [None, torch.float32, torch.bfloat16]
+        options = itertools.product(groups_list, use_bias_list, use_channelwise_list, output_dtype_list)
+        for groups, use_bias, use_channelwise, output_dtype in options:
+            qconv = torch.ops.onednn.qconv2d_pointwise
+            qconv_prepack = torch.ops.onednn.qconv_prepack
+            conv_op = torch.nn.Conv2d(
+                input_channels_per_group * groups,
+                output_channels_per_group * groups,
+                kernels,
+                strides,
+                pads,
+                dilations,
+                groups,
+            )
+            pointwise_post_op = PointwisePostOp(unary_attr="swish")
             self._test_qconv_impl_cpu_tensor(
                 qconv,
                 qconv_prepack,
