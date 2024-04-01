@@ -103,7 +103,6 @@ if config.abi_compatible:
             f"{test_name}_dynamic_shapes"
         ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=False)
     skip_list = [
-        "test_linear1_cpu",  # segfault from double free
         "test_multihead_attention_cpu",
     ]
     for test_name in skip_list:
