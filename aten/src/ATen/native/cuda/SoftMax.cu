@@ -175,7 +175,7 @@ inline dim3 SoftMax_getBlockSize(int ILP, uint64_t dim_size) {
 
 inline dim3 SoftMaxForward_getBlockSize(uint64_t dim_size) {
   uint64_t block_size = 1;
-  uint64_t max_block_size = std::min(dim_size / ILP, static_cast<uint64_t>(max_threads));
+  uint64_t max_block_size = std::min(dim_size, static_cast<uint64_t>(max_threads));
 
   if (max_block_size % C10_WARP_SIZE == 0) {
     block_size = max_block_size;
@@ -653,12 +653,18 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   input += static_cast<int64_t>(blockIdx.x) * classes;
   output += static_cast<int64_t>(blockIdx.x) * classes;
 
-  // find the max
+  // Reduce across entire classes dimension for sum and exp simultaneously
   accscalar_t threadMax = -at::numeric_limits<accscalar_t>::max();
-  if (tid < classes) {
-    threadMax = input[tid];
+  accscalar_t threadExp = static_cast<accscalar_t>(0);
+  int offset = tid;
+  while (offset < classes) {
+    accscalar_t crnt_val = (accscalar_t)input[offset];
+    threadMax = std::max(threadMax, crnt_val);
+    threadExp += std::exp(crnt_val);
+    offset += blockDim.x;
   }
 
+  // Reduce inside the thread block
   accscalar_t max_k = cuda_utils::BlockReduceMax<accscalar_t>(threadMax, sdata);
   if (tid == 0) {
     sdata[0] = max_k;
@@ -666,11 +672,8 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   __syncthreads();
   max_k = sdata[0];
 
-  // reduce all values
-  accscalar_t threadExp = static_cast<accscalar_t>(0);
-  if (tid < classes) {
-    threadExp = std::exp(threadMax - max_k);
-  }
+  // Sum reduce
+  threadExp /= std::exp(max_k);
   accscalar_t sumAll = cuda_utils::BlockReduceSum<accscalar_t>(threadExp, sdata);
   if (tid == 0) {
     sdata[0] = sumAll;
@@ -678,11 +681,11 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   __syncthreads();
   sumAll = sdata[0];
 
-  if (tid < classes) {
-    int offset = tid;
-    for (; offset < classes; offset += blockDim.x) {
-      output[offset] = threadExp / sumAll;
-    }
+  Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
+  offset = tid;
+  while (offset < classes) {
+    output[offset] = epilogue(input[offset]);
+    offset += blockDim.x;
   }
 }
 
