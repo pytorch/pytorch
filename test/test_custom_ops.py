@@ -2074,6 +2074,9 @@ class TestCustomOpAPI(TestCase):
         self.assertTrue(cpu_called)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     def test_fake(self):
         @torch.library.custom_op("_torch_testing::add", mutated_args=())
         def add(x: Tensor, y: float) -> Tensor:
