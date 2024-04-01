@@ -19,7 +19,7 @@ static Tensor permuteBatchDimsToFront(const BatchedTensorImpl* batched) {
   if (batched->bdim() == 0) {
     return physical_tensor;
   }
-  const auto sizes = physical_tensor.sizes();
+  const auto sizes = physical_tensor.sym_sizes();
   VmapDimVector permutation(sizes.size(), 0);
   permutation.reserve(sizes.size());
   const auto is_bdim = createBatchDimBitset(batched->bdim());
