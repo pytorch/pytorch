@@ -8,7 +8,9 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #if defined(CPU_CAPABILITY_AVX2)
+#ifdef ATEN_VEC_USE_STATIC_SLEEF_LIB
 #define SLEEF_STATIC_LIBS
+#endif
 #include <sleef.h>
 #endif
 

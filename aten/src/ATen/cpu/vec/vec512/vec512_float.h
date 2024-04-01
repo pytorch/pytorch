@@ -7,7 +7,9 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
 #if defined(CPU_CAPABILITY_AVX512)
+#ifdef ATEN_VEC_USE_STATIC_SLEEF_LIB
 #define SLEEF_STATIC_LIBS
+#endif
 #include <sleef.h>
 #endif
 
