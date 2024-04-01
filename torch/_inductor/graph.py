@@ -700,7 +700,8 @@ class GraphLowering(torch.fx.Interpreter):
                         and data.stride() == value.stride()
                         and data.dtype == value.dtype
                         and data.device == value.device
-                        and torch.eq(data, value).all()
+                        and data.untyped_storage().data_ptr()
+                        == value.untyped_storage().data_ptr()
                     ):
                         return constant_name
 

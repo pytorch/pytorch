@@ -192,7 +192,6 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
-    @requires_cuda
     def test_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -1024,13 +1023,55 @@ class AOTInductorTestsTemplate:
         class Model(torch.nn.Module):
             def __init__(self, device):
                 super().__init__()
+                self.register_buffer("foo", torch.arange(10, device=device))
                 self.register_buffer("bar", torch.arange(10, device=device))
 
             def forward(self, x):
                 self.bar.mul_(2)
-                return x + self.bar
+                self.foo[5] = self.bar[0]
+                return x + self.bar, x * self.foo
 
         example_inputs = (torch.randn(10, device=self.device),)
+        self.check_model(Model(self.device), example_inputs)
+
+    def test_buffer_mutation_3(self):
+        class KVCache(torch.nn.Module):
+            def __init__(
+                self,
+                max_batch_size,
+                max_seq_length,
+                n_heads,
+                head_dim,
+                dtype=torch.float,
+            ):
+                super().__init__()
+                cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
+                self.register_buffer("k_cache", torch.zeros(cache_shape, dtype=dtype))
+                self.register_buffer("v_cache", torch.zeros(cache_shape, dtype=dtype))
+
+            def update(self, input_pos, k_val, v_val):
+                # input_pos: [S], k_val: [B, H, S, D]
+                k_out = self.k_cache
+                v_out = self.v_cache
+                k_out[:, :, input_pos] = k_val
+                v_out[:, :, input_pos] = v_val
+
+                return k_out, v_out
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.kv_cache = KVCache(1, 256, 6, 48)
+
+            def forward(self, inp_pos, k, v):
+                self.kv_cache.update(inp_pos, k, v)
+                return self.kv_cache.k_cache + 1, self.kv_cache.v_cache / 2
+
+        example_inputs = (
+            torch.tensor([0], device=self.device),
+            torch.randn(1, 6, 1, 48, device=self.device),
+            torch.randn(1, 6, 1, 48, device=self.device),
+        )
         self.check_model(Model(self.device), example_inputs)
 
     @skipIfRocm
@@ -2152,6 +2193,65 @@ class AOTInductorTestsTemplate:
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(x_casted)
 
+    def test_non_contiguous_output_alias(self):
+        # Test return x, x.contiguous() where x is non-contiguous.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                squared = x * x
+                transposed = squared.t()  # non-contiguous
+                contig = transposed.contiguous()
+                return transposed, contig
+
+        x = torch.randn(3, 4, dtype=torch.float16, device=self.device)
+        model = Model()
+        with torch.no_grad(), config.patch(
+            {
+                "abi_compatible": self.abi_compatible,
+            }
+        ):
+            result = AOTIRunnerUtil.run(
+                self.device,
+                model,
+                (x,),
+            )
+        actual = model(x)
+        self.assertTrue(same(result, actual))
+
+        # contiguous() should create a new tensor
+        self.assertTrue(result[0].data_ptr() != result[1].data_ptr())
+
+    def test_multiple_output_alias(self):
+        # Test when mutliple outputs alias the same tensor
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                squared = x * x
+                contig = squared.contiguous()  # alias
+                reshaped = squared.reshape(squared.shape)  # alias
+                cubed = squared * x
+                return squared, contig, reshaped, cubed
+
+        x = torch.randn(3, 4, dtype=torch.float32, device=self.device)
+        model = Model()
+
+        with torch.no_grad(), config.patch(
+            {
+                "abi_compatible": self.abi_compatible,
+            }
+        ):
+            result = AOTIRunnerUtil.run(
+                self.device,
+                model,
+                (x,),
+            )
+        actual = model(x)
+        self.assertTrue(same(result, actual))
+
+        # squared, contig and reshaped alias the same tensor.
+        self.assertTrue(result[0].data_ptr() == result[1].data_ptr())
+        self.assertTrue(result[0].data_ptr() == result[2].data_ptr())
+        # cubed shouldn't be an alias.
+        self.assertTrue(result[0].data_ptr() != result[3].data_ptr())
+
     def test_runtime_checks_shape_failed(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -2295,7 +2395,6 @@ CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
-    "test_constant_folding": fail_with_and_without_stack_allocation(is_skip=True),
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
@@ -2315,11 +2414,16 @@ CPU_TEST_FAILURES = {
     # FIXME: failed with compilation error
     "test_runtime_checks": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
-    # There is a double-free issue which will be fixed in another PR
-    "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
+    # undefined symbol: _Z16aoti_torch_dtypeIN3c104HalfEEiv
+    "test_non_contiguous_output_alias": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
     # the test segfaults
+    "test_repeat_output": fail_stack_allocation(is_skip=True),
+    "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
     "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
     "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
+    "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
     "test_index_put_fallback": fail_stack_allocation(is_skip=True),
@@ -2352,7 +2456,6 @@ CUDA_TEST_FAILURES = {
     "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
-    "test_repeat_output": fail_abi_compatible_cuda(is_skip=True),
     # no ABI shim fn for torch.sort; remove this when adding one
     "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
     # no runtime checks for non_abi_compatible mode
@@ -2401,6 +2504,7 @@ if not IS_FBCODE:
             "test_addmm": fail_minimal_arrayref_interface(is_skip=True),
             "test_aliased_buffer_reuse": fail_minimal_arrayref_interface(is_skip=True),
             "test_buffer_reuse": fail_minimal_arrayref_interface(is_skip=True),
+            "test_constant_folding": fail_minimal_arrayref_interface(is_skip=True),
             "test_convolution": fail_minimal_arrayref_interface(is_skip=True),
             "test_empty_graph": fail_minimal_arrayref_interface(is_skip=True),
             "test_large": fail_minimal_arrayref_interface(is_skip=True),
@@ -2506,7 +2610,6 @@ copy_tests(
     {
         "test_addmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
         "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
-        "test_constant_folding": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
         "test_duplicate_constant_folding": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
