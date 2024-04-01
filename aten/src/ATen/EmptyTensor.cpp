@@ -1,6 +1,7 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/EmptyTensor.h>
 #include <ATen/detail/CUDAHooksInterface.h>
+#include <ATen/detail/XPUHooksInterface.h>
 #include <ATen/Context.h>
 #include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/CPUAllocator.h>
@@ -17,6 +18,8 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
     // To properly support this, see https://github.com/pytorch/pytorch/issues/14560
     if (at::globalContext().hasCUDA()) {
       return at::detail::getCUDAHooks().getPinnedMemoryAllocator();
+    } else if (at::globalContext().hasXPU()) {
+      return at::detail::getXPUHooks().getPinnedMemoryAllocator();
     } else if(at::isPrivateUse1HooksRegistered()) {
       return at::GetPrivateUse1HooksInterface()->getPinnedMemoryAllocator();
     } else {

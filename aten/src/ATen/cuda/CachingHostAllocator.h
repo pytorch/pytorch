@@ -2,6 +2,7 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDAStream.h>
+#include <ATen/core/CachingHostAllocator.h>
 
 namespace at::cuda {
 

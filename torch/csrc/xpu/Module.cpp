@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/xpu/CachingHostAllocator.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <c10/util/CallOnce.h>
@@ -191,6 +192,13 @@ PyObject* THXPModule_emptyCache(PyObject* self, PyObject* noargs) {
   Py_RETURN_NONE;
 }
 
+PyObject* THXPModule_xpuHostAllocator(PyObject* _unused, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  c10::Allocator* allocator = at::xpu::getCachingHostAllocator();
+  return PyLong_FromVoidPtr(allocator);
+  END_HANDLE_TH_ERRORS
+}
+
 // XPU module initialization
 
 static void registerXpuDeviceProperties(PyObject* module) {
@@ -325,6 +333,10 @@ static struct PyMethodDef _THXPModule_methods[] = {
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_xpu_synchronize", THXPModule_xpuSynchronize, METH_O, nullptr},
+    {"_xpu_xpuHostAllocator",
+     THXPModule_xpuHostAllocator,
+     METH_NOARGS,
+     nullptr},
     {"_xpu_emptyCache", THXPModule_emptyCache, METH_NOARGS, nullptr},
     {nullptr}};
 
