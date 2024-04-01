@@ -299,6 +299,12 @@ def layer_norm(
     bias: Optional[Tensor] = ...,
     eps: float = ...,
 ) -> Tensor: ...
+def rms_norm(
+    input: Tensor,
+    normalized_shape: Sequence[int],
+    weight: Optional[Tensor] = ...,
+    eps: Optional[float] = ...,
+) -> Tensor: ...
 def group_norm(
     input: Tensor,
     num_groups: int,

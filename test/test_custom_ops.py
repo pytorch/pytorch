@@ -1708,6 +1708,50 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
         lib.impl("foo", lambda x: x.sin().cos(), key)
         self._test_backward_impl_raises(qualname, key)
 
+    def test_is_functional_schema(self):
+        tests = {
+            "foo(Tensor x) -> Tensor": True,
+            "foo(Tensor(a) x) -> Tensor": True,
+            "foo(Tensor(a!) x) -> Tensor": False,
+            "foo(Tensor(a) x) -> Tensor(a)": False,
+            "foo(Tensor x) -> ()": False,
+        }
+        for schema_str, expected in tests.items():
+            res = torch._library.utils.is_functional_schema(schema_str)
+            self.assertEqual(res, expected)
+
+            from torchgen.model import FunctionSchema
+
+            schema = FunctionSchema.parse(schema_str)
+            res = torch._library.utils.is_functional_schema(schema)
+            self.assertEqual(res, expected)
+
+            schema = torch._C.parse_schema(schema_str)
+            res = torch._library.utils.is_functional_schema(schema)
+            self.assertEqual(res, expected)
+
+    def test_is_tensorlist_like_type(self):
+        tensorlists = [
+            # Tensor[]
+            torch.ops.aten.where.default._schema.returns[0].type,
+            # Tensor?[]
+            torch.ops.aten.index.Tensor._schema.arguments[1].type,
+            # Tensor[]?
+            torch._C.parse_schema("foo(Tensor[]? x) -> ()").arguments[0].type,
+            # Tensor?[]?
+            torch._C.parse_schema("foo(Tensor?[]? x) -> ()").arguments[0].type,
+        ]
+        non_tensorlists = [
+            # Tensor
+            torch.ops.aten.sin.default._schema.arguments[0].type,
+            # IntList
+            torch.ops.aten.sum.dim_IntList._schema.arguments[1].type,
+        ]
+        for a in tensorlists:
+            self.assertTrue(torch._library.utils.is_tensorlist_like_type(a))
+        for a in non_tensorlists:
+            self.assertFalse(torch._library.utils.is_tensorlist_like_type(a))
+
     def test_backward_impl_on_existing_op(self):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
@@ -2168,6 +2212,24 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertEqual(out, torch.nn.functional.linear(x, weight, bias))
         self.assertTrue(called_impl)
         self.assertTrue(called_abstract)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_error_cases(self):
+        @torch.library.custom_op("_torch_testing::f", mutated_args=())
+        def f(x: List[Tensor]) -> Tensor:
+            return x[0].sin()
+
+        with self.assertRaises(NotImplementedError):
+            f.register_autograd(lambda: None, lambda: None)
+
+        @torch.library.custom_op("_torch_testing::g", mutated_args=())
+        def g(x: Tensor) -> Tensor:
+            return x.sin()
+
+        x = torch.randn(3, requires_grad=True)
+        y = g(x)
+        with self.assertRaisesRegex(RuntimeError, "no autograd formula"):
+            y.sum().backward()
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_replacement(self):
