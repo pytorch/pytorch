@@ -182,6 +182,8 @@ TORCH_IMPL_FUNC(leaky_relu_backward_out_mps)
 
   MPSStream* stream = getCurrentMPSStream();
 
+  Tensor output_ = at::empty_like(self, self.suggest_memory_format());
+
   @autoreleasepool {
     string key =
         "leaky_relu_backward" + getTensorsStringKey({self, grad_output}) + ":" + to_string(negative_slope.to<double>());
@@ -211,12 +213,13 @@ TORCH_IMPL_FUNC(leaky_relu_backward_out_mps)
 
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
     Placeholder gradOutputPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad_output);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, output);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, output_);
 
     // Create dictionary of inputs and outputs
     auto feeds = dictionaryFromPlaceholders(gradOutputPlaceholder, selfPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
+  output.copy_(output_);
 }
 
 TORCH_IMPL_FUNC(log_softmax_mps_out)

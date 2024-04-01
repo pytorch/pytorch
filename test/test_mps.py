@@ -1473,14 +1473,17 @@ class MPSLeakyReluTest(TestCaseMPS):
                 negative_slope=0.1))
 
     def _testLeakyRelu(self, np_features, negative_slope, contiguous, device):
-        cpu_x = torch.from_numpy(np_features).requires_grad_()
-        mps_x = cpu_x.detach().clone().to('mps').requires_grad_()
+        cpu_x = torch.from_numpy(np_features)
+        mps_x = torch.from_numpy(np_features).to('mps')
 
         if not contiguous:
             # Tranposing will make the tensor non-contiguous
             cpu_x = cpu_x.transpose(0, 1)
             mps_x = mps_x.transpose(0, 1)
             assert not mps_x.is_contiguous()
+
+        cpu_x.requires_grad_()
+        mps_x.requires_grad_()
 
         relu_op = torch.nn.LeakyReLU(negative_slope)
 
@@ -1489,11 +1492,15 @@ class MPSLeakyReluTest(TestCaseMPS):
         torch.testing.assert_close(cpu_leaky_relu, mps_leaky_relu.to('cpu'))
 
         # test backward pass
-        cpu_grad = torch.ones_like(cpu_leaky_relu)
-        mps_grad = cpu_grad.to('mps')
-        mps_leaky_relu.backward(gradient=mps_grad)
-        cpu_leaky_relu.backward(gradient=cpu_grad)
+
+        mps_leaky_relu = mps_leaky_relu.sum()
+        cpu_leaky_relu = cpu_leaky_relu.sum()
+
+        mps_leaky_relu.backward()
+        cpu_leaky_relu.backward()
+        assert cpu_x.grad is not None # Check that the grad is well-populated
         self.assertEqual(cpu_x.grad, mps_x.grad)
+        print(f'With contigous {contiguous} the cpu_x.grad contains {cpu_x.grad} and mps_x.grad {mps_x.grad}')
 
     def testNumbersCPU(self):
         for t in [np.float32]:
@@ -1503,7 +1510,6 @@ class MPSLeakyReluTest(TestCaseMPS):
                     negative_slope=0.2,
                     contiguous=contiguous,
                     device="cpu")
-
 
 class TestAvgPool(TestCaseMPS):
     def _sum_pool2d(self, x, kernel_size):
@@ -6646,6 +6652,9 @@ class TestMPS(TestCaseMPS):
             cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
             x = cpu_x.detach().clone().to('mps').requires_grad_()
 
+            assert x.is_leaf
+            assert cpu_x.is_leaf
+
             if not contiguous and (0 not in shape and len(shape) >= 2):
                 # Tranposing will make the tensor non-contiguous
                 cpu_x = cpu_x.transpose(0, 1)
@@ -6654,17 +6663,18 @@ class TestMPS(TestCaseMPS):
 
             gelu_result = torch.nn.GELU()(x)
             # GELU is not supported on CPU, so cast it to float
-            gelu_result_cpu = torch.nn.GELU()(cpu_x.to(torch.float))
+            gelu_result_cpu = torch.nn.GELU()(cpu_x)
 
-            cpu_grad = torch.ones_like(gelu_result_cpu)
-            grad = cpu_grad.to('mps')
+            gelu_result = gelu_result.sum()
+            gelu_result_cpu = gelu_result_cpu.sum()
 
-            gelu_result.backward(gradient=grad)
-            gelu_result_cpu.backward(gradient=cpu_grad)
+            gelu_result.backward()
+            gelu_result_cpu.backward()
 
             atol = 1e-5 if dtype == torch.float else 1e-2
             rtol = 1e-3 if dtype == torch.float else 1e-2
             self.assertEqual(gelu_result, gelu_result_cpu.to(dtype), atol=atol, rtol=rtol)
+            assert x.grad is not None and cpu_x.grad is not None
             self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
