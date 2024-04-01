@@ -705,6 +705,21 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([5], device=device))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_split_with_unbacked_split_sizes(self):
+        @torch.compile(fullgraph=True, dynamic=True)
+        def f(x, il, jl):
+            i0, i1, i2 = il.tolist()
+            j0, j1, j2 = jl.tolist()
+            for i in [i0, i1, i2, j0, j1, j2]:
+                torch._check_is_size(i)
+            r = torch.rand(x.item())
+            return torch.ops.aten.split_with_sizes.default(
+                r, [i0 + j0, i1 + j1, i2 + j2]
+            )
+
+        f(torch.tensor(20), torch.tensor([2, 5, 3]), torch.tensor([3, 4, 3]))
+
 
 instantiate_device_type_tests(TestInductorDynamic, globals())
 
