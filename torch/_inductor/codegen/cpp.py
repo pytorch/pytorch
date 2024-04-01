@@ -3635,7 +3635,7 @@ class CppScheduling(BaseScheduling):
                 _, (vars2, _) = node2.group
                 assert vars1 == vars2, (vars1, vars2)
                 return FusedSchedulerNode.fuse(node1, node2)
-            elif self.is_outer_loop_fusion(node1, node2):
+            elif self.is_vertical_outer_loop_fusion(node1, node2):
                 return OuterLoopFusedSchedulerNode.fuse(
                     node1, node2, self._get_outer_loop_fusion_depth(node1, node2)
                 )
@@ -3714,6 +3714,10 @@ class CppScheduling(BaseScheduling):
     def _can_fuse_horizontal_impl(self, node1, node2):
         assert isinstance(node1, (FusedSchedulerNode, SchedulerNode))
         assert isinstance(node2, (FusedSchedulerNode, SchedulerNode))
+        if any(
+            isinstance(node, OuterLoopFusedSchedulerNode) for node in (node1, node2)
+        ):
+            return False
         return self._why_fuse_nodes(node1, node2) is not None
 
     def can_fuse_horizontal(self, node1, node2):
@@ -3779,7 +3783,7 @@ class CppScheduling(BaseScheduling):
                 return outer_loop_fusion_depth
         return DISABLE_OUTER_LOOP_FUSION
 
-    def is_outer_loop_fusion(self, node1, node2):
+    def is_vertical_outer_loop_fusion(self, node1, node2):
         return (
             node1.get_names() & node2.ancestors
             and not (
@@ -3790,7 +3794,7 @@ class CppScheduling(BaseScheduling):
         )
 
     def get_fusion_pair_priority(self, node1, node2):
-        if self.is_outer_loop_fusion(node1, node2):
+        if self.is_vertical_outer_loop_fusion(node1, node2):
             # Outer loop fusion with lower priority
             return FusedNodesPriority.Two
         else:
@@ -3799,7 +3803,7 @@ class CppScheduling(BaseScheduling):
     def can_fuse_vertical(self, node1, node2):
         return (
             self._can_fuse_horizontal_impl(node1, node2) and not node1.is_reduction()
-        ) or self.is_outer_loop_fusion(node1, node2)
+        ) or self.is_vertical_outer_loop_fusion(node1, node2)
 
     def codegen_node(
         self,
