@@ -454,6 +454,56 @@ ilpReduce(index_t shift,
   return threadVal;
 }
 
+// Does a simultaneous reduction to compute the Max and SumExp of the elements
+// in the input buffer. It's used to avoid traversing the buffer twice.
+template <int ILP, typename T, typename AccumT, typename index_t=int>
+__device__ __forceinline__ void
+ilpReduceMaxAndSum(index_t shift,
+          const T* data,
+          index_t size,
+          AccumT &threadMax,
+          AccumT &threadExp)
+{
+  using LoadT = at::native::memory::aligned_vector<T, ILP>;
+  index_t offset = threadIdx.x;
+
+  MaxFloat<T, AccumT> redFuncMax;
+  Add<AccumT> redFuncAdd;
+
+  // shift and do 1
+  if(shift > 0){
+    data -= shift;
+    size += shift;
+    if(threadIdx.x >= shift){
+      threadMax = redFuncMax(threadMax, data[offset]);
+      threadExp = redFuncAdd(threadExp, std::exp(data[offset]));
+    }
+    size -= blockDim.x;
+    data += blockDim.x;
+  }
+  index_t last = size % (ILP * blockDim.x);
+
+  T v[ILP];
+  LoadT* value = reinterpret_cast<LoadT*>(&v);
+
+  for (; offset * ILP < (size - last); offset += blockDim.x) {
+    *value = reinterpret_cast<const LoadT*>(data)[offset];
+
+    #pragma unroll
+    for (int j = 0; j < ILP; ++j) {
+      threadMax = redFuncMax(threadMax, v[j]);
+      threadExp = redFuncAdd(threadExp, std::exp(v[j]));
+    }
+  }
+
+  offset = size - last + threadIdx.x;
+  // Epilogue
+  for (; offset < size; offset += blockDim.x) {
+    threadMax = redFuncMax(threadMax, data[offset]);
+    threadExp = redFuncAdd(threadExp, std::exp(data[offset]));
+  }
+}
+
 /**
  * This will apply the Epilogue with vectorized reads & writes when input & output have the same shift
  */
@@ -638,35 +688,35 @@ WriteBpropResults(
   }
 }
 
-template <typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue>
+template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue>
 __global__ void
 cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
 {
   extern __shared__ unsigned char smem[];
   auto sdata = reinterpret_cast<accscalar_t*>(smem);
 
-  // Indexing
-  int tid = threadIdx.x;
+  using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
+  using StoreT = at::native::memory::aligned_vector<outscalar_t, ILP>;
 
   // forward pointers to batch[blockIdx.x]
   // each block handles a sample in the mini-batch
   input += static_cast<int64_t>(blockIdx.x) * classes;
   output += static_cast<int64_t>(blockIdx.x) * classes;
 
-  // Reduce across entire classes dimension for sum and exp simultaneously
+  // Buffers may not always be aligned so we need to compute the
+  // shift offsets to use vectorized LD/ST
+  const int shift = ((uint64_t)input) % ALIGN_BYTES / sizeof(scalar_t);
+  const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
+
+  // ILP reduce for Max and Exp simultaneously to avoid traversing the buffer twice
   accscalar_t threadMax = -at::numeric_limits<accscalar_t>::max();
   accscalar_t threadExp = static_cast<accscalar_t>(0);
-  int offset = tid;
-  while (offset < classes) {
-    accscalar_t crnt_val = (accscalar_t)input[offset];
-    threadMax = std::max(threadMax, crnt_val);
-    threadExp += std::exp(crnt_val);
-    offset += blockDim.x;
-  }
+  ilpReduceMaxAndSum<ILP, scalar_t, accscalar_t>(
+      shift, input, classes, threadMax, threadExp);
 
   // Reduce inside the thread block
   accscalar_t max_k = cuda_utils::BlockReduceMax<accscalar_t>(threadMax, sdata);
-  if (tid == 0) {
+  if (threadIdx.x == 0) {
     sdata[0] = max_k;
   }
   __syncthreads();
@@ -675,17 +725,18 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   // Sum reduce
   threadExp /= std::exp(max_k);
   accscalar_t sumAll = cuda_utils::BlockReduceSum<accscalar_t>(threadExp, sdata);
-  if (tid == 0) {
+  if (threadIdx.x == 0) {
     sdata[0] = sumAll;
   }
   __syncthreads();
   sumAll = sdata[0];
 
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
-  offset = tid;
-  while (offset < classes) {
-    output[offset] = epilogue(input[offset]);
-    offset += blockDim.x;
+
+  if (shift == output_shift) {
+    WriteFpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, input, output, epilogue);
+  } else {
+    WriteFpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, input, output, epilogue);
   }
 }
 
@@ -783,7 +834,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
             int warps = block.x / C10_WARP_SIZE;
-            cunn_SoftMaxForward<scalar_t, accscalar_t, scalar_t, Epilogue>
+            cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
               <<<grid, block, warps * sizeof(accscalar_t), stream>>>(
                 output.mutable_data_ptr<scalar_t>(), input.const_data_ptr<scalar_t>(), dim_size);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -805,7 +856,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
             int warps = block.x / C10_WARP_SIZE;
-            cunn_SoftMaxForward<scalar_t, accscalar_t, accscalar_t, Epilogue>
+            cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
               <<<grid, block, warps * sizeof(accscalar_t), stream>>>(
                 output.mutable_data_ptr<accscalar_t>(), input.const_data_ptr<scalar_t>(), dim_size);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
