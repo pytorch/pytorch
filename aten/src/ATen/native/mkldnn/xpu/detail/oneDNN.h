@@ -7,7 +7,7 @@
 
 namespace at::native::onednn{
 
-sycl::event matmul(
+TORCH_API sycl::event matmul(
     at::Tensor& result,
     const at::Tensor& mat1,
     const at::Tensor& mat2,
@@ -16,7 +16,7 @@ sycl::event matmul(
     Attr attr,
     const std::vector<sycl::event>& deps = {});
 
-sycl::event convolution(
+TORCH_API sycl::event convolution(
     at::Tensor& dst,
     const at::Tensor& src,
     const at::Tensor& wgh,
@@ -29,7 +29,7 @@ sycl::event convolution(
     Attr& attr,
     const std::vector<sycl::event>& deps = {});
 
-sycl::event convolution_backward_weights(
+TORCH_API sycl::event convolution_backward_weights(
     at::Tensor& diff_wgh,
     at::Tensor& diff_bia,
     const at::Tensor& diff_dst,
@@ -42,7 +42,7 @@ sycl::event convolution_backward_weights(
     int64_t groups,
     const std::vector<sycl::event>& deps = {});
 
-sycl::event convolution_backward_data(
+TORCH_API sycl::event convolution_backward_data(
     at::Tensor& diff_src,
     const at::Tensor& diff_dst,
     const at::Tensor& weight,
@@ -54,7 +54,7 @@ sycl::event convolution_backward_data(
     bool bias_defined,
     const std::vector<sycl::event>& deps = {});
 
-sycl::event deconvolution(
+TORCH_API sycl::event deconvolution(
     at::Tensor& dst,
     const at::Tensor& src,
     const at::Tensor& wgh,
@@ -67,7 +67,7 @@ sycl::event deconvolution(
     Attr& attr,
     const std::vector<sycl::event>& deps = {});
 
-sycl::event deconvolution_backward_data(
+TORCH_API sycl::event deconvolution_backward_data(
     at::Tensor& diff_src,
     const at::Tensor& diff_dst,
     const at::Tensor& weight,
@@ -78,7 +78,7 @@ sycl::event deconvolution_backward_data(
     bool bias_defined,
     const std::vector<sycl::event>& deps = {});
 
-sycl::event deconvolution_backward_weights(
+TORCH_API sycl::event deconvolution_backward_weights(
     at::Tensor& diff_wgh,
     at::Tensor& diff_bia,
     const at::Tensor& diff_dst,
