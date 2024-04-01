@@ -734,6 +734,8 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
 
     return filter_desired_device_types(desired_device_type_test_bases, env_except_for, env_only_for)
 
+
+
 # Adds 'instantiated' device-specific test cases to the given scope.
 # The tests in these test cases are derived from the generic tests in
 # generic_test_class. This function should be used instead of
