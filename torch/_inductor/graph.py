@@ -1128,8 +1128,12 @@ class GraphLowering(torch.fx.Interpreter):
                                 result, ir.get_stride_order(n.meta["val"].stride())
                             )
                         if user.target in need_fixed_channels_last_layout:
-                            channels_last_stride_order = [0] + list(reversed(range(1, len(result.get_size()) - 1)))
-                            channels_last_stride_order = [len(channels_last_stride_order)] + channels_last_stride_order
+                            channels_last_stride_order = [0] + list(
+                                reversed(range(1, len(result.get_size()) - 1))
+                            )
+                            channels_last_stride_order = [
+                                len(channels_last_stride_order)
+                            ] + channels_last_stride_order
                             result = ir.ExternKernel.require_stride_order(
                                 result, channels_last_stride_order
                             )
