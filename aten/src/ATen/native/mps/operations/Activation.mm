@@ -131,6 +131,10 @@ TORCH_IMPL_FUNC(leaky_relu_out_mps)(const Tensor& self, const Scalar& negative_s
   using CachedGraph = MPSUnaryCachedGraph;
   TORCH_CHECK(output.is_mps());
 
+  if (self.numel() == 0) {
+    return;
+  }
+
   MPSStream* stream = getCurrentMPSStream();
 
   bool executeGatherOp =
@@ -179,6 +183,10 @@ TORCH_IMPL_FUNC(leaky_relu_backward_out_mps)
   using namespace mps;
   using CachedGraph = MPSUnaryGradCachedGraph;
   TORCH_CHECK(output.is_mps());
+
+  if (self.numel() == 0) {
+    return;
+  }
 
   MPSStream* stream = getCurrentMPSStream();
 
