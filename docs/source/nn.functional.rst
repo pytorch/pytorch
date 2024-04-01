@@ -3,7 +3,15 @@
 
 torch.nn.functional
 ===================
-
+'''
+The torch.nn.functional module in PyTorch provides a wide array of stateless 
+functions for neural network development. 
+It covers various operations such as activation functions, pooling layers, and 
+loss calculations, allowing for precise control over the behavior of neural network components. 
+This module is designed for direct, functional calls, making it suitable for scenarios where 
+you manually manage the forward passes or customize specific layers. With support for CUDA, 
+it also facilitates efficient computation on NVIDIA GPUs, enhancing the performance of tensor operations.
+'''
 .. currentmodule:: torch.nn.functional
 
 Convolution functions
