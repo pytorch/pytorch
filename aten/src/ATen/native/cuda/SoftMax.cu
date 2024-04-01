@@ -177,6 +177,11 @@ inline dim3 SoftMaxForward_getBlockSize(uint64_t dim_size) {
   uint64_t block_size = 1;
   uint64_t max_block_size = std::min(dim_size, static_cast<uint64_t>(max_threads));
 
+  // We need a block size that is a multiple of C10_WARP_SIZE in order
+  // to perform block size reductions using warp shuffle instructions.
+  // Since max_threads is also a multiple of C10_WARPS_SIZE we do not
+  // risk creating a block size larger than the limit.
+
   if (max_block_size % C10_WARP_SIZE == 0) {
     block_size = max_block_size;
   } else {
@@ -454,8 +459,8 @@ ilpReduce(index_t shift,
   return threadVal;
 }
 
-// Does a simultaneous reduction to compute the Max and SumExp of the elements
-// in the input buffer. It's used to avoid traversing the buffer twice.
+// Uses vectorized LD/ST instructions and computes the reduce using
+// Max and Add simultaneously in a single pass.
 template <int ILP, typename T, typename AccumT, typename index_t=int>
 __device__ __forceinline__ void
 ilpReduceMaxAndSum(index_t shift,
@@ -475,8 +480,9 @@ ilpReduceMaxAndSum(index_t shift,
     data -= shift;
     size += shift;
     if(threadIdx.x >= shift){
-      threadMax = redFuncMax(threadMax, data[offset]);
-      threadExp = redFuncAdd(threadExp, std::exp(data[offset]));
+      T val = data[offset];
+      threadMax = redFuncMax(threadMax, val);
+      threadExp = redFuncAdd(threadExp, std::exp(val));
     }
     size -= blockDim.x;
     data += blockDim.x;
@@ -499,8 +505,9 @@ ilpReduceMaxAndSum(index_t shift,
   offset = size - last + threadIdx.x;
   // Epilogue
   for (; offset < size; offset += blockDim.x) {
-    threadMax = redFuncMax(threadMax, data[offset]);
-    threadExp = redFuncAdd(threadExp, std::exp(data[offset]));
+    T val = data[offset];
+    threadMax = redFuncMax(threadMax, val);
+    threadExp = redFuncAdd(threadExp, std::exp(val));
   }
 }
 
@@ -703,18 +710,19 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   input += static_cast<int64_t>(blockIdx.x) * classes;
   output += static_cast<int64_t>(blockIdx.x) * classes;
 
-  // Buffers may not always be aligned so we need to compute the
-  // shift offsets to use vectorized LD/ST
   const int shift = ((uint64_t)input) % ALIGN_BYTES / sizeof(scalar_t);
   const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
 
-  // ILP reduce for Max and Exp simultaneously to avoid traversing the buffer twice
   accscalar_t threadMax = -at::numeric_limits<accscalar_t>::max();
   accscalar_t threadExp = static_cast<accscalar_t>(0);
+
+  // Do the ILP reduce for max and sum simultaneously to avoid traversing
+  // the input buffer twice as the L1 cache size may be insufficient to store the
+  // entire buffer.
   ilpReduceMaxAndSum<ILP, scalar_t, accscalar_t>(
       shift, input, classes, threadMax, threadExp);
 
-  // Reduce inside the thread block
+  // Max reduce using warp shuffle intrinsics and broadcast to all the threads
   accscalar_t max_k = cuda_utils::BlockReduceMax<accscalar_t>(threadMax, sdata);
   if (threadIdx.x == 0) {
     sdata[0] = max_k;
@@ -722,7 +730,7 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   __syncthreads();
   max_k = sdata[0];
 
-  // Sum reduce
+  // Sum reduce using warp shuffle intrinsics and broadcast to all the threads
   threadExp /= std::exp(max_k);
   accscalar_t sumAll = cuda_utils::BlockReduceSum<accscalar_t>(threadExp, sdata);
   if (threadIdx.x == 0) {
@@ -731,8 +739,8 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   __syncthreads();
   sumAll = sdata[0];
 
+  // Write results
   Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
-
   if (shift == output_shift) {
     WriteFpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, input, output, epilogue);
   } else {
@@ -833,9 +841,10 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
           } else {
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
-            int warps = block.x / C10_WARP_SIZE;
+            // Shared memory is used for reduction across warps
+            int shmem_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
             cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
-              <<<grid, block, warps * sizeof(accscalar_t), stream>>>(
+              <<<grid, block, shmem_sz, stream>>>(
                 output.mutable_data_ptr<scalar_t>(), input.const_data_ptr<scalar_t>(), dim_size);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           }
@@ -855,9 +864,10 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
           } else {
             constexpr int ILP = sizeof(float4) / sizeof(accscalar_t);
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
-            int warps = block.x / C10_WARP_SIZE;
+            // Shared memory is used for reduction across warps
+            int shmem_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
             cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
-              <<<grid, block, warps * sizeof(accscalar_t), stream>>>(
+              <<<grid, block, shmem_sz, stream>>>(
                 output.mutable_data_ptr<accscalar_t>(), input.const_data_ptr<scalar_t>(), dim_size);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           }
