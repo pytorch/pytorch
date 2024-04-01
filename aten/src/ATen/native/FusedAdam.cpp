@@ -49,10 +49,10 @@ void _fused_adam_kernel_cpu_(
   }
   TORCH_CHECK(state_steps.size() == n_tensors);
   at::Tensor dummy_max_exp_avg_sq = at::Tensor();
-  for (size_t i = 0; i < n_tensors; i++)
+  for (size_t i = 0; i < n_tensors; i++){
     at::Tensor max_exp_avg_sq = amsgrad ? max_exp_avg_sqs[i] : dummy_max_exp_avg_sq;
-    fused_adam_stub(kCPU, params[i], grads[i], exp_avgs[i], exp_avg_sqs[i], max_exp_avg_sqs[i], state_steps[i],
-    lr, beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale_ptr);
+    fused_adam_stub(kCPU, params[i], grads[i], exp_avgs[i], exp_avg_sqs[i], max_exp_avg_sq, state_steps[i], lr, beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale_ptr);
+  }
 }
 
 // The following overload simply has a Tensor lr
@@ -72,8 +72,7 @@ void _fused_adam_kernel_cpu_(
     const bool maximize,
     const c10::optional<at::Tensor>& grad_scale,
     const c10::optional<at::Tensor>& found_inf) {
-  _fused_adam_kernel_cpu_(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps,
-  lr.item<double>(), beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale, found_inf);
+  _fused_adam_kernel_cpu_(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr.item<double>(), beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale, found_inf);
 }
 
 
