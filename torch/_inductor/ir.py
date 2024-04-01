@@ -1848,7 +1848,7 @@ def is_pointwise_with_channels_last_inputs(x):
             else:
                 return False
 
-        return all(
+        return len(all_reads) >= 1 and all(
             type(read) is dependencies.MemoryDep and is_channel_last_index(read)
             for read in all_reads
         )
@@ -3739,7 +3739,7 @@ class ConcatKernel(NopKernel):
                     output_stride = make_channels_last_strides_for(new_size)
                     break
         if any_input_is_storage_and_layout is False:
-            if all(is_pointwise_with_channels_last_inputs(input) for input in inputs):
+            if all(is_pointwise_with_channels_last_inputs(input) for input in inputs) and len(new_size) in [4, 5]:
                 output_stride = make_channels_last_strides_for(new_size)
 
         concat_kernel = ConcatKernel(
