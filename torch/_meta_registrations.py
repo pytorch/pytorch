@@ -5784,6 +5784,26 @@ def _cudnn_rnn(
     return output, hy, cy, reserve, weight_buf
 
 
+@register_meta(aten._cudnn_rnn_flatten_weight.default)
+def _cudnn_rnn_flatten_weight(
+    weight_arr,
+    weight_stride0,
+    input_size,
+    mode,
+    hidden_size,
+    proj_size,
+    num_layers,
+    batch_first,
+    bidirectional,
+):
+    torch._check(len(weight_arr) > 0)
+    num_weights = sum(weight.numel() for weight in weight_arr)
+    weight_buf = weight_arr[0].new_empty(
+        num_weights, requires_grad=weight_arr[0].requires_grad
+    )
+    return weight_buf
+
+
 @register_meta(aten.mkldnn_rnn_layer.default)
 def mkldnn_rnn_layer(
     input,

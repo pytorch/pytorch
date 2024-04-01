@@ -516,7 +516,29 @@ class FakeTensorTest(TestCase):
                         self.assertEqual(ten.device.type, 'cuda')
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_cuda_lstm(self):
+    @unittest.skipIf(not torch.backends.cudnn.is_available(), "requires cudnn")
+    @skipIfRocm
+    def test_cuda_gru_cudnn(self):
+        with torch.backends.cudnn.flags(enabled=True):
+            with FakeTensorMode(allow_fallback_kernels=False):
+                inps = [
+                    [19, 40, torch.randn(1, 40, 19, device="cuda")],
+                    [16, 16, torch.randn(1024, 20, 16, device="cuda")],
+                    [800, 800, torch.randn(20, 800, 800, device="cuda")]
+                ]
+
+                for L, H_out, inp in inps:
+                    mod = torch.nn.GRU(L, H_out, batch_first=True, device="cuda")
+                    mod.eval()
+                    output, h_n = mod(inp)
+                    N, L, H_in = inp.shape
+                    self.assertEqual(output.shape, (N, L, H_out))
+                    self.assertEqual(output.device.type, 'cuda')
+                    self.assertEqual(h_n.shape, (1, N, H_out))
+                    self.assertEqual(h_n.device.type, 'cuda')
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_cuda_lstm_no_cudnn(self):
         # Ensure CUDA (non-cuDNN) impl succeeds with fake tensors.
         with torch.backends.cudnn.flags(enabled=False):
             fake_tensor_mode = FakeTensorMode(allow_fallback_kernels=False)
