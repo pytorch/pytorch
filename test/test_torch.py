@@ -5932,10 +5932,12 @@ else:
         for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
             self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
 
-    @onlyCUDA
+    @onlyNativeDeviceTypes
     def test_grad_scaling_autocast_fused(self, device):
         device = torch.device(device)
         for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
+            if optimizer_ctor != torch.optim.Adam and device == torch.device('cpu'):
+                self.skipTest("For CPU, only support fused with Adam")
             self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
 
     # Make sure that the parameters become nonsense when scaled gradients are finite
@@ -5952,7 +5954,7 @@ else:
                 {"foreach": False, "fused": True},
             ),
         ):
-            if device.type != "cuda":
+            if device.type != "cuda" and optimizer_ctor.__name__ != "Adam":
                 optimizer_kwargs['fused'] = False
             with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
                 self._test_grads_invalidated_between_unscale_and_step(device.type, optimizer_ctor, optimizer_kwargs)

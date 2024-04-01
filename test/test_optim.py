@@ -3,6 +3,7 @@ import functools
 import math
 import tempfile
 from typing import Any, Dict, Tuple
+from itertools import product
 import unittest
 from copy import deepcopy
 
@@ -17,9 +18,9 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_optimizers import (
     optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS)
+    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS, onlyNativeDeviceTypes)
 from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase
-
+from torch.testing._internal.common_cuda import _create_scaling_case
 
 FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
 
@@ -556,16 +557,22 @@ class TestOptimRenewed(TestCase):
             self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)
 
 
-    @onlyCUDA
+    @onlyNativeDeviceTypes
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float64])
     def test_fused_matches_forloop(self, device, dtype, optim_info):
+        if device == 'cpu' and optim_info.optim_cls.__name__ != "Adam":
+            # For cpu, we only support fused with Adam now
+            self.skipTest("For CPU, only support fused with Adam")
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
 
-    @onlyCUDA
-    @largeTensorTest("64GB", "cuda")
+    @onlyNativeDeviceTypes
+    @largeTensorTest("64GB")
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float16])
     def test_fused_large_tensor(self, device, dtype, optim_info):
+        if device == 'cpu' and optim_info.optim_cls.__name__ != "Adam":
+            # For cpu, we only support fused with Adam now
+            self.skipTest("For CPU, only support fused with Adam")
         optim_cls = optim_info.optim_cls
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
@@ -1291,6 +1298,55 @@ class TestOptimRenewed(TestCase):
             res2 = optim_neg_inf.step(closure)
             self.assertEqual(type(res1), type(res2))
 
+    @onlyCPU
+    def test_grad_scaling_autocast_fused_optimizers(self):
+        optimizer_kwargs = ({"fused": True, "amsgrad": False}, {"fused": True, "amsgrad": True})
+        separate_unscale = (False, True)
+        for kwargs, _separate_unscale in list(product(optimizer_kwargs, separate_unscale)):
+            self._grad_scaling_autocast_fused_optimizers(
+                optimizer_ctor=torch.optim.Adam, optimizer_kwargs=kwargs, separate_unscale=_separate_unscale)
+
+    def _grad_scaling_autocast_fused_optimizers(self, optimizer_ctor, optimizer_kwargs, separate_unscale):
+        (
+            mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, _,
+        ) = _create_scaling_case(optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs, device='cpu')
+        kwargs = deepcopy(optimizer_kwargs)
+        kwargs["fused"] = False
+        opt_control = optimizer_ctor(mod_control.parameters(), lr=1.0, **kwargs)
+
+        scaler = torch.cpu.amp.GradScaler(init_scale=128.0)
+
+        for input, target in data:
+            opt_control.zero_grad()
+            with torch.autocast('cpu', dtype=torch.half):
+                output_control = mod_control(input)
+                loss_control = loss_fn(output_control, target)
+            scaler.scale(loss_control).backward()
+            scaler.step(opt_control)
+            scaler.update()
+
+            opt_scaling.zero_grad()
+            with torch.autocast('cpu', dtype=torch.half):
+                output_scaling = mod_scaling(input)
+                loss_scaling = loss_fn(output_scaling, target)
+            scaler.scale(loss_scaling).backward()
+            if separate_unscale:
+                scaler.unscale_(opt_scaling)
+            scaler.step(opt_scaling)
+            scaler.update()
+
+            self.assertEqual(loss_control, loss_scaling)
+            for param_control, param_scaling in zip(mod_control.parameters(), mod_scaling.parameters()):
+                self.assertEqual(param_control.grad, param_scaling.grad)
+                self.assertEqual(param_control, param_scaling)
+
+                state_control, state_scaling = opt_control.state[param_control], opt_scaling.state[param_scaling]
+
+                for k in state_control:
+                    actual = state_scaling[k]
+                    if k == "step":
+                        actual = actual.squeeze()
+                    self.assertEqual(state_control[k], actual)
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 

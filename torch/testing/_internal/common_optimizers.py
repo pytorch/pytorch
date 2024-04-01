@@ -970,7 +970,8 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
         for x in optim_info.supported_impls
         if x not in skip
         and (
-            _get_device_type(device) in _get_fused_kernels_supported_devices()
+            _get_device_type(device)
+            in _get_fused_kernels_supported_devices(optim_info.optim_cls)
             or x != "fused"
         )
         and (
