@@ -5,6 +5,7 @@ import sys
 from typing import Any, Callable, Tuple
 
 import torch
+from torch import _C
 
 
 @dataclasses.dataclass
@@ -79,24 +80,38 @@ def is_functional_schema(schema: Any) -> bool:
     - it has at least one return
     """
 
+    def is_functional(schema):
+        if schema.is_mutable:
+            return False
+        rets = schema.returns
+        is_non_mutating_view = len(rets) > 0 and any(
+            r.alias_info is not None and not r.alias_info.is_write for r in rets
+        )
+        if is_non_mutating_view:
+            return False
+        if not schema.returns:
+            return False
+        return True
+
+    if isinstance(schema, torch._C.FunctionSchema):
+        return is_functional(schema)
+
     # Lazy import because not all PyTorch builds have torchgen
-    from torchgen.model import FunctionSchema, SchemaKind
+    from torchgen.model import FunctionSchema
 
     assert isinstance(schema, (str, FunctionSchema))
     if isinstance(schema, str):
         schema = FunctionSchema.parse(schema)
+    return is_functional(schema)
 
-    if schema.kind() != SchemaKind.functional:
-        return False
-    rets = schema.returns
-    is_non_mutating_view = len(rets) > 0 and any(
-        r.annotation is not None and not r.annotation.is_write for r in rets
+
+def is_tensorlist_like_type(typ: torch._C.Type):
+    return (
+        typ == _C.ListType(_C.TensorType.get())
+        or typ == _C.ListType(_C.OptionalType(_C.TensorType.get()))
+        or typ == _C.OptionalType(_C.ListType(_C.TensorType.get()))
+        or typ == _C.OptionalType(_C.ListType(_C.OptionalType(_C.TensorType.get())))
     )
-    if is_non_mutating_view:
-        return False
-    if not schema.returns:
-        return False
-    return True
 
 
 def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
