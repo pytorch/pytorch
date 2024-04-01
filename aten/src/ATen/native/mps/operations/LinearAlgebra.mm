@@ -2,6 +2,7 @@
 
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/mps/MPSProfiler.h>
+#include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -571,6 +572,87 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   });
   return out;
 }
+
+static void lu_factor_stub_mps(const Tensor& LU, const Tensor& pivots, const Tensor& info, bool compute_pivots) {
+  TORCH_CHECK(compute_pivots, "linalg.lu_factor: LU without pivoting is not implemented on MPS device");
+
+  if (LU.numel() == 0) {
+    return;
+  }
+
+  auto LU_continous = LU;
+  if (!LU.is_contiguous()) {
+    LU_continous = LU.contiguous();
+  }
+
+  // set info to 0
+  info.fill_(0);
+
+  id<MTLBuffer> luBuffer = getMTLBufferStorage(LU_continous);
+  id<MTLBuffer> infoBuffer = getMTLBufferStorage(info);
+  id<MTLBuffer> pivotsBuffer = getMTLBufferStorage(pivots);
+  id<MTLDevice> device = MPSDevice::getInstance()->device();
+  MPSStream* mpsStream = getCurrentMPSStream();
+
+  uint64_t luRows = LU.size(-2);
+  uint64_t luCols = LU.size(-1);
+  // uint64_t batchSize = LU.sizes().size() > 2 ? LU.size(0) : 1;
+  auto batchSize = batchCount(LU);
+  uint64_t luElemSize = LU.element_size();
+
+  dispatch_sync(mpsStream->queue(), ^() {
+    @autoreleasepool {
+      mpsStream->endKernelCoalescing();
+      id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
+
+      MPSMatrixDescriptor* luDescriptor = [MPSMatrixDescriptor matrixDescriptorWithRows:luRows
+                                                                                columns:luCols
+                                                                               matrices:batchSize
+                                                                               rowBytes:luCols * luElemSize
+                                                                            matrixBytes:luRows * luCols * luElemSize
+                                                                               dataType:getMPSDataType(LU)];
+
+      MPSMatrixDescriptor* pivotDescriptor = [MPSMatrixDescriptor matrixDescriptorWithRows:1
+                                                                                   columns:luCols
+                                                                                  matrices:batchSize
+                                                                                  rowBytes:sizeof(uint32_t) * luCols
+                                                                               matrixBytes:sizeof(uint32_t) * luCols
+                                                                                  dataType:MPSDataTypeUInt32];
+
+      MPSMatrixDecompositionLU* filter = [[MPSMatrixDecompositionLU alloc] initWithDevice:device
+                                                                                     rows:luRows
+                                                                                  columns:luCols];
+
+      getMPSProfiler().beginProfileKernel(filter, " lu_factor_mps", {LU_continous});
+
+      for (const auto i : c10::irange(batchSize)) {
+        const uint64_t luBatchOffset = i * luRows * luCols;
+        const uint64_t infoBatchOffset = i * luRows;
+        const uint64_t pivotsBatchOffset = i * luCols;
+        MPSMatrix* luMatrix =
+            [[MPSMatrix alloc] initWithBuffer:luBuffer
+                                       offset:(LU_continous.storage_offset() + luBatchOffset) * luElemSize
+                                   descriptor:luDescriptor];
+        MPSMatrix* pivotMatrix =
+            [[MPSMatrix alloc] initWithBuffer:pivotsBuffer
+                                       offset:(pivots.storage_offset() + pivotsBatchOffset) * sizeof(uint32_t)
+                                   descriptor:pivotDescriptor];
+
+        [filter encodeToCommandBuffer:commandBuffer
+                         sourceMatrix:luMatrix
+                         resultMatrix:luMatrix
+                         pivotIndices:pivotMatrix
+                               status:nil]; // TODO: add infoBuffer
+      }
+
+      getMPSProfiler().endProfileKernel(filter);
+    }
+  });
+
+  LU.copy_(LU_continous);
+}
+
+REGISTER_MPS_DISPATCH(lu_factor_stub, &lu_factor_stub_mps);
 
 } // namespace mps
 
