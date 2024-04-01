@@ -21,7 +21,7 @@ TORCH_API dnnl::memory make_onednn_memory(
 bool set_onednn_verbose(int level);
 
 // GpuEngineManager singleton
-struct GpuEngineManager {
+struct TORCH_API GpuEngineManager {
   static GpuEngineManager& Instance(); // Singleton
 
   dnnl::engine& get_engine(const Device& device) {
@@ -51,7 +51,7 @@ struct GpuEngineManager {
 };
 
 // GpuStreamManager singleton
-struct GpuStreamManager {
+struct TORCH_API GpuStreamManager {
   static GpuStreamManager& Instance(); // Singleton
 
   dnnl::stream get_stream() {
