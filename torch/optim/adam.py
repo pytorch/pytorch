@@ -76,7 +76,7 @@ class Adam(Optimizer):
                 if len(p_state) != 0 and not torch.is_tensor(p_state['step']):
                     step_val = float(p_state["step"])
                     p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(is_fused=fused), device=p.device)
-                                       if group['capturable'] or group['fused']
+                                       if group['capturable']
                                        else torch.tensor(step_val, dtype=_get_scalar_dtype()))
 
     def _init_group(
@@ -106,7 +106,7 @@ class Adam(Optimizer):
                     # This is because kernel launches are costly on CUDA and XLA.
                     state['step'] = (
                         torch.zeros((), dtype=_get_scalar_dtype(is_fused=group['fused']), device=p.device)
-                        if group['capturable'] or group['fused']
+                        if group['capturable']
                         else torch.tensor(0.0, dtype=_get_scalar_dtype())
                     )
                     # Exponential moving average of gradient values

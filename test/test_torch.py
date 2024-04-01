@@ -5937,7 +5937,7 @@ else:
         device = torch.device(device)
         for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
             if optimizer_ctor != torch.optim.Adam and device == torch.device('cpu'):
-                self.skipTest("For CPU, only support fused with Adam")
+                continue
             self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
 
     # Make sure that the parameters become nonsense when scaled gradients are finite
