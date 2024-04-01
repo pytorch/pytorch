@@ -145,7 +145,6 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
           aws-region: us-east-1
-          role-duration-seconds: 10800
 
       - name: Configure AWS credentials(PyTorch account) for RC builds
         if: ${{ github.event_name == 'push' &&  (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')) }}
@@ -153,7 +152,6 @@ jobs:
         with:
           role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_test_build_wheels
           aws-region: us-east-1
-          role-duration-seconds: 10800
 
       - name: Download Build Artifacts
         uses: actions/download-artifact@v3
