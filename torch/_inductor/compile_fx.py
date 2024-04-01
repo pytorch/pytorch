@@ -458,9 +458,11 @@ def compile_fx_inner(
 
     # check cudagraph disabling reasons from inductor lowering
     if cudagraphs and compiled_graph.disabled_cudagraphs_reason:
-        perf_hint_log.warning(
-            "skipping cudagraphs due to %s", compiled_graph.disabled_cudagraphs_reason
-        )
+        if "cuda" in compiled_graph.device_types:
+            perf_hint_log.warning(
+                "skipping cudagraphs due to %s",
+                compiled_graph.disabled_cudagraphs_reason,
+            )
         BoxedBool.disable(cudagraphs)
 
     # Return the output strides to the caller via TracingContext

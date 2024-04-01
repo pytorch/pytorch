@@ -3806,8 +3806,12 @@ class ShapeEnv:
                 "Maybe you need to add guard_size_oblivious to framework code, see doc below for more guidance.\n\n"
             )
         fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
+        if expr.is_integer:
+            msg = "Could extract specialized integer from data-dependent expression"
+        else:
+            msg = "Could not guard on data-dependent expression"
         return GuardOnDataDependentSymNode(
-            f"Could not guard on data-dependent expression {expr} (unhinted: {unhinted_expr}).  "
+            f"{msg} {expr} (unhinted: {unhinted_expr}).  "
             f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
             f"{size_oblivious_result_msg}"
             "Potential framework code culprit (scroll up for full backtrace):\n"
@@ -4266,8 +4270,7 @@ class ShapeEnv:
         try:
             if orig_expr.is_number:
                 self.log.debug("eval %s [trivial]", orig_expr)
-                # NB: don't test float as there may be precision issues
-                if isinstance(hint, (int, bool)):
+                if hint is not None:
                     assert orig_expr == hint, f"{orig_expr} != {hint}"
                 return orig_expr
 
@@ -4278,8 +4281,7 @@ class ShapeEnv:
                                                       size_oblivious=size_oblivious)
             if static_expr is not None:
                 self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
-                # NB: don't test float as there may be precision issues
-                if isinstance(hint, (int, bool)):
+                if hint is not None:
                     assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
