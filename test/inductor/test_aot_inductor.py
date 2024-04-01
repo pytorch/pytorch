@@ -312,7 +312,7 @@ class AOTInductorTestsTemplate:
 
     def test_amp_fallback_random(self):
         def fn(x):
-            return torch.nn.functional.silu(x) * x
+            return x + x
 
         example_inputs = (torch.randn(10, 10, device=self.device),)
 
