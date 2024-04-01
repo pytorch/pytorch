@@ -1505,7 +1505,7 @@ class MPSLeakyReluTest(TestCaseMPS):
 
     def testNumbersCPU(self):
         for t in [torch.float, torch.half]:
-            for shape in [(4,), (4, 3), (5, 4, 3)]:
+            for shape in [[], (0,), (0, 3), (4,), (4, 3), (5, 4, 3)]:
                 for contiguous in [True, False]:
                     self._testLeakyRelu(shape,
                                         dtype=t,
@@ -6680,7 +6680,7 @@ class TestMPS(TestCaseMPS):
 
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
-            for shape in [(0,4), (2, 3), (2, 8, 4, 5)]: # (0, 3), [] removed, REGRESSION
+            for shape in [[], (0,), (0, 3), (4,), (4, 3), (5, 4, 3)]: # (0, 3), [] removed, REGRESSION
                 for contiguous in [True, False]:
                     helper(shape, dtype, contiguous)
         # Test that gelu would raise an assert for integral types
@@ -6718,7 +6718,7 @@ class TestMPS(TestCaseMPS):
 
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
-            for shape in [(2, 3), (2, 8, 4, 5)]: # (0, 3), [] removed, REGRESSION
+            for shape in [(0,), (0, 3), (4,), (4, 3), (5, 4, 3)]: # (0, 3), [] removed, REGRESSION
                 for contiguous in [True, False]:
                     helper(shape, dtype, contiguous)
 
