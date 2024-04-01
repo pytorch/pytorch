@@ -36,6 +36,12 @@
 #include <c10/util/irange.h>
 #include <c10/util/Load.h>
 
+#if defined(__GNUC__)
+#define __FORCE_INLINE __attribute__((always_inline)) inline
+#elif defined(_MSC_VER)
+#define __FORCE_INLINE __forceinline
+#endif
+
 // These macros helped us unify vec_base.h
 #ifdef CPU_CAPABILITY_AVX512
 #if defined(__GNUC__)
@@ -1115,3 +1121,4 @@ inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) 
 // additional headers for more operations that depend on vec_base
 #include <ATen/cpu/vec/vec_n.h>
 #include <ATen/cpu/vec/vec_mask.h>
+#include <ATen/cpu/vec/vec_convert.h>
