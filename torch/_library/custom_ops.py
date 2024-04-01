@@ -167,7 +167,7 @@ class CustomOpDef:
                         result = self._backend_fns[device_type](*args, **kwargs)
 
                         tuple_result = result
-                        if isinstance(result, (Tensor, list)):
+                        if not isinstance(result, tuple):
                             tuple_result = (result,)
                         for tensor in iter_tensors(tuple_result, {}):
                             key = id(tensor.untyped_storage())
@@ -245,6 +245,7 @@ class CustomOpDef:
             >>> bias = torch.randn(2)
             >>> # xdoctest: +SKIP("Requires Python <= 3.11")
             >>> out = torch.compile(custom_linear, fullgraph=True)(x, weight, bias)
+            >>> # xdoctest: +SKIP("Requires Python <= 3.11")
             >>> assert torch.allclose(out, torch.nn.functional.linear(x, weight, bias))
             >>>
             >>> # Example 2: an operator with data-dependent output shape
@@ -269,6 +270,7 @@ class CustomOpDef:
             >>> x = torch.tensor([0, 1, 2, 0, 0, 1])
             >>> # xdoctest: +SKIP("Requires Python <= 3.11")
             >>> out = torch.compile(custom_nonzero)(x)
+            >>> # xdoctest: +SKIP("Requires Python <= 3.11")
             >>> assert torch.allclose(out, x.nonzero())
 
         """
