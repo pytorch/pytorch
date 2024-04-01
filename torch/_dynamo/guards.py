@@ -370,6 +370,18 @@ def getitem_on_dict_manager(
     )
 
 
+def is_grad_source(source):
+    if isinstance(source, AttrSource):
+        return source.member == "grad"
+    return False
+
+
+def match_on_id_for_tensor(guard):
+    return guard.originating_source.is_dict_key() and not is_grad_source(
+        guard.originating_source
+    )
+
+
 # The ready to eval generated code (possibly multiple parts) for a guard, plus
 # the original guard object that created it for provenance
 @dataclasses.dataclass
@@ -707,12 +719,13 @@ class GuardBuilder(GuardBuilderBase):
 
     # Note: the order of the guards in this file matters since we sort guards on the same object by lineno
     def HASATTR(self, guard: Guard):
-        assert isinstance(
-            guard.originating_source, AttrSource
-        ), f"invalid source {guard.name}"
-        base_source = guard.originating_source.base
+        source = guard.originating_source
+        if isinstance(source, NNModuleSource):
+            source = source.base
+        assert isinstance(source, AttrSource), f"invalid source {guard.name}"
+        base_source = source.base
         base = base_source.name()
-        attr = guard.originating_source.member
+        attr = source.member
 
         ref = self.arg_ref(base)
         val = hasattr(self.get(base), attr)
@@ -730,8 +743,9 @@ class GuardBuilder(GuardBuilderBase):
             if val:
                 # Just install a getattr manager. GetAttrGuardAccessor itself
                 # acts as hasattr guard.
+                example_value = self.get(source.name())
                 base_manager.getattr_manager(
-                    attr=attr, source=guard.name, example_value=val
+                    attr=attr, source=guard.name, example_value=example_value
                 )
             else:
                 base_manager.add_no_hasattr_guard(
@@ -865,7 +879,20 @@ class GuardBuilder(GuardBuilderBase):
         # in the fx graph
         dual_level = torch.autograd.forward_ad._current_level
         code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
-        self._produce_guard_code(guard, code)
+        self._set_guard_export_info(guard, [code])
+        if config.enable_cpp_guard_manager:
+            # TODO(anijain2305) - Consider this moving this guard to C++
+            forward_ad = torch.autograd.forward_ad
+
+            def fn(x):
+                return forward_ad._current_level == dual_level
+
+            assert self.guard_manager  # to make mypy happy
+            self.guard_manager.root.add_lambda_guard(
+                fn, get_verbose_code_parts(code, guard)
+            )
+        else:
+            self._produce_guard_code(guard, code)
 
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
@@ -1294,7 +1321,7 @@ class GuardBuilder(GuardBuilderBase):
                 self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        if guard.is_nn_module() or guard.originating_source.is_dict_key():
+        if guard.is_nn_module() or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
@@ -1354,12 +1381,11 @@ class GuardBuilder(GuardBuilderBase):
                     self.tensor_check_guard_managers.append(guard_manager)
 
                     output_graph = self.check_fn_manager.output_graph
-                    size = convert_to_concrete_values(
-                        output_graph.tensor_weakref_to_sizes_strides[value]["size"]
-                    )
-                    stride = convert_to_concrete_values(
-                        output_graph.tensor_weakref_to_sizes_strides[value]["stride"]
-                    )
+                    metadata = output_graph.input_source_to_sizes_strides[
+                        guard.originating_source
+                    ]
+                    size = convert_to_concrete_values(metadata["size"])
+                    stride = convert_to_concrete_values(metadata["stride"])
 
                     verbose_code_parts = get_verbose_code_parts(
                         get_tensor_guard_code_part(value, tensor_name, size, stride),
