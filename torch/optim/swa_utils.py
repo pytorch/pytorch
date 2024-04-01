@@ -50,7 +50,7 @@ def get_swa_multi_avg_fn():
             if isinstance(num_averaged, Tensor):
                 torch._foreach_addcdiv_(averaged_param_list, diffs, [num_averaged + 1] * len(averaged_param_list))
             else:
-                torch._foreach_add_(averaged_param_list, diffs, alpha=1 / (num_averaged + 1))
+                torch._foreach_add_(averaged_param_list, diffs, alpha=1.0 / (num_averaged + 1))
 
     return swa_update
 
