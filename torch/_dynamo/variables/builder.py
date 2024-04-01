@@ -889,10 +889,19 @@ class VariableBuilder:
                 source=source,
             )
 
-            # for each unpacked tensor, access it from this list instead of from a lifted arg
+            guards = []
             for i, tensor_variable in enumerate(list_variable.items):
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
+                # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
+
+                guard = functools.partial(
+                    GuardBuilder.TENSOR_MATCH,
+                    value=TensorWeakRef(value[i])
+                )
+                guards.append(source_i.make_guard(guard))
+
+            install_guard(*guards, skip=1)
 
             grapharg = GraphArg(
                 source, value, is_unspecialized=False, fake_tensor=None, is_tensor=False
