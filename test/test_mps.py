@@ -1490,7 +1490,7 @@ class MPSLeakyReluTest(TestCaseMPS):
         cpu_leaky_relu = relu_op(cpu_x)
         mps_leaky_relu = relu_op(mps_x)
         torch.testing.assert_close(cpu_leaky_relu, mps_leaky_relu.to('cpu'))
-        import pdb; pdb.set_trace()
+
         # test backward pass
 
         mps_leaky_relu = mps_leaky_relu.sum()
@@ -1499,7 +1499,7 @@ class MPSLeakyReluTest(TestCaseMPS):
         mps_leaky_relu.backward()
         cpu_leaky_relu.backward()
         assert cpu_x.grad is not None # Check that the grad is well-populated
-        import pdb; pdb.set_trace()
+
         self.assertEqual(cpu_x.grad, mps_x.grad)
         print(f'With contigous {contiguous} the cpu_x.grad contains {cpu_x.grad} and mps_x.grad {mps_x.grad}')
 
@@ -6680,7 +6680,7 @@ class TestMPS(TestCaseMPS):
 
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
-            for shape in [(2, 3), (2, 8, 4, 5)]: # (0, 3), [] removed, REGRESSION
+            for shape in [(0,4), (2, 3), (2, 8, 4, 5)]: # (0, 3), [] removed, REGRESSION
                 for contiguous in [True, False]:
                     helper(shape, dtype, contiguous)
         # Test that gelu would raise an assert for integral types
