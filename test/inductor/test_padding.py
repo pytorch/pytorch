@@ -2,6 +2,7 @@
 import copy
 import os
 
+import unittest
 import torch
 from torch import nn
 from torch._dynamo.test_case import run_tests, TestCase
@@ -14,6 +15,11 @@ from torch._dynamo.utils import maybe_cprofile
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 DO_ACC_TEST = os.environ.get("DO_ACC_TEST", "1") == "1"
+
+def get_optim(m):
+    return torch.optim.Adam(
+        m.parameters(), lr=0.01, capturable=True, foreach=True
+    )
 
 def create_timm_model(model_name):
     from timm.models import create_model
@@ -28,6 +34,16 @@ def create_timm_model(model_name):
         # pretrained=True,
     )
     return model
+
+def gen_transformer_inputs(vocab_size, bs, seq_length):
+    def geninp():
+        return torch.randint(0, vocab_size, (bs, seq_length), dtype=torch.int64, requires_grad=False)
+
+    input_dict = {
+        "input_ids": geninp(),
+        "labels": geninp()
+    }
+    return input_dict
 
 
 class LinearAndSoftmax(nn.Module):
@@ -283,12 +299,6 @@ class PaddingTest(TestCase):
         if DO_PERF_TEST:
             print("Do performance test")
 
-            def get_optim(m):
-                return torch.optim.Adam(
-                    m.parameters(), lr=0.01, capturable=True, foreach=True
-                )
-
-
             if len(kwargs) > 0:
                 # for huggingface models
                 def get_f(m, optim):
@@ -342,18 +352,18 @@ class PaddingTest(TestCase):
             # profiling
             self.do_profiling(opt_f_with_padding, opt_f_without_padding, perf_args, perf_kwargs)
 
-    def do_profiling(self, f_with_padding, f_without_padding, args=(), kwargs={}):
+    def do_profiling(self, f_lhs, f_rhs, tag_lhs="With padding", tag_rhs="Without padding", args=(), kwargs={}):
        torch.cuda.synchronize()
        with torch.profiler.profile() as p:
            niter = 3
            for _ in range(niter):
                with torch.profiler.record_function(
-                   "With padding"
+                   tag_lhs
                ), torch.autograd.skip_grad_layout_contract():
-                   f_with_padding(*args, **kwargs)
+                   f_lhs(*args, **kwargs)
 
-               with torch.profiler.record_function("Without padding"):
-                   f_without_padding(*args, **kwargs)
+               with torch.profiler.record_function(tag_rhs):
+                   f_rhs(*args, **kwargs)
            torch.cuda.synchronize()
 
        profile_path = "/tmp/chrome.json"
@@ -383,6 +393,49 @@ class PaddingTest(TestCase):
 
         self.run_acc_and_perf_test(model, inputs)
 
+    @unittest.skipIf(not DO_PERF_TEST, "Perf test not enabled")
+    def test_BertForMaskedLM(self, num_layers=1):
+        """
+        Make sure padding can be 'almost' as good as using a good shape.
+        """
+        from transformers import BertForMaskedLM 
+        config_cls = BertForMaskedLM.config_class
+        bs = 16
+        seq_length = 512
+
+        def create_model(vocab_size):
+            config = config_cls()
+            config.num_hidden_layers = num_layers
+            config.vocab_size = vocab_size
+            inputs = gen_transformer_inputs(config.vocab_size, bs, seq_length)
+            model = BertForMaskedLM(config)
+
+            optim = get_optim(model)
+            
+            def f(**inputs):
+                optim.zero_grad(True)
+                with torch.cuda.amp.autocast():
+                    pred = model(**inputs)
+                    loss = pred[0]
+                loss.backward()
+                optim.step()
+
+            return torch.compile(f), inputs
+
+        f_good_shape, inputs_good_shape = create_model(30528)
+        f_bad_shape, inputs_bad_shape = create_model(30527)
+
+        print("benchmark for good shape")
+        latency_good_shape = do_bench(lambda: f_good_shape(**inputs_good_shape))
+        print("benchmark for bad shape")
+        latency_bad_shape = do_bench(lambda: f_bad_shape(**inputs_bad_shape))
+        print(
+            f"Latency with good and bad shape: {latency_good_shape:.3f} v.s. {latency_bad_shape:.3f}"
+        )
+
+        self.do_profiling(lambda: f_good_shape(**inputs_good_shape), lambda: f_bad_shape(**inputs_bad_shape), tag_lhs="With good shape", tag_rhs="With bad shape")
+
+
     def test_longformer(self, bs=4):
         from transformers import AutoConfig, AutoModelForMaskedLM
         config = AutoConfig.from_pretrained("allenai/longformer-base-4096")
@@ -393,12 +446,7 @@ class PaddingTest(TestCase):
         #   "labels": [4, 1024]
         vocab_size = model.config.vocab_size
         seq_length = 1024
-        def geninp():
-            return torch.randint(0, vocab_size, (bs, seq_length), dtype=torch.int64, requires_grad=False)
-        input_dict = {
-            "input_ids": geninp(),
-            "labels": geninp()
-        }
+        input_dict = gen_transformer_inputs(vocab_size, bs, seq_length)
 
         self.run_acc_and_perf_test(model, input_dict)
 
@@ -478,6 +526,7 @@ class PaddingTest(TestCase):
             # According to this chrome trace: https://gist.github.com/shunting314/ce45398f7d51a63ce05fc8d411faddb3
             # An extra kernel is called if we pad x1 here. That cuase perf loss.
             self.do_profiling(lambda: fun(x2, weight), lambda: fun(x1, weight))
+
 
 if __name__ == "__main__":
     if HAS_CUDA:
