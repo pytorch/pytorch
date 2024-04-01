@@ -4170,6 +4170,9 @@ class ExternKernel(InputsKernel):
 
     def codegen_size_asserts(self, wrapper):
         if config.size_asserts and not V.graph.cpp_wrapper:
+            # comparing strides for 0 size tensor is tricky. Ignore them for now.
+            if sympy_product(self.get_size()) == 0:
+                return
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
             wrapper.writeline(
@@ -5271,25 +5274,25 @@ class FallbackKernel(ExternKernelAlloc):
             self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
         else:
             # For non-aten OpOverload, i.e. custom ops
+            self.python_kernel_name = f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"  # type: ignore[union-attr]
             if V.graph.cpp_wrapper:
                 self.use_runtime_dispatch = True
                 self.set_cpp_kernel(kernel)
-            else:
-                self.python_kernel_name = f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"  # type: ignore[union-attr]
 
         if self.use_runtime_dispatch:
             self.codegen_comment(wrapper)
 
             exported_args = None
             args = None
-            if config.is_fbcode() and V.graph.cpp_wrapper:
+            if config.abi_compatible:
                 exported_args = self.export_extern_kernel_node()
             else:
                 args = [*self.codegen_args(), *self.codegen_kwargs()]
 
             wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
                 self.get_name(),
-                self.get_kernel_name(),
+                self.python_kernel_name,
+                self.cpp_kernel_name,
                 args,
                 self.cpp_op_schema,
                 self.cpp_kernel_key,
@@ -5691,7 +5694,8 @@ class ConvolutionUnary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5766,7 +5770,8 @@ class ConvolutionBinary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5856,7 +5861,8 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5942,7 +5948,8 @@ class MKLPackedLinear(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5996,7 +6003,8 @@ class LinearUnary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -6062,7 +6070,8 @@ class LinearBinary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -6133,7 +6142,8 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -6386,7 +6396,8 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         )
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             codegen_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -6571,7 +6582,8 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         )
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             conv_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -6781,7 +6793,8 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         )
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             codegen_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,

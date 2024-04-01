@@ -382,7 +382,11 @@ class SymNode:
     def expect_true(self, file, line):
         from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
-        if self.has_hint() and not free_unbacked_symbols(self.expr):
+        if (
+            self.has_hint()
+            and not free_unbacked_symbols(self.expr)
+            and not self.shape_env.prefer_deferred_runtime_asserts_over_guards
+        ):
             # OK to generate guards
             return self.guard_bool(file, line)
         # Generate a deferred runtime assert (this might actually end up doing
@@ -715,9 +719,9 @@ current_module = sys.modules[__name__]
 
 def _get_sym_math_fn(name):
     def fn(a):
-        import sympy
+        import torch.utils._sympy.functions
 
-        return getattr(sympy, name)(a)
+        return getattr(torch.utils._sympy.functions, f"OpaqueUnaryFn_{name}")(a)
 
     return fn
 
