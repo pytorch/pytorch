@@ -310,7 +310,7 @@ class AOTInductorTestsTemplate:
         self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 1)
         self.assertEqual(counters["inductor"]["scmerge_split_sections_removed"], 1)
 
-    def test_amp_cpu(self):
+    def test_amp_fallback_random(self):
         def fn(x):
             return torch.nn.functional.silu(x) * x
 
