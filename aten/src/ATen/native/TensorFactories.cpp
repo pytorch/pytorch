@@ -1392,6 +1392,9 @@ Tensor zeros_like(
     if (self.is_sparse()) {
       res.sparse_resize_and_clear_(
           self.sizes(), self.sparse_dim(), self.dense_dim());
+    } else if (at::sparse_csr::is_sparse_compressed(self)) {
+      res.sparse_resize_and_clear_(
+          self.sizes(), self.sizes().size() - self.dense_dim(), self.dense_dim());
     } else {
       res.sparse_resize_and_clear_(self.sizes(), self.sizes().size(), 0);
     }
