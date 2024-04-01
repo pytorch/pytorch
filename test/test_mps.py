@@ -1472,11 +1472,11 @@ class MPSLeakyReluTest(TestCaseMPS):
                                                          0.9]]),
                 negative_slope=0.1))
 
-    def _testLeakyRelu(self, np_features, negative_slope, contiguous, device):
-        cpu_x = torch.from_numpy(np_features)
-        mps_x = torch.from_numpy(np_features).to('mps')
+    def _testLeakyRelu(self, shape, dtype, negative_slope, contiguous):
+        cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+        mps_x = cpu_x.detach().clone().to('mps')
 
-        if not contiguous:
+        if not contiguous and not (0 in shape or len(shape) < 2):
             # Tranposing will make the tensor non-contiguous
             cpu_x = cpu_x.transpose(0, 1)
             mps_x = mps_x.transpose(0, 1)
@@ -1490,7 +1490,7 @@ class MPSLeakyReluTest(TestCaseMPS):
         cpu_leaky_relu = relu_op(cpu_x)
         mps_leaky_relu = relu_op(mps_x)
         torch.testing.assert_close(cpu_leaky_relu, mps_leaky_relu.to('cpu'))
-
+        import pdb; pdb.set_trace()
         # test backward pass
 
         mps_leaky_relu = mps_leaky_relu.sum()
@@ -1499,17 +1499,18 @@ class MPSLeakyReluTest(TestCaseMPS):
         mps_leaky_relu.backward()
         cpu_leaky_relu.backward()
         assert cpu_x.grad is not None # Check that the grad is well-populated
+        import pdb; pdb.set_trace()
         self.assertEqual(cpu_x.grad, mps_x.grad)
         print(f'With contigous {contiguous} the cpu_x.grad contains {cpu_x.grad} and mps_x.grad {mps_x.grad}')
 
     def testNumbersCPU(self):
-        for t in [np.float32]:
-            for contiguous in [True, False]:
-                self._testLeakyRelu(
-                    np.array([[-9, 7, -5, 3, -1], [1, -3, 5, -7, 9]]).astype(t),
-                    negative_slope=0.2,
-                    contiguous=contiguous,
-                    device="cpu")
+        for t in [torch.float, torch.half]:
+            for shape in [(4,), (4, 3), (5, 4, 3)]:
+                for contiguous in [True, False]:
+                    self._testLeakyRelu(shape,
+                                        dtype=t,
+                                        negative_slope=0.2,
+                                        contiguous=contiguous)
 
 class TestAvgPool(TestCaseMPS):
     def _sum_pool2d(self, x, kernel_size):
