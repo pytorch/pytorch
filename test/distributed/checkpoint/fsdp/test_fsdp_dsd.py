@@ -8,7 +8,9 @@ from torch.distributed._composable.fsdp import fully_shard
 from torch.distributed._tensor import DTensor
 from torch.distributed.checkpoint.state_dict import (
     get_model_state_dict,
+    get_optimizer_state_dict,
     set_model_state_dict,
+    set_optimizer_state_dict,
     StateDictOptions,
 )
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
@@ -111,13 +113,15 @@ class TestFullyShardWithDistributedStateDict(FSDPTest):
     def test_compiled_model_with_buffers(self):
         model = ModelWithBuffers()
         model = torch.compile(model)
-
-        print(f"{model._persistent_buffers_set=}")
+        optim = torch.optim.Adam(model.parameters())
 
         sharded_sd = get_model_state_dict(model)
         self.assertTrue("non_persistent_buffer" not in sharded_sd)
         self.assertTrue("persistent_buffer" in sharded_sd)
         set_model_state_dict(model, sharded_sd)
+
+        sharded_osd = get_optimizer_state_dict(model, optim)
+        set_optimizer_state_dict(model, optim, optim_state_dict=sharded_osd)
 
 
 if __name__ == "__main__":

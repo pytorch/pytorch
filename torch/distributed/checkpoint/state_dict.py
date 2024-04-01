@@ -212,7 +212,10 @@ def _verify_options(
     )
     all_fqns = set()
 
-    for name, param in model.state_dict().items():
+    for name, param in chain(model.named_parameters(), model.named_buffers()):
+        # skip non-persistent buffers as they should not be in state_dict.
+        if name in model._non_persistent_buffers_set:
+            continue
         fqns = _get_fqns(model, name)
         fqn_param_mapping[param] = fqns
         for fqn in fqns:
@@ -407,7 +410,10 @@ def _load_model_state_dict(
     if not info.handle_model or not state_dict:
         return _IncompatibleKeys({}, {})
 
-    for key in model.state_dict().keys():
+    for key, _ in chain(model.named_parameters(), model.named_buffers()):
+        # skip non-persistent buffers as they should not be in state_dict.
+        if key in model._non_persistent_buffers_set:
+            continue
         fqns = _get_fqns(model, key)
         fqns_with_prefix = _get_fqns(
             model, key, skip_ddp_prefix=False, skip_compiler_prefix=False
