@@ -4068,7 +4068,9 @@ class ExternKernel(InputsKernel):
                     x,
                     freeze=True,
                     want_contiguous=False,
-                    stride_order=None
+                    stride_order=get_stride_order(
+                        V.graph.sizevars.size_hints(x.get_layout().stride)
+                    )
                     if is_stride_order_storage_and_layout(x, order)
                     else order,
                 )
@@ -4179,6 +4181,9 @@ class ExternKernel(InputsKernel):
 
     def codegen_size_asserts(self, wrapper):
         if config.size_asserts and not V.graph.cpp_wrapper:
+            # comparing strides for 0 size tensor is tricky. Ignore them for now.
+            if sympy_product(self.get_size()) == 0:
+                return
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
             wrapper.writeline(
