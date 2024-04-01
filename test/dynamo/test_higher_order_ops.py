@@ -4927,6 +4927,47 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(actual, expected)
 
     @config.patch(capture_func_transforms=True)
+    def test_linearize(self):
+        counters.clear()
+
+        if check_dynamic_shape_capture():
+            self.skipTest("test fails with dynamic shapes")
+
+        def wrapper_fn(x):
+            output, jvp_fn = torch.func.linearize(torch.sin, x)
+            return output, jvp_fn(x)
+
+        x = torch.randn(3, 3, 3)
+        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False)
+
+        # Dynamic shapes produce a slightly different graph.
+        if check_dynamic_shape_capture():
+            return
+
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_self_tensor_constant0 : torch.Tensor):
+        l_self_tensor_constant0 = L_self_tensor_constant0
+
+        alias_default = torch.ops.aten.alias.default(l_self_tensor_constant0);  l_self_tensor_constant0 = None
+
+        sin_default = torch.ops.aten.sin.default(alias_default)
+
+        alias_default_1 = torch.ops.aten.alias.default(alias_default)
+
+        cos_default = torch.ops.aten.cos.default(alias_default_1);  alias_default_1 = None
+
+        alias_default_2 = torch.ops.aten.alias.default(sin_default)
+        return (alias_default, cos_default, sin_default)
+""",
+        )
+
+
+
+    @config.patch(capture_func_transforms=True)
     @config.patch(error_on_recompile=True)
     def test_vmap_recompile(self):
         @torch.compile(backend="eager")

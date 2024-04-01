@@ -46,9 +46,9 @@ from torch._C._functorch import (
 from torch._functorch.utils import exposed_in, argnums_t
 
 
-def lazy_dynamo_disable(func):
+def lazy_dynamo_disallow(func):
     import torch._dynamo
-    return torch._dynamo.disable(func)
+    return torch._dynamo.disallow_in_graph(func)
 
 @contextlib.contextmanager
 def enable_inplace_requires_grad(enabled):
@@ -85,6 +85,14 @@ def _jvp_treespec_compare(primals, tangents):
             f'tangents also must be. Got primals with structure {primals_spec} '
             f'and tangents with structure {tangents_spec}')
 
+
+def _linearize_treespec_compare(primals, tangents):
+    # Revert this once #116264 gets fixed
+    _, primals_argspec = tree_flatten(primals)
+    _, tangent_argspec = tree_flatten(tangents)
+    if tangent_argspec != primals_argspec:
+        raise RuntimeError(f"Expected the tangents {tangent_argspec} to have "
+                           f"the same argspec as the primals {primals_argspec}")
 
 def _set_tensor_requires_grad(x):
     # avoid graph-break on x.requires_grad_()
@@ -1627,8 +1635,8 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
 
         return tangents
 
-    jvp_graph = make_fx(trace_fn)(flat_tangents)
-    const_folded_jvp_graph = const_fold.split_const_subgraphs(jvp_graph)
+    jvp_graph = lazy_dynamo_disallow(make_fx)(trace_fn)(flat_tangents)
+    const_folded_jvp_graph = lazy_dynamo_disallow(const_fold.split_const_subgraphs)(jvp_graph)
 
     # Hold only the meta-data regarding the primals.
     flat_primals_shape = tuple(p.shape for p in flat_primals)
@@ -1660,9 +1668,10 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
     #   calling the folded fx graph and unflattening fx graph output
     def jvp_fn(*tangents):
         flat_tangents, tangent_argspec = tree_flatten(tangents)
-        if tangent_argspec != primals_argspec:
-            raise RuntimeError(f"Expected the tangents {tangent_argspec} to have "
-                               f"the same argspec as the primals {primals_argspec}")
+        _linearize_treespec_compare(primals, tangents)
+        # if tangent_argspec != primals_argspec:
+        #     raise RuntimeError(f"Expected the tangents {tangent_argspec} to have "
+        #                        f"the same argspec as the primals {primals_argspec}")
 
         forward_ad_checks(flat_tangents)
 
@@ -1670,5 +1679,4 @@ def linearize(func: Callable, *primals) -> Tuple[Any, Callable]:
         # const folded graph can return flat output,
         # so transform output.
         return tree_unflatten(flat_output, output_spec)
-
     return output, jvp_fn
