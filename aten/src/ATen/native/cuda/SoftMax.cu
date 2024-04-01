@@ -175,7 +175,7 @@ inline dim3 SoftMax_getBlockSize(int ILP, uint64_t dim_size) {
 
 inline dim3 SoftMaxForward_getBlockSize(uint64_t dim_size) {
   uint64_t block_size = 1;
-  uint64_t max_block_size = std::min(dim_size / ILP, static_cast<uint64_t>(max_threads));
+  uint64_t max_block_size = std::min(dim_size, static_cast<uint64_t>(max_threads));
 
   if (max_block_size % C10_WARP_SIZE == 0) {
     block_size = max_block_size;
