@@ -31,6 +31,7 @@ from . import config, inductor_prims
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
+quantized = torch.ops.quantized
 quantized_decomposed = torch.ops.quantized_decomposed
 
 inductor_decompositions = get_decompositions(
@@ -70,6 +71,7 @@ inductor_decompositions = get_decompositions(
         aten.tril_indices,
         aten.triu_indices,
         aten.upsample_bilinear2d.vec,
+        quantized.linear_dynamic_fp16_unpacked_weight,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
@@ -465,6 +467,16 @@ def randint_like_low(
 @register_decomposition(aten.randint.default)
 def randint(high, size, **kwargs):
     return aten.randint.low(0, high, size, **kwargs)
+
+
+@register_decomposition(quantized.linear_dynamic_fp16_unpacked_weight.default)
+def linear_dynamic_fp16_unpacked_weight(
+    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+) -> torch.Tensor:
+    packed_weight = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16(weight)
+    return torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight(
+        input, packed_weight, bias, weight.size()[0]
+    )
 
 
 # The difference between quantize_per_tensor.default and quantize_per_tensor.tensor is
