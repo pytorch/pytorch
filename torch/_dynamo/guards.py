@@ -719,12 +719,13 @@ class GuardBuilder(GuardBuilderBase):
 
     # Note: the order of the guards in this file matters since we sort guards on the same object by lineno
     def HASATTR(self, guard: Guard):
-        assert isinstance(
-            guard.originating_source, AttrSource
-        ), f"invalid source {guard.name}"
-        base_source = guard.originating_source.base
+        source = guard.originating_source
+        if isinstance(source, NNModuleSource):
+            source = source.base
+        assert isinstance(source, AttrSource), f"invalid source {guard.name}"
+        base_source = source.base
         base = base_source.name()
-        attr = guard.originating_source.member
+        attr = source.member
 
         ref = self.arg_ref(base)
         val = hasattr(self.get(base), attr)
@@ -742,7 +743,7 @@ class GuardBuilder(GuardBuilderBase):
             if val:
                 # Just install a getattr manager. GetAttrGuardAccessor itself
                 # acts as hasattr guard.
-                example_value = self.get(guard.originating_source.name())
+                example_value = self.get(source.name())
                 base_manager.getattr_manager(
                     attr=attr, source=guard.name, example_value=example_value
                 )

@@ -2241,7 +2241,6 @@ class ShapeEnv:
         fresh = False
 
         if self._translation_validation_enabled and node_key not in self.fx_node_cache:
-            from torch.fx.experimental.validator import z3op
 
             # Presence of None in the arguments implies that we should ignore this operation.
             if any(a is None for a in args):
@@ -2251,12 +2250,11 @@ class ShapeEnv:
                 return None, fresh
 
             fresh = True
-            lifted_op = z3op(op, self.validator)
 
             # If translation validation is enabled, all arguments must have its
             # own FX node.
             assert all(a is not None for a in args), f"missing arg in FX graph ({op.__name__}): {args}"
-            node = self.fx_node_cache[node_key] = self.graph.call_function(lifted_op, args)
+            node = self.fx_node_cache[node_key] = self.graph.call_function(op, args)
             self.name_to_node[node.name] = node
 
         return self.fx_node_cache.get(node_key, None), fresh
@@ -3808,8 +3806,12 @@ class ShapeEnv:
                 "Maybe you need to add guard_size_oblivious to framework code, see doc below for more guidance.\n\n"
             )
         fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
+        if expr.is_integer:
+            msg = "Could extract specialized integer from data-dependent expression"
+        else:
+            msg = "Could not guard on data-dependent expression"
         return GuardOnDataDependentSymNode(
-            f"Could not guard on data-dependent expression {expr} (unhinted: {unhinted_expr}).  "
+            f"{msg} {expr} (unhinted: {unhinted_expr}).  "
             f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
             f"{size_oblivious_result_msg}"
             "Potential framework code culprit (scroll up for full backtrace):\n"
@@ -4268,8 +4270,7 @@ class ShapeEnv:
         try:
             if orig_expr.is_number:
                 self.log.debug("eval %s [trivial]", orig_expr)
-                # NB: don't test float as there may be precision issues
-                if isinstance(hint, (int, bool)):
+                if hint is not None:
                     assert orig_expr == hint, f"{orig_expr} != {hint}"
                 return orig_expr
 
@@ -4280,8 +4281,7 @@ class ShapeEnv:
                                                       size_oblivious=size_oblivious)
             if static_expr is not None:
                 self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
-                # NB: don't test float as there may be precision issues
-                if isinstance(hint, (int, bool)):
+                if hint is not None:
                     assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
