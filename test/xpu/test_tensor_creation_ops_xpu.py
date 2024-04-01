@@ -1,15 +1,21 @@
 # Owner(s): ["module: intel"]
 
+import os
 import sys
 
 import torch
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import NoTest, run_tests, TEST_XPU, TestCase
 
-from test.xpu.xpu_test_utils import copy_tests, XPUPatch
+# Add test folder to path
+current_file_path = os.path.realpath(__file__)
+test_package = os.path.dirname(os.path.dirname(current_file_path))
+sys.path.append(test_package)
+
+from xpu.xpu_test_utils import copy_tests, XPUPatch
 
 with XPUPatch():
-    from test.test_tensor_creation_ops import Namespace
+    from test_tensor_creation_ops import Namespace
 
 if not TEST_XPU:
     print("XPU not available, skipping tests", file=sys.stderr)
