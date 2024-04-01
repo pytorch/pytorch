@@ -89,6 +89,8 @@ else:
         return False
 
 
+output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+
 LOCK_TIMEOUT = 600
 
 # timing metrics for time spent in the compilation
@@ -1661,6 +1663,7 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+        output_code_log.info("Output code written to: %s", input_path)
 
         def _compile_consts_linux(consts: bytes) -> str:
             _, consts_path = write(
@@ -2731,12 +2734,6 @@ class AsyncCompile:
             return task()
         return cls.pool().submit(task)
 
-    @classmethod
-    def map(cls, fn: Callable[..., Any], seq: List[Any]) -> List[Any]:
-        if config.compile_threads <= 1 or len(seq) <= 1:
-            return list(map(fn, seq))
-        return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
-
     def triton(
         self, kernel_name: str, source_code: str, device_str: str = "cuda"
     ) -> Union[TritonFuture, ModuleType]:
@@ -2753,17 +2750,11 @@ class AsyncCompile:
         else:
             return _load_kernel(kernel_name, source_code)
 
-    def multi_kernel(self, *args, **kwargs) -> ModuleType:
-        """
-        Async compile the python shim for multi-kernel.
-        """
+    def multi_kernel(self, *args, **kwargs) -> Any:
+        from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
-        def task():
-            from torch._inductor.codegen.multi_kernel import MultiKernelCall
-
-            return MultiKernelCall(*args, **kwargs)
-
-        return self.submit(task)
+        # no need to call this in parallel since the sub-kernels are already parallel tasks
+        return MultiKernelCall(*args, **kwargs)
 
     def cpp(self, source_code: str) -> ModuleType:
         def task():
