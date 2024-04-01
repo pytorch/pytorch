@@ -109,7 +109,6 @@ if config.abi_compatible:
         ] = test_torchinductor.TestFailure(("cuda_wrapper",), is_skip=False)
     skip_list = [
         "test_multi_device_cuda",
-        "test_linear1_cuda",  # segfault from double free
     ]
     for test_name in skip_list:
         test_failures_cuda_wrapper[test_name] = test_torchinductor.TestFailure(

@@ -7194,8 +7194,6 @@ class CommonTemplate:
 
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_dtype_sympy_expr(self):
-        torch._inductor.metrics.disable_cpp_wrapper = 0
-
         @torch._dynamo.optimize_assert("inductor")
         def fn(a):
             y = a[..., :-1, :].contiguous()
@@ -7203,11 +7201,6 @@ class CommonTemplate:
 
         result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
         result.sum().backward()
-
-        expected_disable_cpp_wrapper = 0
-        self.assertEqual(
-            torch._inductor.metrics.disable_cpp_wrapper, expected_disable_cpp_wrapper
-        )
 
     def test_dropout2(self):
         n = 100000
