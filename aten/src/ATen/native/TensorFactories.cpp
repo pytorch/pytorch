@@ -35,6 +35,7 @@
 #include <ATen/ops/_efficientzerotensor_native.h>
 #include <ATen/ops/_empty_affine_quantized.h>
 #include <ATen/ops/_empty_per_channel_affine_quantized.h>
+#include <ATen/ops/_sparse_compressed_tensor_with_dims_native.h>
 #include <ATen/ops/arange.h>
 #include <ATen/ops/arange_native.h>
 #include <ATen/ops/bartlett_window_native.h>
@@ -1396,6 +1397,21 @@ Tensor zeros_like(
     }
     res._coalesced_(true);
 
+    return res;
+  } else if (at::sparse_csr::is_sparse_compressed(options.layout())) {
+    int64_t nnz = 0;
+    int64_t dense_dim = (self.layout() == kStrided ? self.dim() - 2: self.dense_dim());
+    DimVector blocksize{};
+    if (self.layout() == kSparseBsr || self.layout() == kSparseBsc) {
+      blocksize.append(at::sparse_csr::getBlockSize(self));
+    }
+    ScalarType index_dtype = at::sparse_csr::getIndexDtype(self);
+    auto res = at::native::sparse_compressed_tensor_with_dims(
+      nnz, dense_dim, self.sizes(), blocksize, index_dtype,
+      typeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
+    Tensor compressed_indices, plain_indices;
+    std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(res);
+    compressed_indices.zero_();
     return res;
   }
   auto result = at::empty_like(self, options, optional_memory_format);
