@@ -849,6 +849,11 @@ class Argument:
     is_out: _bool
     alias_info: Optional[AliasInfo]
 
+
+class Type:
+    pass
+
+
 class FunctionSchema:
     arguments: List[Argument]
     returns: List[Argument]
