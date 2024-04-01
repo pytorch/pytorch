@@ -715,11 +715,12 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps)
   using namespace mps;
   using CachedGraph = MPSUnaryGradCachedGraph;
 
-  Tensor grad_input_ = at::empty_like(self, self.suggest_memory_format());
   // Empty output
-  if (grad_input.numel() == 0) {
-    grad_input.copy_(grad_input_);
+  if (self.numel() == 0) {
+    return;
   }
+
+  Tensor grad_input_ = at::empty_like(self, self.suggest_memory_format());
 
   auto approximate_type = get_gelutype_enum(approximate);
   MPSStream* stream = getCurrentMPSStream();
