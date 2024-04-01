@@ -19,6 +19,12 @@ cmake_policy(SET CMP0069 NEW)
 # nice when it's possible, and it's possible on our Windows configs.
 cmake_policy(SET CMP0092 NEW)
 
+# Prohibit in-source builds
+if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
+message(FATAL_ERROR "In-source build are not supported")
+endif()
+
+
 # ---[ Project and semantic versioning.
 project(Torch CXX C)
 
