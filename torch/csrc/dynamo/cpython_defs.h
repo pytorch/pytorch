@@ -2,6 +2,10 @@
 
 #include <torch/csrc/utils/python_compat.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Functions that need to be copied from the CPython source
 // should go in cpython_defs.c. Copying is required when, e.g.,
 // we need to call internal CPython functions that are not exposed.
@@ -31,3 +35,7 @@ void THP_PyThreadState_PopFrame(
 // pointers to _PyOpcode_Caches for C++
 extern const uint8_t* THP_PyOpcode_Caches;
 extern const int THP_PyOpcode_Caches_size;
+
+#ifdef __cplusplus
+}
+#endif
