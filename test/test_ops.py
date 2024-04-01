@@ -2411,6 +2411,22 @@ class Namespace:
     class TestCommonWrapper(TestCommon):
         pass
 
+    class TestCompositeComplianceWrapper(TestCompositeCompliance):
+        pass
+
+    class TestMathBitsWrapper(TestMathBits):
+        pass
+
+    class TestRefsOpsInfoWrapper(TestRefsOpsInfo):
+        pass
+
+    class TestFakeTensorWrapper(TestFakeTensor):
+        pass
+
+    class TestTagsWrapper(TestTags):
+        pass
+
+
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
