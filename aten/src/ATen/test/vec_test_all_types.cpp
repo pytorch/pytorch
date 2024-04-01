@@ -555,7 +555,7 @@ namespace {
         using UVT = UvalueType<vec>;
         UVT tolerance = getDefaultTolerance<UVT>();
         // double: 2e+305  float: 4e+36 (https://sleef.org/purec.xhtml#eg)
-        UVT maxCorrect = std::is_same<UVT, float>::value ? (UVT)4e+36 : (UVT)2e+305;
+        UVT maxCorrect = std::is_same_v<UVT, float> ? (UVT)4e+36 : (UVT)2e+305;
         TestingCase<vec> testCase = TestingCase<vec>::getBuilder()
             .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)0}}, true, tolerance})
             .addDomain(CheckWithinDomains<UVT>{ { {(UVT)0, (UVT)1000 }}, true, tolerance})
