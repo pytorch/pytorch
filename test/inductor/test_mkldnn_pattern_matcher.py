@@ -1654,7 +1654,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     to_bf16_after_binary = 2 * (add_fn == add_fn_list[2] and fq_x2)
                 else:
                     convert_before_quant = int8_mixed_bf16 and not fq_x2
-                    to_bf16_after_binary = (add_fn == add_fn_list[2] and fq_x2)
+                    to_bf16_after_binary = add_fn == add_fn_list[2] and fq_x2
                 self.assertEqual(
                     counters["inductor"]["qlinear_binary_matcher_nodes"],
                     10 + 2 * use_relu + to_bf16_after_binary + convert_before_quant,
