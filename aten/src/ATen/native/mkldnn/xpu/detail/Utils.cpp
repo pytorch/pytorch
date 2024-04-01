@@ -349,5 +349,4 @@ bool binary_valid(
   return false;
 }
 
-
 }
