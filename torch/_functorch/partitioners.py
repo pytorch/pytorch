@@ -957,11 +957,11 @@ def min_cut_rematerialization_partition(
             if is_alias:
                 required_bw_nodes.update(set(view_chain))
 
-    # TODO(yf225): if any saved nodes is an alias of primal input, save the primal input instead of the alias.
-    # We do this by updating `required_bw_nodes` and then redo min-cut algorithm.
-    if_primal_input_alias_is_saved_then_move_the_view_chain_to_bwd_graph(saved_values)
-
-    saved_sym_nodes, saved_values = min_cut()
+    if config.move_view_chain_to_bwd_graph:
+        # TODO(yf225): if any saved nodes is an alias of primal input, save the primal input instead of the alias.
+        # We do this by updating `required_bw_nodes` and then redo min-cut algorithm.
+        if_primal_input_alias_is_saved_then_move_the_view_chain_to_bwd_graph(saved_values)
+        saved_sym_nodes, saved_values = min_cut()
 
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
     fw_module, bw_module = _extract_fwd_bwd_modules(

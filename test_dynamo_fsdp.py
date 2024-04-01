@@ -258,6 +258,7 @@ def main_compiled(n_iter):
         return torch.compile(gm, backend="inductor", fullgraph=True)
 
     torch._dynamo.config.trace_distributed = True
+    torch._functorch.config.move_view_chain_to_bwd_graph = True
     torch._inductor.config.triton.unique_kernel_names = True
 
     # if dist.get_rank() == 0:

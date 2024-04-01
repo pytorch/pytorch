@@ -331,6 +331,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 def compiler_fn(gm):
                     return torch.compile(gm, backend="inductor", fullgraph=True)
                 torch._dynamo.config.trace_distributed = True
+                torch._functorch.config.move_view_chain_to_bwd_graph = True
                 torch._inductor.config.triton.unique_kernel_names = True
                 model_to_be_compiled = copy.deepcopy(model).cuda()
                 fully_shard(model_to_be_compiled, reshard_after_forward=True, _reshard_after_forward_root=True)
@@ -479,6 +480,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 def compiler_fn(gm):
                     return torch.compile(gm, backend="inductor", fullgraph=True)
                 torch._dynamo.config.trace_distributed = True
+                torch._functorch.config.move_view_chain_to_bwd_graph = True
                 torch._inductor.config.triton.unique_kernel_names = True
                 model_to_be_compiled = copy.deepcopy(model).cuda()
                 for mlp in model_to_be_compiled:
@@ -655,6 +657,7 @@ class TestFullyShard1DTrainingCore(FSDPTest):
                 def compiler_fn(gm):
                     return torch.compile(gm, backend="inductor", fullgraph=True)
                 torch._dynamo.config.trace_distributed = True
+                torch._functorch.config.move_view_chain_to_bwd_graph = True
                 torch._inductor.config.triton.unique_kernel_names = True
                 model_to_be_compiled = copy.deepcopy(model).cuda()
                 fully_shard(model_to_be_compiled.inner, reshard_after_forward=True, _reshard_after_forward_root=True)
