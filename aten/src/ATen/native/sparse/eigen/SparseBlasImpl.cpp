@@ -419,4 +419,4 @@ void add_out_sparse(
 
 } // namespace at::native::sparse::impl::eigen
 
-#endif C10_MOBILE
+#endif // C10_MOBILE
