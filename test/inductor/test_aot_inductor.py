@@ -20,7 +20,10 @@ from torch.export import Dim, export
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
-from torch.testing._internal.common_quantization import skip_if_no_torchvision
+from torch.testing._internal.common_quantization import (
+    skip_if_no_torchvision,
+    skipIfNoFBGEMM,
+)
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
@@ -756,6 +759,23 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device=self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    @skipIfNoFBGEMM
+    def test_quantized_linear(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+                self.bias = torch.randn(10, device=device)
+
+            def forward(self, x):
+                return torch.ops.quantized.linear_dynamic_fp16_unpacked_weight(
+                    x, self.weight, self.bias
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
 
     def test_zero_grid_with_unbacked_symbols(self):
         class Repro(torch.nn.Module):
@@ -2409,6 +2429,8 @@ CUDA_TEST_FAILURES = {
     "test_runtime_checks_fp8": fail_non_abi_compatible_cuda(is_skip=True),
     "test_runtime_checks_dtype_failed": fail_non_abi_compatible_cuda(is_skip=True),
     "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
+    # quantized unsupported for GPU
+    "test_quantized_linear": fail_cuda(is_skip=True),
 }
 
 if TEST_WITH_ROCM:
@@ -2458,6 +2480,7 @@ if not IS_FBCODE:
                 is_skip=True
             ),
             "test_output_path_1": fail_minimal_arrayref_interface(is_skip=True),
+            "test_quantized_linear": fail_minimal_arrayref_interface(is_skip=True),
             "test_repeat_interleave": fail_minimal_arrayref_interface(is_skip=True),
             "test_return_constant": fail_minimal_arrayref_interface(is_skip=True),
             "test_reuse_kernel": fail_minimal_arrayref_interface(is_skip=True),

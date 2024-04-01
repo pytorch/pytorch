@@ -5269,7 +5269,15 @@ class FallbackKernel(ExternKernelAlloc):
                     self.init_args_default_value(schema)
             else:
                 self.python_kernel_name = str(kernel)
-
+        elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
+            # Internal Quantized Fallback Ops
+            assert isinstance(kernel, torch._ops.OpOverload)
+            if V.graph.cpp_wrapper:
+                self.set_cpp_kernel(kernel)
+                if not config.abi_compatible:
+                    self.use_runtime_dispatch = True
+            else:
+                self.python_kernel_name = str(kernel)
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
         else:
