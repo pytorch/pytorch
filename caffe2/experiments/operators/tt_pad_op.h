@@ -79,7 +79,6 @@ class TTPadGradientOp final : public Operator<Context> {
 
     auto old_dim0 = *Input(1).template data<int64_t>();
     auto new_dim0 = G.size(0);
-    auto dim1 = G.size(1);
 
     if (old_dim0 < new_dim0) {
       output->ShrinkTo(old_dim0);

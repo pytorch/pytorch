@@ -4,6 +4,7 @@ import unittest
 from typing import NamedTuple
 
 from torch._inductor import config
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
@@ -11,7 +12,6 @@ from torch.testing._internal.common_utils import (
     slowTest,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase as TorchTestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -49,11 +49,11 @@ class CudaWrapperTemplate:
     pass
 
 
-class TestCudaWrapper(TorchTestCase):
+class TestCudaWrapper(InductorTestCase):
     device = "cuda"
 
 
-class DynamicShapesCudaWrapperCudaTests(TorchTestCase):
+class DynamicShapesCudaWrapperCudaTests(InductorTestCase):
     device = "cuda"
 
 
@@ -97,8 +97,6 @@ if config.abi_compatible:
     xfail_list = [
         "test_bernoulli1_cuda",  # cpp fallback op naming issue
         "test_conv_backward_cuda",
-        "test_custom_op_cuda",  # needs custom op support
-        "test_index_put_deterministic_fallback_cuda",
         "test_profiler_mark_wrapper_call_cuda",
         "test_scaled_dot_product_attention_cuda_dynamic_shapes",
     ]
@@ -175,7 +173,7 @@ if RUN_CUDA:
     class BaseTest(NamedTuple):
         name: str
         device: str = "cuda"
-        tests: TorchTestCase = test_torchinductor.GPUTests()
+        tests: InductorTestCase = test_torchinductor.GPUTests()
 
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
@@ -189,7 +187,9 @@ if RUN_CUDA:
         BaseTest("test_cat"),  # alias
         BaseTest("test_convolution1"),
         BaseTest("test_conv_backward"),
-        BaseTest("test_custom_op"),
+        BaseTest("test_custom_op_1"),
+        BaseTest("test_custom_op_2"),
+        BaseTest("test_custom_op_3"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),
@@ -237,10 +237,16 @@ if RUN_CUDA:
         #     device=None,
         #     tests=test_select_algorithm.TestSelectAlgorithm(),
         # ),
-        BaseTest(
-            "test_mm_plus_mm2",
-            tests=test_select_algorithm.TestSelectAlgorithm(),
-        ),
+        # TODO: Re-enable this test after fixing cpp wrapper for mm_plus_mm2.
+        # This test is unstable: it succeeds when an Triton kernel is used, and fails when a Aten kernel is used.
+        # The current state is that it's unstable, depending on the autotune result.
+        # The failing code generates aoti_torch_cuda__mm_plus_mm (likely some bug when generating ExternKernel)
+        # More information check:
+        # https://hud.pytorch.org/pytorch/pytorch/commit/b6982bf2b25d2d3ba5d82488a39721d6013a838f?fbclid=IwAR23OCV2rCALsGQk6kmkOqT8DfgQedYDt_Gs2R-t9ejSJNjRskkS1rzncDE
+        # BaseTest(
+        #     "test_mm_plus_mm2",
+        #     tests=test_select_algorithm.TestSelectAlgorithm(),
+        # ),
         BaseTest("test_fft_real_input"),
         BaseTest("test_fft_real_input_real_output"),
     ]:
@@ -262,7 +268,7 @@ if RUN_CUDA:
     )
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if RUN_CUDA:
         run_tests(needs="filelock")

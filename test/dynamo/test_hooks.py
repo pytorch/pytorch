@@ -512,9 +512,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         x2 = torch.ones(4, requires_grad=True)
         with compiled_autograd.enable(compiler_fn):
             dynamo_out = torch._dynamo.optimize("inductor", nopython=True)(mod)(x2, obj)
-            with self.assertRaisesRegex(
-                torch._dynamo.exc.Unsupported, ".*BuiltinVariable\\(str\\).*"
-            ):
+            with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "builtin: str"):
                 dynamo_out[0].backward(torch.ones(4))
 
         self.assertEqual(obj.count, 2)

@@ -9,6 +9,10 @@ inputs:
   job_identifier:
     description: Text that uniquely identifies a given job type within a workflow. All shards of a job should share the same job identifier.
     required: true
+  s3_bucket:
+    description: S3 bucket to download PyTest cache
+    required: false
+    default: "gha-artifacts"
 
 runs:
   using: composite
@@ -30,6 +34,7 @@ runs:
         CACHE_DIR: ${{ inputs.cache_dir }}
         JOB_IDENTIFIER: ${{ inputs.job_identifier }}
         REPO: ${{ github.repository }}
+        BUCKET: ${{ inputs.s3_bucket }}
       run: |
         python3 .github/scripts/pytest_cache.py \
           --download \
@@ -38,3 +43,4 @@ runs:
           --job_identifier $JOB_IDENTIFIER \
           --temp_dir $RUNNER_TEMP \
           --repo $REPO \
+          --bucket $BUCKET \
