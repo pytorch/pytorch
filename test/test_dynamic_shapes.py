@@ -377,6 +377,21 @@ class TestPySymInt(TestCase):
         self.assertEqual(guard_int(a0), 2)
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
 
+    def test_prefer_deferred_runtime_assertions_over_guards(self):
+        shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
+        s0 = create_symint(shape_env, 2)
+        self.assertEqual(guard_int(s0), 2)
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
+
+        shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
+        s0 = create_symint(shape_env, 2)
+        self.assertTrue(expect_true(s0 == 2))
+        self.assertEqual(len(shape_env.guards), 0)
+        self.assertExpectedInline(
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[None]]),
+            """[Eq(s0, 2)]"""
+        )
+
     def test_sym_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -403,7 +418,7 @@ class TestPySymInt(TestCase):
         r = torch._sym_sqrt(a0)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s0), 2)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(s0), 2)""")
 
     def test_sym_floor(self):
         shape_env = ShapeEnv()

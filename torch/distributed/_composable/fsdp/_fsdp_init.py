@@ -118,7 +118,6 @@ def _move_states_to_device(
     params: List[nn.Parameter],
     buffers: List[torch.Tensor],
     device: torch.device,
-    mesh_info: FSDPMeshInfo,
 ) -> None:
     """
     We have FSDP move states to device for simpler and faster initialization
@@ -133,7 +132,7 @@ def _move_states_to_device(
             # Keep meta-device tensors on meta device for deferred init
             continue
         if isinstance(tensor, DTensor):
-            if (dtensor_mesh_type := tensor._spec.mesh.device_type) != device.type:
+            if (dtensor_mesh_type := tensor.device_mesh.device_type) != device.type:
                 raise ValueError(
                     "Requires DTensor to have mesh of the same type as the FSDP mesh "
                     f"but got {dtensor_mesh_type} for DTensor and {device.type} for FSDP"
