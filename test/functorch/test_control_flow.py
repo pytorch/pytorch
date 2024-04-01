@@ -1667,7 +1667,6 @@ def forward(self, x_1):
         assert isinstance(args, (tuple, list))
         self.assertEqual(f(*args), exp_res)
         gm = make_fx(f)(*args)
-        gm.print_readable()
         self.assertEqual(gm(*args), exp_res)
 
         def cnt_placeholder(gm):

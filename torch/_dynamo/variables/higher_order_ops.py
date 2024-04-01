@@ -793,9 +793,6 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Expected a tuple but got {args[3].python_type()}",
             )
         additional_inputs = args[3].unpack_var_sequence(tx)
-        assert (
-            len(additional_inputs) == 0
-        ), "Additional inputs are set automatically by dynamo"
 
         (
             (cond_r, cond_treespec),
@@ -804,7 +801,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             args[0],
-            operands,
+            operands + additional_inputs,
             {},
             "while_loop",
             source_target=self.value,
@@ -833,7 +830,7 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             args[1],
-            operands,
+            operands + additional_inputs,
             {},
             "while_loop",
             source_target=self.value,
@@ -856,7 +853,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             "body_fn",
         )
 
-        additional_lifted_inputs = tuple(cond_shared + cond_unique + body_unique)
+        # Note: cond_shared and body_shared refer to the same proxy in parent graph
+        # so using either of them is OK. Use cond_shared as it doesnt matter.
+        additional_lifted_inputs = cond_shared + cond_unique + body_unique
 
         body_nn_modules = dict(tx.output.nn_modules)
 
@@ -880,7 +879,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             cond_node,
             body_node,
             tuple([operand.as_proxy() for operand in operands]),
-            additional_lifted_inputs,
+            tuple(
+                [inp.as_proxy() for inp in additional_inputs] + additional_lifted_inputs
+            ),
         )
 
         return _call_function_and_unflatten_output(

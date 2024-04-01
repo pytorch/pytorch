@@ -7210,22 +7210,21 @@ class WhileLoop(ExternKernel):
     ):
         carried_inputs = [cls.realize_input(x) for x in carried_inputs]
         additional_inputs = [cls.realize_input(x) for x in additional_inputs]
+        all_inputs = carried_inputs + additional_inputs
 
-        fx_carried_inputs = V.graph.current_node.args[-2]
-        fx_additional_inputs = V.graph.current_node.args[-1]
-        fake_carried_inputs = [x.meta["val"] for x in fx_carried_inputs]  # type: ignore[union-attr]
-        fake_additional_inputs = [x.meta["val"] for x in fx_additional_inputs]  # type: ignore[union-attr]
+        fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
+        fake_all_inputs = [x.meta["val"] for x in fx_all_inputs]  # type: ignore[union-attr]
 
         for subgraph in (cond_fn, body_fn):
             if subgraph.graph is None:
                 # create and lower subgraphs
                 subgraph.graph = V.graph.make_subgraph(
                     gm=subgraph.graph_module,
-                    example_inputs=fake_carried_inputs + fake_additional_inputs,
+                    example_inputs=fx_all_inputs,  # type: ignore[arg-type]
                     subgraph_name=subgraph.name,
                 )
                 with V.set_graph_handler(subgraph.graph):
-                    subgraph.graph.run(*fake_carried_inputs, *fake_additional_inputs)
+                    subgraph.graph.run(*fake_all_inputs)
 
         cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
         body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
@@ -7242,10 +7241,10 @@ class WhileLoop(ExternKernel):
         assert len(cond_outputs[0].get_size()) == 0, cond_outputs
 
         assert (
-            len(carried_inputs) > 0
+            len(all_inputs) > 0
         ), "torch.while_loop is assumed to have at least one operand."
 
-        device = carried_inputs[0].get_device()
+        device = all_inputs[0].get_device()
 
         # make sure carried_inputs and body outputs are structurally equivalent
         assert len(carried_inputs) == len(body_outputs), (carried_inputs, body_outputs)

@@ -1,3 +1,5 @@
+from typing import Tuple
+
 import torch
 import torch.utils._pytree as pytree
 
@@ -31,19 +33,26 @@ class WhileLoopOp(HigherOrderOperator):
             )
         if not isinstance(carried_inputs, tuple):
             raise RuntimeError(
-                "carried_inputs must be a tuple, got " f"{type(carried_inputs)}"
+                f"carried_inputs must be a tuple, got {type(carried_inputs)}"
             )
         if not isinstance(additional_inputs, tuple):
             raise RuntimeError(
-                "additional_inputs must be a tuple, got " f"{type(additional_inputs)}"
+                f"additional_inputs must be a tuple, got {type(additional_inputs)}"
             )
         if not all(
-            isinstance(t, (torch.Tensor, int, float, bool))
-            for t in (*carried_inputs, *additional_inputs)
+            isinstance(t, (torch.Tensor, int, float, bool)) for t in carried_inputs
         ):
             raise RuntimeError(
                 "carried_inputs must be a tuple of tensors, ints, floats, or bools, got "
                 f"{carried_inputs}"
+            )
+
+        if not all(
+            isinstance(t, (torch.Tensor, int, float, bool)) for t in additional_inputs
+        ):
+            raise RuntimeError(
+                "additional_inputs must be a tuple of tensors, ints, floats, or bools, got "
+                f"{additional_inputs}"
             )
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
@@ -105,8 +114,12 @@ def while_loop(cond_fn, body_fn, carried_inputs):
         - 'while_loop' only supports **inference** right now. Autograd will be supported in the future.
 
     """
+
+    # Currently, additional_inputs is not a user-facing input. It will be automatically set in dynamo.
+    # parameters and buffers accessed in cond_fn or body_fn or tensor closures will become additional_inputs.
+    additional_inputs: Tuple = tuple()
     if torch.compiler.is_dynamo_compiling():
-        return while_loop_op(cond_fn, body_fn, carried_inputs, tuple())
+        return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
 
     def _validate_input(cond_fn, body_fn, carried_inputs):
         if not callable(cond_fn) or not callable(body_fn):
@@ -124,13 +137,13 @@ def while_loop(cond_fn, body_fn, carried_inputs):
 
     with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
         return torch.compile(while_loop_op, backend="eager", fullgraph=True)(
-            cond_fn, body_fn, carried_inputs, tuple()
+            cond_fn, body_fn, carried_inputs, additional_inputs
         )
 
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
-    init_val = carried_inputs
+    carried_vals = carried_inputs
 
     def _is_boolean_scalar_tensor(pred):
         return (
@@ -144,20 +157,20 @@ def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
             f"carried_inputs must be a tuple but got {type(carried_inputs)}"
         )
 
-    while pred := cond_fn(*init_val, *additional_inputs):
+    while pred := cond_fn(*carried_vals, *additional_inputs):
         if not _is_boolean_scalar_tensor(pred):
             raise RuntimeError(
                 f"cond_fn must return a boolean scalar tensor but got {pred}"
             )
-        out = body_fn(*init_val, *additional_inputs)
+        out = body_fn(*carried_vals, *additional_inputs)
         assert isinstance(
             out, tuple
         ), f"body_fn should return a tuple but got {type(out)}"
         assert len(out) == len(
-            init_val
+            carried_inputs
         ), "body_fn should return the same number of elements as carried_inputs"
-        init_val = out
-    return init_val
+        carried_vals = out
+    return carried_vals
 
 
 while_loop_op.py_impl(DispatchKey.Autograd)(
