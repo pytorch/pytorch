@@ -219,24 +219,24 @@ class AbstractImplCtx:
 
         Example::
             >>> import torch
-            >>> @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
-            >>> class FakeTensorQueue:
-            >>>     def __init__(self, q):
-            >>>         self.queue = q
-            >>>
-            >>>     @classmethod
-            >>>     def from_real(cls, real_tq):
-            >>>         ctx = torch.library.get_ctx()
-            >>>         fake_queue = [ctx.to_fake_tensor(t) for t in real_tq.get_raw_queue()]
-            >>>         return cls(fake_queue)
-            >>>
-            >>>     def push(self, x):
-            >>>         self.queue.append(x)
-            >>>
-            >>>     def pop(self):
-            >>>         return self.queue.pop(0)
-            >>>
-            >>>     def size(self):
-            >>>         return len(self.queue)
+            >>> @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")  # xdoctest: +SKIP
+            ... class FakeTensorQueue:
+            ...     def __init__(self, q):
+            ...         self.queue = q
+            ...
+            ...     @classmethod
+            ...     def from_real(cls, real_tq):
+            ...         ctx = torch.library.get_ctx()
+            ...         fake_queue = [ctx.to_fake_tensor(t) for t in real_tq.get_raw_queue()]
+            ...         return cls(fake_queue)
+            ...
+            ...     def push(self, x):
+            ...         self.queue.append(x)
+            ...
+            ...     def pop(self):
+            ...         return self.queue.pop(0)
+            ...
+            ...     def size(self):
+            ...         return len(self.queue)
         """
         return self._fake_mode.from_tensor(tensor)
