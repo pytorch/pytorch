@@ -78,7 +78,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         @functools.wraps(inner)
         def wrapper():
-            assert False, "wrapper called"
+            raise AssertionError("wrapper called")
 
         # This behavior is not ideal, but supporting it would add overhead
         # to callsites of eval_frame.innermost_fn. A warning would also be very noisy.
