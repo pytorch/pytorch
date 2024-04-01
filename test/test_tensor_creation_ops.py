@@ -4120,6 +4120,15 @@ class TestAsArray(TestCase):
         # The storage pointers should not be equal
         self.assertNotEqual(original.data_ptr(), tensor.data_ptr())
 
+class Namespace:
+    class TestTensorCreationWrapper(TestTensorCreation):
+        pass
+
+    class TestRandomTensorCreationWrapper(TestRandomTensorCreation):
+        pass
+
+    class TestLikeTensorCreationWrapper(TestLikeTensorCreation):
+        pass
 
 instantiate_device_type_tests(TestTensorCreation, globals())
 instantiate_device_type_tests(TestRandomTensorCreation, globals())

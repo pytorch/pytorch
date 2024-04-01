@@ -4,6 +4,8 @@ import sys
 import unittest
 
 import torch
+
+from test.xpu.xpu_test_utils import get_wrapped_fn, XPUPatch
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyXPU,
@@ -19,8 +21,6 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
     TestCase,
 )
-
-from xpu.utils import get_wrapped_fn, XPUPatch
 
 with XPUPatch():
     from test.test_ops import Namespace
