@@ -1149,12 +1149,18 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         local_sharded_norm = _get_grad_norm(sharded_params, norm_type).to(
             self.compute_device
         )
-        local_nonsharded_norm = _get_grad_norm(nonsharded_params, norm_type).to(
-            self.compute_device
+        local_nonsharded_norm = (
+            _get_grad_norm(nonsharded_params, norm_type).to(self.compute_device)
+            if nonsharded_params
+            else None
         )
         # Reconstruct the total gradient norm depending on the norm type
         if norm_type == math.inf:
-            total_norm = torch.maximum(local_sharded_norm, local_nonsharded_norm)
+            total_norm = (
+                torch.maximum(local_sharded_norm, local_nonsharded_norm)
+                if local_nonsharded_norm is not None
+                else local_sharded_norm
+            )
             dist.all_reduce(
                 total_norm, op=torch.distributed.ReduceOp.MAX, group=self.process_group
             )
@@ -1163,7 +1169,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
             dist.all_reduce(total_norm, group=self.process_group)
             # All-reducing the local non-sharded norm would count it an extra
             # world-size-many times
-            total_norm += local_nonsharded_norm**norm_type
+            if local_nonsharded_norm is not None:
+                total_norm += local_nonsharded_norm**norm_type
             total_norm = total_norm ** (1.0 / norm_type)
         if self.cpu_offload.offload_params:
             total_norm = total_norm.cpu()
