@@ -1824,17 +1824,31 @@ def is_pointwise_with_channels_last_inputs(x):
         all_reads = x.data.get_reads()
 
         def is_channel_last_index(read):
-            if len(read.size) != 4:
+            if len(read.size) == 4:
+                expected_channel_last_index = (
+                    read.var_names[0] * read.size[1] * read.size[2] * read.size[3]
+                    + read.var_names[1]
+                    + read.var_names[2] * read.size[1] * read.size[3]
+                    + read.var_names[3] * read.size[1]
+                )
+                return expected_channel_last_index == read.index
+            elif len(read.size) == 5:
+                expected_channel_last_index = (
+                    read.var_names[0]
+                    * read.size[1]
+                    * read.size[2]
+                    * read.size[3]
+                    * read.size[4]
+                    + read.var_names[1]
+                    + read.var_names[2] * read.size[1] * read.size[3] * read.size[4]
+                    + read.var_names[3] * read.size[1] * read.size[4]
+                    + read.var_names[4] * read.size[1]
+                )
+                return expected_channel_last_index == read.index
+            else:
                 return False
-            expected_channel_last_index = (
-                read.var_names[0] * read.size[1] * read.size[2] * read.size[3]
-                + read.var_names[1]
-                + read.var_names[2] * read.size[1] * read.size[3]
-                + read.var_names[3] * read.size[1]
-            )
-            return expected_channel_last_index == read.index
 
-        return any(
+        return all(
             type(read) is dependencies.MemoryDep and is_channel_last_index(read)
             for read in all_reads
         )
@@ -3711,9 +3725,11 @@ class ConcatKernel(NopKernel):
 
         output_stride = FlexibleLayout.contiguous_strides(new_size)
         # If any of the inputs is in CL format, use CL format for the output
+        any_input_is_storage_and_layout = False
         for i in range(len(inputs)):
             x = inputs[i]
             if is_storage_and_layout(x):
+                any_input_is_storage_and_layout = True
                 layout = x.get_layout()
                 if (
                     isinstance(layout, FixedLayout)
@@ -3722,9 +3738,9 @@ class ConcatKernel(NopKernel):
                     # use CL stride for the output
                     output_stride = make_channels_last_strides_for(new_size)
                     break
-            elif is_pointwise_with_channels_last_inputs(x):
+        if any_input_is_storage_and_layout is False:
+            if all(is_pointwise_with_channels_last_inputs(input) for input in inputs):
                 output_stride = make_channels_last_strides_for(new_size)
-                break
 
         concat_kernel = ConcatKernel(
             name=None,
