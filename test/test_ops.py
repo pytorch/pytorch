@@ -2407,9 +2407,6 @@ class TestFakeTensor(TestCase):
             strided_result = op(sample.input, *sample.args, **kwargs)
             self.assertEqual(strided_result.layout, torch.strided)
 
-class Namespace:
-    class TestCommonWrapper(TestCommon):
-        pass
 
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestCompositeCompliance, globals())
