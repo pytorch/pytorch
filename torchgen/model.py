@@ -1363,6 +1363,17 @@ class FunctionSchema:
     # TODO: Need to handle collisions with argument names at some point
     returns: Tuple["Return", ...]
 
+    @property
+    def is_mutable(self) -> bool:
+        def is_write(arg: "Argument") -> bool:
+            if arg.annotation is None:
+                return False
+            return arg.annotation.is_write
+
+        # Corresponds to torch._C._FunctionSchema.is_mutable
+        # See aten/src/ATen/core/function_schema.h (keep these in sync)
+        return any(is_write(a) for a in self.arguments.flat_all)
+
     def schema_order_arguments(self) -> Iterator["Argument"]:
         return itertools.chain(
             self.arguments.flat_positional,
@@ -1987,6 +1998,10 @@ class Argument:
     # model will have to change!
     annotation: Optional[Annotation]
 
+    @property
+    def alias_info(self) -> Optional[Annotation]:
+        return self.annotation
+
     @staticmethod
     def parse(arg: str) -> "Argument":
         name: str
@@ -2045,6 +2060,10 @@ class Return:
     name: Optional[str]
     type: Type
     annotation: Optional[Annotation]
+
+    @property
+    def alias_info(self) -> Optional[Annotation]:
+        return self.annotation
 
     @staticmethod
     def parse(arg: str) -> "Return":
