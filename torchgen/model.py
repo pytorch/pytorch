@@ -865,16 +865,16 @@ class NativeFunction:
             )
 
         has_composite_implicit_autograd_kernel = (
-            DispatchKey.CompositeImplicitAutograd in dispatch.keys()
+            DispatchKey.CompositeImplicitAutograd in dispatch
         )
         has_composite_implicit_autograd_nested_tensor_kernel = (
-            DispatchKey.CompositeImplicitAutogradNestedTensor in dispatch.keys()
+            DispatchKey.CompositeImplicitAutogradNestedTensor in dispatch
         )
         has_composite_explicit_autograd_kernel = (
-            DispatchKey.CompositeExplicitAutograd in dispatch.keys()
+            DispatchKey.CompositeExplicitAutograd in dispatch
         )
         has_composite_explicit_autograd_non_functional_kernel = (
-            DispatchKey.CompositeExplicitAutogradNonFunctional in dispatch.keys()
+            DispatchKey.CompositeExplicitAutogradNonFunctional in dispatch
         )
 
         # We aren't going to store dispatch metadata inline in NativeFunctions;
