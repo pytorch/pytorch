@@ -1,8 +1,8 @@
 import numpy as np
-import caffe2.python.fakelowp.init_shared_libs  # noqa
+import glow.fb.test.init_shared_libs  # noqa
 from caffe2.python import core, workspace
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
-from caffe2.python.fakelowp.test_utils import print_test_debug_info
+from glow.fb.test.test_utils import print_test_debug_info
 import caffe2.python.serialized_test.serialized_test_util as serial
 import datetime
 from hypothesis import settings
