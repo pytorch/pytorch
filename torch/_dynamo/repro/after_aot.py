@@ -496,11 +496,6 @@ def repro_common(options, mod, load_args):
     return mod, args
 
 
-ACCURACY_KWARGS: Dict[str, Dict[str, Any]] = {
-    "accuracy": dict(require_fp64=True, ignore_non_fp=True),
-    "strict_accuracy": dict(require_fp64=False, ignore_non_fp=False),
-}
-
 ACCURACY_FAILS: Dict[str, Callable[[nn.Module, Any], bool]] = {
     "": inductor_fails,
     # This might look inverted but it's not.  strict_accuracy means "we will

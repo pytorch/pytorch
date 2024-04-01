@@ -45,14 +45,16 @@ use_buck = inductor_config.is_fbcode()
 #                           MAIN ENTRY POINT
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
+
 def _accuracy_fails(gm, example_inputs, compiler_fn):
     return backend_accuracy_fails(
         gm,
         example_inputs,
         compiler_fn,
-        fwd_only=config.repro_forward_only,
+        only_fwd=config.repro_forward_only,
         ignore_non_fp=config.repro_ignore_non_fp,
     )
+
 
 def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
     """
@@ -433,7 +435,7 @@ def repro_run(options, mod, load_args):
                 mod,
                 opt_mod,
                 args,
-                fwd_only=config.repro_fwd_only,
+                only_fwd=config.repro_forward_only,
                 ignore_non_fp=config.repro_ignore_non_fp,
             ):
                 raise AccuracyError("Dynamo failed")
