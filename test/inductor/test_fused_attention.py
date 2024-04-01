@@ -403,6 +403,9 @@ class TestSDPAPatternRewriterTemplate(TestCase):
                 self.is_inv_factor = is_inv_factor
 
             def forward(self, query, key, value, scale_factor) -> torch.Tensor:
+                # Dividing by scale_factor makes scale_factor gradients very
+                # unstable
+                scale_factor = scale_factor.detach()
                 y = torch.matmul(query, key.transpose(-2, -1))
                 if self.is_inv_factor:
                     y = y.div(scale_factor)
@@ -421,7 +424,7 @@ class TestSDPAPatternRewriterTemplate(TestCase):
             model = Model(is_inv_factor).eval()
             # The training path has an accuracy gap compared with eager mode.
             self._check_common(
-                model, args1=args, contains=False, atol=1e-4, has_fuse_pattern=False
+                model, args1=args, contains=False, atol=1e-3, has_fuse_pattern=False
             )
 
     def _test_pattern_fails_with_unsupported_mask(self):

@@ -439,6 +439,12 @@ def check_model(
     if check_has_compiled:
         assert called, "Ran graph without calling compile_fx"
     assert type(actual) == type(correct)
+    if isinstance(actual, (tuple, list)):
+        assert len(actual) == len(correct)
+        assert all(
+            type(actual_item) == type(correct_item)
+            for actual_item, correct_item in zip(actual, correct)
+        )
 
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat = pytree.tree_leaves(actual)
@@ -1031,9 +1037,8 @@ class CommonTemplate:
                 if self.device == "cpu":
                     _, code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
-                    # match ternary operator
-                    pattern = r"\?.*:"
-                    if re.findall(pattern, code):
+                    # match ternary operator for scalar or blendv for vector
+                    if re.findall(r"\?.*:", code) or re.findall("blendv", code):
                         found = True
                     self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
@@ -1363,11 +1368,6 @@ class CommonTemplate:
         self.common(fn, [packed])
 
     def test_expanded_reduction(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest(
-                "https://github.com/pytorch/torchdynamo/issues/1697"
-            )
-
         def fn(x, y):
             z = x * y
             return z.sum((0, 1))
@@ -2475,6 +2475,20 @@ class CommonTemplate:
             return a
 
         self.common(fn, [torch.randint(5, (1, 8)), 5400])
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_scalar_output(self):
+        def fn(arg0_1, arg2_1):
+            arg1_1 = arg2_1.size(1)
+            view = torch.ops.aten.view.default(arg2_1, [-1, arg1_1])
+            embedding = torch.ops.aten.embedding.default(arg0_1, view)
+            full = torch.ops.aten.full.default([1, arg1_1], 1, dtype=torch.float32)
+            return (full, arg1_1, embedding)
+
+        arg0_1 = rand_strided((32128, 768), (768, 1), device="cpu", dtype=torch.float32)
+        arg2_1 = rand_strided((1, 22), (22, 1), device="cpu", dtype=torch.int64)
+        self.common(fn, [arg0_1, arg2_1])
 
     def test_shape_prop_torch_ones(self):
         class Model(torch.nn.Module):
@@ -6442,19 +6456,24 @@ class CommonTemplate:
                 ],
             )
 
-    # issue #1150
     def test_dense_mask_index(self):
+        r"""
+        There will be a little difference for reduce order between aten and inductor
+        https://github.com/pytorch/pytorch/pull/122289
+        Absolute difference: 0.00067138671875 (up to 1e-05 allowed)
+        Relative difference: 3.1747371732500974e-06 (up to 1.3e-06 allowed)
+        """
+        kwargs = {}
         if self.device == "cpu":
-            raise unittest.SkipTest(
-                "https://github.com/pytorch/torchdynamo/issues/1697"
-            )
+            kwargs["atol"] = 1e-4
+            kwargs["rtol"] = 1.3e-5
 
         def fn(x, y):
             y = torch.ops.aten.select.int(y, 0, 2)
             z = x * y
             return z.sum()
 
-        self.common(fn, [torch.randn(102400), torch.randn(3)])
+        self.common(fn, [torch.randn(102400), torch.randn(3)], **kwargs)
 
     def test_empty1(self):
         def fn():
@@ -10101,6 +10120,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
 
         @patch("torch._inductor.config.comment_origin", True)
+        @patch("torch._functorch.config.max_dist_from_bw", 0)
         def test_inductor_sequence_nr(self):
             class Model(torch.nn.Module):
                 def __init__(self):
@@ -10153,7 +10173,6 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                         res = re.search(r"seq_nr:(\d+)", line)
                         if res:
                             seq_nr_set.add(int(res.group(1)))
-
             self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
 
     class RNNTest(TestCase):
