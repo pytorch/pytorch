@@ -7,7 +7,8 @@
 #include <ATen/cpu/vec/vec_base.h>
 #include <c10/util/irange.h>
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
@@ -16,7 +17,18 @@ namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
+
+#ifndef SLEEF_CONST
+#if (defined(__GNUC__) || defined(__CLANG__)) && !defined(__INTEL_COMPILER)
+#define SLEEF_CONST const
+#else
+#define SLEEF_CONST
+#endif
+#define SLEEF_CONST_OLD SLEEF_CONST
+#else
+#define SLEEF_CONST_OLD
+#endif
 
 // bfloat16 conversion
 static inline void cvtbf16_fp32(const __m256i& a, __m512& o) {
@@ -367,7 +379,8 @@ public:
   }
   #pragma clang diagnostic push
   #pragma clang diagnostic ignored "-Wignored-qualifiers"
-  Vectorized<T> map(const __m512 (*const vop)(__m512)) const {
+
+  Vectorized<T> map(SLEEF_CONST __m512 (*SLEEF_CONST_OLD vop)(__m512)) const {
     __m512 lo, hi;
     cvt_to_fp32<T>(values, lo, hi);
     const auto o1 = vop(lo);
@@ -1576,7 +1589,7 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
 CONVERT_VECTORIZED_INIT(BFloat16, bfloat16);
 CONVERT_VECTORIZED_INIT(Half, half);
 
-#else //defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#else //defined(CPU_CAPABILITY_AVX512)
 
 #define CONVERT_NON_VECTORIZED_INIT(type, name) \
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_##name##_float(const Vectorized<type>& a) { \
@@ -1606,9 +1619,9 @@ inline Vectorized<type> convert_float_##name(const Vectorized<float>& a, const V
 CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
 CONVERT_NON_VECTORIZED_INIT(Half, half);
 
-#endif // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#endif // defined(CPU_CAPABILITY_AVX512)
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
 #define LOAD_FP32_VECTORIZED_INIT(type, name) \
 inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
   auto values = _mm256_loadu_si256(reinterpret_cast<const __m256i*>(data)); \
@@ -1627,7 +1640,7 @@ inline void load_fp32_from_##name(const type *data, Vectorized<float>& out1, Vec
 LOAD_FP32_VECTORIZED_INIT(BFloat16, bf16);
 LOAD_FP32_VECTORIZED_INIT(Half, fp16);
 
-#else // defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#else // defined(CPU_CAPABILITY_AVX512)
 #define LOAD_FP32_NON_VECTORIZED_INIT(type, name) \
 inline void load_fp32_from_##name(const type *data, Vectorized<float>& out) { \
   __at_align__ float values[Vectorized<float>::size()]; \
