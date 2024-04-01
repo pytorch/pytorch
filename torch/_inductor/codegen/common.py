@@ -1486,10 +1486,11 @@ class Kernel(CodeGen):
                                     fx_node.args[1].args[0]
                                 ]
                                 arg_bounds.append(bound_sympy(sympy_expr))
+                            elif isinstance(x, sympy.Expr):
+                                arg_bounds.append(bound_sympy(x))
                             else:
                                 arg_bounds.append(x)
-                        else:
-                            buf_bounds = bound_handler(*arg_bounds)
+                        buf_bounds = bound_handler(*arg_bounds)
 
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
 
