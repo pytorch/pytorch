@@ -18,6 +18,7 @@ from copy import deepcopy
 from enum import Enum
 from functools import wraps
 from typing import List
+from unittest import mock
 
 import numpy as np
 import torch
@@ -3389,6 +3390,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         actual = fn_opt(*inputs)
         self.assertTrue(same(actual, expected))
 
+    @mock.patch("torch._dynamo.config.guard_nn_modules", True)
     def test_hf_xsoftmax_training(self):
         from torch._dynamo.utils import counters
 
