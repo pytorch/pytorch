@@ -29,6 +29,30 @@ void run_cudnn_SDP_fprop(
       false, "PyTorch was not compiled with cuDNN Flash Attention enabled!");
 }
 
+void run_cudnn_SDP_bprop(
+    int64_t b,
+    int64_t h,
+    int64_t s_q,
+    int64_t s_kv,
+    int64_t d,
+    float scaling_factor,
+    bool is_causal,
+    float dropout_probability,
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v,
+    const Tensor& o,
+    const Tensor& dO,
+    const Tensor& softmaxstats,
+    Tensor& dQ,
+    Tensor& dK,
+    Tensor& dV,
+    const Tensor& dropoutseed,
+    const Tensor& dropoutoffset) {
+  TORCH_CHECK(
+      false, "PyTorch was not compiled with cuDNN Flash Attention enabled!");
+}
+
 } // namespace native
 } // namespace at
 
@@ -342,7 +366,7 @@ auto build_graph_and_tensors(
   AT_CUDNN_FRONTEND_CHECK(mha_graph->build_plans(handle));
 
   return std::make_tuple(
-      mha_graph, Q, K, V, attn_scale, seed, offset, O, Stats);
+      std::move(mha_graph), std::move(Q), std::move(K), std::move(V), std::move(attn_scale), std::move(seed), std::move(offset), std::move(O), std::move(Stats));
 }
 
 auto build_graph_and_tensors_backward(
@@ -453,7 +477,7 @@ auto build_graph_and_tensors_backward(
      AT_CUDNN_FRONTEND_CHECK(mha_graph->check_support(handle));
      AT_CUDNN_FRONTEND_CHECK(mha_graph->build_plans(handle));
      return std::make_tuple(
-       mha_graph, Q, K, V, attn_scale, Seed, Offset, O, DO, STATS, DQ, DK, DV);
+       std::move(mha_graph), std::move(Q), std::move(K), std::move(V), std::move(attn_scale), std::move(Seed), std::move(Offset), std::move(O), std::move(DO), std::move(STATS), std::move(DQ), std::move(DK), std::move(DV));
 }
 
 
