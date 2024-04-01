@@ -1358,7 +1358,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             quantizer = X86InductorQuantizer().set_global(
                 xiq.get_default_x86_inductor_quantization_config()
             )
-            quantizer._set_aten_operator_type(torch.ops.aten.conv2d.default, None)
+            quantizer._set_aten_operator_qconfig(torch.ops.aten.conv2d.default, None)
             node_occurrence = {
                 # one for input and weight of the conv
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
@@ -1393,7 +1393,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             quantizer = X86InductorQuantizer().set_global(
                 xiq.get_default_x86_inductor_quantization_config()
             )
-            quantizer._set_aten_operator_type(torch.ops.aten.linear.default, None)
+            quantizer._set_aten_operator_qconfig(torch.ops.aten.linear.default, None)
             node_occurrence = {
                 # one for input and weight of the conv
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
@@ -1425,7 +1425,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             quantizer = X86InductorQuantizer().set_global(
                 xiq.get_default_x86_inductor_quantization_config()
             )
-            quantizer._set_aten_operator_type(torch.ops.aten.max_pool2d.default, None)
+            quantizer._set_aten_operator_qconfig(torch.ops.aten.max_pool2d.default, None)
             node_occurrence = {
                 # one for input and weight of the conv
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
