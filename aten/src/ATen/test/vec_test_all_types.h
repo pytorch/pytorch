@@ -15,6 +15,7 @@
 #include <math.h>
 #include <float.h>
 #include <algorithm>
+#include <c10/util/BFloat16-math.h>
 
 #if defined(CPU_CAPABILITY_AVX512)
 #define CACHE_LINE 64
@@ -268,33 +269,42 @@ std::ostream& operator<<(std::ostream& stream, const CheckWithinDomains<T>& dmn)
 }
 
 template <typename T>
-bool check_both_nan(T x, T y) {
-    if constexpr (std::is_floating_point_v<T>) {
-        return std::isnan(x) && std::isnan(y);
-    }
+std::enable_if_t<std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>, bool> check_both_nan(T x,
+    T y) {
+    return std::isnan(x) && std::isnan(y);
+}
+
+template <typename T>
+std::enable_if_t<!(std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>), bool> check_both_nan(T x,
+    T y) {
     return false;
 }
 
 template <typename T>
-bool check_both_inf(T x, T y) {
-    if constexpr (std::is_floating_point_v<T>) {
-        return std::isinf(x) && std::isinf(y);
-    }
+std::enable_if_t<std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>, bool> check_both_inf(T x,
+    T y) {
+    return std::isinf(x) && std::isinf(y);
+}
+
+template <typename T>
+std::enable_if_t<!(std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>), bool> check_both_inf(T x,
+    T y) {
     return false;
 }
 
 template<typename T>
-std::enable_if_t<!std::is_floating_point_v<T>, bool> check_both_big(T x, T y) {
+std::enable_if_t<!(std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>), bool> check_both_big(T x, T y) {
     return false;
 }
 
 template<typename T>
-std::enable_if_t<std::is_floating_point_v<T>, bool> check_both_big(T x, T y) {
-    T cmax = std::is_same_v<T, float> ? static_cast<T>(1e+30) : static_cast<T>(1e+300);
-    T cmin = std::is_same_v<T, float> ? static_cast<T>(-1e+30) : static_cast<T>(-1e+300);
-    //only allow when one is inf
-    bool x_inf = std::isinf(x);
-    bool y_inf = std::isinf(y);
+std::enable_if_t<std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>, bool> check_both_big(T x, T y) {
+    T cmax = std::is_same_v<T, c10::Half> ? static_cast<T>(5e+4) : (
+        std::is_same_v<T, float> ? static_cast<T>(1e+30) : static_cast<T>(1e+300)
+    );
+    T cmin = std::is_same_v<T, c10::Half> ? static_cast<T>(-5e+4) : (
+        std::is_same_v<T, float> ? static_cast<T>(-1e+30) : static_cast<T>(-1e+300)
+    );
     bool px = x > 0;
     bool py = y > 0;
     return (px && x_inf && y >= cmax) || (py && y_inf && x >= cmax) ||
@@ -322,7 +332,7 @@ T safe_fpt_division(T f1, T f2)
 }
 
 template<class T>
-std::enable_if_t<std::is_floating_point_v<T>, bool>
+std::enable_if_t<std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>, bool>
 nearlyEqual(T a, T b, T tolerance) {
     if (check_both_nan<T>(a, b)) return true;
     if (check_both_big(a, b)) return true;
@@ -338,7 +348,7 @@ nearlyEqual(T a, T b, T tolerance) {
 }
 
 template<class T>
-std::enable_if_t<!std::is_floating_point_v<T>, bool>
+std::enable_if_t<!(std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>), bool>
 nearlyEqual(T a, T b, T tolerance) {
     return a == b;
 }
@@ -411,7 +421,7 @@ void filter_clamp(T& f, T& s, T& t) {
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmod(T& a, T& b) {
+std::enable_if_t<std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>, void> filter_fmod(T& a, T& b) {
     // This is to make sure fmod won't cause overflow when doing the div
     if (std::abs(b) < (T)1) {
       b = b < (T)0 ? (T)-1 : T(1);
@@ -419,7 +429,7 @@ std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmod(T& a, T& b) {
 }
 
 template <typename T>
-std::enable_if_t<std::is_floating_point_v<T>, void> filter_fmadd(T& a, T& b, T& c) {
+std::enable_if_t<std::is_floating_point_v<T> || std::is_reduced_floating_point_v<T>, void> filter_fmadd(T& a, T& b, T& c) {
     // This is to setup a limit to make sure fmadd (a * b + c) won't overflow
     T max = std::sqrt(std::numeric_limits<T>::max()) / T(2.0);
     T min = ((T)0 - max);
@@ -892,6 +902,13 @@ public:
                         EXPECT_DOUBLE_EQ(expArr[i], actArr[i]) << getDetail(i / unitStorageCount);
                     }
                 }
+                else if constexpr (std::is_reduced_floating_point_v<UVT>)
+                {
+                    if (!check_both_nan(expArr[i], actArr[i]))
+                    {
+                        EXPECT_EQ(expArr[i], actArr[i]) << getDetail(i / unitStorageCount);
+                    }
+                }
                 else
                 {
                     EXPECT_EQ(expArr[i], actArr[i]) << getDetail(i / unitStorageCount);
@@ -927,7 +944,7 @@ void test_unary(
     CACHE_ALIGN VT vals[el_count];
     CACHE_ALIGN VT expected[el_count];
     bool bitwise = testCase.isBitwise();
-    UVT default_start = std::is_floating_point_v<UVT> ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
+    UVT default_start = (std::is_floating_point_v<UVT> || std::is_reduced_floating_point_v<UVT>) ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
     auto domains = testCase.getDomains();
     auto domains_size = domains.size();
@@ -1044,7 +1061,7 @@ void test_ternary(
     CACHE_ALIGN VT vals2[el_count];
     CACHE_ALIGN VT expected[el_count];
     bool bitwise = testCase.isBitwise();
-    UVT default_start = std::is_floating_point_v<UVT> ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
+    UVT default_start = (std::is_floating_point_v<UVT> || std::is_reduced_floating_point_v<UVT>) ? std::numeric_limits<UVT>::lowest() : std::numeric_limits<UVT>::min();
     UVT default_end = std::numeric_limits<UVT>::max();
     auto domains = testCase.getDomains();
     auto domains_size = domains.size();
@@ -1424,6 +1441,12 @@ T getDefaultTolerance() {
     return static_cast<T>(0.0);
 }
 
+// MKG: changed from 5e-3f to account for accuracy of RSqrt & Reciprocal
+template<>
+c10::Half getDefaultTolerance() {
+    return 1.e-2f;
+}
+
 template<>
 float getDefaultTolerance() {
     return 5.e-5f;
@@ -1456,7 +1479,7 @@ template<typename T>
 TestingCase<T> createDefaultUnaryTestCase(TestSeed seed = TestSeed(), bool bitwise = false, bool checkWithTolerance = false, size_t trials = 0) {
     using UVT = UvalueType<T>;
     TestingCase<T> testCase;
-    if (!bitwise && std::is_floating_point_v<UVT>) {
+    if (!bitwise && (std::is_floating_point_v<UVT> || std::is_reduced_floating_point_v<UVT>)) {
         //for float types lets add manual ranges
         UVT tolerance = getDefaultTolerance<UVT>();
         testCase = TestingCase<T>::getBuilder()

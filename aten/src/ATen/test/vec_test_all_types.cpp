@@ -1,5 +1,6 @@
 #include <ATen/test/vec_test_all_types.h>
 #include <c10/util/irange.h>
+#include <c10/util/Half.h>
 namespace {
 #if GTEST_HAS_TYPED_TEST
     template <typename T>
@@ -68,51 +69,66 @@ namespace {
     class FunctionalTestsReducedFloat : public ::testing::Test {};
     template <typename T>
     class InfiniteTests : public ::testing::Test {};
+#if !(defined(__APPLE__) || defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))
+    // use for non AVX* testing
+    using RealFloatHalfTestedTypes = ::testing::Types<vfloat, vdouble, vHalf>;
+    using FloatHalfTestedTypes = ::testing::Types<vfloat, vdouble, vHalf, vcomplex, vcomplexDbl>;
+    using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vHalf, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
+    using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
+    using RealFloatHalfIntTestedTypes = ::testing::Types<vfloat, vdouble, vHalf, vlong, vint, vshort>;
+    using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
+    using FloatHalfIntTestedTypes = ::testing::Types<vfloat, vdouble, vHalf, vcomplex, vcomplexDbl, vlong, vint, vshort>;
+    using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
+    using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
+#else
+    // AVX tests exclude vHalf
     template <typename T>
     class VecConvertTests : public ::testing::Test {};
     template <typename T>
     class VecMaskTests : public ::testing::Test {};
-    using RealFloatTestedTypes = ::testing::Types<vfloat, vdouble>;
-    using FloatTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
+    using RealFloatHalfTestedTypes = ::testing::Types<vfloat, vdouble>;
+    using FloatHalfTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl>;
     using ALLTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vlong, vint, vshort, vqint8, vquint8, vqint>;
     using QuantTestedTypes = ::testing::Types<vqint8, vquint8, vqint>;
-#if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
+    // Quantization8BitWithTailTests on AVX* only
     using Quantization8BitWithTailTestedTypes =
         ::testing::Types<vqint8, vquint8>;
-#endif
+    using RealFloatHalfIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
     using RealFloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vlong, vint, vshort>;
-    using FloatIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
+    using FloatHalfIntTestedTypes = ::testing::Types<vfloat, vdouble, vcomplex, vcomplexDbl, vlong, vint, vshort>;
     using ComplexTypes = ::testing::Types<vcomplex, vcomplexDbl>;
-    using ReducedFloatTestedTypes = ::testing::Types<vBFloat16, vHalf>;
+    using ReducedFloatTestedTypes = ::testing::Types<vBFloat16>;
+#endif
+
     TYPED_TEST_SUITE(Memory, ALLTestedTypes);
-    TYPED_TEST_SUITE(Arithmetics, FloatIntTestedTypes);
-    TYPED_TEST_SUITE(Comparison, RealFloatIntTestedTypes);
-    TYPED_TEST_SUITE(Bitwise, FloatIntTestedTypes);
-    TYPED_TEST_SUITE(MinMax, RealFloatIntTestedTypes);
-    TYPED_TEST_SUITE(Nan, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(Interleave, RealFloatIntTestedTypes);
-    TYPED_TEST_SUITE(SignManipulation, FloatIntTestedTypes);
+    TYPED_TEST_SUITE(Arithmetics, FloatHalfIntTestedTypes);
+    TYPED_TEST_SUITE(Comparison, RealFloatHalfIntTestedTypes);
+    TYPED_TEST_SUITE(Bitwise, FloatHalfIntTestedTypes);
+    TYPED_TEST_SUITE(MinMax, RealFloatHalfIntTestedTypes);
+    TYPED_TEST_SUITE(Nan, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(Interleave, RealFloatHalfIntTestedTypes);
+    TYPED_TEST_SUITE(SignManipulation, FloatHalfIntTestedTypes);
     TYPED_TEST_SUITE(SignManipulationHalfPrecision, ReducedFloatTestedTypes);
-    TYPED_TEST_SUITE(Rounding, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(SqrtAndReciprocal, FloatTestedTypes);
-    TYPED_TEST_SUITE(SqrtAndReciprocalReal, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(FractionAndRemainderReal, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(Trigonometric, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(ErrorFunctions, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(Exponents, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(Hyperbolic, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(InverseTrigonometricReal, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(InverseTrigonometric, FloatTestedTypes);
-    TYPED_TEST_SUITE(LGamma, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(Logarithm, FloatTestedTypes);
-    TYPED_TEST_SUITE(LogarithmReals, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(Pow, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(RealTests, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(RangeFactories, FloatIntTestedTypes);
-    TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatTestedTypes);
-    TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatTestedTypes);
+    TYPED_TEST_SUITE(Rounding, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(SqrtAndReciprocal, FloatHalfTestedTypes);
+    TYPED_TEST_SUITE(SqrtAndReciprocalReal, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(FractionAndRemainderReal, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(Trigonometric, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(ErrorFunctions, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(Exponents, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(Hyperbolic, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(InverseTrigonometricReal, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(InverseTrigonometric, FloatHalfTestedTypes);
+    TYPED_TEST_SUITE(LGamma, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(Logarithm, FloatHalfTestedTypes);
+    TYPED_TEST_SUITE(LogarithmReals, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(Pow, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(RealTests, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(RangeFactories, FloatHalfIntTestedTypes);
+    TYPED_TEST_SUITE(BitwiseFloatsAdditional, RealFloatHalfTestedTypes);
+    TYPED_TEST_SUITE(BitwiseFloatsAdditional2, FloatHalfTestedTypes);
     TYPED_TEST_SUITE(QuantizationTests, QuantTestedTypes);
-    TYPED_TEST_SUITE(InfiniteTests, RealFloatTestedTypes);
+    TYPED_TEST_SUITE(InfiniteTests, RealFloatHalfTestedTypes);
 #if (defined(CPU_CAPABILITY_AVX2) ||  defined(CPU_CAPABILITY_AVX512))  && !defined(_MSC_VER)
     TYPED_TEST_SUITE(
         Quantization8BitWithTailTests,
@@ -299,7 +315,7 @@ namespace {
             NAME_INFO(rsqrt),
             rsqrt<ValueType<vec>>,
             [](vec v) { return v.rsqrt(); },
-            createDefaultUnaryTestCase<vec>(TestSeed()),
+            createDefaultUnaryTestCase<vec>(TestSeed(), /*bitwise=*/false, /*checkWithTolerance=*/true),
             RESOLVE_OVERLOAD(filter_zero));
     }
     TYPED_TEST(SqrtAndReciprocalReal, Reciprocal) {
@@ -308,7 +324,7 @@ namespace {
             NAME_INFO(reciprocal),
             reciprocal<ValueType<vec>>,
             [](vec v) { return v.reciprocal(); },
-            createDefaultUnaryTestCase<vec>(TestSeed()),
+            createDefaultUnaryTestCase<vec>(TestSeed(), /*bitwise=*/false, /*checkWithTolerance=*/true),
             RESOLVE_OVERLOAD(filter_zero));
     }
     TYPED_TEST(FractionAndRemainderReal, Frac) {
@@ -476,7 +492,7 @@ namespace {
         auto test_case =
             TestingCase<vec>::getBuilder()
             .addDomain(CheckWithinDomains<UVT>{ { {-1, 1000}}, true, getDefaultTolerance<UVT>()})
-            .addDomain(CheckWithinDomains<UVT>{ { {1000, 1.e+30}}, true, getDefaultTolerance<UVT>()})
+            .addDomain(CheckWithinDomains<UVT>{ { {1000, std::numeric_limits<UVT>::max() / 2.0} }, true, getDefaultTolerance<UVT>()})
             .setTrialCount(65536)
             .setTestSeed(TestSeed());
         test_unary<vec>(
@@ -519,11 +535,17 @@ namespace {
     }
     TYPED_TEST(ErrorFunctions, Erfinv) {
         using vec = TypeParam;
+        using UVT = UvalueType<TypeParam>;
+         auto test_case =
+            TestingCase<vec>::getBuilder()
+            .addDomain(CheckWithinDomains<UVT>{ {{-1, 1}}, true, getDefaultTolerance<UVT>()})
+            .setTrialCount(65536)
+            .setTestSeed(TestSeed());
         test_unary<vec>(
             NAME_INFO(erfinv),
             RESOLVE_OVERLOAD(calc_erfinv),
             [](const vec& v) { return v.erfinv(); },
-            createDefaultUnaryTestCase<vec>(TestSeed(), false, true));
+            test_case);
     }
     TYPED_TEST(Nan, IsNan) {
         using vec = TypeParam;
@@ -555,7 +577,8 @@ namespace {
         using UVT = UvalueType<vec>;
         UVT tolerance = getDefaultTolerance<UVT>();
         // double: 2e+305  float: 4e+36 (https://sleef.org/purec.xhtml#eg)
-        UVT maxCorrect = std::is_same_v<UVT, float> ? (UVT)4e+36 : (UVT)2e+305;
+        // Half not available in Sleef, but we set max at 4e+4.
+        UVT maxCorrect = std::is_same_v<UVT, c10::Half>::value ? (UVT)4e+4 : (std::is_same<UVT, float> ? (UVT)4e+36 : (UVT)2e+305);
         TestingCase<vec> testCase = TestingCase<vec>::getBuilder()
             .addDomain(CheckWithinDomains<UVT>{ { {(UVT)-100, (UVT)0}}, true, tolerance})
             .addDomain(CheckWithinDomains<UVT>{ { {(UVT)0, (UVT)1000 }}, true, tolerance})
@@ -1430,7 +1453,7 @@ namespace {
         for (const auto i : c10::irange(N)) { ref_y[i] = x1[i] + x2[i] + x3[i] + x4[i]; }
         cmp(y, ref_y);
     }
-      TYPED_TEST(FunctionalTestsReducedFloat, Reduce) {
+    TYPED_TEST(FunctionalTestsReducedFloat, Reduce) {
       using vec = TypeParam;
       // Can't use ValueType<TypeParam> here:
       // Vectorized<BFloat16>::value_type returns uint16_t on AVX2/AVX512
