@@ -226,11 +226,12 @@ def save(
         f = os.fspath(f)
 
     with zipfile.ZipFile(f, 'w') as zipf:
-        # Save every field the SerializedArtifact to a file
+        # Save every field in the SerializedArtifact to a file.
         assert isinstance(artifact.exported_program, bytes)
         zipf.writestr("serialized_exported_program.json", artifact.exported_program)
         zipf.writestr("serialized_state_dict.pt", artifact.state_dict)
         zipf.writestr("serialized_constants.pt", artifact.constants)
+        zipf.writestr("serialized_example_inputs.pt", artifact.example_inputs)
 
         zipf.writestr('version', ".".join(map(str, SCHEMA_VERSION)))
 
@@ -271,6 +272,7 @@ def load(
         serialized_exported_program: Optional[bytes] = None
         serialized_state_dict: Optional[bytes] = None
         serialized_constants: Optional[bytes] = None
+        serialized_example_inputs: Optional[bytes] = None
 
         for file_info in zipf.infolist():
             file_content = zipf.read(file_info.filename)
@@ -287,6 +289,8 @@ def load(
                 serialized_state_dict = file_content
             elif file_info.filename == "serialized_constants.pt":
                 serialized_constants = file_content
+            elif file_info.filename == "serialized_example_inputs.pt":
+                serialized_example_inputs = file_content
             elif file_info.filename.startswith("extra_files"):
                 filename = file_info.filename.split("/", 1)[1]
                 extra_files[filename] = file_content.decode('utf-8')
@@ -294,10 +298,12 @@ def load(
         assert serialized_exported_program is not None
         assert serialized_state_dict is not None
         assert serialized_constants is not None
+        assert serialized_example_inputs is not None
         artifact: SerializedArtifact = SerializedArtifact(
             serialized_exported_program,
             serialized_state_dict,
             serialized_constants,
+            serialized_example_inputs,
         )
 
         # Deserialize ExportedProgram
@@ -369,10 +375,9 @@ def aot_compile(
             # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
             restore_fqn=False,
         )
-    flat_example_inputs = pytree.arg_tree_leaves(*args, **(kwargs or {}))
 
     with torch.no_grad():
-        so_path = torch._inductor.aot_compile(gm, flat_example_inputs, options)  # type: ignore[arg-type]
+        so_path = torch._inductor.aot_compile(gm, args, kwargs, options=options)  # type: ignore[arg-type]
 
     return so_path
 

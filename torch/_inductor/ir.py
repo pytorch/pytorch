@@ -2726,7 +2726,7 @@ class FlexibleLayout(Layout):
 
 
 class NonOwningLayout(Layout):
-    """Shares the same storage as another tensor"""
+    """Is a view into the storage of another tensor"""
 
     def __init__(self, view: Union[BaseView, "TensorBox"]):
         layout = view.get_layout()
@@ -3234,6 +3234,7 @@ class ComputedBuffer(Buffer):
             else:
                 self.freeze_layout()
 
+    @cache_on_self
     def get_default_sizes_body(self):
         args, var_ranges = dependencies.index_vars_squeeze(
             self.data.get_pointwise_size(), self.data.get_reduction_size(), prefix="q"
@@ -4169,6 +4170,9 @@ class ExternKernel(InputsKernel):
 
     def codegen_size_asserts(self, wrapper):
         if config.size_asserts and not V.graph.cpp_wrapper:
+            # comparing strides for 0 size tensor is tricky. Ignore them for now.
+            if sympy_product(self.get_size()) == 0:
+                return
             size = V.graph.wrapper_code.codegen_shape_tuple(self.get_size())
             stride = V.graph.wrapper_code.codegen_shape_tuple(self.get_stride())
             wrapper.writeline(
@@ -5265,30 +5269,38 @@ class FallbackKernel(ExternKernelAlloc):
                     self.init_args_default_value(schema)
             else:
                 self.python_kernel_name = str(kernel)
-
+        elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
+            # Internal Quantized Fallback Ops
+            assert isinstance(kernel, torch._ops.OpOverload)
+            if V.graph.cpp_wrapper:
+                self.set_cpp_kernel(kernel)
+                if not config.abi_compatible:
+                    self.use_runtime_dispatch = True
+            else:
+                self.python_kernel_name = str(kernel)
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
         else:
             # For non-aten OpOverload, i.e. custom ops
+            self.python_kernel_name = f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"  # type: ignore[union-attr]
             if V.graph.cpp_wrapper:
                 self.use_runtime_dispatch = True
                 self.set_cpp_kernel(kernel)
-            else:
-                self.python_kernel_name = f"{kernel.__module__.replace('._ops.', '.ops.')}.{kernel.__name__}"  # type: ignore[union-attr]
 
         if self.use_runtime_dispatch:
             self.codegen_comment(wrapper)
 
             exported_args = None
             args = None
-            if config.is_fbcode() and V.graph.cpp_wrapper:
+            if config.abi_compatible:
                 exported_args = self.export_extern_kernel_node()
             else:
                 args = [*self.codegen_args(), *self.codegen_kwargs()]
 
             wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
                 self.get_name(),
-                self.get_kernel_name(),
+                self.python_kernel_name,
+                self.cpp_kernel_name,
                 args,
                 self.cpp_op_schema,
                 self.cpp_kernel_key,
@@ -5690,7 +5702,8 @@ class ConvolutionUnary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5765,7 +5778,8 @@ class ConvolutionBinary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5855,7 +5869,8 @@ class ConvolutionBinaryInplace(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5941,7 +5956,8 @@ class MKLPackedLinear(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -5995,7 +6011,8 @@ class LinearUnary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -6061,7 +6078,8 @@ class LinearBinary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -6132,7 +6150,8 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
     def codegen(self, wrapper):
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             self.codegen_args(),
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -6385,7 +6404,8 @@ class QConvPointWisePT2E(ExternKernelAlloc):
         )
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             codegen_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -6570,7 +6590,8 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
         )
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             conv_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -6780,7 +6801,8 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
         )
         wrapper.generate_extern_kernel_alloc_and_find_schema_if_needed(
             self.get_name(),
-            self.get_kernel_name(),
+            self.python_kernel_name,
+            self.cpp_kernel_name,
             codegen_args,
             self.cpp_op_schema,
             self.cpp_kernel_key,
@@ -7604,11 +7626,11 @@ class Wait(ExternKernelAlloc):
 
     def get_inputs_that_alias_output(self):
         # Signal to codegen that our output buffer isn't safe to reuse
-        return [self.inputs[0].codegen_reference()]
+        return [self.inputs[0].get_name()]
 
     def get_mutation_names(self):
         # The generated `_wait_tensor` op mutates the input tensor
-        return [self.inputs[0].codegen_reference()]
+        return [self.inputs[0].get_name()]
 
 
 class CollectiveKernel(ExternKernel):
