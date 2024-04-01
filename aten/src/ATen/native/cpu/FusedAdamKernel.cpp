@@ -37,6 +37,7 @@ void adam_fused_step_impl(
   double bias_correction2 = 1 - std::pow(beta2, step);
   double exp_avg_grad_coefficient = 1 - beta1;
   double exp_avg_sq_grad_coefficient = 1 - beta2;
+  double bias_correction2_sqrt = std::sqrt(bias_correction2);
 
   using Vec = at::vec::Vectorized<scalar_t>;
 
@@ -80,10 +81,10 @@ void adam_fused_step_impl(
                 maximum(Vec::loadu(max_exp_avg_sq_ptr + d), exp_avg_sq_vec);
             max_exp_avg_sq_vec.store(max_exp_avg_sq_ptr + d);
             denom_vec =
-                (max_exp_avg_sq_vec / Vec(scalar_t(bias_correction2))).sqrt() + Vec(scalar_t(eps));
+                (max_exp_avg_sq_vec.sqrt() / Vec(scalar_t(bias_correction2_sqrt))) + Vec(scalar_t(eps));
           } else {
             denom_vec =
-                (exp_avg_sq_vec / Vec(scalar_t(bias_correction2))).sqrt() + Vec(scalar_t(eps));
+                (exp_avg_sq_vec.sqrt() / Vec(scalar_t(bias_correction2_sqrt))) + Vec(scalar_t(eps));
           }
 
           param_vec = param_vec - Vec(scalar_t(step_size)) * exp_avg_vec / denom_vec;
@@ -110,9 +111,9 @@ void adam_fused_step_impl(
             max_exp_avg_sq_ptr[d] =
                 std::max(max_exp_avg_sq_ptr[d], exp_avg_sq_ptr[d]);
             demon_val =
-                std::sqrt(max_exp_avg_sq_ptr[d] / bias_correction2) + eps;
+                std::sqrt(max_exp_avg_sq_ptr[d]) / bias_correction2_sqrt + eps;
           } else {
-            demon_val = std::sqrt(exp_avg_sq_ptr[d] / bias_correction2) + eps;
+            demon_val = std::sqrt(exp_avg_sq_ptr[d]) / bias_correction2_sqrt + eps;
           }
           param_ptr[d] = param_ptr[d] - step_size * exp_avg_ptr[d] / demon_val;
         }
