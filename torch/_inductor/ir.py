@@ -3985,7 +3985,7 @@ class ExternKernel(InputsKernel):
                 reads_bufs.append(V.graph.name_to_buffer[r.name])
             elif r.name in V.graph.graph_inputs_original.keys():
                 reads_bufs.append(V.graph.graph_inputs_original[r.name])
-        if any(
+        if isinstance(x.unwrap_view().layout, FlexibleLayout) and any(
             isinstance(buf.layout, FixedLayout)
             and buf.layout.is_channels_last_contiguous()
             for buf in reads_bufs
