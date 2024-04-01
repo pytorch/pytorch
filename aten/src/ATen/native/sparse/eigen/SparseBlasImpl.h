@@ -17,4 +17,4 @@ void add_out_sparse(
     const at::Scalar& alpha,
     const at::Tensor& result);
 
-} // namespace at::native::eigen::sparse
+} // namespace at::native::sparse::impl::eigen

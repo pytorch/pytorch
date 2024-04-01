@@ -1,5 +1,44 @@
 #include <ATen/native/sparse/eigen/SparseBlasImpl.h>
 
+#ifdef C10_MOBILE
+
+namespace at::native::sparse::impl::eigen {
+
+void addmm_out_sparse(
+    const at::Tensor& mat1,
+    const at::Tensor& mat2,
+    const at::Tensor& result,
+    const at::Scalar& alpha,
+    const at::Scalar& beta) {
+    TORCH_CHECK(
+      false,
+      "eigen::addmm_out_sparse: computation on mobile is not implemented for ",
+      result.layout(),
+      " + ",
+      mat1.layout(),
+      " @ ",
+      mat2.layout());
+}
+
+void add_out_sparse(
+    const at::Tensor& mat1,
+    const at::Tensor& mat2,
+    const at::Scalar& alpha,
+    const at::Tensor& result) {
+    TORCH_CHECK(
+      false,
+      "eigen::add_out_sparse: computation on mobile is not implemented for ",
+      mat1.layout(),
+      " + ",
+      mat2.layout(),
+      " -> ",
+      result.layout());
+}
+
+} // namespace at::native::sparse::impl::eigen
+
+#else
+
 #include <ATen/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -378,4 +417,6 @@ void add_out_sparse(
   });
 }
 
-} // namespace at::native::eigen::sparse
+} // namespace at::native::sparse::impl::eigen
+
+#endif C10_MOBILE
