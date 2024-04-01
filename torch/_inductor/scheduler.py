@@ -2027,6 +2027,10 @@ class Scheduler:
             return False  # heuristic not needed for correctness
 
         if node2.is_template():
+            if node2.node.get_origin_node().name != "mm":
+                why("prologue fusion can be enabled only with matmul")
+                return False
+
             if not config.prologue_fusion:
                 why("prologue fusion is disabled in config")
                 return False
@@ -2034,22 +2038,16 @@ class Scheduler:
             if len(node1.get_nodes()) > 1:
                 why("fusing multiple nodes into template is not supported")
                 return False
-
-            # Check if input size is a power of 2 and more than the smallest block size, which is defined in filtered_configs in mm_common.py
+            # Avoid fusing expensive ops in prolgoue by estimating the cost based on the code size
             node = node1.get_nodes()[0]
             if isinstance(node.node, ComputedBuffer):
-                for read in node1.read_writes.reads:
-                    if isinstance(read, MemoryDep):
-                        for size in read.size:
-                            if size & (size - 1) != 0:
-                                why("Tensor size is not a power of 2. Zero-padding will incur wrong results in some prologue functions such as sigmoid.")
-                                return False
-                            elif node.node.data.dtype == torch.int8 and size < 1024:
-                                why("Tensor size is smaller than Triton kernel's minimum block size 32. Zero-padding will incur wrong results in some prologue functions such as sigmoid.")
-                                return False
-                            elif size < 256:
-                                why("Tensor size is smaller than Triton kernel's minimum block size 16. Zero-padding will incur wrong results in some prologue functions such as sigmoid.")
-                                return False
+                pointwise = node.node.data
+                if pointwise.inner_fn_opcount() >= config.max_prologue_opcount:
+                    why("prolgoue op count is more than the threshold %s", config.max_prologue_opcount)
+                    return False
+                if len(pointwise.get_reads()) > 1:
+                    why("multiple reads in prologue is currently not supported")
+                    return False
 
             # Check if node1's reads and node2's reads have common indices
             index1 = {

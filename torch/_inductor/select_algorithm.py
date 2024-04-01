@@ -3,6 +3,7 @@ import functools
 import inspect
 import itertools
 import logging
+import math
 import operator
 import sys
 import textwrap
@@ -34,6 +35,7 @@ from .exc import CUDACompileError
 from .utils import (
     do_bench,
     get_dtype_size,
+    is_dynamic,
     Placeholder,
     sympy_dot,
     sympy_product,
@@ -319,17 +321,16 @@ class TritonTemplateKernel(TritonKernel):
             # more stuff might have been added since the codegen_body above
             if V.kernel.is_epilogue:
                 self.codegen_body()
-                return textwrap.indent(self.body.getvalue(), "    ").strip()
-            else:
-                return textwrap.indent(self.body.getvalue(), "    ").strip()
+            return textwrap.indent(self.body.getvalue(), "    ").strip()
 
         assert "<STORE_OUTPUT>" not in self.render_hooks
         self.render_hooks["<STORE_OUTPUT>"] = hook
         return "<STORE_OUTPUT>"
 
-    def prologue(self, val, index, last_index=False):
+    def prologue(self, val, index, mask):
         prologue = self.input_nodes[0]
-        size = prologue.get_size()
+        size = math.prod(prologue.get_size())
+        dtype = prologue.get_dtype()
         if V.kernel.is_epilogue:
             # No need to register hook
             return ""
@@ -338,7 +339,8 @@ class TritonTemplateKernel(TritonKernel):
         _, call_args, _ = self.args.python_argdefs()
         emit = False
         for read in prologue.get_reads():
-            if len(call_args) == 1:
+            if (  len(call_args) == 1 and not is_dynamic(prologue)
+               or len(call_args) == 2 and is_dynamic(prologue)):
                 if call_args[0] in V.kernel.rename_dict:
                     V.ops.set_cse_store_cache(read.name, "prologue_val")
                     emit = True
@@ -354,8 +356,23 @@ class TritonTemplateKernel(TritonKernel):
             return ""
 
         def hook():
-            self.codegen_prologue_body(val, last_index)
+            # prologue
+            self.codegen_prologue_body(val)
             stmts = textwrap.indent(self.prologue_body.getvalue(), "        ").strip()
+
+            # mask
+            if  (  is_dynamic(prologue)
+                or (size & (size - 1)) != 0
+                # See filtered_configs in mm_common.py
+                or dtype == torch.int8 and size < 1024
+                or size < 256):
+                val_assign = stmts.splitlines()[-1].split("=")[0].strip()
+                V.ops.masked(mask, lambda:val_assign, 0.0)
+                self.codegen_prologue_body(val, mask=True)
+                stmts += "\n        "
+                stmts += textwrap.indent(self.prologue_body.getvalue(), "        ").strip()
+
+            # assign to val
             val_assign = stmts.splitlines()[-1].split("=")[0].strip()
             assign = textwrap.indent(f"{val} = {val_assign}", "        ").strip()
             stmts += "\n        "

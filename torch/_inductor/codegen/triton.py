@@ -1255,6 +1255,7 @@ class TritonKernel(Kernel):
         self.inside_reduction = self.numels[-1] != 1
         self.body = IndentedBuffer()
         self.prologue_body = IndentedBuffer()
+        self.prologue_reuse = IndentedBuffer()
         self.indexing_code = IndentedBuffer()
         self.suffix: IndentedBuffer = IndentedBuffer()  # type: ignore[assignment]
         self.outside_loop_vars: Set[Any] = set()
@@ -2426,11 +2427,26 @@ class TritonKernel(Kernel):
         result_var.mask_vars = masks  # type: ignore[attr-defined]
         return result_var
 
-    def codegen_prologue_body(self, x, clear_buffer=False):
-        self.prologue_body.clear()
-        self.prologue_body.splice(self.compute.getvalue().replace("prologue_val", x))
-        if clear_buffer:
-            self.compute.clear()
+    def codegen_prologue_body(self, x, mask=False):
+        self.prologue_body.splice(self.loads)
+        if mask:
+            self.prologue_body.clear()
+            self.prologue_body.splice(self.compute)
+        else:
+            if self.prologue_reuse:
+                self.prologue_body.clear()
+                self.prologue_body.splice(self.prologue_reuse.getvalue().replace("prologue_val", x))
+                self.prologue_reuse.clear()
+            else:
+                compute = self.compute.getvalue()
+                if compute.find("prologue_val"):
+                    self.prologue_reuse.splice(compute)
+                    self.prologue_body.splice(compute.replace("prologue_val", x))
+                else:
+                    # cannot find "prologue_val" from compute buffer.
+                    None
+
+        self.compute.clear()
 
     def codegen_body(self):
         """
@@ -3575,6 +3591,9 @@ class TritonScheduling(BaseScheduling):
         """
         Codegen a triton template
         """
+        if not is_epilogue:
+            counters["inductor"]["cuda_prologue_fusion_counter"] += len(nodes)
+
         _, (numel, rnumel) = template_node.group
         assert rnumel == 1
         kernel, render = template_node.node.make_kernel_render(template_node.node)
@@ -3589,7 +3608,7 @@ class TritonScheduling(BaseScheduling):
                 node.codegen(kernel.split_and_set_ranges(node.get_ranges()))
 
         # finalize must be called after adding epilogue above
-        with V.set_kernel_handler(kernel):
+        with kernel, V.set_kernel_handler(kernel):
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
             src_code = (
                 partial_code

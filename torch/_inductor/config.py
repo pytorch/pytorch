@@ -71,11 +71,14 @@ benchmark_harness = True
 # fuse pointwise into templates
 epilogue_fusion = True
 
-# fuse pointwise into templates
-prologue_fusion = False
-
 # do epilogue fusions before other fusions
 epilogue_fusion_first = False
+
+# fuse pointwise into templates
+prologue_fusion = True
+
+# threshold to emit prologue code
+max_prologue_opcount = 4
 
 # enable pattern match+replace optimizations
 pattern_matcher = True

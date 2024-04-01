@@ -803,50 +803,57 @@ class TestMaxAutotune(TestCase):
             torch.testing.assert_close(y1, y1_expected)
 
     def test_triton_template_with_prologues_and_dynamic_shape(self):
-        def fn(
-            x: torch.Tensor, w: torch.Tensor, bias: torch.Tensor, mul: torch.Tensor
-        ) -> torch.Tensor:
-            return (
-                    (
-                    torch.matmul(
-                         torch.nn.functional.relu(torch.transpose(x, 0, 1)),
-                         torch.transpose(w, 0, 1)
-                    )
-                    + bias
-                )
-                * mul
-            )
+        def const(x: torch.Tensor, val) -> torch.Tensor:
+            return torch.full(x.size(), val).cuda()
 
-        M0 = 5
-        M1 = 8
-        K = 4
-        N = 3
-        w = torch.rand(N, K).cuda().half()
-        b = torch.rand(N).cuda().half()
+        def fn(
+            x: torch.Tensor, w: torch.Tensor
+        ) -> torch.Tensor:
+            return torch.matmul(
+                       torch.transpose(x, 0, 1) * torch.transpose(const(x, 0.05), 0, 1) + torch.transpose(const(x, 0.1), 0, 1),
+                       torch.transpose(w, 0, 1)
+                   )
+
+        torch.backends.cuda.matmul.allow_tf32 = False
 
         with config.patch(
             {
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "Triton",
-                "prologue_fusion" : True,
+                "prologue_fusion": True,
+                "max_prologue_opcount": 16,
             }
         ):
             compiled_fn = torch.compile(
                 fn, fullgraph=True, dynamic=True, mode="max-autotune-no-cudagraphs"
             )
 
-            x0 = torch.rand(K, M0).cuda().half()
-            mul0 = torch.rand(M0, N).cuda().half()
-            y0 = compiled_fn(x0, w, b, mul0)
-            y0_expected = fn(x0, w, b, mul0)
+            counters["inductor"]["cuda_prologue_fusion_counter"] = 0
+
+            M0 = 5
+            K = 5
+            N = 5
+            w = torch.rand(N, K).cuda()
+            x0 = torch.rand(K, M0).cuda()
+            y0 = compiled_fn(x0, w)
+            y0_expected = fn(x0, w)
             torch.testing.assert_close(y0, y0_expected)
 
-            x1 = torch.rand(K, M1).cuda().half()
-            mul1 = torch.rand(M1, N).cuda().half()
-            y1 = compiled_fn(x1, w, b, mul1)
-            y1_expected = fn(x1, w, b, mul1)
+            M1 = 8
+            K = 8
+            N = 8
+            w = torch.rand(N, K).cuda()
+            x1 = torch.rand(K, M1).cuda()
+            y1 = compiled_fn(x1, w)
+            y1_expected = fn(x1, w)
             torch.testing.assert_close(y1, y1_expected)
+
+            actual_count = counters["inductor"]["cuda_prologue_fusion_counter"]
+            assert (
+                actual_count == 1
+            ), f"Expected fuse count of 1 but got {actual_count}"
+
 
     @config.patch(
         benchmark_kernel=True,
