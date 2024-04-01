@@ -11,7 +11,11 @@ namespace c10::cuda {
 namespace {
 
 DriverAPI create_driver_api() {
-  c10::string_view libName = (USE_ROCM) ? "libamdhip64.so" : "libcuda.so.1";
+#ifndef USE_ROCM
+  c10::string_view libName{"libcuda.so.1"};
+#else
+  c10::string_view libName{"libamdhip64.so"};
+#end
   void* handle_0 = dlopen(libName.data(), RTLD_LAZY | RTLD_NOLOAD);
   TORCH_CHECK(handle_0, "Can't open libs", dlerror());
   void* handle_1 = DriverAPI::get_nvml_handle();
