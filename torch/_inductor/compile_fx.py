@@ -1471,7 +1471,6 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
 
     compiled_fn = compile_gm(GmWrapper(), inputs)
 
-    @functools.wraps(compiled_fn)
     def wrapper(*args):
         # note this doesn't check the spec, assuming it is the same
         return compiled_fn(*pytree.arg_tree_leaves(*args))
