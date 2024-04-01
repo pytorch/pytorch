@@ -8,6 +8,7 @@ import time
 import unittest
 import copy
 from sys import platform
+import warnings
 
 import torch
 import torch.cuda
@@ -941,5 +942,7 @@ if __name__ == "__main__":
 
 if __name__ == '__main__':
     # multiprocessing ipc use case not supported on Jetson
-    if not IS_JETSON:
+    if IS_JETSON:
+        warnings.warn("skipping multiprocessing tests for Jetson since multiprocessing ipc use case is not supported")
+    else:
         run_tests()
