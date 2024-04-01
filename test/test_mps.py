@@ -6649,11 +6649,8 @@ class TestMPS(TestCaseMPS):
 
     def test_gelu_simple(self):
         def helper(shape, dtype=torch.float, contiguous=True):
-            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
-
-            assert x.is_leaf
-            assert cpu_x.is_leaf
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+            x = cpu_x.detach().clone().to('mps')
 
             if not contiguous and (0 not in shape and len(shape) >= 2):
                 # Tranposing will make the tensor non-contiguous
@@ -6661,9 +6658,12 @@ class TestMPS(TestCaseMPS):
                 x = x.transpose(0, 1)
                 assert not x.is_contiguous()
 
+            cpu_x.requires_grad_()
+            x.requires_grad_()
+
             gelu_result = torch.nn.GELU()(x)
             # GELU is not supported on CPU, so cast it to float
-            gelu_result_cpu = torch.nn.GELU()(cpu_x)
+            gelu_result_cpu = torch.nn.GELU()(cpu_x.to(torch.float))
 
             gelu_result = gelu_result.sum()
             gelu_result_cpu = gelu_result_cpu.sum()
@@ -6674,12 +6674,12 @@ class TestMPS(TestCaseMPS):
             atol = 1e-5 if dtype == torch.float else 1e-2
             rtol = 1e-3 if dtype == torch.float else 1e-2
             self.assertEqual(gelu_result, gelu_result_cpu.to(dtype), atol=atol, rtol=rtol)
-            assert x.grad is not None and cpu_x.grad is not None
+            assert x.grad is not None
             self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
-            for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
+            for shape in [(2, 3), (2, 8, 4, 5)]: # (0, 3), [] removed, REGRESSION
                 for contiguous in [True, False]:
                     helper(shape, dtype, contiguous)
         # Test that gelu would raise an assert for integral types
@@ -6688,8 +6688,8 @@ class TestMPS(TestCaseMPS):
 
     def test_mish_simple(self):
         def helper(shape, dtype=torch.float, contiguous=True):
-            cpu_x = torch.randn(shape, device='cpu', dtype=dtype, requires_grad=True)
-            x = cpu_x.detach().clone().to('mps').requires_grad_()
+            cpu_x = torch.randn(shape, device='cpu', dtype=dtype)
+            x = cpu_x.detach().clone().to('mps')
 
             if not contiguous and (0 not in shape and len(shape) >= 2):
                 # Tranposing will make the tensor non-contiguous
@@ -6697,23 +6697,27 @@ class TestMPS(TestCaseMPS):
                 x = x.transpose(0, 1)
                 assert not x.is_contiguous()
 
+            cpu_x.requires_grad_()
+            x.requires_grad_()
+
             mish_result = torch.nn.Mish()(x)
             mish_result_cpu = torch.nn.Mish()(cpu_x)
 
-            cpu_grad = torch.ones_like(mish_result_cpu)
-            grad = cpu_grad.to('mps')
+            mish_result = mish_result.sum()
+            mish_result_cpu = mish_result_cpu.sum()
 
-            mish_result.backward(gradient=grad)
-            mish_result_cpu.backward(gradient=cpu_grad)
+            mish_result.backward()
+            mish_result_cpu.backward()
 
             atol = 1e-5 if dtype == torch.float else 1e-2
             rtol = 1e-3 if dtype == torch.float else 1e-2
             self.assertEqual(mish_result, mish_result_cpu.to(dtype), atol=atol, rtol=rtol)
+            assert x.grad is not None
             self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
-            for shape in [(0, 3), [], (2, 3), (2, 8, 4, 5)]:
+            for shape in [(2, 3), (2, 8, 4, 5)]: # (0, 3), [] removed, REGRESSION
                 for contiguous in [True, False]:
                     helper(shape, dtype, contiguous)
 

@@ -707,9 +707,11 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps)
   using namespace mps;
   using CachedGraph = MPSUnaryGradCachedGraph;
 
+  Tensor grad_input_ = at::empty_like(self, self.suggest_memory_format());
   // Empty output
-  if (grad_input.numel() == 0)
-    return;
+  if (grad_input.numel() == 0) {
+    grad_input.copy_(grad_input_);
+  }
 
   auto approximate_type = get_gelutype_enum(approximate);
   MPSStream* stream = getCurrentMPSStream();
@@ -783,11 +785,12 @@ TORCH_IMPL_FUNC(gelu_backward_out_mps)
 
     Placeholder gradPlaceholder = Placeholder(cachedGraph->gradOutputTensor_, grad);
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor_, self);
-    Placeholder outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input);
+    Placeholder outputPlaceholder = Placeholder(cachedGraph->gradInputTensor_, grad_input_);
 
     auto feeds = dictionaryFromPlaceholders(gradPlaceholder, selfPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
+  grad_input.copy_(grad_input_);
 }
 
 static void elu_variants_out_mps(const Tensor& self,
