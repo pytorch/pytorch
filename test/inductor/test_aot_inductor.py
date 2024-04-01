@@ -20,7 +20,10 @@ from torch.export import Dim, export
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import SM80OrLater, SM90OrLater
-from torch.testing._internal.common_quantization import skip_if_no_torchvision
+from torch.testing._internal.common_quantization import (
+    skip_if_no_torchvision,
+    skipIfNoFBGEMM,
+)
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
     IS_CI,
@@ -756,6 +759,23 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 48, 64, 64, dtype=torch.bfloat16, device=self.device),
         )
         self.check_model(Model(), example_inputs)
+
+    @skipIfNoFBGEMM
+    def test_quantized_linear(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.weight = torch.randn(10, 10, device=device)
+                self.bias = torch.randn(10, device=device)
+
+            def forward(self, x):
+                return torch.ops.quantized.linear_dynamic_fp16_unpacked_weight(
+                    x, self.weight, self.bias
+                )
+
+        example_inputs = (torch.randn(10, 10, device=self.device),)
+        with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
+            self.check_model(Model(self.device), example_inputs)
 
     def test_zero_grid_with_unbacked_symbols(self):
         class Repro(torch.nn.Module):
@@ -2140,6 +2160,65 @@ class AOTInductorTestsTemplate:
         with self.assertRaisesRegex(Exception, ""):
             aot_inductor_module(x_casted)
 
+    def test_non_contiguous_output_alias(self):
+        # Test return x, x.contiguous() where x is non-contiguous.
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                squared = x * x
+                transposed = squared.t()  # non-contiguous
+                contig = transposed.contiguous()
+                return transposed, contig
+
+        x = torch.randn(3, 4, dtype=torch.float16, device=self.device)
+        model = Model()
+        with torch.no_grad(), config.patch(
+            {
+                "abi_compatible": self.abi_compatible,
+            }
+        ):
+            result = AOTIRunnerUtil.run(
+                self.device,
+                model,
+                (x,),
+            )
+        actual = model(x)
+        self.assertTrue(same(result, actual))
+
+        # contiguous() should create a new tensor
+        self.assertTrue(result[0].data_ptr() != result[1].data_ptr())
+
+    def test_multiple_output_alias(self):
+        # Test when mutliple outputs alias the same tensor
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                squared = x * x
+                contig = squared.contiguous()  # alias
+                reshaped = squared.reshape(squared.shape)  # alias
+                cubed = squared * x
+                return squared, contig, reshaped, cubed
+
+        x = torch.randn(3, 4, dtype=torch.float32, device=self.device)
+        model = Model()
+
+        with torch.no_grad(), config.patch(
+            {
+                "abi_compatible": self.abi_compatible,
+            }
+        ):
+            result = AOTIRunnerUtil.run(
+                self.device,
+                model,
+                (x,),
+            )
+        actual = model(x)
+        self.assertTrue(same(result, actual))
+
+        # squared, contig and reshaped alias the same tensor.
+        self.assertTrue(result[0].data_ptr() == result[1].data_ptr())
+        self.assertTrue(result[0].data_ptr() == result[2].data_ptr())
+        # cubed shouldn't be an alias.
+        self.assertTrue(result[0].data_ptr() != result[3].data_ptr())
+
     def test_runtime_checks_shape_failed(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -2302,9 +2381,13 @@ CPU_TEST_FAILURES = {
     # FIXME: failed with compilation error
     "test_runtime_checks": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
-    # There is a double-free issue which will be fixed in another PR
-    "test_repeat_output": fail_with_and_without_stack_allocation(is_skip=True),
+    # undefined symbol: _Z16aoti_torch_dtypeIN3c104HalfEEiv
+    "test_non_contiguous_output_alias": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
     # the test segfaults
+    "test_repeat_output": fail_stack_allocation(is_skip=True),
+    "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
     "test_buffer_mutation": fail_stack_allocation(is_skip=True),
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
@@ -2338,7 +2421,6 @@ CUDA_TEST_FAILURES = {
     "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
     "test_normal_functional": fail_abi_compatible_cuda(),
     # There is a double-free issue which will be fixed in another PR
-    "test_repeat_output": fail_abi_compatible_cuda(is_skip=True),
     # no ABI shim fn for torch.sort; remove this when adding one
     "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
     # no runtime checks for non_abi_compatible mode
@@ -2347,6 +2429,8 @@ CUDA_TEST_FAILURES = {
     "test_runtime_checks_fp8": fail_non_abi_compatible_cuda(is_skip=True),
     "test_runtime_checks_dtype_failed": fail_non_abi_compatible_cuda(is_skip=True),
     "test_runtime_checks_shape_failed": fail_non_abi_compatible_cuda(is_skip=True),
+    # quantized unsupported for GPU
+    "test_quantized_linear": fail_cuda(is_skip=True),
 }
 
 if TEST_WITH_ROCM:
@@ -2396,6 +2480,7 @@ if not IS_FBCODE:
                 is_skip=True
             ),
             "test_output_path_1": fail_minimal_arrayref_interface(is_skip=True),
+            "test_quantized_linear": fail_minimal_arrayref_interface(is_skip=True),
             "test_repeat_interleave": fail_minimal_arrayref_interface(is_skip=True),
             "test_return_constant": fail_minimal_arrayref_interface(is_skip=True),
             "test_reuse_kernel": fail_minimal_arrayref_interface(is_skip=True),
