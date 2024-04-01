@@ -3317,12 +3317,12 @@ def check_file(filename, is_inlined_call=False):
     if any(filename.startswith(d) for d in get_legacy_mod_inlinelist()):
         return SkipResult(
             False,
-            "inlined according trace_rules.LEGACY_MOD_INLINELIST",
+            "LEGACY_MOD_INLINELIST",
         )
     if is_inlined_call and is_torch_inline_allowed(filename):
         return SkipResult(
             False,
-            "inlined according trace_rules.MOD_INLINELIST",
+            "MOD_INLINELIST",
         )
     if (
         is_fbcode
@@ -3331,10 +3331,10 @@ def check_file(filename, is_inlined_call=False):
     ):
         return SkipResult(
             True,
-            "skipped according trace_rules.FBCODE_SKIP_DIRS",
+            "FBCODE_SKIP_DIRS",
         )
     if bool(SKIP_DIRS_RE.match(filename)):
-        return SkipResult(True, "skipped according trace_rules.SKIP_DIRS")
+        return SkipResult(True, "SKIP_DIRS")
     else:
         return SkipResult(False, "inlined by default")
 
@@ -3400,19 +3400,20 @@ def check_verbose(obj, is_inlined_call=False):
         fi = FunctionInfo(obj, None, getfile(obj), None)
 
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
+    reasons: Set[str] = set()
     rule = torch._dynamo.trace_rules.lookup_inner(
-        fi.py_obj, fi.name, fi.filename, is_inlined_call
+        fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons
     )
     if rule in [UserFunctionVariable, FunctorchHigherOrderVariable]:
         return SkipResult(
             False,
-            "inlined according trace_rules.lookup",
+            f"inlined according trace_rules.lookup {reasons.pop()}",
         )
     else:
         assert rule == SkipFunctionVariable, rule
         return SkipResult(
             True,
-            "skipped according trace_rules.lookup",
+            f"skipped according trace_rules.lookup {reasons.pop()}",
         )
 
 
@@ -3471,18 +3472,28 @@ def lookup(obj):
     return lookup_inner(obj)
 
 
-def lookup_inner(obj, name=None, filename=None, is_direct_call=True):
+def lookup_inner(
+    obj,
+    name=None,
+    filename=None,
+    is_direct_call=True,
+    reasons: Union[None, Set[str]] = None,
+):
     # Step 1: lookup obj's tracing rule in `torch_name_rule_map`.
     # The rules defined in `torch_name_rule_map` mainly includes two parts:
     # - Manually defined rules for any functions.
     # - The list of torch in graph functions.
     if not hashable(obj):
+        if reasons is not None:
+            reasons.add("obj is not hashable")
         return None
     if obj is not None:
         if is_aten_op_or_tensor_method(obj):
             return TorchInGraphFunctionVariable
         rule = get_torch_obj_rule_map().get(obj, None)
         if rule is not None:
+            if reasons is not None:
+                reasons.add("get_torch_obj_rule_map")
             return rule
     elif name is not None and filename is not None and not is_direct_call:
         if name.startswith(TORCH_DYNAMO_RESUME_IN_PREFIX):
@@ -3492,20 +3503,29 @@ def lookup_inner(obj, name=None, filename=None, is_direct_call=True):
         else:
             rule = get_torch_obj_rule_map().get(filename + "#" + name, None)
         if rule is not None:
+            if reasons is not None:
+                reasons.add("get_torch_obj_rule_map")
             return rule
 
     # Step 2: lookup obj's tracing rule by function name.
     if is_direct_call:
         if name == "patched_init":
+            if reasons is not None:
+                reasons.add("func name is patched_init")
             return SkipFunctionVariable
         elif name == "__torch_function__":
+            if reasons is not None:
+                reasons.add("func name is __torch_function__")
             return UserFunctionVariable
 
     # Step 3: lookup obj's tracing rule by filename.
     if filename is None:
         filename = getfile(obj)
 
-    if check_file(filename, is_direct_call).skipped:
+    skip_result = check_file(filename, is_direct_call)
+    if reasons is not None:
+        reasons.add(skip_result.reason)
+    if skip_result.skipped:
         return SkipFunctionVariable
     else:
         return UserFunctionVariable
