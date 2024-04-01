@@ -1,4 +1,4 @@
-from typing import Tuple
+from typing import Callable, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -23,14 +23,17 @@ from torch.fx.experimental.proxy_tensor import (
 
 
 class WhileLoopOp(HigherOrderOperator):
-    def __call__(self, cond_fn, body_fn, carried_inputs, additional_inputs):
-        if not isinstance(cond_fn, torch.fx.GraphModule) or not isinstance(
-            body_fn, torch.fx.GraphModule
-        ):
-            raise RuntimeError(
-                "cond_fn and body_fn must be torch.fx.GraphModule, got "
-                f"{type(cond_fn)} and {type(body_fn)}"
-            )
+    def __init__(self):
+        super().__init__("while_loop")
+
+    def __call__(
+        self,
+        cond_fn: Callable,
+        body_fn: Callable,
+        carried_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
+        additional_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
+        /,
+    ):
         if not isinstance(carried_inputs, tuple):
             raise RuntimeError(
                 f"carried_inputs must be a tuple, got {type(carried_inputs)}"
@@ -57,7 +60,10 @@ class WhileLoopOp(HigherOrderOperator):
         return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
-while_loop_op = HigherOrderOperator("while_loop")
+while_loop_op = WhileLoopOp()
+# Override while_loop_op.__module__ to "torch.ops.higher_order" so that in the generated
+# graph module, while_loop node's target is correctedly printed as torch.ops.higher_order.while_loop
+while_loop_op.__module__ = "torch.ops.higher_order"
 
 
 def while_loop(cond_fn, body_fn, carried_inputs):
