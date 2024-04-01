@@ -2,7 +2,7 @@ import dataclasses
 import inspect
 import re
 import sys
-from typing import Any, Callable, Tuple
+from typing import Any, Callable, Dict, Iterable, Tuple
 
 import torch
 from torch import _C
@@ -105,7 +105,7 @@ def is_functional_schema(schema: Any) -> bool:
     return is_functional(schema)
 
 
-def is_tensorlist_like_type(typ: torch._C.Type):
+def is_tensorlist_like_type(typ: torch.Type):
     return (
         typ == _C.ListType(_C.TensorType.get())
         or typ == _C.ListType(_C.OptionalType(_C.TensorType.get()))
@@ -152,7 +152,9 @@ def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
     return True
 
 
-def zip_schema(schema, args, kwargs):
+def zip_schema(
+    schema: _C.FunctionSchema, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+) -> Iterable[Tuple[_C.Argument, Any]]:
     """zips schema.arguments and (args, kwargs) together.
 
     Assumes that (args, kwargs) were the inputs to some torch._ops.OpOverload:
