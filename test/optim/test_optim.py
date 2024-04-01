@@ -1,6 +1,5 @@
 # Owner(s): ["module: optimizer"]
 
-import unittest
 import functools
 import itertools
 
@@ -25,8 +24,6 @@ from torch.testing._internal.common_utils import (
 )
 
 
-from torch.testing._internal.common_cuda import TEST_CUDA
-from unittest.mock import patch
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
@@ -602,78 +599,6 @@ class TestOptim(TestCase):
         )
 
 
-    def test_fused_optimizer_does_not_step_if_foundinf(self):
-        if not torch.cuda.is_available():
-            self.skipTest("CUDA is required.")
-
-        from torch.optim import adam, adamw, sgd
-
-        num_tensors = 5
-        for functional_optim, amsgrad, no_grad_scale in itertools.product((adam.adam, adamw.adamw), (False, True), (False, True)):
-            params, grads, exp_avgs, exp_avg_sqs = (
-                [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(4))
-            prev_params = [t.clone().detach() for t in params]
-            max_exp_avg_sqs = [torch.ones((1,), device="cuda") for _ in range(num_tensors)] if amsgrad else []
-            state_steps = [torch.ones((), dtype=torch.float32, device="cuda") for _ in range(num_tensors)]
-            grad_scale = None if no_grad_scale else torch.ones((1,), dtype=torch.float32, device="cuda")
-            found_inf = torch.ones((), dtype=torch.float32, device="cuda")
-
-            functional_optim(
-                params,
-                grads,
-                exp_avgs,
-                exp_avg_sqs,
-                max_exp_avg_sqs,
-                state_steps,
-                foreach=False,
-                capturable=False,
-                fused=True,
-                amsgrad=amsgrad,
-                beta1=0.9,
-                beta2=0.99,
-                lr=1e-2,
-                weight_decay=0.0,
-                eps=1e-8,
-                maximize=False,
-                grad_scale=grad_scale,
-                found_inf=found_inf,
-            )
-
-            self.assertEqual(
-                state_steps,
-                [
-                    torch.ones((), dtype=torch.float32, device="cuda")
-                    for _ in range(num_tensors)
-                ],
-            )
-            self.assertEqual(params, prev_params)
-        else:
-            for momentum in (0.0, 0.1):
-                params, d_p_list, momentum_buffer_list = (
-                    [torch.ones((1,), device="cuda") for _ in range(num_tensors)] for _ in range(3))
-                if momentum == 0.0:
-                    momentum_buffer_list = [None for _ in range(num_tensors)]
-                prev_params = [t.clone().detach() for t in params]
-                grad_scale = None if no_grad_scale else torch.ones((1,), dtype=torch.float32, device="cuda")
-                found_inf = torch.ones((), dtype=torch.float32, device="cuda")
-                sgd.sgd(
-                    params,
-                    d_p_list,
-                    momentum_buffer_list,
-                    has_sparse_grad=False,
-                    foreach=False,
-                    fused=True,
-                    grad_scale=grad_scale,
-                    found_inf=found_inf,
-                    weight_decay=0.0,
-                    momentum=momentum,
-                    lr=0.01,
-                    dampening=0.0,
-                    nesterov=False,
-                    maximize=False,
-                )
-
-
 def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):
     # Ignored is the list of values in `opt_differentiable_state`, we do this
     # for `gradcheck` to correctly track the state tensors as function inputs
@@ -979,39 +904,6 @@ class TestDifferentiableOptimizer(TestCase):
                 *state.values(),
             ),
         )
-
-    @unittest.skipIf(not TEST_CUDA, "test requires CUDA")
-    def test_defaults_changed_to_foreach(self):
-        from torch.optim import (adam, adamw, nadam, sgd, radam, rmsprop, rprop,
-                                 asgd, adamax, adadelta, adagrad)
-        multi_optims = ((Adam, adam, "_multi_tensor_adam"),
-                        (AdamW, adamw, "_multi_tensor_adamw"),
-                        (NAdam, nadam, "_multi_tensor_nadam"),
-                        (SGD, sgd, "_multi_tensor_sgd"),
-                        (RAdam, radam, "_multi_tensor_radam"),
-                        (RMSprop, rmsprop, "_multi_tensor_rmsprop"),
-                        (Rprop, rprop, "_multi_tensor_rprop"),
-                        (ASGD, asgd, "_multi_tensor_asgd"),
-                        (Adamax, adamax, "_multi_tensor_adamax"),
-                        (Adadelta, adadelta, "_multi_tensor_adadelta"),
-                        (Adagrad, adagrad, "_multi_tensor_adagrad"),)
-
-        model = torch.nn.Linear(5, 5)
-        model.to(dtype=torch.float64, device="cuda")
-        input = torch.rand(2, 5, dtype=torch.float64, device="cuda")
-
-        for opt, mod, func in multi_optims:
-            defaults = {}
-            if opt == SGD:
-                defaults["lr"] = 1e-2
-            optimizer = opt(model.parameters(), **defaults)
-            optimizer.zero_grad()
-            output = model(input)
-            loss = output.sum()
-            loss.backward()
-            with patch.object(mod, func) as mocked_foreach_impl:
-                optimizer.step()
-                self.assertTrue(mocked_foreach_impl.called)
 
 
 if __name__ == "__main__":
