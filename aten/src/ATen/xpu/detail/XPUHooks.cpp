@@ -1,4 +1,3 @@
-#include <ATen/xpu/PinnedMemoryAllocator.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUDevice.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
