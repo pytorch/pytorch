@@ -1174,15 +1174,8 @@ class DICT_CONTAINS : public LeafGuard {
  *
  * We have to be careful about resetting in case the other guards fail and we
  * have some state in the relational guard. This is done by virtual method
- * reset_state(). This is called by the GuardManager whenever
- * there is a guard failure. In the event that the Guard evals to true, we do
- * not need to reset the state. THe check_nopybind method should itself reset
- * the state if it was called N times. So, fast path is unaffected.
+ * reset_state(). This is called by the RootGuardManager before it exits.
  *
- * There is a question on which GuardManager node calls the
- * reset_state. This is done by registering the guard as a
- * relational_guard_resetter on the root node, which calls the resets all the
- * relational guards on guard evaluation to False.
  */
 class RelationalGuard : public LeafGuard {
  public:
@@ -1208,9 +1201,7 @@ class TENSOR_ALIASING : public RelationalGuard {
       _is_first_call = false;
       return true;
     }
-    bool result = _first_tensor == value;
-    reset_state();
-    return result;
+    return _first_tensor == value;
   }
 
   void reset_state() final {
@@ -1251,10 +1242,6 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
       // it.
       return false;
     }
-    _counter++;
-    if (_counter == _num_tensors) {
-      reset_state();
-    }
     return true;
   }
 
@@ -1265,18 +1252,20 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
       std::stringstream fail_reason;
       fail_reason << "Duplicate tensor found where not expected! ";
       fail_reason << py::cast<std::string>(_tensor_names[_counter])
-                  << " should not alias to anything, but is aliased";
+                  << " should not alias to anything, but is aliased."
+                  << " Total number of tensors are " << _num_tensors;
       return GuardDebugInfo(false, fail_reason.str(), 0);
     }
+    _counter += 1;
     return GuardDebugInfo(true, 1);
   }
 
   void reset_state() final {
+    _counter = 0;
     for (auto item : _unique_tensors) {
       Py_DECREF(item.first);
     }
     _unique_tensors.clear();
-    _counter = 0;
   }
 
  private:
@@ -1725,6 +1714,7 @@ class RootGuardManager : public GuardManager {
         return false;
       }
     }
+    _reset_relational_guard_state();
     return true;
   }
 
@@ -1761,6 +1751,7 @@ class RootGuardManager : public GuardManager {
             false, tmp_debug_info.verbose_code_parts, num_guards_executed);
       }
     }
+    _reset_relational_guard_state();
     return GuardDebugInfo(true, num_guards_executed);
   }
 
