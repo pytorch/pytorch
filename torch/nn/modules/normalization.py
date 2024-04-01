@@ -7,9 +7,9 @@ from .. import functional as F
 from .. import init
 
 from torch import Tensor, Size
-from typing import Union, List, Tuple
+from typing import Union, List, Optional, Tuple
 
-__all__ = ['LocalResponseNorm', 'CrossMapLRN2d', 'LayerNorm', 'GroupNorm']
+__all__ = ['LocalResponseNorm', 'CrossMapLRN2d', 'LayerNorm', 'GroupNorm', 'RMSNorm']
 
 class LocalResponseNorm(Module):
     r"""Applies local response normalization over an input signal.
@@ -290,6 +290,88 @@ class GroupNorm(Module):
     def extra_repr(self) -> str:
         return '{num_groups}, {num_channels}, eps={eps}, ' \
             'affine={affine}'.format(**self.__dict__)
+
+
+class RMSNorm(Module):
+    r"""Applies Root Mean Square Layer Normalization over a mini-batch of inputs.
+
+    This layer implements the operation as described in
+    the paper `Root Mean Square Layer Normalization <https://arxiv.org/pdf/1910.07467.pdf>`__
+
+    .. math::
+        y = \frac{x}{\sqrt{\mathrm{RMS}[x] + \epsilon}} * \gamma
+
+    The root mean squared norm is taken over the last ``D`` dimensions, where ``D``
+    is the dimension of :attr:`normalized_shape`. For example, if :attr:`normalized_shape`
+    is ``(3, 5)`` (a 2-dimensional shape), the rms norm is computed over
+    the last 2 dimensions of the input.
+
+    Args:
+        normalized_shape (int or list or torch.Size): input shape from an expected input
+            of size
+
+            .. math::
+                [* \times \text{normalized\_shape}[0] \times \text{normalized\_shape}[1]
+                    \times \ldots \times \text{normalized\_shape}[-1]]
+
+            If a single integer is used, it is treated as a singleton list, and this module will
+            normalize over the last dimension which is expected to be of that specific size.
+        eps: a value added to the denominator for numerical stability. Default: :func:`torch.finfo(x.dtype).eps`
+        elementwise_affine: a boolean value that when set to ``True``, this module
+            has learnable per-element affine parameters initialized to ones (for weights)
+            and zeros (for biases). Default: ``True``.
+
+    Shape:
+        - Input: :math:`(N, *)`
+        - Output: :math:`(N, *)` (same shape as input)
+
+    Examples::
+
+        >>> rms_norm = nn.RMSNorm([2, 3])
+        >>> input = torch.randn(2, 2, 3)
+        >>> rms_norm(input)
+
+    """
+    __constants__ = ['normalized_shape', 'eps', 'elementwise_affine']
+    normalized_shape: Tuple[int, ...]
+    eps: Optional[float]
+    elementwise_affine: bool
+
+    def __init__(self, normalized_shape: _shape_t, eps: Optional[float] = None, elementwise_affine: bool = True,
+                 device=None, dtype=None) -> None:
+        factory_kwargs = {'device': device, 'dtype': dtype}
+        super().__init__()
+        if isinstance(normalized_shape, numbers.Integral):
+            # mypy error: incompatible types in assignment
+            normalized_shape = (normalized_shape,)  # type: ignore[assignment]
+        self.normalized_shape = tuple(normalized_shape)  # type: ignore[arg-type]
+        self.eps = eps
+        self.elementwise_affine = elementwise_affine
+        if self.elementwise_affine:
+            self.weight = Parameter(torch.empty(self.normalized_shape, **factory_kwargs))
+        else:
+            self.register_parameter('weight', None)
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        """
+        Resets parameters based on their initialization used in __init__.
+        """
+        if self.elementwise_affine:
+            init.ones_(self.weight)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Runs forward pass.
+        """
+        return F.rms_norm(x, self.normalized_shape, self.weight, self.eps)
+
+    def extra_repr(self) -> str:
+        """
+        Extra information about the module.
+        """
+        return '{normalized_shape}, eps={eps}, ' \
+            'elementwise_affine={elementwise_affine}'.format(**self.__dict__)
 
 
 # TODO: ContrastiveNorm2d
