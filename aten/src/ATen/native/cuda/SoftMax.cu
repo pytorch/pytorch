@@ -653,18 +653,12 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   input += static_cast<int64_t>(blockIdx.x) * classes;
   output += static_cast<int64_t>(blockIdx.x) * classes;
 
-  // Reduce across entire classes dimension
+  // find the max
   accscalar_t threadMax = -at::numeric_limits<accscalar_t>::max();
-  accscalar_t threadExp = static_cast<accscalar_t>(0);
-  int offset = tid;
-  while (offset < classes) {
-    accscalar_t crnt_val = (accscalar_t)input[offset];
-    threadMax = std::max(threadMax, crnt_val);
-    threadExp += std::exp(crnt_val);
-    offset += blockDim.x;
+  if (tid < classes) {
+    threadMax = input[tid];
   }
 
-  // Reduce inside the thread block
   accscalar_t max_k = cuda_utils::BlockReduceMax<accscalar_t>(threadMax, sdata);
   if (tid == 0) {
     sdata[0] = max_k;
@@ -672,8 +666,11 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   __syncthreads();
   max_k = sdata[0];
 
-  // Sum reduce
-  threadExp /= std::exp(max_k);
+  // reduce all values
+  accscalar_t threadExp = static_cast<accscalar_t>(0);
+  if (tid < classes) {
+    threadExp = std::exp(threadMax - max_k);
+  }
   accscalar_t sumAll = cuda_utils::BlockReduceSum<accscalar_t>(threadExp, sdata);
   if (tid == 0) {
     sdata[0] = sumAll;
@@ -681,11 +678,11 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   __syncthreads();
   sumAll = sdata[0];
 
-  Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
-  offset = tid;
-  while (offset < classes) {
-    output[offset] = epilogue(input[offset]);
-    offset += blockDim.x;
+  if (tid < classes) {
+    int offset = tid;
+    for (; offset < classes; offset += blockDim.x) {
+      output[offset] = threadExp / sumAll;
+    }
   }
 }
 
