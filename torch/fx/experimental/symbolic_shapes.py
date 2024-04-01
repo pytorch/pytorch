@@ -1857,6 +1857,21 @@ class DimConstraints:
 TLS = threading.local()
 
 
+@dataclass(frozen=True)
+class ShapeEnvSettings:
+    """
+    Encapsulates all shape env settings that could potentially affect
+    FakeTensor dispatch. Used when creating dispatch cache keys.
+    """
+
+    allow_scalar_outputs: bool
+    allow_dynamic_output_shape_ops: bool
+    assume_static_by_default: bool
+    specialize_zero_one: bool
+    duck_shape: bool
+    prefer_deferred_runtime_asserts_over_guards: bool
+
+
 class ShapeEnv:
     # This is a wrapper over the actual __init__ function.
     #
@@ -1951,9 +1966,17 @@ class ShapeEnv:
         # XXX Add any new settings that could affect FakeTensor evaluation
         # to: torch._subclasses.fake_tensor._ShapeEnvSettings
     ):
-        # Not directly used by ShapeEnv; indirectly used by FakeTensor
-        self.allow_scalar_outputs = allow_scalar_outputs
-        self.allow_dynamic_output_shape_ops = allow_dynamic_output_shape_ops
+        self.settings = ShapeEnvSettings(
+            # Not directly used by ShapeEnv; indirectly used by FakeTensor
+            allow_scalar_outputs=allow_scalar_outputs,
+            allow_dynamic_output_shape_ops=allow_dynamic_output_shape_ops,
+            # End
+            assume_static_by_default=assume_static_by_default,
+            specialize_zero_one=specialize_zero_one,
+            duck_shape=duck_shape,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+        )
+
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
@@ -2017,10 +2040,6 @@ class ShapeEnv:
         # part of the cache key); otherwise we'd have to iterate through
         # deferred_runtime_asserts to compute its length
         self.num_deferred_runtime_asserts = 0
-        self.assume_static_by_default = assume_static_by_default
-        self.specialize_zero_one = specialize_zero_one
-        self.prefer_deferred_runtime_asserts_over_guards = prefer_deferred_runtime_asserts_over_guards
-        self.duck_shape = duck_shape
         self.log = log
         self.log.debug("create_env")
         self.frozen = False
@@ -2067,6 +2086,30 @@ class ShapeEnv:
             # variable. Otherwise, the built FX graph on the replayed ShapeEnv will
             # not be valid.
             self.name_to_node: Dict[str, torch.fx.Node] = {}
+
+    @property
+    def allow_scalar_outputs(self):
+        return self.settings.allow_scalar_outputs
+
+    @property
+    def allow_dynamic_output_shape_ops(self):
+        return self.settings.allow_dynamic_output_shape_ops
+
+    @property
+    def assume_static_by_default(self):
+        return self.settings.assume_static_by_default
+
+    @property
+    def specialize_zero_one(self):
+        return self.settings.specialize_zero_one
+
+    @property
+    def duck_shape(self):
+        return self.settings.duck_shape
+
+    @property
+    def prefer_deferred_runtime_asserts_over_guards(self):
+        return self.settings.prefer_deferred_runtime_asserts_over_guards
 
     def check_equal(self, other: "ShapeEnv") -> None:
         """Compare another ShapeEnv for equivalence
@@ -2198,7 +2241,6 @@ class ShapeEnv:
         fresh = False
 
         if self._translation_validation_enabled and node_key not in self.fx_node_cache:
-            from torch.fx.experimental.validator import z3op
 
             # Presence of None in the arguments implies that we should ignore this operation.
             if any(a is None for a in args):
@@ -2208,12 +2250,11 @@ class ShapeEnv:
                 return None, fresh
 
             fresh = True
-            lifted_op = z3op(op, self.validator)
 
             # If translation validation is enabled, all arguments must have its
             # own FX node.
             assert all(a is not None for a in args), f"missing arg in FX graph ({op.__name__}): {args}"
-            node = self.fx_node_cache[node_key] = self.graph.call_function(lifted_op, args)
+            node = self.fx_node_cache[node_key] = self.graph.call_function(op, args)
             self.name_to_node[node.name] = node
 
         return self.fx_node_cache.get(node_key, None), fresh
@@ -3765,8 +3806,12 @@ class ShapeEnv:
                 "Maybe you need to add guard_size_oblivious to framework code, see doc below for more guidance.\n\n"
             )
         fsummary, maybe_user_loc, maybe_extra_debug = self._get_stack_summary(True)
+        if expr.is_integer:
+            msg = "Could extract specialized integer from data-dependent expression"
+        else:
+            msg = "Could not guard on data-dependent expression"
         return GuardOnDataDependentSymNode(
-            f"Could not guard on data-dependent expression {expr} (unhinted: {unhinted_expr}).  "
+            f"{msg} {expr} (unhinted: {unhinted_expr}).  "
             f"(Size-like symbols: {', '.join(map(str, size_like_symbols)) or 'none'})\n\n"
             f"{size_oblivious_result_msg}"
             "Potential framework code culprit (scroll up for full backtrace):\n"
@@ -4225,8 +4270,7 @@ class ShapeEnv:
         try:
             if orig_expr.is_number:
                 self.log.debug("eval %s [trivial]", orig_expr)
-                # NB: don't test float as there may be precision issues
-                if isinstance(hint, (int, bool)):
+                if hint is not None:
                     assert orig_expr == hint, f"{orig_expr} != {hint}"
                 return orig_expr
 
@@ -4237,8 +4281,7 @@ class ShapeEnv:
                                                       size_oblivious=size_oblivious)
             if static_expr is not None:
                 self.log.debug("eval %s == %s [statically known]", orig_expr, static_expr)
-                # NB: don't test float as there may be precision issues
-                if isinstance(hint, (int, bool)):
+                if hint is not None:
                     assert static_expr == hint, f"{static_expr} != {hint}"
                 return static_expr
 
