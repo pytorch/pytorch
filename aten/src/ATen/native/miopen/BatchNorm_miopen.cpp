@@ -117,11 +117,14 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     save_var = at::empty({ num_features }, weight_t.options());
     MIOPEN_CHECK(miopenBatchNormalizationForwardTraining(
       handle, mode, &one, &zero,
-      idesc.desc(), input->data_ptr(),
+      idesc.desc(), input->const_data_ptr(),
       idesc.desc(), output->data_ptr(),
       wdesc.desc(),
-      weight->data_ptr(),
-      bias->data_ptr(),
+      // NOTE: MIOpen docs say that the bnScale and bnBias args are only inputs,
+      // not outputs. However, unfortunately the function signature only takes
+      // non-const pointers, presumably by accident
+      const_cast<void*>(weight->const_data_ptr()),
+      const_cast<void*>(bias->const_data_ptr()),
       exponential_average_factor,
       at::maybe_data_ptr(running_mean),
       at::maybe_data_ptr(running_var),
@@ -133,11 +136,14 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     save_var = at::empty({0}, weight_t.options());
     MIOPEN_CHECK(miopenBatchNormalizationForwardInference(
       handle, mode, &one, &zero,
-      idesc.desc(), input->data_ptr(),
+      idesc.desc(), input->const_data_ptr(),
       idesc.desc(), output->data_ptr(),
       wdesc.desc(),
-      weight->data_ptr(),
-      bias->data_ptr(),
+      // NOTE: MIOpen docs say that the bnScale and bnBias args are only inputs,
+      // not outputs. However, unfortunately the function signature only takes
+      // non-const pointers, presumably by accident
+      const_cast<void*>(weight->const_data_ptr()),
+      const_cast<void*>(bias->const_data_ptr()),
       running_mean->data_ptr(),
       running_var->data_ptr(),
       epsilon));
