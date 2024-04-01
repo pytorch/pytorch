@@ -182,7 +182,11 @@ XPU_BLOCKLIST = [
     "test_autograd",
 ]
 
-XPU_TEST = ["test_xpu", "xpu/test_tensor_creation_ops_xpu"]
+XPU_TEST = [
+    "test_xpu",
+    "xpu/test_tensor_creation_ops_xpu",
+    "xpu/test_ops_xpu.py",
+]
 
 # The tests inside these files should never be run in parallel with each other
 RUN_PARALLEL_BLOCKLIST = [
