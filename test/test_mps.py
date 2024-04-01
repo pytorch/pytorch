@@ -6718,7 +6718,7 @@ class TestMPS(TestCaseMPS):
 
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
-            for shape in [(0,), (0, 3), (4,), (4, 3), (5, 4, 3)]: # (0, 3), [] removed, REGRESSION
+            for shape in [[], (0,), (0, 3), (4,), (4, 3), (5, 4, 3)]: # (0, 3), [] removed, REGRESSION
                 for contiguous in [True, False]:
                     helper(shape, dtype, contiguous)
 
