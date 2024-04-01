@@ -117,8 +117,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return trace_rules.lookup(func)(func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
-        elif source and inspect.ismemberdescriptor(obj):
-            return VariableBuilder(tx, source)(obj.__get__(self.value))
+        elif source:
+            # __mro__ is a member in < 3.12, an attribute in >= 3.12
+            if inspect.ismemberdescriptor(obj) or (
+                sys.version_info >= (3, 12) and name == "__mro__"
+            ):
+                return VariableBuilder(tx, source)(obj.__get__(self.value))
 
         # Special handling of collections.OrderedDict.fromkeys()
         # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
@@ -418,6 +422,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return tensor_variable
 
         return super().call_function(tx, args, kwargs)
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if self.source:
+            source = AttrSource(self.source, name)
+            install_guard(source.make_guard(GuardBuilder.HASATTR))
+            return variables.ConstantVariable(hasattr(self.value, name))
+        return super().call_hasattr(tx, name)
 
     def const_getattr(self, tx, name):
         if name == "__name__":
