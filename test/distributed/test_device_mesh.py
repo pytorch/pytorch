@@ -14,6 +14,7 @@ from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 
 from torch.distributed.distributed_c10d import (
+    _world,
     get_global_rank,
     get_world_size,
     init_process_group,
@@ -320,6 +321,24 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "Invalid mesh_dim_name"):
             dp_mesh = mesh["dim0"]
 
+    @with_comms
+    @run_with_both_funcol_impls
+    def test_cache_and_reuse_submesh_slice_result(self):
+        mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
+
+        dp_mesh = mesh["dp"]
+        ref_pg_count = _world.group_count
+
+        # When we call the "dp" slice second time, it should not create any new pg.
+        # As we are just using the cached result so the pg count should be the same.
+        dp_mesh_2 = mesh["dp"]
+        self.assertEqual(ref_pg_count, _world.group_count)
+
+        # When we call the "tp" slice, it should create a new pg, as the "tp" slice is called
+        # for the first time.
+        tp_mesh = mesh["tp"]
+        self.assertTrue(_world.group_count > ref_pg_count)
+
 
 @instantiate_parametrized_tests
 class TestMeshEnv(DTensorTestBase):
@@ -482,9 +501,11 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 torch.chunk(big_tensor, device_mesh.size(), dim=shard_dim)
             )
             unpadded_list = [
-                shard_placement._unpad_tensor(big_tensor_chunks[i], pad_sizes[i])
-                if pad_sizes[i] > 0
-                else big_tensor_chunks[i]
+                (
+                    shard_placement._unpad_tensor(big_tensor_chunks[i], pad_sizes[i])
+                    if pad_sizes[i] > 0
+                    else big_tensor_chunks[i]
+                )
                 for i, big_tensor in enumerate(big_tensor_chunks)
             ]
             all_gathered_tensor = torch.cat(unpadded_list, dim=shard_dim)
