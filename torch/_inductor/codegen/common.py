@@ -532,7 +532,7 @@ class OpOverrides:
 
     @staticmethod
     def reciprocal(x):
-        return ops.truediv("1", x)
+        return ops.truediv(ops.constant(1, torch.int32), x)
 
     @staticmethod
     def square(x):
@@ -1480,7 +1480,11 @@ class Kernel(CodeGen):
                                 if fx_node is None:
                                     break
                                 # This always comes from an index_expr, otherwise it'd be a CSEVariable
-                                assert fx_node.target == "index_expr"
+                                assert fx_node.target == "index_expr", (
+                                    name,
+                                    fx_node.target,
+                                    args,
+                                )
                                 # TODO a better fix would be to already return a CSEVariable with the bound computed
                                 sympy_expr = V.kernel.current_node._body.indexing_exprs[
                                     fx_node.args[1].args[0]
