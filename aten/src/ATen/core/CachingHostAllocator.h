@@ -77,7 +77,7 @@ struct TORCH_API ComparatorSize {
  * their own implement and the related runtime functions, like
  * allocate_host_memory, free_block, record_events_by_each_stream, query_event;
  * Even inheriting from the interface to extend additional features.
- * 
+ *
  * Some of the invariants here are less strict than they could be - for example,
  * we do not enforce that free(Block* block) => block->event_count == 0. This is
  * for compatibility reasons, and we can explore enforcing these in subsequent
