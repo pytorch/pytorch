@@ -1,7 +1,7 @@
 import dataclasses
 import inspect
 import sys
-from typing import Any, Callable, Tuple
+from typing import Any, Callable, Dict, Iterable, Tuple
 
 import torch
 from torch import _C
@@ -151,7 +151,9 @@ def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
     return True
 
 
-def zip_schema(schema, args, kwargs):
+def zip_schema(
+    schema: _C.FunctionSchema, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+) -> Iterable[Tuple[_C.Argument, Any]]:
     """zips schema.arguments and (args, kwargs) together.
 
     Assumes that (args, kwargs) were the inputs to some torch._ops.OpOverload:
