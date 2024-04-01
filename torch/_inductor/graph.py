@@ -837,7 +837,6 @@ class GraphLowering(torch.fx.Interpreter):
                     )
                 )
 
-            # env = create_placeholder(name) for name in ["score", "b_1", "h_1", "m_1", "n_1"]]
             scalar_inps = ["score", "b", "h", "m", "n"]
             env = {}
             cnt = 0

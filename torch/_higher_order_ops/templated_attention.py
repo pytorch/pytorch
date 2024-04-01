@@ -1,17 +1,16 @@
 from typing import Callable
 
 import torch
-import torch.nn.functional as F
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
+    autograd_not_implemented,
     UnsupportedAliasMutationException,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import (
-    disable_proxy_modes_tracing,
     make_fx,
     ProxyTorchDispatchMode,
     track_tensor_tree,
@@ -20,13 +19,26 @@ from torch.fx.experimental.proxy_tensor import (
 sdpa = HigherOrderOperator("templated_attention")
 
 
-def math_attention_vmap(
+def math_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: Callable,
     *other_buffers: torch.Tensor,
 ):
+    """Eager implementation
+
+    This implementation uses vmap to vectorize the score_mod function over the batch, head, m, and n dimensions.
+    We then apply the vectorized score_mod function to the scores matrix. Each wrap of vmap applies one of the
+    batch, head, m, or n dimensions. We need to apply vmap 4 times to vectorized over all 4 dimensions.
+
+    Args:
+        query: The query tensor
+        key: The key tensor
+        value: The value tensor
+        score_mod: The score_mod function
+        other_buffers: Other buffers that are passed to the score_mod function
+    """
     scores = query @ key.transpose(-2, -1)
 
     b = torch.arange(0, scores.size(0), device=scores.device)
@@ -46,46 +58,6 @@ def math_attention_vmap(
     return scores @ value
 
 
-def math_attention_2(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    score_mod: Callable,
-    *other_buffers: torch.Tensor,
-):
-    scores = query @ key.transpose(-2, -1)
-
-    b = torch.arange(0, scores.size(0), device=scores.device).view(-1, 1, 1, 1)
-    h = torch.arange(0, scores.size(1), device=scores.device).view(1, -1, 1, 1)
-    m = torch.arange(0, scores.size(2), device=scores.device).view(1, 1, -1, 1)
-    n = torch.arange(0, scores.size(3), device=scores.device).view(1, 1, 1, -1)
-
-    scores = score_mod(scores, b, h, m, n, *other_buffers)
-
-    scores = scores.softmax(dim=-1)
-    return scores @ value
-
-
-def math_attention(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    score_mod: Callable,
-    *other_buffers: torch.Tensor,
-):
-    scores = query @ key.transpose(-2, -1)
-
-    from functorch.dim import dims
-
-    b, h, m, n = dims()
-
-    scores = scores[b, h, m, n]
-    scores = score_mod(scores, b, h, m, n, *other_buffers)
-    scores = scores.order(b, h, m, n)
-    scores = scores.softmax(dim=-1)
-    return scores @ value
-
-
 @sdpa.py_impl(DispatchKey.CompositeExplicitAutograd)
 def sdpa_dense(
     query: torch.Tensor,
@@ -94,16 +66,11 @@ def sdpa_dense(
     score_mod: Callable,
     *other_buffers: torch.Tensor,
 ):
-    # TODO using the vmap version currently throws error in validate_and_convert_non_fake_tensors
-    return math_attention_vmap(
-        query, key, value, score_mod, *other_buffers
-    ).contiguous()
-    # return math_attention_2(query, key, value, score_mod, *other_buffers).contiguous()
+    return math_attention(query, key, value, score_mod, *other_buffers).contiguous()
 
 
-# TODO For now lets disable but we need to figure this out
-# TODO DOUBLE TODO I should be able to call autograd_not_implemented with sdpa, not sure why this fails functional tensor mode
-# sdpa.py_impl(DispatchKey.Autograd)(autograd_not_implemented(sdpa, deferred_error=False))
+# TODO We need to implement an autograd function for this, there is some complexity to do this generically
+sdpa.py_impl(DispatchKey.Autograd)(autograd_not_implemented(sdpa, deferred_error=True))
 
 
 def trace_sdpa(
@@ -114,17 +81,18 @@ def trace_sdpa(
     score_mod: Callable,
     *other_buffers: torch.Tensor,
 ):
-    if score_mod is None:
-        with proxy_mode:
-            return F.scaled_dot_product_attention(query, key, value)
+    """Traces the sdpa operator with the given score_mod function and other_buffers.
 
-    with disable_proxy_modes_tracing():
-        example_out = F.scaled_dot_product_attention(query, key, value)
+    Trace SDPA will call make_fx with "fake" example vals and then trace the score_mod function
+    This will produce a GraphModule that will be stored on the root tracer as "sdpa_score". We
+    access this graph module in inductor to inline the score_mod function to the triton template.
+    """
+    example_out = sdpa(query, key, value, score_mod, *other_buffers)
+
     example_vals = [
         torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
     ] + [torch.zeros((), dtype=torch.int) for _ in range(4)]
     score_graph = make_fx(score_mod)(*example_vals, *other_buffers)
-    breakpoint()
     proxy_mode.tracer.root.register_module("sdpa_score", score_graph)
     node_args = (query, key, value, score_graph, *other_buffers)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
@@ -164,7 +132,7 @@ def sdpa_functionalize(
     """Defines the functionalization rules for the sdpa operator.
 
     Write now we are unwrapping each tensor and then redispatching to the next, however we want to
-    guard against any mutations or aliases in the score_mod function. To the other_buffers since those
+    guard against any mutations in the score_mod function, to the other_buffers since those
     are free variables.
     """
     query_unwrapped = ctx.unwrap_tensors(query)
@@ -203,11 +171,6 @@ def sdpa_fake_tensor_mode(
     value: torch.Tensor,
     score_mod: Callable,
     *other_buffers: torch.Tensor,
-):
+) -> torch.Tensor:
     with mode:
-        return math_attention_2(query, key, value, score_mod, *other_buffers)
         return torch.empty_like(query, memory_format=torch.contiguous_format)
-    # return sdpa_dense(query, key, value, score_mod, *other_buffers)
-
-
-sdpa.fallthrough(DispatchKey.AutogradCUDA)
