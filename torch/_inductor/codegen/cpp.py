@@ -27,6 +27,7 @@ from ..scheduler import (
     BaseSchedulerNode,
     BaseScheduling,
     ForeachKernelSchedulerNode,
+    FusedNodesPriority,
     FusedSchedulerNode,
     Scheduler,
     SchedulerNode,
@@ -3568,20 +3569,6 @@ class CppScheduling(BaseScheduling):
         self.scheduler = scheduler
         self.get_kernel_group()
         self._ready_to_flush = False
-        self._enable_outer_loop_fusion = False
-
-    def _get_outer_loop_fusion_status(self):
-        return self._enable_outer_loop_fusion
-
-    def _set_outer_loop_fusion_status(self, status: bool):
-        self._enable_outer_loop_fusion = status
-
-    @contextlib.contextmanager
-    def enable_outer_loop_fusion(self):
-        prev_outer_loop_fusion_status = self._get_outer_loop_fusion_status()
-        self._set_outer_loop_fusion_status(True)
-        yield
-        self._set_outer_loop_fusion_status(prev_outer_loop_fusion_status)
 
     def _set_flush_status(self, status: bool):
         self._ready_to_flush = status
@@ -3744,13 +3731,10 @@ class CppScheduling(BaseScheduling):
 
     def _get_outer_loop_fusion_depth(self, node1, node2):
         DISABLE_OUTER_LOOP_FUSION = 0
-        if not (
-            self._get_outer_loop_fusion_status()
-            and all(
-                type(node)
-                in (OuterLoopFusedSchedulerNode, FusedSchedulerNode, SchedulerNode)
-                for node in (node1, node2)
-            )
+        if not all(
+            type(node)
+            in (OuterLoopFusedSchedulerNode, FusedSchedulerNode, SchedulerNode)
+            for node in (node1, node2)
         ):
             return DISABLE_OUTER_LOOP_FUSION
 
@@ -3798,6 +3782,17 @@ class CppScheduling(BaseScheduling):
                 # First 2 nodes to generate OuterLoopFusedSchedulerNode
                 return outer_loop_fusion_depth
         return DISABLE_OUTER_LOOP_FUSION
+
+    def get_fusion_pair_priority(self, node1, node2):
+        if (
+            node1.get_names() & node2.ancestors
+            and self.can_fuse_vertical(node1, node2)
+            and self._get_outer_loop_fusion_depth(node1, node2) >= 1
+        ):
+            # Outer loop fusion with lower priority
+            return FusedNodesPriority.Two
+        else:
+            return FusedNodesPriority.One
 
     def can_fuse_vertical(self, node1, node2):
         return (
