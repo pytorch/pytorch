@@ -8,7 +8,7 @@
 
 namespace at::native::onednn{
 
-sycl::event matmul(
+TORCH_API sycl::event matmul(
     at::Tensor& result,
     const at::Tensor& mat1,
     const at::Tensor& mat2,

@@ -12,19 +12,13 @@
 
 namespace at::native::onednn {
 
-// Keep non-static and non-inline
-bool set_onednn_verbose(int level);
-
-static inline dnnl::memory make_onednn_memory(
+TORCH_API dnnl::memory make_onednn_memory(
     dnnl::memory::desc md,
     dnnl::engine& engine,
-    void* ptr) {
-  return dnnl::sycl_interop::make_memory(
-      md,
-      engine,
-      dnnl::sycl_interop::memory_kind::usm,
-      ptr == nullptr ? DNNL_MEMORY_ALLOCATE : ptr);
-}
+    void* ptr);
+
+// Keep non-static and non-inline
+bool set_onednn_verbose(int level);
 
 // GpuEngineManager singleton
 struct GpuEngineManager {
