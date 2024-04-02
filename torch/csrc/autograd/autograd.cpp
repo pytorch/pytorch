@@ -126,7 +126,9 @@ static variable_list run_backward(
       }
       TORCH_CHECK(
           input.requires_grad(),
-          "One of the differentiated Tensors does not require grad");
+          "element ",
+          i,
+          " of input tensors does not require grad");        
       if (!grad_fn) {
         // See NOTE [ Autograd Unreachable Input ] for details
         output_edges.emplace_back(std::make_shared<Identity>(), 0);
