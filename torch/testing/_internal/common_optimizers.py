@@ -1049,13 +1049,6 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
                 "test_tensor_lr",
@@ -1162,13 +1155,6 @@ optim_db: List[OptimizerInfo] = [
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
@@ -1266,9 +1252,7 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
+                skipIfTorchDynamo("initial_value is incorrect in dynamo, see #123202"),
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
             ),
@@ -1361,13 +1345,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
@@ -1490,13 +1467,6 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
                 "test_tensor_lr",
@@ -1572,13 +1542,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
@@ -1728,13 +1691,6 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
                 "test_tensor_lr",
@@ -1825,13 +1781,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
@@ -1935,13 +1884,6 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
                 "test_tensor_lr",
@@ -2040,13 +1982,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
@@ -2159,9 +2094,7 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
+                skipIfTorchDynamo("initial_value is incorrect in dynamo, see #123202"),
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
             ),
