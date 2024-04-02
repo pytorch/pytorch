@@ -697,7 +697,10 @@ def jagged_scaled_dot_product_attention(
         from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
 
         attention = nested_view_from_values_offsets(
-            attention.squeeze(0), output_nt_info["offsets"]
+            attention.squeeze(0),
+            output_nt_info["offsets"],
+            min_seqlen=output_nt_info["_min_seqlen"],
+            max_seqlen=output_nt_info["_max_seqlen"],
         ).transpose(1, 2)
         return _post_process_flash_output(attention, og_size)
     elif backend_choice == SDPBackend.EFFICIENT_ATTENTION:
@@ -737,7 +740,10 @@ def jagged_scaled_dot_product_attention(
         from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
 
         return nested_view_from_values_offsets(
-            attention.squeeze(0), output_nt_info["offsets"]
+            attention.squeeze(0),
+            output_nt_info["offsets"],
+            min_seqlen=output_nt_info["_min_seqlen"],
+            max_seqlen=output_nt_info["_max_seqlen"],
         ).transpose(1, 2)
     elif backend_choice == SDPBackend.MATH:
         # save the offsets and shape of the inputs, so we can reshape the final output
@@ -770,8 +776,14 @@ def jagged_scaled_dot_product_attention(
         # convert strided layout Nested Tensor back to jagged layout Nested Tensor
         attn_out = attn_out.transpose(1, 2).contiguous().values()
         attn_out = attn_out.view(-1, d1, d2)
-        attn_out = nested_view_from_values_offsets(attn_out, offsets)
-        attn_out = attn_out.transpose(1, 2)
+        min_seqlen = query._metadata_cache.get("min_seqlen", -1)  # type: ignore[attr-defined]
+        max_seqlen = query._metadata_cache.get("max_seqlen", -1)  # type: ignore[attr-defined]
+        attn_out = nested_view_from_values_offsets(
+            attn_out,
+            offsets,
+            min_seqlen=min_seqlen,
+            max_seqlen=max_seqlen,
+        ).transpose(1, 2)
 
         return attn_out
     else:
