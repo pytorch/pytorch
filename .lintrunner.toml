@@ -2371,7 +2371,7 @@ exclude_patterns = [
     'torch/testing/_internal/common_subclass.py',
     'torch/testing/_internal/common_utils.py',
     'torch/testing/_internal/composite_compliance.py',
-    'torch/testing/_internal/control_flow_opinfo_db.py',
+    'torch/testing/_internal/hop_db.py',
     'torch/testing/_internal/custom_op_db.py',
     'torch/testing/_internal/data/__init__.py',
     'torch/testing/_internal/data/network1.py',

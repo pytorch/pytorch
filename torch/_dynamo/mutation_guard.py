@@ -5,6 +5,7 @@ import weakref
 
 import torch.nn
 from torch.nn import Module
+from . import config
 
 from .utils import ExactWeakKeyDictionary, is_lazy_module
 
@@ -92,6 +93,8 @@ def is_dynamic_nn_module(obj):
         return obj.torchdynamo_force_dynamic
     if is_lazy_module(obj):
         return False
+    if config.inline_inbuilt_nn_modules:
+        return True
     dyn = GenerationTracker.dynamic_classes.get(type(obj)) or GenerationTracker.check(
         obj
     )
