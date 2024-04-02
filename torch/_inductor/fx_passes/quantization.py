@@ -1152,6 +1152,7 @@ def _register_woq_lowering(pattern, computation_woq, computation_reshape):
 
 def _register_woq_mm_int8_pattern1():
     # F.linear(x, weight.to(dtype=x.dtype)) * scales
+    # case of dispatching to mm or mv
     _woq_pattern = CallFunction(
         aten.mul.Tensor,
         CallFunction(
@@ -1204,6 +1205,7 @@ def _register_woq_mm_int8_pattern1():
 
 def _register_woq_mm_int8_pattern2():
     # F.linear(x, weight.to(dtype=x.dtype)) * scales
+    # case of dispatching to bmm
     _woq_pattern = CallFunction(
         aten.mul.Tensor,
         CallFunction(
@@ -1340,6 +1342,19 @@ def _register_dequant_promotion_pass(
     end_node_target_candidates,
     dtype=torch.float32,
 ):
+    """
+    When one node after dequant is used for several times,
+    its dequant is only recorded in graph once.
+    In order to do the pattern match, we need to keep the dequant number as many as the user numbers.
+    The dequant promotion pass is to duplicate the dequant processes for cases with more than 1 user.
+    @param pattern: dequant pattern
+    @param pass_number: pass priority
+    @param extra_check_fn: check if it is legal to run the pass
+    @param find_first_node_fn: function to find the first node of pattern
+    @param end_node_target_candidates: define the supported end node targets
+    @param dtype: valid dequant type
+    """
+
     @register_freezing_graph_pattern(
         pattern,
         extra_check=extra_check_fn(end_node_target_candidates, dtype),
@@ -1388,7 +1403,7 @@ def _register_dequant_promotion_pass(
 
         # Find the start node and end node of a dequant pattern
         # * End node should be the match.output_node()
-        # * Start node should be the node of dtype convert to float32
+        # * Start node is defined by find_first_node_fn()
         dequant_pattern_end_node = match.output_node()
         assert dequant_pattern_end_node.target in end_node_target_candidates
 
@@ -2134,6 +2149,18 @@ def _register_woq_mm_dequant_promotion():
             ), "In in dequant pattern, each node should have more than 1 arg."
             return _find_first_node_in_dequant_pattern(_node.args[0])
 
+    # Expected dequantization pattern:
+    #           node0
+    #   + - - - - | - - - - +
+    #   |      reshape      |
+    #   |         |         |
+    #   |       to_fp32     |
+    #   |         |         |
+    #   |     unsqueeze     |
+    #   |      /     \      |
+    #   |    node1  node2   |
+    #   + - - | - - - | - - +
+    #        node3  node4
     _register_dequant_promotion_pass(
         CallFunction(
             aten.unsqueeze.default,
