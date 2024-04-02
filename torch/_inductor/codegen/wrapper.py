@@ -493,6 +493,7 @@ class WrapperCodeGen(CodeGen):
 
                 aten = torch.ops.aten
                 inductor_ops = torch.ops.inductor
+                _quantized = torch.ops._quantized
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
@@ -714,6 +715,10 @@ class WrapperCodeGen(CodeGen):
             self.write_triton_header_once()
         result = IndentedBuffer()
         result.splice(self.header)
+        # We do not want the cpp header for intermediate const graph. Headers would be
+        # rendered by the main module instead.
+        if V.graph.aot_mode and V.graph.cpp_wrapper and V.graph.is_const_graph:
+            result = IndentedBuffer()
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
@@ -1316,7 +1321,7 @@ class WrapperCodeGen(CodeGen):
             import triton
 
         if isinstance(s, SymTypes):
-            return pexpr(sympy.expand(repr(s)))
+            return pexpr(s.node.expr)
         elif isinstance(s, sympy.Expr):
             return pexpr(s)
         elif isinstance(s, (tuple, list)):
