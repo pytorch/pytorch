@@ -311,16 +311,22 @@ class AOTInductorTestsTemplate:
         self.assertEqual(counters["inductor"]["scmerge_split_sections_removed"], 1)
 
     def test_amp_fallback_random(self):
-        if self.device == "cuda":
-            raise unittest.SkipTest("The test fails on CUDA with or without this PR")
-        
-        def fn(x):
-            return x + x
+        def fn(x, w):
+            return torch.functional.F.linear(x, w)
 
-        example_inputs = (torch.randn(10, 10, device=self.device),)
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        if self.device == "cuda":
+            ctx = torch.cuda.amp.autocast
+        elif self.device == "cpu":
+            ctx = torch.cpu.amp.autocast
+        else:
+            assert False, "unsupport device"
 
         with config.patch({"fallback_random": True}):
-            with torch.cpu.amp.autocast():
+            with ctx():
                 self.check_model(fn, example_inputs)
 
     def test_missing_output(self):
@@ -2394,6 +2400,7 @@ CPU_TEST_FAILURES = {
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
+    "test_amp_fallback_random": fail_minimal_arrayref_interface(),  # undefined symbol: _Z16aoti_torch_dtypeIN3c108BFloat16EEiv
     "test_simple_dynamic": fail_minimal_arrayref_interface(),
     "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(
         is_skip=True
