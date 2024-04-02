@@ -3625,7 +3625,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(nt.is_contiguous())
 
         # construct from (values, offsets, lengths)
-        lengths = torch.tensor([2, 1, 1, 2])
+        lengths = torch.tensor([2, 1, 1, 2], device=device)
         nt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets, lengths=lengths)
         self.assertTrue(isinstance(nt, NestedTensor))
         self.assertTrue(nt._is_view() and nt._base is values)
@@ -3638,7 +3638,7 @@ class TestNestedTensorSubclass(TestCase):
 
         # construct from (values, lengths)
         values = torch.randn(14, 5, device=device, dtype=dtype)
-        lengths = torch.tensor([2, 3, 4, 5])
+        lengths = torch.tensor([2, 3, 4, 5], device=device)
         nt = torch.nested.nested_tensor_from_jagged(values, lengths=lengths)
         self.assertTrue(isinstance(nt, NestedTensor))
         self.assertTrue(nt._is_view() and nt._base is values)
@@ -3647,7 +3647,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.size(-1), values.size(-1))
         # for now, if only lengths is specified, convert to offsets to integrate best with the
         # existing kernels
-        expected_offsets = torch.tensor([0, 2, 5, 9, 14])
+        expected_offsets = torch.tensor([0, 2, 5, 9, 14], device=device)
         expected_nt = torch.nested.nested_tensor_from_jagged(values, offsets=expected_offsets)
         for n1, n2 in zip(nt.unbind(), expected_nt.unbind()):
             self.assertEqual(n1, n2)
