@@ -872,6 +872,11 @@ def _export(
                 pre_dispatch=pre_dispatch,
                 transform=_tuplify_outputs,
             )
+        ep_non_strict.gm.meta["inline_constraints"] = {
+            k: v
+            for k, v in fake_mode.shape_env.var_to_range.items()
+            if free_unbacked_symbols(k)
+        }
         try:
             range_constraints = make_constraints(
                 fake_mode,
