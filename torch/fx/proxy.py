@@ -86,7 +86,15 @@ class ScopeContextManager:
         return
 
 
-_COPY_META_FIELDS = ["nn_module_stack", "source_fn_stack", "original_aten", "recompute", "from_node", "quantization_tag"]
+_COPY_META_FIELDS = [
+    "nn_module_stack",
+    "torch_fn",
+    "source_fn_stack",
+    "original_aten",
+    "recompute",
+    "from_node",
+    "quantization_tag",
+]
 
 
 @compatibility(is_backward_compatible=True)
@@ -368,7 +376,7 @@ class Proxy:
             indexed_item = proxied_value[i]
 
     For a more detailed description into the Proxy internals, check out
-    the "Proxy" section in `torch/fx/OVERVIEW.md`
+    the "Proxy" section in `torch/fx/README.md`
     """
 
     @compatibility(is_backward_compatible=True)
