@@ -2301,6 +2301,47 @@ class DictGetItemGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Represents tensor.grad acccessor.
+ */
+class GradGuardAccessor : public GuardAccessor {
+ public:
+  GradGuardAccessor(
+      RootGuardManager* root,
+      py::str name,
+      std::string source,
+      py::handle example_value)
+      : GuardAccessor(root, std::move(name), std::move(source), example_value) {
+  }
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    // check that its a tensor
+    if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
+      return false;
+    }
+    PyObject* grad = THPVariable_Wrap(THPVariable_Unpack(obj).grad());
+    return _guard_manager->check_nopybind(grad);
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    // check that its a tensor
+    if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
+      return GuardDebugInfo(
+          false, "not a tensor - grad field is accessed " + get_source(), 0);
+    }
+    PyObject* grad = THPVariable_Wrap(THPVariable_Unpack(obj).grad());
+    return _guard_manager->check_verbose_nopybind(grad);
+  }
+
+  std::string repr() const override {
+    // Helpful when priting GuardManager tree structure.
+    return "GradGuardAccessor(grad)";
+  }
+};
+
+/**
  * Represents func.__defaults__ accessor.
  */
 class FuncDefaultsGuardAccessor : public GuardAccessor {
@@ -3166,6 +3207,21 @@ PyObject* torch_c_dynamo_guards_init() {
           "lambda_manager",
           &GuardManager::get_child_manager<PythonLambdaGuardAccessor>,
           py::arg("python_lambda"),
+          py::arg("source"),
+          py::arg("example_value"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "grad_manager",
+          [](GuardManager& self,
+             std::string source,
+             py::handle example_value) -> GuardManager* {
+            // A unique key is used to save as the accessor key.
+            py::str unique_key("__grad_accessor__");
+            return self.get_child_manager<GradGuardAccessor>(
+                std::move(unique_key), std::move(source), example_value);
+          },
           py::arg("source"),
           py::arg("example_value"),
           py::return_value_policy::reference)

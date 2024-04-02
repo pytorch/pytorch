@@ -66,6 +66,7 @@ from .source import (
     GlobalSource,
     GlobalStateSource,
     GlobalWeakRefSource,
+    GradSource,
     LocalSource,
     NNModuleSource,
     NotNNModuleSource,
@@ -372,16 +373,9 @@ def getitem_on_dict_manager(
     )
 
 
-def is_grad_source(source):
-    if isinstance(source, AttrSource):
-        return source.member == "grad"
-    return False
-
-
 def match_on_id_for_tensor(guard):
-    return guard.originating_source.is_dict_key() and not is_grad_source(
-        guard.originating_source
-    )
+    source = guard.originating_source
+    return source.is_dict_key() and not isinstance(source, GradSource)
 
 
 # The ready to eval generated code (possibly multiple parts) for a guard, plus
@@ -543,6 +537,11 @@ class GuardBuilder(GuardBuilderBase):
         ):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager
+        elif istype(source, GradSource):
+            assert base_guard_manager  # to make mypy happy
+            return base_guard_manager.grad_manager(
+                source=source_name, example_value=example_value
+            )
         elif istype(source, AttrSource):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager.getattr_manager(
