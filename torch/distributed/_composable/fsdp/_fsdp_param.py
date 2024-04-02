@@ -280,7 +280,7 @@ class FSDPParam:
             if not hasattr(inner_tensor, "fsdp_post_all_gather"):
                 return  # already initialized
             for tensor in self._unsharded_inner_tensors:
-                unsafe_alloc_storage(tensor)
+                alloc_storage(tensor)
             inner_tensor.fsdp_post_all_gather(
                 tuple(self.all_gather_outputs),
                 self._all_gather_metadata,
@@ -418,13 +418,13 @@ class FSDPParam:
 
     def alloc_all_gather_outputs(self) -> None:
         for tensor in self.all_gather_outputs:
-            unsafe_alloc_storage(tensor)
+            alloc_storage(tensor)
 
     def free_unsharded_param(self) -> None:
         for tensor in itertools.chain(
             self.all_gather_outputs, self._unsharded_inner_tensors
         ):
-            unsafe_free_storage(tensor)
+            free_storage(tensor)
 
     @property
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
@@ -481,14 +481,14 @@ class FSDPParam:
             )
 
 
-def unsafe_alloc_storage(tensor: torch.Tensor) -> None:
+def alloc_storage(tensor: torch.Tensor) -> None:
     size = tensor.numel() * tensor.itemsize
     storage = tensor.untyped_storage()
     if storage.size() != size:
         storage.resize_(size)
 
 
-def unsafe_free_storage(tensor: torch.Tensor) -> None:
+def free_storage(tensor: torch.Tensor) -> None:
     storage = tensor.untyped_storage()
     if storage.size() != 0:
         storage.resize_(0)
