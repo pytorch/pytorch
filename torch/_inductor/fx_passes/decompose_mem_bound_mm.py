@@ -71,6 +71,7 @@ def should_decompose_mm(mat1, mat2) -> bool:
 
 
 def should_decompose_mmt(mat1, mat2) -> bool:
+
     if is_node_meta_valid(mat1) and is_node_meta_valid(mat2):
         mat1 = mat1.meta["val"]
         mat2 = mat2.meta["val"]
@@ -106,6 +107,12 @@ def is_node_meta_valid(node: torch.fx.Node):
     return "val" in node.meta
 
 
+def realize_inputs(inputs: List[torch.fx.Node]):
+    for inp in inputs:
+        if isinstance(inp, torch.fx.node.Node):
+            inp.meta["inductor_realize"] = True
+
+
 def print_decompose_pattern(match: Match, inputs: List[torch.fx.Node]):
     node = match.nodes[-1]
     log.debug(
@@ -131,6 +138,7 @@ def decompose_bmm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
         counters["inductor"]["decompose_bmm"] += 1
         match.replace_by_example(repl, [mat1, mat2])
         print_decompose_pattern(match, [mat1, mat2])
+        realize_inputs([mat1, mat2])
     return
 
 
@@ -152,6 +160,7 @@ def decompose_addmm(
         counters["inductor"]["decompose_addmm"] += 1
         match.replace_by_example(repl, [mat1, mat2, mat3])
         print_decompose_pattern(match, [mat1, mat2, mat3])
+        realize_inputs([mat1, mat2, mat3])
     return
 
 
@@ -172,6 +181,7 @@ def decompose_mmt(
         counters["inductor"]["decompose_mmt"] += 1
         match.replace_by_example(repl, [mat1, mat2])
         print_decompose_pattern(match, [mat1, mat2])
+        realize_inputs([mat1, mat2])
     return
 
 
@@ -192,6 +202,7 @@ def decompose_mm(
         counters["inductor"]["decompose_mm"] += 1
         match.replace_by_example(repl, [mat1, mat2])
         print_decompose_pattern(match, [mat1, mat2])
+        realize_inputs([mat1, mat2])
     return
 
 
@@ -213,4 +224,5 @@ def decompose_mm_large_k(
         counters["inductor"]["decompose_mm_large_k"] += 1
         match.replace_by_example(repl, [mat1, mat2])
         print_decompose_pattern(match, [mat1, mat2])
+        realize_inputs([mat1, mat2])
     return
