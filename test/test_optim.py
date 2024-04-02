@@ -987,10 +987,11 @@ class TestOptimRenewed(TestCase):
 
             # Make sure that device of state['step'] is still CPU _unless_ torch.compile() added a capturable!
             capturable = state_dict_cpu["param_groups"][0].get("capturable", False)
+            fused = state_dict_cpu["param_groups"][0].get("capturable", False)
             new_state_dict = optimizer_cuda.state_dict()
             for state_cpu, state_cuda in zip(state_dict_cpu["state"].values(), new_state_dict["state"].values()):
                 if "step" in state_cpu and torch.is_tensor(state_cpu["step"]):
-                    self.assertEqual(state_cuda["step"].device.type, "cuda" if capturable else "cpu")
+                    self.assertEqual(state_cuda["step"].device.type, "cuda" if capturable or fused else "cpu")
 
             for _ in range(5):
                 optimizer.step(closure)

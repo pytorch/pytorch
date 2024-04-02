@@ -14,7 +14,7 @@ namespace at {
 
 namespace native {
 
-void _fused_adam_kernel_cpu_(
+void _fused_adam_cpu_(
     at::TensorList params,
     at::TensorList grads,
     at::TensorList exp_avgs,
@@ -70,7 +70,7 @@ void _fused_adam_kernel_cpu_(
 }
 
 // The following overload simply has a Tensor lr
-void _fused_adam_kernel_cpu_(
+void _fused_adam_cpu_(
     at::TensorList params,
     at::TensorList grads,
     at::TensorList exp_avgs,
@@ -86,7 +86,7 @@ void _fused_adam_kernel_cpu_(
     const bool maximize,
     const c10::optional<at::Tensor>& grad_scale,
     const c10::optional<at::Tensor>& found_inf) {
-  _fused_adam_kernel_cpu_(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr.item<double>(), beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale, found_inf);
+  _fused_adam_cpu_(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr.item<double>(), beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale, found_inf);
 }
 
 DEFINE_DISPATCH(fused_adam_stub);
