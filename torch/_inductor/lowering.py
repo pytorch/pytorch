@@ -5857,7 +5857,18 @@ def resize(x, size, *, memory_format=None):
         # using zero as that is what empty does
         uninitalized_val = 0.0
 
-    x_flat = view(x, (-1,))
+    if V.graph.sizevars.evaluate_expr(sympy.Eq(old_numel, 0)):
+        return full(size, uninitalized_val, dtype=dtype, device=device)
+
+    x_flat = as_strided(
+        x,
+        [
+            old_numel,
+        ],
+        [
+            1,
+        ],
+    )
     flat_loader = x_flat.make_loader()
     out_stride = ir.FlexibleLayout.stride_ordered_for_memory_format(size, memory_format)
     out_indexer = ir.FixedLayout(device, dtype, size, out_stride).make_indexer()

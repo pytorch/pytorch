@@ -8692,7 +8692,9 @@ class CommonTemplate:
         self.common(fn, (x,), atol=0, rtol=0)
 
     @staticmethod
-    def _check_resize_common(self, fn, x, size_or_y, memory_format, inplace):
+    def _check_resize_common(
+        self, fn, x, size_or_y, memory_format, inplace, deterministic
+    ):
         x_ref_arg = x.clone()
         x_opt_arg = x.clone()
         x_numel = x.numel()
@@ -8708,12 +8710,14 @@ class CommonTemplate:
                 # assume shape
                 return functools.reduce(lambda x, y: x * y, size_or_y, 1)
 
-        nele_check = min(x_numel, get_numel(size_or_y))
+        if deterministic:
+            nele_check = correct.numel()
+        else:
+            nele_check = min(x_numel, get_numel(size_or_y))
+
         correct_values = correct.as_strided((nele_check,), (1,))
-        # sanity check
-        self.assertTrue(same(x.as_strided((nele_check,), (1,)), correct_values))
         actual_values = actual.as_strided((nele_check,), (1,))
-        self.assertTrue(same(correct_values, actual_values))
+        self.assertTrue(same(correct_values, actual_values, equal_nan=deterministic))
         correct_strides = correct.stride()
         actual_strides = actual.stride()
         self.assertEqual(correct_strides, actual_strides)
@@ -8727,6 +8731,7 @@ class CommonTemplate:
             ((2,), (1, 3, 2, 3, 1)),
             ((100,), (1, 3, 2, 3, 1)),
             ((1, 3, 2, 3, 1), (1, 3, 2, 3, 1)),
+            ((2, 0, 1), (2, 2)),
         ]
         for x_size, y_size in sizes:
             memory_formats = [torch.contiguous_format]
@@ -8737,6 +8742,10 @@ class CommonTemplate:
             for memory_format in memory_formats:
                 x = torch.randn(*x_size)
                 yield x, y_size, memory_format
+                # check some non-contiguous tensors
+                if x.numel() == 100:
+                    x_strided = x[::2].reshape(25, 2).transpose(0, 1)
+                    yield x_strided, y_size, memory_format
 
     def test_resize(self):
         def fn(x, size, memory_format):
@@ -8749,7 +8758,13 @@ class CommonTemplate:
             ):
                 for x, y_size, memory_format in CommonTemplate._cases_resize_common():
                     CommonTemplate._check_resize_common(
-                        self, fn, x, y_size, memory_format, inplace=False
+                        self,
+                        fn,
+                        x,
+                        y_size,
+                        memory_format,
+                        inplace=False,
+                        deterministic=deterministic,
                     )
 
     def test_inplace_resize(self):
@@ -8787,7 +8802,13 @@ class CommonTemplate:
             ):
                 for x, y, memory_format in CommonTemplate._cases_resize_as_common():
                     CommonTemplate._check_resize_common(
-                        self, fn, x, y, memory_format, inplace=False
+                        self,
+                        fn,
+                        x,
+                        y,
+                        memory_format,
+                        inplace=False,
+                        deterministic=deterministic,
                     )
 
     def test_inplace_resize_as(self):
