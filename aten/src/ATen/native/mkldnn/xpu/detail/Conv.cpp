@@ -15,7 +15,6 @@ namespace at::native::onednn {
 constexpr int src_batch_size_dim = 0;
 constexpr int weight_dst_channels_dim = 0;
 
-
 dnnl::memory::dims conv_dst_size(
     int64_t ndim,
     IntArrayRef src_size,
