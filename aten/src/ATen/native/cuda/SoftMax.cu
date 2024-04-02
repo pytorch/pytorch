@@ -469,17 +469,15 @@ ilpReduceMaxAndSum(index_t shift,
           AccumT &threadMax,
           AccumT &threadExp)
 {
-  using LoadT = at::native::memory::aligned_vector<T, ILP>;
-  index_t offset = threadIdx.x;
-
   MaxFloat<T, AccumT> redFuncMax;
   Add<AccumT> redFuncAdd;
 
-  // shift and do 1
-  if(shift > 0){
+  // Prologue
+  index_t offset = threadIdx.x;
+  if (shift > 0) {
     data -= shift;
     size += shift;
-    if(threadIdx.x >= shift){
+    if (threadIdx.x >= shift) {
       T val = data[offset];
       threadMax = redFuncMax(threadMax, val);
       threadExp = redFuncAdd(threadExp, std::exp(val));
@@ -487,23 +485,24 @@ ilpReduceMaxAndSum(index_t shift,
     size -= blockDim.x;
     data += blockDim.x;
   }
+
+  using LoadT = at::native::memory::aligned_vector<T, ILP>;
+  const LoadT* const data_vec_ptr = reinterpret_cast<const LoadT*>(data);
+
+  // Used vectorized load instructions for the center of the buffer
   index_t last = size % (ILP * blockDim.x);
-
-  T v[ILP];
-  LoadT* value = reinterpret_cast<LoadT*>(&v);
-
   for (; offset * ILP < (size - last); offset += blockDim.x) {
-    *value = reinterpret_cast<const LoadT*>(data)[offset];
+    LoadT v = data_vec_ptr[offset];
 
     #pragma unroll
     for (int j = 0; j < ILP; ++j) {
-      threadMax = redFuncMax(threadMax, v[j]);
-      threadExp = redFuncAdd(threadExp, std::exp(v[j]));
+      threadMax = redFuncMax(threadMax, v.val[j]);
+      threadExp = redFuncAdd(threadExp, std::exp(v.val[j]));
     }
   }
 
-  offset = size - last + threadIdx.x;
   // Epilogue
+  offset = size - last + threadIdx.x;
   for (; offset < size; offset += blockDim.x) {
     T val = data[offset];
     threadMax = redFuncMax(threadMax, val);
@@ -701,9 +700,6 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
 {
   extern __shared__ unsigned char smem[];
   auto sdata = reinterpret_cast<accscalar_t*>(smem);
-
-  using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
-  using StoreT = at::native::memory::aligned_vector<outscalar_t, ILP>;
 
   // forward pointers to batch[blockIdx.x]
   // each block handles a sample in the mini-batch
