@@ -4446,6 +4446,22 @@ class TestSparseMeta(TestCase):
                 result = torch.zeros_like(f, device=f.fake_device)
             self.assertEqual(result, expected)
 
+    @all_sparse_layouts('layout', include_strided=False)
+    @parametrize("dtype", [torch.float64])
+    def test_empty_like_fake(self, dtype, layout):
+        from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
+        from torch.utils._mode_utils import no_dispatch
+        fake_mode = FakeTensorMode()
+        index_dtype = torch.int64
+        device = 'cpu'
+        for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            f = FakeTensor.from_tensor(t, fake_mode)
+            # empty_like on a fake sparse tensor is equivalent to zeros_like:
+            expected = torch.zeros_like(t)
+            with no_dispatch():
+                result = torch.empty_like(f, device=f.fake_device)
+            self.assertEqual(result, expected)
+
 
 class _SparseDataset(torch.utils.data.Dataset):
     # An utility class used in TestSparseAny.test_dataloader method.

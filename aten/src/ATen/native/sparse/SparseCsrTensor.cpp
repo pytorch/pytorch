@@ -868,55 +868,60 @@ Tensor empty_like_sparse_csr(
       self.options()
           .merge_in(options_)
           .merge_memory_format(optional_memory_format);
+  TORCH_INTERNAL_ASSERT(at::sparse_csr::is_sparse_compressed(self));
+  if (options.layout() == self.layout()) {
+    int64_t nnz = self._nnz();
+    DimVector blocksize{};
+    if (self.layout() == kSparseBsr || self.layout() == kSparseBsc) {
+      blocksize.append(at::sparse_csr::getBlockSize(self));
+    }
+    ScalarType index_dtype = at::sparse_csr::getIndexDtype(self);
 
-  TORCH_CHECK(options.layout() == self.layout(),
-    "empty_like with different sparse layout is not supported (self is ",
-    self.layout(), " but you requested ", options.layout(), ")");
-  if (options.layout() == kSparseCsr) {
-    auto result = at::native::_sparse_csr_tensor_unsafe(
-        self.crow_indices().to(options.device(), self.crow_indices().dtype(), false, true),
-        self.col_indices().to(options.device(), self.col_indices().dtype(), false, true),
-        at::empty(self.values().sizes(), options.layout(kStrided)),
-        self.sizes(),
-        optTypeMetaToScalarType(options.dtype()),
-        self.layout(),
-        options.device());
-    return result;
-  } else if (options.layout() == kSparseCsc) {
-    auto result = at::native::_sparse_csc_tensor_unsafe(
-        self.ccol_indices().to(options.device(), self.ccol_indices().dtype(), false, true),
-        self.row_indices().to(options.device(), self.row_indices().dtype(), false, true),
-        at::empty(self.values().sizes(), options.layout(kStrided)),
-        self.sizes(),
-        optTypeMetaToScalarType(options.dtype()),
-        self.layout(),
-        options.device());
-    return result;
-  } else if (options.layout() == kSparseBsr) {
-    auto result = at::native::_sparse_bsr_tensor_unsafe(
-        self.crow_indices().to(options.device(), self.crow_indices().dtype(), false, true),
-        self.col_indices().to(options.device(), self.col_indices().dtype(), false, true),
-        at::empty(self.values().sizes(), options.layout(kStrided)),
-        self.sizes(),
-        optTypeMetaToScalarType(options.dtype()),
-        self.layout(),
-        options.device());
+    auto res = at::native::sparse_compressed_tensor_with_dims(
+        nnz, self.dense_dim(), self.sizes(), blocksize, index_dtype,
+        optTypeMetaToScalarType(options.dtype()), options.layout(), options.device(), options.pinned_memory());
 
-    return result;
-  } else if (options.layout() == kSparseBsc) {
-    auto result = at::native::_sparse_bsc_tensor_unsafe(
-        self.ccol_indices().to(options.device(), self.ccol_indices().dtype(), false, true),
-        self.row_indices().to(options.device(), self.row_indices().dtype(), false, true),
-        at::empty(self.values().sizes(), options.layout(kStrided)),
-        self.sizes(),
-        optTypeMetaToScalarType(options.dtype()),
-        self.layout(),
-        options.device());
-    return result;
+    Tensor compressed_indices, plain_indices, self_compressed_indices, self_plain_indices;
+    std::tie(compressed_indices, plain_indices) = at::sparse_csr::getCompressedPlainIndices(res);
+    std::tie(self_compressed_indices, self_plain_indices) = at::sparse_csr::getCompressedPlainIndices(self);
+
+    if (nnz > 0) {
+
+      // empty_like indices are initialized mainly because empty_like
+      // is an user-facing function that is assumed to produce a valid
+      // tensor. However, this assumption is contradictory in that it
+      // will defeat the purpose of empty_like not to trigger any
+      // kernel calls, does not allow supporting empty_like with
+      // different sparse layouts, its semantics is different from
+      // empty_like on sparse COO tensors, empty_like on fake sparse
+      // compressed tensors produces different result (nnz will be 0)
+      // from when applying it to real tensors (nnz is defined by the
+      // input)... Just to name a few issues that the current behaviour
+      // gives rise to.
+      //
+      // This contradiction can be avoided if functions on sparse
+      // compressed tensors will use
+      // sparse_compressed_tensor_with_dims instead of empty_like to
+      // construct uninitialized sparse compressed tensors and
+      // implement operation-specific behavior regarding initializing
+      // the indices tensors. For instance, in zeros_like, the
+      // resulting tensor will have nnz == 0 while in randn_like,
+      // initializing sparse compressed tensor indices with the input
+      // indices would make sense.
+
+      compressed_indices.copy_(self_compressed_indices);
+      plain_indices.copy_(self_plain_indices);
+    } else {
+      // this covers also fake tensor input cases:
+      compressed_indices.zero_();
+    }
+
+    return res;
   } else if (options.layout() == kStrided) {
     return at::native::empty_like(self, dtype, layout, device, pin_memory, optional_memory_format);
   } else {
-    TORCH_CHECK(false, "Layout ", options.layout(), " is not supported");
+    TORCH_CHECK(false, "empty_like with different sparse layout is not supported (self is ",
+                self.layout(), " but you requested ", options.layout(), ")");
   }
 }
 
