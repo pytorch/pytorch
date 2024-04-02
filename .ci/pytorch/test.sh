@@ -23,6 +23,8 @@ trap_add cleanup_workspace EXIT
 sudo chown -R jenkins /var/lib/jenkins/workspace
 git config --global --add safe.directory /var/lib/jenkins/workspace
 
+exit 1  # Fail test to make sure trap cleanup_workspace works properly.
+
 echo "Environment variables:"
 env
 
