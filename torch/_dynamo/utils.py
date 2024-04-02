@@ -92,12 +92,12 @@ import importlib
 import torch
 import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
+import torch.utils._pytree as pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
-import torch.utils._pytree as pytree
 from torch.utils._triton import has_triton, has_triton_package
 
 
