@@ -199,15 +199,15 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
     // This is achieved by dynamically allocating a buffer, managing the
     // lifetime of the buffer with a CUDA User Object, and transferring the
     // ownership of the CUDA User Object to the capturing graph.
-    auto graph_owned_buf =
-        c10::cuda::CUDACachingAllocator::raw_alloc(total_bytes);
-
+    void* graph_owned_buf = nullptr;
     {
-      // Copy the data from the host staging buffer to the graph-owned device
-      // buffer. The copy won't be captured in the graph.
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
       c10::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
 #endif
+      // See cudaMallocMaybeCapturing
+      C10_CUDA_CHECK(cudaMalloc(&graph_owned_buf, total_bytes));
+      // Copy the data from the host staging buffer to the graph-owned device
+      // buffer. The copy won't be captured in the graph.
       at::cuda::memcpy_and_sync(
           graph_owned_buf,
           buf_tensor.data_ptr(),
@@ -221,7 +221,7 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
     C10_CUDA_CHECK(cudaUserObjectCreate(
         &user_object,
         graph_owned_buf,
-        [](void* buf) { c10::cuda::CUDACachingAllocator::raw_delete(buf); },
+        [](void* buf) { cudaFree(buf); },
         1, // refcount
         cudaUserObjectNoDestructorSync));
 
