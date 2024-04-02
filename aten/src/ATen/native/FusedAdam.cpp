@@ -7,6 +7,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
+#include <ATen/ops/_fused_adam.h>
 #include <ATen/ops/_fused_adam_native.h>
 #endif
 namespace at {
