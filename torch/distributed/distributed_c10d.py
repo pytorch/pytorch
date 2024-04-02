@@ -2033,15 +2033,17 @@ def _coalescing_manager(
                 f"Coalescing manager does not support fast-path coalescing of {op0}, "
                 f"yet {op0} is still recorded in op list. This is an internal error of c10d."
             )
+        cm.append(work)
 
     if device:
         # Old style of letting each coll inside the context manager to call into C++ counterpart via python binding
-        work = group._end_coalescing(device)
+        work_ec = group._end_coalescing(device)
+        # If work is empty, it means we fell back to the old style of coalescing
+        if len(cm.works) == 0:
+            cm.append(work_ec)
 
-    if async_ops:
-        cm.append(work)  # type: ignore[possibly-undefined]
-    else:
-        work.wait()  # type: ignore[possibly-undefined]
+    if not async_ops:
+        cm.wait()
 
 
 def batch_isend_irecv(p2p_op_list):
