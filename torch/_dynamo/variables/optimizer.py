@@ -206,6 +206,12 @@ class OptimizerVariable(UserDefinedObjectVariable):
                     param_source,
                     "grad",
                 )
+
+                if p.is_complex():
+                    raise Unsupported(
+                        "Optimizer with complex parameters not supported by torch.compile()."
+                    )
+
                 if p.grad is not None:
                     self.grad_to_source[p.grad] = grad_source
                 else:
