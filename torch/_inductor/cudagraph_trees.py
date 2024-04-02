@@ -76,6 +76,11 @@ from torch._inductor.compile_fx import (
     remove_unaligned_input_idxs,
     static_input,
 )
+from torch._inductor.cudagraph_utils import (
+    check_for_mutation,
+    FunctionID,
+    WrappedFunction,
+)
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.storage import UntypedStorage
 from torch.types import _bool
@@ -106,30 +111,13 @@ log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 from . import config
 
 
+perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
+
+
 @dataclasses.dataclass(frozen=True)
 class GraphID:
     "Unique counter of a cuda graph recording"
     id: int
-
-
-@dataclasses.dataclass(frozen=True)
-class FunctionID:
-    "Unique counter of a function wrapped in cudagraphify_impl"
-    id: int
-
-
-@dataclasses.dataclass(frozen=True)
-class WrappedFunction:
-    """
-    Represents a function that you want to record for CUDA graph replay,
-    with a little more metadata so we can identify if we have an applicable
-    CUDA graph in our CUDA graph tree for it.
-    """
-
-    model: Callable[..., Any]
-    static_input_idxs: List[int]
-    id: FunctionID
-    constants: Tuple[torch.Tensor, ...]
 
 
 def clear_cublass_cache():
@@ -398,6 +386,8 @@ def cudagraphify(
     is_inference: bool,
     stack_traces: Optional[StackTraces] = None,
     constants: Tuple[torch.Tensor, ...] = (),
+    placeholders: Tuple[torch.fx.Node, ...] = (),
+    mutated_input_idxs: Tuple[int, ...] = (),
 ):
     manager = get_container(device_index).get_tree_manager()
     assert not (is_backward and is_inference)
@@ -414,6 +404,8 @@ def cudagraphify(
         stack_traces,
         mode,
         constants,
+        placeholders,
+        mutated_input_idxs,
     )
 
 
@@ -1804,6 +1796,19 @@ class CUDAGraphTreeManager:
         if self.in_warmup:
             self.try_end_curr_warmup(function_id)
 
+        # Runtime check to ensure that the function only mutates inputs from parameters/buffers
+        # or cudagraph recorded tensors. Otherwise execute the eager function. This check should
+        # happen after `try_end_curr_recording` and `try_end_curr_warmup` which may change self.current_node.
+        wrapped_function = self.ids_to_funcs[function_id]
+        _checked_node = self.current_node
+        if has_mutation_str := check_for_mutation(
+            wrapped_function,
+            new_inputs,
+            self.current_node._is_cuda_graph_recorded_tensor,
+        ):
+            perf_hint_log.warning(has_mutation_str)
+            return wrapped_function.model(new_inputs)
+
         # warming up a function and subsequentally recording may use different memory addresses
         # because both depend on the state of the caching allocator. if we warm up graph A,
         # then warm up graph B and make more allocations, the subsequent recording of A will not
@@ -1855,6 +1860,17 @@ class CUDAGraphTreeManager:
             self.try_end_curr_execution()
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
+
+        # Runtime check again if self.current_node is changed
+        if self.current_node != _checked_node and (
+            has_mutation_str := check_for_mutation(
+                wrapped_function,
+                new_inputs,
+                self.current_node._is_cuda_graph_recorded_tensor,
+            )
+        ):
+            perf_hint_log.warning(has_mutation_str)
+            return wrapped_function.model(new_inputs)
 
         # now, we are in a recording state !
         return self.record_function(new_inputs, function_id)
@@ -1955,6 +1971,8 @@ class CUDAGraphTreeManager:
         stack_traces,
         mode,
         constants,
+        placeholders,
+        mutated_input_idxs,
     ) -> Tuple[Callable[..., Any], List[Optional[Tensor]]]:
         id = self.new_func_id()
         self.ids_to_stack_traces[id] = stack_traces
@@ -1963,6 +1981,8 @@ class CUDAGraphTreeManager:
             list(static_input_idxs),
             id,
             tuple(t for t in constants if isinstance(t, torch.Tensor) and t.is_cuda),
+            placeholders,
+            mutated_input_idxs,
         )
         self.id_to_mode[id] = mode
         fn = functools.partial(self.run, function_id=id)
