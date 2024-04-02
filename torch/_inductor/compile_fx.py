@@ -662,9 +662,10 @@ def fx_codegen_and_compile(
         optimus_scuba_log["inductor"] = counters["inductor"]
         signpost_event(
             "optimus",
-            "compile_fx.post_grad_passes",
+            "compile_fx",
             optimus_scuba_log,
         )
+        log.debug("optimus parameter sent to the scuba: %s", optimus_scuba_log)
 
     with V.set_fake_mode(fake_mode):
         const_output_index = None
