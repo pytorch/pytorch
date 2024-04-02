@@ -7,7 +7,7 @@ import logging
 import re
 import textwrap
 import traceback
-from contextlib import contextmanager, nullcontext
+from contextlib import nullcontext
 from enum import Enum
 from functools import partial
 from typing import (
@@ -6972,32 +6972,6 @@ class TensorBox(MutableBox):
         return TensorBox(StorageBox(data))
 
 
-import threading
-
-disable_register_buffer_flag = threading.local()
-disable_register_buffer_flag.value = False
-
-
-# For templated attention we dont want to register buffers for the intermediate
-# lambda score mod function ouput, as they are not used in the final graph
-# We call "realize" under this context manager to avoid registering buffers
-@contextmanager
-def disable_register_buffer():
-    try:
-        disable_register_buffer_flag.value = True
-        yield
-    finally:
-        disable_register_buffer_flag.value = False
-
-
-def is_register_buffer_disabled() -> bool:
-    return (
-        disable_register_buffer_flag.value
-        if hasattr(disable_register_buffer_flag, "value")
-        else False
-    )
-
-
 class StorageBox(MutableBox):
     def is_input_buffer(self):
         if isinstance(self.data, (InputBuffer, ReinterpretView)):
@@ -7035,8 +7009,7 @@ class StorageBox(MutableBox):
             data=self.data,
         )
 
-        if not is_register_buffer_disabled():
-            self.data.name = V.graph.register_buffer(self.data)
+        self.data.name = V.graph.register_buffer(self.data)
         self.data.origins = self.origins
         self.data.origin_node = origin_node
         self.data.traceback = traceback

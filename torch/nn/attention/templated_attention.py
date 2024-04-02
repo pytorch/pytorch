@@ -1,7 +1,9 @@
 from typing import Callable
 
 import torch
-from torch._higher_order_ops.templated_attention import sdpa
+from torch._higher_order_ops.templated_attention import (
+    templated_attention as templated_attention_hop,
+)
 
 
 _score_mod_signature = Callable[
@@ -30,4 +32,4 @@ def templated_attention(
     Returns:
         output (Tensor): Attention output; shape :math:`(B, H, L, Ev)`.
     """
-    return sdpa(query, key, value, score_mod)
+    return templated_attention_hop(query, key, value, score_mod)

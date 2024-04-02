@@ -289,11 +289,13 @@ class TritonTemplateKernel(TritonKernel):
 
         if self.modification_cache is None:
             with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
-                # Kinda hacky
-                if isinstance(self.subgraphs.data.data, ir.InputBuffer):
-                    out = self.subgraphs.make_loader()((1,))
+                assert isinstance(
+                    self.subgraphs, ir.ComputedBuffer
+                ), "Expected the subgraph to be a ComputedBuffer"
+                if isinstance(self.subgraphs.data, ir.InputBuffer):
+                    out = self.subgraphs.data.make_loader()((1,))
                 else:
-                    out = self.subgraphs.data.data.data.inner_fn((1,))
+                    out = self.subgraphs.data.inner_fn((1,))
 
             self.codegen_body()
             self.body.writeline(f"{fixed_inputs['out']} = {out.value}")

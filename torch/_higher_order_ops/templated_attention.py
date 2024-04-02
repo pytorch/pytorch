@@ -16,7 +16,7 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 
-sdpa = HigherOrderOperator("templated_attention")
+templated_attention = HigherOrderOperator("templated_attention")
 
 
 def math_attention(
@@ -58,7 +58,7 @@ def math_attention(
     return scores @ value
 
 
-@sdpa.py_impl(DispatchKey.CompositeExplicitAutograd)
+@templated_attention.py_impl(DispatchKey.CompositeExplicitAutograd)
 def sdpa_dense(
     query: torch.Tensor,
     key: torch.Tensor,
@@ -70,10 +70,12 @@ def sdpa_dense(
 
 
 # TODO We need to implement an autograd function for this, there is some complexity to do this generically
-sdpa.py_impl(DispatchKey.Autograd)(autograd_not_implemented(sdpa, deferred_error=True))
+templated_attention.py_impl(DispatchKey.Autograd)(
+    autograd_not_implemented(templated_attention, deferred_error=True)
+)
 
 
-def trace_sdpa(
+def trace_templated_attention(
     proxy_mode: ProxyTorchDispatchMode,
     query: torch.Tensor,
     key: torch.Tensor,
@@ -81,13 +83,13 @@ def trace_sdpa(
     score_mod: Callable,
     *other_buffers: torch.Tensor,
 ):
-    """Traces the sdpa operator with the given score_mod function and other_buffers.
+    """Traces the templated_attention operator with the given score_mod function and other_buffers.
 
     Trace SDPA will call make_fx with "fake" example vals and then trace the score_mod function
     This will produce a GraphModule that will be stored on the root tracer as "sdpa_score". We
     access this graph module in inductor to inline the score_mod function to the triton template.
     """
-    example_out = sdpa(query, key, value, score_mod, *other_buffers)
+    example_out = templated_attention(query, key, value, score_mod, *other_buffers)
 
     example_vals = [
         torch.zeros((), dtype=query.dtype, requires_grad=query.requires_grad)
@@ -97,15 +99,15 @@ def trace_sdpa(
     node_args = (query, key, value, score_graph, *other_buffers)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, node_args)
     out_proxy = proxy_mode.tracer.create_proxy(
-        "call_function", sdpa, proxy_args, {}, name="templated_attention"
+        "call_function", templated_attention, proxy_args, {}, name="templated_attention"
     )
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
     )
 
 
-@sdpa.py_impl(ProxyTorchDispatchMode)
-def sdpa_proxy_torch_dispatch_mode(
+@templated_attention.py_impl(ProxyTorchDispatchMode)
+def templated_attention_proxy_torch_dispatch_mode(
     mode: ProxyTorchDispatchMode,
     query: torch.Tensor,
     key: torch.Tensor,
@@ -115,13 +117,15 @@ def sdpa_proxy_torch_dispatch_mode(
 ):
     assert mode is not None, "Mode should always be enabled for python fallback key"
     if mode.enable_tracing:
-        return trace_sdpa(mode, query, key, value, score_mod, *other_buffers)
+        return trace_templated_attention(
+            mode, query, key, value, score_mod, *other_buffers
+        )
     else:
-        return sdpa(query, key, value, score_mod, *other_buffers)
+        return templated_attention(query, key, value, score_mod, *other_buffers)
 
 
-@sdpa.py_functionalize_impl
-def sdpa_functionalize(
+@templated_attention.py_functionalize_impl
+def templated_attention_functionalize(
     ctx: torch._subclasses.functional_tensor.BaseFunctionalizeAPI,
     query: torch.Tensor,
     key: torch.Tensor,
@@ -129,7 +133,7 @@ def sdpa_functionalize(
     score_mod: Callable,
     *other_buffers: torch.Tensor,
 ):
-    """Defines the functionalization rules for the sdpa operator.
+    """Defines the functionalization rules for the templated_attention operator.
 
     Write now we are unwrapping each tensor and then redispatching to the next, however we want to
     guard against any mutations in the score_mod function, to the other_buffers since those
@@ -153,7 +157,7 @@ def sdpa_functionalize(
         if mutates:
             raise UnsupportedAliasMutationException("Mutations detected in score_mod")
 
-        out = sdpa(
+        out = templated_attention(
             query_unwrapped,
             key_unwrapped,
             value_unwrapped,
@@ -163,8 +167,8 @@ def sdpa_functionalize(
     return ctx.wrap_tensors(out)
 
 
-@sdpa.py_impl(FakeTensorMode)
-def sdpa_fake_tensor_mode(
+@templated_attention.py_impl(FakeTensorMode)
+def templated_attention_fake_tensor_mode(
     mode: FakeTensorMode,
     query: torch.Tensor,
     key: torch.Tensor,
