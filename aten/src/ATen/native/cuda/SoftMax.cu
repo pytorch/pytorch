@@ -718,7 +718,7 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   ilpReduceMaxAndSum<ILP, scalar_t, accscalar_t>(
       shift, input, classes, threadMax, threadExp);
 
-  // Max reduce using warp shuffle intrinsics and broadcast to all the threads
+  // Max reduce using warp shuffles and broadcast to all the threads
   accscalar_t max_k = cuda_utils::BlockReduceMax<accscalar_t>(threadMax, sdata);
   if (threadIdx.x == 0) {
     sdata[0] = max_k;
@@ -726,7 +726,7 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   __syncthreads();
   max_k = sdata[0];
 
-  // Sum reduce using warp shuffle intrinsics and broadcast to all the threads
+  // Sum reduce using warp shuffles and broadcast to all the threads
   threadExp /= std::exp(max_k);
   accscalar_t sumAll = cuda_utils::BlockReduceSum<accscalar_t>(threadExp, sdata);
   if (threadIdx.x == 0) {
