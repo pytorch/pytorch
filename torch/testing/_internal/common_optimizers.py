@@ -774,6 +774,15 @@ def optim_error_inputs_func_rmsprop(device, dtype):
 
 
 def optim_inputs_func_rprop(device):
+    cuda_supported_configs = [
+        OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
+        OptimizerInput(
+            params=None,
+            kwargs={"lr": torch.tensor(0.001), "capturable": True},
+            desc="Tensor lr with capturable",
+        ),
+    ]
+
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 2e-4}, desc="non-default lr"),
@@ -786,7 +795,7 @@ def optim_inputs_func_rprop(device):
             desc="non-default step_sizes",
         ),
         OptimizerInput(params=None, kwargs={"maximize": True}, desc="maximize"),
-    ]
+    ] + (cuda_supported_configs if "cuda" in str(device) else [])
 
 
 def optim_error_inputs_func_rprop(device, dtype):
@@ -1085,6 +1094,13 @@ optim_db: List[OptimizerInfo] = [
                 "CompiledOptimizerParityTests",
                 "test_correctness",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1156,6 +1172,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1225,6 +1248,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
             ),
         ),
     ),
@@ -1333,6 +1363,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_param_groups_lr",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1402,6 +1439,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
             ),
         ),
     ),
@@ -1475,6 +1519,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
             ),
         ),
     ),
@@ -1605,6 +1656,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1686,6 +1744,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_can_load_older_state_dict",
                 device_type="cpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
             ),
         ),
     ),
@@ -1774,6 +1839,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1850,6 +1922,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
             ),
         ),
     ),
@@ -1957,6 +2036,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
             ),
         ),
     ),

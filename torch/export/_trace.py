@@ -922,7 +922,7 @@ def _export(
 
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
         _verify_nn_module_stack(gm)
-        exported_program = ExportedProgram(
+        return ExportedProgram(
             root=gm,
             graph=gm.graph,
             graph_signature=ep_non_strict.sig,
@@ -934,11 +934,6 @@ def _export(
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
         )
-        if len(range_constraints) > 0:
-            exported_program = exported_program._transform_do_not_use(
-                _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)
-            )
-        return exported_program
 
     gm_torch_level = _export_to_torch_ir(
         mod,
