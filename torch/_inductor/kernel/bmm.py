@@ -92,21 +92,10 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     # because bmm cpu implementation does contiguous() if not
     # this is to avoid additional copies in bmm
     def do_bmm_input_contiguous(t: ir.TensorBox):
-        if (
-            isinstance(t.data, ir.View)
-            and isinstance(t.data.data, ir.PermuteView)
-            and t.data.data.dims == [0, 3, 1, 2]
-        ):
-            t = ir.Pointwise.create(
-                device=t.get_device(),
-                dtype=t.get_dtype(),
-                inner_fn=t.make_loader(),
-                ranges=t.get_size(),
-                origin_node=t.get_origin_node(),
-                traceback=t.get_traceback(),
-            )
-            t.realize()
-            t.freeze_layout()
+        if isinstance(t.data, ir.View) and isinstance(t.data.data, ir.PermuteView):
+            if ir.is_pointwise_contiguous_or_transposed_after_perm(t.data.data):
+                return t
+            t = ir.ExternKernel.require_contiguous(t)
         return t
 
     if mat1.get_device().type == "cpu" and mat2.get_device().type == "cpu":

@@ -1832,6 +1832,52 @@ def is_stride_order_storage_and_layout(x, stride_order):
         return False
 
 
+def is_pointwise_contiguous_or_transposed_after_perm(x):
+    if (
+        isinstance(x, PermuteView)
+        and isinstance(x.data, StorageBox)
+        and isinstance(x.data.data, Pointwise)
+    ):
+        all_reads = x.data.data.get_reads()
+
+        def is_contiguous_or_transposed_after_perm(read):
+            def get_perm_dims(read):
+                # process perm dim if its length does not equal to reader number
+                perm_dims = x.dims
+                while len(perm_dims) != len(read.size):
+                    if perm_dims[0] != 0:
+                        return []
+                    perm_dims = [d - 1 for d in perm_dims[1:]]
+                return perm_dims
+
+            perm_dims = get_perm_dims(read)
+            if not perm_dims:
+                return False
+
+            # var_names and sizes after permution
+            new_read_var_names = [read.var_names[i] for i in perm_dims]
+            new_read_sizes = [read.size[i] for i in perm_dims]
+
+            # expected to be contigous or transposed for last two dims
+            expected_contiguous_or_transposed_index_lists = [
+                new_read_var_names[-1] + new_read_var_names[-2] * new_read_sizes[-1],
+                new_read_var_names[-2] + new_read_var_names[-1] * new_read_sizes[-2],
+            ]
+            if any(
+                str(i) in str(read.index)
+                for i in expected_contiguous_or_transposed_index_lists
+            ):
+                return True
+            return False
+
+        return len(all_reads) >= 1 and all(
+            type(read) is dependencies.MemoryDep
+            and is_contiguous_or_transposed_after_perm(read)
+            for read in all_reads
+        )
+    return False
+
+
 @dataclasses.dataclass
 class BaseView(IRNode):
     data: IRNode
