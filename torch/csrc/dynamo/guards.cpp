@@ -1699,8 +1699,10 @@ class RootGuardManager : public GuardManager {
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
     // Get the local state. This will be used for TENSOR_MATCH guards.
-    LocalState state;
-    _local_state = state;
+    if (_init_local_state) {
+      LocalState state;
+      _local_state = state;
+    }
 
     if (!GuardManager::check_nopybind(value)) {
       _reset_relational_guard_state();
@@ -1729,8 +1731,10 @@ class RootGuardManager : public GuardManager {
     Py_BLOCK_THREADS; // ; is added to avoid clang-formatting
 
     // Get the local state. This will be used for TENSOR_MATCH guards.
-    LocalState state;
-    _local_state = state;
+    if (_init_local_state) {
+      LocalState state;
+      _local_state = state;
+    }
 
     GuardDebugInfo debug_info = GuardManager::check_verbose_nopybind(value);
     if (!debug_info.result) {
@@ -1757,6 +1761,10 @@ class RootGuardManager : public GuardManager {
 
   void add_epilogue_lambda_guard(std::unique_ptr<LeafGuard> leaf_guard) {
     _epilogue_lambda_guards.emplace_back(std::move(leaf_guard));
+  }
+
+  void set_init_local_state_flag() {
+    _init_local_state = true;
   }
 
   // DEBUG function - Returning raw pointers because we can't return unique_ptr
@@ -1816,6 +1824,10 @@ class RootGuardManager : public GuardManager {
   // then acquires the GIL again after acquiring the mutex lock by using
   // Py_BLOCK_THREADS and Py_UNBLOCK_THREADS. This avoids the deadlock.
   std::mutex _lock;
+
+  // We init LocalState only when this flag it set. This flag is set during
+  // TENSOR_MATCH guard init.
+  bool _init_local_state = false;
 };
 
 /*
@@ -2081,6 +2093,7 @@ class TENSOR_MATCH : public LeafGuard {
       py::object verbose_code_parts)
       : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
         _tensor_name(py::cast<py::str>(std::move(tensor_name))) {
+    root_guard_manager->set_init_local_state_flag();
     PyObject* item = value.ptr();
     if (!THPVariable_CheckExact(item) && !THPVariable_Check(item)) {
       PyErr_SetString(PyExc_TypeError, "expected Tensor()");
