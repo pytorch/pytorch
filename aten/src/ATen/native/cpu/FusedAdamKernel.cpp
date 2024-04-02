@@ -2,7 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/DispatchStub.h>
-#include <ATen/native/fused_adam.h>
+#include <ATen/native/FusedAdam.h>
 #include <ATen/Dispatch.h>
 #include <ATen/cpu/vec/vec.h>
 namespace at::native {
@@ -51,7 +51,7 @@ void adam_fused_step_impl(
         scalar_t* exp_avg_ptr = exp_avg_data + begin;
         scalar_t* exp_avg_sq_ptr = exp_avg_sq_data + begin;
         scalar_t* grad_ptr = grad_data + begin;
-        scalar_t* max_exp_avg_sq_ptr = max_exp_avg_sq_data + begin;
+        scalar_t* max_exp_avg_sq_ptr = amsgrad ? max_exp_avg_sq_data + begin : nullptr;
 
         const int64_t size = end - begin;
         Vec grad_vec_to_store;
