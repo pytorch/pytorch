@@ -207,6 +207,8 @@ class TestPoitwiseOps(torch.nn.Module):
         inputs = torch.split(x.to(self.device), 500, dim=1)
         x_split = torch.split(inputs[0].to(self.device), 50, dim=1)
         y_split = torch.split(inputs[1].to(self.device), 50, dim=1)
+        # testing for broadcast
+        z_split = torch.split(x_split[0], 1, dim=1)
         tanh_1 = [torch.tanh(x_split[i]) for i in range(len(x_split))]
         tanh_2 = [torch.tanh(y_split[i]) for i in range(len(y_split))]
         sigmoid_1 = [torch.sigmoid(tanh_1[i]) for i in range(len(tanh_1))]
@@ -215,9 +217,13 @@ class TestPoitwiseOps(torch.nn.Module):
         relu_2 = [torch.nn.functional.relu(sigmoid_2[i]) for i in range(len(sigmoid_2))]
         add = [torch.add(relu_1[i], relu_2[i]) for i in range(len(relu_1))]
         mul = [torch.mul(add[i], add[i]) for i in range(len(add))]
-        sub = [torch.sub(mul[i], mul[i]) for i in range(len(mul))]
+        sub = [torch.sub(2 * mul[i], mul[i]) for i in range(len(mul))]
         div = [torch.div(sub[i], sub[i]) for i in range(len(sub))]
-        return torch.cat(div, dim=1)
+        broadcast_add = [torch.add(z_split[i], div[i]) for i in range(len(div))]
+        broadcast_mul = [
+            torch.mul(z_split[i], broadcast_add[i]) for i in range(len(broadcast_add))
+        ]
+        return torch.cat(broadcast_mul, dim=1)
 
 
 @requires_cuda
@@ -233,6 +239,8 @@ class TestPoitwiseOps(torch.nn.Module):
     post_grad_fusion_options={
         "batch_aten_add": {},
         "batch_aten_mul": {},
+        "batch_aten_add_broadcast": {},
+        "batch_aten_mul_broadcast": {},
         "batch_aten_sub": {},
         "batch_aten_div": {},
         "group_linear": {"require_fbgemm": True},
@@ -393,6 +401,8 @@ class TestGroupBatchFusion(TestCase):
         self.assertEqual(counters["inductor"]["batch_aten_mul"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_sub"], 1)
         self.assertEqual(counters["inductor"]["batch_aten_div"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_add_broadcast"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_mul_broadcast"], 1)
         ref.sum().backward()
         res.sum().backward()
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
