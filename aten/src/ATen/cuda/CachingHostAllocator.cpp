@@ -138,7 +138,7 @@ private:
     }
   }
 
-  void record_events_by_each_stream(
+  void record_stream(
       c10::optional<std::vector<EventPool::Event>>& events,
       CUDAStream stream) override {
     auto event = event_pool_.get(stream.device_index());

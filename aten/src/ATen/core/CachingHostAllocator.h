@@ -75,8 +75,8 @@ struct TORCH_API ComparatorSize {
  * To share the mechanism across each backend, we abstract its logic to be
  * device-agnostic through an interface. Then each backend can specialize
  * their own implement and the related runtime functions, like
- * allocate_host_memory, free_block, record_events_by_each_stream, query_event;
- * Even inheriting from the interface to extend additional features.
+ * allocate_host_memory, free_block, record_stream, query_event; Even inheriting
+ * from the interface to extend additional features.
  *
  * Some of the invariants here are less strict than they could be - for example,
  * we do not enforce that free(Block* block) => block->event_count == 0. This is
@@ -139,7 +139,7 @@ struct TORCH_API CachingHostAllocatorImplInterface {
         events = std::vector<E>();
         events->reserve(block->streams_.size());
         for (auto stream : block->streams_) {
-          record_events_by_each_stream(events, stream);
+          record_stream(events, stream);
         }
         block->event_count_ += events->size();
         block->streams_.clear();
@@ -243,11 +243,8 @@ struct TORCH_API CachingHostAllocatorImplInterface {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for free_block");
   }
 
-  virtual void record_events_by_each_stream(
-      c10::optional<std::vector<E>>& events,
-      S stream) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "Not implemented for record_events_by_each_stream");
+  virtual void record_stream(c10::optional<std::vector<E>>& events, S stream) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for record_stream");
   }
 
   virtual bool query_event(E& event) {
