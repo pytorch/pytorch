@@ -1049,13 +1049,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115679"
                 ),
                 "TestOptimRenewed",
@@ -1155,13 +1148,6 @@ optim_db: List[OptimizerInfo] = [
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
                 "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
@@ -1253,9 +1239,7 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
+                skipIfTorchDynamo("initial_value is incorrect in dynamo, see #123202"),
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
             ),
@@ -1342,13 +1326,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("Mismatched _foreach_addcdiv_ types, see #118159"),
@@ -1466,13 +1443,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
                 ),
                 "TestOptimRenewed",
@@ -1541,13 +1511,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1686,13 +1649,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
                 ),
                 "TestOptimRenewed",
@@ -1776,13 +1732,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1881,13 +1830,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115679"
                 ),
                 "TestOptimRenewed",
@@ -1979,13 +1921,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_param_group_with_lrscheduler_goes_right_direction",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -2092,9 +2027,7 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
+                skipIfTorchDynamo("initial_value is incorrect in dynamo, see #123202"),
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
             ),
