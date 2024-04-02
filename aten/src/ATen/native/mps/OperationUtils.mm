@@ -276,26 +276,29 @@ std::string getArrayRefString(const IntArrayRef s) {
   return ss.str();
 }
 
-std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype) {
-  std::string str;
-  // The key format per tensor would look like ":Float32[1,1,1,10]:"
-  for (const Tensor& tensor : tensors) {
-    str += ":";
-    if (tensor.defined()) {
-      str += getMPSTypeString(tensor.scalar_type(), short_dtype) + "[";
-      // if tensor is a scalar
-      if (tensor.dim() == 0) {
-        str += "Scalar";
-      } else {
-        const NSString* ns_shape_key = [[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","];
-        str += std::string(ns_shape_key.UTF8String);
-      }
-      str += "]";
-    } else {
-      str += "Undefined";
-    }
-  }
-  return str;
+std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, bool exclude_shape) {
+    std::string str;
+    // The key format per tensor would look like ":Float32[1,1,1,10]:"
+    for (const Tensor& tensor: tensors) {
+      str += ":";
+      if (tensor.defined()) {
+        str += getMPSTypeString(tensor.scalar_type(), short_dtype) + "[";
+        // if tensor is a scalar
+        if (tensor.dim() == 0) {
+          str += "Scalar";
+        } else {
+          if (exclude_shape) {
+            str += "[-1]";
+          } else {
+            str += std::string([[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","].UTF8String);
+          }
+        }
+        str += "]";
+       } else {
+        str += "Undefined";
+       }
+     }
+    return str;
 }
 
 MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format) {
