@@ -1484,7 +1484,7 @@ class Kernel(CodeGen):
                 If the variable comes from an FX node, we forward the bound we have already computed
                 Else, if the variable when codegen'ing another op, we try to compute its bounds
                 """
-                if V.kernel.current_node.is_template():
+                if (node := V.kernel.current_node) and node.is_template():
                     return ValueRanges.unknown()
 
                 fx_node = V.interpreter.current_node
