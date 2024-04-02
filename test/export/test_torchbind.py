@@ -24,22 +24,24 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.torchbind_impls import register_fake_operators
 
 
+def load_torchbind_test_lib():
+    if IS_SANDCASTLE or IS_FBCODE:
+        torch.ops.load_library("//caffe2/test/cpp/jit:test_custom_class_registrations")
+    elif IS_MACOS:
+        raise unittest.SkipTest("non-portable load_library call used in test")
+    else:
+        lib_file_path = find_library_location("libtorchbind_test.so")
+        if IS_WINDOWS:
+            lib_file_path = find_library_location("torchbind_test.dll")
+        torch.ops.load_library(str(lib_file_path))
+
+    register_fake_operators()
+
+
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestExportTorchbind(TestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            if IS_WINDOWS:
-                lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
-
-        register_fake_operators()
+        load_torchbind_test_lib()
 
         @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
         class FakeFoo:
@@ -556,6 +558,9 @@ def forward(self, arg0_1, arg1_1):
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestRegisterFakeClass(TestCase):
+    def setUp(self):
+        load_torchbind_test_lib()
+
     def tearDown(self):
         torch._library.fake_class_registry.global_fake_class_registry.clear()
 
