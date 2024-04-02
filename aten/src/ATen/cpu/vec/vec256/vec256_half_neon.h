@@ -29,12 +29,6 @@ inline namespace CPU_CAPABILITY {
 #error "Big endian is not supported."
 #endif
 
-#if defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
-#define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
-#else
-#define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
-#endif
-
 template <int index, bool mask_val>
 struct BlendHalfRegs {
   static float16x8_t impl(
