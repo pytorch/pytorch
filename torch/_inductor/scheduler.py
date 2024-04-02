@@ -33,7 +33,7 @@ from torch.utils._triton import has_triton
 from . import comms, config, dependencies, ir, metrics
 from .codegen.common import get_scheduling_for_device, Kernel
 from .comm_analysis import estimate_nccl_collective_runtime
-from .dependencies import Dep, MemoryDep, StarDep, WeakDep
+from .dependencies import AccumulateDep, Dep, MemoryDep, StarDep, WeakDep
 from .ir import ComputedBuffer, MultiOutput, MultiOutputLayout
 from .sizevars import SimplifyIndexing
 from .utils import (
@@ -798,7 +798,7 @@ class SchedulerNode(BaseSchedulerNode):
         if len(self.read_writes.writes) == 1 and isinstance(
             read_dep, dependencies.MemoryDep
         ):
-            write_dep = next(iter(self.read_writes.writes))
+            (write_dep,) = next(iter(self.read_writes.writes_with_mode.values()))
             assert isinstance(write_dep, dependencies.MemoryDep), f"{type(write_dep)=}"
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
@@ -1508,7 +1508,13 @@ class Scheduler:
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer
                 add_user(alt_name, node)
-                node.add_mutation_dep(StarDep(alt_name))
+                if len(node.read_writes.writes_with_mode) == 1 and next(
+                    iter(node.read_writes.writes_with_mode.keys())
+                ):
+                    mode = next(iter(node.read_writes.writes_with_mode.keys()))
+                    node.add_mutation_dep(AccumulateDep(StarDep(alt_name), mode))
+                else:
+                    node.add_mutation_dep(StarDep(alt_name))
                 for other_node in name_to_users[alt_name].items:
                     # this node must run after all prior readers
                     other_name = rename(other_node.get_name())
@@ -2060,6 +2066,8 @@ class Scheduler:
         # we still can match unmet dep
         # if there's indirect indexing, don't match it
         def fusable_read_and_write(read: Dep, write: Dep):
+            if isinstance(read, AccumulateDep) and isinstance(write, AccumulateDep):
+                return read.mode == write.mode
             return (
                 self.mutation_renames.get(read.name, read.name) == write.name
                 and (isinstance(read, MemoryDep) and isinstance(write, MemoryDep))
