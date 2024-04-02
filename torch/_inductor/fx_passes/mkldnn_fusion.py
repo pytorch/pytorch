@@ -496,10 +496,7 @@ if torch._C._has_mkldnn:
         else:
             return not (
                 isinstance(_other.data, ir.ReinterpretView)
-                or isinstance(
-                    _other.get_layout(),
-                    (ir.MutationLayoutSHOULDREMOVE, ir.NonOwningLayout),
-                )
+                or len(_other.get_inputs_that_alias_output()) > 0
             )
 
     def _register_binary_unary_maybe_inplace_fusion_lowering(
