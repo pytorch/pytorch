@@ -151,6 +151,8 @@ def to_underlying_dtype(qdtype):
         torch.int8: torch.int8,
         torch.int16: torch.int16,
         torch.int32: torch.int32,
+        torch.float8_e5m2: torch.float8_e5m2,
+        torch.float8_e4m3fn: torch.float8_e4m3fn,
     }
     assert qdtype in DTYPE_MAPPING, "Unsupported dtype: " + str(qdtype)
     return DTYPE_MAPPING[qdtype]
@@ -231,7 +233,9 @@ def activation_is_statically_quantized(qconfig):
             torch.uint8,
             torch.int8,
             torch.int16,
-            torch.int32
+            torch.int32,
+            torch.float8_e5m2,
+            torch.float8_e4m3fn,
         ]
         and (not activation_is_dynamically_quantized(qconfig))
     )
@@ -269,7 +273,9 @@ def weight_is_quantized(qconfig):
         torch.uint8,
         torch.int8,
         torch.int16,
-        torch.int32
+        torch.int32,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn,
     ]
 
 def weight_is_statically_quantized(qconfig):
@@ -305,7 +311,18 @@ def get_quant_type(qconfig):
     assert qconfig is not None
     activation = qconfig.activation()
     weight = qconfig.weight()
-    static_dtypes = [torch.quint8, torch.qint8, torch.quint4x2, torch.qint32, torch.uint8, torch.int8, torch.int16, torch.int32]
+    static_dtypes = [
+        torch.quint8,
+        torch.qint8,
+        torch.quint4x2,
+        torch.qint32,
+        torch.uint8,
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.float8_e5m2,
+        torch.float8_e4m3fn
+    ]
     if weight.dtype in static_dtypes:
         if hasattr(activation, 'is_dynamic') and activation.is_dynamic:
             return QuantType.DYNAMIC
