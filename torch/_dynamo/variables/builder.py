@@ -896,8 +896,7 @@ class VariableBuilder:
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
 
                 guard = functools.partial(
-                    GuardBuilder.TENSOR_MATCH,
-                    value=TensorWeakRef(value[i])
+                    GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
                 )
                 guards.append(source_i.make_guard(guard))
 
