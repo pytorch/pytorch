@@ -31,6 +31,7 @@ import torch
 import torch.utils._device
 from torch._dynamo.source import (
     is_from_local_source,
+    is_from_optimizer_source,
     TensorProperty,
     TensorPropertySource,
 )
@@ -70,6 +71,7 @@ from .source import (
     NotNNModuleSource,
     NumpyTensorSource,
     ODictGetItemSource,
+    OptimizerSource,
     ShapeEnvSource,
     TupleIteratorGetItemSource,
     TypeSource,
@@ -535,7 +537,10 @@ class GuardBuilder(GuardBuilderBase):
             return base_guard_manager.type_manager(
                 source=source_name, example_value=example_value
             )
-        elif istype(source, (NNModuleSource, NotNNModuleSource, FSDPNNModuleSource)):
+        elif istype(
+            source,
+            (OptimizerSource, NNModuleSource, NotNNModuleSource, FSDPNNModuleSource),
+        ):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager
         elif istype(source, AttrSource):
@@ -1126,6 +1131,11 @@ class GuardBuilder(GuardBuilderBase):
         ref_a = self.arg_ref(guard)
         ref_b = self.arg_ref(source_b.name())
 
+        if is_from_optimizer_source(
+            guard.originating_source
+        ) or is_from_optimizer_source(source_b):
+            return
+
         code = [f"{ref_b} is {ref_a}"]
         self._set_guard_export_info(guard, code)
 
@@ -1370,9 +1380,7 @@ class GuardBuilder(GuardBuilderBase):
                     else:
                         code.append(f"{tensor_name}.{term} == {real_value}")
             else:
-                self.tensor_check_names.append(tensor_name)
                 self.tensor_check_examples.append(value)
-                self.tensor_check_guards.append(guard)
 
                 if config.enable_cpp_guard_manager:
                     guard_manager = self.get_guard_manager(guard)
@@ -1398,6 +1406,15 @@ class GuardBuilder(GuardBuilderBase):
                         tensor_name,
                         verbose_code_parts,
                     )
+
+                    if not is_from_optimizer_source(guard.originating_source):
+                        # Skip no tensor aliasing guard for optimizers. We know
+                        # they do not alias.
+                        self.tensor_check_names.append(tensor_name)
+                        self.tensor_check_guards.append(guard)
+                else:
+                    self.tensor_check_names.append(tensor_name)
+                    self.tensor_check_guards.append(guard)
 
             # A frame is valid for reuse with dynamic dimensions if the new
             # (user-requested) dynamic dimensions are a subset of the old
