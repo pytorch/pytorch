@@ -411,6 +411,7 @@ def mps_ops_modifier(ops):
         'nn.functional.pixel_shuffle',
         'nn.functional.pixel_unshuffle',
         'nn.functional.tanhshrink',
+        'nn.functional.rms_norm',
         'nonzero',
         'prod',
         'reciprocal',
