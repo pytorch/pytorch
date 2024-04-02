@@ -1,7 +1,8 @@
 # Owner(s): ["oncall: export"]
 
+import unittest
+
 import torch
-import torch.testing._internal.torchbind_impls  # noqa: F401
 import torch.utils._pytree as pytree
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._library.fake_class_registry import FakeScriptObject
@@ -9,17 +10,37 @@ from torch.export import export
 from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
+    find_library_location,
     instantiate_parametrized_tests,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
 )
+from torch.testing._internal.torchbind_impls import register_fake_operators
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestExportTorchbind(TestCase):
     def setUp(self):
+        if IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library(
+                "//caffe2/test/cpp/jit:test_custom_class_registrations"
+            )
+        elif IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        else:
+            lib_file_path = find_library_location("libtorchbind_test.so")
+            if IS_WINDOWS:
+                lib_file_path = find_library_location("torchbind_test.dll")
+            torch.ops.load_library(str(lib_file_path))
+
+        register_fake_operators()
+
         @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
         class FakeFoo:
             def __init__(self, x: int, y: int):
