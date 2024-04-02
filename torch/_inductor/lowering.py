@@ -5856,7 +5856,7 @@ def resize(x, size, *, memory_format=None):
         # using zero as that is what empty does
         uninitalized_val = 0.0
 
-    if V.graph.sizevars.evaluate_expr(sympy.Eq(old_numel, 0)):
+    if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
         return full(size, uninitalized_val, dtype=dtype, device=device)
 
     x_flat = as_strided(
