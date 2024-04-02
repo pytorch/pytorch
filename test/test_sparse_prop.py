@@ -45,9 +45,6 @@ class TestSparseProp(TestCase):
     @parametrize("itype", SPARSE_ITYPES)
     @parametrize("layout", SPARSE_LAYOUTS)
     def test_copy(self, dtype, itype, layout):
-        if layout == torch.sparse_coo and itype != torch.int64:
-            self.skipTest("COO only supports int64 index type")
-
         for sparse_input in self.generate_simple_inputs(
             layout,
             device="cpu",
