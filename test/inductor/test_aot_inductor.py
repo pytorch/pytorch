@@ -1025,7 +1025,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
-    def test_buffer_mutation(self):
+    def test_buffer_mutation_1(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
                 super().__init__()
@@ -1037,9 +1037,62 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.rand(4, 4, device=self.device),)
         torch._export.aot_compile(Model(self.device), example_inputs)
-        with self.assertRaisesRegex(AssertionError, "False is not true"):
-            # TODO: AOTI seems to mutate the buffer while tracing
-            self.check_model(Model(self.device), example_inputs)
+        self.check_model(Model(self.device), example_inputs)
+
+    def test_buffer_mutation_2(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer("foo", torch.arange(10, device=device))
+                self.register_buffer("bar", torch.arange(10, device=device))
+
+            def forward(self, x):
+                self.bar.mul_(2)
+                self.foo[5] = self.bar[0]
+                return x + self.bar, x * self.foo
+
+        example_inputs = (torch.randn(10, device=self.device),)
+        self.check_model(Model(self.device), example_inputs)
+
+    def test_buffer_mutation_3(self):
+        class KVCache(torch.nn.Module):
+            def __init__(
+                self,
+                max_batch_size,
+                max_seq_length,
+                n_heads,
+                head_dim,
+                dtype=torch.float,
+            ):
+                super().__init__()
+                cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
+                self.register_buffer("k_cache", torch.zeros(cache_shape, dtype=dtype))
+                self.register_buffer("v_cache", torch.zeros(cache_shape, dtype=dtype))
+
+            def update(self, input_pos, k_val, v_val):
+                # input_pos: [S], k_val: [B, H, S, D]
+                k_out = self.k_cache
+                v_out = self.v_cache
+                k_out[:, :, input_pos] = k_val
+                v_out[:, :, input_pos] = v_val
+
+                return k_out, v_out
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.kv_cache = KVCache(1, 256, 6, 48)
+
+            def forward(self, inp_pos, k, v):
+                self.kv_cache.update(inp_pos, k, v)
+                return self.kv_cache.k_cache + 1, self.kv_cache.v_cache / 2
+
+        example_inputs = (
+            torch.tensor([0], device=self.device),
+            torch.randn(1, 6, 1, 48, device=self.device),
+            torch.randn(1, 6, 1, 48, device=self.device),
+        )
+        self.check_model(Model(self.device), example_inputs)
 
     @skipIfRocm
     @requires_multigpu()
@@ -2389,7 +2442,9 @@ CPU_TEST_FAILURES = {
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
     "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
-    "test_buffer_mutation": fail_stack_allocation(is_skip=True),
+    "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
+    "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
+    "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
