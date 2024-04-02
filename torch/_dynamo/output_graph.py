@@ -633,9 +633,8 @@ class OutputGraph:
         def handle_tensor(t, src):
             for i, s in enumerate(t.size()):
                 bind_symint(s, TensorPropertySource(src, TensorProperty.SIZE, i))
-            if t.layout is torch.strided:
-                for i, s in enumerate(t.stride()):
-                    bind_symint(s, TensorPropertySource(src, TensorProperty.STRIDE, i))
+            for i, s in enumerate(t.stride()):
+                bind_symint(s, TensorPropertySource(src, TensorProperty.STRIDE, i))
             bind_symint(
                 t.storage_offset(),
                 TensorPropertySource(src, TensorProperty.STORAGE_OFFSET),
