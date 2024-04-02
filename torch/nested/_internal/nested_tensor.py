@@ -225,13 +225,15 @@ class NestedTensor(torch.Tensor):
 
         from .ops import jagged_torch_function
 
-        try:
-            return jagged_torch_function(func, *args, **kwargs)
-        except NotImplementedError:
-            pass
+        ret = jagged_torch_function(func, *args, **kwargs)
+        if ret is not NotImplemented:
+            return ret
+
         with torch._C.DisableTorchFunctionSubclass():
             return func(*args, **kwargs)
 
+
+torch._dynamo.config.traceable_tensor_subclasses.add(NestedTensor)
 
 # NB: These fake view autograd.Functions are superseded by real view ops. Don't use them!
 # TODO: Remove ViewBufferFromNested, ViewNestedFromBuffer, and buffer_from_jagged once the
