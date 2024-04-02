@@ -1,7 +1,6 @@
-import copy
 import functools
 import time
-from typing import Any, Callable, Dict, List, Tuple, TypeVar
+from typing import Any, Callable, Dict, List, TypeVar
 
 from typing_extensions import ParamSpec
 
@@ -17,36 +16,28 @@ _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
 
-def _parse_dcp_method_args(*args, **kwargs) -> Tuple[Tuple[Any], Dict[str, Any]]:
+def _msg_dict_from_dcp_method_args(*args, **kwargs) -> Dict[str, Any]:
     """
-    Parse method arguments into positional and keyword arguments.
+    Extracts log data from dcp method args
     """
-    args, kwargs = copy.copy(args), copy.copy(kwargs)
-
-    # remove objects which are too large/complicated to log
-    # we can do this because the save/load API's force kwargs for all cases except state_dict
-    state_dict = kwargs.pop("state_dict", None)
-    if not state_dict:
-        args = args[:0]
-
-    storage_writer = kwargs.pop("storage_writer", None)
-    storage_reader = kwargs.pop("storage_reader", None)
-
-    # handled in the c10d logger
-    kwargs["group"] = kwargs.pop("process_group", None)
+    msg_dict = {}
 
     # checkpoint ID can be passed in through the serializer or through the checkpoint id directly
+    storage_writer = kwargs.get("storage_writer", None)
+    storage_reader = kwargs.get("storage_reader", None)
     if kwargs.get("checkpoint_id") is None and (
         serializer := storage_writer or storage_reader
     ):
-        kwargs["checkpoint_id"] = getattr(serializer, "checkpoint_id", None)
+        msg_dict["checkpoint_id"] = getattr(serializer, "checkpoint_id", None)
 
-    return args, kwargs
+    return msg_dict
 
 
 def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
-    log_args, log_kwargs = _parse_dcp_method_args(*args, **kwargs)
-    return c10d_logger._get_msg_dict(func_name, *log_args, **log_kwargs)
+    msg_dict = _msg_dict_from_dcp_method_args(*args, **kwargs)
+    msg_dict.update(c10d_logger._get_msg_dict(func_name, **msg_dict))
+
+    return msg_dict
 
 
 def _dcp_method_logger(

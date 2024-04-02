@@ -585,6 +585,29 @@ class GetAttrVariable(VariableTracker):
     ) -> "VariableTracker":
         return self.obj.call_method(tx, self.name, args, kwargs)
 
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if (
+            name == "__getitem__"
+            and self.name == "__dict__"
+            and len(args) == 1
+            and not kwargs
+            and args[0].is_python_constant()
+        ):
+            obj = self.obj
+            key = args[0].as_python_constant()
+            # redirect to var_getattr on the original obj
+            if isinstance(obj, variables.UserDefinedObjectVariable):
+                obj._check_for_getattribute()
+                if key in obj.value.__dict__:
+                    return obj.var_getattr(tx, key)
+        return super().call_method(tx, name, args, kwargs)
+
 
 class MethodWrapperVariable(VariableTracker):
     def __init__(self, method_wrapper, **kwargs):
@@ -911,3 +934,14 @@ class DebuggingVariable(VariableTracker):
                 return False
 
         return True
+
+
+class StopIterationVariable(VariableTracker):
+    def __init__(self, args, **kwargs):
+        super().__init__(**kwargs)
+        self.args = args
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("builtins", "StopIteration")
+        codegen.foreach(self.args)
+        codegen.call_function(len(self.args), True)
