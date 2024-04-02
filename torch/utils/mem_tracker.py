@@ -6,7 +6,6 @@ from typing import Any, Dict, List, NamedTuple, Optional
 
 import torch
 import torch.nn as nn
-from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
 from torch.utils.hooks import RemovableHandle
@@ -69,10 +68,8 @@ class MemoryTrackingMode(TorchDispatchMode):
         self.FIRST_OPT_ITER: bool = True
         self._module_to_hook_handles: Dict[nn.Module, _ModuleHookHandles] = {}
         self._param_to_grad_hook_handles: Dict[nn.Parameter, RemovableHandle] = {}
-        self._optimizer_hook_handle: RemovableHandle = None
-        self.WINFO: Dict[
-            torch.storage.UntypedStorage, _WeakRefInfo
-        ] = WeakIdKeyDictionary()
+        self._optimizer_hook_handle: RemovableHandle
+        self.WINFO = WeakIdKeyDictionary()
 
     def _update_stats(self):
         curr_use: int = 0
@@ -92,13 +89,13 @@ class MemoryTrackingMode(TorchDispatchMode):
 
     def _get_current_memory_allocated(self) -> Dict[str, int]:
         mem_stats = defaultdict(int)
-        mem_stats[_RefType.parameter] = 0
-        mem_stats[_RefType.gradient] = 0
-        mem_stats[_RefType.optstate] = 0
-        mem_stats[_RefType.activation] = 0
-        mem_stats[_RefType.buffer] = 0
+        mem_stats[_RefType.parameter.name] = 0
+        mem_stats[_RefType.gradient.name] = 0
+        mem_stats[_RefType.optstate.name] = 0
+        mem_stats[_RefType.activation.name] = 0
+        mem_stats[_RefType.buffer.name] = 0
         for winfo in self.WINFO.values():
-            mem_stats[winfo.reftype] += winfo.get_mem_consumed()
+            mem_stats[winfo.reftype.name] += winfo.get_mem_consumed()
         mem_stats["total"] = sum([m for m in mem_stats.values()])
         return mem_stats
 
@@ -110,7 +107,7 @@ class MemoryTrackingMode(TorchDispatchMode):
             divisor = 2**20
         elif self.units == "KB":
             divisor = 2**10
-        elif self.units == "B":
+        else:
             divisor = 1
             rounding_fn = lambda x, y, z: x
         for mem_type, mem_val in stats.items():
@@ -176,7 +173,8 @@ class MemoryTrackingMode(TorchDispatchMode):
             self._register_module_hooks(name, module)
 
         def _grad_hook(param: nn.Parameter):
-            winfo = self.WINFO[param.grad.untyped_storage()]
+            st = param.grad.untyped_storage()
+            winfo = self.WINFO.get(st, None)
             assert winfo is not None, "grad tensor not found in WINFO"
             winfo.reftype = _RefType.gradient
 
@@ -250,7 +248,7 @@ class MemoryTrackingMode(TorchDispatchMode):
         return res
 
 
-def experiment():
+def test():
     class DummyModel(nn.Module):
         def __init__(self, layers: int, dim: int):
             super(DummyModel, self).__init__()
@@ -268,10 +266,10 @@ def experiment():
     if torch.cuda.is_available():
         torch.set_default_device("cuda")
         torch.cuda.reset_peak_memory_stats()
-    fake_mode = FakeTensorMode()
+
     model = DummyModel(layers, dim)
     optim = torch.optim.Adam(model.parameters(), fused=True)
-    mem_tracker = MemoryTrackingMode(model, optim, display_modulewise_stats=False)
+    mem_tracker = MemoryTrackingMode(model, optim, display_modulewise_stats=True)
     with mem_tracker as mt:
         input_batch = torch.randn(batch_size, dim)
         print(f"After Model and mini-batch init:")
@@ -299,4 +297,4 @@ def experiment():
 
 
 if __name__ == "__main__":
-    experiment()
+    test()
