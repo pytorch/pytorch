@@ -287,7 +287,6 @@ class TestOptimRenewed(TestCase):
 
         for optim_input in supported_inputs:
             kwargs = optim_input.kwargs
-            print(kwargs)
             multi_tensor = kwargs.get("foreach", False)
 
             # For rosenbrock tests, it is mandated that the param is a tensor with 2 numbers

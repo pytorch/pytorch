@@ -1199,6 +1199,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "Fails assertion of params close to params_c at all, see #123147"
+                ),
+                "TestOptimRenewed",
+                "test_rosenbrock_sparse",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "Accessing grad.real errors, see https://github.com/pytorch/pytorch/issues/117184"
                 ),
                 "TestOptimRenewed",
@@ -2133,6 +2140,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Fails assertion of params close to params_c at all, see #123147"
+                ),
+                "TestOptimRenewed",
+                "test_rosenbrock_sparse",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
