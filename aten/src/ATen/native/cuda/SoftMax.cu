@@ -473,12 +473,11 @@ ilpReduceMaxAndSum(index_t shift,
   Add<AccumT> redFuncAdd;
 
   // Prologue
-  index_t offset = threadIdx.x;
   if (shift > 0) {
     data -= shift;
     size += shift;
     if (threadIdx.x >= shift) {
-      T val = data[offset];
+      T val = data[threadIdx.x];
       threadMax = redFuncMax(threadMax, val);
       threadExp = redFuncAdd(threadExp, std::exp(val));
     }
@@ -491,7 +490,7 @@ ilpReduceMaxAndSum(index_t shift,
 
   // Used vectorized load instructions for the center of the buffer
   index_t last = size % (ILP * blockDim.x);
-  for (; offset * ILP < (size - last); offset += blockDim.x) {
+  for (index_t offset = threadIdx.x; offset * ILP < (size - last); offset += blockDim.x) {
     LoadT v = data_vec_ptr[offset];
 
     #pragma unroll
@@ -502,8 +501,7 @@ ilpReduceMaxAndSum(index_t shift,
   }
 
   // Epilogue
-  offset = size - last + threadIdx.x;
-  for (; offset < size; offset += blockDim.x) {
+  for (index_t offset = size - last + threadIdx.x; offset < size; offset += blockDim.x) {
     T val = data[offset];
     threadMax = redFuncMax(threadMax, val);
     threadExp = redFuncAdd(threadExp, std::exp(val));
