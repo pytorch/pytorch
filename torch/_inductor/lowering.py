@@ -6001,6 +6001,92 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
     return list(map(TensorBox.create, result))
 
 
+@register_lowering(torch.ops.higher_order.templated_attention)
+def templated_attention(*args, **kwargs):
+    from torch._prims_common import make_contiguous_strides_for
+    from .ir import FixedLayout, InputBuffer, TensorBox
+
+    query, key, value, subgraph = args
+
+    def create_placeholder(name: str, dtype: torch.dtype) -> InputBuffer:
+        return TensorBox.create(
+            InputBuffer(
+                name,
+                FixedLayout(
+                    query.get_device(),
+                    dtype,
+                    [
+                        1,
+                    ],
+                    [
+                        1,
+                    ],
+                ),
+            )
+        )
+
+    scalar_inps = ["score", "b", "h", "m", "n"]
+    env = {}
+    cnt = 0
+    placeholder_inps = [
+        create_placeholder(name, dtype)
+        for name, dtype in [
+            ("score", query.get_dtype()),
+            ("b", torch.int64),
+            ("h", torch.int64),
+            ("m", torch.int64),
+            ("n", torch.int64),
+        ]
+    ]
+    for node in subgraph.graph_module.graph.nodes:
+        if node.op == "placeholder":
+            if cnt >= len(scalar_inps):
+                env[node] = args[cnt - 1]
+            else:
+                env[node] = placeholder_inps[cnt]
+            cnt += 1
+        elif node.op == "call_function":
+            from torch.utils._pytree import tree_map
+
+            env[node] = lowerings[node.target](
+                *tree_map(lambda x: env[x] if x in env else x, node.args)
+            )
+        elif node.op == "output":
+            from torch._inductor.ir import disable_register_buffer
+
+            output_buffer = env[node.args[0]]
+            # TODO - this is needed to inline the lambda but we dont want to create this
+            with disable_register_buffer():
+                output_buffer.realize()
+            # breakpoint() # output_buffer.decide_layout()
+            from .kernel.templated_attention import sdpa_template
+
+            layout = FixedLayout(
+                output_buffer.get_device(),
+                output_buffer.get_dtype(),
+                query.get_size(),
+                make_contiguous_strides_for(query.get_size()),
+            )
+            choices: List[Any] = []
+            from .select_algorithm import autotune_select_algorithm
+
+            sdpa_template.maybe_append_choice(
+                choices=choices,
+                input_nodes=(query, key, value),
+                layout=layout,
+                subgraphs=output_buffer,
+                num_stages=2,
+                num_warps=4,
+                BLOCK_M=64,
+                BLOCK_N=128,
+                BLOCK_DMODEL=query.get_size()[-1],
+            )
+            return autotune_select_algorithm(
+                "sdpa", choices, [query, key, value], layout
+            )
+    raise ValueError("TemplatedAttention was passed a subgraph with no output node!")
+
+
 try:
     import torch.distributed._functional_collectives
 

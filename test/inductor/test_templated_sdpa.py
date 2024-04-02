@@ -4,8 +4,9 @@ import functools
 from collections import namedtuple
 from typing import Callable
 
-import torch
+from unittest import expectedFailure
 
+import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.nn.attention.templated_attention import templated_attention
 from torch.testing._internal import common_utils
@@ -88,6 +89,17 @@ class TestTemplatedSDPA(InductorTestCase):
     def test_alibi_causal(self, dtype: torch.dtype):
         def score_mod(score, b, h, m, n):
             return torch.where(m <= n, score + (m - n) * h, float("-inf"))
+
+        self.run_test(score_mod, dtype)
+
+    @expectedFailure
+    @requires_cuda
+    @common_utils.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    def test_captured_buffers(self, dtype: torch.dtype):
+        head_offset = torch.rand(8, device="cuda", dtype=dtype)
+
+        def score_mod(score, b, h, m, n):
+            return score + head_offset[h]
 
         self.run_test(score_mod, dtype)
 

@@ -16,6 +16,12 @@ def templated_attention(
     score_mod: _score_mod_signature,
 ) -> torch.Tensor:
     """This function implements scaled dot product attention with an arbitrary attention score modification function.
+
+    .. warning::
+        `torch.nn.attention.templated_attention` is a prototype feature in PyTorch. It doesn't support training currently.
+        Please look forward to a more stable implementation in a future version of PyTorch.
+        Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
+
     Args:
         query (Tensor): Query tensor; shape :math:`(B, H, L, E)`.
         key (Tensor): Key tensor; shape :math:`(B, H, S, E)`.

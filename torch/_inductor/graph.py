@@ -17,7 +17,6 @@ import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._logging import LazyString, trace_structured
-from torch._prims_common import make_contiguous_strides_for
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -818,87 +817,6 @@ class GraphLowering(torch.fx.Interpreter):
                 layout_constraint = constrain_to_fx_strides
             return layout_constraint, args, kwargs
 
-        if target.__name__ == "templated_attention":
-
-            def create_placeholder(name: str, dtype: torch.dtype) -> InputBuffer:
-                return TensorBox.create(
-                    InputBuffer(
-                        name,
-                        FixedLayout(
-                            args[0].get_device(),
-                            dtype,
-                            [
-                                1,
-                            ],
-                            [
-                                1,
-                            ],
-                        ),
-                    )
-                )
-
-            scalar_inps = ["score", "b", "h", "m", "n"]
-            env = {}
-            cnt = 0
-            placeholder_inps = [
-                create_placeholder(name, dtype)
-                for name, dtype in [
-                    ("score", args[0].get_dtype()),
-                    ("b", torch.int64),
-                    ("h", torch.int64),
-                    ("m", torch.int64),
-                    ("n", torch.int64),
-                ]
-            ]
-            for node in args[3].graph_module.graph.nodes:
-                if node.op == "placeholder":
-                    if cnt >= len(scalar_inps):
-                        env[node] = args[cnt - 1]
-                    else:
-                        env[node] = placeholder_inps[cnt]
-                    cnt += 1
-                elif node.op == "call_function":
-                    from torch.utils._pytree import tree_map
-
-                    env[node] = lowerings[node.target](
-                        *tree_map(lambda x: env[x] if x in env else x, node.args)
-                    )
-                elif node.op == "output":
-                    from torch._inductor.ir import disable_register_buffer
-
-                    output_buffer = env[node.args[0]]
-                    # TODO - this is needed to inline the lambda but we dont want to create this
-                    with disable_register_buffer():
-                        output_buffer.realize()
-                    # breakpoint() # output_buffer.decide_layout()
-                    from .kernel.templated_attention import sdpa_template
-
-                    layout = FixedLayout(
-                        output_buffer.get_device(),
-                        output_buffer.get_dtype(),
-                        args[0].get_size(),
-                        make_contiguous_strides_for(args[0].get_size()),
-                    )
-                    choices: List[Any] = []
-                    from .select_algorithm import autotune_select_algorithm
-
-                    sdpa_template.maybe_append_choice(
-                        choices=choices,
-                        input_nodes=(args[0], args[1], args[2]),
-                        layout=layout,
-                        subgraphs=output_buffer,
-                        num_stages=2,
-                        num_warps=4,
-                        BLOCK_M=64,
-                        BLOCK_N=128,
-                        BLOCK_DMODEL=args[0].get_size()[-1],
-                    )
-                    return autotune_select_algorithm(
-                        "sdpa", choices, [args[0], args[1], args[2]], layout
-                    )
-            return lowerings[torch.ops.aten.scaled_dot_product_attention.default](
-                args[0], args[1], args[2]
-            )
         if target not in lowerings:
             assert isinstance(
                 target, torch._ops.OpOverload
