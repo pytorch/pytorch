@@ -1631,6 +1631,29 @@ class TestLinalg(TestCase):
                 result_n = np.linalg.norm(x_n, ord=ord)
                 self.assertEqual(result, result_n, msg=msg)
 
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_vector_norm_reduce_over_1D_vector(self, device, dtype):
+        input_sizes_and_dims = [
+            ((6, 1), -1),
+            ((3, 1, 2, 1), (1, 3)),
+            ((1,), None),
+        ]
+        orders = [float('inf'), -float('inf'), 0, 1, -1, 2, -2]
+        keepdims = [True, False]
+
+        for input_size_and_dim, ord, keepdim in product(input_sizes_and_dims, orders, keepdims):
+            input_size = input_size_and_dim[0]
+            dim = input_size_and_dim[1]
+            if type(dim) is tuple and ord == 0:
+                # skip because np.linalg.norm raises 'ValueError: Invalid norm order for matrices.'
+                continue
+            input = make_tensor(input_size, dtype=dtype, device=device, low=-9, high=9)
+            result = torch.linalg.vector_norm(input, ord, dim, keepdim)
+            result_numpy = np.linalg.norm(input.cpu().numpy(), ord, dim, keepdim)
+
+            msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
+            self.assertEqual(result, result_numpy, msg=msg)
+
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
@@ -7635,6 +7658,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         def run_subtest(guess_rank, actual_rank, matrix_size, batches, device, pca, **options):
             density = options.pop('density', 1)
+            use_svd_lowrank = options.pop('use_svd_lowrank', False)
             if isinstance(matrix_size, int):
                 rows = columns = matrix_size
             else:
@@ -7646,7 +7670,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 a_input = random_sparse_matrix(rows, columns, density, device=device, dtype=dtype)
                 a = a_input.to_dense()
 
-            u, s, v = pca(a_input, q=guess_rank, **options)
+            if use_svd_lowrank:
+                m = a_input.mean(dim=-2, keepdim=True)
+                u, s, v = pca(a_input, q=guess_rank, M=m, **options)
+            else:
+                u, s, v = pca(a_input, q=guess_rank, **options)
 
             self.assertEqual(s.shape[-1], guess_rank)
             self.assertEqual(u.shape[-2], rows)
@@ -7684,6 +7712,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                     if guess_rank <= min(*size):
                         run_subtest(guess_rank, actual_rank, size, batches, device, torch.pca_lowrank)
                         run_subtest(guess_rank, actual_rank, size[::-1], batches, device, torch.pca_lowrank)
+                        run_subtest(guess_rank, actual_rank, size, batches, device, torch.svd_lowrank, use_svd_lowrank=True)
+                        run_subtest(guess_rank, actual_rank, size[::-1], batches, device, torch.svd_lowrank, use_svd_lowrank=True)
 
         # sparse input
         for guess_rank, size in [

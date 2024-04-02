@@ -22,6 +22,9 @@
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
 #endif
 
+#include <ATen/cpu/vec/vec256/vec256_convert.h>
+#include <ATen/cpu/vec/vec256/vec256_mask.h>
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>

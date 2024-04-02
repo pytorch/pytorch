@@ -17,7 +17,8 @@ from collections import namedtuple
 from copy import deepcopy
 from enum import Enum
 from functools import wraps
-from typing import List
+from typing import Any, Iterator, List
+from unittest import mock
 
 import numpy as np
 import torch
@@ -360,6 +361,56 @@ class ReformerEncoder(torch.nn.Module):
             all_attentions=all_attentions,
             past_buckets_states=past_buckets_states,
         )
+
+
+class ListConfig:
+    class ValueNode:
+        def __init__(self, value):
+            self.value = value
+
+        def _dereference_node(self):
+            return self
+
+        def _is_missing(self):
+            return False
+
+        def _value(self):
+            return self.value
+
+    # Based on an example from omegaconfig.listconfig
+    class ListIterator(Iterator[Any]):
+        def __init__(self, lst: Any, resolve: bool) -> None:
+            self.resolve = resolve
+            self.iterator = iter(lst.__dict__["_content"])
+            self.index = 0
+
+        def __next__(self) -> Any:
+            x = next(self.iterator)
+            if self.resolve:
+                x = x._dereference_node()
+                if x._is_missing():
+                    raise AssertionError()
+
+            self.index = self.index + 1
+            if isinstance(x, ListConfig.ValueNode):
+                return x._value()
+            raise AssertionError()
+
+    def __iter__(self):
+        return self._iter_ex(True)
+
+    def _iter_ex(self, resolve: bool) -> Iterator[Any]:
+        try:
+            return ListConfig.ListIterator(self, resolve)
+        except Exception:
+            raise AssertionError()
+
+    def __init__(self):
+        self._content = [
+            ListConfig.ValueNode(1),
+            ListConfig.ValueNode(3),
+            ListConfig.ValueNode(torch.tensor([7.0])),
+        ]
 
 
 def longformer_chunk(hidden_states, window_overlap=256):
@@ -1969,6 +2020,22 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
+    def test_issue111522(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x, y):
+            return x + y.a
+
+        class A:
+            a = 2
+
+        self.assertEqual(f(torch.zeros(2), A()), torch.full([2], 2.0))
+
+        del A.a
+
+        # graph break on missing attr
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            f(torch.zeros(2), A())
+
     def test_dict_list_values(self):
         def inner_fn(args):
             return [x[1].shape for x in args]
@@ -2079,6 +2146,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_m.forward(listy)
 
         self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_issue111918(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def fn(x):
+            x = x + 1
+            y = x.item()
+            if y > 2:
+                return x * 2
+            else:
+                return x * 3
+
+        x = torch.tensor([3.0])
+        fn(x)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 4)
+
+        torch._dynamo.reset()
+        fn = torch.compile(fn, fullgraph=True, backend="eager")
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            fn(x)
 
     def test_vdd_duplicate_error(self):
         def fn(a, dt):
@@ -2449,6 +2539,50 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(mod(*args), opt_mod(*args)))
         self.assertEqual(cnt.op_count, 5)
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_omegaconf_listconfig_iter(self):
+        obj = ListConfig()
+        x = torch.zeros(2)
+
+        def fn():
+            y = x
+            for i in obj:
+                y += i
+            return y
+
+        expected = fn()
+        actual = torch.compile(fn, fullgraph=True, backend="eager")()
+        self.assertEqual(actual, expected)
+
+    def test_user_defined_iter(self):
+        class MyIter:
+            def __init__(self):
+                self.i = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self.i < 3:
+                    self.i += 1
+                    return self.i
+                raise StopIteration()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            for i in MyIter():
+                x += i
+            return x
+
+        self.assertEqual(fn(torch.zeros(1)), torch.full([1], 6.0))
+
+    def test_stop_iteration_reconstruct(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.sin(), StopIteration(1, 2, 3)
+
+        _, res = fn(torch.ones(1))
+        self.assertEqual(str(res), str(StopIteration(1, 2, 3)))
 
     def test_tensor_data_kwarg(self):
         # https://github.com/pytorch/pytorch/issues/96278
@@ -3350,6 +3484,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         actual = fn_opt(*inputs)
         self.assertTrue(same(actual, expected))
 
+    @mock.patch("torch._dynamo.config.guard_nn_modules", True)
     def test_hf_xsoftmax_training(self):
         from torch._dynamo.utils import counters
 
@@ -3542,6 +3677,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR
 
         self.assertEqual(f(), _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR)
+
+    def test_randint_out_dynamic(self):
+        def randint_fn(high, size, out):
+            return torch.randint(high, size, out=out)
+
+        opt_model = torch.compile(randint_fn)
+
+        out1 = torch.empty(10, dtype=torch.int32)
+        opt_model(17, (10,), out1)
+
+        out2 = torch.empty(12, dtype=torch.int32)
+        opt_model(17, (12,), out2)
 
     @requires_cuda
     def test_guard_default_device(self):
@@ -4093,6 +4240,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch._dynamo.optimize(cnt, nopython=True)(fn)
         x = torch.rand([2, 2])
         opt_fn(x, x)
+        self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_arange_in_bounds(self):
+        # see https://github.com/pytorch/pytorch/issues/113002
+        class PaddingNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, lengths):
+                max_seq_len = lengths.max().item()
+                row_vector = torch.arange(0, max_seq_len, 1)
+                matrix = torch.unsqueeze(lengths, dim=-1)
+                mask = row_vector < matrix
+                mask = mask.type(torch.float32)
+                mask_3d_btd = mask[:, :, None]
+                return mask_3d_btd
+
+        model = PaddingNet()
+        lengths = torch.tensor([5, 4, 4, 4], dtype=torch.int32)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(model)
+        opt_fn(lengths)
         self.assertEqual(cnt.frame_count, 1)
 
     def test_user_ctor_ctx_manager_custom_init(self):
