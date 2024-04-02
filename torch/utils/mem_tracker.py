@@ -63,7 +63,9 @@ class MemoryTrackingMode(TorchDispatchMode):
         self.depth = depth
         self.units = units
         self.display_modulewise_stats = display_modulewise_stats
-        self.memory_tracking:Dict[str, Dict[str, Dict[str, int]]] = defaultdict(lambda: defaultdict(defaultdict))
+        self.memory_tracking: Dict[str, Dict[str, Dict[str, int]]] = defaultdict(
+            lambda: defaultdict(defaultdict)
+        )
         self.parents: List[str] = []
         self._MEMORY_MAX: int = 0
         self.FIRST_OPT_ITER: bool = True
@@ -105,9 +107,9 @@ class MemoryTrackingMode(TorchDispatchMode):
     def print_mem_stats(self, stats: Optional[Dict[str, int]] = None):
         if stats is None:
             stats = self._get_current_memory_allocated()
-        rounding_fn = lambda x, y, z: round(x/y,z)       
+        rounding_fn = lambda x, y, z: round(x / y, z)
         if self.units == "MB":
-            divisor = _MB           
+            divisor = _MB
         elif self.units == "KB":
             divisor = _KB
         elif self.units == "B":
@@ -119,7 +121,7 @@ class MemoryTrackingMode(TorchDispatchMode):
     def get_max_memory(self) -> int:
         return self._MEMORY_MAX
 
-    def _display_mem_stats(self, depth = None):
+    def _display_mem_stats(self, depth=None):
         if depth is None:
             depth = self.depth
         for mod in self.memory_tracking.keys():
@@ -296,6 +298,7 @@ def experiment():
         CUDA_MEMORY_MAX = torch.cuda.max_memory_allocated()
         print(f"Cuda measured: {CUDA_MEMORY_MAX}")
         print(f"Peak comparison ratio: {MAX_MEMORY/CUDA_MEMORY_MAX}")
+
 
 if __name__ == "__main__":
     experiment()
