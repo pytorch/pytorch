@@ -166,8 +166,13 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # Mark all the tensors in the state dict to be static address. This has
         # to be done first because the variable builder relies on the static
         # address annotation.
+        # Note: we don't mark complex params as static addresses
+        # The main reason for this is that both a real view
+        # and the original complex tensor will share their data_ptr
+        # so we should guard on the dtype in this case.
         def mark_static(x):
-            mark_static_address(x)
+            if not x.is_complex():
+                mark_static_address(x)
 
         tree_map_only(torch.Tensor, mark_static, self.value.state)
 
