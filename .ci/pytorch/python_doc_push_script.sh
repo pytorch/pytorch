@@ -68,8 +68,8 @@ build_docs () {
 }
 
 
-git clone https://github.com/pytorch/docs -b "$branch" --depth 1
-pushd docs
+git clone https://github.com/pytorch/docs pytorch_docs -b "$branch" --depth 1
+pushd pytorch_docs
 
 export LC_ALL=C
 export PATH=/opt/conda/bin:$PATH
