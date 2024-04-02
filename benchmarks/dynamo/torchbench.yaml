@@ -252,6 +252,7 @@ accuracy:
     eager_not_deterministic:
       # Models that deterministic algorithms can not be turned on for eager mode.
       - Background_Matting
+      - pytorch_unet
 
   max_batch_size:
     hf_GPT2: 2
