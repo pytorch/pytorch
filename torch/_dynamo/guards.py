@@ -719,12 +719,13 @@ class GuardBuilder(GuardBuilderBase):
 
     # Note: the order of the guards in this file matters since we sort guards on the same object by lineno
     def HASATTR(self, guard: Guard):
-        assert isinstance(
-            guard.originating_source, AttrSource
-        ), f"invalid source {guard.name}"
-        base_source = guard.originating_source.base
+        source = guard.originating_source
+        if isinstance(source, NNModuleSource):
+            source = source.base
+        assert isinstance(source, AttrSource), f"invalid source {guard.name}"
+        base_source = source.base
         base = base_source.name()
-        attr = guard.originating_source.member
+        attr = source.member
 
         ref = self.arg_ref(base)
         val = hasattr(self.get(base), attr)
@@ -742,7 +743,7 @@ class GuardBuilder(GuardBuilderBase):
             if val:
                 # Just install a getattr manager. GetAttrGuardAccessor itself
                 # acts as hasattr guard.
-                example_value = self.get(guard.originating_source.name())
+                example_value = self.get(source.name())
                 base_manager.getattr_manager(
                     attr=attr, source=guard.name, example_value=example_value
                 )
@@ -878,7 +879,20 @@ class GuardBuilder(GuardBuilderBase):
         # in the fx graph
         dual_level = torch.autograd.forward_ad._current_level
         code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
-        self._produce_guard_code(guard, code)
+        self._set_guard_export_info(guard, [code])
+        if config.enable_cpp_guard_manager:
+            # TODO(anijain2305) - Consider this moving this guard to C++
+            forward_ad = torch.autograd.forward_ad
+
+            def fn(x):
+                return forward_ad._current_level == dual_level
+
+            assert self.guard_manager  # to make mypy happy
+            self.guard_manager.root.add_lambda_guard(
+                fn, get_verbose_code_parts(code, guard)
+            )
+        else:
+            self._produce_guard_code(guard, code)
 
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
