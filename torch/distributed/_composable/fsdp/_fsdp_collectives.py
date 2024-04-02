@@ -34,7 +34,6 @@ def foreach_all_gather(
     device: torch.device,
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
-    # - Copy in
     with torch.cuda.stream(all_gather_copy_in_stream):
         param_all_gather_inputs: List[List[torch.Tensor]] = [
             fsdp_param.all_gather_inputs for fsdp_param in fsdp_params
@@ -63,7 +62,6 @@ def foreach_all_gather(
         del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
     with torch.cuda.stream(all_gather_stream):
-        # - All-gather
         all_gather_work = dist.all_gather_into_tensor(
             output_tensor=all_gather_output,
             input_tensor=all_gather_input,
