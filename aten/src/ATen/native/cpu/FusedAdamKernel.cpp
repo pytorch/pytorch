@@ -25,7 +25,7 @@ void adam_fused_step_impl(
     const bool amsgrad,
     const bool maximize,
     const float* grad_scale_ptr) {
-  int64_t step = state_step.item<int64_t>();
+  float step = state_step.item<float>();
   scalar_t* param_data = param.data_ptr<scalar_t>();
   scalar_t* exp_avg_data = exp_avg.data_ptr<scalar_t>();
   scalar_t* exp_avg_sq_data = exp_avg_sq.data_ptr<scalar_t>();
