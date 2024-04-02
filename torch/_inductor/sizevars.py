@@ -415,6 +415,7 @@ class SizeVarAllocator:
         return sympy_subs(expr, self.var_to_val)
 
     def size_hint(self, expr: Expr, *, fallback: Optional[int] = None) -> int:
+        expr = self.simplify(expr)
         out = self.symbolic_hint(expr)
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
             # Use the provided heuristic fallback hint
