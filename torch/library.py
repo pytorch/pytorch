@@ -8,7 +8,7 @@ import inspect
 import re
 import contextlib
 import sys
-from ._library.custom_ops import custom_op
+from torch._library.custom_ops import custom_op
 
 
 __all__ = [
