@@ -972,6 +972,10 @@ def all_gather_tensor_inplace(
     assert (
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
+
+    group = group or dist.group.WORLD
+    assert group is not None
+
     return output_tensor.copy_(all_gather_tensor(input_tensor, gather_dim, group, tag))
 
 
@@ -987,6 +991,10 @@ def reduce_scatter_tensor_inplace(
     assert (
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
+
+    group = group or dist.group.WORLD
+    assert group is not None
+
     return output.copy_(reduce_scatter_tensor(input, op, scatter_dim, group, tag))
 
 
@@ -1013,6 +1021,9 @@ def all_reduce_inplace(
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
 
+    group = group or dist.group.WORLD
+    assert group is not None
+
     return tensor.copy_(all_reduce(tensor, op, group, tag))
 
 
@@ -1028,8 +1039,18 @@ def all_to_all_inplace(
     assert (
         not async_op
     ), "Can't remap async version of inplace op to functional collective"
+
+    group = group or dist.group.WORLD
+    assert group is not None
+
     return output.copy_(
-        all_to_all_single(input, output_split_sizes, input_split_sizes, group, tag)
+        all_to_all_single(
+            input,
+            output_split_sizes,
+            input_split_sizes,
+            group,
+            tag,
+        )
     )
 
 
@@ -1046,6 +1067,9 @@ def all_gather_inplace(
     assert all(
         t.size(0) == tensor.size(0) for t in tensor_list
     ), "Remapping variable size all_gather is not yet supported"
+
+    group = group or dist.group.WORLD
+    assert group is not None
 
     output = all_gather_tensor(tensor, 0, group, tag)
 
