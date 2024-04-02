@@ -141,6 +141,9 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", False)
 # [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
+# [@compile_ignored: runtime_behaviour] User can set customized rename alias in filename
+cprofile_rename = os.environ.get("TORCH_COMPILE_CPROFILE_RENAME", None)
+
 # legacy config, does nothing now!
 skipfiles_inline_module_allowlist: Dict[Any, Any] = {}
 

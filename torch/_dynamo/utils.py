@@ -141,7 +141,8 @@ def cprofile_wrapper(func):
     def profile_wrapper(*args, **kwargs):
         global timer_counter
         profile_cnt = next(timer_counter)
-        profile_path = Path(func.__name__ + f"{profile_cnt}.profile")
+        profile_suffix = f".{config.cprofile_rename}.profile" if config.cprofile_rename else ".profile"
+        profile_path = Path(func.__name__ + f"{profile_cnt}{profile_suffix}")
         prof = cProfile.Profile()
         prof.enable()
         start_ts = time.time()
