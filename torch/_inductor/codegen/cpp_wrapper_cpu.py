@@ -1109,11 +1109,13 @@ class CppWrapperCpu(WrapperCodeGen):
         if config.c_shim_version == "1":
             # For sdpa, we need the v2 version since v1 didn't consider optional arg
             # FIXME: no need to do this after we switch to the torchgen-ed C shim
-            shim_fn = (
-                f"aoti_torch_{kernel_suffix}_v2"
-                if kernel_suffix == "_scaled_dot_product_flash_attention"
-                else f"aoti_torch_{kernel_suffix}"
-            )
+            if kernel_suffix == "_scaled_dot_product_flash_attention":
+                shim_fn = "aoti_torch__scaled_dot_product_flash_attention_v2"
+            elif kernel_suffix.startswith("wrapped_fbgemm"):
+                assert self.device == "cpu", "Using wrapped_fbgemm out of CPU!"
+                shim_fn = f"aoti_torch_cpu_{kernel_suffix}"
+            else:
+                shim_fn = f"aoti_torch_{kernel_suffix}"
         else:
             shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
         return shim_fn
