@@ -370,6 +370,18 @@ def getitem_on_dict_manager(
     )
 
 
+def is_grad_source(source):
+    if isinstance(source, AttrSource):
+        return source.member == "grad"
+    return False
+
+
+def match_on_id_for_tensor(guard):
+    return guard.originating_source.is_dict_key() and not is_grad_source(
+        guard.originating_source
+    )
+
+
 # The ready to eval generated code (possibly multiple parts) for a guard, plus
 # the original guard object that created it for provenance
 @dataclasses.dataclass
@@ -707,12 +719,13 @@ class GuardBuilder(GuardBuilderBase):
 
     # Note: the order of the guards in this file matters since we sort guards on the same object by lineno
     def HASATTR(self, guard: Guard):
-        assert isinstance(
-            guard.originating_source, AttrSource
-        ), f"invalid source {guard.name}"
-        base_source = guard.originating_source.base
+        source = guard.originating_source
+        if isinstance(source, NNModuleSource):
+            source = source.base
+        assert isinstance(source, AttrSource), f"invalid source {guard.name}"
+        base_source = source.base
         base = base_source.name()
-        attr = guard.originating_source.member
+        attr = source.member
 
         ref = self.arg_ref(base)
         val = hasattr(self.get(base), attr)
@@ -730,8 +743,9 @@ class GuardBuilder(GuardBuilderBase):
             if val:
                 # Just install a getattr manager. GetAttrGuardAccessor itself
                 # acts as hasattr guard.
+                example_value = self.get(source.name())
                 base_manager.getattr_manager(
-                    attr=attr, source=guard.name, example_value=val
+                    attr=attr, source=guard.name, example_value=example_value
                 )
             else:
                 base_manager.add_no_hasattr_guard(
@@ -1294,7 +1308,7 @@ class GuardBuilder(GuardBuilderBase):
                 self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        if guard.is_nn_module() or guard.originating_source.is_dict_key():
+        if guard.is_nn_module() or match_on_id_for_tensor(guard):
             self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
@@ -1354,12 +1368,11 @@ class GuardBuilder(GuardBuilderBase):
                     self.tensor_check_guard_managers.append(guard_manager)
 
                     output_graph = self.check_fn_manager.output_graph
-                    size = convert_to_concrete_values(
-                        output_graph.tensor_weakref_to_sizes_strides[value]["size"]
-                    )
-                    stride = convert_to_concrete_values(
-                        output_graph.tensor_weakref_to_sizes_strides[value]["stride"]
-                    )
+                    metadata = output_graph.input_source_to_sizes_strides[
+                        guard.originating_source
+                    ]
+                    size = convert_to_concrete_values(metadata["size"])
+                    stride = convert_to_concrete_values(metadata["stride"])
 
                     verbose_code_parts = get_verbose_code_parts(
                         get_tensor_guard_code_part(value, tensor_name, size, stride),
@@ -1767,24 +1780,22 @@ class CheckFunctionManager:
         check_tensors_fn = None
         check_tensors_verbose_fn = None
         if tensor_check_names and not config.enable_cpp_guard_manager:
+            tensor_check_guards = builder.tensor_check_guards
             assert (
                 not self.output_graph.export
             ), "Illegal to set tensor_check_names in export."
             tensor_check_examples = builder.tensor_check_examples
 
-            dynamic_dims_sizes = [
-                convert_to_concrete_values(
-                    self.output_graph.tensor_weakref_to_sizes_strides[t]["size"]
+            dynamic_dims_sizes = []
+            dynamic_dims_strides = []
+            for t, g in zip(tensor_check_examples, tensor_check_guards):
+                metadata = self.output_graph.input_source_to_sizes_strides[
+                    g.originating_source
+                ]
+                dynamic_dims_sizes.append(convert_to_concrete_values(metadata["size"]))
+                dynamic_dims_strides.append(
+                    convert_to_concrete_values(metadata["stride"])
                 )
-                for t in tensor_check_examples
-            ]
-
-            dynamic_dims_strides = [
-                convert_to_concrete_values(
-                    self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"]
-                )
-                for t in tensor_check_examples
-            ]
 
             tensor_guards = TensorGuards(
                 *tensor_check_examples,
@@ -1799,7 +1810,6 @@ class CheckFunctionManager:
             # Do this manually, to un-stagger the guards in log message
             code_parts.append(f"___check_tensors({tensor_check_args})")
             verbose_code_parts.append(f"___check_tensors({tensor_check_args})")
-            tensor_check_guards = builder.tensor_check_guards
 
             for i, name in enumerate(tensor_check_names):
                 # This is a copy of what guards.cpp checks against

@@ -30,7 +30,6 @@ from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, Sha
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.reference import PythonReferenceAnalysis
-from torch.utils.weak import WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -250,7 +249,8 @@ class OutputGraph:
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
-        self.tensor_weakref_to_sizes_strides = WeakTensorKeyDictionary()
+        # Map from graph input's `Source` to sizes / strides metadata
+        self.input_source_to_sizes_strides: Dict[Source, Dict[str, Any]] = {}
         self.cleanup_hooks: List[Callable[[], Any]] = []
         # compile_id is an id number for the current torch.compile
         self.compile_id: int = next(_compile_id_counter)
@@ -296,6 +296,7 @@ class OutputGraph:
             shape_env=shape_env,
             # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
             allow_non_fake_inputs=True if self.export else False,
+            _allow_unsafe_data_ptr_access=False,
         )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.init_ambient_guards()
@@ -997,6 +998,7 @@ class OutputGraph:
             for arg in args:
                 cg(arg)
             cg.extend_output(create_call_function(len(args), True))
+            cg.extend_output([create_instruction("POP_TOP")])
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
         self.side_effects.codegen_update_mutated(cg)
@@ -1138,6 +1140,7 @@ class OutputGraph:
             # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
             backend_fake_mode = torch._subclasses.FakeTensorMode(
                 shape_env=old_fake_mode.shape_env,
+                _allow_unsafe_data_ptr_access=False,
             )
             # TODO(voz): Ostensibily, this should be scoped and
             # restore back to old_fake_mode, but doing so currently violates
