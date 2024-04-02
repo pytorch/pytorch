@@ -2244,10 +2244,10 @@ class Scheduler:
         for node1, node2 in possible_fusions:
             assert node1.get_device() == node2.get_device()
             device = node1.get_device()
-            fuison_pair_priority = self.get_backend(device).get_fusion_pair_priority(
+            fusion_pair_priority = self.get_backend(device).get_fusion_pair_priority(
                 node1, node2
             )
-            possible_fusions_group_by_priority[int(fuison_pair_priority)].append(
+            possible_fusions_group_by_priority[int(fusion_pair_priority)].append(
                 (node1, node2)
             )
 
