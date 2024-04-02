@@ -216,6 +216,47 @@ class DefaultLoadPlanner(LoadPlanner):
         return narrow_tensor_by_index(tensor, read_item.dest_offsets, read_item.lengths)
 
 
+class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
+    """
+    Extension of DefaultLoadPlanner, which rebuilds state_dict from the saved metadata.
+    Useful for loading in state_dict without first initializing a model, such as
+    when converting a DCP checkpoint into a Torch save file.
+
+    . N.B. `state_dict` must be an empty dictionary when used with this LoadPlanner
+
+    .. warning::
+        Because the entire state dict is initialized, It's recommended to only utilize
+        this LoadPlanner on a single rank or process to avoid OOM.
+
+    """
+
+    def __init__(self, keys=None, *args, **kwargs):
+        self.keys = keys
+        super().__init__(*args, **kwargs)
+
+    def set_up_planner(
+        self,
+        state_dict: STATE_DICT_TYPE,
+        metadata: Metadata,
+        is_coordinator: bool,
+    ) -> None:
+        assert not state_dict
+
+        # rebuild the state dict from the metadata
+        for k, v in metadata.state_dict_metadata.items():
+            if self.keys and k not in self.keys:
+                continue
+
+            if isinstance(v, TensorStorageMetadata):
+                v = torch.empty(v.size, dtype=v.properties.dtype)  # type: ignore[assignment]
+            if k in metadata.planner_data:
+                set_element(state_dict, metadata.planner_data[k], v)
+            else:
+                state_dict[k] = v
+
+        super().set_up_planner(state_dict, metadata, is_coordinator)
+
+
 def create_default_local_load_plan(
     state_dict: Dict[str, Any],
     metadata: Metadata,

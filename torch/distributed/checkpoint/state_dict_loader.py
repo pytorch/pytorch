@@ -4,6 +4,7 @@ from typing import Any, cast, Dict, Optional, Union
 
 import torch
 import torch.distributed as dist
+from torch.distributed.checkpoint.default_planner import _EmptyStateDictLoadPlanner
 from torch.distributed.checkpoint.stateful import Stateful
 
 from ._storage_utils import _storage_setup
@@ -73,7 +74,7 @@ def load(
         pos-processing and non-tensor data properly propagates.
 
     .. note:
-        If no process group is initialized, this function can assumesbe the intent
+        If no process group is initialized, this function will assume the intent
         is to load a checkpoint into the local process. This can be useful in the
         case of local inference, and when using regular Tensors (as opposed to DTensor
          or ShardedTensor)
@@ -215,3 +216,70 @@ def _load_state_dict(
         return None
 
     _ = distW.all_gather("read", read_data)
+
+
+def _load_state_dict_from_keys(
+    keys: Optional[set] = None,
+    *,
+    checkpoint_id: Union[str, os.PathLike, None] = None,
+    storage_reader: Optional[StorageReader] = None,
+    process_group: Optional[dist.ProcessGroup] = None,
+) -> Dict[str, Any]:
+    """
+    Load only the specified keys from the checkpoint, if no keys are specified, the entire
+    checkpoint will be loaded. Note, this method completely loads the checkpoint into the
+    current process and is not distributed.
+
+    .. warning::
+
+
+    .. warning::
+
+        All non-tensor data is loaded using `torch.load()`
+
+    .. note:
+        As opposed to the usual pattern, this function does not take a state dict as input
+        and does not load inplace. Instead, a new state dict is directly initialized and read
+        from file.
+
+    .. note:
+        If no process group is initialized, this function will assume the intent
+        is to load a checkpoint into the local process. This can be useful in the
+        case of local inference, and when using regular Tensors (as opposed to DTensor
+         or ShardedTensor)
+
+    .. note:
+        Rank 0 is assumed to be the coordinator rank.
+
+    Args:
+        state_dict (Dict[str, Any]): The state_dict to save.
+        checkpoint_id (Union[str, os.PathLike, None]):
+            The ID of this checkpoint instance. The meaning of the checkpoint_id
+            depends on the storage. It can be a path to a folder or to a file.
+            It can also be a key if the storage is a key-value store.
+            (Default: ``None``)
+        storage_reader (Optional[StorageReader]):
+            Instance of StorageWriter used to perform reads. If this is not
+            specified, DCP will automatically infer the reader based on the
+            checkpoint_id. If checkpoint_id is also None, an exception will
+            be raised. (Default: ``None``)
+        process_group (Optional[ProcessGroup]):
+            ProcessGroup to be used for cross-rank synchronization.
+            (Default: ``None``)
+
+    Returns:
+        State dict from specified keys
+    """
+    torch._C._log_api_usage_once(
+        "torch.distributed.checkpoint._load_state_dict_from_keys"
+    )
+
+    sd: Dict[str, Any] = {}
+    load(
+        sd,
+        storage_reader=storage_reader,
+        planner=_EmptyStateDictLoadPlanner(keys=keys or set()),
+        process_group=process_group,
+    )
+
+    return sd
