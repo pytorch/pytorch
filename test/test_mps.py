@@ -1501,7 +1501,6 @@ class MPSLeakyReluTest(TestCaseMPS):
         assert cpu_x.grad is not None # Check that the grad is well-populated
 
         self.assertEqual(cpu_x.grad, mps_x.grad)
-        print(f'With contigous {contiguous} the cpu_x.grad contains {cpu_x.grad} and mps_x.grad {mps_x.grad}')
 
     def testNumbersCPU(self):
         for t in [torch.float, torch.half]:
@@ -6676,19 +6675,18 @@ class TestMPS(TestCaseMPS):
             rtol = 1e-3 if dtype == torch.float else 1e-2
             self.assertEqual(gelu_result, gelu_result_cpu.to(dtype), atol=atol, rtol=rtol)
             assert x.grad is not None
-            self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
+            if (dtype, shape, contiguous) not in [(torch.float32, [], True), # Known issues, not a regression
+                                                (torch.float32, [], False),
+                                                (torch.float16, [], True),
+                                                (torch.float16, [], False),
+                                                (torch.float16, (4,), True),
+                                                (torch.float16, (4,), False)]:
+                self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
-            for shape in [[], (0,), (0, 3), (4,), (4, 3), (5, 4, 3)]: # (0, 3), [] removed, REGRESSION
+            for shape in [[], (0,), (0, 3), (4,), (4, 3), (5, 4, 3)]:
                 for contiguous in [True, False]:
-                    if (dtype, shape, contiguous) in [(torch.float32, [], True),
-                                                      (torch.float32, [], False),
-                                                      (torch.float16, [], True),
-                                                      (torch.float16, [], False),
-                                                      (torch.float16, (4,), True),
-                                                      (torch.float16, (4,), False)]:
-                        continue
                     helper(shape, dtype, contiguous)
         # Test that gelu would raise an assert for integral types
         for dtype in [torch.int8, torch.int16, torch.int32, torch.int64]:
@@ -6721,19 +6719,18 @@ class TestMPS(TestCaseMPS):
             rtol = 1e-3 if dtype == torch.float else 1e-2
             self.assertEqual(mish_result, mish_result_cpu.to(dtype), atol=atol, rtol=rtol)
             assert x.grad is not None
-            self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
+            if (dtype, shape, contiguous) not in [(torch.float32, [], True), # Known issues, not a regression
+                                                (torch.float32, [], False),
+                                                (torch.float16, [], True),
+                                                (torch.float16, [], False),
+                                                (torch.float16, (4,), True),
+                                                (torch.float16, (4,), False)]:
+                self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
-            for shape in [[], (0,), (0, 3), (4,), (4, 3), (5, 4, 3)]: # (0, 3), [] removed, REGRESSION
+            for shape in [[], (0,), (0, 3), (4,), (4, 3), (5, 4, 3)]:
                 for contiguous in [True, False]:
-                    if (dtype, shape, contiguous) in [(torch.float32, [], False),
-                                                      (torch.float32, [], True),
-                                                      (torch.float16, [], True),
-                                                      (torch.float16, [], False),
-                                                      (torch.float16, (4,), True),
-                                                      (torch.float16, (4,), False)]:
-                        continue
                     helper(shape, dtype, contiguous)
 
     def test_gelu(self):
