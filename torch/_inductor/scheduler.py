@@ -1556,6 +1556,9 @@ class Scheduler:
             if name in V.graph.graph_inputs:
                 add_user(name, OutputNode(StarDep(name)))
                 V.graph.mutated_inputs.add(name)
+            elif name in V.graph.constants:
+                # In AOTI, module parameters and buffers are not lifted as graph inputs
+                add_user(name, OutputNode(StarDep(name)))
 
         inp_names = {
             name: index for index, name in enumerate(V.graph.graph_inputs.keys())
