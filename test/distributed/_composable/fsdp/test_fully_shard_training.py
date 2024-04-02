@@ -4,7 +4,7 @@ import contextlib
 import copy
 import functools
 import unittest
-from typing import Iterable, List, Tuple, Union
+from typing import Iterable, List, Tuple, Type, Union
 
 import torch
 import torch.distributed as dist
@@ -58,7 +58,6 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         return 2
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    @test_compiled_fsdp()
     def test_root_move_forward_input_to_device(self):
         device = torch.device("cuda", 0)
 
@@ -288,7 +287,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp()
     def test_train_parity_multi_group_compile(self):
         self.run_subtests(
             {
@@ -804,12 +802,16 @@ class TestFullyShard2DTraining(FSDPTest):
                 # If reusing, then load into the same model/optimizer instance
                 # else construct new ones (requiring eager optim state init)
                 "reuse_model_optim": [False, True],
+                "optimizer_class": [torch.optim.Adam, torch.optim.AdamW],
             },
             self._test_train_parity_2d_transformer_checkpoint_resume,
         )
 
     def _test_train_parity_2d_transformer_checkpoint_resume(
-        self, use_seq_parallel: bool, reuse_model_optim: bool
+        self,
+        use_seq_parallel: bool,
+        reuse_model_optim: bool,
+        optimizer_class: Type[torch.optim.Optimizer],
     ):
         def train_step(
             _model: nn.Module, _optim: torch.optim.Optimizer, _inp: torch.Tensor
@@ -835,7 +837,7 @@ class TestFullyShard2DTraining(FSDPTest):
         model_no_cp = parallelize(
             Transformer(model_args), global_mesh, use_seq_parallel
         )
-        optim_no_cp = torch.optim.Adam(model_no_cp.parameters(), lr=1e-2)
+        optim_no_cp = optimizer_class(model_no_cp.parameters(), lr=1e-2)
 
         torch.manual_seed(42 + global_mesh["dp"].get_local_rank() + 1)
         inp = torch.randint(0, model_args.vocab_size, (3, 16), device="cuda")
@@ -846,7 +848,7 @@ class TestFullyShard2DTraining(FSDPTest):
         # model/optimizer, load checkpoint, and run another iteration
         torch.manual_seed(seed)
         model_cp = parallelize(Transformer(model_args), global_mesh, use_seq_parallel)
-        optim_cp = torch.optim.Adam(model_cp.parameters(), lr=1e-2)
+        optim_cp = optimizer_class(model_cp.parameters(), lr=1e-2)
 
         loss_cp1 = train_step(model_cp, optim_cp, inp)
         self.assertEqual(loss_no_cp1, loss_cp1)
@@ -875,7 +877,7 @@ class TestFullyShard2DTraining(FSDPTest):
             model_cp = parallelize(
                 Transformer(model_args), global_mesh, use_seq_parallel
             )
-            optim_cp = torch.optim.Adam(model_cp.parameters(), lr=1e-2)
+            optim_cp = optimizer_class(model_cp.parameters(), lr=1e-2)
         self.assertNotEqual(loss_no_cp2, train_step(model_cp, optim_cp, inp))
 
         sharded_sd = {
@@ -890,6 +892,78 @@ class TestFullyShard2DTraining(FSDPTest):
 
         loss_cp2 = train_step(model_cp, optim_cp, inp)
         self.assertEqual(loss_no_cp2, loss_cp2)
+
+
+class TestFullyShardHSDPTraining(FSDPTest):
+    @property
+    def world_size(self) -> int:
+        return min(4, torch.cuda.device_count())
+
+    @skip_if_lt_x_gpu(2)
+    def test_train_parity_hsdp(self):
+        shard_size = 2 if self.world_size > 2 else 1
+        replicate_size = self.world_size // shard_size
+        global_mesh = init_device_mesh(
+            "cuda", (replicate_size, shard_size), mesh_dim_names=("replicate", "shard")
+        )
+        self.run_subtests(
+            {
+                "reshard_after_forward": [False, True],
+                "use_activation_checkpointing": [False, True],
+                "mlp_dim": [3, 16, 17],
+                "sync_gradients_at_last_batch": [True, False],
+            },
+            functools.partial(self._test_train_parity_hsdp, global_mesh),
+        )
+
+    def _test_train_parity_hsdp(
+        self,
+        global_mesh: DeviceMesh,
+        reshard_after_forward: bool,
+        use_activation_checkpointing: bool,
+        mlp_dim: int,
+        sync_gradients_at_last_batch: bool,
+    ):
+        torch.manual_seed(42)
+        model = nn.Sequential(
+            nn.LayerNorm(mlp_dim, bias=False),
+            MLP(mlp_dim, dim_multiplier=3),
+            MLP(mlp_dim),
+            MLP(mlp_dim, dim_multiplier=3),
+        )
+        ref_model = copy.deepcopy(model).cuda()
+        replicate(ref_model, device_ids=[self.rank])
+        ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
+        for mlp in model:
+            if use_activation_checkpointing:
+                checkpoint(mlp)
+            fully_shard(
+                mlp, mesh=global_mesh, reshard_after_forward=reshard_after_forward
+            )
+        fully_shard(
+            model, mesh=global_mesh, reshard_after_forward=reshard_after_forward
+        )
+        optim = torch.optim.Adam(model.parameters(), lr=1e-2)
+        check_sharded_parity(self, ref_model, model)
+        torch.manual_seed(42 + self.rank + 1)
+        device = torch.device("cuda")
+        num_microbatches = 3
+        for iter_idx in range(5):
+            for microbatch_idx in range(num_microbatches):
+                is_last_microbatch = microbatch_idx == num_microbatches - 1
+                if sync_gradients_at_last_batch:
+                    model.set_requires_gradient_sync(is_last_microbatch)
+                inp = torch.randn((8, mlp_dim), device=device)
+                losses: List[torch.Tensor] = []
+                for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                    losses.append(_model(inp).sum())
+                    losses[-1].backward()
+                self.assertEqual(losses[0], losses[1])
+            check_sharded_parity(self, ref_model, model)
+            for _model, _optim in ((ref_model, ref_optim), (model, optim)):
+                _optim.step()
+                _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
+            check_sharded_parity(self, ref_model, model)
 
 
 if __name__ == "__main__":
