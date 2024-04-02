@@ -926,12 +926,19 @@ class CUDAGraphNode:
 
         self.graph.replay()
 
-    def _copy_input(self, idx, dst, src):
-        expanded_dims = self.expanded_dims[idx]
-        dst = index_expanded_dims(dst, expanded_dims)
-        src = index_expanded_dims(src, expanded_dims)
-        # TODO - one jit kernel across multiple inputs
-        dst.copy_(src)
+    def _copy_inputs_and_remove_from_src(self, dsts, srcs):
+        dst_tensors = []
+        src_tensors = []
+        for idx in self.non_static_input_idx:
+            if not isinstance(srcs[idx], torch.Tensor):
+                continue
+            expanded_dims = self.expanded_dims[idx]
+            dst_tensors.append(index_expanded_dims(dsts[idx], expanded_dims))
+            src_tensors.append(index_expanded_dims(srcs[idx], expanded_dims))
+            srcs[idx] = None
+        # Fails on empty lists
+        if dst_tensors:
+            torch._foreach_copy_(dst_tensors, src_tensors)
 
     def check_static_inputs_are_stable(self, new_inputs):
         # avoid checking managed tensor static points since we already checked those in check_invariants
@@ -964,13 +971,7 @@ class CUDAGraphNode:
     def run(self, new_inputs):
         self.check_static_inputs_are_stable(new_inputs)
 
-        for idx in self.non_static_input_idx:
-            if not isinstance(new_inputs[idx], torch.Tensor):
-                continue
-
-            # non-static input, need to copy it into CUDA graph
-            self._copy_input(idx, self.reconstructed_inputs[idx], new_inputs[idx])
-
+        self._copy_inputs_and_remove_from_src(self.reconstructed_inputs, new_inputs)
         new_inputs.clear()
 
         self.run_graph()
@@ -1519,12 +1520,10 @@ class CUDAGraphNode:
                 elif i not in self.static_input_idxs:
                     # static_input does an allocation!
                     recording_inputs.append(static_input(inp))
-                    # copy over and clear non recording input
-                    self._copy_input(i, recording_inputs[-1], inp)
-                    inputs[i] = None
-                    del inp
                 else:
                     recording_inputs.append(inp)
+
+            self._copy_inputs_and_remove_from_src(recording_inputs, inputs)
 
         return recording_inputs
 
