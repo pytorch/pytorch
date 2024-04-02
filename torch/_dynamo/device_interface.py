@@ -233,6 +233,13 @@ class XpuInterface(DeviceInterface):
     @staticmethod
     def get_compute_capability(device: _device_t = None):
         cc = torch.xpu.get_device_capability(device)
+        print("====etaf-debug====")
+        print("cc = ", cc)
+        assert isinstance(cc, dict)
+        for k, v in cc.items():
+            print(k, v)
+            print(type(k), type(v))
+        print("====etaf-debug end====")
         return cc
 
 
