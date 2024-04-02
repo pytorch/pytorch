@@ -13,8 +13,6 @@ namespace at {
 
 namespace native {
 
-DEFINE_DISPATCH(fused_adam_stub);
-
 void _fused_adam_kernel_cpu_(
     at::TensorList params,
     at::TensorList grads,
@@ -75,6 +73,7 @@ void _fused_adam_kernel_cpu_(
   _fused_adam_kernel_cpu_(params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps, lr.item<double>(), beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale, found_inf);
 }
 
+DEFINE_DISPATCH(fused_adam_stub);
 
 }
 }
