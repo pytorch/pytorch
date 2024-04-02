@@ -5937,6 +5937,7 @@ else:
         device = torch.device(device)
         for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
             if optimizer_ctor != torch.optim.Adam and device == torch.device('cpu'):
+                # TODO: haozhe, support AdamW
                 continue
             self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
 
@@ -5955,6 +5956,7 @@ else:
             ),
         ):
             if device.type != "cuda" and optimizer_ctor.__name__ != "Adam":
+                # TODO: haozhe, support AdamW
                 optimizer_kwargs['fused'] = False
             with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
                 self._test_grads_invalidated_between_unscale_and_step(device.type, optimizer_ctor, optimizer_kwargs)
