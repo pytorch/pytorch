@@ -4139,10 +4139,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     @parametrize("timing_enabled", [True, False])
-    @parametrize("compute_duration", [True, False])
-    def test_short(self, timing_enabled, compute_duration):
-        if compute_duration:
-            os.environ["TORCH_NCCL_COMPUTE_DURATION"] = '1'
+    def test_short(self, timing_enabled):
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
@@ -4183,7 +4180,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         event_created_time = datetime.fromtimestamp(last['time_created_ns'] / 1000000000)
         before_test = now - timedelta(minutes=1)
         self.assertTrue(before_test < event_created_time < now)
-        if compute_duration:
+        if timing_enabled:
             # very loose bounds, measured 0.036 ms on devgpu
             self.assertTrue(0 < last['duration_ms'] < 100)
         else:
@@ -4364,14 +4361,12 @@ class NCCLTraceTest(NCCLTraceTestBase):
         [(2, 3), (5, 5), (1,)],
     ])
     @parametrize("timing_enabled", [True, False])
-    @parametrize("compute_duration", [True, False])
-    def test_batched_send_recv(self, op_sizes_per_coalesce, timing_enabled, compute_duration):
+    def test_batched_send_recv(self, op_sizes_per_coalesce, timing_enabled):
         """
         'WorkEnqueue' was skipped for isendirecv, leading to segfault on dump_entries when update_state tried to use
         a destructed Work obj's cuda events
         """
-        if compute_duration:
-            os.environ["TORCH_NCCL_COMPUTE_DURATION"] = '1'
+
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
@@ -4394,7 +4389,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         torch.cuda.synchronize()
 
-        if timing_enabled or compute_duration:
+        if timing_enabled:
             # wait for watchdog thread to process the queue of works
             time.sleep(1)
 
@@ -4433,7 +4428,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(t['entries'][coalesced_op]['state'], 'completed')
             self.assertEqual(t['entries'][coalesced_op]['input_sizes'], [])
             self.assertEqual(t['entries'][coalesced_op]['output_sizes'], [])
-            if compute_duration:
+            if timing_enabled:
                 duration = t['entries'][coalesced_op]['duration_ms']
                 self.assertTrue(0.001 < duration < 10000, duration)
             else:
@@ -4446,14 +4441,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
         [(2, 3), (5, 5), (1,)],
     ])
     @parametrize("timing_enabled", [True, False])
-    @parametrize("compute_duration", [True, False])
-    def test_individual_send_recv(self, op_sizes, timing_enabled, compute_duration):
+    def test_individual_send_recv(self, op_sizes, timing_enabled):
         """
         'WorkEnqueue' was skipped for isendirecv, leading to segfault on dump_entries when update_state tried to use
         a destructed Work obj's cuda events
         """
-        if compute_duration:
-            os.environ["TORCH_NCCL_COMPUTE_DURATION"] = '1'
 
         if self.rank == self.MAIN_PROCESS_RANK:
             return
@@ -4472,7 +4464,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     dist.send(tensor, 0)
 
         torch.cuda.synchronize()
-        if timing_enabled or compute_duration:
+        if timing_enabled:
             # wait for watchdog thread to process the queue of works
             time.sleep(1)
 
@@ -4491,7 +4483,8 @@ class NCCLTraceTest(NCCLTraceTestBase):
             self.assertEqual(t['entries'][seq]['input_sizes'], [input_sizes])
             self.assertEqual(t['entries'][seq]['output_sizes'], [input_sizes])
             self.assertEqual(t['entries'][seq]['state'], 'completed')
-            if compute_duration:
+
+            if timing_enabled:
                 duration = t['entries'][seq]['duration_ms']
                 self.assertTrue(0.001 < duration < 10000, duration)
             else:
@@ -4504,8 +4497,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
     @parametrize("timing_enabled", [True, False])
-    @parametrize("compute_duration", [True, False])
-    def test_coalescing_manager_collective(self, timing_enabled, compute_duration):
+    def test_coalescing_manager_collective(self, timing_enabled):
         """
         The coalescing manager api works by accumulating operations in python via a contextmanager, and then making
         one call into c++ to an <op>_coalesced API.  It has limited support for ops and has been added recently to
@@ -4513,8 +4505,6 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         For now, flight recording of coalescing_manager collectives is less detailed than cpp coalesced collectives.
         """
-        if compute_duration:
-            os.environ["TORCH_NCCL_COMPUTE_DURATION"] = '1'
         if self.rank == self.MAIN_PROCESS_RANK:
             return
         pg = self._create_process_group_nccl()
@@ -4534,7 +4524,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         torch.cuda.synchronize()
 
-        if timing_enabled or compute_duration:
+        if timing_enabled:
             # wait for watchdog thread to process the queue of works
             time.sleep(1)
 
@@ -4546,7 +4536,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(t['entries'][0]['input_sizes'], [[2, 2], [2, 2]])
         self.assertEqual(t['entries'][0]['output_sizes'], [[2,], [2,]])
         self.assertEqual(t['entries'][0]['state'], 'completed')
-        if compute_duration:
+        if timing_enabled:
             duration = t['entries'][0]['duration_ms']
             self.assertTrue(0.001 < duration < 10000, duration)
         else:
@@ -4676,6 +4666,60 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 # Force rank 1 to idle so that it will eventually timeout as well after
                 # getting the global signal to dump the debugging info.
                 time.sleep(600)
+
+class NcclErrorDumpTest(NCCLTraceTestBase):
+    def _wait_process(self, rank, timeout):
+        try:
+            self.processes[rank].join(timeout)
+            return self.processes[rank].exitcode
+        except TimeoutError:
+            return None
+
+    def _check_return_codes(self, elapsed_time):
+        # the base test infra assumes processes exit with matching return codes,
+        # but we want rank0 to abort with exception and rank1 to exit with exit 1
+        self.assertEqual(self.processes[0].exitcode, -6)
+        self.assertEqual(self.processes[1].exitcode, 1)
+
+    @requires_nccl()
+    @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
+    @skip_if_lt_x_gpu(2)
+    @skip_if_rocm
+    def test_nccl_errors_dump(self):
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '1000'
+        os.environ["TORCH_NCCL_DUMP_ON_TIMEOUT"] = '1'
+        # need rank0 to dump before abort
+        os.environ['TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC'] = '5'
+
+        if self.rank == self.MAIN_PROCESS_RANK:
+            # wait for both rank0 and 1 to crash before looking for dump
+            self.assertEqual(self._wait_process(0, timeout=90), -6)
+            self.assertEqual(self._wait_process(1, timeout=90), 1)
+            # verify that the trace file exists for rank0
+            self.assertTrue(os.path.exists(self._trace_name(rank=0)))
+            return
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        process_group = c10d.ProcessGroupNCCL(
+            store,
+            self.rank,
+            self.world_size,
+            timeout=timedelta(seconds=10),
+        )
+        process_group.allreduce(torch.rand(10).cuda(self.rank))
+        if self.rank == 0:
+            work = process_group.allreduce(torch.rand(10).cuda(self.rank))
+            # expect an error to be raised
+            with self.assertRaisesRegex(dist.DistBackendError, ""):
+                # Block the current stream on the NCCL stream
+                work.wait()
+                # Run some GPU operations
+                a = torch.rand(10).cuda(self.rank)
+        elif self.rank == 1:
+            # Clean up structures (ex: files for FileStore before going down)
+            del process_group
+            sys.exit(1)
 
 
 if __name__ == "__main__":
