@@ -255,7 +255,7 @@ class TensorParallelAPITests(DTensorTestBase):
     @with_comms
     def test_parallelize_module_multi_wildcard(self):
         inp_size = [12, 10]
-        model = MLPStacked(self.device_type, n_layers=2)
+        model = MLPStacked(self.device_type)
         device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         model_tp = deepcopy(model)
@@ -263,8 +263,7 @@ class TensorParallelAPITests(DTensorTestBase):
             model_tp,
             device_mesh,
             {
-                "layers.*.net[1]": ColwiseParallel(),
-                "layers.*.net[2]": RowwiseParallel(),
+                "layers.*.net?": ColwiseParallel(output_layouts=Replicate()),
             },
         )
         self._compare_module(model, model_tp, inp_size, rank0_only=False)
