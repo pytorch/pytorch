@@ -76,6 +76,10 @@ def make_test(fn=None, expected_frame_count=1):
     return test_fn
 
 
+class MyCls:
+    a = 1
+
+
 @torch.jit.script_if_tracing
 def inline_script_if_tracing(x):
     return x + 1.2
@@ -196,6 +200,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if c > d:
             return a - b
         return b - a
+
+    @make_test
+    def test_cls_hasattr(self, x):
+        if hasattr(MyCls, "a"):
+            x = x + 1
+        if hasattr(MyCls, "b"):
+            x = x + 2
+        return x
 
     @make_test
     def test_finfo(a, b):
@@ -557,6 +569,29 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     def test_get_autocast_gpu_dtype(x):
         dtype = torch.get_autocast_gpu_dtype()
         return x.type(dtype)
+
+    @make_test
+    def test_list_compare_polyfill(x):
+        for a, b, c in [
+            [(1, 2, 3), (1, 2, 3), 7.77],
+            [(1, 4, 3), (1, 2, 3), 3.33],
+            [(1, 2), (1, 2, 3), 5.55],
+            [(1, 2, 3), (1, 2), 11.11],
+            [(1, -1, 3), (1, 2, 3), 13.33],
+        ]:
+            if a != b:
+                x += 1 * c
+            if a == b:
+                x += 2 * c
+            if a < b:
+                x += 4 * c
+            if a > b:
+                x += 8 * c
+            if a <= b:
+                x += 16 * c
+            if a >= b:
+                x += 32 * c
+        return x
 
     @make_test
     def test_promote_types(x):

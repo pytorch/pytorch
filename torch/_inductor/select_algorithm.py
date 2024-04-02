@@ -94,7 +94,7 @@ class TritonTemplateKernel(TritonKernel):
         grid_fn,
         meta,
         call_sizes,
-        use_jit=True,
+        use_jit=False,
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
@@ -150,13 +150,17 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
-            "device": V.graph.scheduler.current_device.index,
-            "device_type": V.graph.scheduler.current_device.type,
+            "device": self.output_node.get_device().index,
+            "device_type": self.output_node.get_device().type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
             triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+        matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
+        if matrix_instr_nonkdim != 0:
+            triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
+
         self.triton_meta = triton_meta
 
         inductor_meta = {
@@ -498,7 +502,7 @@ class TritonTemplate(KernelTemplate):
         ), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
-            use_jit=True,
+            use_jit=False,
             **kernel_options,
         ) as kernel:
             try:
@@ -684,6 +688,10 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         assert self.bmreq is not None
         return self.bmreq.benchmark(*args, output_tensor=out)
 
+    def precompile(self):
+        assert self.bmreq is not None
+        self.bmreq.precompile()
+
     def __str__(self):
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
 
@@ -734,6 +742,9 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
+        if out.numel() == 0:
+            # no need to run the kerrnel of do benchmarking
+            return 0.0
         if self.has_out_variant:
             return super().benchmark(*args, out=out)
         else:
@@ -821,6 +832,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
+
         if len(choices) == 0:
             raise RuntimeError(
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
@@ -855,12 +867,15 @@ class AlgorithmSelectorCache(PersistentCache):
                 len(choices),
                 num_workers,
             )
-            with ThreadPoolExecutor(max_workers=num_workers) as executor:
-                futures = executor.map(
-                    lambda c: c.precompile(),
-                    [c for c in choices if hasattr(c, "precompile")],
-                    timeout=precompilation_timeout_seconds,
-                )
+
+            executor = ThreadPoolExecutor(max_workers=num_workers)
+            futures = executor.map(
+                lambda c: c.precompile(),
+                [c for c in choices if hasattr(c, "precompile")],
+                timeout=precompilation_timeout_seconds,
+            )
+
+            def wait_on_futures():
                 try:
                     iterator = iter(futures)
                     while True:
@@ -878,14 +893,9 @@ class AlgorithmSelectorCache(PersistentCache):
                     pass
                 executor.shutdown(wait=True)
 
+            return wait_on_futures
+
         def autotune(choices):
-            try:
-                precompile(choices)
-            except TimeoutError:
-                log.warning(
-                    "Precompilation phase took longer than timeout allowed. Continuing"
-                )
-                pass
             return make_benchmark_fn()(choices)
 
         if config.autotune_in_subproc:
@@ -894,51 +904,68 @@ class AlgorithmSelectorCache(PersistentCache):
             # do the optional warmup
             tuning_pool.initialize()
 
-        autotune_start_ts = time.time()
-        timings = self.lookup(
-            choices,
-            name,
-            repr([self.key_of(x) for x in input_nodes]),
-            autotune,
-        )
-        autotune_elapse = time.time() - autotune_start_ts
-        if timings == {} or choices[0] not in timings:
-            return choices[0].output_node()
+        def do_autotuning(precompile_fn):
+            precompile_start_ts = time.time()
+            precompile_fn()
+            precompile_elapse = time.time() - precompile_start_ts
 
-        if make_benchmark_fn.cache_info().currsize:
-            counters["inductor"]["select_algorithm_autotune"] += 1
-        if (
-            make_benchmark_fn.cache_info().currsize
-            or log.getEffectiveLevel() == logging.DEBUG
-            or config.trace.log_autotuning_results
-        ):
-            self.log_results(name, input_nodes, timings, autotune_elapse)
+            autotune_start_ts = time.time()
+            timings = self.lookup(
+                choices,
+                name,
+                repr([self.key_of(x) for x in input_nodes]),
+                autotune,
+            )
+            autotune_elapse = time.time() - autotune_start_ts
+
+            if make_benchmark_fn.cache_info().currsize:
+                counters["inductor"]["select_algorithm_autotune"] += 1
+
+            if (
+                make_benchmark_fn.cache_info().currsize
+                or log.getEffectiveLevel() == logging.DEBUG
+                or config.trace.log_autotuning_results
+            ):
+                self.log_results(
+                    name, input_nodes, timings, autotune_elapse, precompile_elapse
+                )
+
+            return timings
+
+        precompile_fn = precompile(choices)
 
         if return_multi_template:
-            min_extern_choice = float("inf")
-            for choice, timing in timings.items():
-                if isinstance(choice, ExternKernelCaller):
-                    min_extern_choice = min(min_extern_choice, timing)
 
-            timings = {
-                choice: time
-                for choice, time in timings.items()
-                if (
-                    time <= min_extern_choice
-                    or not isinstance(choice, ExternKernelCaller)
-                )
-            }
+            def get_timings():
+                timings = do_autotuning(precompile_fn)
+                min_extern_choice = float("inf")
+                for choice, timing in timings.items():
+                    if isinstance(choice, ExternKernelCaller):
+                        min_extern_choice = min(min_extern_choice, timing)
 
-            if len(timings) == 1:
-                return next(iter(timings)).output_node()
+                timings = {
+                    choice: time
+                    for choice, time in timings.items()
+                    if (
+                        time <= min_extern_choice
+                        or not isinstance(choice, ExternKernelCaller)
+                    )
+                }
+
+                return timings
 
             return torch._inductor.ir.TensorBox.create(
                 torch._inductor.ir.MultiTemplateBuffer(
                     layout,
                     input_nodes,
-                    timings,
+                    get_timings,
                 )
             )
+
+        # TODO - dont want to precompile if we have a cache hit
+        timings = do_autotuning(precompile_fn)
+        if timings == {} or choices[0] not in timings:
+            return choices[0].output_node()
 
         selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
         log.debug("selected choice: %s", str(selected_choice))
@@ -1074,6 +1101,7 @@ class AlgorithmSelectorCache(PersistentCache):
         input_nodes: List[ir.IRNode],
         timings: Dict[ChoiceCaller, float],
         elapse: float,
+        precompile_elapse: float,
     ):
         V.debug.log_autotuning_results(name, input_nodes, timings, elapse)
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
@@ -1110,7 +1138,10 @@ class AlgorithmSelectorCache(PersistentCache):
         autotune_type_str = (
             "SubProcess" if config.autotune_in_subproc else "SingleProcess"
         )
-        sys.stderr.write(f"{autotune_type_str} AUTOTUNE takes {elapse:.4f} seconds\n")
+        sys.stderr.write(
+            f"{autotune_type_str} AUTOTUNE benchmarking takes {elapse:.4f} seconds and {precompile_elapse:.4f}"
+            " seconds precompiling\n"
+        )
 
     @staticmethod
     def benchmark_example_value(node):

@@ -72,7 +72,7 @@ into its two constituting operations, ``sub = l_x_ - l_y_`` and
 When we say that the trace is linear, we mean that there is no branching
 or any control flow. To see this, consider
 
-.. code:: python!
+.. code::
 
    import torch
 
@@ -89,7 +89,7 @@ or any control flow. To see this, consider
 
 which, when executed with ``TORCH_LOGS=graph_code``, returns
 
-.. code:: python!
+.. code::
 
    def forward(l_x_: torch.Tensor):
        # File: example.py:5, code: y = x ** 2
@@ -125,7 +125,7 @@ encounters when processing text or audio.
 
 We can see this by executing a few more times the example above
 
-.. code:: python!
+.. code::
 
    import torch
 
@@ -144,7 +144,7 @@ We can see this by executing a few more times the example above
 
 In this case, ``TORCH_LOGS=graph_code`` generates two more graphs
 
-.. code:: python!
+.. code::
 
    # Graph for n==2 omitted
 
@@ -157,7 +157,7 @@ In this case, ``TORCH_LOGS=graph_code`` generates two more graphs
        mul = add * y
        return (mul,)
 
-.. code:: python!
+.. code::
 
    def forward(self, l_x_: torch.Tensor, l_n_: torch.SymInt):
        # File: a.py:5, code: y = x ** 2
@@ -227,7 +227,7 @@ that occur during this execution. This is exactly what Dynamo does.
 Dynamo uses this CPython API to parse all these objects and packs them
 into `a Python
 structure <https://github.com/pytorch/pytorch/blob/e891a3bba9f05697d72776f6e89347231a141f03/torch/csrc/dynamo/eval_frame.c#L93-L108>`__.
-After it has done so… it goes back from C to Python! Other than for this
+After it has done so… it goes back from C to Other than for this
 piece of code that communicates with CPython, Dynamo is fully
 implemented in Python.
 
@@ -312,7 +312,7 @@ in
 all of Python bytecodes. As an example, we can see the implementation of
 ``BUILD_LIST``
 
-.. code:: python!
+.. code::
 
    def BUILD_LIST(self, inst):
        items = self.popn(inst.argval)
@@ -339,9 +339,10 @@ be returned by Dynamo.
 
 All the inputs and intermediary elements of the FX graph are
 ``fx.Node``\ s. In Dynamo, ``fx.Node``\ s are wrapped in
-``fx.Proxy``\ s, which record operations done on them in the graph. We
-can create a new operation to be added to the graph by calling
-```create_proxy`` <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/_dynamo/output_graph.py#L430-L431>`__.
+``fx.Proxy``\ s. ``fx.Proxy``\ s are used to build the FX graph.
+In particular, they record every PyTorch operation performed on them
+into the graph. You can can create a new operation to be added to
+the graph by calling ```create_proxy`` <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/_dynamo/output_graph.py#L430-L431>`__.
 Then, we can add it to the graph through the function
 ```wrap_fx_proxy`` <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/_dynamo/variables/builder.py#L1311>`__.
 
@@ -349,11 +350,13 @@ A graph stores operations on tensors… and operations on symbolic
 integers. We will discuss symbolic integers later on, but first we will
 discuss how Dynamo addresses a rather important correctness issue.
 
+.. making-dynamo-sound-guards:
+
 Making Dynamo Sound: Guards
 ---------------------------
 
-At this point, we have a way to trace linear programs. And for that, we
-have reimplemented all of CPython… If this sounds like a bit of an
+At this point, we have a way to trace programs completely disregarding control flow.
+And for that, we have reimplemented all of CPython… If this sounds like a bit of an
 overkill, that is because it is.
 ```torch.jit.trace`` <https://pytorch.org/docs/stable/generated/torch.jit.trace.html>`__
 already implements this without all this machinery, so what gives?
@@ -378,7 +381,7 @@ For example, any constant input to a function, like a string, installs a
 guard stating that that input should be of type ``str`` and equal to the
 string we passed. Running
 
-.. code:: python!
+.. code::
 
    import torch
 
@@ -390,16 +393,17 @@ string we passed. Running
 
 with ``TORCH_LOGS=guards`` prints (among other guards)
 
-.. code:: python!
+.. code::
 
    ___check_type_id(L['b'], 94334122025024)
    L['b'] == 'Hello'
 
 This reads as “the local variable ``b`` should have a specific type
-(``str`` in this case) and its value should be ``'Hello'``”. If we then
-execute the function again passing a different argument
+(``str`` in this case, represented by the constant `9433...`) and
+its value should be ``'Hello'``”. If we then execute the function
+again passing a different argument
 
-.. code:: python!
+.. code::
 
    import torch
 
@@ -412,7 +416,7 @@ execute the function again passing a different argument
 
 we can see the guard that failed by running ``TORCH_LOGS=recompiles``
 
-.. code:: python!
+.. code::
 
    Recompiling function fn in script.py:3
    triggered by the following guard failure(s):
@@ -431,7 +435,7 @@ local or global variables present when entering the current frame. In
 particular, it tracks the original local and global objects and any of
 the objects they contain. In
 
-.. code:: python!
+.. code::
 
    def foo(x: Tensor, y: List[Tensor]):
        a = x * y[0]
@@ -450,7 +454,7 @@ All these are defined in
 We can see the guard generated by ``GetItemSource`` in the following
 example:
 
-.. code:: python!
+.. code::
 
    import torch
 
@@ -462,11 +466,10 @@ example:
 
 generates the following guards
 
-.. code:: python!
+.. code::
 
    ___check_type_id(L['l'], 94439025877664)
    len(L['l']) == 2
-   hasattr(L['x'], '_dynamo_dynamic_indices') == False
    ___check_type_id(L['l'][0], 94439025840192)
    L['l'][0] == 'Hi'
    ___check_type_id(L['l'][1], 94439025840192)
@@ -513,7 +516,7 @@ trace it and generate a graph generic on that variable.
 We already saw this behavior in the introduction using integers. Let us
 now look at an example using shapes of tensors.
 
-.. code:: python!
+.. code::
 
    import torch
 
@@ -527,7 +530,7 @@ now look at an example using shapes of tensors.
 Running this program with ``TORCH_LOGS=graph_code`` we see that these
 two calls are traced as
 
-.. code:: python!
+.. code::
 
    def forward(self, l_a_: torch.Tensor, l_b_: torch.Tensor):
        mul = 4 * l_a_
@@ -560,11 +563,11 @@ the program with ``TORCH_LOGS=graph_sizes``
    mul_1 (concrete): (8, 3)
 
 where we can see that the first dimension of the two tensor args is
-dynamic.
+dynamic, given that it is represented by the ``s0`` variable.
 
 We can find how Dynamo implements this by running ``TORCH_LOGS=guards``
 
-.. code:: python!
+.. code::
 
    # Guards first call
    check_tensor(L['a'], torch.float32, device=None, requires_grad=False, size=[4, 3], stride=[3, 1])
@@ -624,7 +627,7 @@ and the properties they have. Now, why is that symbolic shapes forced us
 through the tricky route of getting control of the CPython interpreter?
 Consider the following example:
 
-.. code:: python!
+.. code::
 
    import torch
 
@@ -744,7 +747,7 @@ break has the following structure:
 
 Let us see this in a simple example
 
-.. code:: python!
+.. code::
 
    import torch
 
@@ -759,7 +762,7 @@ Let us see this in a simple example
 Running this with ``TORCH_LOGS=bytecode`` shows us the initial bytecode
 and the modified bytecode
 
-.. code:: python!
+.. code::
 
    MODIFIED BYTECODE fn script.py line 3
     0 LOAD_GLOBAL              1 (__compiled_fn_0)
