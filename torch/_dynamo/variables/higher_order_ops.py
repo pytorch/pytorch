@@ -22,7 +22,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 
 from ..exc import UncapturedHigherOrderOpError, unimplemented, Unsupported
-from ..source import AttrSource, FSDPNNModuleSource, GetItemSource, NNModuleSource
+from ..source import AttrSource
 from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
@@ -472,7 +472,7 @@ def make_attr(tx, name):
     return node
 
 
-def add_subgraph(tx, source, name, gm):
+def add_subgraph(tx, name, gm):
     next_name = None
     i = 0
     while not next_name:
@@ -483,12 +483,10 @@ def add_subgraph(tx, source, name, gm):
             next_name = candidate
 
     gm.__name__ = next_name
-    if source.guard_source().is_fsdp_module():
-        src = FSDPNNModuleSource(GetItemSource(source, next_name))
-    else:
-        src = NNModuleSource(GetItemSource(source, next_name))
     gm.torchdynamo_force_dynamic = False
-    tx.output.register_attr_or_module(gm, next_name, source=src)
+    # This graph module is not present in the user space, so it can't be
+    # accessed by a source. Set source=None.
+    tx.output.register_attr_or_module(gm, next_name, source=None)
     return next_name
 
 
@@ -712,13 +710,11 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         true_name = add_subgraph(
             tx,
-            self.source,
             "cond_true",
             torch.fx.GraphModule(true_nn_modules, true_graph),
         )
         false_name = add_subgraph(
             tx,
-            self.source,
             "cond_false",
             torch.fx.GraphModule(false_nn_modules, false_graph),
         )
@@ -853,13 +849,11 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
         cond_name = add_subgraph(
             tx,
-            self.source,
             "cond_fn",
             torch.fx.GraphModule(cond_nn_modules, cond_graph),
         )
         body_name = add_subgraph(
             tx,
-            self.source,
             "body_fn",
             torch.fx.GraphModule(body_nn_modules, body_graph),
         )
@@ -901,7 +895,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 UserFunctionVariable,
                 NestedUserFunctionVariable,
             ),
-        ), str(type(fn_var))
+        )
 
         # operands
         if input.python_type() != torch.Tensor:
@@ -1059,7 +1053,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_name = add_subgraph(
             tx,
-            self.source,
             "map_body",
             torch.fx.GraphModule(body_nn_modules, body_graph),
         )
@@ -1162,7 +1155,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
         body_name = add_subgraph(
             tx,
-            self.source,
             "wrap_body",
             body_gmod,
         )
@@ -1270,7 +1262,6 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         strict_mode_name = add_subgraph(
             tx,
-            self.source,
             "strict_mode_body",
             torch.fx.GraphModule(strict_mode_nn_modules, ret_graph),
         )
@@ -1564,7 +1555,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
         fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
         fwd_name = add_subgraph(
             tx,
-            fwd_src,
             "fwd_body",
             torch.fx.GraphModule(fwd_nn_modules.nn_modules, fwd_graph),
         )
@@ -1575,7 +1565,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
         bwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
         bwd_name = add_subgraph(
             tx,
-            bwd_src,
             "bwd_body",
             torch.fx.GraphModule(bwd_nn_modules.nn_modules, bwd_graph),
         )
