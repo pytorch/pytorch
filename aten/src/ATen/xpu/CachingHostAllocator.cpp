@@ -21,7 +21,7 @@ struct XPUHostAllocatorImpl : public AllocatorImplInterface {
     sycl::free(block->ptr_, c10::xpu::get_device_context());
   }
 
-  void record_events_by_each_stream(
+  void record_stream(
       c10::optional<std::vector<XPUEvent>>& events,
       XPUStream stream) override {
     XPUEvent event;
