@@ -16,7 +16,7 @@ static inline dnnl::memory::dims deconv_compatible_dilation(IntArrayRef& dilatio
   return ret;
 }
 
-static inline dnnl::memory::dims deconv_dst_tz(
+static inline dnnl::memory::dims deconv_dst_size(
     IntArrayRef src_size,
     IntArrayRef weight_size,
     IntArrayRef padding,
@@ -61,7 +61,7 @@ static inline dnnl::memory::format_tag deconv_src_fmt(
 static inline std::vector<int64_t> deconv_weight_fmt(
     const at::Tensor& weight,
     const int64_t ndim,
-    dnnl::memory::dims weight_tz,
+    dnnl::memory::dims weight_size,
     const bool grouped = false,
     const bool is_channels_last = false) {
   // 3D fmt: (g)i/o/w ((g)i/w/o)  [b/a/c  (b/c/a)]
@@ -70,7 +70,7 @@ static inline std::vector<int64_t> deconv_weight_fmt(
   auto strides_ = weight.strides().vec();
   std::vector<int64_t> strides;
   if (grouped) {
-    strides = compatible_groups_deconv_strides(weight, weight_tz);
+    strides = compatible_groups_deconv_strides(weight, weight_size);
   } else {
     strides = strides_;
     std::swap(strides[0], strides[1]);
@@ -83,21 +83,21 @@ static inline dnnl::memory::dims deconv_compatible_weight_dims(
     int64_t groups,
     int64_t oc,
     int64_t ic,
-    IntArrayRef weight_tz) {
+    IntArrayRef weight_size) {
   if (ndim == 3) {
-    auto kw = weight_tz[2];
+    auto kw = weight_size[2];
     return (groups != 1) ? dnnl::memory::dims({groups, oc / groups, ic / groups, kw})
                          : dnnl::memory::dims({oc, ic, kw});
   } else if (ndim == 4) {
-    auto kh = weight_tz[2];
-    auto kw = weight_tz[3];
+    auto kh = weight_size[2];
+    auto kw = weight_size[3];
     return (groups != 1)
         ? dnnl::memory::dims({groups, oc / groups, ic / groups, kh, kw})
         : dnnl::memory::dims({oc, ic, kh, kw});
   } else if (ndim == 5) {
-    auto kd = weight_tz[2];
-    auto kh = weight_tz[3];
-    auto kw = weight_tz[4];
+    auto kd = weight_size[2];
+    auto kh = weight_size[3];
+    auto kw = weight_size[4];
     return (groups != 1)
         ? dnnl::memory::dims({groups, oc / groups, ic / groups, kd, kh, kw})
         : dnnl::memory::dims({oc, ic, kd, kh, kw});
@@ -126,12 +126,12 @@ deconv_get_plain_md(
 
   auto ic = src.size(1);
   auto oc = dst.size(1);
-  dnnl::memory::dims weight_tz =
+  dnnl::memory::dims weight_size =
       deconv_compatible_weight_dims(ndim, groups, oc, ic, weight.sizes());
   auto weight_dt = get_onednn_dtype_include_double(weight);
   auto fmt_weight = deconv_weight_fmt(
-      weight, ndim, weight_tz, groups != 1, is_channels_last_suggested);
-  dnnl::memory::desc weight_usr_md = dnnl::memory::desc(weight_tz, weight_dt, fmt_weight);
+      weight, ndim, weight_size, groups != 1, is_channels_last_suggested);
+  dnnl::memory::desc weight_usr_md = dnnl::memory::desc(weight_size, weight_dt, fmt_weight);
 
   return {src_usr_md, weight_usr_md, dst_usr_md};
 }
