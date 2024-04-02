@@ -2673,8 +2673,8 @@ class BenchmarkRunner:
 
         self.init_optimizer(name, current_device, model.parameters())
 
-        # The self.autocast context is needed for the model we export with aot_compile, similar to
-        # what we do in the check_accuracy function
+        # The self.autocast context is needed for the model we export with aot_compile,
+        # similar to what we do in the check_accuracy function
         ctx = (
             self.autocast(**self.autocast_arg)
             if self.args.export_aot_inductor
