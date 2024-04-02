@@ -5,6 +5,7 @@ import os
 import re
 import sys
 import textwrap
+import ast
 from argparse import Namespace
 from dataclasses import fields, is_dataclass
 from enum import auto, Enum
@@ -58,12 +59,25 @@ IDENT_REGEX = r"(^|\W){}($|\W)"
 
 
 # TODO: Use a real parser here; this will get bamboozled
+# ast built in parser instead of using regex 
 def split_name_params(schema: str) -> Tuple[str, List[str]]:
-    m = re.match(r"(\w+)(\.\w+)?\((.*)\)", schema)
-    if m is None:
-        raise RuntimeError(f"Unsupported function schema: {schema}")
-    name, _, params = m.groups()
-    return name, params.split(", ")
+    node = ast.parse(schema, mode='eval')
+    if isinstance(node, ast.Expression):
+        if isinstance(node.body, ast.Call):
+            function_name = None
+            parameters = []
+            if isinstance(node.body.func, ast.Attribute):
+                function_name = node.body.func.value.id + "." + node.body.func.attr
+            elif isinstance(node.body.func, ast.Name):
+                function_name = node.body.func.id
+            if isinstance(node.body.args, list):
+                for arg in node.body.args:
+                    if isinstance(arg, ast.Name):
+                        parameters.append(arg.id)
+                    elif isinstance(arg, ast.Num):
+                        parameters.append(arg.n)
+            return function_name, parameters
+    return None, []
 
 
 T = TypeVar("T")
