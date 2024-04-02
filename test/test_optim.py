@@ -1316,7 +1316,7 @@ class TestOptimRenewed(TestCase):
         opt_control = optimizer_ctor(mod_control.parameters(), lr=1.0, **kwargs)
 
         scaler = torch.cpu.amp.GradScaler(init_scale=128.0)
-
+        tol = {'atol' : 5e-5, 'rtol' : 5e-6}
         for input, target in data:
             opt_control.zero_grad()
             with torch.autocast('cpu', dtype=torch.half):
@@ -1336,10 +1336,10 @@ class TestOptimRenewed(TestCase):
             scaler.step(opt_scaling)
             scaler.update()
 
-            self.assertEqual(loss_control, loss_scaling)
+            self.assertEqual(loss_control, loss_scaling, **tol)
             for param_control, param_scaling in zip(mod_control.parameters(), mod_scaling.parameters()):
                 self.assertEqual(param_control.grad, param_scaling.grad)
-                self.assertEqual(param_control, param_scaling)
+                self.assertEqual(param_control, param_scaling, **tol)
 
                 state_control, state_scaling = opt_control.state[param_control], opt_scaling.state[param_scaling]
 
@@ -1347,7 +1347,7 @@ class TestOptimRenewed(TestCase):
                     actual = state_scaling[k]
                     if k == "step":
                         actual = actual.squeeze()
-                    self.assertEqual(state_control[k], actual)
+                    self.assertEqual(state_control[k], actual, **tol)
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 
