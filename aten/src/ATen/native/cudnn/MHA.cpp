@@ -451,7 +451,7 @@ auto build_graph_and_tensors_backward(
                 std::vector<int64_t>(softmaxstats.sizes().begin(), softmaxstats.sizes().end()))
             .set_stride(std::vector<int64_t>(
                 softmaxstats.strides().begin(), softmaxstats.strides().end()))
-	    .set_data_type(fe::DataType_t::FLOAT));
+            .set_data_type(fe::DataType_t::FLOAT));
      auto DO = mha_graph->tensor(
         fe::graph::Tensor_attributes()
             .set_name("dO")
@@ -599,7 +599,7 @@ void run_cudnn_SDP_bprop(
        dropout_probability,
        is_causal,
        true);
-   auto graph_and_tensors_backward_ptr = mhagraphbackwardcache.find(key); 
+   auto graph_and_tensors_backward_ptr = mhagraphbackwardcache.find(key);
    graph_and_tensors_backward graph_and_tensors_backward_values;
    if (graph_and_tensors_backward_ptr) {
      graph_and_tensors_backward_values = *graph_and_tensors_backward_ptr;
