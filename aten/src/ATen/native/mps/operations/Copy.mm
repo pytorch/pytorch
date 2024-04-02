@@ -11,7 +11,6 @@
 #include <ATen/ops/real.h>
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros_like.h>
-#include <fmt/format.h>
 
 namespace at::native {
 namespace mps {
@@ -27,56 +26,6 @@ static void* pageAlignedBlockPtr(const void* ptr, NSUInteger size, NSUInteger* a
 
   *alignedBlockSize = alignedLength;
   return (void*)alignedAddress;
-}
-
-static char* COPY_CAST_OP_TEMPLATE_TENSOR = R"METAL_COPY_CAST(
-kernel void copy_cast_kernel(uint tid              [[thread_position_in_grid]],
-                       const device {0} * input   [[buffer(0)]],
-                       device       {1} * output  [[buffer(1)]]) {{
-  output[tid] = ({1})input[tid];
-}}
-)METAL_COPY_CAST";
-
-static
-id<MTLLibrary> compileCopyCastOpsLibrary(id<MTLDevice> device,
-                                              const std::string& dtypeSrc,
-                                              const std::string& dtypeDst) {
-  auto key = dtypeSrc + dtypeDst;
-  static std::unordered_map<std::string, id<MTLLibrary>> _libCache;
-  auto it = _libCache.find(key);
-  if (it != _libCache.end()) {
-    return it->second;
-  }
-  NSError *error = nil;
-  MTLCompileOptions *options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion: MTLLanguageVersion2_3];
-  auto copyCastLib = [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(COPY_CAST_OP_TEMPLATE_TENSOR, dtypeSrc, dtypeDst).c_str()]
-                                               options:options
-                                                 error:&error];
-  TORCH_CHECK(copyCastLib != nil && error == nil, "Failed to compile copy cast library, error: ", [[error description] UTF8String]);
-  _libCache[key] = copyCastLib;
-  return copyCastLib;
-}
-
-static id<MTLComputePipelineState> getPipelineState(id<MTLDevice> device,
-                                                    const std::string& kernel,
-                                                    const std::string& dtypeSrc,
-                                                    const std::string& dtypeDst) {
-  auto key = dtypeSrc + dtypeDst;
-  static std::unordered_map<std::string, id<MTLComputePipelineState>> _mtlPipelineCache;
-  auto it = _mtlPipelineCache.find(key);
-  if (it != _mtlPipelineCache.end()) {
-     return it->second;
-  }
-
-  NSError *error = nil;
-  id<MTLLibrary> library = compileCopyCastOpsLibrary(device, dtypeSrc, dtypeDst);
-  id<MTLFunction> func = [library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
-  TORCH_CHECK(func, "Failed to load the Metal Shader function: ", kernel);
-  id<MTLComputePipelineState> pso = [device newComputePipelineStateWithFunction:func error:&error];
-  TORCH_CHECK(pso != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
-  _mtlPipelineCache[key] = pso;
-  return pso;
 }
 
 // Copy sourceBuffer into destBuffer, casting sourceBuffer to dst.scalar_type().

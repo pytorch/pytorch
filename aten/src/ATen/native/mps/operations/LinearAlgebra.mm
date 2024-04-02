@@ -430,25 +430,6 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
     return result;
   }
 
-  MPSShape* shape = nil;
-  bool doTranspose = false;
-
-  // Handle transposes for the second batch of matrices.
-  if (batch2.is_view() && !batch2.is_contiguous()) {
-    if (batch2.numel() == batch2._base().numel()) {
-      const IntArrayRef& viewSizes = batch2.sizes();
-
-      // Handle 3D and 4D tensors.
-      // For 4D tensors, first it must have been reshaped from 4D to 3D and then transposed.
-      int32_t baseTransposeStrideDim = batch2._base().dim() == 4 ? -3 : -2;
-      if (batch2._base().stride(0) == batch2.stride(0) &&
-          batch2._base().stride(baseTransposeStrideDim) == batch2.stride(-1)) {
-        shape = @[@(viewSizes[0]), @(viewSizes[2]), @(viewSizes[1])];
-        doTranspose = true;
-      }
-    }
-  }
-
   MPSStream* stream = getCurrentMPSStream();
 
   struct CachedGraph : public mps::MPSCachedGraph {
@@ -459,22 +440,14 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   };
 
   @autoreleasepool {
-    string key = "bmm_out_mps_impl" + getTensorsStringKey({batch1, batch2}, true, /*exclude_shape*/true) + std::to_string(doTranspose);
+    string key = "bmm_out_mps_impl" + getTensorsStringKey({batch1, batch2});
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor *batch1Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch1.scalar_type()));
-      MPSGraphTensor *batch2Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch2.scalar_type()));
-      MPSGraphTensor *batch2TensorTranspose = batch2Tensor;
-
-      if (doTranspose) {
-        batch2TensorTranspose = [mpsGraph transposeTensor:batch2Tensor
-                                                dimension:-1
-                                            withDimension:-2
-                                                     name:nil];
-      }
+      MPSGraphTensor* batch1Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch1);
+      MPSGraphTensor* batch2Tensor = mps::mpsGraphRankedPlaceHolder(mpsGraph, batch2);
 
       MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:batch1Tensor
-                                                                      secondaryTensor:batch2TensorTranspose
+                                                                      secondaryTensor:batch2Tensor
                                                                                  name:@"MM/(batch1@batch2)"];
 
       newCachedGraph->batch1Tensor_ = batch1Tensor;
@@ -482,7 +455,7 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
       newCachedGraph->outputTensor_ = productTensor;
     });
     Placeholder batch1Placeholder = Placeholder(cachedGraph->batch1Tensor_, batch1);
-    Placeholder batch2Placeholder = Placeholder(cachedGraph->batch2Tensor_, batch2, shape, !doTranspose);
+    Placeholder batch2Placeholder = Placeholder(cachedGraph->batch2Tensor_, batch2);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor_, result);
 
     auto feeds = dictionaryFromPlaceholders(batch1Placeholder, batch2Placeholder);
