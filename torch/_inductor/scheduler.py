@@ -2231,14 +2231,14 @@ class Scheduler:
         return sum(dep.numbytes_hint() for dep in common_memory_deps)
 
     def filter_possible_fusions_by_priority(self, possible_fusions):
-        # Group the possible_fusions based on backend fusion priority.
-        # Return the group of possible_fusions with highest priority.
+        # Group the possible fusions based on their priority from the backend.
+        # Only return the group of possible fusions with highest priority.
         if len(possible_fusions) == 0:
             return possible_fusions
         possible_fusions_group_by_priority: List[
             List[Tuple["BaseSchedulerNode", "BaseSchedulerNode"]]
         ] = []
-        for _ in range(len(FusedNodesPriority)):
+        for _ in range(len(FusionPriority)):
             possible_fusions_group_by_priority.append([])
 
         for node1, node2 in possible_fusions:
@@ -2252,13 +2252,14 @@ class Scheduler:
             )
 
         assert any(
-            len(fusion_pair_list) > 0
-            for fusion_pair_list in possible_fusions_group_by_priority
+            len(possible_fusions) > 0
+            for possible_fusions in possible_fusions_group_by_priority
         )
-
-        for i in range(len(FusedNodesPriority)):
-            if len(possible_fusions_group_by_priority[i]) > 0:
-                return possible_fusions_group_by_priority[i]
+        return next(
+            possible_fusions
+            for possible_fusions in possible_fusions_group_by_priority
+            if possible_fusions
+        )
 
     def score_fusion_key(self, nodes):
         """
@@ -2490,7 +2491,7 @@ class Scheduler:
         return node.node.get_layout()
 
 
-class FusedNodesPriority(IntEnum):
+class FusionPriority(IntEnum):
     One = 0
     Two = 1
 
@@ -2567,4 +2568,4 @@ class BaseScheduling:
         raise NotImplementedError()
 
     def get_fusion_pair_priority(self, node1, node2):
-        return FusedNodesPriority.One
+        return FusionPriority.One
