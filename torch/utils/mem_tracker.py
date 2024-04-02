@@ -12,8 +12,6 @@ from torch.utils._pytree import tree_map_only
 from torch.utils.hooks import RemovableHandle
 from torch.utils.weak import WeakIdKeyDictionary
 
-_MB = 2**20
-_KB = 2**10
 _PYTORCH_MIN_ALLOCATE = 2**9
 
 __all__ = ["MemoryTrackingMode"]
@@ -109,9 +107,9 @@ class MemoryTrackingMode(TorchDispatchMode):
             stats = self._get_current_memory_allocated()
         rounding_fn = lambda x, y, z: round(x / y, z)
         if self.units == "MB":
-            divisor = _MB
+            divisor = 2**20
         elif self.units == "KB":
-            divisor = _KB
+            divisor = 2**10
         elif self.units == "B":
             divisor = 1
             rounding_fn = lambda x, y, z: x
