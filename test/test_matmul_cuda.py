@@ -260,7 +260,6 @@ class TestFP8MatmulCuda(TestCase):
         # hipblaslt does not yet support bfloat16 output
         if torch.version.hip is None:
             self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
-
         with self.assertRaises(RuntimeError):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
 
