@@ -1,4 +1,5 @@
 import inspect
+import warnings
 from typing import Any, Dict, List, Optional, Union
 
 import torch.nn
@@ -8,6 +9,7 @@ from .bytecode_transformation import (
     create_call_function,
     create_call_method,
     create_instruction,
+    create_load_method,
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
@@ -227,7 +229,8 @@ class SideEffects:
         options,
     ):
         if user_cls is torch.autograd.function.FunctionCtx:
-            obj = torch.autograd.Function()
+            with warnings.catch_warnings(record=True):
+                obj = torch.autograd.Function()
         elif issubclass(user_cls, torch.nn.Module):
             obj = nn_module_new(user_cls)
         else:
@@ -357,9 +360,7 @@ class SideEffects:
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)
-            cg.extend_output(
-                [create_instruction("LOAD_METHOD", argval="save_for_backward")]
-            )
+            cg.extend_output([create_load_method("save_for_backward")])
             for arg in args:
                 cg(arg)
             cg.extend_output(
@@ -458,11 +459,11 @@ class SideEffects:
                 cg.tx.output.update_co_names("update")
 
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.extend_output([create_instruction("LOAD_METHOD", argval="update")])
+                cg.extend_output([create_load_method("update")])
                 cg(var, allow_cache=False)
 
                 cg(var.mutable_local.source)  # type: ignore[attr-defined]
-                cg.extend_output([create_instruction("LOAD_METHOD", argval="clear")])
+                cg.extend_output([create_load_method("clear")])
 
                 suffixes.append(
                     [
