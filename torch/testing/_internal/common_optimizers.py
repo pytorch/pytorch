@@ -2216,6 +2216,11 @@ optim_db: List[OptimizerInfo] = [
                 "test_param_groups_lr",
             ),
             DecorateInfo(
+                skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+            ),
+            DecorateInfo(
                 unittest.skip(
                     "SparseAdam does not support dense gradients, see #116507"
                 ),

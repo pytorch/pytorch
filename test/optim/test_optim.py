@@ -1,7 +1,6 @@
 # Owner(s): ["module: optimizer"]
 
 import functools
-import itertools
 
 import torch
 from torch.nn import Parameter
@@ -132,110 +131,6 @@ class TestOptim(TestCase):
                 sum([rosenbrock(param_t) for param_t in params_t]),
             )
 
-    def _test_basic_cases_template(
-        self,
-        weight_tensor,
-        bias_tensor,
-        input_tensor,
-        constructor,
-        constructor_accepts_maximize=True,
-        constructor_accepts_foreach=False,
-    ):
-        maximize_options = {False, constructor_accepts_maximize}
-        foreach_options = {False, constructor_accepts_foreach}
-
-        four_arg_constructor = constructor
-        if constructor_accepts_maximize and constructor_accepts_foreach:
-            pass
-        elif constructor_accepts_maximize:
-
-            def four_arg_constructor(weight, bias, maximize, foreach):  # noqa: F811
-                self.assertFalse(foreach)
-                return constructor(weight, bias, maximize)
-
-        elif constructor_accepts_foreach:
-
-            def four_arg_constructor(weight, bias, maximize, foreach):
-                self.assertFalse(maximize)
-                return constructor(weight, bias, foreach)
-
-        else:
-
-            def four_arg_constructor(weight, bias, maximize, foreach):
-                self.assertFalse(maximize or foreach)
-                return constructor(weight, bias)
-
-        for maximize, foreach in itertools.product(maximize_options, foreach_options):
-            with torch.no_grad():
-                weight = Parameter(weight_tensor.clone().detach())
-                bias = Parameter(bias_tensor.clone().detach())
-                input = input_tensor.clone().detach().requires_grad_()
-            optimizer = four_arg_constructor(weight, bias, maximize, foreach)
-
-            def fn():
-                optimizer.zero_grad()
-                y = weight.mv(input)
-                if y.is_cuda and bias.is_cuda and y.get_device() != bias.get_device():
-                    y = y.cuda(bias.get_device())
-                loss = (y + bias).pow(2).sum()
-                loss.backward()
-                return loss
-
-            initial_value = fn().item()
-            for _ in range(200):
-                optimizer.step(fn)
-            if maximize:
-                self.assertGreater(fn().item(), initial_value)
-            else:
-                self.assertLess(fn().item(), initial_value)
-
-
-    def _test_basic_cases(
-        self,
-        constructor,
-        constructor_accepts_maximize=False,
-        constructor_accepts_foreach=False,
-    ):
-        self._test_basic_cases_template(
-            torch.randn(10, 5),
-            torch.randn(10),
-            torch.randn(5),
-            constructor,
-            constructor_accepts_maximize,
-            constructor_accepts_foreach,
-        )
-        # non-contiguous parameters
-        self._test_basic_cases_template(
-            torch.randn(10, 5, 2)[..., 0],
-            torch.randn(10, 2)[..., 0],
-            torch.randn(5),
-            constructor,
-            constructor_accepts_maximize,
-            constructor_accepts_foreach,
-        )
-        # CUDA
-        if not torch.cuda.is_available():
-            return
-        self._test_basic_cases_template(
-            torch.randn(10, 5).cuda(),
-            torch.randn(10).cuda(),
-            torch.randn(5).cuda(),
-            constructor,
-            constructor_accepts_maximize,
-            constructor_accepts_foreach,
-        )
-        # Multi-GPU
-        if not torch.cuda.device_count() > 1:
-            return
-        self._test_basic_cases_template(
-            torch.randn(10, 5).cuda(0),
-            torch.randn(10).cuda(1),
-            torch.randn(5).cuda(0),
-            constructor,
-            constructor_accepts_maximize,
-            constructor_accepts_foreach,
-        )
-
 
     def test_sgd_sparse(self):
         for foreach in (False, True):
@@ -248,21 +143,6 @@ class TestOptim(TestCase):
                 scheduler_constructors=[lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
                 multi_tensor=foreach,
             )
-
-
-    def test_adamw(self):
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: AdamW(
-                [weight, bias],
-                lr=torch.tensor(1e-3),
-                weight_decay=1,
-                amsgrad=True,
-                maximize=maximize,
-                foreach=False,  # foreach for lr tensors tested in multi configs
-            ),
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
 
 
     def test_sparse_adam(self):
