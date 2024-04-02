@@ -892,10 +892,20 @@ class CppOverrides(OpOverrides):
 
     @staticmethod
     def index_expr(expr, dtype):
+        bounds = ValueRanges.unknown()
+        # If this expression does not come from an FX node, we compute its bounds
+        if (
+            fx_node := getattr(V.interpreter, "current_node", None)
+        ) and fx_node.target != "index_expr":
+            bounds = bound_sympy(expr)
+
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
         assert opt_ctx and opt_ctx.dtype is not None
         dtype = opt_ctx.dtype
-        return ops.to_dtype(cexpr(V.kernel.rename_indexing(expr)), dtype)
+
+        idx_str = cexpr(V.kernel.rename_indexing(expr))
+        var = V.kernel.cse.generate(V.kernel.compute, idx_str, bounds=bounds)
+        return ops.to_dtype(var, dtype)
 
     @staticmethod
     def masked(mask, body, other):
@@ -1481,7 +1491,15 @@ class CppVecOverrides(CppOverrides):
         if stride == 0:
             return CppOverrides.index_expr(expr, dtype)
         elif stride is not None:
-            value = ops.to_dtype(cexpr(index), dtype)
+            bounds = ValueRanges.unknown()
+            # If this expression does not come from an FX node, we compute its bounds
+            if (
+                fx_node := getattr(V.interpreter, "current_node", None)
+            ) and fx_node.target != "index_expr":
+                bounds = bound_sympy(index)
+
+            idx = V.kernel.cse.generate(V.kernel.compute, cexpr(index), bounds=bounds)
+            value = ops.to_dtype(idx, dtype)
             if isinstance(value, OpsValue):
                 value = value.value
             csevar = V.kernel.arange(value, stride)

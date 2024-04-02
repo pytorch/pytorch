@@ -36,7 +36,7 @@ from torch._dynamo.utils import preserve_rng_state
 from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
-from torch.utils._sympy.value_ranges import ValueRanges
+from torch.utils._sympy.value_ranges import bound_sympy, ValueRanges
 from torch.utils._triton import has_triton_package
 
 from ..._dynamo.utils import counters
@@ -898,10 +898,15 @@ class TritonKernelOverrides(TritonOverrides):
 
     @classmethod
     def index_expr(cls, expr, dtype):
+        bounds = ValueRanges.unknown()
+        # If this expression does not come from an FX node, we compute its bounds
+        if (
+            fx_node := getattr(V.interpreter, "current_node", None)
+        ) and fx_node.target != "index_expr":
+            bounds = bound_sympy(expr)
         indexing = V.kernel.indexing(expr, block_ptr=False)
         assert isinstance(indexing, IndexingOptions)
-        # This is called from CSEProxy.__getattr__,  so we'll set the bounds there
-        var = V.kernel.cse.generate(V.kernel.compute, indexing.index_str)
+        var = V.kernel.cse.generate(V.kernel.compute, indexing.index_str, bounds=bounds)
 
         if dtype not in {torch.int32, torch.int64}:
             var = V.kernel.cse.generate(V.kernel.compute, cls.to_dtype(var, dtype))

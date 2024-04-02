@@ -570,8 +570,10 @@ class OpOverrides:
     @staticmethod
     def remainder(a, b):
         r = ops.mod(a, b)
-        cond = ops.and_(ops.ne(r, ops.constant(0, torch.int32)),
-                        ops.ne(ops.signbit(r), ops.signbit(b)))
+        cond = ops.and_(
+            ops.ne(r, ops.constant(0, torch.int32)),
+            ops.ne(ops.signbit(r), ops.signbit(b)),
+        )
         return ops.where(cond, ops.add(r, b), r)
 
     @staticmethod
@@ -1488,35 +1490,36 @@ class Kernel(CodeGen):
                     fx_node := getattr(V.interpreter, "current_node", None)
                 ) and fx_node.target == name:
                     assert isinstance(self.node_to_bounds, dict)
-                    buf_bounds = self.node_to_bounds.get(
-                        fx_node, ValueRanges.unknown()
-                    )
+                    buf_bounds = self.node_to_bounds.get(fx_node, ValueRanges.unknown())
                 elif (hasattr(ValueRangeAnalysis, name)) and fx_node is not None:
                     # These create lots of inner strings. We would need to compute the bounds at the ops
                     # We will also likely not get much from computing VRs on these nodes
-                    if all(s not in fx_node.target for s in ("set_indirect", "reduction", "scan")):
+                    if all(
+                        s not in fx_node.target
+                        for s in ("set_indirect", "reduction", "scan")
+                    ):
                         # If there is no FX bound but we know how to compute one we do so
                         assert not kwargs
 
                         def arg_to_bound(x):
                             if isinstance(x, CSEVariable):
                                 return x.bounds
-                            elif isinstance(x, str):
-                                # This always comes from an index_expr, otherwise it'd be a CSEVariable
-                                assert fx_node.target == "index_expr", fx_node.target
-                                # TODO a better fix would be to already return a variable with the bound computed
-                                sympy_expr = V.kernel.current_node._body.indexing_exprs[
-                                    fx_node.args[1].args[0]
-                                ]
-                                return bound_sympy(sympy_expr)
+                            # elif isinstance(x, str):
+                            #    # This always comes from an index_expr, otherwise it'd be a CSEVariable
+                            #    assert fx_node.target == "index_expr", fx_node.target
+                            #    # TODO a better fix would be to already return a variable with the bound computed
+                            #    sympy_expr = V.kernel.current_node._body.indexing_exprs[
+                            #        fx_node.args[1].args[0]
+                            #    ]
+                            #    return bound_sympy(sympy_expr)
                             elif isinstance(x, sympy.Expr):
                                 return bound_sympy(x)
                             else:
                                 return x
+
                         arg_bounds = map(arg_to_bound, args)
                         buf_bounds = getattr(CSEProxy.vr_analysis, name)(*arg_bounds)
                 return buf_bounds
-
 
             @staticmethod
             def indirect_indexing(
