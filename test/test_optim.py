@@ -37,7 +37,7 @@ def rosenbrock(tensor):
 def drosenbrock(tensor):
     assert tensor.size() == torch.Size([2]), f"Requires tensor with 2 scalars but got {tensor.size()}"
     x, y = tensor
-    return torch.tensor((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
+    return torch.stack((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 
 
 @markDynamoStrictTest
@@ -316,11 +316,11 @@ class TestOptimRenewed(TestCase):
                 # Depending on w, provide only the x or y gradient
                 if sparse_grad:
                     if w:
-                        i = torch.LongTensor([[0, 0]])
+                        i = torch.tensor([[0, 0]], dtype=torch.int64)
                         x = grad[0]
                         v = torch.tensor([x / 4.0, x - x / 4.0])
                     else:
-                        i = torch.LongTensor([[1, 1]])
+                        i = torch.tensor([[1, 1]], dtype=torch.int64)
                         y = grad[1]
                         v = torch.tensor([y - y / 4.0, y / 4.0])
                     grad_out = torch.sparse_coo_tensor(i, v, (2,), dtype=v.dtype)

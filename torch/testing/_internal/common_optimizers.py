@@ -2,6 +2,7 @@
 
 import functools
 import itertools
+import sys
 import unittest
 from copy import deepcopy
 from enum import Enum
@@ -1060,6 +1061,12 @@ optim_db: List[OptimizerInfo] = [
                 "test_param_group_with_lrscheduler_goes_right_direction",
             ),
             DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115679"
                 ),
@@ -1177,6 +1184,12 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115607"
                 ),
@@ -1286,6 +1299,12 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
                 ),
@@ -1368,6 +1387,12 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo("Mismatched _foreach_addcdiv_ types, see #118159"),
@@ -1491,6 +1516,12 @@ optim_db: List[OptimizerInfo] = [
                 "test_param_group_with_lrscheduler_goes_right_direction",
             ),
             DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
                 ),
@@ -1567,6 +1598,12 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1675,6 +1712,12 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1709,6 +1752,12 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1802,6 +1851,12 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1906,6 +1961,12 @@ optim_db: List[OptimizerInfo] = [
                 "test_param_group_with_lrscheduler_goes_right_direction",
             ),
             DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/115679"
                 ),
@@ -2005,6 +2066,12 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -2126,6 +2193,12 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
