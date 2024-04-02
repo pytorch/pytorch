@@ -13,7 +13,9 @@ body:
         Note: if you're submitting an issue that you generated from a fuzzer. Please do the following:
 
         - Ensure rtol/atol are at default tolerances
+
         - Dont compare indices of max/min etc, because that avoids the above requirement
+
         - If comparing eager and torch.compile at fp16/bf16, you should use fp32 as baseline
 
         If the above requirements are met, add the label "topic: fuzzer" to your issue.
