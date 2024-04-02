@@ -8,14 +8,7 @@ from torch.nn import Parameter
 from torch.optim import (
     Adadelta, Adagrad, Adam, Adamax, AdamW, ASGD, NAdam, RAdam, RMSprop, Rprop, SGD, SparseAdam
 )
-from torch.optim.lr_scheduler import (
-    StepLR,
-    ConstantLR,
-    LinearLR,
-    ExponentialLR,
-    ReduceLROnPlateau,
-    PolynomialLR,
-)
+from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau
 from torch.testing._internal.common_utils import (
     TestCase,
     load_tests,
@@ -145,7 +138,6 @@ class TestOptim(TestCase):
         bias_tensor,
         input_tensor,
         constructor,
-        scheduler_constructors,
         constructor_accepts_maximize=True,
         constructor_accepts_foreach=False,
     ):
@@ -179,10 +171,6 @@ class TestOptim(TestCase):
                 bias = Parameter(bias_tensor.clone().detach())
                 input = input_tensor.clone().detach().requires_grad_()
             optimizer = four_arg_constructor(weight, bias, maximize, foreach)
-            schedulers = []
-            for scheduler_constructor in scheduler_constructors:
-                schedulers.append(scheduler_constructor(optimizer))
-
 
             def fn():
                 optimizer.zero_grad()
@@ -196,12 +184,6 @@ class TestOptim(TestCase):
             initial_value = fn().item()
             for _ in range(200):
                 optimizer.step(fn)
-                for scheduler in schedulers:
-                    if isinstance(scheduler, ReduceLROnPlateau):
-                        val_loss = fn()
-                        scheduler.step(val_loss)
-                    else:
-                        scheduler.step()
             if maximize:
                 self.assertGreater(fn().item(), initial_value)
             else:
@@ -211,19 +193,14 @@ class TestOptim(TestCase):
     def _test_basic_cases(
         self,
         constructor,
-        scheduler_constructors=None,
         constructor_accepts_maximize=False,
         constructor_accepts_foreach=False,
     ):
-        if scheduler_constructors is None:
-            scheduler_constructors = []
-
         self._test_basic_cases_template(
             torch.randn(10, 5),
             torch.randn(10),
             torch.randn(5),
             constructor,
-            scheduler_constructors,
             constructor_accepts_maximize,
             constructor_accepts_foreach,
         )
@@ -233,7 +210,6 @@ class TestOptim(TestCase):
             torch.randn(10, 2)[..., 0],
             torch.randn(5),
             constructor,
-            scheduler_constructors,
             constructor_accepts_maximize,
             constructor_accepts_foreach,
         )
@@ -245,7 +221,6 @@ class TestOptim(TestCase):
             torch.randn(10).cuda(),
             torch.randn(5).cuda(),
             constructor,
-            scheduler_constructors,
             constructor_accepts_maximize,
             constructor_accepts_foreach,
         )
@@ -257,87 +232,8 @@ class TestOptim(TestCase):
             torch.randn(10).cuda(1),
             torch.randn(5).cuda(0),
             constructor,
-            scheduler_constructors,
             constructor_accepts_maximize,
             constructor_accepts_foreach,
-        )
-
-
-    def _build_params_dict(self, weight, bias, **kwargs):
-        return [{"params": [weight]}, dict(params=[bias], **kwargs)]
-
-    def test_sgd(self):
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: SGD(
-                [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
-            ),
-            scheduler_constructors=[lambda opt: StepLR(opt, gamma=0.9, step_size=10)],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: SGD(
-                [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
-            ),
-            scheduler_constructors=[
-                lambda opt: LinearLR(
-                    opt, start_factor=0.4, end_factor=0.8, total_iters=4
-                )
-            ],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: SGD(
-                [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
-            ),
-            scheduler_constructors=[lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: SGD(
-                [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
-            ),
-            scheduler_constructors=[lambda opt: PolynomialLR(opt, power=0.9, total_iters=4)],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: SGD(
-                [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
-            ),
-            scheduler_constructors=[
-                lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                lambda opt: LinearLR(
-                    opt, start_factor=0.4, end_factor=0.6, total_iters=4
-                ),
-            ],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: SGD(
-                [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
-            ),
-            [
-                lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                lambda opt: ReduceLROnPlateau(opt),
-            ],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: SGD(
-                [weight, bias], lr=1e-3, maximize=maximize, foreach=foreach
-            ),
-            [
-                lambda opt: StepLR(opt, gamma=0.99, step_size=10),
-                lambda opt: ExponentialLR(opt, gamma=0.99),
-                lambda opt: ReduceLROnPlateau(opt),
-            ],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
         )
 
 
@@ -352,110 +248,6 @@ class TestOptim(TestCase):
                 scheduler_constructors=[lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
                 multi_tensor=foreach,
             )
-
-
-    def test_adam(self):
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            [lambda opt: ExponentialLR(opt, gamma=0.9)],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            [lambda opt: LinearLR(opt, start_factor=0.4, total_iters=4)],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adam(
-                [weight, bias],
-                lr=1e-3,
-                amsgrad=True,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            [
-                lambda opt: ConstantLR(opt, factor=0.4, total_iters=4),
-                lambda opt: ExponentialLR(opt, gamma=0.9),
-            ],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adam(
-                [weight, bias],
-                lr=1e-3,
-                amsgrad=True,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            [
-                lambda opt: ExponentialLR(opt, gamma=0.9),
-                lambda opt: ReduceLROnPlateau(opt),
-            ],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3,
-                amsgrad=True,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            [
-                lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                lambda opt: ReduceLROnPlateau(opt),
-            ],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-3,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            [lambda opt: PolynomialLR(opt, total_iters=4, power=0.9)],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adam(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=torch.tensor(1e-3),
-                maximize=maximize,
-                foreach=False,  # foreach for lr tensors tested in multi configs
-            ),
-            [lambda opt: PolynomialLR(opt, total_iters=4, power=0.9)],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
 
 
     def test_adamw(self):
@@ -484,80 +276,6 @@ class TestOptim(TestCase):
             maximize=True,
         )
 
-    # ROCm precision is too low to pass this test
-    def test_adadelta(self):
-        # Handles https://github.com/pytorch/pytorch/issues/69698
-        self.rel_tol = 4e-3
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adadelta(
-                self._build_params_dict(weight, bias, rho=0.95),
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            [
-                lambda opt: StepLR(opt, gamma=0.9, step_size=10),
-                lambda opt: ReduceLROnPlateau(opt),
-            ],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-
-
-
-    def test_nadam(self):
-        self._test_basic_cases(
-            lambda weight, bias, foreach: NAdam(
-                [weight, bias],
-                lr=1e-3,
-                weight_decay=0.1,
-                momentum_decay=6e-3,
-                foreach=foreach,
-            ),
-            [lambda opt: ExponentialLR(opt, gamma=0.9)],
-            constructor_accepts_foreach=True,
-        )
-        # NAdamW tests
-        self._test_basic_cases(
-            lambda weight, bias, foreach: NAdam(
-                [weight, bias],
-                lr=1e-3,
-                weight_decay=0.1,
-                momentum_decay=6e-3,
-                decoupled_weight_decay=True,
-                foreach=foreach,
-            ),
-            [lambda opt: ExponentialLR(opt, gamma=0.9)],
-            constructor_accepts_foreach=True,
-        )
-
-
-    def test_adagrad(self):
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adagrad(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-1,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            [lambda opt: ReduceLROnPlateau(opt)],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-        self._test_basic_cases(
-            lambda weight, bias, maximize, foreach: Adagrad(
-                self._build_params_dict(weight, bias, lr=1e-2),
-                lr=1e-1,
-                maximize=maximize,
-                foreach=foreach,
-            ),
-            [
-                lambda opt: ReduceLROnPlateau(opt),
-                lambda opt: ExponentialLR(opt, gamma=0.99),
-            ],
-            constructor_accepts_maximize=True,
-            constructor_accepts_foreach=True,
-        )
-
 
     def test_adagrad_sparse(self):
         for foreach in (False, True):
@@ -573,30 +291,6 @@ class TestOptim(TestCase):
                 ],
                 multi_tensor=foreach,
             )
-
-
-    def test_radam(self):
-        self._test_basic_cases(
-            lambda weight, bias, foreach: RAdam(
-                [weight, bias], lr=1e-3, foreach=foreach
-            ),
-            [
-                lambda opt: ExponentialLR(opt, gamma=0.9),
-                lambda opt: ReduceLROnPlateau(opt),
-            ],
-            constructor_accepts_foreach=True,
-        )
-        # RAdamW tests
-        self._test_basic_cases(
-            lambda weight, bias, foreach: RAdam(
-                [weight, bias], lr=1e-3, weight_decay=0.1, decoupled_weight_decay=True, foreach=foreach
-            ),
-            [
-                lambda opt: ExponentialLR(opt, gamma=0.9),
-                lambda opt: ReduceLROnPlateau(opt),
-            ],
-            constructor_accepts_foreach=True,
-        )
 
 
 def _diff_fn(p, grad, opt_differentiable_state, opt_class, kwargs, *ignored):

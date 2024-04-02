@@ -1,11 +1,14 @@
 # Owner(s): ["module: optimizer"]
 import functools
+import itertools
 import math
 import tempfile
 from typing import Any, Dict, Tuple
 import unittest
 from copy import deepcopy
 from unittest.mock import patch
+
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 import torch
 from torch.optim import Optimizer, SGD
@@ -29,6 +32,7 @@ def rosenbrock(tensor):
     assert tensor.size() == torch.Size([2]), f"Requires tensor with 2 scalars but got {tensor.size()}"
     x, y = tensor
     return (1 - x) ** 2 + 100 * (y - x**2) ** 2
+
 
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
@@ -69,11 +73,13 @@ class TestOptimRenewed(TestCase):
 
 
     @parametrize("contiguous", [True, False])
+    @parametrize("with_lrsched", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_forloop_goes_right_direction(self, device, dtype, optim_info, contiguous):
+    def test_forloop_goes_right_direction(self, device, dtype, optim_info, contiguous, with_lrsched):
         optim_cls = optim_info.optim_cls
         optim_inputs = optim_info.optim_inputs_func(device=device)
-        for optim_input in optim_inputs:
+        schedulers_constructors = optim_info.scheduler_inputs if with_lrsched else [None]
+        for optim_input, schedulers_constructor in itertools.product(optim_inputs, schedulers_constructors):
             if "foreach" in optim_info.supported_impls:
                 optim_input.kwargs["foreach"] = False  # force forloop
             if contiguous:
@@ -85,6 +91,7 @@ class TestOptimRenewed(TestCase):
             input = torch.randn(5, device=device, dtype=dtype)
 
             optimizer = optim_cls([weight, bias], **optim_input.kwargs)
+            schedulers = [s(optimizer) for s in (schedulers_constructor if schedulers_constructor else [])]
 
             def closure():
                 optimizer.zero_grad()
@@ -99,7 +106,12 @@ class TestOptimRenewed(TestCase):
 
             initial_value = closure().item()
             for _ in range(20):
-                optimizer.step(closure)
+                loss = optimizer.step(closure)
+                for scheduler in schedulers:
+                    if isinstance(scheduler, ReduceLROnPlateau):
+                        scheduler.step(loss)
+                    else:
+                        scheduler.step()
 
             if optim_input.kwargs.get("maximize", False):
                 self.assertGreater(closure().item(), initial_value)
@@ -109,22 +121,26 @@ class TestOptimRenewed(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @parametrize("with_lrsched", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_forloop_goes_right_direction_multigpu(self, device, dtype, optim_info):
+    def test_forloop_goes_right_direction_multigpu(self, device, dtype, optim_info, with_lrsched):
         optim_cls = optim_info.optim_cls
         optim_inputs = optim_info.optim_inputs_func(device=device)
-        for optim_input in optim_inputs:
+        schedulers_constructors = optim_info.scheduler_inputs if with_lrsched else [None]
+        for optim_input, schedulers_constructor in itertools.product(optim_inputs, schedulers_constructors):
             if "foreach" in optim_info.supported_impls:
                 optim_input.kwargs["foreach"] = False  # force forloop
 
             weight = Parameter(torch.randn((10, 5), device="cuda:0", dtype=dtype))
             bias = Parameter(torch.randn((10), device="cuda:1", dtype=dtype))
-            input = torch.randn(5, device="cuda:0", dtype=dtype)
+            inpt = torch.randn(5, device="cuda:0", dtype=dtype)
+
             optimizer = optim_cls([weight, bias], **optim_input.kwargs)
+            schedulers = [s(optimizer) for s in (schedulers_constructor if schedulers_constructor else [])]
 
             def closure():
                 optimizer.zero_grad()
-                loss = (weight.mv(input).cuda(1) + bias).pow(2).sum()
+                loss = (weight.mv(inpt).cuda(1) + bias).pow(2).sum()
                 loss.backward()
                 if optim_info.only_supports_sparse_grads:
                     # For this test, we naively convert the Tensor layout, which we know does
@@ -135,12 +151,52 @@ class TestOptimRenewed(TestCase):
 
             initial_value = closure().item()
             for _ in range(20):
-                optimizer.step(closure)
+                loss = optimizer.step(closure)
+                for scheduler in schedulers:
+                    if isinstance(scheduler, ReduceLROnPlateau):
+                        scheduler.step(loss)
+                    else:
+                        scheduler.step()
 
             if optim_input.kwargs.get("maximize", False):
                 self.assertGreater(closure().item(), initial_value)
             else:
                 self.assertLess(closure().item(), initial_value)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_param_group_with_lrscheduler_goes_right_direction(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        for schedulers_c in optim_info.scheduler_inputs:
+            weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+            bias = Parameter(torch.randn((10), device=device, dtype=dtype))
+            inpt = torch.randn(5, device=device, dtype=dtype)
+
+            optimizer = optim_cls([{"params": [weight]}, {"params": [bias], "lr": 0.01}])
+            schedulers = [scheduler_c(optimizer) for scheduler_c in schedulers_c]
+
+            def closure():
+                optimizer.zero_grad()
+                loss = (weight.mv(inpt) + bias).pow(2).sum()
+                loss.backward()
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
+                    weight.grad = weight.grad.to_sparse()
+                    bias.grad = bias.grad.to_sparse()
+                return loss
+
+            initial_value = closure().item()
+            for _ in range(20):
+                loss = optimizer.step(closure)
+                for scheduler in schedulers:
+                    if isinstance(scheduler, ReduceLROnPlateau):
+                        scheduler.step(loss)
+                    else:
+                        scheduler.step()
+
+            self.assertLess(closure().item(), initial_value)
 
 
     @skipMPS
