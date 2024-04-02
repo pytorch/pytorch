@@ -918,10 +918,14 @@ class TritonKernelOverrides(TritonOverrides):
         with V.kernel.mask_loads(mask) as new_mask:
             result = body()
 
+        # Remove once CSEVariables track the dtype
+        if result.bounds.is_bool:
+            other = bool(other)
         # Take dtype from result to prevent accidental promotion
         other = V.kernel.cse.generate(
             V.kernel.compute,
             f"tl.full({result}.shape, {triton_constant(other)}, {result}.dtype)",
+            bounds=ValueRanges.wrap(other),
         )
         return ops.where(new_mask, result, other)
 
