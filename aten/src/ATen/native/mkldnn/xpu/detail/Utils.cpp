@@ -378,12 +378,12 @@ bool use_channels_last_for_conv(
 }
 
 std::vector<int64_t> compatible_groups_deconv_strides(
-    const at::Tensor& wgh,
+    const at::Tensor& weight,
     dnnl::memory::dims group_size) {
-  std::vector<int64_t> strides = wgh.strides().vec();
-  strides[0] = wgh.strides()[1];
-  strides[1] = wgh.strides()[0];
-  strides.insert(strides.begin(), group_size[2] * wgh.strides()[0]);
+  std::vector<int64_t> strides = weight.strides().vec();
+  strides[0] = weight.strides()[1];
+  strides[1] = weight.strides()[0];
+  strides.insert(strides.begin(), group_size[2] * weight.strides()[0]);
   return strides;
 }
 

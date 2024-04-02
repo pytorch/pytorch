@@ -19,7 +19,7 @@ TORCH_API sycl::event matmul(
 TORCH_API sycl::event convolution(
     at::Tensor& dst,
     const at::Tensor& src,
-    const at::Tensor& wgh,
+    const at::Tensor& weight,
     const at::Tensor& bia,
     IntArrayRef padding_front_top_left,
     IntArrayRef padding_back_bottom_right,
@@ -30,11 +30,11 @@ TORCH_API sycl::event convolution(
     const std::vector<sycl::event>& deps = {});
 
 TORCH_API sycl::event convolution_backward_weights(
-    at::Tensor& diff_wgh,
+    at::Tensor& diff_weight,
     at::Tensor& diff_bia,
     const at::Tensor& diff_dst,
     const at::Tensor& src,
-    IntArrayRef diff_wgh_aten_tz,
+    IntArrayRef diff_weight_aten_size,
     IntArrayRef padding_front_top_left,
     IntArrayRef padding_back_bottom_right,
     IntArrayRef stride,
@@ -57,7 +57,7 @@ TORCH_API sycl::event convolution_backward_data(
 TORCH_API sycl::event deconvolution(
     at::Tensor& dst,
     const at::Tensor& src,
-    const at::Tensor& wgh,
+    const at::Tensor& weight,
     const at::Tensor& bia,
     IntArrayRef stride,
     IntArrayRef padding,
@@ -79,7 +79,7 @@ TORCH_API sycl::event deconvolution_backward_data(
     const std::vector<sycl::event>& deps = {});
 
 TORCH_API sycl::event deconvolution_backward_weights(
-    at::Tensor& diff_wgh,
+    at::Tensor& diff_weight,
     at::Tensor& diff_bia,
     const at::Tensor& diff_dst,
     const at::Tensor& src,

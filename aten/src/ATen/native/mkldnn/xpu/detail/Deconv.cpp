@@ -18,7 +18,7 @@ static inline dnnl::memory::dims deconv_compatible_dilation(IntArrayRef& dilatio
 
 dnnl::memory::dims deconv_dst_size(
     IntArrayRef src_size,
-    IntArrayRef wgh_size,
+    IntArrayRef weight_size,
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
@@ -26,10 +26,10 @@ dnnl::memory::dims deconv_dst_size(
     int64_t groups) {
   auto dim = src_size.size();
   dnnl::memory::dims dst_size(dim);
-  auto kernel_size = wgh_size.slice(2);
+  auto kernel_size = weight_size.slice(2);
 
   dst_size[0] = src_size[0];
-  dst_size[1] = wgh_size[1] * groups;
+  dst_size[1] = weight_size[1] * groups;
   for (size_t d = 2; d < dim; ++d) {
     dst_size[d] = (src_size[d] - 1) * stride[d - 2] - 2 * padding[d - 2] +
         (dilation[d - 2] * (kernel_size[d - 2] - 1) + 1) + dst_padding[d - 2];
@@ -58,19 +58,19 @@ static inline dnnl::memory::format_tag deconv_src_fmt(
   }
 }
 
-static inline std::vector<int64_t> deconv_wgh_fmt(
-    const at::Tensor& wgh,
+static inline std::vector<int64_t> deconv_weight_fmt(
+    const at::Tensor& weight,
     const int64_t ndim,
-    dnnl::memory::dims wgh_tz,
+    dnnl::memory::dims weight_tz,
     const bool grouped = false,
     const bool is_channels_last = false) {
   // 3D fmt: (g)i/o/w ((g)i/w/o)  [b/a/c  (b/c/a)]
   // 4D fmt: (g)i/o/h/w ((g)i/h/w/o) [b/a/c/d (b/c/d/a)]
   // 5D fmt: (g)i/o/d/h/w ((g)i/d/h/w/o) [b/a/c/d/e (b/c/d/e/a)]
-  auto strides_ = wgh.strides().vec();
+  auto strides_ = weight.strides().vec();
   std::vector<int64_t> strides;
   if (grouped) {
-    strides = compatible_groups_deconv_strides(wgh, wgh_tz);
+    strides = compatible_groups_deconv_strides(weight, weight_tz);
   } else {
     strides = strides_;
     std::swap(strides[0], strides[1]);
@@ -78,26 +78,26 @@ static inline std::vector<int64_t> deconv_wgh_fmt(
   return strides;
 }
 
-static inline dnnl::memory::dims deconv_compatible_wgh_dims(
+static inline dnnl::memory::dims deconv_compatible_weight_dims(
     int64_t ndim,
     int64_t groups,
     int64_t oc,
     int64_t ic,
-    IntArrayRef wgh_tz) {
+    IntArrayRef weight_tz) {
   if (ndim == 3) {
-    auto kw = wgh_tz[2];
+    auto kw = weight_tz[2];
     return (groups != 1) ? dnnl::memory::dims({groups, oc / groups, ic / groups, kw})
                          : dnnl::memory::dims({oc, ic, kw});
   } else if (ndim == 4) {
-    auto kh = wgh_tz[2];
-    auto kw = wgh_tz[3];
+    auto kh = weight_tz[2];
+    auto kw = weight_tz[3];
     return (groups != 1)
         ? dnnl::memory::dims({groups, oc / groups, ic / groups, kh, kw})
         : dnnl::memory::dims({oc, ic, kh, kw});
   } else if (ndim == 5) {
-    auto kd = wgh_tz[2];
-    auto kh = wgh_tz[3];
-    auto kw = wgh_tz[4];
+    auto kd = weight_tz[2];
+    auto kh = weight_tz[3];
+    auto kw = weight_tz[4];
     return (groups != 1)
         ? dnnl::memory::dims({groups, oc / groups, ic / groups, kd, kh, kw})
         : dnnl::memory::dims({oc, ic, kd, kh, kw});
@@ -112,7 +112,7 @@ static std::tuple<
     dnnl::memory::desc>
 deconv_get_plain_md(
     const at::Tensor& src,
-    const at::Tensor& wgh,
+    const at::Tensor& weight,
     const at::Tensor& dst,
     int64_t groups,
     bool is_channels_last_suggested) {
@@ -126,20 +126,20 @@ deconv_get_plain_md(
 
   auto ic = src.size(1);
   auto oc = dst.size(1);
-  dnnl::memory::dims wgh_tz =
-      deconv_compatible_wgh_dims(ndim, groups, oc, ic, wgh.sizes());
-  auto wgh_dt = get_onednn_dtype_include_double(wgh);
-  auto fmt_wgh = deconv_wgh_fmt(
-      wgh, ndim, wgh_tz, groups != 1, is_channels_last_suggested);
-  dnnl::memory::desc wgh_usr_md = dnnl::memory::desc(wgh_tz, wgh_dt, fmt_wgh);
+  dnnl::memory::dims weight_tz =
+      deconv_compatible_weight_dims(ndim, groups, oc, ic, weight.sizes());
+  auto weight_dt = get_onednn_dtype_include_double(weight);
+  auto fmt_weight = deconv_weight_fmt(
+      weight, ndim, weight_tz, groups != 1, is_channels_last_suggested);
+  dnnl::memory::desc weight_usr_md = dnnl::memory::desc(weight_tz, weight_dt, fmt_weight);
 
-  return {src_usr_md, wgh_usr_md, dst_usr_md};
+  return {src_usr_md, weight_usr_md, dst_usr_md};
 }
 
 sycl::event deconvolution(
     at::Tensor& dst,
     const at::Tensor& src,
-    const at::Tensor& wgh,
+    const at::Tensor& weight,
     const at::Tensor& bia,
     IntArrayRef stride,
     IntArrayRef padding,
@@ -152,13 +152,13 @@ sycl::event deconvolution(
       GpuEngineManager::Instance().get_engine({c10::kXPU, c10::xpu::current_device()});
   auto stream = GpuStreamManager::Instance().get_stream();
 
-  bool is_channels_last_suggested = use_channels_last_for_conv(src, wgh, /*is_transposed=*/true);
+  bool is_channels_last_suggested = use_channels_last_for_conv(src, weight, /*is_transposed=*/true);
 
   // create usr_md for tensors, and md for conv primitive
-  dnnl::memory::desc src_md, wgh_md, dst_md;
+  dnnl::memory::desc src_md, weight_md, dst_md;
 
-  std::tie(src_md, wgh_md, dst_md) =
-      deconv_get_plain_md(src, wgh, dst, groups, is_channels_last_suggested);
+  std::tie(src_md, weight_md, dst_md) =
+      deconv_get_plain_md(src, weight, dst, groups, is_channels_last_suggested);
 
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
   auto bia_md = bia.defined()
@@ -187,7 +187,7 @@ sycl::event deconvolution(
       dnnl::prop_kind::forward,
       dnnl::algorithm::deconvolution_direct,
       src_md,
-      wgh_md,
+      weight_md,
       bia_md,
       dst_md,
       _stride,
@@ -196,16 +196,16 @@ sycl::event deconvolution(
       _padding,
       pattr);
 
-  dnnl::memory src_m, wgh_m, dst_m, bia_m;
-  at::Tensor src_blocked, wgh_blocked, dst_blocked = dst;
+  dnnl::memory src_m, weight_m, dst_m, bia_m;
+  at::Tensor src_blocked, weight_blocked, dst_blocked = dst;
 
   src_m = make_onednn_memory(src_md, engine, src.data_ptr());
-  wgh_m = make_onednn_memory(wgh_md, engine, wgh.data_ptr());
+  weight_m = make_onednn_memory(weight_md, engine, weight.data_ptr());
   dst_m = make_onednn_memory(dst_md, engine, dst.data_ptr());
 
   std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_SRC, src_m});
-  args.insert({DNNL_ARG_WEIGHTS, wgh_m});
+  args.insert({DNNL_ARG_WEIGHTS, weight_m});
   args.insert({DNNL_ARG_DST, dst_m});
 
   if (bia.defined()) {
@@ -245,14 +245,14 @@ sycl::event deconvolution_backward_data(
   bool is_channels_last_suggested =
       use_channels_last_for_conv(diff_dst, weight, /*is_transposed=*/true);
   // create memory desc
-  dnnl::memory::desc src_md, wgh_md, dst_md;
-  std::tie(src_md, wgh_md, dst_md) =
+  dnnl::memory::desc src_md, weight_md, dst_md;
+  std::tie(src_md, weight_md, dst_md) =
       deconv_get_plain_md(
           diff_src, weight, diff_dst, groups, is_channels_last_suggested);
 
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
-  auto bia_md = bias_defined
-      ? dnnl::memory::desc({diff_dst.size(1)}, wgh_md.get_data_type(), bia_fmt)
+  auto bias_md = bias_defined
+      ? dnnl::memory::desc({diff_dst.size(1)}, weight_md.get_data_type(), bia_fmt)
       : dnnl::memory::desc();
 
   // create fwd primitive desc hint
@@ -271,8 +271,8 @@ sycl::event deconvolution_backward_data(
       dnnl::prop_kind::forward,
       dnnl::algorithm::deconvolution_direct,
       src_md,
-      wgh_md,
-      bia_md,
+      weight_md,
+      bias_md,
       dst_md,
       _stride,
       _dilation,
@@ -285,7 +285,7 @@ sycl::event deconvolution_backward_data(
       engine,
       dnnl::algorithm::deconvolution_direct,
       src_md,
-      wgh_md,
+      weight_md,
       dst_md,
       _stride,
       _dilation,
@@ -297,7 +297,7 @@ sycl::event deconvolution_backward_data(
   dnnl::memory diff_dst_m, wei_m, diff_src_m;
 
   diff_src_m = make_onednn_memory(src_md, engine, diff_src.data_ptr());
-  wei_m = make_onednn_memory(wgh_md, engine, weight.data_ptr());
+  wei_m = make_onednn_memory(weight_md, engine, weight.data_ptr());
   diff_dst_m = make_onednn_memory(dst_md, engine, diff_dst.data_ptr());
 
   // insert args
@@ -323,7 +323,7 @@ sycl::event deconvolution_backward_data(
 }
 
 sycl::event deconvolution_backward_weights(
-    at::Tensor& diff_wgh,
+    at::Tensor& diff_weight,
     at::Tensor& diff_bia,
     const at::Tensor& diff_dst,
     const at::Tensor& src,
@@ -340,9 +340,9 @@ sycl::event deconvolution_backward_weights(
       use_channels_last_for_conv(src, diff_dst, /*is_transposed=*/true);
 
   // create memory desc
-  dnnl::memory::desc src_md, wgh_md, dst_md;
-  std::tie(src_md, wgh_md, dst_md) = deconv_get_plain_md(
-          src, diff_wgh, diff_dst, groups, is_channels_last_suggested);
+  dnnl::memory::desc src_md, weight_md, dst_md;
+  std::tie(src_md, weight_md, dst_md) = deconv_get_plain_md(
+          src, diff_weight, diff_dst, groups, is_channels_last_suggested);
 
   dnnl::memory::format_tag bia_fmt = dnnl::memory::format_tag::x;
   auto bia_md = diff_bia.defined()
@@ -365,7 +365,7 @@ sycl::event deconvolution_backward_weights(
       dnnl::prop_kind::forward,
       dnnl::algorithm::deconvolution_direct,
       src_md,
-      wgh_md,
+      weight_md,
       bia_md,
       dst_md,
       _stride,
@@ -378,7 +378,7 @@ sycl::event deconvolution_backward_weights(
       engine,
       dnnl::algorithm::deconvolution_direct,
       src_md,
-      wgh_md,
+      weight_md,
       bia_md,
       dst_md,
       _stride,
@@ -389,17 +389,17 @@ sycl::event deconvolution_backward_weights(
       pattr);
 
   // create bwd dnnl::memory
-  dnnl::memory src_m, diff_dst_m, diff_wgh_m;
+  dnnl::memory src_m, diff_dst_m, diff_weight_m;
 
   src_m = make_onednn_memory(src_md, engine, src.data_ptr());
   diff_dst_m = make_onednn_memory(dst_md, engine, diff_dst.data_ptr());
-  diff_wgh_m = make_onednn_memory(wgh_md, engine, diff_wgh.data_ptr());
+  diff_weight_m = make_onednn_memory(weight_md, engine, diff_weight.data_ptr());
 
   // insert args
   std::unordered_map<int, dnnl::memory> args;
   args.insert({DNNL_ARG_DIFF_DST, diff_dst_m});
   args.insert({DNNL_ARG_SRC, src_m});
-  args.insert({DNNL_ARG_DIFF_WEIGHTS, diff_wgh_m});
+  args.insert({DNNL_ARG_DIFF_WEIGHTS, diff_weight_m});
 
   if (diff_bia.defined()) {
     dnnl::memory diff_bia_m =
