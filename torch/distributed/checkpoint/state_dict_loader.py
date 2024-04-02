@@ -219,19 +219,23 @@ def _load_state_dict(
 
 
 def _load_state_dict_from_keys(
-    keys: Optional[set],
+    keys: Optional[set] = None,
     *,
     checkpoint_id: Union[str, os.PathLike, None] = None,
-    storage_reader: Optional[StorageReader],
+    storage_reader: Optional[StorageReader] = None,
     process_group: Optional[dist.ProcessGroup] = None,
 ) -> Dict[str, Any]:
     """
-    Load only the specified keys from the checkpoint.
+    Load only the specified keys from the checkpoint, if no keys are specified, the entire
+    checkpoint will be loaded. Note, this method completely loads the checkpoint into the
+    current process and is not distributed.
 
     .. warning::
 
-        All non-tensor data is loaded using `torch.load()` and modified in place
-        on state_dict.
+
+    .. warning::
+
+        All non-tensor data is loaded using `torch.load()`
 
     .. note:
         As opposed to the usual pattern, this function does not take a state dict as input
