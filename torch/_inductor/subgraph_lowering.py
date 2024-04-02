@@ -5,7 +5,7 @@
 import functools
 import operator
 from dataclasses import dataclass
-from typing import List, TypeVar
+from typing import List, Optional, TypeVar
 
 import torch
 
@@ -18,7 +18,7 @@ T = TypeVar("T")
 
 
 class PointwiseSubgraphLowering(torch.fx.Interpreter):
-    graph_outputs: List[ir.IRNode]
+    graph_outputs: Optional[List[ir.IRNode]]
 
     def __init__(
         self,
@@ -26,7 +26,7 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         root_graph_lowering: "torch._inductor.graph.GraphLowering",
     ):
         super().__init__(gm)
-        self.graph_outputs = []
+        self.graph_outputs = None
         self.root_graph = root_graph_lowering
 
     @property
@@ -62,7 +62,8 @@ class PointwiseSubgraphLowering(torch.fx.Interpreter):
         return lowerings[target](*args, **kwargs)
 
     def output(self, target, args, kwargs):
-        self.graph_outputs.extend(args)
+        assert len(args) == 1
+        self.graph_outputs = args[0]
 
 
 @dataclass
@@ -115,15 +116,12 @@ def lower_pointwise_subgraph(subgraph: ir.Subgraph, inputs: List[InputDescriptor
     tracer = torch.fx.Tracer()
     tracer.graph = torch.fx.Graph(tracer_cls=tracer.__class__)
     trace_ops = SimpleCSEHandler(TracingOpsHandler(tracer, len(inputs)))
-
-    outputs = pw_subgraph.graph_outputs
-    assert len(outputs) == 1
-    outputs = outputs[0]
+    assert pw_subgraph.graph_outputs is not None
 
     with V.set_ops_handler(trace_ops):
         output_irs = []
 
-        for out_var in outputs:
+        for out_var in pw_subgraph.graph_outputs:
             assert isinstance(out_var, ir.TensorBox), type(out_var)
             assert out_var.get_size() == []
             assert isinstance(out_var.data, ir.StorageBox)

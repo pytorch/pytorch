@@ -1,11 +1,13 @@
 import functools
 import itertools
 import logging
+import math
 import operator
 import os
 import warnings
 from collections import defaultdict
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from unittest.mock import patch
 
 import sympy
 
@@ -3981,13 +3983,8 @@ def max_pool2d_with_indices_backward(
     is_channels_last = (x_stride is not None and x_stride[1] == 1) or (
         gO_stride is not None and gO_stride[1] == 1
     )
-    autotune = (
-        config.coordinate_descent_tuning
-        or config.max_autotune
-        or config.max_autotune_pointwise
-    )
-    if any(d != 1 for d in dilation) or (is_channels_last and not autotune):
-        # don't codegen channels-last when autotune is not enabled, it's very slow
+    if any(d != 1 for d in dilation):
+        # dilation NYI
         return fallback_max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
@@ -4083,12 +4080,16 @@ def max_pool2d_with_indices_backward(
         assert gradient is not None
         return gradient
 
-    return Pointwise.create(
+    out = Pointwise.create(
         device=grad_output.get_device(),
         dtype=grad_output.get_dtype(),
         inner_fn=fn,
         ranges=new_size,
     )
+    if is_channels_last:
+        return ir.ExternKernel.require_channels_last(out)
+    else:
+        return out
 
 
 def pad_adaptive_loader(x, pad_val=0.0):
@@ -5232,6 +5233,35 @@ def mul(a, b):
         return make_pointwise(fn)(a, b)
 
 
+def get_constant_value(x: ir.IRNode) -> Optional[ir.Constant]:
+    """Try convert an arbitrary IR node into an ir.Constant value"""
+
+    # First try unwrapping the IRNode to see if it is already an ir.Constant
+    # Optional step, but avoids unnecessary inner_fn evaluation.
+    if isinstance(x, ir.MutableBox):
+        return get_constant_value(x.data)
+    if isinstance(x, ir.BaseView):
+        return get_constant_value(x.unwrap_view())
+    if isinstance(x, ir.Constant):
+        return x
+
+    # If the unwrapped node is not an ir.Constant, try evaluating inner_fn
+    # to see if the returned value is from an `ops.constant` call
+    if not isinstance(x, ir.Loops):
+        return None
+
+    handler = torch._inductor.ops_handler.ExtractConstantsHandler(x.get_device())
+    with V.set_ops_handler(handler), patch.object(
+        ir.FlexibleLayout, "allow_indexing", True
+    ):
+        out = x.inner_fn(*x.inner_fn_args())
+
+    assert isinstance(out, torch._inductor.virtualized.OpsValue)
+    if isinstance(out.value, ir.Constant):
+        return out.value
+    return None
+
+
 # NOTE: prims.div maps to a / b in C, so performs truncation division on
 #   integer inputs and true division for floating and complex inputs.
 @register_lowering([prims.div], broadcast=True)
@@ -5240,6 +5270,14 @@ def div_prim(a, b):
 
     if is_integral:
         return truncdiv(a, b)
+
+    if (divisor := get_constant_value(b)) is not None:
+        # Replace divide by constant with multiply by reciprocal
+        if divisor.value == 0:
+            reciprocal = math.copysign(float("inf"), divisor.value)
+        else:
+            reciprocal = 1.0 / divisor.value
+        return mul(a, reciprocal)
 
     def fn(*args):
         return ops.truediv(*args)
