@@ -428,12 +428,7 @@ class OutputGraph:
         )
 
         ci = torch._C._functorch.peek_interpreter_stack()
-        keys = (
-            torch._C._functorch.TransformType.Vmap,
-            torch._C._functorch.TransformType.Grad,
-            torch._C._functorch.TransformType.Jvp,
-        )
-        if ci is not None and ci.key() in keys:
+        if ci is not None:
             self.guards.add(
                 GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
             )
