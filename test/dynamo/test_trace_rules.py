@@ -33,6 +33,13 @@ ignored_c_binding_in_graph_function_names = {
     # Ignored because they have manual rules defined at `trace_rules.manual_torch_name_rule_map`.
     "torch._nested_tensor_from_mask",
     "torch._nested_from_padded",
+    "torch.sparse_compressed_tensor",
+    "torch.sparse_bsc_tensor",
+    "torch.sparse_bsr_tensor",
+    "torch.sparse_coo_tensor",
+    "torch.sparse_csc_tensor",
+    "torch.sparse_csr_tensor",
+    "torch.cuda._get_device_properties",
     # Ignored and go through rules defined at `trace_rules.check`.
     "torch._functionalize_are_all_mutations_under_no_grad_or_inference_mode",
     "torch._cslt_sparse_mm_search",
@@ -62,7 +69,13 @@ ignored_c_binding_in_graph_function_names = {
     "torch._test_parallel_materialize",
     "torch._C._storage_address",
     "torch._C._pickle_save",
-    "torch.cuda._get_device_properties",
+    "torch._validate_sparse_compressed_tensor_args",
+    "torch._validate_sparse_csr_tensor_args",
+    "torch._validate_sparse_bsr_tensor_args",
+    "torch._validate_sparse_csc_tensor_args",
+    "torch._validate_sparse_coo_tensor_args",
+    "torch._validate_sparse_bsc_tensor_args",
+    "torch._validate_compressed_sparse_indices",
 }
 if torch._C._llvm_enabled():
     ignored_c_binding_in_graph_function_names |= {

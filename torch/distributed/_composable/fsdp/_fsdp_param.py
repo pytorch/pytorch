@@ -104,7 +104,6 @@ class FSDPParam:
     param_dtype: Optional[torch.dtype]
     reduce_dtype: Optional[torch.dtype]
     _orig_size: torch.Size  # ND
-    _contiguous_orig_stride: Tuple[int, ...]
     sharded_size: torch.Size  # ND
     contiguous_sharded_stride: Tuple[int, ...]
     padded_sharded_param_size: torch.Size  # ND
@@ -200,7 +199,6 @@ class FSDPParam:
             self._global_stride = param.stride()
             param_data = param
         self._orig_size = param_data.size()
-        self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
         shard_rank = self.mesh_info.shard_mesh_rank
         shard_world_size = self.mesh_info.shard_mesh_size
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=0)
@@ -254,6 +252,11 @@ class FSDPParam:
                 f"defined or not defined for {inner_tensor}"
             )
         if self._has_fsdp_pre_all_gather:
+            if self.padded_sharded_param_size != self._sharded_local_tensor.size():
+                raise NotImplementedError(
+                    "FSDP extensions only support even sharding on dim-0.\n"
+                    f"{self._orig_size} is not divisible by FSDP world size {self.mesh_info.mesh.size()}."
+                )
             self._all_gather_metadata: Optional[Any] = None
             self._unsharded_inner_tensors: List[torch.Tensor] = []
 
@@ -307,7 +310,7 @@ class FSDPParam:
         unsharded_param = torch.as_strided(
             unsharded_tensor,
             self._orig_size,
-            self._contiguous_orig_stride,
+            make_contiguous_strides_for(self._orig_size),
             storage_offset=0,
         )
         if self.is_dtensor:
@@ -449,13 +452,10 @@ class FSDPParam:
         if self.sharded_state == ShardedState.SHARDED:
             sharded_param_data = self._sharded_param_data
             if self._has_fsdp_pre_all_gather:
-                assert hasattr(
-                    sharded_param_data, "fsdp_pre_all_gather"
-                ), f"Subclass was not preserved for {self._sharded_local_tensor}"
                 (
                     all_gather_inputs,
                     self._all_gather_metadata,
-                ) = sharded_param_data.fsdp_pre_all_gather()
+                ) = self._sharded_local_tensor.fsdp_pre_all_gather()
                 return [t.view(-1) for t in all_gather_inputs]
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:

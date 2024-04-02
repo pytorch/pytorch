@@ -1857,6 +1857,21 @@ class DimConstraints:
 TLS = threading.local()
 
 
+@dataclass(frozen=True)
+class ShapeEnvSettings:
+    """
+    Encapsulates all shape env settings that could potentially affect
+    FakeTensor dispatch. Used when creating dispatch cache keys.
+    """
+
+    allow_scalar_outputs: bool
+    allow_dynamic_output_shape_ops: bool
+    assume_static_by_default: bool
+    specialize_zero_one: bool
+    duck_shape: bool
+    prefer_deferred_runtime_asserts_over_guards: bool
+
+
 class ShapeEnv:
     # This is a wrapper over the actual __init__ function.
     #
@@ -1940,12 +1955,28 @@ class ShapeEnv:
         duck_shape=True,
         # For debugging
         co_fields=None,
+        # When True, whenever safe, we will generate a deferred runtime assert
+        # instead of a guard whenever we know that an expression must be True,
+        # otherwise it would be an error, even for backed SymInts (where we
+        # could ostensibly unconditionally generate guards).  This is useful
+        # for export, where preventing "error checking" sizes from showing up
+        # in guards is helpful, since these guards in some sense are overly
+        # pedantic.  See also https://github.com/pytorch/pytorch/issues/121749
+        prefer_deferred_runtime_asserts_over_guards=False,
         # XXX Add any new settings that could affect FakeTensor evaluation
         # to: torch._subclasses.fake_tensor._ShapeEnvSettings
     ):
-        # Not directly used by ShapeEnv; indirectly used by FakeTensor
-        self.allow_scalar_outputs = allow_scalar_outputs
-        self.allow_dynamic_output_shape_ops = allow_dynamic_output_shape_ops
+        self.settings = ShapeEnvSettings(
+            # Not directly used by ShapeEnv; indirectly used by FakeTensor
+            allow_scalar_outputs=allow_scalar_outputs,
+            allow_dynamic_output_shape_ops=allow_dynamic_output_shape_ops,
+            # End
+            assume_static_by_default=assume_static_by_default,
+            specialize_zero_one=specialize_zero_one,
+            duck_shape=duck_shape,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+        )
+
         self.guards: List[ShapeGuard] = []
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
@@ -2009,9 +2040,6 @@ class ShapeEnv:
         # part of the cache key); otherwise we'd have to iterate through
         # deferred_runtime_asserts to compute its length
         self.num_deferred_runtime_asserts = 0
-        self.assume_static_by_default = assume_static_by_default
-        self.specialize_zero_one = specialize_zero_one
-        self.duck_shape = duck_shape
         self.log = log
         self.log.debug("create_env")
         self.frozen = False
@@ -2058,6 +2086,30 @@ class ShapeEnv:
             # variable. Otherwise, the built FX graph on the replayed ShapeEnv will
             # not be valid.
             self.name_to_node: Dict[str, torch.fx.Node] = {}
+
+    @property
+    def allow_scalar_outputs(self):
+        return self.settings.allow_scalar_outputs
+
+    @property
+    def allow_dynamic_output_shape_ops(self):
+        return self.settings.allow_dynamic_output_shape_ops
+
+    @property
+    def assume_static_by_default(self):
+        return self.settings.assume_static_by_default
+
+    @property
+    def specialize_zero_one(self):
+        return self.settings.specialize_zero_one
+
+    @property
+    def duck_shape(self):
+        return self.settings.duck_shape
+
+    @property
+    def prefer_deferred_runtime_asserts_over_guards(self):
+        return self.settings.prefer_deferred_runtime_asserts_over_guards
 
     def check_equal(self, other: "ShapeEnv") -> None:
         """Compare another ShapeEnv for equivalence
@@ -2189,7 +2241,6 @@ class ShapeEnv:
         fresh = False
 
         if self._translation_validation_enabled and node_key not in self.fx_node_cache:
-            from torch.fx.experimental.validator import z3op
 
             # Presence of None in the arguments implies that we should ignore this operation.
             if any(a is None for a in args):
@@ -2199,12 +2250,11 @@ class ShapeEnv:
                 return None, fresh
 
             fresh = True
-            lifted_op = z3op(op, self.validator)
 
             # If translation validation is enabled, all arguments must have its
             # own FX node.
             assert all(a is not None for a in args), f"missing arg in FX graph ({op.__name__}): {args}"
-            node = self.fx_node_cache[node_key] = self.graph.call_function(lifted_op, args)
+            node = self.fx_node_cache[node_key] = self.graph.call_function(op, args)
             self.name_to_node[node.name] = node
 
         return self.fx_node_cache.get(node_key, None), fresh
@@ -4364,7 +4414,7 @@ class ShapeEnv:
 
         # Attempt to eliminate the unbacked SymInt
         new_expr = self._maybe_evaluate_static(expr, unbacked_only=True)
-        if new_expr.free_symbols <= self.var_to_val.keys():
+        if not self.prefer_deferred_runtime_asserts_over_guards and new_expr.free_symbols <= self.var_to_val.keys():
             # Do a normal guard
             return self.evaluate_expr(new_expr, fx_node=fx_node)
         # NB: Don't use new_expr as expr; it could contain gunk like shape0
@@ -4395,7 +4445,10 @@ class ShapeEnv:
             ra = RuntimeAssert(expr, msg, stack)
             # TODO: Do this in a way that is less janky than int(s.name[1:])
             cands = sorted([s for s in expr.free_symbols if s.name.startswith("u")], key=lambda s: int(s.name[1:]))
-            self.deferred_runtime_asserts.setdefault(cands[-1], []).append(ra)
+            # Is None when prefer_deferred_runtime_asserts_over_guards=True
+            # and the guard in question has no unbacked SymInts in front
+            ix = cands[-1] if cands else None
+            self.deferred_runtime_asserts.setdefault(ix, []).append(ra)
             self.num_deferred_runtime_asserts += 1
             self._update_version_counter()
             self._log_guard("runtime_assert", orig_expr, forcing_spec=False)

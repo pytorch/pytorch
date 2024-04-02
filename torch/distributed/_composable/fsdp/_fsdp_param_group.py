@@ -270,6 +270,7 @@ class FSDPParamGroup:
                 return
         self._to_sharded()
 
+    @torch.compiler.disable()
     def pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
