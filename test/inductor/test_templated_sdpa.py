@@ -10,6 +10,7 @@ import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.nn.attention.templated_attention import templated_attention
 from torch.testing._internal import common_utils
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.testing._internal.common_utils import requires_cuda
 
 
@@ -18,6 +19,25 @@ Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 
 def create_attention(score_mod):
     return functools.partial(templated_attention, score_mod=score_mod)
+
+
+# Function composition helpers
+def compose2(f, g):
+    def inner(score, b, h, m, n):
+        return f(g(score, b, h, m, n), b, h, m, n)
+
+    return inner
+
+
+def compose(*fs):
+    return functools.reduce(compose2, fs)
+
+
+test_dtypes = (
+    [torch.float16, torch.bfloat16, torch.float32]
+    if PLATFORM_SUPPORTS_BF16
+    else [torch.float16, torch.float32]
+)
 
 
 class TestTemplatedSDPA(InductorTestCase):
@@ -45,7 +65,7 @@ class TestTemplatedSDPA(InductorTestCase):
         )
 
     @requires_cuda
-    @common_utils.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @common_utils.parametrize("dtype", test_dtypes)
     def test_identity(self, dtype: torch.dtype):
         def score_mod(score, b, h, m, n):
             return score
@@ -53,7 +73,7 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(score_mod, dtype)
 
     @requires_cuda
-    @common_utils.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @common_utils.parametrize("dtype", test_dtypes)
     def test_causal_mask(self, dtype: torch.dtype):
         def score_mod(score, b, h, seq_len_q, seq_len_kv):
             return torch.where(seq_len_q >= seq_len_kv, score, float("-inf"))
@@ -61,7 +81,7 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(score_mod, dtype)
 
     @requires_cuda
-    @common_utils.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @common_utils.parametrize("dtype", test_dtypes)
     def test_rel_bias(self, dtype: torch.dtype):
         def score_mod(score, b, h, m, n):
             return score + (m - n)
@@ -69,7 +89,7 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(score_mod, dtype)
 
     @requires_cuda
-    @common_utils.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @common_utils.parametrize("dtype", test_dtypes)
     def test_alibi_bias(self, dtype: torch.dtype):
         def score_mod(score, b, h, m, n):
             return score + (m - n) * h
@@ -77,7 +97,7 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(score_mod, dtype)
 
     @requires_cuda
-    @common_utils.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @common_utils.parametrize("dtype", test_dtypes)
     def test_rel_causal(self, dtype: torch.dtype):
         def score_mod(score, b, h, m, n):
             return torch.where(m <= n, score + (m - n), float("-inf"))
@@ -85,16 +105,29 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(score_mod, dtype)
 
     @requires_cuda
-    @common_utils.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @common_utils.parametrize("dtype", test_dtypes)
     def test_alibi_causal(self, dtype: torch.dtype):
         def score_mod(score, b, h, m, n):
             return torch.where(m <= n, score + (m - n) * h, float("-inf"))
 
         self.run_test(score_mod, dtype)
 
+    @requires_cuda
+    @common_utils.parametrize("dtype", test_dtypes)
+    def test_function_composition(self, dtype: torch.dtype):
+        def score_mod_1(score, b, h, m, n):
+            return score + (m - n)
+
+        def score_mod_2(score, b, h, m, n):
+            return torch.where(m <= n, score, float("-inf"))
+
+        composed_score_mod = compose(score_mod_1, score_mod_2)
+
+        self.run_test(composed_score_mod, dtype)
+
     @expectedFailure
     @requires_cuda
-    @common_utils.parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32])
+    @common_utils.parametrize("dtype", test_dtypes)
     def test_captured_buffers(self, dtype: torch.dtype):
         head_offset = torch.rand(8, device="cuda", dtype=dtype)
 
