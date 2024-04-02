@@ -317,6 +317,9 @@ class OpsHandler(Protocol[T]):
     def log10(self, x0: T) -> T:
         ...
 
+    def log2(self, x0: T) -> T:
+        ...
+
     def nextafter(self, x0: T, x1: T) -> T:
         ...
 
@@ -512,7 +515,7 @@ class NoopHandler:
         return (None, None)
 
     @staticmethod
-    def scan(dtypes, combine_fn, values, inits) -> Tuple[None, ...]:
+    def scan(dtypes, combine_fn, values) -> Tuple[None, ...]:
         return tuple(None for i in range(len(values)))
 
     @staticmethod
