@@ -199,6 +199,56 @@ class TestOptimRenewed(TestCase):
             self.assertLess(closure().item(), initial_value)
 
 
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_tensor_lr(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+        for optim_input in all_optim_inputs:
+            weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+            weight_c = weight.clone().detach().requires_grad_(True)
+            bias = Parameter(torch.randn((10), device=device, dtype=dtype))
+            bias_c = bias.clone().detach().requires_grad_(True)
+            inpt = torch.randn(5, device=device, dtype=dtype)
+
+            kwargs = optim_input.kwargs
+            if "lr" in kwargs:
+                del kwargs["lr"]
+
+            kwargs["lr"] = 1.0 if optim_info.step_requires_closure else 1e-3
+            optimizer_r = optim_cls([weight, bias], **kwargs)
+
+            try:
+                kwargs["lr"] = torch.tensor(kwargs["lr"])
+                optimizer = optim_cls([weight_c, bias_c], **kwargs)
+            except ValueError as e:
+                self.assertRegex(str(e), ".*lr as a Tensor is not supported.*")
+                continue
+
+            def closure(optim, w, b, i):
+                optim.zero_grad()
+                loss = (w.mv(i) + b).pow(2).sum()
+                loss.backward()
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
+                    w.grad = w.grad.to_sparse()
+                    b.grad = b.grad.to_sparse()
+                return loss
+
+            for _ in range(5):
+                if optim_info.step_requires_closure:
+                    optimizer_r.step(functools.partial(closure, optimizer_r, weight, bias, inpt))
+                    optimizer.step(functools.partial(closure, optimizer, weight_c, bias_c, inpt))
+                else:
+                    closure(optimizer_r, weight, bias, inpt)
+                    closure(optimizer, weight_c, bias_c, inpt)
+
+                self.assertEqual(weight, weight_c)
+                self.assertEqual(bias, bias_c)
+
+
     @skipMPS
     @optims([o for o in optim_db if o.supports_complex], dtypes=[torch.complex64])
     def test_complex(self, device, dtype, optim_info):
