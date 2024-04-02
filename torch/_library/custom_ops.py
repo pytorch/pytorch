@@ -12,12 +12,15 @@ from typing import (
     Union,
 )
 
+from torch.utils._exposed_in import exposed_in
+
 from .. import _C, _library, autograd, library, Tensor
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
 
 
+@exposed_in("torch.library")
 def custom_op(
     name: str,
     /,
@@ -115,7 +118,6 @@ class CustomOpDef:
         # Fields used to interface with the PyTorch dispatcher
         self._namespace = namespace
         self._name = name
-        self._qualname = f"{self._namespace}::{self._name}"
         self._schema = schema
 
         self._init_fn = fn
@@ -127,6 +129,10 @@ class CustomOpDef:
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
+
+    @property
+    def _qualname(self) -> str:
+        return f"{self._namespace}::{self._name}"
 
     def __repr__(self) -> str:
         return f"<CustomOpDef({self._qualname})>"
@@ -249,11 +255,11 @@ class CustomOpDef:
             >>> from torch import Tensor
             >>>
             >>> # Example 1: an operator without data-dependent output shape
-            >>> @torch.library.custom_op("mylib::custom_linear", mutated_args=())
-            >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
+            >>> @torch.library.custom_op("mylib::linear", mutated_args=())
+            >>> def linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
             >>>     return (x @ weight.t()) + bias
             >>>
-            >>> @custom_linear.register_fake
+            >>> @linear.register_fake
             >>> def _(x, weight, bias):
             >>>     assert x.dim() == 2
             >>>     assert weight.dim() == 2
@@ -267,18 +273,18 @@ class CustomOpDef:
             >>> weight = torch.randn(2, 2)
             >>> bias = torch.randn(2)
             >>> # xdoctest: +SKIP("Requires Python <= 3.11")
-            >>> out = torch.compile(custom_linear, fullgraph=True)(x, weight, bias)
+            >>> out = torch.compile(linear, fullgraph=True)(x, weight, bias)
             >>> # xdoctest: +SKIP("Requires Python <= 3.11")
             >>> assert torch.allclose(out, torch.nn.functional.linear(x, weight, bias))
             >>>
             >>> # Example 2: an operator with data-dependent output shape
-            >>> @torch.library.custom_op("mylib::custom_nonzero", mutated_args=())
-            >>> def custom_nonzero(x: Tensor) -> Tensor:
+            >>> @torch.library.custom_op("mylib::nonzero", mutated_args=())
+            >>> def nonzero(x: Tensor) -> Tensor:
             >>>     x_np = x.cpu().numpy()
             >>>     res = np.stack(np.nonzero(x_np), axis=1)
             >>>     return torch.tensor(res, device=x.device)
             >>>
-            >>> @custom_nonzero.register_fake
+            >>> @nonzero.register_fake
             >>> def _(x):
             >>>     # Number of nonzero-elements is data-dependent.
             >>>     # Since we cannot peek at the data in an abstract impl,
@@ -292,7 +298,7 @@ class CustomOpDef:
             >>>
             >>> x = torch.tensor([0, 1, 2, 0, 0, 1])
             >>> # xdoctest: +SKIP("Requires Python <= 3.11")
-            >>> out = torch.compile(custom_nonzero)(x)
+            >>> out = torch.compile(nonzero, fullgraph=True)(x)
             >>> # xdoctest: +SKIP("Requires Python <= 3.11")
             >>> assert torch.allclose(out, x.nonzero())
 
