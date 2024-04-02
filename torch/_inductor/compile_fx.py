@@ -60,7 +60,12 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import ExternKernelNode
-from .utils import get_dtype_size, has_incompatible_cudagraph_ops, output_node
+from .utils import (
+    get_cloned_parameter_buffer_name,
+    get_dtype_size,
+    has_incompatible_cudagraph_ops,
+    output_node,
+)
 from .virtualized import V
 
 if config.is_fbcode():
@@ -151,12 +156,23 @@ def _unlift_graph(mod, gm, graph_signature):
 
     placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
     lifted_inputs = []
+
+    # In AOTI, module parameters and buffers are not lifted as graph inputs.
+    # As a result, mutation to buffers has side effect which makes their initial
+    # values different from Eager. So we clone them here as a copy.
+    # We are not cloning for parameters, although it will be needed if we want to
+    # support training.
     for node in placeholder_nodes:
         node_name = node.name
         if node_name in graph_signature.inputs_to_parameters:
-            lifted_inputs.append(graph_signature.inputs_to_parameters[node_name])
+            parameter_name = graph_signature.inputs_to_parameters[node_name]
+            lifted_inputs.append(parameter_name)
         elif node_name in graph_signature.inputs_to_buffers:
-            lifted_inputs.append(graph_signature.inputs_to_buffers[node_name])
+            buffer_name = graph_signature.inputs_to_buffers[node_name]
+            lifted_inputs.append(buffer_name)
+            gm.meta[
+                get_cloned_parameter_buffer_name(buffer_name)
+            ] = clone_preserve_strides(state_dict[buffer_name])
         else:
             assert node_name in graph_signature.user_inputs
             lifted_inputs.append(None)
