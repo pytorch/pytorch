@@ -1498,8 +1498,7 @@ class MPSLeakyReluTest(TestCaseMPS):
 
         mps_leaky_relu.backward()
         cpu_leaky_relu.backward()
-        assert cpu_x.grad is not None # Check that the grad is well-populated
-
+        assert cpu_x.grad is not None  # Check that the grad is well-populated
         self.assertEqual(cpu_x.grad, mps_x.grad)
 
     def testNumbersCPU(self):
@@ -6665,23 +6664,18 @@ class TestMPS(TestCaseMPS):
             # GELU is not supported on CPU, so cast it to float
             gelu_result_cpu = torch.nn.GELU()(cpu_x.to(torch.float))
 
-            gelu_result = gelu_result.sum()
-            gelu_result_cpu = gelu_result_cpu.sum()
+            cpu_grad = torch.ones_like(gelu_result_cpu)
+            grad = cpu_grad.to('mps')
 
-            gelu_result.backward()
-            gelu_result_cpu.backward()
+            gelu_result.backward(gradient=grad)
+            gelu_result_cpu.backward(gradient=cpu_grad)
 
             atol = 1e-5 if dtype == torch.float else 1e-2
             rtol = 1e-3 if dtype == torch.float else 1e-2
             self.assertEqual(gelu_result, gelu_result_cpu.to(dtype), atol=atol, rtol=rtol)
-            assert x.grad is not None
-            if (dtype, shape, contiguous) not in [(torch.float32, [], True), # Known issues, not a regression
-                                                (torch.float32, [], False),
-                                                (torch.float16, [], True),
-                                                (torch.float16, [], False),
-                                                (torch.float16, (4,), True),
-                                                (torch.float16, (4,), False)]:
-                self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
+
+            assert x.grad is not None  # Check that the grad is well-populated
+            self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
@@ -6709,23 +6703,18 @@ class TestMPS(TestCaseMPS):
             mish_result = torch.nn.Mish()(x)
             mish_result_cpu = torch.nn.Mish()(cpu_x)
 
-            mish_result = mish_result.sum()
-            mish_result_cpu = mish_result_cpu.sum()
+            cpu_grad = torch.ones_like(mish_result_cpu)
+            grad = cpu_grad.to('mps')
 
-            mish_result.backward()
-            mish_result_cpu.backward()
+            mish_result.backward(gradient=grad)
+            mish_result_cpu.backward(gradient=cpu_grad)
 
             atol = 1e-5 if dtype == torch.float else 1e-2
             rtol = 1e-3 if dtype == torch.float else 1e-2
             self.assertEqual(mish_result, mish_result_cpu.to(dtype), atol=atol, rtol=rtol)
-            assert x.grad is not None
-            if (dtype, shape, contiguous) not in [(torch.float32, [], True), # Known issues, not a regression
-                                                (torch.float32, [], False),
-                                                (torch.float16, [], True),
-                                                (torch.float16, [], False),
-                                                (torch.float16, (4,), True),
-                                                (torch.float16, (4,), False)]:
-                self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
+
+            assert x.grad is not None  # Check that the grad is well-populated
+            self.assertEqual(x.grad, cpu_x.grad, atol=atol, rtol=rtol)
 
         # Test empty shape too
         for dtype in [torch.float, torch.half]:
