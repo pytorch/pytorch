@@ -882,7 +882,7 @@ class CppOverrides(OpOverrides):
     @staticmethod
     def constant(val, dtype):
         opt_ctx: OptimizationContext = get_current_node_opt_ctx()
-        assert opt_ctx and opt_ctx.dtype is not None
+        assert opt_ctx and opt_ctx.dtype is not None, opt_ctx
         dtype = opt_ctx.dtype
         if dtype in DTYPE_LOWP_FP:
             # Since load promotes all half-precision inputs to float, constants

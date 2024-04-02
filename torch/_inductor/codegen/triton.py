@@ -609,7 +609,7 @@ class TritonOverrides(OpOverrides):
         elif bug == "accuracy":
             return f"{x} + 1"
         elif bug is None:
-            return ops.maximum("0", x)
+            return ops.maximum(ops.constant(0, torch.int32), x)
         else:
             raise AssertionError(
                 f"unrecognized config triton.inject_relu_bug_TESTING_ONLY = {bug!r}"
@@ -850,11 +850,9 @@ class TritonOverrides(OpOverrides):
 
     @staticmethod
     def sign(x):
-        def to_int(s):
-            return f"{s}.to(tl.int8)"
-
-        left = to_int(ops.lt("0", x))
-        right = to_int(ops.lt(x, "0"))
+        z = ops.constant(0, torch.int32)
+        left = ops.to_dtype((ops.lt(z, x)), torch.int8)
+        right = ops.to_dtype((ops.lt(x, z)), torch.int8)
         sub = ops.sub(left, right)
         return f"{sub}.to({x}.dtype)"
 

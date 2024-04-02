@@ -340,6 +340,9 @@ class SymPyValueRangeAnalysis:
 
     @staticmethod
     def constant(value, dtype):
+        if isinstance(value, ValueRanges):
+            assert value.is_singleton()
+            value = value.lower
         # NB: value is NOT a sympy expression, it's a constant!
         is_python = isinstance(value, (int, float, bool))
         assert is_python or isinstance(

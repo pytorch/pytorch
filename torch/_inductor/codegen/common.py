@@ -276,6 +276,7 @@ class DataTypePropagation:
         if node.target in (
             "get_index",
             "index_expr",
+            "randint64",
         ):
             return torch.int64
 
@@ -569,7 +570,9 @@ class OpOverrides:
     @staticmethod
     def remainder(a, b):
         r = ops.mod(a, b)
-        return ops.where(f"(({r} != 0) & (({r} < 0) != ({b} < 0)))", ops.add(r, b), r)
+        cond = ops.and_(ops.ne(r, ops.constant(0, torch.int32)),
+                        ops.ne(ops.signbit(r), ops.signbit(b)))
+        return ops.where(cond, ops.add(r, b), r)
 
     @staticmethod
     def load_seed(name, offset):
@@ -1455,57 +1458,65 @@ class Kernel(CodeGen):
         # TODO: hoist this to top level
         class CSEProxy:
             self.name = "CSEProxy"
+            vr_analysis = ValueRangeAnalysis()
 
             @staticmethod
             def __getattr__(name: str) -> Callable[..., CSEVariable]:  # type: ignore[misc]
                 def inner(*args, **kwargs):
-                    # TritonTemplateKernel has no current_node
-                    buf_bounds = ValueRanges.unknown()
-                    if (
-                        fx_node := getattr(V.interpreter, "current_node", None)
-                    ) and fx_node.target == name:
-                        assert isinstance(self.node_to_bounds, dict)
-                        buf_bounds = self.node_to_bounds.get(
-                            fx_node, ValueRanges.unknown()
-                        )
-                    elif bound_handler := getattr(ValueRangeAnalysis, name, None):
-                        # If there is no FX bound but we know how to compute one we do so
-                        assert not kwargs
-                        arg_bounds = []
-                        for x in args:
-                            if isinstance(x, CSEVariable):
-                                arg_bounds.append(x.bounds)
-                            elif isinstance(x, str):
-                                # No current node here
-                                if fx_node is None:
-                                    break
-                                # This always comes from an index_expr, otherwise it'd be a CSEVariable
-                                assert fx_node.target == "index_expr", (
-                                    name,
-                                    fx_node.target,
-                                    args,
-                                )
-                                # TODO a better fix would be to already return a CSEVariable with the bound computed
-                                sympy_expr = V.kernel.current_node._body.indexing_exprs[
-                                    fx_node.args[1].args[0]
-                                ]
-                                arg_bounds.append(bound_sympy(sympy_expr))
-                            elif isinstance(x, sympy.Expr):
-                                arg_bounds.append(bound_sympy(x))
-                            else:
-                                arg_bounds.append(x)
-                        buf_bounds = bound_handler(*arg_bounds)
+                    bounds = CSEProxy._bound_variable(name, *args, **kwargs)
 
                     value = getattr(parent_handler, name)(*args, **kwargs)  # type: ignore[has-type]
 
                     def do_cse(v):
-                        csevar = self.cse.generate(self.compute, v, bounds=buf_bounds)
+                        csevar = self.cse.generate(self.compute, v, bounds=bounds)
                         csevar.update_on_args(name, args, kwargs)
                         return csevar
 
                     return pytree.tree_map(do_cse, value)
 
                 return inner
+
+            @staticmethod
+            def _bound_variable(name, *args, **kwargs):
+                """
+                If the variable comes from an FX node, we forward the bound we have already computed
+                Else, if the variable when codegen'ing another op, we try to compute its bounds
+                """
+                # TritonTemplateKernel has no current_node
+                buf_bounds = ValueRanges.unknown()
+                if (
+                    fx_node := getattr(V.interpreter, "current_node", None)
+                ) and fx_node.target == name:
+                    assert isinstance(self.node_to_bounds, dict)
+                    buf_bounds = self.node_to_bounds.get(
+                        fx_node, ValueRanges.unknown()
+                    )
+                elif (hasattr(ValueRangeAnalysis, name)) and fx_node is not None:
+                    # These create lots of inner strings. We would need to compute the bounds at the ops
+                    # We will also likely not get much from computing VRs on these nodes
+                    if all(s not in fx_node.target for s in ("set_indirect", "reduction", "scan")):
+                        # If there is no FX bound but we know how to compute one we do so
+                        assert not kwargs
+
+                        def arg_to_bound(x):
+                            if isinstance(x, CSEVariable):
+                                return x.bounds
+                            elif isinstance(x, str):
+                                # This always comes from an index_expr, otherwise it'd be a CSEVariable
+                                assert fx_node.target == "index_expr", fx_node.target
+                                # TODO a better fix would be to already return a variable with the bound computed
+                                sympy_expr = V.kernel.current_node._body.indexing_exprs[
+                                    fx_node.args[1].args[0]
+                                ]
+                                return bound_sympy(sympy_expr)
+                            elif isinstance(x, sympy.Expr):
+                                return bound_sympy(x)
+                            else:
+                                return x
+                        arg_bounds = map(arg_to_bound, args)
+                        buf_bounds = getattr(CSEProxy.vr_analysis, name)(*arg_bounds)
+                return buf_bounds
+
 
             @staticmethod
             def indirect_indexing(
