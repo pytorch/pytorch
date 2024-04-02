@@ -255,13 +255,10 @@ class TestFP8MatmulCuda(TestCase):
         with self.assertRaises(RuntimeError):
             self._test_tautological_mm(device, e5m2_type, e5m2_type)
 
-        version = _get_torch_cuda_version()
+        self._test_tautological_mm(device, size=64, out_dtype=torch.float16)
+        self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
+        # hipblaslt does not yet support bfloat16 output
         if torch.version.hip is None:
-            with self.assertRaises(RuntimeError):
-              self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
-              self._test_tautological_mm(device, size=64, out_dtype=torch.float16)
-
-        with self.assertRaises(RuntimeError):
             self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
 
         with self.assertRaises(RuntimeError):
