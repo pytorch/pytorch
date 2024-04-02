@@ -63,7 +63,7 @@ bool use_channels_last_for_conv(
     bool is_transpose);
 
 std::vector<int64_t> compatible_groups_deconv_strides(
-    const at::Tensor& wgh,
+    const at::Tensor& weight,
     dnnl::memory::dims group_size);
 
 } // namespace at::native::onednn
