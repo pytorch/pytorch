@@ -1493,11 +1493,12 @@ class MPSLeakyReluTest(TestCaseMPS):
 
         # test backward pass
 
-        mps_leaky_relu = mps_leaky_relu.sum()
-        cpu_leaky_relu = cpu_leaky_relu.sum()
+        cpu_grad = torch.ones_like(cpu_leaky_relu)
+        mps_grad = cpu_grad.to('mps')
 
-        mps_leaky_relu.backward()
-        cpu_leaky_relu.backward()
+        mps_leaky_relu.backward(gradient=mps_grad)
+        cpu_leaky_relu.backward(gradient=cpu_grad)
+
         assert cpu_x.grad is not None  # Check that the grad is well-populated
         self.assertEqual(cpu_x.grad, mps_x.grad)
 
