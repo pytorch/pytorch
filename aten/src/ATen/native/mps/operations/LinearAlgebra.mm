@@ -443,7 +443,7 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
       int32_t baseTransposeStrideDim = batch2._base().dim() == 4 ? -3 : -2;
       if (batch2._base().stride(0) == batch2.stride(0) &&
           batch2._base().stride(baseTransposeStrideDim) == batch2.stride(-1)) {
-        shape = @[@(viewSizes[0]), @(viewSizes[2]), @(viewSizes[1])];
+        shape = @[ @(viewSizes[0]), @(viewSizes[2]), @(viewSizes[1]) ];
         doTranspose = true;
       }
     }
@@ -459,18 +459,16 @@ static Tensor& bmm_out_mps_impl(const Tensor& batch1, const Tensor& batch2, Tens
   };
 
   @autoreleasepool {
-    string key = "bmm_out_mps_impl" + getTensorsStringKey({batch1, batch2}, true, /*exclude_shape*/true) + std::to_string(doTranspose);
+    string key = "bmm_out_mps_impl" + getTensorsStringKey({batch1, batch2}, true, /*exclude_shape*/ true) +
+        std::to_string(doTranspose);
 
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor *batch1Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch1.scalar_type()));
-      MPSGraphTensor *batch2Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch2.scalar_type()));
-      MPSGraphTensor *batch2TensorTranspose = batch2Tensor;
+      MPSGraphTensor* batch1Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch1.scalar_type()));
+      MPSGraphTensor* batch2Tensor = mps::mpsGraphUnrankedPlaceHolder(mpsGraph, getMPSDataType(batch2.scalar_type()));
+      MPSGraphTensor* batch2TensorTranspose = batch2Tensor;
 
       if (doTranspose) {
-        batch2TensorTranspose = [mpsGraph transposeTensor:batch2Tensor
-                                                dimension:-1
-                                            withDimension:-2
-                                                     name:nil];
+        batch2TensorTranspose = [mpsGraph transposeTensor:batch2Tensor dimension:-1 withDimension:-2 name:nil];
       }
 
       MPSGraphTensor* productTensor = [mpsGraph matrixMultiplicationWithPrimaryTensor:batch1Tensor

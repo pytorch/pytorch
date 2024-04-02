@@ -37,23 +37,26 @@ kernel void copy_cast_kernel(uint tid              [[thread_position_in_grid]],
 }}
 )METAL_COPY_CAST";
 
-static
-id<MTLLibrary> compileCopyCastOpsLibrary(id<MTLDevice> device,
-                                              const std::string& dtypeSrc,
-                                              const std::string& dtypeDst) {
+static id<MTLLibrary> compileCopyCastOpsLibrary(id<MTLDevice> device,
+                                                const std::string& dtypeSrc,
+                                                const std::string& dtypeDst) {
   auto key = dtypeSrc + dtypeDst;
   static std::unordered_map<std::string, id<MTLLibrary>> _libCache;
   auto it = _libCache.find(key);
   if (it != _libCache.end()) {
     return it->second;
   }
-  NSError *error = nil;
-  MTLCompileOptions *options = [[MTLCompileOptions new] autorelease];
-  [options setLanguageVersion: MTLLanguageVersion2_3];
-  auto copyCastLib = [device newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(COPY_CAST_OP_TEMPLATE_TENSOR, dtypeSrc, dtypeDst).c_str()]
-                                               options:options
-                                                 error:&error];
-  TORCH_CHECK(copyCastLib != nil && error == nil, "Failed to compile copy cast library, error: ", [[error description] UTF8String]);
+  NSError* error = nil;
+  MTLCompileOptions* options = [[MTLCompileOptions new] autorelease];
+  [options setLanguageVersion:MTLLanguageVersion2_3];
+  auto copyCastLib = [device
+      newLibraryWithSource:[NSString stringWithUTF8String:fmt::format(COPY_CAST_OP_TEMPLATE_TENSOR, dtypeSrc, dtypeDst)
+                                                              .c_str()]
+                   options:options
+                     error:&error];
+  TORCH_CHECK(copyCastLib != nil && error == nil,
+              "Failed to compile copy cast library, error: ",
+              [[error description] UTF8String]);
   _libCache[key] = copyCastLib;
   return copyCastLib;
 }
@@ -66,15 +69,16 @@ static id<MTLComputePipelineState> getPipelineState(id<MTLDevice> device,
   static std::unordered_map<std::string, id<MTLComputePipelineState>> _mtlPipelineCache;
   auto it = _mtlPipelineCache.find(key);
   if (it != _mtlPipelineCache.end()) {
-     return it->second;
+    return it->second;
   }
 
-  NSError *error = nil;
+  NSError* error = nil;
   id<MTLLibrary> library = compileCopyCastOpsLibrary(device, dtypeSrc, dtypeDst);
   id<MTLFunction> func = [library newFunctionWithName:[NSString stringWithUTF8String:kernel.c_str()]];
   TORCH_CHECK(func, "Failed to load the Metal Shader function: ", kernel);
   id<MTLComputePipelineState> pso = [device newComputePipelineStateWithFunction:func error:&error];
-  TORCH_CHECK(pso != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
+  TORCH_CHECK(
+      pso != nil && error == nil, "Failed to construct pipeline state: ", [[error localizedDescription] UTF8String]);
   _mtlPipelineCache[key] = pso;
   return pso;
 }
