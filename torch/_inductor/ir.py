@@ -4059,9 +4059,14 @@ class ExternKernel(InputsKernel):
             while isinstance(x.get_layout(), NonOwningLayout):
                 x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
-                # If the default size and stride of a FlexibleLayout is already the required order,
-                # return it as a FixedLayout by using its default size and stride, to be consistent
-                # with the behavior of calling require_stride_order on a FixedLayout
+                # If the the FlexibleLayout already has the size and stride in the required order,
+                # freeze it to a FixedLayout by using its current size and stride.
+                # The behavior of using its current size and stride or the given order can be different
+                # if the size and stride has ambiguilty, for example for a 4D input where the iC = 1:
+                # size=[s0, 1, 28, 28], stride=[784, 784, 28, 1]. If the required order is [3, 0, 2, 1] (channels last),
+                # the current size and stride already satisfies this order.
+                # However by freezing it to the required order, the layout will be changed to:
+                # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
 
                 # fix flexiblelayout to be FixedLayout with stride_order
                 as_storage_and_layout(
