@@ -124,10 +124,14 @@ class OptimizerInfo:
         # A subset of the global-cliquey flags (fused, foreach, differentiable) the optimizer
         # supports. See NOTE: [optimizer kwarg categories] for what global-cliquey means.
         supported_impls: Tuple[str] = ("foreach", "differentiable"),
-        # the devices on which the optim supports sparse tensors for params and grads, see SGD
-        supports_sparse_on: Tuple[str] = (),
+        # the optim supports passing in sparse gradients as well as dense grads
+        supports_sparse: bool = False,
         # the optim only supports one config: sparse grads w/ dense params, see SparseAdam
         only_supports_sparse_grads: bool = False,
+        # Tuple of (optimizer kwargs, schedulers_constructors) specifically for sparse tests,
+        # with especially tuned hyperparameters. These only apply if the optimizer supports
+        # sparse parameters or grads.
+        metadata_for_sparse=({}, []),
         # the optim supports complex parameters
         supports_complex: bool = True,
         # whether the optimizer.step() function requires a closure to be passed
@@ -144,7 +148,8 @@ class OptimizerInfo:
         self.optim_inputs_func = optim_inputs_func
         self.scheduler_inputs = scheduler_inputs
         self.supported_impls = supported_impls
-        self.supports_sparse_on = supports_sparse_on
+        self.supports_sparse = supports_sparse
+        self.metadata_for_sparse = metadata_for_sparse
         self.only_supports_sparse_grads = only_supports_sparse_grads
         self.supports_complex = supports_complex
         self.step_requires_closure = step_requires_closure
@@ -1135,7 +1140,14 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adagrad,
         optim_error_inputs_func=optim_error_inputs_func_adagrad,
         supported_impls=("foreach", "differentiable"),
-        supports_sparse_on=("cpu"),
+        supports_sparse=True,
+        metadata_for_sparse=(
+            {"lr": 0.1, "weight_decay": 0, "lr_decay": 0},
+            [
+                lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
+                lambda opt: ReduceLROnPlateau(opt, threshold=1e-4),
+            ],
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1183,6 +1195,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Fails assertion of params close to params_c at all, see #123147"
+                ),
+                "TestOptimRenewed",
+                "test_rosenbrock_sparse",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -2077,7 +2096,17 @@ optim_db: List[OptimizerInfo] = [
         ),
         optim_error_inputs_func=optim_error_inputs_func_sgd,
         supported_impls=("foreach", "differentiable", "fused"),
-        supports_sparse_on=("cpu", "cuda"),
+        supports_sparse=True,
+        metadata_for_sparse=(
+            {
+                "lr": 4.8e-3,
+                "maximize": False,
+                "momentum": 0,
+                "nesterov": False,
+                "weight_decay": 0,
+            },
+            [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
+        ),
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -2117,6 +2146,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Fails assertion of params close to params_c at all, see #123147"
+                ),
+                "TestOptimRenewed",
+                "test_rosenbrock_sparse",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -2203,6 +2239,7 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_sparseadam,
         supported_impls=(),
         only_supports_sparse_grads=True,
+        metadata_for_sparse=({"lr": 4e-2}, []),
         supports_complex=False,  # Missing complex support, see #118153
         skips=(
             DecorateInfo(
