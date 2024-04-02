@@ -355,6 +355,15 @@ def _create_cpu_state_dict(
     Given a state_dict, create another state_dict with the same structure and elements.
     However, all tensors in the returned state_dict are new tensors on CPU. These
     tensors can be placed on pin_memory or share_memory based on the provided arguments.
+
+    .. warning::
+        Setting both `pin_memory` and `share_memory` to True significantly increases the
+        latency of this method because of the nuances which require us to register memory
+        as pinned directly as opposed to relying on the pin_memory cache allocator. This
+        option should only be used for long lived tensors which are required to be shared.
+        This is not the case as long as at least one of `pin_memory` or `share_memory` is
+         set to False.
+
     """
 
     def tensor_func(
