@@ -171,6 +171,71 @@ class CudaInterface(DeviceInterface):
         return major * 10 + min
 
 
+get_xpu_stream: Optional[Callable[[int], int]]
+if torch.xpu._is_compiled():
+    from torch._C import _xpu_getCurrentRawStream as get_xpu_stream
+else:
+    get_xpu_stream = None
+
+
+class XpuInterface(DeviceInterface):
+    device = torch.xpu.device
+    Event = torch.xpu.Event
+    Stream = torch.xpu.Stream
+
+    class Worker:
+        @staticmethod
+        def set_device(device: int):
+            caching_worker_current_devices["xpu"] = device
+
+        @staticmethod
+        def current_device() -> int:
+            if "xpu" in caching_worker_current_devices:
+                return caching_worker_current_devices["xpu"]
+            return torch.xpu.current_device()
+
+        @staticmethod
+        def get_device_properties(device: _device_t = None):
+            if device is not None:
+                if isinstance(device, str):
+                    device = torch.device(device)
+                    assert device.type == "xpu"
+                if isinstance(device, torch.device):
+                    device = device.index
+            if device is None:
+                device = XpuInterface.Worker.current_device()
+
+            if "xpu" not in caching_worker_device_properties:
+                device_prop = [
+                    torch.xpu.get_device_properties(i)
+                    for i in range(torch.xpu.device_count())
+                ]
+                caching_worker_device_properties["xpu"] = device_prop
+
+            return caching_worker_device_properties["xpu"][device]
+
+    current_device = staticmethod(torch.xpu.current_device)
+    set_device = staticmethod(torch.xpu.set_device)
+    device_count = staticmethod(torch.xpu.device_count)
+    stream = staticmethod(torch.xpu.stream)  # type: ignore[assignment]
+    current_stream = staticmethod(torch.xpu.current_stream)
+    set_stream = staticmethod(torch.xpu.set_stream)  # type: ignore[assignment]
+    _set_stream_by_id = staticmethod(torch.xpu._set_stream_by_id)  # type: ignore[assignment]
+    synchronize = staticmethod(torch.xpu.synchronize)
+    get_device_properties = staticmethod(torch.xpu.get_device_properties)  # type: ignore[assignment]
+    get_raw_stream = staticmethod(get_xpu_stream)  # type: ignore[arg-type]
+
+    # Can be mock patched by @patch decorator.
+    @staticmethod
+    def is_available() -> bool:
+        return torch.xpu.is_available()
+
+    @staticmethod
+    def get_compute_capability(device: _device_t = None):
+        cc = torch.xpu.get_device_capability(device)
+        return cc
+
+
 device_interfaces: Dict[str, Type[DeviceInterface]] = {}
 _device_initialized = False
 
@@ -204,4 +269,9 @@ def init_device_reg():
     register_interface_for_device("cuda", CudaInterface)
     for i in range(torch.cuda.device_count()):
         register_interface_for_device(f"cuda:{i}", CudaInterface)
+
+    register_interface_for_device("xpu", XpuInterface)
+    for i in range(torch.xpu.device_count()):
+        register_interface_for_device(f"xpu:{i}", XpuInterface)
+
     _device_initialized = True
