@@ -85,7 +85,7 @@ ExtraState* init_and_set_extra_state(PyCodeObject* code) {
 PyObject* lookup(
     ExtraState* extra_state,
     PyObject* f_locals,
-    PyObject* backend) {
+    const PyObject* backend) {
   size_t index = 0;
   CacheEntry* found = nullptr;
   py::handle locals(f_locals);

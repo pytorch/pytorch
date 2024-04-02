@@ -102,14 +102,9 @@ static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
 static std::vector<std::string> TORCH_NCCL_ABORT_IN_DESTROY_PG = {
     "TORCH_NCCL_ABORT_IN_DESTROY_PG"};
 
-// Whether to compute duration between start and end cuda events.
-// If true, timing (enableTiming_) will also be automatically enabled.
-static std::vector<std::string> TORCH_NCCL_COMPUTE_DURATION = {
-    "TORCH_NCCL_COMPUTE_DURATION"};
-
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
-constexpr const char* TIMEOUT_DUMP = "timeout_dump";
+constexpr const char* EXCEPTION_DUMP = "exception_dump";
 
 constexpr const int kWorkStatusUpdatePeriodMs = 30 * 1000; // 30 seconds
 
@@ -986,10 +981,10 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   int coalescing_state_ = 0;
 
   // Stores device indexes for all collectives run inside a coalescing block
-  std::vector<at::Device> coalescedDevices_;
+  at::Device coalescedDevice_ = at::Device("cuda");
 
   // Stores communicators for all collectives run inside a coalescing block
-  std::vector<std::shared_ptr<NCCLComm>> coalescedComms_;
+  std::shared_ptr<NCCLComm> coalescedComm_ = nullptr;
 
   // map from the key: "group name + pg counter (ID)" to the
   // unique NCCL ID count. This needs to be group and pg specific
@@ -1031,11 +1026,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
 
-  // Whether or not to compute duration between start and end cuda events.
-  bool computeDuration_;
-
-  // Whether or not to dump debug info on timeout
-  bool dumpOnTimeout_;
+  // Whether or not to dump debug info on exception including both watchdog
+  // timeout and nccl errors.
+  bool dumpOnException_;
 
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
