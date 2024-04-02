@@ -34,11 +34,11 @@ void adam_fused_step_impl(
 
   // need to use double here to align with non-fused adam
   double bias_correction1 = 1 - std::pow(beta1, step);
-  double step_size =  lr / bias_correction1;
-  double bias_correction2 = 1 - std::pow(beta2, step);
-  double exp_avg_grad_coefficient = 1 - beta1;
-  double exp_avg_sq_grad_coefficient = 1 - beta2;
-  double bias_correction2_sqrt = std::sqrt(bias_correction2);
+  scalar_t step_size =  lr / bias_correction1;
+  scalar_t bias_correction2 = 1 - std::pow(beta2, step);
+  scalar_t exp_avg_grad_coefficient = 1 - beta1;
+  scalar_t exp_avg_sq_grad_coefficient = 1 - beta2;
+  scalar_t bias_correction2_sqrt = std::sqrt(bias_correction2);
 
   using Vec = at::vec::Vectorized<scalar_t>;
 
@@ -69,10 +69,11 @@ void adam_fused_step_impl(
           if (weight_decay != 0.f){
             grad_vec += param_vec * Vec(scalar_t(weight_decay));
           }
-          Vec exp_avg_vec = Vec::loadu(exp_avg_ptr + d) * Vec(scalar_t(beta1)) +
-              grad_vec * Vec(scalar_t(exp_avg_grad_coefficient));
+          Vec exp_avg_vec = Vec::loadu(exp_avg_ptr + d);
+          exp_avg_vec = exp_avg_vec + Vec(scalar_t(exp_avg_grad_coefficient)) * (grad_vec - exp_avg_vec);
+
           Vec exp_avg_sq_vec = Vec::loadu(exp_avg_sq_ptr + d) * Vec(scalar_t(beta2)) +
-              grad_vec * grad_vec * Vec(scalar_t(exp_avg_sq_grad_coefficient));
+              Vec(scalar_t(exp_avg_sq_grad_coefficient)) * grad_vec * grad_vec;
           exp_avg_vec.store(exp_avg_ptr + d);
           exp_avg_sq_vec.store(exp_avg_sq_ptr + d);
 
@@ -101,20 +102,20 @@ void adam_fused_step_impl(
           }
           if (maximize) grad_val = -grad_val;
           if (weight_decay != 0.f){
-            grad_val += param_ptr[d] * weight_decay;
+            grad_val += param_ptr[d] * scalar_t(weight_decay);
           }
-          exp_avg_ptr[d] =
-              exp_avg_ptr[d] * beta1 + grad_val * exp_avg_grad_coefficient;
-          exp_avg_sq_ptr[d] = exp_avg_sq_ptr[d] * beta2 +
-              grad_val * grad_val * (exp_avg_sq_grad_coefficient);
+          exp_avg_ptr[d] = exp_avg_ptr[d] + exp_avg_grad_coefficient * (grad_val - exp_avg_ptr[d]);
+          exp_avg_sq_ptr[d] = exp_avg_sq_ptr[d] * beta2;
+          exp_avg_sq_ptr[d] = exp_avg_sq_ptr[d] +
+              exp_avg_sq_grad_coefficient * grad_val * grad_val;
           scalar_t demon_val;
           if (amsgrad) {
             max_exp_avg_sq_ptr[d] =
                 std::max(max_exp_avg_sq_ptr[d], exp_avg_sq_ptr[d]);
             demon_val =
-                std::sqrt(max_exp_avg_sq_ptr[d]) / bias_correction2_sqrt + eps;
+                std::sqrt(max_exp_avg_sq_ptr[d]) / bias_correction2_sqrt + scalar_t(eps);
           } else {
-            demon_val = std::sqrt(exp_avg_sq_ptr[d]) / bias_correction2_sqrt + eps;
+            demon_val = std::sqrt(exp_avg_sq_ptr[d]) / bias_correction2_sqrt + scalar_t(eps);
           }
           param_ptr[d] = param_ptr[d] - step_size * exp_avg_ptr[d] / demon_val;
         }
