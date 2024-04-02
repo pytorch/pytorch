@@ -353,7 +353,7 @@ def _copy_state_dict(
         _identity_func,
         pg=None,
         device=None,
-        cpu_offload=True,  # This is used just for the copy.
+        cpu_offload=False,
         ranks_only=tuple(),
         companion_obj=copy_state_dict,
         type_check=True,
@@ -403,7 +403,6 @@ def _create_cpu_state_dict(
         device=None,
         cpu_offload=False,
         ranks_only=tuple(),
-        # companion_obj=state_dict,
         type_check=False,
     )
     return ret
