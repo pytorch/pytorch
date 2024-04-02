@@ -321,8 +321,7 @@ always_keep_tensor_constants = False
 assert_indirect_indexing = True
 
 # constant folding on the joint graph
-# TODO(yf225): make it work with FSDP FX passes
-joint_graph_constant_folding = False
+joint_graph_constant_folding = True
 
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
