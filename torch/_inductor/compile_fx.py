@@ -34,9 +34,9 @@ from torch._dynamo import (
 from torch._dynamo.utils import (
     counters,
     detect_fake_mode,
+    flatten_graph_inputs,
     lazy_format_graph_code,
     optimus_scuba_log,
-    flatten_graph_inputs,
 )
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
