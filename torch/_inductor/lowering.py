@@ -5985,14 +5985,14 @@ def cond(pred, true_fn, false_fn, operands):
 
 
 @register_lowering(torch.ops.higher_order.while_loop)
-def while_loop(cond_fn, body_fn, operands):
-    if any(map(is_triton, operands)):
+def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
+    if any(map(is_triton, carried_inputs + additional_inputs)):
         msg = "control flow operator: torch.while_loop."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result = ir.WhileLoop.create(cond_fn, body_fn, operands)
+    result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
     return list(map(TensorBox.create, result))
 
 
