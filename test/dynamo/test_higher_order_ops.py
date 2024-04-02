@@ -4927,11 +4927,8 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(actual, expected)
 
     @config.patch(capture_func_transforms=True)
-    def test_linearize(self):
+    def test_linearize_jvp_fn(self):
         counters.clear()
-
-        if check_dynamic_shape_capture():
-            self.skipTest("test fails with dynamic shapes")
 
         def wrapper_fn(x):
             output, jvp_fn = torch.func.linearize(torch.sin, x)
@@ -4964,8 +4961,6 @@ class GraphModule(torch.nn.Module):
         return (alias_default, cos_default, sin_default)
 """,
         )
-
-
 
     @config.patch(capture_func_transforms=True)
     @config.patch(error_on_recompile=True)
