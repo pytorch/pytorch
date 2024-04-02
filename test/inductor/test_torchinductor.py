@@ -421,9 +421,11 @@ def check_model(
 
     def reference_to_expect(actual_flat, correct_flat):
         return tuple(
-            y.to(x.dtype)
-            if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
-            else y
+            (
+                y.to(x.dtype)
+                if isinstance(y, torch.Tensor) and y.dtype.is_floating_point
+                else y
+            )
             for x, y in zip(actual_flat, correct_flat)
         )
 
@@ -846,6 +848,21 @@ class CommonTemplate:
         # generator not yet supported in dynamo
         with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "Generator"):
             self.common(fn, (torch.linspace(-10, 10, 41), torch.Generator(self.device)))
+
+    def test_random(self):
+        # https://github.com/pytorch/pytorch/issues/121621
+        def fn(x, y, z):
+            # random_.from
+            x.random_(-10, 10)
+            # random_.to
+            y.random_(20)
+            # random_.default
+            z.random_()
+
+            return x, y, z
+
+        x, y, z = torch.randn([4]), torch.randn([4]), torch.randn([4])
+        self.common(fn, (x, y, z))
 
     def test_sgn_extremal(self):
         def fn(a):
@@ -2583,12 +2600,16 @@ class CommonTemplate:
                 x = F.batch_norm(
                     x,
                     # If buffers are not to be tracked, ensure that they won't be updated
-                    self.running_mean
-                    if not self.training or self.track_running_stats
-                    else None,
-                    self.running_var
-                    if not self.training or self.track_running_stats
-                    else None,
+                    (
+                        self.running_mean
+                        if not self.training or self.track_running_stats
+                        else None
+                    ),
+                    (
+                        self.running_var
+                        if not self.training or self.track_running_stats
+                        else None
+                    ),
                     self.weight,
                     self.bias,
                     bn_training,
@@ -9315,14 +9336,6 @@ class CommonTemplate:
 
         self.assertTrue(len(result) == 2)
 
-    def test_random_from(self):
-        # https://github.com/pytorch/pytorch/issues/121621
-        def fn(x):
-            x.random_(-10, 10)
-            return x
-
-        x = torch.randn([4, 4, 3])
-        self.common(fn, (x,))
 
 @dataclasses.dataclass
 class TestFailure:
