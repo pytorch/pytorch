@@ -2699,6 +2699,8 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
 
     def test_CTCLoss_zero_lengths(self):
+        devices = ['cpu']
+        devices += ['cuda'] if TEST_CUDA else []
         N = 3
         S = 2
         C = 200
@@ -2706,12 +2708,17 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         target = torch.randint(low=1, high=C, size=(N, S), dtype=torch.int)
         input_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
         target_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
-        devices = ['cpu']
-        devices += ['cuda'] if TEST_CUDA else []
         for device in devices:
             inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
             res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
             self.assertTrue((res == 0).all().item())
+            res.sum().backward()
+            self.assertTrue((inp.grad == 0).all().item())
+        target_lengths = torch.full(size=(N,), fill_value=1, dtype=torch.int)
+        for device in devices:
+            inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+            res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
+            self.assertTrue((res == torch.inf).all().item())
             res.sum().backward()
             self.assertTrue((inp.grad == 0).all().item())
 
