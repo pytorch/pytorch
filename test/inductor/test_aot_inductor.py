@@ -323,7 +323,7 @@ class AOTInductorTestsTemplate:
         elif self.device == "cpu":
             ctx = torch.cpu.amp.autocast
         else:
-            assert False, "unsupport device"
+            raise AssertionError("Unsupported device")
 
         with config.patch({"fallback_random": True}):
             with ctx():
