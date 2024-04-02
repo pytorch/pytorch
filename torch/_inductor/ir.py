@@ -3511,7 +3511,7 @@ class InputsKernel(Buffer):
 
         return dependencies.ReadWrites(
             set(star_dep),
-            {dependencies.StarDep(self.get_name())},
+            {None: {dependencies.StarDep(self.get_name())}},
             set(),
             [],
             None,

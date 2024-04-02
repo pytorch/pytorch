@@ -41,7 +41,7 @@ from torch.utils._triton import has_triton_package
 from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path, PyCodeCache
-from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
+from ..dependencies import AccumulateDep, Dep, MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
@@ -3715,13 +3715,13 @@ class TritonScheduling(BaseScheduling):
         rw = node.pointwise_read_writes()
         assert len(rw.range_vars) == len(ranges)
 
-        # isinstance(dep, MemoryDep): this filters out StarDeps. StarDeps refer to reads
+        # isinstance(dep, MemoryDep): this filters out StarDeps/AccumulateDeps. StarDeps refer to reads
         # that need to access the entire tensor; they don't contribute read indexing
         # information (and practically, they don't have dep.index so they can't be used
         # for stride_hints below
         dep_sources = [rw.reads, rw.writes]
         assert all(
-            isinstance(dep, (MemoryDep, StarDep))
+            isinstance(dep, (MemoryDep, StarDep, AccumulateDep))
             for dep in itertools.chain.from_iterable(dep_sources)
         )
         deps = [

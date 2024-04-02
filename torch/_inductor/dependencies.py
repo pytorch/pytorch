@@ -114,6 +114,47 @@ class StarDep(typing.NamedTuple):
         return False
 
 
+# Used for tracking atomic accumulate dependencies
+# if A and B both modifies a buffer with the same atomic operation
+# they can be fused together
+class AccumulateDep(typing.NamedTuple):
+    dep: Dep
+    mode: Optional[str]
+
+    @property
+    def name(self):
+        return self.dep.name
+
+    @property
+    def index(self):
+        return self.dep.index
+
+    def get_numel(self) -> sympy.Expr:
+        return V.graph.get_numel(self.name)
+
+    def rename(self, renames: Dict[str, str]) -> "AccumulateDep":
+        if self.name in renames:
+            return AccumulateDep(self.dep.rename(renames), self.mode)
+        return self
+
+    def numbytes_hint(self):
+        return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
+            V.graph.get_dtype(self.name)
+        )
+
+    def has_unbacked_symbols(self):
+        return len(free_unbacked_symbols(self.get_numel())) > 0
+
+    def is_contiguous(self) -> bool:
+        return False
+
+    def is_scalar(self) -> bool:
+        return False
+
+    def is_indirect(self) -> bool:
+        return False
+
+
 # Used for tracking mutation ordering
 # if A reads a buffer and B mutates it
 # B must be ordered after A
@@ -154,7 +195,7 @@ class IndexExprDep(typing.NamedTuple):
 @dataclasses.dataclass
 class ReadWrites:
     reads: Set[Dep]
-    writes: Set[Dep]
+    writes_with_mode: Dict[Optional[str], Set[Dep]]
     index_exprs: Set[IndexExprDep]
     range_vars: Optional[List[sympy.Expr]] = None
     var_ranges: Optional[VarRanges] = None
@@ -165,7 +206,10 @@ class ReadWrites:
     def rename(self, renames: typing.Dict[str, str]) -> "ReadWrites":
         return ReadWrites(
             {dep.rename(renames) for dep in self.reads},
-            {dep.rename(renames) for dep in self.writes},
+            {
+                mode: {dep.rename(renames) for dep in deps}
+                for mode, deps in self.writes_with_mode.items()
+            },
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
@@ -173,27 +217,41 @@ class ReadWrites:
         )
 
     def with_read(self, dep: Dep) -> "ReadWrites":
-        assert isinstance(dep, (WeakDep, StarDep))
+        assert isinstance(dep, (WeakDep, StarDep, AccumulateDep))
         return ReadWrites(
             set.union(self.reads, {dep}),
-            self.writes,
+            self.writes_with_mode,
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
             op_counts=self.op_counts,
         )
 
+    @property
+    def writes(self):
+        if len(self.writes_with_mode) == 1 and (
+            mode := next(iter(self.writes_with_mode.keys()))
+        ):
+            (writes,) = self.writes_with_mode.values()
+            return {AccumulateDep(write, mode) for write in writes}
+        else:
+            return set.union(*list(self.writes_with_mode.values()))
+
     def merge(self, other: "ReadWrites"):
-        reads = set.union(self.reads, other.reads)
-        writes = set.union(self.writes, other.writes)
-        index_exprs = set.union(self.index_exprs, other.index_exprs)
-        op_counts = collections.Counter(self.op_counts)
-        op_counts.update(other.op_counts)
-        return ReadWrites(reads - writes, writes, index_exprs, op_counts=op_counts)
+        return ReadWrites.merge_list([self, other])
 
     @staticmethod
     def merge_list(read_writes: List["ReadWrites"]):
-        all_writes = set.union(*[rw.writes for rw in read_writes])
+        all_modes = set.union(*[set(rw.writes_with_mode.keys()) for rw in read_writes])
+        all_writes_with_mode = {
+            mode: set.union(
+                *[set(rw.writes_with_mode.get(mode, set())) for rw in read_writes]
+            )
+            for mode in all_modes
+        }
+        all_writes = set.union(
+            *[set(writes) for writes in all_writes_with_mode.values()]
+        )
         all_reads = set.union(*[rw.reads for rw in read_writes]) - all_writes
         all_index_exprs = set.union(*[rw.index_exprs for rw in read_writes])
 
@@ -201,12 +259,14 @@ class ReadWrites:
         for rw in read_writes:
             op_counts.update(rw.op_counts)
 
-        return ReadWrites(all_reads, all_writes, all_index_exprs, op_counts=op_counts)
+        return ReadWrites(
+            all_reads, all_writes_with_mode, all_index_exprs, op_counts=op_counts
+        )
 
     def remove_reads(self, rem_reads):
         return ReadWrites(
             self.reads - rem_reads,
-            self.writes,
+            self.writes_with_mode,
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
@@ -214,14 +274,16 @@ class ReadWrites:
         )
 
     def reads_and_writes(self):
-        return itertools.chain(self.reads, self.writes)
+        return itertools.chain(self.reads, set.union(*self.writes_with_mode.values()))
 
 
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
         super().__init__()
         self._reads: Set[Dep] = set()
-        self._writes: Set[MemoryDep] = set()
+        self._writes_with_mode: Dict[
+            Union[str], Set[MemoryDep]
+        ] = collections.defaultdict(set)
         self._index_exprs: Set[IndexExprDep] = set()
         self._var_ranges: VarRanges = var_ranges
         self._normalize: bool = normalize
@@ -280,7 +342,7 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         return self.load(name, sympy.Integer(index))
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
-        self._writes.add(MemoryDep(name, *self.canonicalize(index)))
+        self._writes_with_mode[mode].add(MemoryDep(name, *self.canonicalize(index)))
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def store_reduction(self, name: str, index, value) -> str:
@@ -376,7 +438,7 @@ def extract_read_writes(
     inner = rw.parent_handler.parent_handler
     return ReadWrites(
         set(inner._reads),
-        set(inner._writes),
+        inner._writes_with_mode,
         inner._index_exprs,
         range_vars,
         var_ranges,
