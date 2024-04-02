@@ -194,6 +194,10 @@ struct TensorQueue : torch::CustomClassHolder {
     }
     return ret;
   }
+  std::vector<at::Tensor> get_raw_queue() {
+    std::vector<at::Tensor> raw_queue(queue_.begin(), queue_.end());
+    return raw_queue;
+  }
 
  private:
   std::deque<at::Tensor> queue_;
@@ -563,6 +567,7 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
       .def("top", &TensorQueue::top)
       .def("size", &TensorQueue::size)
       .def("clone_queue", &TensorQueue::clone_queue)
+      .def("get_raw_queue", &TensorQueue::get_raw_queue)
       .def_pickle(
           // __getstate__
           [](const c10::intrusive_ptr<TensorQueue>& self)
