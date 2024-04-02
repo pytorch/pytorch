@@ -84,7 +84,7 @@ def _iterate_state_dict(
         iter_object (Any): the target state_dict.
         sharded_tensor_func (Callable): the function to apply to ShardedTensor
         dtensor_func (Callable): the function to apply to DTensor
-        dtensor_func (Callable): the function to apply to Tensor
+        tensor_func (Callable): the function to apply to Tensor
         pg (Optional[dist.ProcessGroup]): process group passed to tensor functions
         device (Optional[torch.device]): device passed to tensor functions
         cpu_offload (bool): whether to offload the tensors to CPU memory. This option is ignored
@@ -272,8 +272,6 @@ def _offload_state_dict_to_cpu(
     state_dict: Dict[str, Any],
     *,
     ranks_only: Tuple[int, ...] = tuple(),
-    cpu_offload_state_dict: Optional[Dict[str, Any]] = None,
-    cpu_offload_sync: bool = True,
     type_check: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -288,14 +286,6 @@ def _offload_state_dict_to_cpu(
         ranks_only: (Tuple[int, ...]): if this tuple is empty, all ranks will
             have the same state_dicts. Otherwise only ranks that in ``ranks_only``
             have the same state_dicts. Other ranks will get empty state_dicts.
-        cpu_offload_state_dict (Optional[Dict[str, Any]]): the CPU state_dict
-            that will be returned. If this is not None, this API will use
-            `copy_` to copy the GPU tensor to the tensor in this CPU state_dict.
-            This CPU state_dict must have exactly the same structure as the
-            `state_dict` the only difference is that all the tensors in this
-            CPU state_dict are on CPU memory.
-        cpu_offload_sync: (bool): flag to decide whether to call `synchronize()`
-            before this API returns.
         type_check: (bool): check if the instance data type is a supported type
             that can be saved by DCP.  The current supported data types are
             torch.Tensor, DTensor, int, float, str, list, dict, None.
@@ -313,11 +303,8 @@ def _offload_state_dict_to_cpu(
         device=None,
         cpu_offload=True,
         ranks_only=ranks_only,
-        companion_obj=cpu_offload_state_dict,
         type_check=type_check,
     )
-    if cpu_offload_state_dict is not None and cpu_offload_sync:
-        torch.cuda.synchronize()
     return ret
 
 
@@ -387,7 +374,9 @@ def _create_cpu_state_dict(
                     t.numel() * t.element_size(),
                     1,  # lines up with 'cudaHostRegisterPortable'
                 )
-                assert succ == 0, f"Pinning shared memory failed with {succ}"
+                assert (
+                    succ == 0
+                ), f"Pinning shared memory failed with error-code: {succ}"
             return t
         elif pin_memory:
             return torch.empty(*tuple(obj.size()), dtype=obj.dtype).pin_memory()
