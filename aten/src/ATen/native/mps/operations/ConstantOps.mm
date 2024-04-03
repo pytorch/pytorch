@@ -44,7 +44,7 @@ static Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
 
     auto mpsScalar = getMPSScalar(value, self.scalar_type());
     auto mpsScalarData = getMPSGraphTensorFromScalar(getCurrentMPSStream(), mpsScalar);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds =@{cachedGraph->inputTensor_ : mpsScalarData};
+    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{cachedGraph->inputTensor_ : mpsScalarData};
 
     Placeholder outputPlaceholder =
         Placeholder(cachedGraph->outputTensor_, needsCopyToOutput ? output : self, nullptr, !needsCopyToOutput);
