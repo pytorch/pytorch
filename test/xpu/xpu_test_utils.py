@@ -63,20 +63,6 @@ def copy_tests(
     generic_test_class, generic_base_class, applicable_list=None, bypass_list=None
 ):
     assert len(generic_base_class.__bases__) > 0
-    # Device test classes need to be wrapped as nested classes. Otherwise, they are not
-    # visible to other test files because instantiate_device_type_tests
-    # will change its name and its test member functions.
-    # So the generic_base_class here should be a Nested and Wrapped class.
-    #  ex:
-    #    class TestCommon(TestCase):
-    #      ...
-    #
-    #    class Namespace:
-    #      class TestCommonWrapper(TestCommon):
-    #        ...
-    # We need to wrap TestCommon as TestCommonWrapper to avoid instantiate_device_type_tests
-    # changing its meta information and moving it under Namespace class to prevent test runners
-    # from picking it up and running it.
     generic_base_class_members = set(generic_base_class.__dict__.keys()) - set(
         generic_test_class.__dict__.keys()
     )
