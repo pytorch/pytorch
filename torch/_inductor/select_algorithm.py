@@ -157,6 +157,10 @@ class TritonTemplateKernel(TritonKernel):
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
             triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+        matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
+        if matrix_instr_nonkdim != 0:
+            triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
+
         self.triton_meta = triton_meta
 
         inductor_meta = {
@@ -738,6 +742,9 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
+        if out.numel() == 0:
+            # no need to run the kerrnel of do benchmarking
+            return 0.0
         if self.has_out_variant:
             return super().benchmark(*args, out=out)
         else:
@@ -822,8 +829,6 @@ class AlgorithmSelectorCache(PersistentCache):
         return_multi_template=False,
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
-
-        # TODO - assert that we have not mutating kernels here
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
@@ -979,9 +984,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # de-duplicate args
         unique_example_inputs = {
-            x.get_name(): input_gen_fns.get(
-                i, functools.partial(cls.benchmark_example_value, written_to=False)
-            )(x)
+            x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
             for i, x in enumerate(input_nodes)
         }
         example_inputs = list(unique_example_inputs.values())
@@ -1003,7 +1006,8 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             for input_node in input_nodes
         ]
-        out = cls.benchmark_example_value(layout, written_to=True)
+
+        out = cls.benchmark_example_value(layout)
         out_extern = torch.as_strided(
             out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
         )
@@ -1140,7 +1144,7 @@ class AlgorithmSelectorCache(PersistentCache):
         )
 
     @staticmethod
-    def benchmark_example_value(node, written_to=True):
+    def benchmark_example_value(node):
         """
         Convert an ir.Buffer into a concrete torch.Tensor we can use for
         benchmarking.
@@ -1152,27 +1156,16 @@ class AlgorithmSelectorCache(PersistentCache):
             node = node.unwrap_view()
         # preserve rng states to avoid the rand_strided call below changes
         # the rng states for the real model code.
-        size = V.graph.sizevars.size_hints(
-            node.get_size(),
-            fallback=config.unbacked_symint_fallback,
-        )
-        stride = V.graph.sizevars.size_hints(
-            node.get_stride(),
-            fallback=config.unbacked_symint_fallback,
-        )
-        device = node.get_device()
-        dtype = node.get_dtype()
-        extra_size = node.layout.offset
-
-        if not written_to:
-            return torch._inductor.utils.get_read_only_benchmark_value(
-                size, stride, dtype=dtype, device=device, extra_size=extra_size
-            )
-
         with preserve_rng_state():
             return rand_strided(
-                size,
-                stride,
+                V.graph.sizevars.size_hints(
+                    node.get_size(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                V.graph.sizevars.size_hints(
+                    node.get_stride(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
                 device=node.get_device(),
                 dtype=node.get_dtype(),
                 extra_size=node.layout.offset,
