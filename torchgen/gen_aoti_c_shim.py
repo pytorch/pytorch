@@ -103,12 +103,12 @@ def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str
         j = 0  # index for names
         new_aten_types = []
         new_callsite_exprs = []
-        for i, aten_type in enumerate(aten_types):
+        for aten_type in aten_types:
             # Use pointer to denote optional type
             c_types[j] = c_types[j] + "*"
             if aten_type.startswith("c10::ArrayRef<"):
                 # ArrayRef is passed as pointer + size, but no need to add "*" to the size argument
-                new_aten_types.append(f"c10::optional<{aten_type}>")
+                new_aten_types.append(f"::std::optional<{aten_type}>")
                 base_type = aten_type[len("c10::ArrayRef<") : -1]
                 new_callsite_exprs.append(
                     f"pointer_to_optional_list<{base_type}>({names[j]}, {names[j+1]})"
@@ -116,13 +116,13 @@ def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str
                 j += 2
             elif aten_type == "c10::Device":
                 # Device is passed as device_type + device_index
-                new_aten_types.append("c10::optional<c10::Device>")
+                new_aten_types.append("::std::optional<c10::Device>")
                 new_callsite_exprs.append(
                     f"pointer_to_optional_device({names[j]}, {names[j+1]})"
                 )
                 j += 2
             else:
-                new_aten_types.append(f"c10::optional<{aten_type}>")
+                new_aten_types.append(f"::std::optional<{aten_type}>")
                 new_callsite_exprs.append(
                     f"pointer_to_optional<{aten_type}>({names[j]})"
                 )
@@ -152,8 +152,8 @@ def convert_arg_type_and_name(typ: Type, name: str) -> Tuple[List[str], List[str
             # construct std::array<bool, N> instead
             assert typ.size is not None
             callsite_exprs.append(f"pointer_to_list<{typ.size}>({name})")
-        elif atype == "c10::optional<at::Tensor>":
-            # convert from std::vector<c10::optional<at::Tensor>> to c10::List<c10::optional<at::Tensor>>
+        elif atype == "::std::optional<at::Tensor>":
+            # convert from std::vector<::std::optional<at::Tensor>> to c10::List<::std::optional<at::Tensor>>
             callsite_exprs.append(
                 f"c10::List<{atype}>(c10::ArrayRef<{atype}>(pointer_to_list<{atype}>({name}, {name}_len_)))"
             )
