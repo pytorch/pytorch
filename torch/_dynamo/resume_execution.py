@@ -10,6 +10,7 @@ from .bytecode_transformation import (
     create_dup_top,
     create_instruction,
     create_jump_absolute,
+    create_load_method,
     Instruction,
     InstructionExnTabEntry,
     transform_code_object,
@@ -28,6 +29,9 @@ CO_NOFREE = 0x0040
 CO_COROUTINE = 0x0080
 CO_ITERABLE_COROUTINE = 0x0100
 CO_ASYNC_GENERATOR = 0x0200
+
+# trace_rules.py import this constant for consistency
+TORCH_DYNAMO_RESUME_IN_PREFIX = "torch_dynamo_resume_in"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -70,7 +74,7 @@ class ReenterWith:
             *create_call_function(len(load_args), True),
             create_instruction("STORE_FAST", argval=ctx_name),
             create_instruction("LOAD_FAST", argval=ctx_name),
-            create_instruction("LOAD_METHOD", argval="__enter__"),
+            create_load_method("__enter__"),
             *create_call_method(0),
             create_instruction("POP_TOP"),
         ]
@@ -94,7 +98,7 @@ class ReenterWith:
         def create_reset():
             return [
                 create_instruction("LOAD_FAST", argval=ctx_name),
-                create_instruction("LOAD_METHOD", argval="__exit__"),
+                create_load_method("__exit__"),
                 create_instruction("LOAD_CONST", argval=None),
                 create_dup_top(),
                 create_dup_top(),
@@ -254,7 +258,9 @@ class ReenterWith:
                 exn_tab_1_target,  # PUSH_EXC_INFO
                 create_instruction("WITH_EXCEPT_START"),
                 create_instruction(
-                    "POP_JUMP_FORWARD_IF_TRUE",
+                    "POP_JUMP_FORWARD_IF_TRUE"
+                    if sys.version_info < (3, 12)
+                    else "POP_JUMP_IF_TRUE",
                     target=pop_top_after_with_except_start,
                 ),
                 exn_tab_2_end,  # RERAISE 2
@@ -365,9 +371,19 @@ class ContinueExecutionCache:
             freevars = tuple(code_options["co_cellvars"] or []) + tuple(
                 code_options["co_freevars"] or []
             )
-            code_options["co_name"] = f"resume_in_{code_options['co_name']}"
+            code_options[
+                "co_name"
+            ] = f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_{code_options['co_name']}_at_{lineno}"
             if is_py311_plus:
-                code_options["co_qualname"] = f"resume_in_{code_options['co_qualname']}"
+                qualified_path = code_options["co_qualname"].rsplit(".", maxsplit=1)
+                if len(qualified_path) == 1:
+                    code_options["co_qualname"] = code_options["co_name"]
+                else:
+                    assert len(qualified_path) == 2
+                    module_name, co_name = qualified_path
+                    code_options[
+                        "co_qualname"
+                    ] = f"{module_name}.{TORCH_DYNAMO_RESUME_IN_PREFIX}_{co_name}_at_{lineno}"
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = tuple()
             code_options["co_freevars"] = freevars
@@ -556,7 +572,7 @@ class ContinueExecutionCache:
 
             # if offset is not in setup_fn_target_offsets, it is an error
             setup_fn_target_offsets = tuple(
-                block_target_offset_remap[n] for n in setup_fn_target_offsets
+                meta.block_target_offset_remap[n] for n in setup_fn_target_offsets
             )
         return ContinueExecutionCache.lookup(
             meta.code, lineno, new_offset, setup_fn_target_offsets, *args

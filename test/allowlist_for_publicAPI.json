@@ -35,20 +35,6 @@
     "torch.nn.quantizable.modules.activation": "torch.ao.nn.quantizable.modules.activation",
     "torch.nn.quantizable.modules.rnn": "torch.ao.nn.quantizable.modules.rnn"
   },
-  "torch.autograd": [
-    "NestedIOFunction",
-    "detect_anomaly",
-    "enable_grad",
-    "grad",
-    "gradcheck",
-    "gradgradcheck",
-    "inference_mode",
-    "no_grad",
-    "set_detect_anomaly",
-    "set_grad_enabled",
-    "set_multithreading_enabled",
-    "variable"
-  ],
   "torch.backends": [
     "contextmanager"
   ],
@@ -149,10 +135,15 @@
     "Optional"
   ],
   "torch.distributed.elastic.events.handlers": [
-    "Dict"
+    "Dict",
+    "Optional",
+    "ScubaLogHandler",
+    "ScubaRdzvLogHandler"
   ],
   "torch.distributed.elastic.metrics": [
-    "Optional"
+    "Optional",
+    "get_logger",
+    "TorchElasticService"
   ],
   "torch.distributed.elastic.multiprocessing": [
     "Callable",
@@ -260,8 +251,7 @@
     "urlparse",
     "urlunparse"
   ],
-  "torch.distributed.rpc": [
-  ],
+  "torch.distributed.rpc": [],
   "torch.fft": [
     "Tensor",
     "fft",
@@ -1529,7 +1519,6 @@
     "SharedQuantizationSpec",
     "Tuple",
     "fold_bn_weights_into_conv_node",
-    "get_aten_graph_module",
     "replace_pattern_with_filters"
   ],
   "torch.ao.quantization.quantize_fx": [
@@ -1926,7 +1915,7 @@
     "extract_val",
     "fake_signature",
     "fetch_sym_proxy",
-    "fetch_tensor_proxy",
+    "fetch_object_proxy",
     "get_isolated_graphmodule",
     "get_proxy_slot",
     "get_torch_dispatch_modes",
@@ -2434,5 +2423,185 @@
   ],
   "torch.utils.tensorboard": [
     "RecordWriter"
+  ],
+  "torch.ao.quantization.experimental.APoT_tensor": [
+    "APoTQuantizer"
+  ],
+  "torch.ao.quantization.experimental.fake_quantize": [
+    "APoTObserver",
+    "FakeQuantizeBase",
+    "Tensor"
+  ],
+  "torch.ao.quantization.experimental.fake_quantize_function": [
+    "dequantize_APoT",
+    "quantize_APoT",
+    "Tensor"
+  ],
+  "torch.ao.quantization.experimental.linear": [
+    "APoTObserver",
+    "quantize_APoT",
+    "WeightedQuantizedModule"
+  ],
+  "torch.ao.quantization.experimental.observer": [
+    "apot_to_float",
+    "float_to_apot",
+    "ObserverBase"
+  ],
+  "torch.ao.quantization.experimental.qconfig": [
+    "APoTFakeQuantize",
+    "default_symmetric_fake_quant",
+    "default_weight_symmetric_fake_quant",
+    "FakeQuantize",
+    "MinMaxObserver",
+    "QConfig"
+  ],
+  "torch.ao.quantization.experimental.quantizer": [
+    "apot_to_float",
+    "float_to_apot",
+    "quant_dequant_util",
+    "Tensor"
+  ],
+  "torch.ao.sparsity": [
+    "BaseScheduler",
+    "BaseSparsifier",
+    "CubicSL",
+    "FakeSparsity",
+    "fqn_to_module",
+    "get_arg_info_from_tensor_fqn",
+    "get_dynamic_sparse_quantized_mapping",
+    "get_static_sparse_quantized_mapping",
+    "LambdaSL",
+    "module_to_fqn",
+    "NearlyDiagonalSparsifier",
+    "WeightNormSparsifier"
+  ],
+  "torch.ao.sparsity.scheduler.base_scheduler": [
+    "BaseScheduler"
+  ],
+  "torch.ao.sparsity.scheduler.cubic_scheduler": [
+    "CubicSL"
+  ],
+  "torch.ao.sparsity.scheduler.lambda_scheduler": [
+    "LambdaSL"
+  ],
+  "torch.ao.sparsity.sparsifier.base_sparsifier": [
+    "BaseSparsifier"
+  ],
+  "torch.ao.sparsity.sparsifier.nearly_diagonal_sparsifier": [
+    "NearlyDiagonalSparsifier"
+  ],
+  "torch.ao.sparsity.sparsifier.utils": [
+    "FakeSparsity",
+    "fqn_to_module",
+    "get_arg_info_from_tensor_fqn",
+    "module_to_fqn"
+  ],
+  "torch.ao.sparsity.sparsifier.weight_norm_sparsifier": [
+    "WeightNormSparsifier"
+  ],
+  "torch.csrc.jit.tensorexpr.codegen_external": [
+    "FileManager",
+    "parse_native_yaml"
+  ],
+  "torch.distributed.checkpoint.examples.async_checkpointing_example": [
+    "FSDP",
+    "init_device_mesh"
+  ],
+  "torch.distributed.checkpoint.examples.fsdp_checkpoint_example": [
+    "FSDP",
+    "load_sharded_optimizer_state_dict",
+    "StateDictType"
+  ],
+  "torch.distributed.checkpoint.examples.stateful_example": [
+    "FSDP",
+    "init_device_mesh"
+  ],
+  "torch.distributed.elastic.events.fb.scuba": [
+    "await_sync",
+    "cast",
+    "Dict",
+    "Enum",
+    "Event",
+    "EventMetadataValue",
+    "List",
+    "Optional",
+    "RdzvEvent",
+    "RuntimeEnvironment",
+    "TorchelasticRdzvLogEntry",
+    "TorchelasticStatusLogEntry",
+    "WhenceScribeLogged"
+  ],
+  "torch.distributed.elastic.metrics.fb.service_data_metrics": [
+    "MetricHandler",
+    "ServiceDataMetrics"
+  ],
+  "torch.distributed.elastic.metrics.static_init": [
+    "configure",
+    "get_logger",
+    "MetricsConfig",
+    "Optional",
+    "ServiceDataMetricsHandler",
+    "TorchElasticService"
+  ],
+  "torch.distributed.elastic.multiprocessing.errors.fb.error_handler_fb": [
+    "Any",
+    "Dict",
+    "ErrorHandler",
+    "format_exception",
+    "generate_python_trace",
+    "MastReplyFileErrorCode",
+    "Optional",
+    "RuntimeEnvironment",
+    "RuntimeEnvironmentScheduler",
+    "write_formatted_message"
+  ],
+  "torch.distributed.elastic.multiprocessing.errors.handlers": [
+    "ErrorHandlerFB"
+  ],
+  "torch.distributed.elastic.rendezvous.fb.mast_rendezvous": [
+    "create_c10d_store",
+    "DistNetworkError",
+    "DistStoreError",
+    "get_logger",
+    "List",
+    "Optional",
+    "RendezvousClosedError",
+    "RendezvousHandler",
+    "RendezvousParameters",
+    "RendezvousTimeoutError",
+    "Tuple"
+  ],
+  "torch.distributed.elastic.rendezvous.fb.zeus": [
+    "gethostname",
+    "get_logger",
+    "namedtuple",
+    "Optional",
+    "RendezvousClosedError",
+    "RendezvousHandler",
+    "RendezvousParameters",
+    "RendezvousTimeoutError"
+  ],
+  "torch.distributed.elastic.rendezvous.registry": [
+    "create_handler",
+    "RendezvousHandler",
+    "RendezvousParameters"
+  ],
+  "torch.distributed.logging_handlers": [
+    "C10D_CATEGORY",
+    "Dict",
+    "LogCategory",
+    "Optional",
+    "Sample",
+    "ScubaData",
+    "signpost",
+    "SignpostType"
+  ],
+  "torch.utils.benchmark.examples.sparse.op_benchmark": [
+    "BinaryOpSparseFuzzer",
+    "Timer",
+    "UnaryOpSparseFuzzer"
+  ],
+  "torch.version": [
+    "get_file_path"
   ]
 }

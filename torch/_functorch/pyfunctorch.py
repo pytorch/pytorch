@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 import contextlib
-from typing import Any
+from typing import Any, List, Tuple
 import torch
 import torch.utils._pytree as pytree
 from torch._C._functorch import (
@@ -70,6 +70,12 @@ class FuncTorchInterpreter(ABC):
     def key(self):
         return self._cptr.key()
 
+    def get_state(self):
+        raise NotImplementedError()
+
+    def check_state(self, state):
+        return state == self.get_state()
+
 
 @contextlib.contextmanager
 def temporarily_pop_interpreter_stack():
@@ -79,6 +85,30 @@ def temporarily_pop_interpreter_stack():
     finally:
         push_dynamic_layer_stack(saved)
 
+@contextlib.contextmanager
+def temporarily_clear_interpreter_stack():
+    stack = []
+    try:
+        while torch._C._functorch.peek_interpreter_stack() is not None:
+            stack.append(pop_dynamic_layer_stack())
+        yield list(stack)
+    finally:
+        while stack:
+            push_dynamic_layer_stack(stack.pop())
+
+@contextlib.contextmanager
+def temporarily_restore_interpreter_stack(stack):
+    pushed = []
+    try:
+        for s in reversed(stack):
+            push_dynamic_layer_stack(s)
+            pushed.append(s)
+        yield
+    finally:
+        for s in reversed(pushed):
+            # TODO: would be nice to assert that the layers are the same, but
+            # Python object identity is not preserved
+            pop_dynamic_layer_stack()
 
 class VmapInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter):
@@ -105,6 +135,9 @@ class VmapInterpreter(FuncTorchInterpreter):
         elif typ == RandomnessType.Different:
             return "different"
         raise RuntimeError(f"Unknown RandomnessType: {typ}")
+
+    def get_state(self):
+        return (self.key().name, self.level(), self.randomness())
 
 
 @contextlib.contextmanager
@@ -143,6 +176,9 @@ class GradInterpreter(FuncTorchInterpreter):
     def prev_grad_mode(self):
         return self._cptr.prevGradMode()
 
+    def get_state(self):
+        return (self.key().name, self.level(), self.prev_grad_mode())
+
 
 class JvpInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter):
@@ -172,6 +208,9 @@ class JvpInterpreter(FuncTorchInterpreter):
     def prev_fwd_grad_mode(self):
         return self._cptr.prevFwdGradMode()
 
+    def get_state(self):
+        return (self.key().name, self.level(), self.prev_fwd_grad_mode())
+
 
 class FunctionalizeInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter):
@@ -200,10 +239,32 @@ def coerce_cinterpreter(cinterpreter: CInterpreter) -> FuncTorchInterpreter:
     raise RuntimeError(f"NYI: PyDispatcher has not implemented support for {key}")
 
 
-def retrieve_current_functorch_interpreter():
+def retrieve_current_functorch_interpreter() -> FuncTorchInterpreter:
     interpreter = torch._C._functorch.peek_interpreter_stack()
     assert interpreter is not None
     return coerce_cinterpreter(interpreter)
+
+
+def retrieve_all_functorch_interpreters() -> List[FuncTorchInterpreter]:
+    cis = torch._C._functorch.get_interpreter_stack()
+    if cis is None:
+        return []
+    return [coerce_cinterpreter(ci) for ci in cis]
+
+
+def compare_functorch_state(states: List[Tuple[Any, ...]]) -> bool:
+    # There are four possible cases covered here:
+    # 1. Current stack empty AND stack when generated not empty -> Invalidate
+    # 2. Current stack not empty AND stack when generated empty -> Invalidate
+    # 3. Current stack and generated stack empty -> Valid FX graph
+    # 4. Current stack and generated stack not empty -> Valid if both states match
+    peek = torch._C._functorch.peek_interpreter_stack()
+    if (peek is None and len(states) != 0) or (peek is not None and len(states) == 0):
+        return False
+
+    cis = retrieve_all_functorch_interpreters()
+    return len(cis) == len(states) and \
+        all(ci.check_state(state) for ci, state in zip(cis, states))
 
 
 def dispatch_functorch(op, args, kwargs):

@@ -258,7 +258,6 @@ void IValue::getSubValues(HashAliasedIValues& subValues) const {
     case Tag::Capsule:
       TORCH_CHECK_TYPE(
           false, "Cannot inspect value of type ", this->tagKind());
-      [[fallthrough]];
     default:
       // don't record scalars.
       break;
@@ -985,6 +984,7 @@ void IValue::reportToTensorTypeError() const {
 }
 
 std::string ivalue::Object::name() const {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   return type()->name()->qualifiedName();
 }
 

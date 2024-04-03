@@ -2,6 +2,7 @@
 
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandBase.h>
 #include <ATen/OpMathType.h>
 #include <ATen/native/TensorIterator.h>
@@ -285,7 +286,7 @@ namespace cuda {
 
 template<typename RNG>
 void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t base, RNG gen) {
-  AT_DISPATCH_ALL_TYPES_AND3(at::ScalarType::Bool, at::ScalarType::Half, at::ScalarType::BFloat16, iter.dtype(), "random_from_to_kernel_cuda", [&] {
+  AT_DISPATCH_V2(iter.dtype(), "random_from_to_kernel_cuda", AT_WRAP([&] {
     if ((
       std::is_same<scalar_t, int64_t>::value ||
       std::is_same<scalar_t, double>::value ||
@@ -317,7 +318,7 @@ void random_from_to_kernel(TensorIteratorBase& iter, uint64_t range, int64_t bas
         },
         random_func);
     }
-   });
+   }), AT_EXPAND(AT_ALL_TYPES), kBool, kHalf, kBFloat16, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
 }
 
 // This is the special kernel to handle single specific case:
@@ -617,7 +618,7 @@ void bernoulli_tensor_cuda_kernel(
       };
   // The template argument `4` below indicates that we want to operate on four
   // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
-  at::cuda::CUDA_tensor_apply2<scalar_t, prob_t, 4, decltype(functor),
+  at::cuda::CUDA_tensor_apply2<scalar_t, const prob_t, 4, decltype(functor),
                                /*max_threads_per_block=*/512,
                                /*min_blocks_per_sm==*/2>(ret, p, functor);
 }

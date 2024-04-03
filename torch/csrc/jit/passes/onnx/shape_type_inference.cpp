@@ -77,10 +77,7 @@ void MergeInferredTypeAndSetMap(
     Value* dest_v,
     TypePtr existing_type,
     TypePtr inferred_type) {
-  TypePtr mergedType;
-  bool inferred;
-  std::tie(mergedType, inferred) =
-      MergeInferredType(existing_type, inferred_type);
+  auto [mergedType, inferred] = MergeInferredType(existing_type, inferred_type);
   dest_v->setType(mergedType);
   ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
 }
@@ -919,11 +916,15 @@ void ProcessReduceNode(Node* n) {
     size_t rank_0 = input_shape_value_0.value().size();
     std::vector<::c10::ShapeSymbol> final_shape;
     std::vector<int64_t> axes_vector(rank_0);
-    if (!n->hasAttributeS("axes")) {
-      std::iota(axes_vector.begin(), axes_vector.end(), 0);
-    } else {
+    if (n->hasAttributeS("axes")) {
       axes_vector = n->is(attr::axes);
+    } else if (n->inputs().size() > 1) {
+      axes_vector =
+          ConstantValueMap::GetValueInto1DInt64Vector(n->input(1)->debugName());
+    } else {
+      std::iota(axes_vector.begin(), axes_vector.end(), 0);
     }
+
     for (auto idx : c10::irange(axes_vector.size())) {
       if (axes_vector[idx] < 0) {
         axes_vector[idx] += rank_0;
@@ -1968,8 +1969,6 @@ void UpdateReliable(
       nodeTypeReliableForTracer.end();
   if (!inferred && !isTypeReliableForTracer &&
       !output->node()->kind().is_onnx() && no_type_warning) {
-    // TODO(84661): This warning comes before setType in symbolic_fn.
-    // tracked in #84661
     TORCH_WARN(
         "The shape inference of ",
         output->node()->kind().toDisplayString(),

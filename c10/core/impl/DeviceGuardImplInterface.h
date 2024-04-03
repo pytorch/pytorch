@@ -21,23 +21,16 @@ class DataPtr;
  * PYTORCH_DEFAULT and BACKEND_DEFAULT are valid for all backends. The
  * BACKEND_DEFAULT is what a particular backend would select if no
  * flags were given. PYTORCH_DEFAULT is the PyTorch's framework default
- * choice for events on that backend, which may not be the same. For example,
- * when PyTorch creates a CUDA event it sets the flag
- * CUDA_EVENT_DISABLING_TIMING by default to improve performance.
+ * choice for events on that backend, which may not be the same.
  *
  * The mapping of PYTORCH_DEFAULT and BACKEND_DEFAULT is done by each
- * backend implementation. Backend-specific flags, like CUDA_EVENT_DEFAULT,
- * should map one-to-one with actual event flags for those backends.
+ * backend implementation.
  */
 enum class EventFlag {
+  // Disable timing
   PYTORCH_DEFAULT,
+  // Enable timing
   BACKEND_DEFAULT,
-  // CUDA flags
-  CUDA_EVENT_DEFAULT,
-  CUDA_EVENT_DISABLE_TIMING, // PyTorch-default for CUDA
-  // HIP flags
-  HIP_EVENT_DEFAULT,
-  HIP_EVENT_DISABLE_TIMING, // PyTorch-default for HIP
   // FOR TESTING ONLY
   INVALID
 };
@@ -290,6 +283,7 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
 // in a Meyer singleton), it implies that you must *leak* objects when
 // putting them in the registry.  This is done by deleting the destructor
 // on DeviceGuardImplInterface.
+// NOLINTNEXTLINE(*c-arrays*)
 extern C10_API std::atomic<const DeviceGuardImplInterface*>
     device_guard_impl_registry[static_cast<size_t>(
         DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES)];

@@ -19,9 +19,9 @@ are much faster in ``lower_precision_fp``. Other ops, like reductions, often req
 range of ``float32``.  Mixed precision tries to match each op to its appropriate datatype.
 
 Ordinarily, "automatic mixed precision training" with datatype of ``torch.float16`` uses :class:`torch.autocast` and
-:class:`torch.cuda.amp.GradScaler` together, as shown in the :ref:`CUDA Automatic Mixed Precision examples<amp-examples>`
+:class:`torch.cpu.amp.GradScaler` or :class:`torch.cuda.amp.GradScaler` together, as shown in the :ref:`CUDA Automatic Mixed Precision examples<amp-examples>`
 and `CUDA Automatic Mixed Precision recipe <https://pytorch.org/tutorials/recipes/recipes/amp_recipe.html>`_.
-However, :class:`torch.autocast` and :class:`torch.cuda.amp.GradScaler` are modular, and may be used separately if desired.
+However, :class:`torch.autocast` and :class:`torch.GradScaler` are modular, and may be used separately if desired.
 As shown in the CPU example section of :class:`torch.autocast`, "automatic mixed precision training/inference" on CPU with
 datatype of ``torch.bfloat16`` only uses :class:`torch.autocast`.
 
@@ -29,6 +29,8 @@ For CUDA and CPU, APIs are also provided separately:
 
 * ``torch.autocast("cuda", args...)`` is equivalent to ``torch.cuda.amp.autocast(args...)``.
 * ``torch.autocast("cpu", args...)`` is equivalent to ``torch.cpu.amp.autocast(args...)``. For CPU, only lower precision floating point datatype of ``torch.bfloat16`` is supported for now.
+* ``torch.GradScaler("cuda", args...)`` is equivalent to ``torch.cuda.amp.GradScaler(args...)``.
+* ``torch.GradScaler("cpu", args...)`` is equivalent to ``torch.cpu.amp.GradScaler(args...)``.
 
 :class:`torch.autocast` and :class:`torch.cpu.amp.autocast` are new in version `1.10`.
 
@@ -392,4 +394,6 @@ regardless of whether autocast is enabled.
 .. py:module:: torch.cpu.amp.autocast_mode
 .. py:module:: torch.cuda.amp.autocast_mode
 .. py:module:: torch.cuda.amp.common
+.. py:module:: torch.amp.grad_scaler
+.. py:module:: torch.cpu.amp.grad_scaler
 .. py:module:: torch.cuda.amp.grad_scaler

@@ -23,8 +23,7 @@
 
 constexpr int64_t CONV3D_GRAIN_SALT = 20;
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -73,7 +72,7 @@ static Tensor compute_columns3d(
                         input.options());
 
     AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "compute_columns3d", [&] {
-      auto input_a = input.accessor<scalar_t, 5>();
+      auto input_a = input.accessor<const scalar_t, 5>();
       auto columns_a = columns.accessor<scalar_t, 3>();
 
       at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
@@ -262,11 +261,11 @@ static Tensor view_weight_2d(const Tensor& weight_) {
 
 template <typename scalar_t>
 static void slow_conv3d_update_output_frame(
-    TensorAccessor<scalar_t, 4> input,
+    TensorAccessor<const scalar_t, 4> input,
     TensorAccessor<scalar_t, 4> output,
-    TensorAccessor<scalar_t, 2> weight,
+    TensorAccessor<const scalar_t, 2> weight,
     bool has_bias,
-    TensorAccessor<scalar_t, 2> finput,
+    TensorAccessor<const scalar_t, 2> finput,
     int64_t kernel_depth,
     int64_t kernel_height,
     int64_t kernel_width,
@@ -431,12 +430,12 @@ void slow_conv3d_backward_out_cpu_template(
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, input.scalar_type(), "slow_conv3d_cpu_grad_input", [&] {
+    auto grad_input_a = grad_input.accessor<scalar_t, 5>();
+    auto grad_output_a = grad_output_contiguous.accessor<scalar_t, 5>();
+    auto fgrad_input_a = fgrad_input.accessor<scalar_t, 3>();
+    auto weight_2d_a = weight2d.accessor<scalar_t, 2>();
     at::parallel_for(0, batch_size, CONV3D_GRAIN_SALT,
                     [&](int64_t start, int64_t end) {
-        auto grad_input_a = grad_input.accessor<scalar_t, 5>();
-        auto grad_output_a = grad_output_contiguous.accessor<scalar_t, 5>();
-        auto fgrad_input_a = fgrad_input.accessor<scalar_t, 3>();
-        auto weight_2d_a = weight2d.accessor<scalar_t, 2>();
 
         for (const auto t : c10::irange(start, end)) {
           auto grad_input_t = grad_input_a[t];
@@ -624,10 +623,10 @@ Tensor& slow_conv3d_forward_out_cpu(const Tensor& self,
   TORCH_CHECK(output.is_contiguous(), "slow_conv3d output must be contiguous");
 
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "slow_conv3d_cpu", [&] {
-    auto input_a = input.accessor<scalar_t, 5>();
+    auto input_a = input.accessor<const scalar_t, 5>();
     auto output_a = output.accessor<scalar_t, 5>();
-    auto finput_a = finput.accessor<scalar_t, 3>();
-    auto weight_2d_a = weight_2d.accessor<scalar_t, 2>();
+    auto finput_a = finput.accessor<const scalar_t, 3>();
+    auto weight_2d_a = weight_2d.accessor<const scalar_t, 2>();
 
     at::parallel_for(
         0, batch_size, CONV3D_GRAIN_SALT, [&](int64_t start, int64_t end) {
@@ -803,5 +802,4 @@ Tensor slow_conv3d(
   return at::slow_conv3d_forward(self, weight, kernel_size, bias, stride, padding);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

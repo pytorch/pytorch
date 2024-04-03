@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch._dynamo.test_case
 import unittest.mock
 import os
@@ -6,6 +8,7 @@ import torch._logging
 import torch._logging._internal
 from torch._dynamo.utils import LazyString
 import logging
+import io
 
 @contextlib.contextmanager
 def preserve_log_state():
@@ -127,6 +130,9 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
         torch._logging._internal.log_state.clear()
         torch._logging._init_logs()
 
+    def hasRecord(self, records, m):
+        return any(m in r.getMessage() for r in records)
+
     def getRecord(self, records, m):
         record = None
         for r in records:
@@ -177,3 +183,29 @@ class LoggingTestCase(torch._dynamo.test_case.TestCase):
                 )
 
         return exit_stack
+
+
+def logs_to_string(module, log_option):
+    """Example:
+    logs_to_string("torch._inductor.compile_fx", "post_grad_graphs")
+    returns the output of TORCH_LOGS="post_grad_graphs" from the
+    torch._inductor.compile_fx module.
+    """
+    log_stream = io.StringIO()
+    handler = logging.StreamHandler(stream=log_stream)
+
+    @contextlib.contextmanager
+    def tmp_redirect_logs():
+        try:
+            logger = torch._logging.getArtifactLogger(module, log_option)
+            logger.addHandler(handler)
+            yield
+        finally:
+            logger.removeHandler(handler)
+
+    def ctx_manager():
+        exit_stack = log_settings(log_option)
+        exit_stack.enter_context(tmp_redirect_logs())
+        return exit_stack
+
+    return log_stream, ctx_manager

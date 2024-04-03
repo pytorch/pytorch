@@ -6,8 +6,6 @@
 #include <iterator>
 #include <limits>
 
-#include <c10/util/C++17.h>
-
 #include <ATen/cuda/cub_definitions.cuh>
 
 #if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()

@@ -90,6 +90,8 @@ struct TORCH_API Module : public Object {
   Module() = default;
   Module(const Module&) = default;
   Module& operator=(const Module&) = default;
+  Module(Module&&) noexcept = default;
+  Module& operator=(Module&&) noexcept = default;
   Module(
       c10::QualifiedName,
       std::shared_ptr<CompilationUnit> cu,

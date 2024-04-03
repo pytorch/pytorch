@@ -1,16 +1,9 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import Dict, Tuple
 
-from torch.distributed.checkpoint.metadata import (
-    STATE_DICT_TYPE,
-)
+from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
 
-from ._traverse import (
-    traverse_state_dict,
-    set_element,
-    OBJ_PATH,
-    STATE_DICT_ITEM,
-)
+from ._traverse import OBJ_PATH, set_element, STATE_DICT_ITEM, traverse_state_dict
 
 """
 TODO:

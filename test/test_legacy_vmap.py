@@ -1,6 +1,6 @@
 # Owner(s): ["module: vmap"]
 
-from torch.testing._internal.common_utils import TestCase, run_tests
+from torch.testing._internal.common_utils import TestCase, run_tests, skipIfTorchDynamo
 import torch
 import torch.nn.functional as F
 from torch import Tensor
@@ -22,7 +22,7 @@ class EnableVmapFallbackWarnings:
     def __exit__(self, *ignored):
         torch._C._debug_only_display_vmap_fallback_warnings(self.prev_state)
 
-class TestVmapAPI(TestCase):
+class TestVmapAPILegacy(TestCase):
     def test_non_tensor_output_raises(self):
         with self.assertRaisesRegex(ValueError, "got type <class 'float'> as the return"):
             output = vmap(lambda x: 3.14)(torch.ones(3))
@@ -912,18 +912,18 @@ def allowVmapFallbackUsage(fn):
     fn._allow_vmap_fallback_usage = True
     return fn
 
-# All tests of TestVmapBase check that the slow vmap fallback is never invoked.
+# All tests of TestVmapBaseLegacy check that the slow vmap fallback is never invoked.
 # This is so that we can incrementally add batching rules for operators to
 # replace the slow vmap fallback path for said operators. To skip this check,
 # please use the allowVmapFallbackUsage decorator.
 #
-# NB: Don't add tests to TestVmapBase directly, unless you want them to run
-# on every subclass of TestVmapBase. Add them to e.g. TestVmapOperators.
+# NB: Don't add tests to TestVmapBaseLegacy directly, unless you want them to run
+# on every subclass of TestVmapBaseLegacy. Add them to e.g. TestVmapOperators.
 #
-# NB: TestVmapBase is a nested class. This prevents test runners from picking
+# NB: TestVmapBaseLegacy is a nested class. This prevents test runners from picking
 # it up and running it.
 class Namespace:
-    class TestVmapBase(TestCase):
+    class TestVmapBaseLegacy(TestCase):
         def __init__(self, method_name='runTest'):
             super().__init__(method_name)
 
@@ -983,7 +983,7 @@ class Namespace:
                 uses_fallback(self)
 
 
-class TestVmapOperators(Namespace.TestVmapBase):
+class TestVmapOperatorsLegacy(Namespace.TestVmapBaseLegacy):
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -1953,6 +1953,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(op, (torch.randn(B0, 2), torch.randint(10, [B0], dtype=torch.int64)),
              check_propagates_grad=False)
 
+    @skipIfTorchDynamo("too slow")
     def test_tensor_split(self):
         test = self._vmap_view_test
         op = torch.tensor_split
@@ -2213,7 +2214,7 @@ def _get_rand_no_zeros(*args, **kwargs):
     result = torch.rand(*args, **kwargs_without_requires_grad)
     return result.clamp_min_(0.1).requires_grad_(requires_grad)
 
-class TestVmapBatchedGradient(Namespace.TestVmapBase):
+class TestVmapBatchedGradientLegacy(Namespace.TestVmapBaseLegacy):
     def _vmap_test(self, *args, **kwargs):
         return _vmap_test(self, *args, **kwargs)
 
@@ -2487,7 +2488,7 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self.assertEqual(result, torch.zeros(B0, *x.shape, device=device))
 
 instantiate_device_type_tests(
-    TestVmapBatchedGradient,
+    TestVmapBatchedGradientLegacy,
     globals(),
     None,
 )

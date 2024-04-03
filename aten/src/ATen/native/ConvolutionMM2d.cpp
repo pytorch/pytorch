@@ -21,8 +21,7 @@
 #include <ATen/ops/thnn_conv2d_native.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -62,7 +61,7 @@ static Tensor compute_columns2d(
         kernel_height * kernel_width * n_input_plane : output_height * output_width;
     columns = at::empty({batch_size, row, col}, input.options());
     AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "slow_conv2d_cpu", [&]{
-      auto input_a = input.accessor<scalar_t, 4>();
+      auto input_a = input.accessor<const scalar_t, 4>();
       auto columns_a = columns.accessor<scalar_t, 3>();
 
       at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
@@ -221,9 +220,9 @@ static inline Tensor view_weight_2d(const Tensor& weight_,
 
 template <typename scalar_t>
 static void slow_conv2d_update_output_frame(
-    TensorAccessor<scalar_t, 3> input,
+    TensorAccessor<const scalar_t, 3> input,
     TensorAccessor<scalar_t, 3> output,
-    TensorAccessor<scalar_t, 2> weight,
+    TensorAccessor<const scalar_t, 2> weight,
     bool has_bias,
     TensorAccessor<scalar_t, 2> finput,
     int64_t kernel_height,
@@ -589,10 +588,10 @@ Tensor& slow_conv2d_forward_out_cpu(
   TORCH_CHECK(output.is_contiguous(memory_format), "slow_conv2d output tensor must be contiguous");
 
   AT_DISPATCH_ALL_TYPES_AND2(kBFloat16, kHalf, input.scalar_type(), "slow_conv2d_cpu", [&]{
-    auto input_a = input.accessor<scalar_t, 4>();
+    auto input_a = input.accessor<const scalar_t, 4>();
     auto output_a = output.accessor<scalar_t, 4>();
     auto finput_a = finput.accessor<scalar_t, 3>();
-    auto weight_2d_a = weight_2d.accessor<scalar_t, 2>();
+    auto weight_2d_a = weight_2d.accessor<const scalar_t, 2>();
 
     at::parallel_for(0, batch_size, 0, [&](int64_t start, int64_t end) {
       for (const auto t : c10::irange(start, end)) {
@@ -743,5 +742,4 @@ Tensor thnn_conv2d(const Tensor & self, const Tensor & weight, IntArrayRef kerne
   return at::_slow_conv2d_forward(self, weight, kernel_size, bias, stride, padding);
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

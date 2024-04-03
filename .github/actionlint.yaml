@@ -3,6 +3,7 @@ self-hosted-runner:
     - linux.20_04.4x
     - linux.20_04.16x
     - linux.large
+    - linux.large.arc
     - linux.2xlarge
     - linux.4xlarge
     - linux.12xlarge
@@ -18,7 +19,7 @@ self-hosted-runner:
     - windows.g5.4xlarge.nvidia.gpu
     - bm-runner
     - linux.rocm.gpu
-    - macos-m1-12
+    - macos-m1-stable
     - macos-m1-13
     - macos-12-xl
     - macos-12

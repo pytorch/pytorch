@@ -167,7 +167,7 @@ void launch_binomial_cuda_kernel(
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(42);
   }
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.input_dtype(), "binomial_cuda", [&] {
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, iter.input_dtype(), "binomial_cuda", [&] {
     binomial_cuda_kernel<scalar_t>(iter, rng_engine_inputs);
   });
 }

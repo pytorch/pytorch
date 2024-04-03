@@ -7,8 +7,6 @@
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <chrono>
 #include <exception>
-#include <ratio>
-#include <tuple>
 
 #ifdef _WIN32
 #include <gloo/common/win.h>
@@ -1923,29 +1921,68 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
   std::vector<c10::Event> outputEvents;
 };
 
+// A work that takes an lambda on construction and calls it on wait.
+// It is useful for add a continuation to another work, and/or
+// composing multiple works together.
+class LambdaWork : public Work {
+ public:
+  LambdaWork(std::function<void(void)> fn) : fn_(fn) {}
+
+  bool wait(std::chrono::milliseconds /* unused */) override {
+    fn_();
+    return true;
+  }
+
+ private:
+  std::function<void(void)> fn_;
+};
+
 } // namespace
 
 c10::intrusive_ptr<Work> ProcessGroupGloo::_reduce_scatter_base(
     at::Tensor& outputTensor,
     at::Tensor& inputTensor,
     const ReduceScatterOptions& opts) {
-  if (opts.asyncOp) {
-    throw std::runtime_error(
-        "Gloo reduce_scatter_base fallback not supported with async_op=True");
+  std::vector<at::Tensor> outputTensors = {outputTensor};
+  std::vector<at::Tensor> inputTensors = {inputTensor};
+  return reduce_scatter_tensor_coalesced(outputTensors, inputTensors, opts);
+}
+
+c10::intrusive_ptr<Work> ProcessGroupGloo::reduce_scatter_tensor_coalesced(
+    std::vector<at::Tensor>& outputTensors,
+    std::vector<at::Tensor>& inputTensors,
+    const ReduceScatterOptions& opts) {
+  if (outputTensors.size() != inputTensors.size()) {
+    TORCH_CHECK(
+        false, "requires input/output tensor lists to have the same length");
   }
-  // first all reduce input
-  // TODO we can probably make this fully async by chaining the allreduce
-  // future.
-  std::vector<at::Tensor> inputs = {inputTensor};
-  std::vector<at::Tensor> outputs = {outputTensor};
-  allreduce(inputs)->wait();
-  std::vector<std::vector<at::Tensor>> inputTensors;
-  if (getRank() == 0) {
-    auto chunkedInputs = at::chunk(inputTensor, this->getSize(), 0);
-    inputTensors = {chunkedInputs};
+  const auto rank = getRank();
+  const auto worldSize = getSize();
+  std::vector<at::Tensor> buffers;
+  for (const auto i : c10::irange(inputTensors.size())) {
+    auto inputShape = inputTensors[i].sizes().vec();
+    auto outputShape = outputTensors[i].sizes().vec();
+    TORCH_CHECK_EQ(outputTensors[i].dtype(), inputTensors[i].dtype());
+    TORCH_CHECK_EQ(outputShape[0] * worldSize, inputShape[0]);
+    for (size_t i = 1; i < outputShape.size(); ++i) {
+      TORCH_CHECK_EQ(outputShape[i], inputShape[i]);
+    }
+    buffers.push_back(inputTensors[i].clone());
   }
-  auto scatterWork = this->scatter(outputs, inputTensors);
-  return scatterWork;
+  std::vector<c10::intrusive_ptr<Work>> works;
+  for (const auto i : c10::irange(buffers.size())) {
+    std::vector<at::Tensor> inp = {buffers[i]};
+    AllreduceOptions arOpts;
+    arOpts.reduceOp = opts.reduceOp;
+    works.push_back(allreduce(inp));
+  }
+  return c10::make_intrusive<LambdaWork>(
+      [rank, worldSize, buffers, outputTensors, works = std::move(works)]() {
+        for (const auto i : c10::irange(outputTensors.size())) {
+          works[i]->wait();
+          outputTensors[i].copy_(buffers[i].chunk(worldSize)[rank]);
+        }
+      });
 }
 
 c10::intrusive_ptr<Work> ProcessGroupGloo::_allgather_base(
@@ -2151,6 +2188,21 @@ c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_coalesced(
       std::move(context), output_lists, input_list, tag, seq_);
   enqueue(work);
   return work;
+}
+
+c10::intrusive_ptr<Work> ProcessGroupGloo::allgather_into_tensor_coalesced(
+    std::vector<at::Tensor>& outputs,
+    std::vector<at::Tensor>& inputs,
+    const AllgatherOptions& opts) {
+  TORCH_CHECK_EQ(outputs.size(), inputs.size());
+  std::vector<std::vector<at::Tensor>> output_lists(getSize());
+  for (auto& output : outputs) {
+    auto chunks = output.chunk(getSize());
+    for (const auto i : c10::irange(output_lists.size())) {
+      output_lists[i].push_back(std::move(chunks[i]));
+    }
+  }
+  return allgather_coalesced(output_lists, inputs, opts);
 }
 
 namespace {
