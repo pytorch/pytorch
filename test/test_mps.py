@@ -290,6 +290,7 @@ def mps_ops_modifier(ops):
         'nn.functional.conv_transpose1d',
         'nn.functional.padcircular',
         'nn.functional.feature_alpha_dropoutwithout_train',
+        'nn.functional.rms_norm',
         'nn.functional.unfold',
         'ones',
         'outer',
