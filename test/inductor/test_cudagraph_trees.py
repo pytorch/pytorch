@@ -324,10 +324,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     self.buf.add_(x)
                     return self.buf + x
 
-            @torch.compile(mode="reduce-overhead")
             def foo(mod, x):
                 return mod(x)
 
+            foo = get_compile_fn(backend)(foo)
             mod = Mod()
             mod2 = Mod()
 
