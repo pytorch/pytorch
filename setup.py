@@ -1191,6 +1191,7 @@ def main():
         "include/ATen/native/nested/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
+        "include/ATen/native/transformers/*.h",
         "include/ATen/native/sparse/*.h",
         "include/ATen/native/utils/*.h",
         "include/ATen/quantized/*.h",
