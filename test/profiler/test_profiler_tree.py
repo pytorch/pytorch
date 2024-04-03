@@ -12,7 +12,7 @@ import expecttest
 import torch
 from torch._C._profiler import _ExtraFields_PyCall, _ExtraFields_PyCCall
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF, IS_ARM64)
+    TestCase, run_tests, IS_WINDOWS, TEST_WITH_CROSSREF, IS_ARM64, skipIfTorchDynamo)
 from torch.utils._pytree import tree_map
 
 # These functions can vary from based on platform and build (e.g. with CUDA)
@@ -59,8 +59,6 @@ class TorchDispatchTensor(torch.Tensor):
         t = torch.Tensor._make_subclass(cls, elem, elem.requires_grad)
         t.elem = elem
         return t
-
-    __torch_function__ = torch._C._disabled_torch_function_impl
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
@@ -469,53 +467,56 @@ class TestProfilerTree(TestCase):
                             [memory]
                         aten::fill_
                     <built-in method append of list object at 0xXXXXXXXXXXXX>
-                  <built-in method run_backward of torch._C._EngineBase object at 0xXXXXXXXXXXXX>
-                    autograd::engine::evaluate_function: PowBackward0
-                      PowBackward0
-                        aten::pow
-                          aten::result_type
-                          aten::to
-                          [memory]
-                          aten::copy_
-                        aten::mul
-                          [memory]
-                          aten::mul
+                  torch/autograd/graph.py(...): _engine_run_backward
+                    logging/__init__.py(...): getEffectiveLevel
+                    <built-in method run_backward of torch._C._EngineBase object at 0xXXXXXXXXXXXX>
+                      autograd::engine::evaluate_function: PowBackward0
+                        PowBackward0
+                          aten::pow
+                            aten::result_type
                             aten::to
-                              aten::_to_copy
-                                aten::empty_strided
-                                  [memory]
-                                aten::copy_
                             [memory]
+                            aten::copy_
+                          aten::mul
+                            [memory]
+                            aten::mul
+                              aten::to
+                                aten::_to_copy
+                                  aten::empty_strided
+                                    [memory]
+                                  aten::copy_
+                              [memory]
+                              [memory]
+                            [memory]
+                          aten::mul
                             [memory]
                           [memory]
-                        aten::mul
                           [memory]
                         [memory]
-                        [memory]
-                      [memory]
-                    autograd::engine::evaluate_function: SubBackward0
-                      SubBackward0
-                        aten::neg
-                          [memory]
-                      [memory]
-                    autograd::engine::evaluate_function: AddBackward0
-                      AddBackward0
-                    autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
-                      torch::autograd::AccumulateGrad
-                        aten::new_empty_strided
-                          aten::empty_strided
+                      autograd::engine::evaluate_function: SubBackward0
+                        SubBackward0
+                          aten::neg
                             [memory]
-                        aten::copy_
-                    autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
-                      torch::autograd::AccumulateGrad
-                        aten::detach
-                          detach
+                        [memory]
+                      autograd::engine::evaluate_function: AddBackward0
+                        AddBackward0
+                      autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
+                        torch::autograd::AccumulateGrad
+                          aten::new_empty_strided
+                            aten::empty_strided
+                              [memory]
+                          aten::copy_
+                      autograd::engine::evaluate_function: torch::autograd::AccumulateGrad
+                        torch::autograd::AccumulateGrad
+                          aten::detach
+                            detach
                 [memory]
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
                   ..."""
         )
 
+    @skipIfTorchDynamo("too slow")
     @unittest.skipIf(TEST_WITH_CROSSREF, "crossref intercepts calls and changes the callsite.")
     @ProfilerTree.test
     def test_profiler_experimental_tree_with_stack_and_modules(self):

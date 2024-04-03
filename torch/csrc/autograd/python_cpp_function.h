@@ -8,8 +8,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/utils/object_ptr.h>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 struct THPCppFunction {
   PyObject_HEAD std::shared_ptr<Node> cdata;
@@ -103,5 +102,4 @@ PyObject* functionToPyObject(const std::shared_ptr<Node>& cdata);
 
 bool THPCppFunction_Check(PyObject* obj);
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

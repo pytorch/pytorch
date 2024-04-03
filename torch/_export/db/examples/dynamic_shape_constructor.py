@@ -4,12 +4,16 @@ from torch._export.db.case import export_case
 
 
 @export_case(
-    example_inputs=(torch.ones(3, 2),),
+    example_inputs=(torch.randn(3, 2),),
     tags={"torch.dynamic-shape"},
 )
-def dynamic_shape_constructor(x):
+class DynamicShapeConstructor(torch.nn.Module):
     """
     Tensor constructors should be captured with dynamic shape inputs rather
     than being baked in with static shape.
     """
-    return torch.ones(x.shape[0] * 2)
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        return torch.zeros(x.shape[0] * 2)

@@ -7,8 +7,7 @@
 
 #include <atomic>
 
-namespace c10 {
-namespace impl {
+namespace c10::impl {
 
 struct C10_API PyObjectSlot {
  public:
@@ -57,7 +56,7 @@ struct C10_API PyObjectSlot {
         // fallthrough, we lost the race.  We are guaranteed not to lose the
         // race with ourself, as calls to init_pyobj with the same interpreter
         // ID must be sequentialized by the GIL
-        C10_FALLTHROUGH;
+        [[fallthrough]];
       case impl::PyInterpreterStatus::TAGGED_BY_OTHER:
         TORCH_CHECK(
             false,
@@ -188,5 +187,4 @@ struct C10_API PyObjectSlot {
   PyObject* pyobj_;
 };
 
-} // namespace impl
-} // namespace c10
+} // namespace c10::impl

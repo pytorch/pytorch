@@ -93,6 +93,16 @@ if(USE_CUDA)
   endif()
 endif()
 
+# ---[ XPU
+if(USE_XPU)
+  include(${CMAKE_CURRENT_LIST_DIR}/public/xpu.cmake)
+  if(NOT PYTORCH_FOUND_XPU)
+    # message(WARNING "Not compiling with XPU. Could NOT find SYCL."
+    # "Suppress this warning with -DUSE_XPU=OFF.")
+    caffe2_update_option(USE_XPU OFF)
+  endif()
+endif()
+
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO AND NOT INTERN_BUILD_MOBILE)
   disable_ubsan()
@@ -467,8 +477,6 @@ if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
     # We build static version of cpuinfo but link
     # them into a shared library for Caffe2, so they need PIC.
     set_property(TARGET cpuinfo PROPERTY POSITION_INDEPENDENT_CODE ON)
-    # Need to set this to avoid conflict with XNNPACK's clog external project
-    set(CLOG_SOURCE_DIR "${CPUINFO_SOURCE_DIR}/deps/clog")
   endif()
   list(APPEND Caffe2_DEPENDENCY_LIBS cpuinfo)
 endif()
@@ -619,7 +627,22 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
     # Disable ARM BF16 and FP16 vector for now; unused and causes build failures because
     # these new ISA features may not be supported on older compilers
     set(XNNPACK_ENABLE_ARM_BF16 OFF CACHE BOOL "")
-    set(XNNPACK_ENABLE_ARM_FP16_VECTOR OFF CACHE BOOL "")
+
+    # Disable AVXVNNI for now, older clang versions seem not to support it
+    # (clang 12 is where avx-vnni support is added)
+    set(XNNPACK_ENABLE_AVXVNNI OFF CACHE BOOL "")
+
+    # Disable I8MM For CI since clang 9 does not support neon i8mm.
+    set(XNNPACK_ENABLE_ARM_I8MM OFF CACHE BOOL "")
+
+    # Conditionally disable AVX512AMX, as it requires Clang 11 or later. Note that
+    # XNNPACK does conditionally compile this based on GCC version. Once it also does
+    # so based on Clang version, this logic can be removed.
+    IF(CMAKE_C_COMPILER_ID STREQUAL "Clang")
+      IF(CMAKE_C_COMPILER_VERSION VERSION_LESS "11")
+        set(XNNPACK_ENABLE_AVX512AMX OFF CACHE BOOL "")
+      ENDIF()
+    ENDIF()
 
     # Setting this global PIC flag for all XNNPACK targets.
     # This is needed for Object libraries within XNNPACK which must
@@ -1192,16 +1215,6 @@ if(ANDROID)
   list(APPEND Caffe2_DEPENDENCY_LIBS log)
 endif()
 
-# ---[ Kernel asserts
-# Kernel asserts are enabled by default for CUDA and disabled for ROCm.
-# For ROCm, it can be enabled by setting ROCM_FORCE_ENABLE_GPU_ASSERTS
-if(USE_ROCM AND ROCM_FORCE_ENABLE_GPU_ASSERTS)
-  message(STATUS "Forcefully enabling kernel asserts on ROCM")
-elseif(USE_ROCM AND NOT ROCM_FORCE_ENABLE_GPU_ASSERTS)
-  message(STATUS "Disabling kernel asserts for ROCm")
-  caffe2_update_option(TORCH_DISABLE_GPU_ASSERTS ON)
-endif()
-
 # ---[ LLVM
 if(USE_LLVM)
   message(STATUS "Looking for LLVM in ${USE_LLVM}")
@@ -1218,6 +1231,9 @@ endif(USE_LLVM)
 
 # ---[ cuDNN
 if(USE_CUDNN)
+  if(CUDNN_VERSION VERSION_LESS 8.5)
+    message(FATAL_ERROR "PyTorch needs CuDNN-8.5 or above, but found ${CUDNN_VERSION}. Builds are still possible with `USE_CUDNN=0`")
+  endif()
   set(CUDNN_FRONTEND_INCLUDE_DIR ${CMAKE_CURRENT_LIST_DIR}/../third_party/cudnn_frontend/include)
   target_include_directories(torch::cudnn INTERFACE ${CUDNN_FRONTEND_INCLUDE_DIR})
 endif()
@@ -1249,6 +1265,7 @@ if(USE_ROCM)
       caffe2_update_option(USE_SYSTEM_NCCL ON)
     endif()
 
+
     list(APPEND HIP_CXX_FLAGS -fPIC)
     list(APPEND HIP_CXX_FLAGS -D__HIP_PLATFORM_AMD__=1)
     list(APPEND HIP_CXX_FLAGS -DCUDA_HAS_FP16=1)
@@ -1262,6 +1279,21 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
     list(APPEND HIP_CXX_FLAGS -std=c++17)
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "6.0.0")
+      list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
+    endif()
+    if(HIPBLASLT_CUSTOM_DATA_TYPE)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_DATA_TYPE)
+    endif()
+    if(HIPBLASLT_CUSTOM_COMPUTE_TYPE)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_CUSTOM_COMPUTE_TYPE)
+    endif()
+    if(HIPBLASLT_HAS_GETINDEXFROMALGO)
+      list(APPEND HIP_CXX_FLAGS -DHIPBLASLT_HAS_GETINDEXFROMALGO)
+    endif()
+    if(HIP_NEW_TYPE_ENUMS)
+      list(APPEND HIP_CXX_FLAGS -DHIP_NEW_TYPE_ENUMS)
+    endif()
     add_definitions(-DROCM_VERSION=${ROCM_VERSION_DEV_INT})
     add_definitions(-DTORCH_HIP_VERSION=${TORCH_HIP_VERSION})
     message("TORCH_HIP_VERSION=${TORCH_HIP_VERSION} is added as a compiler defines")
@@ -1287,10 +1319,26 @@ if(USE_ROCM)
 
     set(Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       ${PYTORCH_HIP_LIBRARIES} ${PYTORCH_MIOPEN_LIBRARIES} ${hipcub_LIBRARIES} ${ROCM_HIPRTC_LIB} ${ROCM_ROCTX_LIB})
+    if(ROCM_VERSION_DEV VERSION_GREATER_EQUAL "5.7.0")
+      list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS ${hipblaslt_LIBRARIES})
+    endif()
 
     list(APPEND Caffe2_PUBLIC_HIP_DEPENDENCY_LIBS
       roc::hipblas hip::hipfft hip::hiprand roc::hipsparse roc::hipsolver)
 
+    # ---[ Kernel asserts
+    # Kernel asserts is disabled for ROCm by default.
+    # It can be turned on by turning on the env USE_ROCM_KERNEL_ASSERT to the build system.
+    if(USE_ROCM_KERNEL_ASSERT)
+      message(STATUS "Enabling Kernel Assert for ROCm")
+    else()
+      message(STATUS "Disabling Kernel Assert for ROCm")
+    endif()
+
+    include(${CMAKE_CURRENT_LIST_DIR}/External/aotriton.cmake)
+    if(USE_CUDA)
+      caffe2_update_option(USE_MEM_EFF_ATTENTION OFF)
+    endif()
   else()
     caffe2_update_option(USE_ROCM OFF)
   endif()
@@ -1919,7 +1967,7 @@ if(USE_KINETO)
   endif()
 
   if(NOT LIBKINETO_NOROCTRACER)
-    if(NOT ENV{ROCM_SOURCE_DIR})
+    if("$ENV{ROCM_SOURCE_DIR}" STREQUAL "")
       set(ENV{ROCM_SOURCE_DIR} "/opt/rocm")
     endif()
   endif()

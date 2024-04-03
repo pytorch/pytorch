@@ -217,7 +217,7 @@ class SubTensor(torch.Tensor):
     """
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if(kwargs is None):
+        if kwargs is None:
             kwargs = {}
 
         if func not in HANDLED_FUNCTIONS_SUB:
@@ -368,7 +368,7 @@ class TensorLike:
     """
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if(kwargs is None):
+        if kwargs is None:
             kwargs = {}
 
         if func not in HANDLED_FUNCTIONS_TENSOR_LIKE:
@@ -638,7 +638,7 @@ def generate_tensor_like_override_tests(cls):
                 return instance_gen()
             elif arg_type == "TensorList" or arg_type == "ITensorListRef":
                 return [instance_gen(), instance_gen()]
-            elif arg_type == "c10::List<c10::optional<Tensor>>":
+            elif arg_type == "c10::List<::std::optional<Tensor>>":
                 return [instance_gen(), instance_gen()]
             elif arg_type == "IntArrayRef" or arg_type == "SymIntArrayRef":
                 size = arg.get("size", 2)

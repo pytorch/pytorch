@@ -7,6 +7,7 @@ functionalities in `torch.jit`.
 """
 import os
 import weakref
+from typing import Any, Dict, Type
 
 import torch
 
@@ -60,8 +61,8 @@ _python_cu = torch._C.CompilationUnit()
 
 
 # python class => ScriptClass mapping
-_script_classes = {}
-_name_to_pyclass = {}
+_script_classes: Dict[Type[Any], Type[Any]] = {}
+_name_to_pyclass: Dict[str, Type[Any]] = {}
 
 
 def _add_script_class(python_class, script_class):

@@ -24,8 +24,8 @@
 
 namespace at::indexing {
 
-const int64_t INDEX_MIN = c10::SymInt::min_representable_int();
-const int64_t INDEX_MAX = -(INDEX_MIN + 1);
+constexpr int64_t INDEX_MIN = c10::SymInt::min_representable_int();
+constexpr int64_t INDEX_MAX = -(INDEX_MIN + 1);
 
 enum class TensorIndexType { None, Ellipsis, SymInt, Boolean, Slice, Tensor };
 
@@ -130,9 +130,7 @@ struct TORCH_API TensorIndex final {
   TensorIndex(int integer) : TensorIndex(SymInt(integer)) {}
 
   // Case 4: Boolean value
-  template <
-      class T,
-      class = typename std::enable_if<std::is_same<bool, T>::value>::type>
+  template <class T, class = std::enable_if_t<std::is_same_v<bool, T>>>
   TensorIndex(T boolean) : boolean_(boolean), type_(TensorIndexType::Boolean) {}
 
   // Case 5: Slice represented in `at::indexing::Slice` form
@@ -219,12 +217,14 @@ static inline Tensor applySlice(
     SymInt length = (self_device == at::kCPU || self_device == at::kCUDA)
         ? (*self_sizes)[dim]
         : self.sym_size(dim);
-    if (!disable_slice_optimization && start == 0 && length == stop &&
+    if (!disable_slice_optimization &&
+        TORCH_GUARD_SIZE_OBLIVIOUS(start.sym_eq(0)) && length == stop &&
         step == 1) {
       return self;
     }
   }
-  return self.slice_symint(dim, start, stop, std::move(step));
+  return self.slice_symint(
+      dim, std::move(start), std::move(stop), std::move(step));
 }
 
 static inline Tensor applySelect(
@@ -245,8 +245,13 @@ static inline Tensor applySelect(
     }
 
     auto size = (*self_sizes)[dim];
+    // Note: `size >= -index` is not equivalent to `size > -1 - index` if index
+    // is INT64_MIN For std::numeric_limits<int64_t>::min() result of unary
+    // minus is undefined by the standard but in practice is equal to self. On
+    // the other hand, indexing wraping is valid for all negative int64_t
+    // values, as x[INT64_MIN] is the same as x[INT64_MAX]
     TORCH_CHECK_INDEX(
-        size >= -index && size > index,
+        size > -1 - index && size > index,
         "index ",
         index,
         " is out of bounds for dimension ",
@@ -258,7 +263,7 @@ static inline Tensor applySelect(
   // if the index is negative, do not normalize it because that would fix the
   // index on the current tensor size in the tracer. aten::select also works on
   // negative indices
-  return self.select_symint(dim, index);
+  return self.select_symint(dim, std::move(index));
 }
 
 static inline Tensor boolToIndexingTensorCPUOrCUDA(
@@ -267,9 +272,9 @@ static inline Tensor boolToIndexingTensorCPUOrCUDA(
   // booleans add a dimension of size 1. true indexes this dimension as if 0:,
   // false as empty.
   if (value) {
-    return at::empty({1}, {}, self.options().dtype(kLong)).fill_(0.);
+    return at::empty({1}, self.options().dtype(kLong)).fill_(0.);
   } else {
-    return at::empty({0}, {}, self.options().dtype(kLong));
+    return at::empty({0}, self.options().dtype(kLong));
   }
 }
 
@@ -279,9 +284,9 @@ static inline Tensor boolToIndexingTensorNonNativeDeviceType(
   // booleans add a dimension of size 1. true indexes this dimension as if 0:,
   // false as empty.
   if (value) {
-    return at::zeros({1}, {}, self.options().dtype(kLong));
+    return at::zeros({1}, self.options().dtype(kLong));
   } else {
-    return at::empty({0}, {}, self.options().dtype(kLong));
+    return at::empty({0}, self.options().dtype(kLong));
   }
 }
 
@@ -312,12 +317,12 @@ static inline void recordTensorIndex(
   (*dim_ptr)++;
 };
 
-static inline c10::List<c10::optional<Tensor>> typeConvertIndices(
+static inline c10::List<::std::optional<Tensor>> typeConvertIndices(
     const Tensor& /*self*/,
     std::vector<Tensor>&& indices) {
-  c10::List<c10::optional<Tensor>> converted_inds;
+  c10::List<::std::optional<Tensor>> converted_inds;
   converted_inds.reserve(indices.size());
-  for (const auto& i : indices) {
+  for (auto&& i : std::move(indices)) {
     converted_inds.push_back(std::move(i));
   }
   return converted_inds;
@@ -533,9 +538,9 @@ static inline Tensor applySlicing(
         /*prev_dim_result=*/result,
         /*original_tensor=*/self,
         /*index=*/obj,
-        /*dim=*/&dim,
-        /*specified_dims=*/&specified_dims,
-        /*real_dim=*/i,
+        /*dim_ptr=*/&dim,
+        /*specified_dims_ptr=*/&specified_dims,
+        /*real_dim=*/static_cast<int64_t>(i),
         /*outIndices=*/outIndices,
         /*disable_slice_optimization=*/disable_slice_optimization,
         /*original_tensor_device=*/self_device,

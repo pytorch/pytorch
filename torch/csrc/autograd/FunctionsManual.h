@@ -12,10 +12,7 @@
 #include <ATen/ATen.h>
 #include <torch/csrc/autograd/generated/Functions.h>
 
-namespace torch {
-namespace autograd {
-namespace generated {
-namespace details {
+namespace torch::autograd::generated::details {
 
 extern const char* kCudnnDoubleBackwardMsg;
 
@@ -1099,7 +1096,6 @@ mkldnn_rnn_layer_differentiable_backward(
     bool batch_first,
     const at::Tensor& workspace);
 
-} // namespace details
-} // namespace generated
-} // namespace autograd
-} // namespace torch
+Tensor values_backward(const Tensor& grad, const Tensor& self);
+
+} // namespace torch::autograd::generated::details

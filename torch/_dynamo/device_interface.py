@@ -172,20 +172,36 @@ class CudaInterface(DeviceInterface):
 
 
 device_interfaces: Dict[str, Type[DeviceInterface]] = {}
+_device_initialized = False
 
 
-def register_interface_for_device(device: str, device_interface: Type[DeviceInterface]):
+def register_interface_for_device(
+    device: Union[str, torch.device], device_interface: Type[DeviceInterface]
+):
+    if isinstance(device, torch.device):
+        device = str(device)
     device_interfaces[device] = device_interface
 
 
-def get_interface_for_device(device: str) -> Type[DeviceInterface]:
+def get_interface_for_device(device: Union[str, torch.device]) -> Type[DeviceInterface]:
+    if isinstance(device, torch.device):
+        device = str(device)
+    if not _device_initialized:
+        init_device_reg()
     if device in device_interfaces:
         return device_interfaces[device]
     raise NotImplementedError(f"No interface for device {device}")
 
 
 def get_registered_device_interfaces() -> Iterable[Tuple[str, Type[DeviceInterface]]]:
+    if not _device_initialized:
+        init_device_reg()
     return device_interfaces.items()
 
 
-register_interface_for_device("cuda", CudaInterface)
+def init_device_reg():
+    global _device_initialized
+    register_interface_for_device("cuda", CudaInterface)
+    for i in range(torch.cuda.device_count()):
+        register_interface_for_device(f"cuda:{i}", CudaInterface)
+    _device_initialized = True

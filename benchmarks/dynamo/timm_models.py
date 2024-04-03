@@ -43,31 +43,39 @@ with open(filename) as fh:
 
 BATCH_SIZE_DIVISORS = {
     "beit_base_patch16_224": 2,
-    "cait_m36_384": 8,
     "convit_base": 2,
     "convmixer_768_32": 2,
     "convnext_base": 2,
     "cspdarknet53": 2,
     "deit_base_distilled_patch16_224": 2,
-    "dpn107": 2,
     "gluon_xception65": 2,
     "mobilevit_s": 2,
-    "pit_b_224": 2,
     "pnasnet5large": 2,
     "poolformer_m36": 2,
-    "res2net101_26w_4s": 2,
     "resnest101e": 2,
-    "sebotnet33ts_256": 2,
     "swin_base_patch4_window7_224": 2,
     "swsl_resnext101_32x16d": 2,
-    "twins_pcpvt_base": 2,
     "vit_base_patch16_224": 2,
     "volo_d1_224": 2,
     "jx_nest_base": 4,
-    "xcit_large_24_p8_224": 4,
 }
 
-REQUIRE_HIGHER_TOLERANCE = set("sebotnet33ts_256")
+REQUIRE_HIGHER_TOLERANCE = {
+    "fbnetv3_b",
+    "gmixer_24_224",
+    "hrnet_w18",
+    "inception_v3",
+    "sebotnet33ts_256",
+    "selecsls42b",
+}
+
+REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING = {
+    "adv_inception_v3",
+    "botnet26t_256",
+    "gluon_inception_v3",
+    "selecsls42b",
+    "swsl_resnext101_32x16d",
+}
 
 SCALED_COMPUTE_LOSS = {
     "ese_vovnet19b_dw",
@@ -303,9 +311,16 @@ class TimmRunner(BenchmarkRunner):
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         cosine = self.args.cosine
         tolerance = 1e-3
+
+        if self.args.freezing and name in REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING:
+            # the conv-batchnorm fusion used under freezing may cause relatively
+            # large numerical difference. We need are larger tolerance.
+            # Check https://github.com/pytorch/pytorch/issues/120545 for context
+            tolerance = 8 * 1e-2
+
         if is_training:
-            if REQUIRE_HIGHER_TOLERANCE:
-                tolerance = 2 * 1e-2
+            if name in REQUIRE_HIGHER_TOLERANCE:
+                tolerance = 4 * 1e-2
             else:
                 tolerance = 1e-2
         return tolerance, cosine
@@ -325,13 +340,13 @@ class TimmRunner(BenchmarkRunner):
         return reduce_to_scalar_loss(pred) / 1000.0
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             return mod(*inputs)
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
         self.optimizer_zero_grad(mod)
-        with self.autocast():
+        with self.autocast(**self.autocast_arg):
             pred = mod(*cloned_inputs)
             if isinstance(pred, tuple):
                 pred = pred[0]

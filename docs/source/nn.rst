@@ -103,6 +103,7 @@ Pooling layers
     nn.FractionalMaxPool3d
     nn.LPPool1d
     nn.LPPool2d
+    nn.LPPool3d
     nn.AdaptiveMaxPool1d
     nn.AdaptiveMaxPool2d
     nn.AdaptiveMaxPool3d
@@ -130,6 +131,9 @@ Padding Layers
     nn.ConstantPad1d
     nn.ConstantPad2d
     nn.ConstantPad3d
+    nn.CircularPad1d
+    nn.CircularPad2d
+    nn.CircularPad3d
 
 Non-linear Activations (weighted sum, nonlinearity)
 ---------------------------------------------------
@@ -203,6 +207,7 @@ Normalization Layers
     nn.LazyInstanceNorm3d
     nn.LayerNorm
     nn.LocalResponseNorm
+    nn.RMSNorm
 
 Recurrent Layers
 ----------------
@@ -395,6 +400,7 @@ Utility functions to convert Module parameter memory formats.
     :nosignatures:
 
     convert_conv2d_weight_memory_format
+    convert_conv3d_weight_memory_format
 
 Utility functions to apply and remove weight normalization from Module parameters.
 
@@ -522,6 +528,18 @@ Lazy Modules Initialization
 
     nn.modules.lazy.LazyModuleMixin
 
+Aliases
+_______
+
+The following are aliases to their counterparts in ``torch.nn``:
+
+.. currentmodule:: torch
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    nn.modules.normalization.RMSNorm
 
 .. This module needs to be documented. Adding here in the meantime
 .. for tracking purposes

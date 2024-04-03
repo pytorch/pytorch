@@ -28,9 +28,9 @@ using TraceKey = strong::type<
 
 struct CompressedEvent {
   TraceKey key_;
-  uint64_t system_tid_;
-  kineto::DeviceAndResource kineto_info_;
-  c10::time_t enter_t_;
+  uint64_t system_tid_{};
+  kineto::DeviceAndResource kineto_info_{};
+  c10::time_t enter_t_{};
 };
 
 /*

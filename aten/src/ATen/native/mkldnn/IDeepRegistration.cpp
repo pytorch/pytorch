@@ -30,4 +30,4 @@ void clear_computation_cache() {
 
 } // namespace  at::native::mkldnn
 
-#endif // AT_MKLDNN_ENALBED()
+#endif // AT_MKLDNN_ENABLED()

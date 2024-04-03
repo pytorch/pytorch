@@ -43,7 +43,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     AnnotatedSingleLayerLinearModel,
@@ -327,6 +327,36 @@ class TestObserver(QuantizationTestCase):
         self.assertEqual(min_shape_before, obs.min_val.shape)
         self.assertEqual(max_shape_before, obs.max_val.shape)
 
+    def test_histogram_observer_ignore_infinity(self):
+        """
+        Ensures that HistogramObserver doesn't record values of infinity
+        """
+        obs = HistogramObserver()
+        obs2 = HistogramObserver()
+        x = torch.randn(4, 4, 4, 4)
+        obs(x * torch.inf)
+        obs(x)
+        obs2(x)
+        obs(x * torch.inf)
+        self.assertTrue(obs.min_val != -torch.inf and obs.max_val != torch.inf)
+        self.assertEqual(obs.histogram, obs2.histogram)
+
+    def test_histogram_observer_handle_close_to_infinity(self):
+        for sign in [-1, 1]:
+            obser = HistogramObserver.with_args(reduce_range=False)()
+            mask = torch.tensor([-3.4028234663852886 * 10**30, 0, 0, 0]) * sign
+            obser(mask)
+            obser(mask - sign)
+            scale, zp = obser.calculate_qparams()
+
+            input = torch.randn(1, 4)
+            ref_result = torch.softmax(input + mask, dim=1)
+
+            quant_mask = torch.quantize_per_tensor(mask, scale, zp, torch.quint8)
+            dequant_mask = quant_mask.dequantize()
+            result = torch.softmax(input + dequant_mask, dim=1)
+            self.assertEqual(result, ref_result)
+
     def test_histogram_observer_save_load_state_dict(self):
         """
         Smoke test on saving/loading state_dict
@@ -399,8 +429,8 @@ class TestObserver(QuantizationTestCase):
             # verify no crash
             x = obs(x)
 
-    def _test_memoryless(self, obs_class):
-        obs = obs_class(averaging_constant=1)
+    def test_dynamic_quant_observer(self):
+        obs = MovingAverageMinMaxObserver(averaging_constant=1, is_dynamic=True)
         x = torch.randn((3, 3))
         obs(x)
         params = obs.calculate_qparams()
@@ -410,11 +440,26 @@ class TestObserver(QuantizationTestCase):
             obs(x)
             self.assertEqual(params, obs.calculate_qparams())
 
-    def test_memoryless_minmaxobserver(self):
-        self._test_memoryless(MovingAverageMinMaxObserver)
+    def test_dynamic_quant_observer_matching_choose_qparams(self):
+        obs = MovingAverageMinMaxObserver(averaging_constant=1, is_dynamic=True)
+        for x in [torch.randn(3, 3), torch.rand(3, 3, 3), torch.randn(3, 3, 3, 3)]:
+            obs(x)
+            params = obs.calculate_qparams()
+            scale, zero_point = torch._choose_qparams_per_tensor(x)
+            self.assertEqual(scale, params[0])
+            self.assertEqual(zero_point, params[1])
 
-    def test_memoryless_perchannelminmaxobserver(self):
-        self._test_memoryless(MovingAveragePerChannelMinMaxObserver)
+    def test_per_channel_observers_load_state_dict(self):
+        observer_list = [PerChannelMinMaxObserver, MovingAveragePerChannelMinMaxObserver]
+
+        for obs_cls in observer_list:
+            obs = obs_cls()
+            obs(torch.randn((32, 32)))
+            new_obs = obs_cls()
+            # make sure the state_dict can be loaded
+            new_obs.load_state_dict(obs.state_dict())
+            self.assertTrue(torch.equal(obs.min_val, new_obs.min_val))
+            self.assertTrue(torch.equal(obs.max_val, new_obs.max_val))
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
@@ -692,6 +737,7 @@ class TestHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.max_val, 8.0)
         self.assertEqual(myobs.histogram, [2., 3., 3.])
 
+    @skipIfTorchDynamo("too slow")
     @given(N=st.sampled_from([10, 1000]),
            bins=st.sampled_from([256, 512, 1024, 2048]),
            dtype=st.sampled_from([torch.qint8, torch.quint8]),

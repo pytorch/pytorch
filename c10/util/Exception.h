@@ -1,10 +1,11 @@
 #ifndef C10_UTIL_EXCEPTION_H_
 #define C10_UTIL_EXCEPTION_H_
 
+#include <c10/macros/Export.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/StringUtil.h>
 
-#include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <string>
 #include <variant>
@@ -445,8 +446,8 @@ C10_API std::string GetExceptionString(const std::exception& e);
     C10_THROW_ERROR(Error, TORCH_CHECK_MSG(cond, type, __VA_ARGS__)); \
   }
 #else
-namespace c10 {
-namespace detail {
+
+namespace c10::detail {
 template <typename... Args>
 decltype(auto) torchCheckMsgImpl(const char* /*msg*/, const Args&... args) {
   return ::c10::str(args...);
@@ -460,8 +461,7 @@ inline C10_API const char* torchCheckMsgImpl(
     const char* args) {
   return args;
 }
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail
 
 #define TORCH_CHECK_MSG(cond, type, ...)                   \
   (::c10::detail::torchCheckMsgImpl(                       \
@@ -476,8 +476,7 @@ inline C10_API const char* torchCheckMsgImpl(
   }
 #endif
 
-namespace c10 {
-namespace detail {
+namespace c10::detail {
 
 [[noreturn]] C10_API void torchCheckFail(
     const char* func,
@@ -516,8 +515,7 @@ namespace detail {
     const char* condMsg,
     const std::string& userMsg);
 
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail
 
 #ifdef STRIP_ERROR_MESSAGES
 #define TORCH_CHECK(cond, ...)                   \
@@ -645,8 +643,7 @@ namespace detail {
 // Deprecated macros
 // ----------------------------------------------------------------------------
 
-namespace c10 {
-namespace detail {
+namespace c10::detail {
 
 /*
 // Deprecation disabled until we fix sites in our codebase
@@ -675,8 +672,7 @@ https://github.com/pytorch/pytorch/issues/20287 for more details.")
 */
 inline void deprecated_AT_ASSERTM() {}
 
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail
 
 // Deprecated alias; this alias was deprecated because people kept mistakenly
 // using it for user error checking.  Use TORCH_INTERNAL_ASSERT or TORCH_CHECK

@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """Dtypes/scalar type implementaions with torch dtypes.
 
 Here `dtype` is always a torch.dtype, this module knows nothing about

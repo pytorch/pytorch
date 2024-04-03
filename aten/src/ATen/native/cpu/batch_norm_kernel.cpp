@@ -34,13 +34,13 @@ void batch_norm_cpu_collect_linear_and_constant_terms(
     const Tensor& save_mean, const Tensor& save_invstd,
     const Tensor& running_mean, const Tensor& running_var, bool train, double eps) {
 
-  const param_t* weight_data = weight.defined() ? weight.data_ptr<param_t>() : nullptr;
-  const param_t* bias_data = bias.defined() ? bias.data_ptr<param_t>() : nullptr;
+  const param_t* weight_data = weight.defined() ? weight.const_data_ptr<param_t>() : nullptr;
+  const param_t* bias_data = bias.defined() ? bias.const_data_ptr<param_t>() : nullptr;
 
-  auto save_mean_a = conditional_accessor_1d<param_t>(save_mean);
-  auto save_invstd_a = conditional_accessor_1d<param_t>(save_invstd);
-  auto running_mean_a = conditional_accessor_1d<param_t>(running_mean);
-  auto running_var_a = conditional_accessor_1d<param_t>(running_var);
+  auto save_mean_a = conditional_accessor_1d<const param_t>(save_mean);
+  auto save_invstd_a = conditional_accessor_1d<const param_t>(save_invstd);
+  auto running_mean_a = conditional_accessor_1d<const param_t>(running_mean);
+  auto running_var_a = conditional_accessor_1d<const param_t>(running_var);
 
   /// Collect the linear and constant terms regarding the input.
   /// output(n, c, h, w)
@@ -91,7 +91,7 @@ batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
      save_mean, save_invstd, running_mean, running_var, train, eps);
 
   scalar_t* output_data = output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   // Apply the linear terms to the input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
@@ -143,7 +143,7 @@ batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
       save_mean, save_invstd, running_mean, running_var, train, eps);
 
   scalar_t* output_data = output.data_ptr<scalar_t>();
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
 
   // Apply the linear terms to the input,
   // output(n, c, h, w) = input(n, c, h, w) * alpha(c) + beta(c)
@@ -185,7 +185,7 @@ batch_norm_cpu_collect_stats_contiguous_impl(
   int64_t image_size = input.numel() / n_batch / n_channel;
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
   scalar_t* mean_data = mean.data_ptr<scalar_t>();
   scalar_t* var_sum_data = var_sum.data_ptr<scalar_t>();
 
@@ -229,12 +229,12 @@ batch_norm_cpu_collect_stats_channels_last_impl(
   int64_t n_channel = input.size(1);
   int64_t N = input.numel() / n_channel;
 
-  const scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
   scalar_t* mean_data = mean.data_ptr<scalar_t>();
   scalar_t* var_sum_data = var_sum.data_ptr<scalar_t>();
 
   // Typical vertical reduce from shape of {NHW, C} to {C}.
-  // Apply two path parallel reduction:
+  // Apply two path parallel reduction when NHW > max_threads:
   // First path: allocate an immediate buffer of size {max_threads, C}, parallel along dim0,
   //    {NHW, C} => {max_threads, C}
   //
@@ -244,64 +244,160 @@ batch_norm_cpu_collect_stats_channels_last_impl(
   // Normal size of C should fit in L1, otherwise consider blocking on C.
   //
   int num_threads = at::get_num_threads();
-  Tensor buffer = at::zeros({num_threads, n_channel}, input.options());
-  scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
 
-  // compute mean per input
-  at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
-    int tid = at::get_thread_num();
-    TORCH_CHECK(tid < num_threads,
-                "expect thread id smaller than ", num_threads, ", got thread id ", tid);
-    scalar_t* buffer_ptr = buffer_data + tid * n_channel;
-    for (const auto i : c10::irange(begin, end)) {
-      const scalar_t* x_ptr = input_data + i * n_channel;
-      vec::map2<scalar_t>(
-          [](Vec x, Vec y) { return x + y; },
-          buffer_ptr,
-          x_ptr,
-          buffer_ptr,
-          n_channel);
-    }
-  });
+  if (N > num_threads) {
+    Tensor buffer = at::zeros({num_threads, n_channel}, input.options());
+    scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
 
-  at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
-      accscalar_t sum = 0;
-      for (const auto t : c10::irange(num_threads)) {
-        sum += buffer_data[t * n_channel + c];
+    // compute mean per input
+    at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
+      int tid = at::get_thread_num();
+      TORCH_CHECK(tid < num_threads,
+                  "expect thread id smaller than ", num_threads, ", got thread id ", tid);
+      scalar_t* buffer_ptr = buffer_data + tid * n_channel;
+      for (const auto i : c10::irange(begin, end)) {
+        const scalar_t* x_ptr = input_data + i * n_channel;
+        vec::map2<scalar_t>(
+            [](Vec x, Vec y) { return x + y; },
+            buffer_ptr,
+            x_ptr,
+            buffer_ptr,
+            n_channel);
       }
-      scalar_t mean = sum / N;
-      mean_data[c] = mean;
-    }
-  });
+    });
 
-  // compute variance per input, reuse the immediate buffer
-  buffer.zero_();
-  at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
-    int tid = at::get_thread_num();
-    TORCH_CHECK(tid < num_threads, "expect thread id smaller than ", num_threads, ", got thread id ", tid);
-    scalar_t* buffer_ptr = buffer_data + tid * n_channel;
-    for (const auto i : c10::irange(begin, end)) {
-      const scalar_t* x_ptr = input_data + i * n_channel;
-      vec::map3<scalar_t>(
-          [](Vec x, Vec y, Vec mean) { return y + (x - mean) * (x - mean); },
-          buffer_ptr,
-          x_ptr,
-          buffer_ptr,
-          mean_data,
-          n_channel);
-    }
-  });
-
-  at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
-    for (const auto c : c10::irange(begin, end)) {
-      accscalar_t _var_sum = 0;
-      for (const auto t : c10::irange(num_threads)) {
-        _var_sum += buffer_data[t * n_channel + c];
+    at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+      for (const auto c : c10::irange(begin, end)) {
+        accscalar_t sum = 0;
+        for (const auto t : c10::irange(num_threads)) {
+          sum += buffer_data[t * n_channel + c];
+        }
+        scalar_t mean = sum / N;
+        mean_data[c] = mean;
       }
-      var_sum_data[c] = _var_sum;
+    });
+
+    // compute variance per input, reuse the immediate buffer
+    buffer.zero_();
+    at::parallel_for(0, N, 1, [&](int64_t begin, int64_t end) {
+      int tid = at::get_thread_num();
+      TORCH_CHECK(tid < num_threads, "expect thread id smaller than ", num_threads, ", got thread id ", tid);
+      scalar_t* buffer_ptr = buffer_data + tid * n_channel;
+      for (const auto i : c10::irange(begin, end)) {
+        const scalar_t* x_ptr = input_data + i * n_channel;
+        vec::map3<scalar_t>(
+            [](Vec x, Vec y, Vec mean) { return y + (x - mean) * (x - mean); },
+            buffer_ptr,
+            x_ptr,
+            buffer_ptr,
+            mean_data,
+            n_channel);
+      }
+    });
+
+    at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+      for (const auto c : c10::irange(begin, end)) {
+        accscalar_t _var_sum = 0;
+        for (const auto t : c10::irange(num_threads)) {
+          _var_sum += buffer_data[t * n_channel + c];
+        }
+        var_sum_data[c] = _var_sum;
+      }
+    });
+  } else {
+    // Vertical reduce from shape of {NHW, C} to {C} when NHW <= max_threads.
+    // We'll use two methods, Method 1 and Method 2.
+    //
+    // Method 1: when TILE_SIZE < C <= THRESHOLD, parallel on C
+    //    {NHW, C} => {C}
+    //
+    // Method 2: when C <= TILE_SIZE or C > THRESHOLD, tile and vectorize on C, C is tiled as:
+    //    C: {TILE_SIZE, TILE_SIZE, ..., Remainder}
+    // parallel on tiles, vectorized vertical reduce on each tile
+    //    {NHW, TILE_SIZE} => {TILE_SIZE}
+    //
+    // The optimal THRESHOLD to tile was found empirically.
+    // When C > THRESHOLD, C is large enough that the benefit from tiling and vectorization outweigh the synchronization overhead.
+    // Wehn C <= TILE_SIZE, the problem size is small enough (C <= TILE_SIZE && NHW <= max_threads) that it's better to launch single thread with vectorization than C threads without vectorization.
+    //
+    // When num_threads == 1, always use Method 2 as there is no synchronization overhead.
+    //
+    int64_t TILE_SIZE = 16;
+    int64_t THRESHOLD = 2048;
+
+    // Method 2: parallel on tiles of C, vectorized vertical reduce on each tile
+    if (num_threads == 1 || (n_channel <= TILE_SIZE || n_channel > THRESHOLD)) {
+      // compute mean per input
+      mean.zero_();
+      at::parallel_for(0, (n_channel + TILE_SIZE - 1) / TILE_SIZE, 1, [&](int64_t tile_idx_begin, int64_t tile_idx_end) {
+        for (int64_t tile_idx = tile_idx_begin; tile_idx < tile_idx_end; tile_idx++) {
+          int64_t jj_begin = tile_idx * TILE_SIZE;
+          int64_t jj_end = std::min(jj_begin + TILE_SIZE, n_channel);
+          scalar_t* mean_ptr = mean_data + jj_begin;
+          for (const auto i : c10::irange(N)) {
+            const scalar_t* x_ptr = input_data + (i * n_channel + jj_begin);
+            vec::map2<scalar_t>(
+              [](Vec x, Vec y) { return x + y; },
+              mean_ptr,
+              x_ptr,
+              mean_ptr,
+              jj_end - jj_begin);
+          }
+          vec::map<scalar_t>(
+            [N](Vec x) { return x / Vec(N); },
+            mean_ptr,
+            mean_ptr,
+            jj_end - jj_begin);
+        }
+      });
+
+      // compute variance per input
+      var_sum.zero_();
+      at::parallel_for(0, (n_channel + TILE_SIZE - 1) / TILE_SIZE, 1, [&](int64_t tile_idx_begin, int64_t tile_idx_end) {
+        for (int64_t tile_idx = tile_idx_begin; tile_idx < tile_idx_end; tile_idx++) {
+          int64_t jj_begin = tile_idx * TILE_SIZE;
+          int64_t jj_end = std::min(jj_begin + TILE_SIZE, n_channel);
+          scalar_t* var_sum_ptr = var_sum_data + jj_begin;
+          scalar_t* mean_ptr = mean_data + jj_begin;
+          for (const auto i : c10::irange(N)) {
+            const scalar_t* x_ptr = input_data + (i * n_channel + jj_begin);
+            vec::map3<scalar_t>(
+              [](Vec x, Vec y, Vec mean) { return y + (x - mean) * (x - mean); },
+              var_sum_ptr,
+              x_ptr,
+              var_sum_ptr,
+              mean_ptr,
+              jj_end - jj_begin);
+          }
+        }
+      });
     }
-  });
+    // Method 1: parallel on C, vertical reduce
+    else {
+      // compute mean per input
+      at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+        for (const auto c : c10::irange(begin, end)) {
+          accscalar_t sum = 0;
+          for (const auto t : c10::irange(N)) {
+            sum += input_data[t * n_channel + c];
+          }
+          scalar_t mean = sum / N;
+          mean_data[c] = mean;
+        }
+      });
+
+      // compute variance per input
+      at::parallel_for(0, n_channel, 1, [&](int64_t begin, int64_t end) {
+        for (const auto c : c10::irange(begin, end)) {
+          accscalar_t _var_sum = 0;
+          for (const auto t : c10::irange(N)) {
+            _var_sum += (input_data[t * n_channel + c] - mean_data[c]) * (input_data[t * n_channel + c] - mean_data[c]);
+          }
+          var_sum_data[c] = _var_sum;
+        }
+      });
+    }
+  }
 }
 
 template <typename scalar_t>
@@ -657,8 +753,7 @@ batch_norm_cpu_contiguous_impl(Tensor& output, const Tensor& input,
       int64_t d = 0;
       for (; d < loop_size; d += bVec::size()) {
         bVec data_bvec = bVec::loadu(input_ptr + d);
-        fVec data_fvec0, data_fvec1;
-        std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+        auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
 
         fVec out_fvec0 = data_fvec0 * alpha_fvec + beta_fvec;
         fVec out_fvec1 = data_fvec1 * alpha_fvec + beta_fvec;
@@ -717,8 +812,7 @@ batch_norm_cpu_channels_last_impl(Tensor& output, const Tensor& input,
         fVec beta_fvec0 = fVec::loadu(beta_data + d);
         fVec beta_fvec1 = fVec::loadu(beta_data + d + fVec::size());
         bVec data_bvec = bVec::loadu(input_ptr + d);
-        fVec data_fvec0, data_fvec1;
-        std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+        auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
 
         fVec out_fvec0 = data_fvec0 * alpha_fvec0 + beta_fvec0;
         fVec out_fvec1 = data_fvec1 * alpha_fvec1 + beta_fvec1;
@@ -756,8 +850,7 @@ inline void batch_norm_cpu_collect_stats_contiguous_internal(
         int64_t d = 0;
         for (; d < image_size - (image_size % bVec::size()); d += bVec::size()) {
           bVec data_bvec = bVec::loadu(input_ptr + d);
-          fVec data_fvec0, data_fvec1;
-          std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+          auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
           sum_fvec += data_fvec0;
           sum_fvec += data_fvec1;
         }
@@ -778,8 +871,7 @@ inline void batch_norm_cpu_collect_stats_contiguous_internal(
         int64_t d = 0;
         for (; d < image_size - (image_size % bVec::size()); d += bVec::size()) {
           bVec data_bvec = bVec::loadu(input_ptr + d);
-          fVec data_fvec0, data_fvec1;
-          std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+          auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
           var_fvec += (data_fvec0 - mean_fvec) * (data_fvec0 - mean_fvec);
           var_fvec += (data_fvec1 - mean_fvec) * (data_fvec1 - mean_fvec);
         }
@@ -833,8 +925,7 @@ inline void batch_norm_cpu_collect_stats_channels_last_internal(
       int64_t d = 0;
       for (; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
         bVec data_bvec = bVec::loadu(input_ptr + d);
-        fVec data_fvec0, data_fvec1;
-        std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
+        auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
         fVec sum_fvec0 = fVec::loadu(buffer_ptr + d) + data_fvec0;
         fVec sum_fvec1 = fVec::loadu(buffer_ptr + d + fVec::size()) + data_fvec1;
         sum_fvec0.store(buffer_ptr + d);
@@ -864,10 +955,8 @@ inline void batch_norm_cpu_collect_stats_channels_last_internal(
       int64_t d = 0;
       for (; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
         bVec data_bvec = bVec::loadu(input_ptr + d);
-        fVec data_fvec0, data_fvec1;
-        std::tie(data_fvec0, data_fvec1) = convert_to_float<scalar_t>(data_bvec);
-        fVec mean_fvec0, mean_fvec1;
-        std::tie(mean_fvec0, mean_fvec1) = load2f(mean_data + d);
+        auto [data_fvec0, data_fvec1] = convert_to_float<scalar_t>(data_bvec);
+        auto [mean_fvec0, mean_fvec1] = load2f(mean_data + d);
         fVec var_fvec0 = fVec::loadu(buffer_ptr + d);
         fVec var_fvec1 = fVec::loadu(buffer_ptr + d + fVec::size());
         var_fvec0 += (data_fvec0 - mean_fvec0) * (data_fvec0 - mean_fvec0);
@@ -957,14 +1046,12 @@ void batch_norm_cpu_backward_contiguous_internal(Tensor& grad_input, Tensor& gra
         int64_t d = 0;
         for (; d < image_size - (image_size % bVec::size()); d += bVec::size()) {
           bVec dy_bvec = bVec::loadu(dy_ptr + d);
-          fVec dy_fvec0, dy_fvec1;
-          std::tie(dy_fvec0, dy_fvec1) = convert_to_float<scalar_t>(dy_bvec);
+          auto [dy_fvec0, dy_fvec1] = convert_to_float<scalar_t>(dy_bvec);
           sum_fvec += dy_fvec0;
           sum_fvec += dy_fvec1;
 
           bVec x_bvec = bVec::loadu(x_ptr + d);
-          fVec x_fvec0, x_fvec1;
-          std::tie(x_fvec0, x_fvec1) = convert_to_float<scalar_t>(x_bvec);
+          auto [x_fvec0, x_fvec1] = convert_to_float<scalar_t>(x_bvec);
           dotp_fvec += (x_fvec0 - fVec(mean)) * dy_fvec0;
           dotp_fvec += (x_fvec1 - fVec(mean)) * dy_fvec1;
         }
@@ -1092,16 +1179,14 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
       int64_t d = 0;
       for(; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
         bVec dy_bvec = bVec::loadu(dy_ptr + d);
-        fVec dy_fvec0, dy_fvec1;
-        std::tie(dy_fvec0, dy_fvec1) = convert_to_float<scalar_t>(dy_bvec);
+        auto [dy_fvec0, dy_fvec1] = convert_to_float<scalar_t>(dy_bvec);
         fVec sum_fvec0 = dy_fvec0 + fVec::loadu(sum_ptr + d);
         fVec sum_fvec1 = dy_fvec1 + fVec::loadu(sum_ptr + d + fVec::size());
         sum_fvec0.store(sum_ptr + d);
         sum_fvec1.store(sum_ptr + d + fVec::size());
 
         bVec x_bvec = bVec::loadu(x_ptr + d);
-        fVec x_fvec0, x_fvec1;
-        std::tie(x_fvec0, x_fvec1) = convert_to_float<scalar_t>(x_bvec);
+        auto [x_fvec0, x_fvec1] = convert_to_float<scalar_t>(x_bvec);
         fVec mean_fvec0 = fVec::loadu(mean_data + d);
         fVec mean_fvec1 = fVec::loadu(mean_data + d + fVec::size());
         fVec dotp_fvec0 = fVec::loadu(dotp_ptr + d);
@@ -1150,8 +1235,7 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
           int64_t d = 0;
           for (; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
             bVec x_bvec = bVec::loadu(x_ptr + d);
-            fVec x_fvec0, x_fvec1;
-            std::tie(x_fvec0, x_fvec1) = convert_to_float<scalar_t>(x_bvec);
+            auto [x_fvec0, x_fvec1] = convert_to_float<scalar_t>(x_bvec);
             fVec mean_fvec0 = fVec::loadu(mean_data + d);
             fVec mean_fvec1 = fVec::loadu(mean_data + d + fVec::size());
             fVec dotp_fvec0 = fVec::loadu(dotp_data + d);
@@ -1163,8 +1247,7 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
             fVec dx_fvec0 = (x_fvec0 - mean_fvec0) * k_fvec0;
             fVec dx_fvec1 = (x_fvec1 - mean_fvec1) * k_fvec1;
             bVec dy_bvec = bVec::loadu(dy_ptr + d);
-            fVec dy_fvec0, dy_fvec1;
-            std::tie(dy_fvec0, dy_fvec1) = convert_to_float<scalar_t>(dy_bvec);
+            auto [dy_fvec0, dy_fvec1] = convert_to_float<scalar_t>(dy_bvec);
             fVec grad_mean_fvec0 = fVec::loadu(sum_data + d) / fVec(N);
             fVec grad_mean_fvec1 = fVec::loadu(sum_data + d + fVec::size()) / fVec(N);
             fVec w_fvec0 = fVec::loadu(weight_data + d);
@@ -1191,8 +1274,7 @@ void batch_norm_cpu_backward_channels_last_internal(Tensor& grad_input, Tensor& 
           int64_t d = 0;
           for (; d < n_channel - (n_channel % bVec::size()); d += bVec::size()) {
             bVec dy_bvec = bVec::loadu(dy_ptr + d);
-            fVec dy_fvec0, dy_fvec1;
-            std::tie(dy_fvec0, dy_fvec1) = convert_to_float<scalar_t>(dy_bvec);
+            auto [dy_fvec0, dy_fvec1] = convert_to_float<scalar_t>(dy_bvec);
             fVec invstd_fvec0 = fVec::loadu(invstd_data + d);
             fVec invstd_fvec1 = fVec::loadu(invstd_data + d + fVec::size());
             fVec w_fvec0 = fVec::loadu(weight_data + d);

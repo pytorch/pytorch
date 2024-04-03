@@ -1,13 +1,13 @@
 #pragma once
 
 #include <c10/cuda/CUDAStream.h>
+#include <iostream>
 #include <utility>
 
 // CUDA Graphs utils used by c10 and aten.
 // aten/cuda/CUDAGraphsUtils.cuh adds utils used by aten only.
 
-namespace c10 {
-namespace cuda {
+namespace c10::cuda {
 
 using CaptureId_t = unsigned long long;
 
@@ -19,8 +19,8 @@ using MempoolId_t = std::pair<CaptureId_t, CaptureId_t>;
 // that controls the error-checking strictness of a capture.
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
 struct C10_CUDA_API CUDAStreamCaptureModeGuard {
-  CUDAStreamCaptureModeGuard(cudaStreamCaptureMode desired) {
-    strictness_ = desired;
+  CUDAStreamCaptureModeGuard(cudaStreamCaptureMode desired)
+      : strictness_(desired) {
     C10_CUDA_CHECK(cudaThreadExchangeStreamCaptureMode(&strictness_));
   }
   ~CUDAStreamCaptureModeGuard() {
@@ -79,7 +79,7 @@ inline std::ostream& operator<<(std::ostream& os, CaptureStatus status) {
 // Use this version where you're sure a CUDA context exists already.
 inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
-  cudaStreamCaptureStatus is_capturing;
+  cudaStreamCaptureStatus is_capturing{cudaStreamCaptureStatusNone};
   C10_CUDA_CHECK(
       cudaStreamIsCapturing(c10::cuda::getCurrentCUDAStream(), &is_capturing));
   return CaptureStatus(is_capturing);
@@ -88,5 +88,4 @@ inline CaptureStatus currentStreamCaptureStatusMayInitCtx() {
 #endif
 }
 
-} // namespace cuda
-} // namespace c10
+} // namespace c10::cuda

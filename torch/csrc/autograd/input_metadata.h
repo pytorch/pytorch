@@ -19,11 +19,7 @@
 #include <ATen/ops/zeros.h>
 #endif
 
-#include <cstdint>
-#include <utility>
-
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 using SymIntSmallVec = c10::SmallVector<c10::SymInt, c10::kDimVectorStaticSize>;
 using MetadataShape = std::variant<SymIntSmallVec, at::Tensor>;
@@ -77,6 +73,11 @@ struct TORCH_API InputMetadata {
 
   at::Tensor reduce_grad(at::Tensor& grad) const;
 
+  at::Tensor maybe_reduce(
+      const size_t index,
+      at::Tensor grad,
+      const std::function<std::string(const std::string&)>& format_error) const;
+
   std::stringstream incompatible_shape_error_message(
       const size_t index,
       const at::Tensor& grad) const;
@@ -109,5 +110,4 @@ struct TORCH_API InputMetadata {
   bool is_nested_ = false;
   bool was_default_constructed_ = true;
 };
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

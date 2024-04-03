@@ -1,10 +1,13 @@
 # Owner(s): ["module: nn"]
 
 import math
+import sys
 import unittest
 from typing import List, Tuple, Union
 
 import torch
+from torch._inductor import config
+from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import (
@@ -115,7 +118,9 @@ class TestDecomp(NNTestCase):
             run_comp_nocomp(torch_addmm, tadd, t1, t2, rtol=rtol, atol=atol)
 
     @unittest.skipIf(TEST_CUDA and not has_triton(), "CUDA tests require triton")
-    @parametrize("dtype", [torch.float, torch.bfloat16])
+    @parametrize(
+        "dtype", [torch.float, torch.bfloat16] if SM80OrLater else [torch.float]
+    )
     @parametrize("bs", [1, 2, 4, 10])
     def test_batched_mm(self, device, dtype, bs):
         fudge = 3
@@ -136,6 +141,18 @@ class TestDecomp(NNTestCase):
                     run_comp_nocomp(
                         torch_baddbmm, tadd, t1, t2, alpha, beta, rtol=rtol, atol=atol
                     )
+
+    @unittest.skipIf(TEST_CUDA and not has_triton(), "CUDA tests require triton")
+    @config.patch(coordinate_descent_tuning=True)
+    def test_bmm_batch2_last_dim_size_is_one(self, device):
+        fudge = 3
+        rtol = default_rtol[torch.float32] * fudge
+        atol = default_atol[torch.float32] * fudge
+
+        t1 = torch.randn(1, 32, 2, device=device)
+        t2 = torch.randn(1, 2, 1, device=device)
+
+        run_comp_nocomp(torch_bmm, t1, t2, rtol=rtol, atol=atol)
 
     @unittest.skipIf(TEST_CUDA and not has_triton(), "CUDA tests require triton")
     @parametrize("dtype", [torch.float, torch.bfloat16, torch.int])
@@ -181,6 +198,7 @@ device_types = ("cpu", "cuda")
 instantiate_device_type_tests(TestDecomp, globals(), only_for=device_types)
 
 if __name__ == "__main__":
-    # We don't support torch.compile() on Windows presently
-    if not IS_WINDOWS:
+    # We don't support torch.compile() on
+    # Windows and Python 3.12+
+    if not IS_WINDOWS and sys.version_info < (3, 12):
         run_tests()

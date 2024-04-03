@@ -60,7 +60,7 @@ Do I still need to export whole graphs?
 For the vast majority of models you probably don’t and you can use
 ``torch.compile()`` as is but there are a few situations where
 full graphs are necessary and you can can ensure a full graph by simply
-running ``torch.compile(..., nopython=True)``. These situations include:
+running ``torch.compile(..., fullgraph=True)``. These situations include:
 
 * Large scale training runs, such as $250K+ that require pipeline parallelism
   and other advanced sharding strategies.
@@ -199,6 +199,8 @@ generated kernels and try to see what’s going on for yourself.
 Why am I not seeing speedups?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+.. _torch.compiler_graph_breaks:
+
 Graph Breaks
 ------------
 
@@ -245,22 +247,29 @@ that are encountered. Here is an example usage:
        if b.sum() < 0:
            b = b * -1
        return x * b
-   explanation, out_guards, graphs, ops_per_graph = dynamo.explain(toy_example, torch.randn(10), torch.randn(10))
+   explanation = dynamo.explain(toy_example)(torch.randn(10), torch.randn(10))
    print(explanation)
    """
-   Dynamo produced 3 graphs, with 2 graph break and 6 ops.
-    Break reasons:
-   1. call_function BuiltinVariable(print) [ConstantVariable(str)] {}
-      File "t2.py", line 16, in toy_example
-       print("woo")
+   Graph Count: 3
+   Graph Break Count: 2
+   Op Count: 5
+   Break Reasons:
+     Break Reason 1:
+       Reason: builtin: print [<class 'torch._dynamo.variables.constant.ConstantVariable'>] False
+       User Stack:
+         <FrameSummary file foo.py, line 5 in toy_example>
+     Break Reason 2:
+       Reason: generic_jump TensorVariable()
+       User Stack:
+         <FrameSummary file foo.py, line 6 in torch_dynamo_resume_in_toy_example_at_5>
+   Ops per Graph:
+     ...
+   Out Guards:
+     ...
+   """
 
-   2. generic_jump
-      File "t2.py", line 17, in toy_example
-       if b.sum() < 0:
-    """
-
-To throw an error on the first graph break encountered you can use
-disable python fallback by using ``nopython=True``, this should be
+To throw an error on the first graph break encountered you can
+disable python fallbacks by using ``fullgraph=True``, this should be
 familiar if you’ve worked with export based compilers.
 
 .. code-block:: python
@@ -268,7 +277,7 @@ familiar if you’ve worked with export based compilers.
    def toy_example(a, b):
       ...
 
-   torch.compile(toy_example, fullgraph=True, backend=<compiler>)
+   torch.compile(toy_example, fullgraph=True, backend=<compiler>)(a, b)
 
 Why didn’t my code recompile when I changed it?
 -----------------------------------------------
@@ -583,8 +592,37 @@ fallback to NumPy for their execution:
 
 - ``ndarray.ctypes`` attribute.
 
-Can I execute NumPy code on CUDA via ``torch.compile``?
--------------------------------------------------------
+Can I compile NumPy code using ``torch.compile``?
+-------------------------------------------------
+
+Of course you do! ``torch.compile`` understands NumPy code natively, and treats it
+as if it were PyTorch code. To do so, simply wrap NumPy code with the ``torch.compile``
+decorator.
+
+.. code-block:: python
+
+   import torch
+   import numpy as np
+
+   @torch.compile
+   def numpy_fn(X: np.ndarray, Y: np.ndarray) -> np.ndarray:
+       return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
+
+   X = np.random.randn(1024, 64)
+   Y = np.random.randn(1024, 64)
+   Z = numpy_fn(X, Y)
+   assert isinstance(Z, np.ndarray)
+
+Executing this example with the environment variable ``TORCH_LOGS=output_code``, we can see
+that ``torch.compile`` was able to fuse the multiplication and the sum into one C++ kernel.
+It was also able to execute them in parallel using OpenMP (native NumPy is single-threaded).
+This can easily make your NumPy code ``n`` times faster, where ``n`` is the number of cores
+in your processor!
+
+Tracing NumPy code this way also supports graph breaks within the compiled code.
+
+Can I execute NumPy code on CUDA and compute gradients via ``torch.compile``?
+-----------------------------------------------------------------------------
 
 Yes you can! To do so, you may simply execute your code within a ``torch.device("cuda")``
 context. Consider the example
@@ -602,35 +640,84 @@ context. Consider the example
    Y = np.random.randn(1024, 64)
    with torch.device("cuda"):
        Z = numpy_fn(X, Y)
-
+   assert isinstance(Z, np.ndarray)
 
 In this example, ``numpy_fn`` will be executed in CUDA. For this to be
 possible, ``torch.compile`` automatically moves ``X`` and ``Y`` from CPU
 to CUDA, and then it moves the result ``Z`` from CUDA to CPU. If we are
 executing this function several times in the same program run, we may want
 to avoid all these rather expensive memory copies. To do so, we just need
-to tweak our ``numpy_fn`` so that it accepts cuda Tensors and returns tensors:
+to tweak our ``numpy_fn`` so that it accepts cuda Tensors and returns tensors.
+We can do so by using ``torch.compiler.wrap_numpy``:
+
+.. code-block:: python
+
+   @torch.compile(fullgraph=True)
+   @torch.compiler.wrap_numpy
+   def numpy_fn(X, Y):
+       return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
+
+   X = torch.randn(1024, 64, device="cuda")
+   Y = torch.randn(1024, 64, device="cuda")
+   Z = numpy_fn(X, Y)
+   assert isinstance(Z, torch.Tensor)
+   assert Z.device.type == "cuda"
+
+Here, we explicitly create the tensors in CUDA memory, and pass them to the
+function, which performs all the computations on the CUDA device.
+``wrap_numpy`` is in charge of marking any ``torch.Tensor`` input as an input
+with ``np.ndarray`` semantics at a ``torch.compile`` level. Marking tensors
+inside the compiler is a very cheap operation, so no data copy or data movement
+happens during runtime.
+
+Using this decorator, we can also differentiate through NumPy code!
+
+.. code-block:: python
+
+   @torch.compile(fullgraph=True)
+   @torch.compiler.wrap_numpy
+   def numpy_fn(X, Y):
+       return np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
+
+   X = torch.randn(1024, 64, device="cuda", requires_grad=True)
+   Y = torch.randn(1024, 64, device="cuda")
+   Z = numpy_fn(X, Y)
+   assert isinstance(Z, torch.Tensor)
+   Z.backward()
+   # X.grad now holds the gradient of the computation
+   print(X.grad)
+
+We have been using ``fullgraph=True`` as graph break are problematic in this context.
+When a graph break occurs, we need to materialize the NumPy arrays. Since NumPy arrays
+do not have a notion of ``device`` or ``requires_grad``, this information is lost during
+a graph break.
+
+We cannot propagate gradients through a graph break, as the graph break code may execute
+arbitrary code that don't know how to differentiate. On the other hand, in the case of
+the CUDA execution, we can work around this problem as we did in the first example, by
+using the ``torch.device("cuda")`` context manager:
 
 .. code-block:: python
 
    @torch.compile
-   def numpy_fn(X: torch.Tensor, Y: torch.Tensor) -> torch.Tensor:
-       X, Y = X.numpy(), Y.numpy()
-       Z = np.sum(X[:, :, None] * Y[:, None, :], axis=(-2, -1))
-       return torch.from_numpy(Z)
+   @torch.compiler.wrap_numpy
+   def numpy_fn(X, Y):
+       prod = X[:, :, None] * Y[:, None, :]
+       print("oops, a graph break!")
+       return np.sum(prod, axis=(-2, -1))
 
    X = torch.randn(1024, 64, device="cuda")
    Y = torch.randn(1024, 64, device="cuda")
+
    with torch.device("cuda"):
        Z = numpy_fn(X, Y)
+   assert isinstance(Z, torch.Tensor)
+   assert Z.device.type == "cuda"
 
-By doing this, we explicitly create the tensors in CUDA memory, and we keep
-them there. In this case ``X.numpy()`` and ``from_numpy()`` are hints to the compiler
-but no real data movement happens. Note that the original program would not run
-on eager mode now. If you want to run it in eager mode, you would need to call
-``.numpy(force=True)`` doing ``Z = Z.cuda()`` before returning
-``Z``. Of course, doing this would execute the program on eager mode NumPy, and
-on CPU.
+During the graph break, the intermediary tensors still need to be moved to CPU, but when the
+tracing is resumed after the graph break, the rest of the graph is still traced on CUDA.
+Given this CUDA <> CPU and CPU <> CUDA movement, graph breaks are fairly costly in the NumPy
+context and should be avoided, but at least they allow tracing through complex pieces of code.
 
 
 How do I debug NumPy code under ``torch.compile``?

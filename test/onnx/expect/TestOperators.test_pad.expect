@@ -199,7 +199,7 @@ graph {
     }
   }
   node {
-    input: "onnx::Pad_0"
+    input: "input"
     input: "onnx::Pad_22"
     output: "23"
     name: "Pad_23"
@@ -212,7 +212,7 @@ graph {
   }
   name: "main_graph"
   input {
-    name: "onnx::Pad_0"
+    name: "input"
     type {
       tensor_type {
         elem_type: 1

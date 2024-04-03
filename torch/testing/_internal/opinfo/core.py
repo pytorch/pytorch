@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import collections
 import collections.abc
 import math
@@ -7,7 +9,7 @@ from dataclasses import asdict, dataclass
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, Callable, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
 
 from torchgen.utils import dataclass_repr
 
@@ -448,7 +450,7 @@ class AliasInfo:
 #   the operator's output (when given the input, args, and kwargs) to the
 #   portion of the output to gradcheck. For example, consider an operator
 #   like torch.linalg.slogdet
-#   (https://pytorch.org/docs/master/generated/torch.linalg.slogdet.html).
+#   (https://pytorch.org/docs/main/generated/torch.linalg.slogdet.html).
 #   This operator returns a tuple of two tensors, but the first tensor
 #   cannot be backwarded through. Its "output_process_fn_grad" filters
 #   this output tuple to just the second argument, which we can call backward
@@ -771,6 +773,13 @@ class OpInfo:
     # Whether the operation has a varargs variant
     # (e.g. functions like ones, zeros, methods like view, permute)
     supports_varargs: bool = False
+
+    # Whether the operation avoids materializing COW tensor inputs
+    supports_cow_input_no_materialize: bool = True
+
+    # If `supports_cow_input_no_materialize == True`, this list contains the arg
+    # indices or kwarg names of inputs that are expected to materialize
+    allow_cow_input_materialize: List[Union[int, str]] = None
 
     # wrapper function for gradcheck
     gradcheck_wrapper: Callable = lambda op, *args, **kwargs: op(*args, **kwargs)
@@ -1321,6 +1330,8 @@ class OpInfo:
         return result
 
     def supported_dtypes(self, device_type):
+        if device_type == "privateuse1":
+            device_type = torch._C._get_privateuse1_backend_name()
         device_type = torch.device(device_type).type
         if device_type == "cuda":
             return self.dtypesIfROCM if TEST_WITH_ROCM else self.dtypesIfCUDA
@@ -1330,6 +1341,8 @@ class OpInfo:
         if not self.supports_autograd:
             return set()
 
+        if device_type == "privateuse1":
+            device_type = torch._C._get_privateuse1_backend_name()
         device_type = torch.device(device_type).type
         backward_dtypes = None
         if device_type == "cuda":
@@ -2699,7 +2712,7 @@ class ForeachFuncInfo(OpInfo):
         supports_scalar_self_arg=False,
         supports_forward_ad=True,
         backward_requires_result=False,
-        has_no_out_of_place=False,
+        supports_out=True,
         **kwargs,
     ):
         (
@@ -2708,13 +2721,15 @@ class ForeachFuncInfo(OpInfo):
             torch_ref_method,
             torch_ref_inplace,
         ) = get_foreach_method_names(name)
-        if has_no_out_of_place:
+        if not supports_out:
             # note(crcrpar): `foreach_method` for `"zero"` is `None` but `None` would call
             # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
             # is not defined at the moment. Thus to skip the qualification, set a similar torch
             # function.
             assert foreach_method is None
-            foreach_method = getattr(torch.Tensor, f"{name}_")
+            assert torch_ref_method is None
+            foreach_method = foreach_method_inplace
+            torch_ref_method = torch_ref_inplace
         super().__init__(
             name="_foreach_" + name,
             op=foreach_method,
@@ -2727,6 +2742,7 @@ class ForeachFuncInfo(OpInfo):
             sample_inputs_func=sample_inputs_func,
             supports_autograd=supports_autograd,
             supports_forward_ad=supports_forward_ad,
+            supports_out=supports_out,
             **kwargs,
         )
         self.supports_scalar_self_arg = supports_scalar_self_arg
@@ -2734,7 +2750,6 @@ class ForeachFuncInfo(OpInfo):
         self.ref_inplace = torch_ref_inplace
         self.supports_alpha_param = supports_alpha_param
         self.backward_requires_result = backward_requires_result
-        self.has_no_out_of_place = has_no_out_of_place
         self.has_no_in_place = self.inplace_variant is None
         self.supports_inplace_autograd = supports_inplace_autograd
 

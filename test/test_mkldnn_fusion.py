@@ -6,7 +6,7 @@ from typing import NamedTuple, List
 import torch
 from torch import nn
 
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase
 
 from test_tensorexpr import warmup_and_run_forward
@@ -22,6 +22,7 @@ class PointwisePostOp(NamedTuple):
 CONV_MODULES = {2: torch.nn.Conv2d, 3: torch.nn.Conv3d}
 CONV_TRANSPOSE_MODULES = {2: torch.nn.ConvTranspose2d}
 
+@skipIfTorchDynamo("too slow")
 @unittest.skipIf(not torch.backends.mkldnn.is_available(), "MKL-DNN build is disabled")
 class TestMkldnnFusion(JitTestCase):
     def assertFused(self, graph, fused_patterns):
@@ -205,11 +206,15 @@ class TestMkldnnFusion(JitTestCase):
                 return x
 
         for pointwise_info in self._unary_list().values():
-            options = itertools.product([[2, 3, 10], [2, 10]], [True, False])
-            for input_shape, bias in options:
+            # Tensor with size = [1, 10] and stride = [0, 1] is contiguous tensor
+            # but it's strides is not default contiguous strides.
+            options = itertools.product([[[2, 3, 10], None], [[2, 10], None], [[1, 10], [0, 1]]], [True, False])
+            for (input_shape, input_stride), bias in options:
                 with torch.no_grad():
                     mod = M(pointwise_info.pointwise_module, input_shape[-1], 10, bias).eval()
                     v = torch.randn(input_shape)
+                    if input_stride is not None:
+                        v = v.as_strided(input_shape, input_stride)
                     ref = mod(v)
                     attr = pointwise_info.attr
                     scalars = pointwise_info.scalars

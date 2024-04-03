@@ -30,10 +30,12 @@
 #include <ATen/ops/nansum_native.h>
 #include <ATen/ops/norm_native.h>
 #include <ATen/ops/prod_native.h>
+#include <ATen/ops/std_mean_native.h>
 #include <ATen/ops/std_native.h>
 #include <ATen/ops/sum.h>
 #include <ATen/ops/sum_native.h>
 #include <ATen/ops/trace_native.h>
+#include <ATen/ops/var_mean_native.h>
 #include <ATen/ops/var_native.h>
 #endif
 
@@ -220,6 +222,7 @@ static void reduction_out_mps(const Tensor& input_t,
            (dtype.value() == kLong && macOS13_3_plus))) {
         inputCastType = getMPSDataType(dtype.value());
       } else if (inputScalarType != kInt && inputScalarType != kHalf && inputScalarType != kFloat &&
+                 inputScalarType != kComplexFloat && inputScalarType != kComplexHalf &&
                  (inputScalarType != kLong || !macOS13_3_plus)) {
         inputCastType = getMPSDataType(kFloat);
       } else if (!is_macos_13_or_newer() && inputScalarType == kHalf) {
@@ -279,13 +282,8 @@ static void reduction_out_mps(const Tensor& input_t,
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t, mpsShape);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_output_shape);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -308,6 +306,7 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
   auto input_t = (input_tensor.sizes().size() == 0) ? input_tensor.view({1}) : input_tensor;
   auto in_dtype = opt_dtype.value_or(input_tensor.scalar_type());
   auto mps_input_dtype = getMPSDataType(in_dtype);
+  TORCH_CHECK(!input_tensor.is_complex(), "norm ops are not supported for complex yet");
 
   IntArrayRef input_shape = cdist ? input_broadcasted_shape.value() : input_t.sizes();
 
@@ -432,10 +431,7 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
       feeds[otherPlaceholder.getMPSGraphTensor()] = otherPlaceholder.getMPSGraphTensorData();
     }
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -604,13 +600,8 @@ static Tensor std_var_common_impl_mps(const Tensor& input_t,
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_output_shape);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(stream, cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return output_t;
@@ -659,14 +650,8 @@ static Tensor min_max_mps_impl(const Tensor& input_t, MPSReductionType reduction
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, @[ @1 ]);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return output_t;
@@ -755,15 +740,8 @@ static void min_max_out_mps(const Tensor& input_t,
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
     auto indicesPlaceholder = Placeholder(cachedGraph->indicesTensor_, indices_t, apparent_out_shape);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-      indicesPlaceholder.getMPSGraphTensor() : indicesPlaceholder.getMPSGraphTensorData()
-    };
-
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    auto results = dictionaryFromPlaceholders(outputPlaceholder, indicesPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 }
@@ -918,14 +896,8 @@ static void argmax_argmin_out_mps(const Tensor& input_t,
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t, apparent_in_shape);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -1264,15 +1236,8 @@ TORCH_IMPL_FUNC(any_out_mps)
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -1314,15 +1279,8 @@ TORCH_IMPL_FUNC(any_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -1373,15 +1331,8 @@ TORCH_IMPL_FUNC(all_out_mps)
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -1420,15 +1371,8 @@ TORCH_IMPL_FUNC(all_all_out_mps)(const Tensor& input_t, const Tensor& output_t) 
 
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t);
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    runMPSGraph(stream, cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 }
 
@@ -1487,7 +1431,7 @@ static std::tuple<Tensor, Tensor> min_mps(const Tensor& input_t, int64_t dim, bo
 Tensor median_mps(const Tensor& input_t) {
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0. ",
-                    "Falling back on CPU. This may have performace implications.");
+                    "Falling back on CPU. This may have performance implications.");
     return at::median(input_t.to("cpu"));
   }
 
@@ -1534,14 +1478,8 @@ Tensor median_mps(const Tensor& input_t) {
     auto inputPlaceholder = Placeholder(cachedGraph->inputTensor_, input_t);
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, @[ @1 ]);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
-
-    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, results);
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    runMPSGraph(getCurrentMPSStream(), cachedGraph->graph(), feeds, outputPlaceholder);
   }
 
   return output_t;
@@ -1624,15 +1562,8 @@ static void median_out_mps(const Tensor& input_t,
     auto outputPlaceholder = Placeholder(cachedGraph->outputTensor_, output_t, apparent_out_shape);
     auto indicesPlaceholder = Placeholder(cachedGraph->indicesTensor_, indices_t, apparent_out_shape);
 
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = @{
-      inputPlaceholder.getMPSGraphTensor() : inputPlaceholder.getMPSGraphTensorData(),
-    };
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results = @{
-      outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData(),
-      indicesPlaceholder.getMPSGraphTensor() : indicesPlaceholder.getMPSGraphTensorData()
-    };
-
+    auto feeds = dictionaryFromPlaceholders(inputPlaceholder);
+    auto results = dictionaryFromPlaceholders(outputPlaceholder, indicesPlaceholder);
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);
   }
 }
@@ -1715,7 +1646,7 @@ TORCH_API ::std::tuple<at::Tensor&, at::Tensor&> median_out_mps(const at::Tensor
 
   if (!is_macos_13_or_newer()) {
     TORCH_WARN_ONCE("MPS: median op is supported natively starting from macOS 13.0.",
-                    "Falling back on CPU. This may have performace implications.");
+                    "Falling back on CPU. This may have performance implications.");
     return median_from_cpu(input_t.to("cpu"),
                            dim,
                            keepdim,
@@ -1728,6 +1659,28 @@ TORCH_API ::std::tuple<at::Tensor&, at::Tensor&> median_out_mps(const at::Tensor
   median_out_mps(input_t, dim, keepdim, values, indices, "median_out_mps");
 
   return std::tuple<Tensor&, Tensor&>{values, indices};
+}
+
+std::tuple<Tensor, Tensor> std_mean_mps(const Tensor& self,
+                                        at::OptionalIntArrayRef dim,
+                                        const c10::optional<Scalar>& correction,
+                                        bool keepdim) {
+  // TODO: Refactor it into a proper std_var_mean composite function
+  auto std = std_mps(self, dim, correction, keepdim);
+  auto mean = at::empty(std.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
+  mps::reduction_out_mps(self, dim, keepdim, c10::nullopt, mean, mps::MPSReductionType::MEAN, "mean_out_mps");
+  return {std, mean};
+}
+
+std::tuple<Tensor, Tensor> var_mean_mps(const Tensor& self,
+                                        at::OptionalIntArrayRef dim,
+                                        const c10::optional<Scalar>& correction,
+                                        bool keepdim) {
+  // TODO: Refactor it into a proper std_var_mean composite function
+  auto var = var_mps(self, dim, correction, keepdim);
+  auto mean = at::empty(var.sizes(), self.scalar_type(), c10::nullopt, kMPS, c10::nullopt, MemoryFormat::Contiguous);
+  mps::reduction_out_mps(self, dim, keepdim, c10::nullopt, mean, mps::MPSReductionType::MEAN, "mean_out_mps");
+  return {var, mean};
 }
 
 } // namespace at::native
