@@ -1682,14 +1682,6 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
-            cmd = (
-                f"{objcopy_command} --rename-section"
-                " .data=.lrodata,alloc,load,readonly,data,contents"
-                f" {consts_o} {consts_o}"
-            )
-            log.debug("aot constant obj command: %s", cmd)
-            run_command_and_check(cmd)
-
             cmd = f"rm {consts_path}"
             log.debug("aot constant bin removal command: %s", cmd)
             run_command_and_check(cmd)
@@ -1716,7 +1708,7 @@ class AotCodeCompiler:
 
         def _compile_consts_darwin(consts: bytes) -> str:
             is_large_consts = len(consts) > 1024
-            consts_asm = "\t.section\t__TEXT,__const\n"
+            consts_asm = "\t.section\t__DATA,__data\n"
             consts_asm += "\t.globl\t__binary_constants_bin_start\n"
             consts_asm += "__binary_constants_bin_start:\n"
             if not is_large_consts:
@@ -1805,8 +1797,8 @@ class AotCodeCompiler:
                 return bytes(raw_array.contents)
 
             aot_constants = b"".join(
-                _to_bytes(tensor)
-                for name, tensor in graph.constants.items()
+                _to_bytes(graph.get_original_value_of_constant(name))
+                for name in graph.constants.keys()
                 if name not in graph.folded_constants
             )
             consts_o = {
