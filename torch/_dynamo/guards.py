@@ -881,6 +881,11 @@ class GuardBuilder(GuardBuilderBase):
         self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)
 
     def DATA_PTR_MATCH(self, guard: Guard):
+        # Add a type check. C++ guard has the type check internally, so only
+        # enable it for Python guards.
+        if not config.enable_cpp_guard_manager:
+            self.TYPE_MATCH(guard)
+
         obj = self.get(guard.name)
         code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
         self._set_guard_export_info(guard, [code])
@@ -1345,7 +1350,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module() or match_on_id_for_tensor(guard):
-            self.ID_MATCH(guard)
+            self.DATA_PTR_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
                 value = value()
