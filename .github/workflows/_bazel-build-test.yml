@@ -86,9 +86,14 @@ jobs:
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
+      - name: Check if in a ARC runner
+        shell: bash
+        id: check_arc_runner
+        run: echo "IN_ARC_RUNNER=$([ -f /.inarc ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
       - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
         uses: pytorch/test-infra/.github/actions/setup-nvidia@main
-        if: ${{ inputs.cuda-version != 'cpu' }}
+        if: ${{ inputs.cuda-version != 'cpu' && steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
 
       - name: Output disk space left
         run: |
