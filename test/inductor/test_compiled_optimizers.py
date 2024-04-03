@@ -308,6 +308,13 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
             # Adagrad doesn't reinitialize state on each step
             if optim_cls is Adagrad:
                 opt_compiled.param_groups[0]["lr"] = 0.02
+            elif optim_cls is Adam:  # ensure we are guarding on the data_ptr of states
+                state_tensor = opt_compiled.state[
+                    opt_compiled.param_groups[0]["params"][0]
+                ]["exp_avg"]
+                opt_compiled.state[opt_compiled.param_groups[0]["params"][0]][
+                    "exp_avg"
+                ] = torch.zeros_like(state_tensor)
             else:
                 opt_compiled.state.clear()
 
