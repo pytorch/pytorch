@@ -93,21 +93,6 @@ except ImportError:
     # ignore the error if torch_xla is not installed
     pass
 
-def is_hpu():
-    return "-dhpu" in sys.argv or \
-        "-d hpu" in sys.argv or \
-        "--device hpu" in sys.argv or \
-        "--device=hpu" in sys.argv or \
-        "--devices hpu" in sys.argv or \
-        "--devices=hpu" in sys.argv
-
-def import_if_hpu():
-    if is_hpu():
-        import habana_frameworks.torch.gpu_migration
-        import habana_frameworks.torch.core as htcore
-
-import_if_hpu()
-
 
 log = logging.getLogger(__name__)
 
@@ -3404,19 +3389,18 @@ def parse_args(args=None):
         "--inference", action="store_true", help="Performs inference"
     )
 
-    ret = parser.parse_args(args)
-    if "cuda" in ret.devices and "hpu" in ret.devices:
-        raise RuntimeError("Cannot use CUDA and HPU in one process due to GPU Migration usage. Please run them separately.")
+    return parser.parse_args(args)
 
-    new_dev_list = []
-    for d in ret.devices:
-        # GPU Migration will be applied depending on sys.argv contents
-        if d == "hpu":
-            new_dev_list.append("cuda")
-        else:
-            new_dev_list.append(d)
-    ret.devices = new_dev_list
-    return ret
+def is_hpu():
+    args = parse_args()
+    return "hpu" in args.devices
+
+
+@functools.lru_cache(None)
+def import_if_hpu():
+    if is_hpu():
+        import habana_frameworks.torch.gpu_migration
+        import habana_frameworks.torch.core as htcore
 
 
 def process_entry(rank, runner, original_dir, args):
@@ -3436,6 +3420,18 @@ def main(runner, original_dir=None, args=None):
     if original_dir:
         os.chdir(original_dir)
     args = parse_args() if not args else parse_args(args)
+
+    if "cuda" in args.devices and "hpu" in args.devices:
+        raise RuntimeError("Cannot use CUDA and HPU in one process due to GPU Migration usage. Please run them separately.")
+    new_dev_list = []
+    for d in args.devices:
+        # GPU Migration will be applied depending on sys.argv contents
+        if d == "hpu":
+            new_dev_list.append("cuda")
+        else:
+            new_dev_list.append(d)
+    args.devices = new_dev_list
+
     if args.baseline:
         args.baseline = os.path.abspath(args.baseline)
 
