@@ -27,7 +27,7 @@ fi
 
 # Argument 1: Where to copy the built documentation to
 # (docs/$install_path)
-install_path="${1:-${DOCS_INSTALL_PATH:-docs/${DOCS_VERSION}}}"
+install_path="${1:-${DOCS_INSTALL_PATH:-${DOCS_VERSION}}}"
 if [ -z "$install_path" ]; then
 echo "error: python_doc_push_script.sh: install_path (arg1) not specified"
   exit 1
