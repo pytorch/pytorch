@@ -264,14 +264,21 @@ TEST(SerializationTest, ParentDirNotExist) {
 }
 
 TEST(SerializationTest, DriverDirectoryCheck) {
-#ifdef WIN32
+#ifdef WIN32  
+  // ZZZ is not a valid drive letter for most cases
   expectThrowsEq(
-      []() {
-        auto t = torch::nn::Linear(5, 5);
-        // highly unlikely a path like this would exist
-        torch::save(t, "Z:\\file.pt");
-      },
-      "Parent directory Z:\\ does not exist.");
+    []() {
+      auto t = torch::nn::Linear(5, 5);
+      torch::save(t, "ZZZ:\\file.pt");
+    },
+    "Parent directory ZZZ:\\ does not exist.");
+  
+  expectThrowsEq(
+    []() {
+      auto t = torch::nn::Linear(5, 5);
+      torch::save(t, "ZZZ:/file.pt");
+    },
+    "Parent directory ZZZ:/ does not exist.");
 #endif
 }
 

@@ -95,7 +95,7 @@ static std::string parentdir(const std::string& name) {
 
   #ifdef WIN32
   if (end != std::string::npos && end > 1 && name[end - 1] == ':') {
-    // This is a Windows root directory, so include the backslash in
+    // This is a Windows root directory, so include the slash in
     // the parent directory
     end++;
   }
@@ -647,17 +647,9 @@ void PyTorchStreamWriter::setup(const string& file_name) {
     valid("opening archive ", file_name.c_str());
 
     const std::string dir_name = parentdir(file_name);
-    if (!dir_name.empty()) {
+    if(!dir_name.empty()) {
       struct stat st;
       bool dir_exists = (stat(dir_name.c_str(), &st) == 0 && (st.st_mode & S_IFDIR));
-      #ifdef WIN32
-      // when trying to save file directly under a driver folder the slashes
-      // get removed and the directory check from the setup method will fail
-      // https://stackoverflow.com/questions/43922213/is-there-a-difference-between-c-and-c
-      dir_exists = dir_exists ||
-          (dir_name.length() == 2 &&
-           dir_name.back() == ':' && isalpha(dir_name.front()));
-      #endif // WIN32
       TORCH_CHECK(dir_exists, "Parent directory ", dir_name, " does not exist.");
     }
     TORCH_CHECK(file_stream_, "File ", file_name, " cannot be opened.");
