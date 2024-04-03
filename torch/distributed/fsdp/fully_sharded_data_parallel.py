@@ -216,7 +216,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     * FSDP does not work with double backwards due to the way it
       registers backward hooks.
 
-    * When it comes to freezing parameters, FSDP has some constraints.
+    * FSDP has some constraints when freezing parameters.
       For ``use_orig_params=False``, each FSDP instance must manage
       parameters that are all frozen or all non-frozen. For
       ``use_orig_params=True``, FSDP supports mixing frozen and
