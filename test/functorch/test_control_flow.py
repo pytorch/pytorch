@@ -3,7 +3,9 @@ import functools
 import contextlib
 import unittest
 
-from torch.testing._internal.common_utils import TEST_WITH_TORCHDYNAMO, parametrize, instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    TEST_WITH_TORCHDYNAMO, parametrize, instantiate_parametrized_tests, skipIfTorchDynamo
+)
 import torch
 import torch.utils._pytree as pytree
 from functorch.experimental import control_flow
@@ -114,7 +116,38 @@ def _while_loop_tests():
                 return i1 - 1, j1.clone(), x1 * 2, y1 / 2
             return while_loop(cond_fn, body_fn, (ci, cj, a, b))
 
+    class SimpleWithLinear(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.linear = torch.nn.Linear(2, 2)
+            self.register_buffer("dec", torch.tensor(1))
+
+        def forward(self, iter, x):
+            def cond_fn(it, x):
+                return it - self.dec > 0
+
+            def body_fn(it, x):
+                return it - 1, self.linear(x)
+            return while_loop(cond_fn, body_fn, (iter, x))
+
+    class NestedWithLinear(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.mod = SimpleWithLinear()
+            self.outer_linear = torch.nn.Linear(2, 2)
+            self.register_buffer("dec", torch.tensor(1))
+
+        def forward(self, iter, x):
+            def cond_fn(it, x):
+                return it - self.dec > 0
+
+            def body_fn(it, x):
+                return it - 1, self.outer_linear(self.mod(it, x)[1])
+            return while_loop(cond_fn, body_fn, (iter, x))
+
     nested2 = Nested()
+    simple_with_linear = SimpleWithLinear()
+    nested_with_linear = NestedWithLinear()
 
     x = torch.zeros(1)
     y = torch.zeros(1)
@@ -122,7 +155,11 @@ def _while_loop_tests():
     return {"simple": (simple, (x,)),
             "nested": (nested, (x, y, z)),
             "nested2": (nested2, (torch.tensor(2), torch.tensor(2), torch.ones(2, 2), torch.ones(2, 2))),
-            "simple_with_mutation": (simple_with_mutation, (x,))}
+            "simple_with_mutation": (simple_with_mutation, (x,)),
+            "simple_with_linear": (simple_with_linear, (torch.tensor(3), torch.randn(2, 2))),
+            "nested_with_linear": (nested_with_linear, (torch.tensor(3), torch.randn(2, 2)))}
+
+WHILE_LOOP_TESTS = _while_loop_tests()
 
 def collect_meta_for_filtered_nodes(gm: torch.fx.GraphModule, node_names, meta_field_name):
     ret = []
@@ -344,11 +381,11 @@ class TestControlFlowTraced(TestCase):
         torch._dynamo.reset()
         super().setUp()
 
-    def _check_tracing(self, fn, args):
+    def _check_tracing(self, fn, args, allow_non_fake_inputs=False):
         graphs = {}
         eager_res = fn(*args)
         for tracing_mode in ["symbolic", "real", "fake"]:
-            graph = make_fx(fn, tracing_mode=tracing_mode)(*args)
+            graph = make_fx(fn, tracing_mode=tracing_mode, _allow_non_fake_inputs=allow_non_fake_inputs)(*args)
             graphs[tracing_mode] = graph
             self.assertEqual(graph(*args), eager_res)
         return graphs
@@ -380,13 +417,13 @@ class TestControlFlowTraced(TestCase):
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
     def test_while_loop_nested_traced(self):
-        fn, inp = _while_loop_tests()["nested"]
+        fn, inp = WHILE_LOOP_TESTS["nested"]
         graphs = self._check_tracing(fn, inp)
         self.assertExpectedInline(graphs["symbolic"].code.strip("\n"), """\
 def forward(self, out_iter_1, it_1, y_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (out_iter_1, it_1, y_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = out_iter_1 = it_1 = y_1 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (out_iter_1, it_1, y_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = out_iter_1 = it_1 = y_1 = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2];  while_loop = None
@@ -402,7 +439,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 def forward(self, arg0_1, arg1_1, arg2_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2];  while_loop = None
@@ -425,7 +462,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     @parametrize("func_type", ["no", "cpp", "python", "functorch"])
     def test_while_loop_simple_functionalize_check_graph(self, func_type):
-        fn, inp = _while_loop_tests()["simple_with_mutation"]
+        fn, inp = WHILE_LOOP_TESTS["simple_with_mutation"]
         fn, mode = self._wrap_with_functionalize(fn, func_type)
         mode = mode if mode is not None else contextlib.nullcontext()
         with mode:
@@ -435,7 +472,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 def forward(self, x_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (x_1,));  while_loop_cond_graph_0 = while_loop_body_graph_0 = x_1 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (x_1,), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = x_1 = None
     getitem = while_loop[0];  while_loop = None
     return (getitem,)
     """)  # noqa: B950
@@ -461,7 +498,7 @@ def forward(self, arg0_1):
 def forward(self, arg0_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1,));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1,), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = None
     getitem = while_loop[0];  while_loop = None
     return (getitem,)
     """)  # noqa: B950
@@ -487,7 +524,7 @@ def forward(self, arg0_1):
 def forward(self, x_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (x_1,));  while_loop_cond_graph_0 = while_loop_body_graph_0 = x_1 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (x_1,), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = x_1 = None
     getitem = while_loop[0];  while_loop = None
     return (getitem,)
     """)  # noqa: B950
@@ -510,20 +547,66 @@ def forward(self, arg0_1):
     """)
 
     @parametrize("func_type", ["no", "cpp", "python", "functorch"])
-    def test_while_loop_functionalize(self, func_type):
-        for fn, inp in _while_loop_tests().values():
+    @parametrize("while_loop_test", list(WHILE_LOOP_TESTS.keys()))
+    def test_while_loop_functionalize(self, func_type, while_loop_test):
+        # simple_with_linear doesn't work becaue parameters and buffers
+        # are not inputs so they're not wrapped by functionalization and tracing.
+        if while_loop_test not in ("simple_with_linear", "nested_with_linear"):
+            fn, inp = WHILE_LOOP_TESTS[while_loop_test]
             fn, mode = self._wrap_with_functionalize(fn, func_type)
             mode = mode if mode is not None else contextlib.nullcontext()
             with mode:
                 self._check_tracing(fn, inp)
 
-    def test_while_loop_compile(self):
-        for backend in ["eager", "aot_eager"]:
-            for fn, inp in _while_loop_tests().values():
-                self._check_compile(fn, inp, backend=backend)
+    @parametrize("while_loop_test", list(WHILE_LOOP_TESTS.keys()))
+    def test_while_loop_tracing(self, while_loop_test):
+        fn, inp = WHILE_LOOP_TESTS[while_loop_test]
+        allow_non_fake_inputs = False if while_loop_test not in ("simple_with_linear", "nested_with_linear") else True
+        self._check_tracing(fn, inp, allow_non_fake_inputs)
+
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("while_loop_test", list(WHILE_LOOP_TESTS.keys()))
+    def test_while_loop_compile(self, backend, while_loop_test):
+        fn, inp = WHILE_LOOP_TESTS[while_loop_test]
+        self._check_compile(fn, inp, backend=backend)
+
+    @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
+    def test_while_loop_simple_with_linear_compile_check_graph(self):
+        fn, inp = WHILE_LOOP_TESTS["simple_with_linear"]
+        from torch._dynamo.testing import (
+            EagerAndRecordGraphs,
+        )
+        backend = EagerAndRecordGraphs()
+        torch.compile(fn, backend=backend)(*inp)
+        self.assertEqual(len(backend.graphs), 1)
+        gm = backend.graphs[0]
+        self.assertExpectedInline(gm.code.strip(), """\
+def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor):
+    l_iter_ = L_iter_
+    l_x_ = L_x_
+    l__self___dec = self.L__self___dec
+    l__self___linear_weight = self.L__self___linear_weight
+    l__self___linear_bias = self.L__self___linear_bias
+    cond_fn_0 = self.cond_fn_0
+    body_fn_0 = self.body_fn_0
+    while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_iter_, l_x_), (l__self___dec, l__self___linear_bias, l__self___linear_weight));  cond_fn_0 = body_fn_0 = l_iter_ = l_x_ = l__self___dec = l__self___linear_bias = l__self___linear_weight = None
+    getitem = while_loop[0]
+    getitem_1 = while_loop[1];  while_loop = None
+    return (getitem, getitem_1)""")  # noqa: B950
+        self.assertExpectedInline(gm.cond_fn_0.code.strip(), """\
+def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
+    sub = l_iter_ - l__self___dec_cond_fn;  l_iter_ = l__self___dec_cond_fn = None
+    gt = sub > 0;  sub = None
+    return gt""")  # noqa: B950
+        self.assertExpectedInline(gm.body_fn_0.code.strip(), """\
+def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
+    sub = l_iter_ - 1;  l_iter_ = None
+    linear = torch._C._nn.linear(l_x_, l__self___linear_weight_body_fn, l__self___linear_bias_body_fn);  l_x_ = l__self___linear_weight_body_fn = l__self___linear_bias_body_fn = None
+    return (sub, linear)""")  # noqa: B950
 
     def test_while_loop_nested2_traced(self):
-        fn, inp = _while_loop_tests()["nested2"]
+        fn, inp = WHILE_LOOP_TESTS["nested2"]
         graphs = self._check_tracing(fn, inp)
         gm = graphs["symbolic"]
         outer_body = gm.while_loop_body_graph_0
@@ -534,7 +617,7 @@ def forward(self, arg0_1):
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2]
@@ -545,7 +628,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2]
@@ -560,7 +643,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
 def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     while_loop_cond_graph_0 = self.while_loop_cond_graph_0
     while_loop_body_graph_0 = self.while_loop_body_graph_0
-    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1));  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
+    while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1, arg1_1, arg2_1, arg3_1), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = arg1_1 = arg2_1 = arg3_1 = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2]
@@ -1584,7 +1667,6 @@ def forward(self, x_1):
         assert isinstance(args, (tuple, list))
         self.assertEqual(f(*args), exp_res)
         gm = make_fx(f)(*args)
-        gm.print_readable()
         self.assertEqual(gm(*args), exp_res)
 
         def cnt_placeholder(gm):

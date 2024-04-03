@@ -138,13 +138,6 @@ pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
     "batch_tanh": {},
     "batch_relu": {},
     "batch_sigmoid": {},
-    "normalization_pass": {},
-    "remove_split_with_size_one_pass": {},
-    "merge_getitem_cat_pass": {},
-    "merge_stack_tahn_unbind_pass": {},
-    "merge_splits_pass": {},
-    "mutate_cat_pass": {},
-    "split_cat_pass": {},
 }
 
 # Post grad fusion and options, set to empty dict to disable fusion.
@@ -741,6 +734,9 @@ class cuda:
     # 3）CUDA_HOME environment variable
     # 4) default system search PATH.
     cuda_cxx: Optional[str] = None
+
+    # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
+    cutlass_backend_min_gemm_size: int = 1
 
     # If set to True, it will ensure that only GEMM ops capable of
     # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
