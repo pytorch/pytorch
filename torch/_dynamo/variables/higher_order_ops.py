@@ -970,7 +970,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
             )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
-        combine_fn_name = add_subgraph(tx, self.source, "scan_combine", combine_gm)
+        combine_fn_name = add_subgraph(tx, "scan_combine", combine_gm)
 
         p_args = (
             input.as_proxy(),
