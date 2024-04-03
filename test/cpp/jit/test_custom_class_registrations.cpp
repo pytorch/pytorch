@@ -122,6 +122,89 @@ struct PickleTester : torch::CustomClassHolder {
   std::vector<int64_t> vals;
 };
 
+// Thread-safe Tensor Queue
+struct TensorQueue : torch::CustomClassHolder {
+  explicit TensorQueue(at::Tensor t) : init_tensor_(t) {}
+
+  explicit TensorQueue(c10::Dict<std::string, at::Tensor> dict) {
+    init_tensor_ = dict.at(std::string("init_tensor"));
+    const std::string key = "queue";
+    at::Tensor size_tensor;
+    size_tensor = dict.at(std::string(key + "/size")).cpu();
+    const auto* size_tensor_acc = size_tensor.data_ptr<int64_t>();
+    int64_t queue_size = size_tensor_acc[0];
+
+    for (const auto index : c10::irange(queue_size)) {
+      at::Tensor val;
+      queue_[index] = dict.at(key + "/" + c10::to_string(index));
+      queue_.push_back(val);
+    }
+  }
+
+  c10::Dict<std::string, at::Tensor> serialize() const {
+    c10::Dict<std::string, at::Tensor> dict;
+    dict.insert(std::string("init_tensor"), init_tensor_);
+    const std::string key = "queue";
+    dict.insert(
+        key + "/size", torch::tensor(static_cast<int64_t>(queue_.size())));
+    for (const auto index : c10::irange(queue_.size())) {
+      dict.insert(key + "/" + c10::to_string(index), queue_[index]);
+    }
+    return dict;
+  }
+  // Push the element to the rear of queue.
+  // Lock is added for thread safe.
+  void push(at::Tensor x) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    queue_.push_back(x);
+  }
+  // Pop the front element of queue and return it.
+  // If empty, return init_tensor_.
+  // Lock is added for thread safe.
+  at::Tensor pop() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (!queue_.empty()) {
+      auto val = queue_.front();
+      queue_.pop_front();
+      return val;
+    } else {
+      return init_tensor_;
+    }
+  }
+  // Return front element of queue, read-only.
+  // We might further optimize with read-write lock.
+  at::Tensor top() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    if (!queue_.empty()) {
+      auto val = queue_.front();
+      return val;
+    } else {
+      return init_tensor_;
+    }
+  }
+  int64_t size() {
+    return queue_.size();
+  }
+
+  std::vector<at::Tensor> clone_queue() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    std::vector<at::Tensor> ret;
+    for (const auto& t : queue_) {
+      ret.push_back(t.clone());
+    }
+    return ret;
+  }
+  std::vector<at::Tensor> get_raw_queue() {
+    std::vector<at::Tensor> raw_queue(queue_.begin(), queue_.end());
+    return raw_queue;
+  }
+
+ private:
+  std::deque<at::Tensor> queue_;
+  std::mutex mutex_;
+  at::Tensor init_tensor_;
+};
+
 at::Tensor take_an_instance(const c10::intrusive_ptr<PickleTester>& instance) {
   return torch::zeros({instance->vals.back(), 4});
 }
@@ -291,6 +374,7 @@ struct ContainsTensor : public torch::CustomClassHolder {
 };
 
 TORCH_LIBRARY(_TorchScriptTesting, m) {
+  m.impl_abstract_pystub("torch.testing._internal.torchbind_impls");
   m.class_<ScalarTypeClass>("_ScalarTypeClass")
       .def(torch::init<at::ScalarType>())
       .def_pickle(
@@ -342,6 +426,8 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           });
   m.def(
       "takes_foo(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor");
+  m.def(
+      "takes_foo_python_meta(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor");
   m.def(
       "takes_foo_list_return(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor[]");
   m.def(
@@ -474,6 +560,25 @@ TORCH_LIBRARY(_TorchScriptTesting, m) {
           [](at::Tensor data) -> c10::intrusive_ptr<ContainsTensor> {
             return c10::make_intrusive<ContainsTensor>(std::move(data));
           });
+  m.class_<TensorQueue>("_TensorQueue")
+      .def(torch::init<at::Tensor>())
+      .def("push", &TensorQueue::push)
+      .def("pop", &TensorQueue::pop)
+      .def("top", &TensorQueue::top)
+      .def("size", &TensorQueue::size)
+      .def("clone_queue", &TensorQueue::clone_queue)
+      .def("get_raw_queue", &TensorQueue::get_raw_queue)
+      .def_pickle(
+          // __getstate__
+          [](const c10::intrusive_ptr<TensorQueue>& self)
+              -> c10::Dict<std::string, at::Tensor> {
+            return self->serialize();
+          },
+          // __setstate__
+          [](c10::Dict<std::string, at::Tensor> data)
+              -> c10::intrusive_ptr<TensorQueue> {
+            return c10::make_intrusive<TensorQueue>(std::move(data));
+          });
 }
 
 at::Tensor takes_foo(c10::intrusive_ptr<Foo> foo, at::Tensor x) {
@@ -502,15 +607,54 @@ std::tuple<at::Tensor, at::Tensor> takes_foo_tuple_return(
   return std::make_tuple(a, b);
 }
 
+void queue_push(c10::intrusive_ptr<TensorQueue> tq, at::Tensor x) {
+  tq->push(x);
+}
+
+at::Tensor queue_pop(c10::intrusive_ptr<TensorQueue> tq) {
+  return tq->pop();
+}
+
+int64_t queue_size(c10::intrusive_ptr<TensorQueue> tq) {
+  return tq->size();
+}
+
+TORCH_LIBRARY_FRAGMENT(_TorchScriptTesting, m) {
+  m.impl_abstract_pystub("torch.testing._internal.torchbind_impls");
+  m.def(
+      "takes_foo_cia(__torch__.torch.classes._TorchScriptTesting._Foo foo, Tensor x) -> Tensor");
+  m.def(
+      "queue_pop(__torch__.torch.classes._TorchScriptTesting._TensorQueue foo) -> Tensor");
+  m.def(
+      "queue_push(__torch__.torch.classes._TorchScriptTesting._TensorQueue foo, Tensor x) -> ()");
+  m.def(
+      "queue_size(__torch__.torch.classes._TorchScriptTesting._TensorQueue foo) -> int");
+}
+
 TORCH_LIBRARY_IMPL(_TorchScriptTesting, CPU, m) {
   m.impl("takes_foo", takes_foo);
   m.impl("takes_foo_list_return", takes_foo_list_return);
   m.impl("takes_foo_tuple_return", takes_foo_tuple_return);
+  m.impl("queue_push", queue_push);
+  m.impl("queue_pop", queue_pop);
+  m.impl("queue_size", queue_size);
 }
+
 TORCH_LIBRARY_IMPL(_TorchScriptTesting, Meta, m) {
   m.impl("takes_foo", &takes_foo);
   m.impl("takes_foo_list_return", takes_foo_list_return);
   m.impl("takes_foo_tuple_return", takes_foo_tuple_return);
+}
+
+TORCH_LIBRARY_IMPL(_TorchScriptTesting, CompositeImplicitAutograd, m) {
+  m.impl("takes_foo_cia", takes_foo);
+}
+
+// Need to implement BackendSelect because these two operators don't have tensor
+// inputs.
+TORCH_LIBRARY_IMPL(_TorchScriptTesting, BackendSelect, m) {
+  m.impl("queue_pop", queue_pop);
+  m.impl("queue_size", queue_size);
 }
 
 } // namespace
