@@ -283,7 +283,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             ).check("x + y").run(captured_output[0])
 
         def test_mutation(self):
-            @torch.compile()
+            @torch.compile(mode="reduce-overhead")
             def foo(x):
                 x.add_(2)
                 return x
@@ -299,8 +299,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             ).run(captured_output[0])
 
             # mutation on inp doesnt hit cudagraphs
-            self.assertIsNone(self.get_manager())
+            self.assertEqual(len(self.get_manager().roots), 0)
 
+            # mutation on parameters/buffers hits cudagraphs
             class Mod(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
@@ -310,7 +311,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     self.buf.add_(x)
                     return self.buf + x
 
-            @torch.compile()
+            @torch.compile(mode="reduce-overhead")
             def foo(mod, x):
                 return mod(x)
 
@@ -322,6 +323,43 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertEqual(mod.buf, mod2.buf)
 
             self.assertIsNotNone(self.get_manager())
+
+        def test_mutation_cudagraph_managed_tensors(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x + 1
+
+            @torch.compile(mode="reduce-overhead")
+            def mut(x):
+                return x.add_(2)
+
+            def non_mut(x):
+                return x.add(2)
+
+            for i in range(3):
+                torch.compiler.cudagraph_mark_step_begin()
+                inp = torch.rand([4], device="cuda")
+
+                tmp = foo(inp)
+                with capture_stderr() as captured_output:
+                    mut_out = mut(tmp)
+                if i == 0:
+                    FileCheck().check(
+                        "skipping cudagraphs due to mutaton on input."
+                    ).check(".add_(2)").run(captured_output[0])
+                else:
+                    self.assertEqual(mut_out, non_mut(foo(inp)))
+
+            torch.compiler.cudagraph_mark_step_begin()
+            inp = torch.rand([4], device="cuda")
+            tmp = foo(inp)
+            # in this case, what previously a mutated cudagraph managed tensor is no longer,
+            # now its an input from eager we should fallback to inductor without cudagraphs
+            with capture_stderr() as captured_output:
+                mut(tmp.clone())
+            FileCheck().check(
+                "skipping cudagraphs due to mutaton on input."
+            ).check(".add_(2)").run(captured_output[0])
 
         def test_function_compiled_multiple_times(self):
             def foo(x):
