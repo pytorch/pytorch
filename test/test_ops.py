@@ -2408,7 +2408,6 @@ class TestFakeTensor(TestCase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
-
 instantiate_device_type_tests(TestCommon, globals())
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
