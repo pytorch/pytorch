@@ -30,7 +30,6 @@ from torch.utils._sympy.value_ranges import ValueRanges
 
 from .. import config, metrics
 from ..utils import (
-    cache_on_self,
     DeferredLineBase,
     free_symbol_startswith,
     generate_assert,

@@ -289,19 +289,20 @@ class IndexPropagation:
 
             # If we are turning a indirect indexing into direct, we need to wrap it
             # and perhaps generate asserts
-            expr = index.value.expr
+            expr = sympy.sympify(index.value.expr)
             bounds = bound_sympy(expr, self.var_ranges)
 
             if bounds.is_singleton():
                 expr = bounds.lower
 
             def wrap_expr(expr):
-                if bounds.lower < 0:
-                    stm = expr + size
-                    if bounds.upper >= 0:
-                        stm = Where(expr < 0, stm, expr)
-                    expr = stm
-                return expr
+                # Positive, negative, mixed
+                if bounds.lower >= 0:
+                    return expr
+                elif bounds.upper < 0:
+                    return expr + size
+                else:
+                    return Where(expr < 0, expr + size, expr)
 
             # To continue through this path, we need to prove that the bounds are correct
             # We do our best effort, otherwise we fallback.
