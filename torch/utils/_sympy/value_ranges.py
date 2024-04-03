@@ -478,30 +478,40 @@ class SymPyValueRangeAnalysis:
         y = ValueRanges.wrap(y)
         # nb. We implement C semantics
 
-        def whole_range(u):
-            if u > 0:
-                return ValueRanges(0, u - 1)
-            else:
-                return ValueRanges(u + 1, 0)
-
         def c_mod(a, b):
             ret = abs(a) % abs(b)
             if a < 0:
                 ret *= -1
             return ret
 
-        if y.lower <= 0 and y.upper >= 0:
+        def c_div(a, b):
+            x = a / b
+            return sympy.Integer(x) if x.is_finite else x
+
+        if 0 in y:
             return ValueRanges.unknown()
-        elif not y.is_singleton():
-            # Too difficult, we bail out
-            return whole_range(y.upper)
-        else:
-            y_val = y.lower
+        elif y.is_singleton():
+            y_val = abs(y.lower)
             # If it wraps, we need to take the whole interval
-            if x.lower // y_val != x.upper // y_val:
-                return whole_range(y_val)
-            else:
+
+            # The function is locally linear if they are in the same class
+            if c_div(x.lower, y_val) == c_div(x.upper, y_val):
                 return ValueRanges.increasing_map(x, lambda u: c_mod(u, y_val))
+            if x.upper < 0:
+                # Negative case
+                return ValueRanges(-y_val + 1, 0)
+            elif x.lower > 0:
+                # Positive case
+                return ValueRanges(0, y_val - 1)
+            else:
+                # Mixed case
+                lower = max(-y_val + 1, x.lower)
+                upper = min(y_val - 1, x.upper)
+                return ValueRanges(lower, upper)
+        else:
+            # Too difficult, we bail out
+            upper = abs(y.upper) - 1
+            return ValueRanges(-upper, upper)
 
     @classmethod
     def modular_indexing(cls, a, b, c):
