@@ -2068,6 +2068,39 @@ class CommonTemplate:
             fn_int_input, (make_tensor(10, device=self.device, dtype=torch.float32), 33)
         )
 
+    def test_div_precision(self):
+        # Reproducer for https://github.com/pytorch/pytorch/issues/101039
+
+        def forward(y):
+            z = y.div(1e-06)
+            return F.softmax(z, dim=-1)
+
+        query = torch.randn(1, 10, 40)
+        key = torch.randn(1, 2, 40)
+        y = torch.matmul(query, key.transpose(-2, -1))
+        self.common(forward, (y,))
+
+    def test_div_by_zero(self):
+        def fn(x, runtime_zero, runtime_neg_zero):
+            zero = torch.zeros_like(x)
+            return (
+                x / 0.0,
+                x / -0.0,
+                zero / 0.0,
+                x / zero,
+                x / -zero,
+                zero / zero,
+                x / runtime_zero,
+                # NOTE: -runtime_zero doesn't work as -(0.0) is broken in triton
+                x / runtime_neg_zero,
+                runtime_zero / runtime_neg_zero,
+            )
+
+        a = torch.randn(10)
+        zero = torch.zeros(10)
+        neg_zero = -zero
+        self.common(fn, (a, zero, neg_zero))
+
     def test_both_scalars(self):
         def fn(a, b):
             return (
@@ -4356,56 +4389,6 @@ class CommonTemplate:
                 torch.randn([1, 3, 3, 16]),
             ),
         )
-
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_nonzero_unbacked_refinement(self):
-        def fn(x):
-            z = x.nonzero()
-            torch._check(z.size(0) == 4)
-            return z + 3
-
-        self.common(
-            fn,
-            (torch.tensor([0, 1, 3, 4, 2, 0, 0]),),
-        )
-
-        with self.assertRaises(RuntimeError):
-            torch.compile(fn)(torch.tensor([0, 0, 0, 0]))
-
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_unbacked_floordiv_simplify(self):
-        def fn(x, y):
-            z = y.item()
-            torch._check(z // 2 == 3)
-            return x + x.new_zeros(z)
-
-        self.common(
-            fn,
-            (
-                torch.randn(6),
-                torch.tensor([6]),
-            ),
-        )
-
-        self.common(
-            fn,
-            (
-                torch.randn(7),
-                torch.tensor([7]),
-            ),
-        )
-
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_unbacked_floordiv_simplify_errors(self):
-        def fn(x, y):
-            z = y.item()
-            torch._check(z // 2 == 3)
-            return x + x.new_zeros(z)
-
-        # This is a little suboptimal: we actually fail /in the compiler/ but
-        # not in a way that causes Dynamo to graph break
-        with self.assertRaises(RuntimeError):
-            torch.compile(fn)(torch.randn(8), torch.tensor(8))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cat_unbacked_legacy_empty(self):

@@ -1025,7 +1025,7 @@ class AOTInductorTestsTemplate:
         example_inputs = (a, b)
         self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
-    def test_buffer_mutation(self):
+    def test_buffer_mutation_1(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
                 super().__init__()
@@ -1037,9 +1037,62 @@ class AOTInductorTestsTemplate:
 
         example_inputs = (torch.rand(4, 4, device=self.device),)
         torch._export.aot_compile(Model(self.device), example_inputs)
-        with self.assertRaisesRegex(AssertionError, "False is not true"):
-            # TODO: AOTI seems to mutate the buffer while tracing
-            self.check_model(Model(self.device), example_inputs)
+        self.check_model(Model(self.device), example_inputs)
+
+    def test_buffer_mutation_2(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.register_buffer("foo", torch.arange(10, device=device))
+                self.register_buffer("bar", torch.arange(10, device=device))
+
+            def forward(self, x):
+                self.bar.mul_(2)
+                self.foo[5] = self.bar[0]
+                return x + self.bar, x * self.foo
+
+        example_inputs = (torch.randn(10, device=self.device),)
+        self.check_model(Model(self.device), example_inputs)
+
+    def test_buffer_mutation_3(self):
+        class KVCache(torch.nn.Module):
+            def __init__(
+                self,
+                max_batch_size,
+                max_seq_length,
+                n_heads,
+                head_dim,
+                dtype=torch.float,
+            ):
+                super().__init__()
+                cache_shape = (max_batch_size, n_heads, max_seq_length, head_dim)
+                self.register_buffer("k_cache", torch.zeros(cache_shape, dtype=dtype))
+                self.register_buffer("v_cache", torch.zeros(cache_shape, dtype=dtype))
+
+            def update(self, input_pos, k_val, v_val):
+                # input_pos: [S], k_val: [B, H, S, D]
+                k_out = self.k_cache
+                v_out = self.v_cache
+                k_out[:, :, input_pos] = k_val
+                v_out[:, :, input_pos] = v_val
+
+                return k_out, v_out
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.kv_cache = KVCache(1, 256, 6, 48)
+
+            def forward(self, inp_pos, k, v):
+                self.kv_cache.update(inp_pos, k, v)
+                return self.kv_cache.k_cache + 1, self.kv_cache.v_cache / 2
+
+        example_inputs = (
+            torch.tensor([0], device=self.device),
+            torch.randn(1, 6, 1, 48, device=self.device),
+            torch.randn(1, 6, 1, 48, device=self.device),
+        )
+        self.check_model(Model(self.device), example_inputs)
 
     @skipIfRocm
     @requires_multigpu()
@@ -1299,6 +1352,19 @@ class AOTInductorTestsTemplate:
 
             def forward(self, x):
                 a = self.cst.clone()
+                return (x, a)
+
+        x = torch.randn(5, device=self.device)
+        self.check_model(Model(self.device), (x,))
+
+    def test_return_view_constant(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.cst = torch.randn(5, 5, device=device)
+
+            def forward(self, x):
+                a = torch.transpose(self.cst, 0, 1)
                 return (x, a)
 
         x = torch.randn(5, device=self.device)
@@ -2362,56 +2428,72 @@ CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
     "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
     "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
+    # https://github.com/pytorch/pytorch/issues/122978
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
     "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
+    # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
     #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
     "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
-    "test_model_modified_weights": fail_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
+    # https://github.com/pytorch/pytorch/issues/122983
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
-    # FIXME: failed with compilation error
-    "test_runtime_checks": fail_minimal_arrayref_interface(is_skip=True),
     "test_normal_functional": fail_with_and_without_stack_allocation(),
     # undefined symbol: _Z16aoti_torch_dtypeIN3c104HalfEEiv
     "test_non_contiguous_output_alias": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
+    "test_return_view_constant": fail_minimal_arrayref_interface(is_skip=True),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
     "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
-    "test_buffer_mutation": fail_stack_allocation(is_skip=True),
+    "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
+    "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
+    "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
+    # FIXME: failed with Segfault while exiting the Python runtime
     "test_scatter_fallback": fail_stack_allocation(is_skip=True),
+    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
     "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
+    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
     "test_index_put_fallback": fail_stack_allocation(is_skip=True),
+    # https://github.com/pytorch/pytorch/issues/122984
     "test_index_put_with_none_index": fail_stack_allocation(is_skip=True),
+    # FIXME: failed with Segfault while exiting the Python runtime
     "test_constant": fail_stack_allocation(is_skip=True),
     # C++ compile error, need for aoti_torch___scaled_dot_product_flash_attention_for_cpu
+    # https://github.com/pytorch/pytorch/issues/122986
     "test_sdpa": fail_with_and_without_stack_allocation(is_skip=True),
+    # The same issue as https://github.com/pytorch/pytorch/issues/122986
     "test_sdpa_2": fail_with_and_without_stack_allocation(is_skip=True),
-    # error: could not find s0
+    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
     "test_simple_dynamic": fail_minimal_arrayref_interface(),
+    # https://github.com/pytorch/pytorch/issues/122989
     "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
+    # failed on MacOS
     "test_zero_grid_with_backed_symbols": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
+    # https://github.com/pytorch/pytorch/issues/122990
     "test_cond_non_tensor_predicates_dynamic_False": fail_stack_allocation(
         is_skip=True
     ),
+    # same issue as https://github.com/pytorch/pytorch/issues/122990
     "test_cond_non_tensor_predicates_dynamic_True": fail_stack_allocation(is_skip=True),
+    # https://github.com/pytorch/pytorch/issues/122991
     "test_runtime_checks_complex": fail_with_and_without_stack_allocation(is_skip=True),
     "test_runtime_checks_fp8": fail_with_and_without_stack_allocation(is_skip=True),
 }
