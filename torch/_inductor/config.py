@@ -138,13 +138,6 @@ pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
     "batch_tanh": {},
     "batch_relu": {},
     "batch_sigmoid": {},
-    "normalization_pass": {},
-    "remove_split_with_size_one_pass": {},
-    "merge_getitem_cat_pass": {},
-    "merge_stack_tahn_unbind_pass": {},
-    "merge_splits_pass": {},
-    "mutate_cat_pass": {},
-    "split_cat_pass": {},
 }
 
 # Post grad fusion and options, set to empty dict to disable fusion.

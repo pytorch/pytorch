@@ -1,6 +1,6 @@
 import copy
 import logging
-from typing import Dict, List, Optional
+from typing import List, Optional
 
 import torch
 import torch.nn as nn
@@ -25,6 +25,7 @@ from ..pattern_matcher import (
 from ..utils import is_cpu_device, pass_execution_and_save
 from .group_batch_fusion import group_batch_fusion_passes
 from .misc_patterns import numpy_compat_normalization
+from .split_cat import PRE_GRAD_PATTERNS
 
 log = logging.getLogger(__name__)
 
@@ -75,10 +76,6 @@ def is_same_dict(inductor_dict, optimus_dict):
     return True
 
 
-def construct_pattern_matcher_pass(pass_name):
-    return PatternMatcherPass(prevent_match_across_mutations=True, pass_name=pass_name)
-
-
 def fuse_parallel_linear_pass(graph):
     return None
 
@@ -87,20 +84,6 @@ def remove_split_ops(graph, shape_prop):
     return None
 
 
-PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
-pass_names = [
-    "normalization_pass",
-    "remove_split_with_size_one_pass",
-    "merge_getitem_cat_pass",
-    "merge_stack_tahn_unbind_pass",
-    "merge_splits_pass",
-    "mutate_cat_pass",
-    "split_cat_pass",
-    "unbind_stack_pass",
-]
-
-for pass_name in pass_names:
-    PRE_GRAD_PATTERNS[pass_name] = construct_pattern_matcher_pass(pass_name)
 # split_cat related fusions
 pattern_matcher_passes = list(PRE_GRAD_PATTERNS.values())
 # non-split_cat related fusions
