@@ -39,7 +39,6 @@ jobs:
     name: linux-jammy-py3.8-gcc11
     uses: ./.github/workflows/_linux-build-rg.yml
     with:
-      aws-role-to-assume: arn:aws:iam::391835788720:role/gha-pytorch-ci-artifacts-role
       build-environment: linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
       test-matrix: |
