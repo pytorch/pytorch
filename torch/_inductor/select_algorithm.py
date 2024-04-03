@@ -157,6 +157,10 @@ class TritonTemplateKernel(TritonKernel):
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
             triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+        matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
+        if matrix_instr_nonkdim != 0:
+            triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
+
         self.triton_meta = triton_meta
 
         inductor_meta = {
@@ -738,6 +742,9 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
+        if out.numel() == 0:
+            # no need to run the kerrnel of do benchmarking
+            return 0.0
         if self.has_out_variant:
             return super().benchmark(*args, out=out)
         else:
@@ -806,6 +813,15 @@ class ErrorFromChoice(RuntimeError):
 
 
 class AlgorithmSelectorCache(PersistentCache):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # the autotuning will get occur in the scheduler, so there is
+        # no guarantee that the first lowering for a given key will also be the
+        # first to benchmark it. share a single precompilation function for all lowerings
+        # of a particular key
+        self.precompile_cache: Dict[str, Callable[[], None]] = {}
+
     def __call__(
         self,
         name,
@@ -844,6 +860,8 @@ class AlgorithmSelectorCache(PersistentCache):
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
+        inputs_key = repr([self.key_of(x) for x in input_nodes])
+
         def precompile(choices):
             if (
                 precompilation_timeout_seconds is None
@@ -863,6 +881,10 @@ class AlgorithmSelectorCache(PersistentCache):
                 num_workers,
             )
 
+            precompile_key = f"{name}: {inputs_key}"
+            if precompile_func := self.precompile_cache.get(precompile_key):
+                return precompile_func
+
             executor = ThreadPoolExecutor(max_workers=num_workers)
             futures = executor.map(
                 lambda c: c.precompile(),
@@ -870,6 +892,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 timeout=precompilation_timeout_seconds,
             )
 
+            @functools.lru_cache(None)
             def wait_on_futures():
                 try:
                     iterator = iter(futures)
@@ -886,7 +909,10 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                 except StopIteration:
                     pass
+
                 executor.shutdown(wait=True)
+
+            self.precompile_cache[precompile_key] = wait_on_futures
 
             return wait_on_futures
 
@@ -908,7 +934,7 @@ class AlgorithmSelectorCache(PersistentCache):
             timings = self.lookup(
                 choices,
                 name,
-                repr([self.key_of(x) for x in input_nodes]),
+                inputs_key,
                 autotune,
             )
             autotune_elapse = time.time() - autotune_start_ts
@@ -977,44 +1003,47 @@ class AlgorithmSelectorCache(PersistentCache):
         if input_gen_fns is None:
             input_gen_fns = {}
 
-        # de-duplicate args
-        unique_example_inputs = {
-            x.get_name(): input_gen_fns.get(
-                i, functools.partial(cls.benchmark_example_value, written_to=False)
-            )(x)
-            for i, x in enumerate(input_nodes)
-        }
-        example_inputs = list(unique_example_inputs.values())
-        example_inputs_extern = [
-            torch.as_strided(
-                unique_example_inputs[input_node.get_name()],
-                V.graph.sizevars.size_hints(
-                    input_node.get_size(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                V.graph.sizevars.size_hints(
-                    input_node.get_stride(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                V.graph.sizevars.size_hint(
-                    input_node.get_layout().offset,
-                    fallback=config.unbacked_symint_fallback,
-                ),
+        def get_inputs():
+            # de-duplicate args
+            unique_example_inputs = {
+                x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
+                for i, x in enumerate(input_nodes)
+            }
+            example_inputs = list(unique_example_inputs.values())
+            example_inputs_extern = [
+                torch.as_strided(
+                    unique_example_inputs[input_node.get_name()],
+                    V.graph.sizevars.size_hints(
+                        input_node.get_size(),
+                        fallback=config.unbacked_symint_fallback,
+                    ),
+                    V.graph.sizevars.size_hints(
+                        input_node.get_stride(),
+                        fallback=config.unbacked_symint_fallback,
+                    ),
+                    V.graph.sizevars.size_hint(
+                        input_node.get_layout().offset,
+                        fallback=config.unbacked_symint_fallback,
+                    ),
+                )
+                for input_node in input_nodes
+            ]
+
+            out = cls.benchmark_example_value(layout)
+            out_extern = torch.as_strided(
+                out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
             )
-            for input_node in input_nodes
-        ]
-        out = cls.benchmark_example_value(layout, written_to=True)
-        out_extern = torch.as_strided(
-            out, out.size(), out.stride(), V.graph.sizevars.size_hint(layout.offset)
-        )
-        if VERIFY:
-            choices[0].benchmark(*example_inputs_extern, out=out_extern)
-            expected = out_extern.clone()
+            expected = None
+            if VERIFY:
+                choices[0].benchmark(*example_inputs_extern, out=out_extern)
+                expected = out_extern.clone()
+
+            return example_inputs, example_inputs_extern, out, out_extern, expected
 
         if DEBUG:
             print(f"{len(choices)} tuning requests:")
 
-        def debug_str():
+        def debug_str(example_inputs, out):
             def tensor_repr(x):
                 return (
                     f"torch.empty_strided({tuple(x.size())!r}, {tuple(x.stride())!r}, "
@@ -1029,7 +1058,7 @@ class AlgorithmSelectorCache(PersistentCache):
             lines += ["]", f"out = {tensor_repr(out)}", ""]
             return "\n".join(lines)
 
-        def benchmark_choice_in_current_process(choice):
+        def benchmark_choice_in_current_process(choice, example_inputs, example_inputs_extern, out, out_extern, expected):
             out.zero_()
             if isinstance(choice, ExternKernelCaller):
                 # aten kernels want the offset baked in for sliced tensors
@@ -1043,10 +1072,12 @@ class AlgorithmSelectorCache(PersistentCache):
             return result
 
         def benchmark_in_current_process(choices):
+            inputs = get_inputs()
+            example_inputs, _, out, _, _ = inputs
             timings = {}
             for choice in choices:
                 try:
-                    timing = benchmark_choice_in_current_process(choice)
+                    timing = benchmark_choice_in_current_process(choice, *inputs)
                 except CUDACompileError as e:
                     log.warning(
                         "CUDA compilation error: \n%s. \nIgnore this choice.", str(e)
@@ -1061,7 +1092,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     else:
                         if "illegal memory access" in msg:
                             msg += "\n\nEither error in template or triton bug.\n"
-                        raise ErrorFromChoice(msg, choice, debug_str())  # noqa: TRY200
+                        raise ErrorFromChoice(msg, choice, debug_str(example_inputs, out))  # noqa: TRY200
                 except AssertionError as e:
                     raise AssertionError(  # noqa: TRY200
                         f"Incorrect result from choice {choice}\n\n{e}"
