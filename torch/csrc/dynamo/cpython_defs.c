@@ -34,9 +34,8 @@
 
 // As a simple way to reduce the impact of ABI changes on the CPython side, this check forces
 // us to manually re-check that the function didn't change on the next major version
-#if PY_VERSION_HEX >= 0x030C0000 // 3.12
-// Spoiler alert: They don't! This will be done in a follow up.
-// #error "Please ensure that the functions below still match the CPython implementation for 3.12"
+#if PY_VERSION_HEX >= 0x030D0000 // 3.13
+#error "Please ensure that the functions below still match the CPython implementation for 3.13"
 #endif
 
 // https://github.com/python/cpython/blob/a7715ccfba5b86ab09f86ec56ac3755c93b46b48/Objects/frameobject.c#L1079
@@ -547,14 +546,30 @@ THP_PyFrame_Clear(_PyInterpreterFrame *frame)
     Py_DECREF(frame->f_code);
 }
 
+// https://github.com/python/cpython/blob/fad48ea1816be3125ea51edcdfe2f999d6ade796/Objects/obmalloc.c#L635
+void *
+THP_PyObject_VirtualAlloc(size_t size)
+{
+    PyObjectArenaAllocator arena;
+    PyObject_GetArenaAllocator(&arena);
+    return arena.alloc(arena.ctx, size);
+}
+
+// https://github.com/python/cpython/blob/fad48ea1816be3125ea51edcdfe2f999d6ade796/Objects/obmalloc.c#L641
+void
+THP_PyObject_VirtualFree(void *obj, size_t size)
+{
+    PyObjectArenaAllocator arena;
+    PyObject_GetArenaAllocator(&arena);
+    return arena.free(arena.ctx, obj, size);
+}
+
 // https://github.com/python/cpython/blob/051b8a2589ff28f0194c3701b21f729444691752/Python/pystate.c#L728
 static _PyStackChunk*
 allocate_chunk(int size_in_bytes, _PyStackChunk* previous)
 {
     CHECK(size_in_bytes % sizeof(PyObject **) == 0);
-    // DYNAMO: _PyStackChunk is a regular C struct, so
-    // it should be safe to use system malloc over Python malloc, e.g. _PyObject_VirtualAlloc
-    _PyStackChunk *res = malloc(size_in_bytes);
+    _PyStackChunk *res = THP_PyObject_VirtualAlloc(size_in_bytes);
     if (res == NULL) {
         return NULL;
     }
@@ -635,8 +650,7 @@ THP_PyThreadState_PopFrame(PyThreadState *tstate, _PyInterpreterFrame * frame)
         CHECK(previous);
         tstate->datastack_top = &previous->data[previous->top];
         tstate->datastack_chunk = previous;
-        // DYNAMO: free instead of _PyObject_VirtualFree
-        free(chunk);
+        THP_PyObject_VirtualFree(chunk, chunk->size);
         tstate->datastack_limit = (PyObject **)(((char *)previous) + previous->size);
     }
     else {
