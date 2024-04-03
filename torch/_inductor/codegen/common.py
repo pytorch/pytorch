@@ -570,10 +570,9 @@ class OpOverrides:
     @staticmethod
     def remainder(a, b):
         r = ops.mod(a, b)
-        z = ops.constant(0, torch.int32)
         cond = ops.and_(
-            ops.ne(r, z),
-            ops.ne(ops.lt(r, z), ops.lt(b, 0)),
+            ops.ne(r, ops.constant(0, torch.int32)),
+            ops.ne(ops.signbit(r), ops.signbit(b)),
         )
         return ops.where(cond, ops.add(r, b), r)
 
