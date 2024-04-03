@@ -677,7 +677,8 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, int classes)
   // segment is used for thread block reductions
   extern __shared__ unsigned char smem[];
   auto smem_input_cache = reinterpret_cast<scalar_t*>(smem);
-  auto max_cache_elements = max_smem_per_block / sizeof(scalar_t) - blockDim.x / C10_WARP_SIZE;
+  auto max_cache_elements = (max_smem_per_block -
+    blockDim.x / C10_WARP_SIZE * sizeof(accscalar_t)) / sizeof(scalar_t);
   auto smem_reduction_cache = reinterpret_cast<accscalar_t*>(smem + max_cache_elements * sizeof(scalar_t));
 
   using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
@@ -862,7 +863,8 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
             auto warps = block.x / C10_WARP_SIZE;
-            auto max_elements_per_smem = max_smem_per_block / sizeof(scalar_t) - warps;
+            auto max_elements_per_smem = (max_smem_per_block -
+              warps * sizeof(accscalar_t)) / sizeof(scalar_t) - warps;
 
             bool can_use_smem = dim_size < max_elements_per_smem;
             can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
@@ -896,7 +898,8 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
             auto warps = block.x / C10_WARP_SIZE;
-            auto max_elements_per_smem = max_smem_per_block / sizeof(scalar_t) - warps;
+            auto max_elements_per_smem = (max_smem_per_block -
+              warps * sizeof(accscalar_t)) / sizeof(scalar_t) - warps;
 
             bool can_use_smem = dim_size < max_elements_per_smem;
             can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
