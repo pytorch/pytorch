@@ -661,7 +661,7 @@ class TestSparseSemiStructuredTraining(TestCase):
 
         if backend == "cutlass":
             assert isinstance(a_sparse, SparseSemiStructuredTensorCUTLASS)
-            (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(
+            (packed, meta, packed_t, meta_t, bitmask) = torch._sparse_semi_structured_tile(
                 mask_dense, use_cutlass=True)
 
             sparse_mask = SparseSemiStructuredTensorCUTLASS(
@@ -670,7 +670,7 @@ class TestSparseSemiStructuredTraining(TestCase):
                 meta=meta,
                 packed_t=packed_t,
                 meta_t=meta_t,
-                threads_masks=threads_masks,
+                compressed_swizzled_bitmask=bitmask,
             )
             assert torch.allclose(a_sparse.meta.view(torch.short), sparse_mask.meta)
 
@@ -745,9 +745,9 @@ class TestSparseSemiStructuredTraining(TestCase):
             meta,
             packed_t,
             meta_t,
-            threads_masks,
+            bitmask,
         ) = torch._sparse_semi_structured_tile(x)
-        packed2, packed_t2 = torch._sparse_semi_structured_apply(x, threads_masks)
+        packed2, packed_t2 = torch._sparse_semi_structured_apply(x, bitmask)
         assert torch.allclose(packed, packed2)
         assert torch.allclose(packed_t, packed_t2)
 
@@ -760,7 +760,7 @@ class TestSparseSemiStructuredTraining(TestCase):
             meta,
             packed_t,
             meta_t,
-            threads_masks,
+            bitmask,
         ) = torch._sparse_semi_structured_tile(x)
 
         expected = SparseSemiStructuredTensorCUTLASS(
@@ -769,20 +769,20 @@ class TestSparseSemiStructuredTraining(TestCase):
             meta=meta,
             packed_t=packed_t,
             meta_t=meta_t,
-            threads_masks=threads_masks,
+            compressed_swizzled_bitmask=bitmask,
         ).to_dense()
 
-        packed2, packed_t2 = torch._sparse_semi_structured_apply(x, threads_masks)
+        packed2, packed_t2 = torch._sparse_semi_structured_apply(x, bitmask)
         sparse = SparseSemiStructuredTensorCUTLASS(
             x.shape,
             packed=packed2,
             meta=meta,
             packed_t=packed_t2,
             meta_t=meta_t,
-            threads_masks=threads_masks,
+            compressed_swizzled_bitmask=bitmask,
         )
 
-        dense = torch._sparse_semi_structured_apply_dense(x, threads_masks)
+        dense = torch._sparse_semi_structured_apply_dense(x, bitmask)
 
         assert torch.allclose(dense, expected)
         assert torch.allclose(sparse.to_dense(), expected)
@@ -795,23 +795,23 @@ class TestSparseSemiStructuredTraining(TestCase):
         b = torch.randn([K, N], device="cuda", dtype=dtype)
         a_m = sparse24_largest_mask_2d(a)
         b_m = sparse24_largest_mask_2d(b)
-        (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(a)
+        (packed, meta, packed_t, meta_t, bitmask) = torch._sparse_semi_structured_tile(a)
         a_s = SparseSemiStructuredTensorCUTLASS(
             a.shape,
             packed=packed,
             meta=meta,
             packed_t=packed_t,
             meta_t=meta_t,
-            threads_masks=threads_masks,
+            compressed_swizzled_bitmask=bitmask,
         )
-        (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(b)
+        (packed, meta, packed_t, meta_t, bitmask) = torch._sparse_semi_structured_tile(b)
         b_s = SparseSemiStructuredTensorCUTLASS(
             b.shape,
             packed=packed,
             meta=meta,
             packed_t=packed_t,
             meta_t=meta_t,
-            threads_masks=threads_masks,
+            compressed_swizzled_bitmask=bitmask,
         )
 
         assert torch.allclose(a_s @ b, (a * a_m) @ b, rtol=1e-1, atol=1e-1)
