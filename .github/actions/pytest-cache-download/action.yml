@@ -10,9 +10,9 @@ inputs:
     description: Text that uniquely identifies a given job type within a workflow. All shards of a job should share the same job identifier.
     required: true
   s3_bucket:
-    description: S3 bucket to upload/download PyTest cache
+    description: S3 bucket to download PyTest cache
     required: false
-    default: ""
+    default: "gha-artifacts"
 
 runs:
   using: composite

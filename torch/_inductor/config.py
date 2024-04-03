@@ -289,7 +289,7 @@ benchmark_multi_templates = (
 )
 
 # Take how many of the top triton kernels to benchmark epilogue
-max_epilogue_benchmarked_choices = 6
+max_epilogue_benchmarked_choices = 3
 
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
@@ -539,11 +539,22 @@ class triton:
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = True
 
+    # Should we skip cudagraphing graphs with dynamic shape inputs
+    # If False, we will re-record a graph for each unique set of shape inputs
+    cudagraph_skip_dynamic_graphs = False
+
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
 
     # TODO - need to debug why this prevents cleanup
     cudagraph_trees_history_recording = False
+
+    # synchronize after cudagraph invocation
+    force_cudagraph_sync = False
+
+    # always run cudagraphs in the eager warmup stage
+    # instead of recording and executing cudagraphs
+    force_cudagraphs_warmup = False
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
