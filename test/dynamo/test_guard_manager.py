@@ -336,7 +336,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(3, 4)
         weakref_x = weakref.ref(x)
 
-        guard = guards.WEAKREF_ALIVE(["weakref_x is not None"])
+        guard = guards.NOT_NONE(["weakref_x is not None"])
         self.assertTrue(guard(weakref_x()))
         del x
         self.assertFalse(guard(weakref_x()))
