@@ -46,9 +46,11 @@ from torch.testing._internal.common_utils import (
 )
 
 from torch.nested._internal.nested_tensor import (
+    buffer_from_jagged,
     jagged_from_list,
     NestedTensor,
     nested_view_from_values_offsets,
+    ViewNestedFromBuffer,
 )
 
 # Tests are ported from pytorch/nestedtensor.
@@ -181,6 +183,33 @@ def random_nt_from_similar(other, dims=None):
 def layout_name(layout):
     # e.g. "torch.jagged" -> "jagged"
     return layout.__repr__().split(".")[-1]
+
+
+# Internally-defined conversion functions are lifted to here for maximum test realism.
+# TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
+@torch.fx.wrap
+def convert_dense_to_nested_tensor(values):
+    offsets = torch.arange(
+        0, values.shape[0] * values.shape[1] + 1, values.shape[1], device=values.device
+    )
+    metadata_cache = {"max_seqlen": values.shape[1], "min_seqlen": 1}
+    nt = ViewNestedFromBuffer.apply(
+        values.view(-1, values.shape[-1]), offsets, metadata_cache
+    )
+    return nt
+
+@torch.fx.wrap
+def convert_jagged_to_nested_tensor(
+    values: torch.Tensor, offsets: torch.Tensor, max_length: int
+) -> torch.Tensor:
+    metadata_cache = {"max_seqlen": max_length, "min_seqlen": 1}
+    nt = ViewNestedFromBuffer.apply(values, offsets, metadata_cache)
+    return nt
+
+
+@torch.fx.wrap
+def convert_nt_to_jagged(nt):
+    return buffer_from_jagged(nt)
 
 
 @markDynamoStrictTest
@@ -4171,6 +4200,32 @@ class TestNestedTensorSubclass(TestCase):
         output = f(nt)
         output.backward(torch.ones_like(output))
         self.assertEqual(output._metadata_cache, cache)
+
+    # This test is for internal usage of the old autograd.Function "view" APIs.
+    # It can be removed when those APIs are deprecated.
+    @skipIfTorchDynamo("SDPA test compiles internally")
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    @onlyCUDA
+    @dtypes(*([torch.float16, torch.bfloat16, torch.float32] if SM80OrLater
+            else [torch.float16, torch.float32]))
+    def test_sdpa_with_autograd_function_views(self, device, dtype):
+        values = torch.randn(9, 3, 256, requires_grad=True, device=device, dtype=dtype)
+        offsets = torch.tensor([0, 1, 3, 5, 9], device=device, dtype=torch.int64)
+
+        @torch.compile
+        def f(values, offsets):
+            nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
+            nt = nt.transpose(-2, -3)
+            # purposefully graph break to trigger view replay for subclass view input
+            torch.tensor(1).item()
+            output = F.scaled_dot_product_attention(nt, nt, nt).transpose(-2, -3)
+            return convert_nt_to_jagged(output)
+
+        output = f(values, offsets)
+        output.sum().backward()
+        self.assertEqual(values.grad, torch.ones_like(values))
 
 
 instantiate_parametrized_tests(TestNestedTensor)
