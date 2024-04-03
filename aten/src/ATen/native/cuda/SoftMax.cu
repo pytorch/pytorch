@@ -703,12 +703,13 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, int classes)
 
   // Reload input from shared memory to compute the sum. The previous
   // reduce has performed a __syncthreads() so the smem contents are populated.
+  SumExpFloat<scalar_t, accscalar_t> sumExpFunc(max_k);
   for (int offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
     LoadT crnt_vec = smem_input_cache_vec_ptr[offset];
 
     #pragma unroll
     for (int i = 0; i < ILP; ++i) {
-      threadExp += std::exp(crnt_vec.val[i] - max_k);
+      threadExp = sumExpFunc(threadExp, crnt_vec.val[i]);
     }
   }
 
