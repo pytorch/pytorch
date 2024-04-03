@@ -1619,7 +1619,6 @@ static at::Tensor _quantized_convolution_onednn(
   // Use oneDNN's APIs instead of prepare/compute from ideep to reduce framework overhead.
   // oneDNN version >= 3.1.0 is required.
   using ideep::tensor;
-  static tensor empty_tensor;
   auto weights_desc = packed_weight.get_desc();
   auto dst_desc = dst.get_desc();
   auto bias_desc = with_bias ?
