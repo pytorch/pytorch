@@ -2,8 +2,10 @@
 import copy
 import os
 
+import functools
 import unittest
 import torch
+from torch import Tensor
 from torch import nn
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.testing import rand_strided
@@ -12,9 +14,12 @@ from torch._inductor.fx_passes import pad_mm as pad_mm_pass
 from torch._inductor.utils import do_bench, run_and_get_code
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch._dynamo.utils import maybe_cprofile
+from torch._inductor.fx_passes.pad_mm import pad_mm, pad_dim
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 DO_ACC_TEST = os.environ.get("DO_ACC_TEST", "1") == "1"
+
+WITH_STACK = os.environ.get("WITH_STACK") == "1"
 
 def get_optim(m):
     return torch.optim.Adam(
@@ -354,7 +359,7 @@ class PaddingTest(TestCase):
 
     def do_profiling(self, f_lhs, f_rhs, tag_lhs="With padding", tag_rhs="Without padding", args=(), kwargs={}):
        torch.cuda.synchronize()
-       with torch.profiler.profile() as p:
+       with torch.profiler.profile(with_stack=WITH_STACK) as p:
            niter = 3
            for _ in range(niter):
                with torch.profiler.record_function(
@@ -423,7 +428,7 @@ class PaddingTest(TestCase):
             return torch.compile(f), inputs
 
         f_good_shape, inputs_good_shape = create_model(30528)
-        f_bad_shape, inputs_bad_shape = create_model(30527)
+        f_bad_shape, inputs_bad_shape = create_model(30522)
 
         print("benchmark for good shape")
         latency_good_shape = do_bench(lambda: f_good_shape(**inputs_good_shape))
@@ -527,6 +532,86 @@ class PaddingTest(TestCase):
             # An extra kernel is called if we pad x1 here. That cuase perf loss.
             self.do_profiling(lambda: fun(x2, weight), lambda: fun(x1, weight))
 
+    @unittest.skipIf(not DO_PERF_TEST, "Perf test not enabled")
+    def test_matmul(self):
+        x_good_shape = torch.randn(8192, 30528, dtype=torch.float16)
+        weight_good_shape = torch.randn(30528, 768, dtype=torch.float16)
+        out_good_shape = torch.randn(8192, 768, dtype=torch.float16)
+
+        x_bad_shape = rand_strided((8192, 30522), (30528, 1), device="cuda", dtype=torch.float16)
+        # x_bad_shape = rand_strided((8192, 30522), (30522, 1), device="cuda", dtype=torch.float16)
+        weight_bad_shape = torch.randn(30522, 768, dtype=torch.float16)
+        out_bad_shape = torch.randn(8192, 768, dtype=torch.float16)
+
+        def f(x, weight, out):
+            torch.mm(x, weight, out=out)
+            return out
+
+        f1 = torch.compile(functools.partial(f, x_good_shape, weight_good_shape, out_good_shape))
+        # f1 = lambda: 0
+        f2 = torch.compile(functools.partial(f, x_bad_shape, weight_bad_shape, out_bad_shape))
+        latency_good_shape = do_bench(f1)
+        latency_bad_shape = do_bench(f2)
+        # Latency with good and bad shapes: 1.705 v.s. 2.625
+        print(f"Latency with good and bad shapes: {latency_good_shape:.3f} v.s. {latency_bad_shape:.3f}")
+        self.do_profiling(f1, f2)
+
+    def test_padmm(self):
+        mat1_pad = torch.randn(8192, 30522, dtype=torch.float16)
+        mat2_pad = torch.randn(30522, 768, dtype=torch.float16)
+
+        def f():
+            return mat1_pad @ mat2_pad
+            
+        def pad_dim(x: Tensor, padded_length: int, dim: int) -> Tensor:
+            pad = x.new_zeros(*x.shape[:dim], padded_length, *x.shape[dim + 1 :])
+            return torch.cat([x, pad], dim=dim)
+
+
+        @torch.compile(fullgraph=True, options={"triton.cudagraphs": False})
+        def g():
+            mat1 = mat1_pad
+            mat2 = mat2_pad
+            # return pad_mm(mat1_pad, mat2_pad, 0, 6, 0)
+            mat1 = pad_dim(mat1, 6, 1)
+            mat2 = pad_dim(mat2, 6, 0)
+            return torch.ops.aten.mm(mat1, mat2)
+
+        ori_time = do_bench(f)
+        pad_time = do_bench(g)
+
+        # test_matmul result: 1.750 v.s. 2.626
+        # this result: 2.616 v.s. 3.374
+        # New result: 2.617 v.s. 2.947
+        # 2.617 v.s. 2.257 Now!
+        print(f"Latency between origional matmul and padded matmul: {ori_time:.3f} v.s. {pad_time:.3f}")
+        self.do_profiling(f, g, "No MM Padding", "With mm padding")
+
+    def test_cat(self):
+        """
+        Compare the perf between aten cat and compiled cat.
+
+        Latency between eager and compiled: 1.596 v.s. 0.601
+
+        Eager cat can be 2.66x slower than inductor kernel.
+        """
+        x = torch.randn(8192, 30522, dtype=torch.float16)
+        def f(x):
+            pad = x.new_zeros(x.size(0), 6)
+            return torch.cat([x, pad], dim=1)
+
+        # disable cudagraphs since cudagraphs need copy the input which
+        # distort the latency a lot! (double the latency here for compiled
+        # version)
+        with config.patch("triton.cudagraphs", False):
+            opt_f = torch.compile(f)
+            opt_f(x)
+        eager_time = do_bench(lambda: f(x))
+        opt_time = do_bench(lambda: opt_f(x))
+        print(f"Latency between eager and compiled: {eager_time:.3f} v.s. {opt_time:.3f}")
+        self.do_profiling(lambda: f(x), lambda: opt_f(x), "Eager Cat", "Compiled Cat")
+        
+        
 
 if __name__ == "__main__":
     if HAS_CUDA:
