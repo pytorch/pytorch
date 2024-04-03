@@ -5170,7 +5170,10 @@ def mutate_to(changed, val, unsafe_alias=False):
         assert isinstance(val, ir.StorageBox)
 
     if isinstance(changed_data, ir.StorageBox) and not (
-        changed_data.is_input_buffer() or isinstance(changed_data.data, ir.NopKernel)
+        changed_data.is_input_buffer()
+        # In AOTI, module parameters and buffers are not lifted as graph inputs
+        or changed_data.is_module_buffer()
+        or isinstance(changed_data.data, ir.NopKernel)
     ):
         # Fast path, just swing the data pointer
         val.realize()
@@ -5632,6 +5635,7 @@ register_pointwise_numeric(aten.erfc)
 register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
+register_pointwise_numeric(aten.log2)
 register_pointwise_numeric(aten.nextafter)
 
 from .codegen.common import pointwise_overrides_data
