@@ -15,6 +15,12 @@ from torch.sparse import (
     to_sparse_semi_structured,
 )
 
+from torch.sparse._semi_structured_conversions import (
+    sparse_semi_structured_from_dense_cutlass,
+    _sparse_semi_structured_tile,
+    _compute_compressed_swizzled_bitmask,
+)
+
 from torch.testing import make_tensor
 
 from torch.testing._internal.common_device_type import (
@@ -557,6 +563,37 @@ class TestSparseSemiStructuredTraining(TestCase):
     def setUp(self):
         if not _IS_SM8X:
             self.skipTest('Only runs on SM80')
+
+
+    @training_dtypes
+    def test_prune_dense_static_sort(self, dtype) -> None:
+        # Ideally we would like to clone and compare, but that won't work because the sorting order will be different
+        # instead we pass the pruned matrix to the CUDA implementation and preserve the sparsity pattern.
+        dense = torch.randn(128, 128, device="cuda", dtype=dtype)
+        pruned = _sparse_semi_structured_tile(dense)
+
+        # CUTLASS
+        reference_cutlass = SparseSemiStructuredTensorCUTLASS.prune_dense_static_sort(pruned, algorithm="largest_abs_values_greedy")
+        assert torch.allclose(pruned, reference_cutlass.to_dense())
+
+        packed_cutlass, meta_cutlass = sparse_semi_structured_from_dense_cutlass(pruned)
+        packed_t_cutlass, meta_t_cutlass = sparse_semi_structured_from_dense_cutlass(pruned.t().contiguous())
+        meta_cutlass = meta_cutlass.as_strided(reference_cutlass.meta.shape, reference_cutlass.meta.stride())
+        meta_t_cutlass = meta_t_cutlass.as_strided(reference_cutlass.meta_t.shape, reference_cutlass.meta_t.stride())
+        compressed_swizzled_bitmask= _compute_compressed_swizzled_bitmask(pruned)
+        compressed_swizzled_bitmask = compressed_swizzled_bitmask.as_strided(reference_cutlass.compressed_swizzled_bitmask.shape, reference_cutlass.compressed_swizzled_bitmask.stride())
+        cutlass = SparseSemiStructuredTensorCUTLASS(dense.shape, packed_cutlass, meta_cutlass, packed_t_cutlass, meta_t_cutlass, compressed_swizzled_bitmask)
+        assert torch.allclose(reference_cutlass.to_dense(), cutlass.to_dense())
+
+        # CUSPARSELT
+        reference_cusparselt = SparseSemiStructuredTensorCUSPARSELT.prune_dense_static_sort(pruned, algorithm="largest_abs_values_greedy")
+        assert torch.allclose(pruned, reference_cusparselt.to_dense())
+
+        packed_cusparselt = torch._cslt_compress(pruned)
+        packed_t_cusparselt = torch._cslt_compress(pruned.t().contiguous())
+        cusparselt = SparseSemiStructuredTensorCUSPARSELT(dense.shape, packed_cusparselt, None, packed_t_cusparselt, None, compressed_swizzled_bitmask)
+        assert torch.allclose(reference_cusparselt.to_dense(), cusparselt.to_dense())
+
 
 
     @training_dtypes

@@ -63,11 +63,11 @@ class SparseSemiStructuredTensor(torch.Tensor):
     meta: Optional[torch.Tensor]
     packed_t: Optional[torch.Tensor]
     meta_t: Optional[torch.Tensor]
-    threads_masks: Optional[torch.Tensor]
+    compressed_swizzled_bitmask: Optional[torch.Tensor]
     fuse_transpose_cusparselt: bool
     alg_id_cusparselt: int
 
-    __slots__ = ["packed", "meta", "packed_t", "meta_t", "threads_masks"]
+    __slots__ = ["packed", "meta", "packed_t", "meta_t", "compressed_swizzled_bitmask"]
 
     @staticmethod
     def __new__(  # noqa: PYI034
@@ -77,7 +77,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         meta: Optional[torch.Tensor],
         packed_t: Optional[torch.Tensor],
         meta_t: Optional[torch.Tensor],
-        threads_masks: Optional[torch.Tensor],
+        compressed_swizzled_bitmask: Optional[torch.Tensor],
         fuse_transpose_cusparselt: bool = False,
         alg_id_cusparselt: int = 0,
         requires_grad: bool = False,
@@ -96,7 +96,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             meta: The metadata of the original dense tensor, if it is stored separately
             packed_t: The compressed representation of the transposed original dense tensor
             meta_t: The metadata of the transposed original dense tensor, if it is stored separately
-            threads_masks: The masks used by the CUTLASS backend to determine which threads should participate in the computation.
+            compressed_swizzeld_bitmask: The masks used by the CUTLASS backend to determine which threads should participate in the computation.
                            Used for pointwise ops.
             fuse_transpose_cusparselt: When running with cuSPARSELt, we have the option to fuse a transposition
                                        with a matmul, which is useful in the case of 2:4 sparse training.
@@ -147,7 +147,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
         tensor.meta = meta
         tensor.packed_t = packed_t
         tensor.meta_t = meta_t
-        tensor.threads_masks = threads_masks
+        tensor.compressed_swizzled_bitmask = compressed_swizzled_bitmask
         tensor.fuse_transpose_cusparselt = fuse_transpose_cusparselt
         tensor.alg_id_cusparselt = alg_id_cusparselt
         return tensor
@@ -185,7 +185,7 @@ class SparseSemiStructuredTensor(torch.Tensor):
             meta=inner_tensors.get("meta", None),
             packed_t=inner_tensors.get("packed_t", None),
             meta_t=inner_tensors.get("meta_t", None),
-            threads_masks=inner_tensors.get("threads_masks", None),
+            compressed_swizzled_bitmask=inner_tensors.get("compressed_swizzled_bitmask", None),
             fuse_transpose_cusparselt=fuse_transpose_cusparselt,
             alg_id_cusparselt=alg_id_cusparselt,
             requires_grad=requires_grad,
@@ -406,13 +406,51 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             meta=meta_tensor_cutlass,
             packed_t=None,
             meta_t=None,
-            threads_masks=None,
+            compressed_swizzled_bitmask=None,
             requires_grad=original_tensor.requires_grad,
         )
 
     @classmethod
     def prune_dense_static_sort(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
-        (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(
+        """
+        This function takes in a unpruned dense tensor and runs a (branchless) static sort across a 4x4 tile.
+
+        It greedily picks the largest values in the tile, upholding the 2:4 sparsity constraint across both the rows and the columns.
+        The algorithm used to prune the matrix is implemented `_sparse_semi_structured_tile`.
+
+        Then it creates the packed and meta tensors for the compressed sparse representation of the pruned dense tensor.
+        It also calculates the packed_t and meta_t tensors for the compressed sparse representation of the transpose of the pruned dense tensor.
+        Since we cannot transpose the compressed representation, it is necessary to store both - for the fw and bw pass respectively.
+
+        Finally, this function also computes a compressed swizzled bitmask that encodes the sparsity pattern, to be used in the backward pass.
+
+        [9 1 7 4]                       [1 2 3 4]
+        [1 2 3 0]                       [1 2 3 4]
+        [8 3 5 4] -> prune 4x4 tile  -> [1 2 3 4] -> pack to CUTLASS semi-structured -> packed
+        [1 2 6 2]                       [1 2 3 4]                                    -> metadata
+
+                                                  -> pack to transposed CUTLASS      -> packed_t
+                                                     semi-structured representation  -> metadata_t
+
+                                                  -> compute swizzled bitmask        -> compressed_swizzled_bitmask
+
+
+        The equivalent PyTorch code to create the same five outputs from the dense tensor can be found below:
+        ```
+        from torch.sparse import SparseSemiStructuredTensorCUTLASS
+        from torch.sparse._semi_structured_conversions import _sparse_semi_structured_tile, _compute_compressed_swizzled_bitmask
+
+        pruned = _sparse_semi_structured_tile(dense)
+        packed_cutlass, meta_cutlass = sparse_semi_structured_from_dense_cutlass(pruned)
+        packed_t_cutlass, meta_t_cutlass = sparse_semi_structured_from_dense_cutlass(pruned.t().contiguous())
+        bitmask = _compute_compressed_swizzled_bitmask(pruned)
+
+        SparseSemiStructuredTensorCUTLASS(dense.shape, packed_cutlass, meta_cutlass, packed_t_cutlass, meta_t_cutlass, bitmask)
+        ```
+        """
+        # torch._sparse_semi_structured_tile can be passed one of three algorithms ["", "causal1122"]
+        # We can either pack to the CUTLASS or cuSPARSELt representation, depending on the use_cutlass flag.
+        (packed, meta, packed_t, meta_t, compressed_swizzled_bitmask) = torch._sparse_semi_structured_tile(
             original_tensor,
             algorithm=algorithm,
             use_cutlass=True)
@@ -423,20 +461,8 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             meta=meta,
             packed_t=packed_t,
             meta_t=meta_t,
-            threads_masks=threads_masks,
+            compressed_swizzled_bitmask=compressed_swizzled_bitmask,
             requires_grad=False,
-            fuse_transpose_cusparselt=True,
-        )
-
-    def to_dense(self):
-        assert self.meta is not None and self.packed is not None
-        return (
-            sparse_semi_structured_to_dense_cutlass(
-                self.packed,
-                self.meta,
-            )
-            if self.meta.ndim == 2
-            else super().to_dense()
         )
 
     def _mm(
@@ -494,7 +520,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
             meta=None,
             packed_t=None,
             meta_t=None,
-            threads_masks=None,
+            compressed_swizzled_bitmask=None,
             fuse_transpose_cusparselt=SparseSemiStructuredTensor._FUSE_TRANSPOSE,
             alg_id_cusparselt=SparseSemiStructuredTensor._DEFAULT_ALG_ID,
             requires_grad=original_tensor.requires_grad,
@@ -502,7 +528,7 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
 
     @classmethod
     def prune_dense_static_sort(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
-        (packed, meta, packed_t, meta_t, threads_masks) = torch._sparse_semi_structured_tile(
+        (packed, meta, packed_t, meta_t, compressed_swizzled_bitmask) = torch._sparse_semi_structured_tile(
             original_tensor,
             algorithm=algorithm,
             use_cutlass=False)
@@ -513,9 +539,8 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
             meta=meta,
             packed_t=packed_t,
             meta_t=meta_t,
-            threads_masks=threads_masks,
+            compressed_swizzled_bitmask=compressed_swizzled_bitmask,
             requires_grad=False,
-            fuse_transpose_cusparselt=True,
         )
 
     def _mm(
