@@ -11,7 +11,7 @@ from warnings import warn
 from torchgen.api.python import (
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
-    returns_named_tuple_pyi,
+    returns_structseq_pyi,
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
 
@@ -647,7 +647,7 @@ def gen_pyi(
     # also needs to update the other file.
 
     # Dictionary for NamedTuple definitions
-    namedtuples: Dict[str, str] = {}
+    structseqs: Dict[str, str] = {}
 
     # Generate type signatures for top-level functions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1002,14 +1002,14 @@ def gen_pyi(
         name = group.signature.name
         unsorted_function_hints[name] += generate_type_hints(group)
 
-        named_tuple = returns_named_tuple_pyi(group.signature)
-        if named_tuple is not None and not group.signature.deprecated:
-            # deprecated namedtuples are currently not included for torch functions
-            tuple_name, tuple_def = named_tuple
-            if tuple_name in namedtuples:
-                assert namedtuples[tuple_name] == tuple_def
+        structseq = returns_structseq_pyi(group.signature)
+        if structseq is not None and not group.signature.deprecated:
+            # deprecated structseqs are currently not included for torch functions
+            tuple_name, tuple_def = structseq
+            if tuple_name in structseqs:
+                assert structseqs[tuple_name] == tuple_def
             else:
-                namedtuples[tuple_name] = tuple_def
+                structseqs[tuple_name] = tuple_def
 
     def replace_special_case(hint: str) -> str:
         # NB: Keep this in sync with enum in aten/src/ATen/core/Reduction.h
@@ -1251,14 +1251,14 @@ def gen_pyi(
         name = group.signature.name
         unsorted_tensor_method_hints[name] += generate_type_hints(group)
 
-        named_tuple = returns_named_tuple_pyi(group.signature)
-        if named_tuple is not None and not group.signature.deprecated:
-            # deprecated namedtuples are currently not included for torch functions
-            tuple_name, tuple_def = named_tuple
-            if tuple_name in namedtuples:
-                assert namedtuples[tuple_name] == tuple_def
+        structseq = returns_structseq_pyi(group.signature)
+        if structseq is not None and not group.signature.deprecated:
+            # deprecated structseqs are currently not included for torch functions
+            tuple_name, tuple_def = structseq
+            if tuple_name in structseqs:
+                assert structseqs[tuple_name] == tuple_def
             else:
-                namedtuples[tuple_name] = tuple_def
+                structseqs[tuple_name] = tuple_def
 
     for op in all_ops:
         name = f"__{op}__"
@@ -1275,10 +1275,10 @@ def gen_pyi(
 
     # TODO: Missing type hints for nn
 
-    # Generate namedtuple definitions
+    # Generate structseq definitions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    namedtuple_defs = [f"{defn}\n" for defn in namedtuples.values()]
+    structseq_defs = [f"{defn}\n" for defn in structseqs.values()]
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1358,7 +1358,7 @@ def gen_pyi(
     hinted_function_names = [
         name for name, hint in unsorted_function_hints.items() if hint
     ]
-    all_symbols = sorted(list(namedtuples.keys()) + hinted_function_names)
+    all_symbols = sorted(list(structseqs.keys()) + hinted_function_names)
     all_directive = pformat(all_symbols, width=100, compact=True).split("\n")
     all_directive[0] = f"__all__ = {all_directive[0]}"
 
@@ -1381,7 +1381,7 @@ def gen_pyi(
     # ~~~~~~~~~~~~~~~~~~
 
     env = {
-        "namedtuple_defs": namedtuple_defs,
+        "structseq_defs": structseq_defs,
         "function_hints": function_hints,
         "tensor_method_hints": tensor_method_hints,
         "legacy_class_hints": legacy_class_hints,

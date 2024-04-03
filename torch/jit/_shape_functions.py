@@ -1145,6 +1145,17 @@ def native_batch_norm(
     return _copy(input), _size, _size
 
 
+def _batch_norm_with_update(
+    input: List[int],
+    weight: Optional[List[int]],
+    bias: Optional[List[int]],
+    running_mean: Optional[List[int]],
+    running_var: Optional[List[int]],
+) -> Tuple[List[int], List[int], List[int], List[int]]:
+    _size = [input[1]]
+    return _copy(input), _size, _size, [0]
+
+
 def cross_entropy_loss(
     self: List[int],
     target: List[int],
@@ -1430,6 +1441,11 @@ add_shape_compute_mapping(
     "aten::_native_batch_norm_legit.no_stats(Tensor input, Tensor? weight, Tensor? bias, Tensor running_mean, Tensor running_var, bool training, float momentum, float eps) -> (Tensor, Tensor, Tensor)",
     native_batch_norm,
 )
+add_shape_compute_mapping(
+    "_batch_norm_with_update(Tensor input, Tensor? weight, Tensor? bias, Tensor(a!) running_mean, Tensor(b!) running_var, float momentum, float eps) -> (Tensor, Tensor, Tensor, Tensor)",
+    _batch_norm_with_update,
+)
+
 add_shape_compute_mapping(
     "aten::cross_entropy_loss(Tensor self, Tensor target, Tensor? weight=None, int reduction=Mean, SymInt ignore_index=-100, float label_smoothing=0.0) -> Tensor",
     cross_entropy_loss,

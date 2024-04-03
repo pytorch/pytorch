@@ -53,8 +53,6 @@ class IncorrectAliasTensor(torch.Tensor):
 
     __slots__ = ['elem']
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
-
     @staticmethod
     def __new__(cls, elem, *args, **kwargs):
         # The wrapping tensor (IncorrectAliasTensor) shouldn't hold any
@@ -295,7 +293,7 @@ class TestSchemaCheck(JitTestCase):
         self.assertEqual(m_expected, m_actual)
         self.assertEqual(e_expected, e_actual)
 
-    # Tests that SchemaCheckMode wraps Torch.tensor with aliasing ouputs due to aliasing inputs
+    # Tests that SchemaCheckMode wraps Torch.tensor with aliasing outputs due to aliasing inputs
     def test_schema_check_mode_functionality_with_multiple_outputs_aliasing(self):
         x = torch.rand((3, 3))
         actual = torch.zeros(3)

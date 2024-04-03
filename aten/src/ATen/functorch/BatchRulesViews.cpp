@@ -5,7 +5,6 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
-#include <iostream>
 #include <utility>
 
 #include <ATen/Operators.h>
@@ -17,7 +16,7 @@
 #include <c10/util/SmallBuffer.h>
 #include <ATen/InferSize.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // Note [Adding vmap support for an operator]
 // Hey there! So you have an operator and you want to get it to work with vmap.
@@ -202,7 +201,7 @@ std::tuple<Tensor, optional<int64_t>> squeeze_batch_rule(const Tensor& self, opt
   int64_t new_batch_idx = 0;
   int64_t original_idx = 0;
 
-  for (auto it : shape) {
+  for (const auto& it : shape) {
     // Keep only dimensions != 1 and the batch dimension (irrespective of size).
     if (it != 1 || original_idx == bdim) {
       squeezed_sizes.push_back(it);
@@ -452,7 +451,7 @@ std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto self_sizes = self_.sym_sizes();
-  auto batch_size = self_sizes[0];
+  const auto& batch_size = self_sizes[0];
 
   c10::SmallVector<c10::SymInt> size_(size.size() + 1);
   size_[0] = batch_size;
@@ -587,4 +586,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(unsafe_split, Tensor, unsafe_split_batch_rule);
 }
 
-}}
+} // namespace at::functorch
