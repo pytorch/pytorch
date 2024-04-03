@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import torch
 import functools
 from torch.testing import make_tensor
@@ -191,7 +189,7 @@ def numpy_view_copy_save_for_backward(inputs, output) -> Tensor:
     return inputs.x.shape
 
 @custom_ops.impl_backward('_torch_testing::numpy_view_copy')
-def numpy_view_copy_backward(ctx, x_shape, grad_out) -> Tensor:
+def numpy_view_copy_backward(ctx, x_shape, grad_out) -> Dict[str, Tensor]:
     return {'x': torch.ops._torch_testing.numpy_view_copy(grad_out, x_shape)}
 
 def sample_inputs_numpy_view_copy(opinfo, device, dtype, requires_grad, **kwargs):
