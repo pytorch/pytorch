@@ -46,8 +46,10 @@ from typing_extensions import Concatenate, ParamSpec
 
 import torch
 from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
+from torch.fx.passes.shape_prop import ShapeProp
 from torch.utils._sympy.functions import CeilDiv, CleanDiv, FloorDiv, ModularIndexing
 from . import config
 
@@ -680,6 +682,13 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
+def output_node(gm: torch.fx.GraphModule):
+    """Get the output node from an FX graph"""
+    last_node = next(iter(reversed(gm.graph.nodes)))
+    assert last_node.op == "output"
+    return last_node
+
+
 # Attempt to import AttrsDescriptor from Triton
 try:
     from triton.compiler.compiler import AttrsDescriptor
@@ -895,6 +904,11 @@ class IndentedBuffer:
             for line in other_code.split("\n"):
                 self.writeline(line)
 
+    def map(self, func: Callable[[Any], Any]) -> IndentedBuffer:
+        res = IndentedBuffer(initial_indent=self._indent)
+        res._lines = [func(line) for line in self._lines]
+        return res
+
     def __repr__(self):
         return f"{type(self)}({self.getvalue()})"
 
@@ -939,10 +953,14 @@ class DeferredLineBase:
 
 
 @functools.lru_cache(None)
-def is_big_gpu(index):
-    sms = torch.cuda.get_device_properties(index).multi_processor_count
-    if sms < 80:  # V100
-        log.warning("not enough SMs to use max_autotune_gemm mode")
+def is_big_gpu(index) -> bool:
+    min_sms = 68  # 3080
+    avail_sms = torch.cuda.get_device_properties(index).multi_processor_count
+    if avail_sms < min_sms:
+        log.warning(
+            "Not enough SMs to use max_autotune_gemm mode",
+            extra={"min_sms": min_sms, "avail_sms": avail_sms},
+        )
         return False
     return True
 
@@ -1030,7 +1048,7 @@ def run_and_get_code(fn, *args, **kwargs):
     from .graph import GraphLowering
 
     compile_to_module = GraphLowering.compile_to_module
-    source_codes = []
+    source_codes: List[str] = []
 
     def patched_compile_to_module(self):
         mod = compile_to_module(self)
@@ -1046,6 +1064,52 @@ def run_and_get_code(fn, *args, **kwargs):
             torch._dynamo.reset()
             result = fn(*args, **kwargs)
     return result, source_codes
+
+
+def get_code(fn, *args, **kwargs):
+    """Get the inductor-generated code, but skip any actual compilation or running."""
+    from .graph import GraphLowering
+
+    source_codes: List[str] = []
+
+    def patched_compile_to_module(self: GraphLowering):
+        class DummyModule:
+            """This is empty to replace the generated triton module"""
+
+            def __init__(self):
+                pass
+
+            def call(self, *args, **kwargs):
+                # Don't do anything when called
+                pass
+
+        code, _ = (
+            self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
+        )
+        # Skip all the actual compiling.
+
+        source_codes.append(code)
+        return DummyModule()
+
+    # If FX code caching is enabled, a hit prevents getting the code.
+    with config.patch({"fx_graph_cache": False}):
+        with mock.patch.object(
+            GraphLowering, "compile_to_module", patched_compile_to_module
+        ):
+            torch._dynamo.reset()
+            # Note the return here is None
+            _ = fn(*args, **kwargs)
+
+    return source_codes
+
+
+def get_triton_code(fn, *args, **kwargs):
+    source_codes = get_code(fn, *args, **kwargs)
+    # Can have two outputs if backwards was eagerly compiled
+    assert (
+        1 <= len(source_codes) <= 2
+    ), f"expected one or two code outputs got {len(source_codes)}"
+    return source_codes[0]
 
 
 def run_and_get_triton_code(fn, *args, **kwargs):
@@ -1327,7 +1391,7 @@ class Placeholder(enum.Enum):
     DESCRIPTIVE_NAME = "DESCRIPTIVE_NAME"
 
 
-def pass_execution_and_save(func, gm, msg):
+def pass_execution_and_save(func, gm, inp, msg):
     from .pattern_matcher import stable_topological_sort
 
     with tempfile.NamedTemporaryFile(
@@ -1337,6 +1401,7 @@ def pass_execution_and_save(func, gm, msg):
     ) as f:
         before_io = io.StringIO()
         after_io = io.StringIO()
+        ShapeProp(gm=gm, fake_mode=detect_fake_mode(inp)).propagate(*inp)
         print(f"Before:\n{gm.graph}", file=f)
         print(gm.graph, file=before_io)
         start_time = datetime.now()
@@ -1431,3 +1496,7 @@ def collect_defined_kernels(kernel_list):
 
     with unittest.mock.patch.object(WrapperCodeGen, "define_kernel", new_define_kernel):
         yield
+
+
+def get_cloned_parameter_buffer_name(name: str):
+    return name + "__original__"

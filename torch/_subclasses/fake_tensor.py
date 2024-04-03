@@ -242,6 +242,12 @@ class FakeTensorConverter:
         tid = self.meta_converter.describer.get_tensor_id(t)
         self.meta_converter.tensor_memo[tid] = v
 
+    # You can have a real tensor that you need to convert into a fake tensor.
+    # If you have a meta tensor already, call from_meta_and_device.
+    #
+    # You're allowed to pass a meta tensor to be turned into a fake
+    # tensor; although an odd thing to do, this can occur if you're doing
+    # cross ref testing and the inner test is already operating on meta tensors.
     def from_real_tensor(
         self,
         fake_mode,
@@ -251,7 +257,6 @@ class FakeTensorConverter:
         *,
         source=None,
         symbolic_context=None,
-        memoized_only=False,
     ):
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
@@ -263,8 +268,6 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
-        if memoized_only:
-            return None
         existing_device = t.device
         # not yet supported in metatensors
         if t.is_quantized:
@@ -315,33 +318,6 @@ class FakeTensorConverter:
         out = FakeTensor(fake_mode, t, device)
         self.set_tensor_memo(t, out)
         return out
-
-    # You can have a real tensor that you need to convert into a fake tensor.
-    # If you have a meta tensor already, call from_meta_and_device.
-    #
-    # You're allowed to pass a meta tensor to be turned into a fake
-    # tensor; although an odd thing to do, this can occur if you're doing
-    # cross ref testing and the inner test is already operating on meta tensors.
-    def __call__(
-        self,
-        fake_mode,
-        t,
-        *,
-        make_constant=False,
-        shape_env=None,
-        source=None,
-        symbolic_context=None,
-        memoized_only=False,
-    ):
-        return self.from_real_tensor(
-            fake_mode,
-            t,
-            make_constant,
-            shape_env=shape_env,
-            source=source,
-            symbolic_context=symbolic_context,
-            memoized_only=memoized_only,
-        )
 
 
 @functools.lru_cache(None)
@@ -457,6 +433,8 @@ class FakeTensor(torch.Tensor):
             dispatch_device=True,
             device_for_backend_keys=device,
         )
+        if not fake_mode._allow_unsafe_data_ptr_access:
+            torch._C._set_throw_on_mutable_data_ptr(self)
 
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
@@ -478,9 +456,12 @@ class FakeTensor(torch.Tensor):
             in ["cuda", "hpu", "xpu", torch._C._get_privateuse1_backend_name()]
             and device.index is None
         ):
-            device = torch.device(
-                f"{device.type}:{getattr(torch, device.type).current_device()}"
-            )
+            if getattr(torch, device.type).is_initialized():
+                device = torch.device(
+                    f"{device.type}:{getattr(torch, device.type).current_device()}"
+                )
+            else:
+                device = torch.device(f"{device.type}:0")
         self.fake_device = device  # type: ignore[attr-defined]
         self.fake_mode = fake_mode  # type: ignore[attr-defined]
         self.constant = constant  # type: ignore[attr-defined]
@@ -707,32 +688,6 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
     )
 
 
-@dataclass(frozen=True)
-class _ShapeEnvSettings:
-    """
-    Encapsulates all shape env settings that could potentially affect
-    FakeTensor dispatch. Used when creating dispatch cache keys.
-    """
-
-    allow_scalar_outputs: bool
-    allow_dynamic_output_shape_ops: bool
-    assume_static_by_default: bool
-    specialize_zero_one: bool
-    duck_shape: bool
-
-    def __init__(self, env: "ShapeEnv"):
-        # Initialize this way because the class is frozen (to enable hashing):
-        object.__setattr__(self, "allow_scalar_outputs", env.allow_scalar_outputs)
-        object.__setattr__(
-            self, "allow_dynamic_output_shape_ops", env.allow_dynamic_output_shape_ops
-        )
-        object.__setattr__(
-            self, "assume_static_by_default", env.assume_static_by_default
-        )
-        object.__setattr__(self, "specialize_zero_one", env.specialize_zero_one)
-        object.__setattr__(self, "duck_shape", env.duck_shape)
-
-
 class _DispatchCacheKey(list):
     """
     Key for the FakeTensor dispatch cache. Inspired by (copied from)
@@ -806,8 +761,10 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
         static_shapes=None,
+        _allow_unsafe_data_ptr_access=True,
     ):
         log.debug("create_mode 0x%x", id(self))
+        self._allow_unsafe_data_ptr_access = _allow_unsafe_data_ptr_access
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
         if static_shapes is not None:
@@ -1013,9 +970,9 @@ class FakeTensorMode(TorchDispatchMode):
             # mode is the same.
             torch.is_inference_mode_enabled(),
             # Shape env settings could affect behavior. One example seen in the wild:
-            # Disasllowing dynamic shapes can introduce a DynamicOutputShapeException
+            # Disallowing dynamic shapes can introduce a DynamicOutputShapeException
             # where it wasn't seen on a previous instance of the same op.
-            _ShapeEnvSettings(self.shape_env) if self.shape_env else None,
+            self.shape_env.settings if self.shape_env else None,
         )
         return _DispatchCacheKey(key_values)
 
@@ -1271,7 +1228,7 @@ class FakeTensorMode(TorchDispatchMode):
                 # therefore the exact type test above
                 with no_dispatch():
                     out = out.clone()
-                return converter(self, out, make_constant=True)
+                return converter.from_real_tensor(self, out, make_constant=True)
 
         # See [subclass inputs] below
         # NB: If you're seeing a mysterious infinite loop involving fake
@@ -1295,7 +1252,7 @@ class FakeTensorMode(TorchDispatchMode):
             assert len(kwargs) == 0 and len(args) == 1, f"{args} {kwargs}"
 
             if type(args[0]) is torch.Tensor:
-                return converter(self, args[0])
+                return converter.from_real_tensor(self, args[0])
 
         # Recompute flat_arg_fake_tensors here again in case some of the inputs
         # were real tensors and fakified in validate_and_convert_non_fake_tensors
@@ -1337,7 +1294,7 @@ class FakeTensorMode(TorchDispatchMode):
             if all_constant:
                 return pytree.tree_map_only(
                     torch.Tensor,
-                    lambda t: converter(self, t, make_constant=True),
+                    lambda t: converter.from_real_tensor(self, t, make_constant=True),
                     out,
                 )
 
@@ -1402,7 +1359,7 @@ class FakeTensorMode(TorchDispatchMode):
             func.name()
         ).abstract_impl.kernel
         if maybe_abstract_impl:
-            ctx = torch._library.abstract_impl.AbstractImplCtx(self.shape_env, func)
+            ctx = torch._library.abstract_impl.AbstractImplCtx(self, func)
             with torch._library.abstract_impl.set_ctx_getter(lambda: ctx), self:
                 result = maybe_abstract_impl(*args, **kwargs)
                 return result
@@ -1525,7 +1482,7 @@ class FakeTensorMode(TorchDispatchMode):
                         f"with 'allow_non_fake_inputs'. Found in {render_call(func, args, kwargs)}"
                     )
 
-                x = converter(self, x)
+                x = converter.from_real_tensor(self, x)
 
             flat_arg_fake_tensors.append(x)
             return x
@@ -1565,7 +1522,7 @@ class FakeTensorMode(TorchDispatchMode):
                     # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
                     # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.
                     # We thus directly convert real tensor to fake tensor.
-                    return converter(self, e)
+                    return converter.from_real_tensor(self, e)
                 else:
                     return converter.from_meta_and_device(
                         self, e, device or common_device
@@ -1629,9 +1586,6 @@ class FakeTensorMode(TorchDispatchMode):
         static_shapes=None,
         source: Optional[Source] = None,
         symbolic_context=None,
-        # Setting this flag will force FakeTensorMode to return `None` if attempting to convert a tensor we have not
-        # seen before.
-        memoized_only=False,
     ):
         shape_env = self.shape_env
         if static_shapes is None:
@@ -1641,19 +1595,12 @@ class FakeTensorMode(TorchDispatchMode):
                 symbolic_context is None
             ), "cannot set both static_shapes and symbolic_context"
             shape_env = None
-        # see note [Tensor Fakification and Symbol Caching]
-        if not symbolic_context and not source and not static_shapes:
-            if tracing_context := torch._guards.TracingContext.try_get():
-                if tensor in tracing_context.tensor_to_context:
-                    symbolic_context = tracing_context.tensor_to_context[tensor]
-                    source = symbolic_context.tensor_source
-        return self.fake_tensor_converter(
+        return self.fake_tensor_converter.from_real_tensor(
             self,
             tensor,
             shape_env=shape_env,
             source=source,
             symbolic_context=symbolic_context,
-            memoized_only=memoized_only,
         )
 
 
@@ -1712,7 +1659,7 @@ def run_fallback_kernel(
             if id(e) in inp_impls:
                 return inp_impls[id(e)]
             else:
-                return fake_mode.fake_tensor_converter(fake_mode, e)
+                return fake_mode.fake_tensor_converter.from_real_tensor(fake_mode, e)
         else:
             return e
 

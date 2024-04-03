@@ -250,14 +250,17 @@ class BaseSchedulerNode:
     def used_or_aliased_buffer_names(self) -> Set[str]:
         used_names = set()
 
-        for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes):
-            used_names.add(dep.name)
-            if V.graph.name_to_buffer.get(dep.name):
-                layout = V.graph.name_to_buffer[dep.name].get_layout()
-                # needed to avoid deallocating aliased buffer
-                # if there are still uses of aliases ahead
-                if isinstance(layout, ir.NonOwningLayout):
-                    used_names.add(layout.view.data.get_name())
+        deps = [
+            dep.name
+            for dep in itertools.chain(self.read_writes.reads, self.read_writes.writes)
+        ]
+        while len(deps) > 0:
+            dep = deps.pop()
+            used_names.add(dep)
+            if V.graph.name_to_buffer.get(dep):
+                for alias in V.graph.name_to_buffer[dep].get_inputs_that_alias_output():
+                    if alias not in used_names:
+                        deps.append(alias)
         return used_names
 
     def prune_deps(self):
@@ -367,7 +370,6 @@ class BaseSchedulerNode:
                             (
                                 ir.MultiOutputLayout,
                                 ir.MutationLayoutSHOULDREMOVE,
-                                ir.NonOwningLayout,
                             ),
                         )
                         and not (
@@ -1554,6 +1556,9 @@ class Scheduler:
             if name in V.graph.graph_inputs:
                 add_user(name, OutputNode(StarDep(name)))
                 V.graph.mutated_inputs.add(name)
+            elif name in V.graph.constants:
+                # In AOTI, module parameters and buffers are not lifted as graph inputs
+                add_user(name, OutputNode(StarDep(name)))
 
         inp_names = {
             name: index for index, name in enumerate(V.graph.graph_inputs.keys())
@@ -2449,16 +2454,9 @@ class Scheduler:
 
         self.flush()
 
-    def is_unaligned_buffer(self, buf_name):
-        if buf_name in V.graph.graph_inputs or buf_name in V.graph.constants:
-            # all graph inputs or constants are assumed to be aligned
-            return False
+    def get_buffer_layout(self, buf_name: str) -> ir.Layout:
         node = self.name_to_node[buf_name]
-        layout = node.node.get_layout()
-        if isinstance(layout, ir.NonOwningLayout):
-            return not layout.maybe_guard_aligned()
-        else:
-            return False
+        return node.node.get_layout()
 
 
 class BaseScheduling:
