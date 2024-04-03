@@ -48,7 +48,7 @@ def format_default_skip_message(reason: str) -> str:
 
 
 def get_mutation_stack_trace(
-    placeholders: Iterable[torch.fx.Node], mutation_indices: Iterable[int]
+    placeholders: List[torch.fx.Node], mutation_indices: Iterable[int]
 ) -> str:
     stack_trace: Optional[str] = ""
 
