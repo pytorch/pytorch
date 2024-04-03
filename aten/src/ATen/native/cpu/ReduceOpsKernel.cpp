@@ -195,7 +195,7 @@ template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>
 void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   if (val == 0.0) {
     binary_kernel_reduce(iter, NormZeroOps<scalar_t, acc_t, out_t>(), acc_t(0));
-  } else if (val == 0.0) {
+  } else if (val == 1.0) {
     binary_kernel_reduce(iter, NormOneOps<scalar_t, acc_t, out_t>(), acc_t(0));
   } else if (val == 2.0) {
     binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t>(), acc_t(0));

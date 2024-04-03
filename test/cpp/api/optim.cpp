@@ -510,6 +510,38 @@ void check_lr_change(
   }
 }
 
+// Very similar to check_lr_change, but for ReduceLROnPlateauScheduler
+// which does not inherit from LRScheduler and requires a metrics
+// input to step().
+void check_lr_change_for_reduce_on_plateau(
+    Optimizer& optimizer,
+    ReduceLROnPlateauScheduler& lr_scheduler,
+    std::map<unsigned, double> expected_epoch_lrs) {
+  // Find maximum epoch in map
+  unsigned kIterations = std::max_element(
+                             expected_epoch_lrs.begin(),
+                             expected_epoch_lrs.end(),
+                             [](const std::pair<unsigned, double>& a,
+                                const std::pair<unsigned, double>& b) -> bool {
+                               return a.second > b.second;
+                             })
+                             ->first;
+
+  for (unsigned i = 0; i <= kIterations; i++) {
+    const auto epoch_iter = expected_epoch_lrs.find(i);
+    if (epoch_iter != expected_epoch_lrs.end()) {
+      // Compare the similarity of the two floating point learning rates
+      ASSERT_TRUE(
+          fabs(
+              epoch_iter->second -
+              optimizer.param_groups()[0].options().get_lr()) <
+          std::numeric_limits<double>::epsilon());
+    }
+    optimizer.step();
+    lr_scheduler.step(5.0);
+  }
+}
+
 TEST(OptimTest, CheckLRChange_StepLR_Adam) {
   torch::Tensor parameters = torch::zeros({1});
   auto optimizer = Adam({parameters}, AdamOptions().lr(1e-3));
@@ -522,4 +554,22 @@ TEST(OptimTest, CheckLRChange_StepLR_Adam) {
   const std::map<unsigned, double> expected_epoch_lrs = {{1, 1e-3}, {25, 5e-4}};
 
   check_lr_change(optimizer, step_lr_scheduler, expected_epoch_lrs);
+}
+
+TEST(OptimTest, CheckLRChange_ReduceLROnPlateau_Adam) {
+  torch::Tensor parameters = torch::zeros({1});
+  auto optimizer = Adam({parameters}, AdamOptions().lr(1e-3));
+  const float factor = 0.5;
+  const int patience = 20;
+  ReduceLROnPlateauScheduler reduce_lr_on_plateau_scheduler(
+      optimizer,
+      ReduceLROnPlateauScheduler::SchedulerMode::min,
+      factor,
+      patience);
+
+  // The learning rate should have halved at epoch 20
+  const std::map<unsigned, double> expected_epoch_lrs = {{1, 1e-3}, {25, 5e-4}};
+
+  check_lr_change_for_reduce_on_plateau(
+      optimizer, reduce_lr_on_plateau_scheduler, expected_epoch_lrs);
 }

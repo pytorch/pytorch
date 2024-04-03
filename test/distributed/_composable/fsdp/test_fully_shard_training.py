@@ -4,7 +4,7 @@ import contextlib
 import copy
 import functools
 import unittest
-from typing import Iterable, List, Tuple, Union
+from typing import Iterable, List, Tuple, Type, Union
 
 import torch
 import torch.distributed as dist
@@ -58,7 +58,6 @@ class TestFullyShardForwardInputs(FSDPTestMultiThread):
         return 2
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    @test_compiled_fsdp()
     def test_root_move_forward_input_to_device(self):
         device = torch.device("cuda", 0)
 
@@ -288,7 +287,6 @@ class TestFullyShard1DTrainingCore(FSDPTest):
         )
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp()
     def test_train_parity_multi_group_compile(self):
         self.run_subtests(
             {
@@ -804,12 +802,16 @@ class TestFullyShard2DTraining(FSDPTest):
                 # If reusing, then load into the same model/optimizer instance
                 # else construct new ones (requiring eager optim state init)
                 "reuse_model_optim": [False, True],
+                "optimizer_class": [torch.optim.Adam, torch.optim.AdamW],
             },
             self._test_train_parity_2d_transformer_checkpoint_resume,
         )
 
     def _test_train_parity_2d_transformer_checkpoint_resume(
-        self, use_seq_parallel: bool, reuse_model_optim: bool
+        self,
+        use_seq_parallel: bool,
+        reuse_model_optim: bool,
+        optimizer_class: Type[torch.optim.Optimizer],
     ):
         def train_step(
             _model: nn.Module, _optim: torch.optim.Optimizer, _inp: torch.Tensor
@@ -835,7 +837,7 @@ class TestFullyShard2DTraining(FSDPTest):
         model_no_cp = parallelize(
             Transformer(model_args), global_mesh, use_seq_parallel
         )
-        optim_no_cp = torch.optim.Adam(model_no_cp.parameters(), lr=1e-2)
+        optim_no_cp = optimizer_class(model_no_cp.parameters(), lr=1e-2)
 
         torch.manual_seed(42 + global_mesh["dp"].get_local_rank() + 1)
         inp = torch.randint(0, model_args.vocab_size, (3, 16), device="cuda")
@@ -846,7 +848,7 @@ class TestFullyShard2DTraining(FSDPTest):
         # model/optimizer, load checkpoint, and run another iteration
         torch.manual_seed(seed)
         model_cp = parallelize(Transformer(model_args), global_mesh, use_seq_parallel)
-        optim_cp = torch.optim.Adam(model_cp.parameters(), lr=1e-2)
+        optim_cp = optimizer_class(model_cp.parameters(), lr=1e-2)
 
         loss_cp1 = train_step(model_cp, optim_cp, inp)
         self.assertEqual(loss_no_cp1, loss_cp1)
@@ -875,7 +877,7 @@ class TestFullyShard2DTraining(FSDPTest):
             model_cp = parallelize(
                 Transformer(model_args), global_mesh, use_seq_parallel
             )
-            optim_cp = torch.optim.Adam(model_cp.parameters(), lr=1e-2)
+            optim_cp = optimizer_class(model_cp.parameters(), lr=1e-2)
         self.assertNotEqual(loss_no_cp2, train_step(model_cp, optim_cp, inp))
 
         sharded_sd = {
