@@ -1750,7 +1750,7 @@ def get_classifications(
 
         # NB: It's important to note that when it comes to ghstack and broken trunk classification,
         # Dr.CI uses the base of the whole stack
-        if is_broken_trunk(name, drci_classifications):
+        if is_broken_trunk(check, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,
