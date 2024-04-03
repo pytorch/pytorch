@@ -15,7 +15,7 @@ from torch.fx.graph_module import _assign_attr
 from weakref import WeakKeyDictionary
 from collections import defaultdict
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
-from torch._dispatch.python import enable_python_dispatcher, enable_pre_dispatch
+from torch._dispatch.python import enable_python_dispatcher
 import torch.fx as fx
 from torch.fx.node import _side_effectful_need_to_be_preserved_pre_dispatch
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
@@ -26,6 +26,7 @@ import weakref
 import operator
 from torch.utils._stats import count
 import logging
+from torch._library.fake_class_registry import FakeScriptObject
 
 from torch.overrides import TorchFunctionMode
 
@@ -97,7 +98,7 @@ def set_proxy_slot(obj, tracer, proxy):
         # We DO want to clobber proxies whenever we run an inplace operation
         # on a tensor, and it affects the metadata on the proxy.
         tracer.tensor_tracker[obj] = proxy
-    elif isinstance(obj, torch.ScriptObject):
+    elif isinstance(obj, (torch.ScriptObject, FakeScriptObject)):
         # We DO want to clobber proxies, with a similar rationale as for tensors.
         tracer.script_object_tracker[obj] = proxy
     else:
@@ -121,7 +122,7 @@ def has_proxy_slot(obj, tracer):
 def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
     if isinstance(obj, torch.Tensor):
         tracker = tracer.tensor_tracker
-    elif isinstance(obj, torch.ScriptObject):
+    elif isinstance(obj, (torch.ScriptObject, FakeScriptObject)):
         tracker = tracer.script_object_tracker
     else:
         assert isinstance(obj, py_sym_types), type(obj)
@@ -141,7 +142,7 @@ def extract_val(val):
         return snapshot_fake(val)
     elif isinstance(val, py_sym_types):
         return val
-    elif isinstance(val, torch.ScriptObject):
+    elif isinstance(val, (torch.ScriptObject, FakeScriptObject)):
         return val
     elif isinstance(val, BackwardState):
         return val
@@ -218,7 +219,7 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e, tracer, lambda: proxy)
-        elif isinstance(e, torch.ScriptObject):
+        elif isinstance(e, (torch.ScriptObject, FakeScriptObject)):
             set_proxy_slot(e, tracer, proxy)
             set_meta(proxy, e)
         elif isinstance(e, (tuple, list)):
@@ -337,7 +338,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     f_flat_args_kwargs = [
         (
             fetch_object_proxy(tracer)(x)
-            if isinstance(x, (torch.Tensor, torch.ScriptObject))
+            if isinstance(x, (torch.Tensor, torch.ScriptObject, FakeScriptObject))
             else x
         )
         for x in flat_args_kwargs
@@ -591,7 +592,7 @@ class PythonKeyTracer(Tracer):
             return get_proxy_slot(e, self, e, lambda e: e.proxy)
         elif isinstance(e, (torch.SymInt, torch.SymFloat, torch.SymBool)):
             return get_proxy_slot(e, self, e, lambda e: e())
-        elif isinstance(e, torch.ScriptObject):
+        elif isinstance(e, (torch.ScriptObject, FakeScriptObject)):
             return get_proxy_slot(e, self, e)
         else:
             return e
@@ -657,6 +658,11 @@ def wrap_key(f, tensors, tracer, pre_dispatch: bool):
         out = pytree.tree_map_only(
             torch.Tensor,
             lambda t: get_proxy_slot(t, tracer, t, lambda x: x.proxy),
+            out
+        )
+        out = pytree.tree_map_only(
+            (torch.ScriptObject, FakeScriptObject),
+            lambda t: get_proxy_slot(t, tracer, t, lambda x: x),
             out
         )
         out = pytree.tree_map_only(
@@ -1148,13 +1154,10 @@ def make_fx(f,
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
         python_dispatcher_mode: Any = nullcontext()
-        pre_dispatch_mode: Any = nullcontext()
         # pre-autograd tracing uses per-dispatch-key modes,
         # which requires the python dispatcher
         if tracing_mode == "symbolic" or pre_dispatch:
             python_dispatcher_mode = enable_python_dispatcher()
-        if pre_dispatch:
-            pre_dispatch_mode = enable_pre_dispatch()
 
         proxy_function_mode: Any = nullcontext()
         if pre_dispatch:
@@ -1182,7 +1185,10 @@ def make_fx(f,
             # NB: don't match on bools
             elif type(x) is int and tracing_mode == "symbolic":
                 return shape_env.create_symintnode(shape_env.create_symbol(x, source, positive=None), hint=x, source=source)
+            elif isinstance(x, torch.ScriptObject):
+                return torch._library.fake_class_registry.to_fake_obj(fake_tensor_mode, x)
 
+            assert not isinstance(x, FakeScriptObject), f"ScriptObject {x} has been fakified. Cannot wrap_fake it again."
             return x
 
         sym_mode = proxy_mode.sym_mode
@@ -1209,7 +1215,7 @@ def make_fx(f,
         # We also disable tracing by any other tensor proxy-based tracers except the current. The
         # purpose of `make_fx` is to produce graphmodules as a side effect; its internal execution is
         # thus irrelevant to any external functional trace.
-        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, pre_dispatch_mode, proxy_function_mode, \
+        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, proxy_function_mode, \
              sym_mode, torch_fn_metadata_mode, proxy_mode, disable_autocast_cache():
             t = dispatch_trace(wrap_key(func, args, fx_tracer, pre_dispatch), tracer=fx_tracer, concrete_args=tuple(phs))
 
