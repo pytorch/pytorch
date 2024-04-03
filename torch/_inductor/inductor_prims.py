@@ -90,7 +90,7 @@ _unsafe_index_put_ = make_prim(
 )
 
 
-def _low_mem_max_pool2d_with_offsets_aten(
+def _low_memory_max_pool2d_with_offsets_aten(
     self, kernel_size, stride, padding, dilation, ceil_mode, *, offset_dtype
 ):
     vals, indices = torch.ops.aten.max_pool2d_with_indices(
@@ -99,7 +99,7 @@ def _low_mem_max_pool2d_with_offsets_aten(
     return vals, indices.to(offset_dtype)
 
 
-def _low_mem_max_pool2d_with_offsets_meta(
+def _low_memory_max_pool2d_with_offsets_meta(
     self, kernel_size, stride, padding, dilation, ceil_mode, *, offset_dtype
 ):
     vals, indices = torch.ops.aten.max_pool2d_with_indices(
@@ -111,8 +111,8 @@ def _low_mem_max_pool2d_with_offsets_meta(
 _low_memory_max_pool2d_with_offsets = _prims._make_prim(
     schema="_low_memory_max_pool2d_with_offsets(Tensor self, int[2] kernel_size, int[2] stride,  int[2] padding, int[2] dilation, bool ceil_mode, *, ScalarType offset_dtype) -> (Tensor, Tensor)",
     return_type=(_prims.RETURN_TYPE.NEW, _prims.RETURN_TYPE.NEW),
-    meta=_low_mem_max_pool2d_with_offsets_meta,
-    impl_aten=_low_mem_max_pool2d_with_offsets_aten,
+    meta=_low_memory_max_pool2d_with_offsets_meta,
+    impl_aten=_low_memory_max_pool2d_with_offsets_aten,
     doc="Instead of returning indices, returns indices offsets.",
 )
 

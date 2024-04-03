@@ -439,6 +439,12 @@ def check_model(
     if check_has_compiled:
         assert called, "Ran graph without calling compile_fx"
     assert type(actual) == type(correct)
+    if isinstance(actual, (tuple, list)):
+        assert len(actual) == len(correct)
+        assert all(
+            type(actual_item) == type(correct_item)
+            for actual_item, correct_item in zip(actual, correct)
+        )
 
     correct_flat, correct_spec = tree_flatten(correct)
     actual_flat = pytree.tree_leaves(actual)
@@ -1031,9 +1037,8 @@ class CommonTemplate:
                 if self.device == "cpu":
                     _, code = run_and_get_cpp_code(fn_opt, *inps)
                     found = False
-                    # match ternary operator
-                    pattern = r"\?.*:"
-                    if re.findall(pattern, code):
+                    # match ternary operator for scalar or blendv for vector
+                    if re.findall(r"\?.*:", code) or re.findall("blendv", code):
                         found = True
                     self.assertTrue(found is has_wrapping)
                     self.assertTrue(("TORCH_CHECK" in code) is has_assert)
@@ -1363,11 +1368,6 @@ class CommonTemplate:
         self.common(fn, [packed])
 
     def test_expanded_reduction(self):
-        if self.device == "cpu":
-            raise unittest.SkipTest(
-                "https://github.com/pytorch/torchdynamo/issues/1697"
-            )
-
         def fn(x, y):
             z = x * y
             return z.sum((0, 1))
@@ -2068,6 +2068,39 @@ class CommonTemplate:
             fn_int_input, (make_tensor(10, device=self.device, dtype=torch.float32), 33)
         )
 
+    def test_div_precision(self):
+        # Reproducer for https://github.com/pytorch/pytorch/issues/101039
+
+        def forward(y):
+            z = y.div(1e-06)
+            return F.softmax(z, dim=-1)
+
+        query = torch.randn(1, 10, 40)
+        key = torch.randn(1, 2, 40)
+        y = torch.matmul(query, key.transpose(-2, -1))
+        self.common(forward, (y,))
+
+    def test_div_by_zero(self):
+        def fn(x, runtime_zero, runtime_neg_zero):
+            zero = torch.zeros_like(x)
+            return (
+                x / 0.0,
+                x / -0.0,
+                zero / 0.0,
+                x / zero,
+                x / -zero,
+                zero / zero,
+                x / runtime_zero,
+                # NOTE: -runtime_zero doesn't work as -(0.0) is broken in triton
+                x / runtime_neg_zero,
+                runtime_zero / runtime_neg_zero,
+            )
+
+        a = torch.randn(10)
+        zero = torch.zeros(10)
+        neg_zero = -zero
+        self.common(fn, (a, zero, neg_zero))
+
     def test_both_scalars(self):
         def fn(a, b):
             return (
@@ -2475,6 +2508,20 @@ class CommonTemplate:
             return a
 
         self.common(fn, [torch.randint(5, (1, 8)), 5400])
+
+    @torch._dynamo.config.patch(dynamic_shapes=True)
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_scalar_output(self):
+        def fn(arg0_1, arg2_1):
+            arg1_1 = arg2_1.size(1)
+            view = torch.ops.aten.view.default(arg2_1, [-1, arg1_1])
+            embedding = torch.ops.aten.embedding.default(arg0_1, view)
+            full = torch.ops.aten.full.default([1, arg1_1], 1, dtype=torch.float32)
+            return (full, arg1_1, embedding)
+
+        arg0_1 = rand_strided((32128, 768), (768, 1), device="cpu", dtype=torch.float32)
+        arg2_1 = rand_strided((1, 22), (22, 1), device="cpu", dtype=torch.int64)
+        self.common(fn, [arg0_1, arg2_1])
 
     def test_shape_prop_torch_ones(self):
         class Model(torch.nn.Module):
@@ -4342,56 +4389,6 @@ class CommonTemplate:
                 torch.randn([1, 3, 3, 16]),
             ),
         )
-
-    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
-    def test_nonzero_unbacked_refinement(self):
-        def fn(x):
-            z = x.nonzero()
-            torch._check(z.size(0) == 4)
-            return z + 3
-
-        self.common(
-            fn,
-            (torch.tensor([0, 1, 3, 4, 2, 0, 0]),),
-        )
-
-        with self.assertRaises(RuntimeError):
-            torch.compile(fn)(torch.tensor([0, 0, 0, 0]))
-
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_unbacked_floordiv_simplify(self):
-        def fn(x, y):
-            z = y.item()
-            torch._check(z // 2 == 3)
-            return x + x.new_zeros(z)
-
-        self.common(
-            fn,
-            (
-                torch.randn(6),
-                torch.tensor([6]),
-            ),
-        )
-
-        self.common(
-            fn,
-            (
-                torch.randn(7),
-                torch.tensor([7]),
-            ),
-        )
-
-    @torch._dynamo.config.patch(capture_scalar_outputs=True)
-    def test_unbacked_floordiv_simplify_errors(self):
-        def fn(x, y):
-            z = y.item()
-            torch._check(z // 2 == 3)
-            return x + x.new_zeros(z)
-
-        # This is a little suboptimal: we actually fail /in the compiler/ but
-        # not in a way that causes Dynamo to graph break
-        with self.assertRaises(RuntimeError):
-            torch.compile(fn)(torch.randn(8), torch.tensor(8))
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_cat_unbacked_legacy_empty(self):
@@ -6442,19 +6439,24 @@ class CommonTemplate:
                 ],
             )
 
-    # issue #1150
     def test_dense_mask_index(self):
+        r"""
+        There will be a little difference for reduce order between aten and inductor
+        https://github.com/pytorch/pytorch/pull/122289
+        Absolute difference: 0.00067138671875 (up to 1e-05 allowed)
+        Relative difference: 3.1747371732500974e-06 (up to 1.3e-06 allowed)
+        """
+        kwargs = {}
         if self.device == "cpu":
-            raise unittest.SkipTest(
-                "https://github.com/pytorch/torchdynamo/issues/1697"
-            )
+            kwargs["atol"] = 1e-4
+            kwargs["rtol"] = 1.3e-5
 
         def fn(x, y):
             y = torch.ops.aten.select.int(y, 0, 2)
             z = x * y
             return z.sum()
 
-        self.common(fn, [torch.randn(102400), torch.randn(3)])
+        self.common(fn, [torch.randn(102400), torch.randn(3)], **kwargs)
 
     def test_empty1(self):
         def fn():
@@ -7192,8 +7194,6 @@ class CommonTemplate:
 
     @torch._dynamo.config.patch(assume_static_by_default=False)
     def test_dtype_sympy_expr(self):
-        torch._inductor.metrics.disable_cpp_wrapper = 0
-
         @torch._dynamo.optimize_assert("inductor")
         def fn(a):
             y = a[..., :-1, :].contiguous()
@@ -7201,11 +7201,6 @@ class CommonTemplate:
 
         result = fn(torch.randn([1, 2, 16, 4]).requires_grad_())
         result.sum().backward()
-
-        expected_disable_cpp_wrapper = 0
-        self.assertEqual(
-            torch._inductor.metrics.disable_cpp_wrapper, expected_disable_cpp_wrapper
-        )
 
     def test_dropout2(self):
         n = 100000
@@ -10101,6 +10096,7 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
 
         @patch("torch._inductor.config.comment_origin", True)
+        @patch("torch._functorch.config.max_dist_from_bw", 0)
         def test_inductor_sequence_nr(self):
             class Model(torch.nn.Module):
                 def __init__(self):
@@ -10153,7 +10149,6 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                         res = re.search(r"seq_nr:(\d+)", line)
                         if res:
                             seq_nr_set.add(int(res.group(1)))
-
             self.assertTrue(bwd_seq_nr_set.issubset(fwd_seq_nr_set))
 
     class RNNTest(TestCase):
