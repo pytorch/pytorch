@@ -73,6 +73,7 @@ class JobCheckState(NamedTuple):
     status: Optional[str]
     classification: Optional[str]
     job_id: Optional[int]
+    workflow_id: Optional[int]
     title: Optional[str]
     summary: Optional[str]
 
@@ -81,9 +82,10 @@ JobNameToStateDict = Dict[str, JobCheckState]
 
 
 class WorkflowCheckState:
-    def __init__(self, name: str, url: str, status: Optional[str]):
+    def __init__(self, name: str, url: str, workflow_id: int, status: Optional[str]):
         self.name: str = name
         self.url: str = url
+        self.workflow_id: int = workflow_id
         self.status: Optional[str] = status
         self.jobs: JobNameToStateDict = {}
 
@@ -123,6 +125,7 @@ fragment PRCheckSuites on CheckSuiteConnection {
         workflow {
           name
         }
+        databaseId
         url
       }
       checkRuns(first: 50) {
@@ -511,7 +514,7 @@ def add_workflow_conclusions(
     workflows: Dict[str, WorkflowCheckState] = {}
 
     # for the jobs that don't have a workflow
-    no_workflow_obj: WorkflowCheckState = WorkflowCheckState("", "", None)
+    no_workflow_obj: WorkflowCheckState = WorkflowCheckState("", "", None, None)
 
     def add_conclusions(edges: Any) -> None:
         for edge_idx, edge in enumerate(edges):
@@ -523,6 +526,7 @@ def add_workflow_conclusions(
 
             if workflow_run is not None:
                 workflow_name = workflow_run["workflow"]["name"]
+                workflow_id = workflow_run["databaseId"]
                 workflow_conclusion = node["conclusion"]
                 # Do not override existing status with cancelled
                 if workflow_conclusion == "CANCELLED" and workflow_name in workflows:
@@ -530,8 +534,9 @@ def add_workflow_conclusions(
                 if workflow_name not in workflows:
                     workflows[workflow_name] = WorkflowCheckState(
                         name=workflow_name,
-                        status=workflow_conclusion,
                         url=workflow_run["url"],
+                        workflow_id=workflow_id,
+                        status=workflow_conclusion,
                     )
                 workflow_obj = workflows[workflow_name]
 
@@ -551,6 +556,7 @@ def add_workflow_conclusions(
                             checkrun_node["conclusion"],
                             classification=None,
                             job_id=checkrun_node["databaseId"],
+                            workflow_id=workflow_obj.workflow_id,
                             title=checkrun_node["title"],
                             summary=checkrun_node["summary"],
                         )
@@ -582,6 +588,7 @@ def add_workflow_conclusions(
                 workflow.status,
                 classification=None,
                 job_id=None,
+                workflow_id=None,
                 title=None,
                 summary=None,
             )
@@ -931,6 +938,7 @@ class GitHubPR:
                     status["state"],
                     classification=None,
                     job_id=None,
+                    workflow_id=None,
                     title=None,
                     summary=None,
                 )
@@ -1632,14 +1640,24 @@ def is_broken_trunk(
 
 
 def is_flaky(
-    name: str,
+    check: Any,
     drci_classifications: Any,
 ) -> bool:
-    if not name or not drci_classifications:
+    if not check or not drci_classifications:
         return False
 
+    name = check.name
+    job_id = check.job_id
+    workflow_id = check.workflow_id
+
     # Consult the list of flaky failures from Dr.CI
-    return any(name == flaky["name"] for flaky in drci_classifications.get("FLAKY", []))
+    return any(
+        (
+            name == flaky["name"]
+            or (job_id == flaky["id"] and workflow_id == flaky["workflowId"])
+        )
+        for flaky in drci_classifications.get("FLAKY", [])
+    )
 
 
 def is_invalid_cancel(
@@ -1719,6 +1737,7 @@ def get_classifications(
                 check.status,
                 "UNSTABLE",
                 check.job_id,
+                check.workflow_id,
                 check.title,
                 check.summary,
             )
@@ -1733,18 +1752,20 @@ def get_classifications(
                 check.status,
                 "BROKEN_TRUNK",
                 check.job_id,
+                check.workflow_id,
                 check.title,
                 check.summary,
             )
             continue
 
-        elif is_flaky(name, drci_classifications):
+        elif is_flaky(check, drci_classifications):
             checks_with_classifications[name] = JobCheckState(
                 check.name,
                 check.url,
                 check.status,
                 "FLAKY",
                 check.job_id,
+                check.workflow_id,
                 check.title,
                 check.summary,
             )
@@ -1760,6 +1781,7 @@ def get_classifications(
                 check.status,
                 "INVALID_CANCEL",
                 check.job_id,
+                check.workflow_id,
                 check.title,
                 check.summary,
             )
@@ -1772,6 +1794,7 @@ def get_classifications(
                 check.status,
                 "IGNORE_CURRENT_CHECK",
                 check.job_id,
+                check.workflow_id,
                 check.title,
                 check.summary,
             )
