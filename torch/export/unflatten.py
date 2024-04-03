@@ -227,10 +227,15 @@ class UnflattenedModule(torch.nn.Module):
         ]
         self.check_input_constraints = True
         # TODO(zhxchen17) We can register modules ahead of time instead of reorder later.
-        _reorder_submodules(self, {fqn: i for i, fqn in enumerate(fqn_list)})
-        assert [
-            fqn for fqn, _ in self.named_modules(remove_duplicate=False)
-        ] == fqn_list
+        fqn_order = {fqn: i for i, fqn in enumerate(fqn_list)}
+        # In the case of legacy IR, we might be missing some modules from metadata.
+        for name, _ in self.named_modules(remove_duplicate=False):
+            if name not in fqn_order:
+                fqn_order[name] = len(fqn_order)
+        _reorder_submodules(self, fqn_order)
+        assert [fqn for fqn, _ in self.named_modules(remove_duplicate=False)] == list(
+            fqn_order.keys()
+        )
 
     def forward(self, *args, **kwargs):
         signature = self.module_call_graph[0].signature

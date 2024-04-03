@@ -141,7 +141,7 @@ private:
   void record_stream(
       c10::optional<std::vector<EventPool::Event>>& events,
       CUDAStream stream) override {
-    auto event = event_pool_.get(stream.device_index());
+    auto event = create_event_internal(stream.device_index());
     event->record(stream);
     events->push_back(std::move(event));
   }
@@ -155,6 +155,12 @@ private:
       C10_CUDA_CHECK(err);
     }
     return true;
+  }
+
+  EventPool::Event create_event_internal(DeviceIndex idx) {
+    // Leak the event pool to avoid shutdown issue.
+    static auto* event_pool = new EventPool();
+    return event_pool->get(idx);
   }
 
   TaskThreadPool* getThreadPool() {
@@ -243,9 +249,6 @@ private:
     // Register the mapped pages using cudaHostRegister
     registerPages(*ptr, roundSize);
   }
-
-  EventPool event_pool_;
-
 };
 
 } // namespace
