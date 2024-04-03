@@ -1626,15 +1626,20 @@ def remove_job_name_suffix(name: str, replacement: str = ")") -> str:
 
 
 def is_broken_trunk(
-    name: str,
+    check: Any,
     drci_classifications: Any,
 ) -> bool:
     if not name or not drci_classifications:
         return False
 
+    name = check.name
+    job_id = check.job_id
+    workflow_id = check.workflow_id
+
     # Consult the list of broken trunk failures from Dr.CI
     return any(
-        name == broken_trunk["name"]
+        (name == broken_trunk["name"])
+        or (job_id == broken_trunk["id"] and workflow_id == broken_trunk["workflowId"])
         for broken_trunk in drci_classifications.get("BROKEN_TRUNK", [])
     )
 
