@@ -22,7 +22,7 @@ def custom_op(
 
     Reasons why you may want to create a custom op include:
     - Wrapping a third-party library or custom kernel to work with PyTorch
-      subsystems like Autograd.
+    subsystems like Autograd.
     - Preventing torch.compile/export/FX tracing from peeking inside your function.
 
     This API is used as a decorator around a function (please see examples).
