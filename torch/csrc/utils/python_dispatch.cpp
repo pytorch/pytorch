@@ -852,6 +852,14 @@ void initDispatchBindings(PyObject* module) {
         ->set_throw_on_mutable_data_ptr();
   });
 
+  // Invariant: you must ONLY call this with FakeTensors.
+  m.def("_set_warn_deprecated_on_mutable_data_ptr", [](const at::Tensor& t) {
+    t.unsafeGetTensorImpl()
+        ->storage()
+        .unsafeGetStorageImpl()
+        ->set_warn_deprecated_on_mutable_data_ptr();
+  });
+
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
       .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)

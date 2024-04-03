@@ -435,6 +435,8 @@ class FakeTensor(torch.Tensor):
         )
         if not fake_mode._allow_unsafe_data_ptr_access:
             torch._C._set_throw_on_mutable_data_ptr(self)
+        else:
+            torch._C._set_warn_deprecated_on_mutable_data_ptr(self)
 
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
