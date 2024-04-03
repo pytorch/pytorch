@@ -130,7 +130,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
     .. _DeepSpeed: https://www.deepspeed.ai/
 
-    To understand its advanced features, you can refer to the
+    To understand its FSDP internals, refer to the
     :ref:`fsdp_notes`.
 
     Example::
@@ -1064,21 +1064,21 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         Returns:
             Total norm of the parameters (viewed as a single vector).
 
-            If every FSDP instance uses ``NO_SHARD``, meaning that no
-            gradients are sharded across ranks, then you may directly use
-            :func:`torch.nn.utils.clip_grad_norm_`.
+        If every FSDP instance uses ``NO_SHARD``, meaning that no
+        gradients are sharded across ranks, then you may directly use
+        :func:`torch.nn.utils.clip_grad_norm_`.
 
-            If at least some FSDP instance uses a sharded strategy (i.e.
-            one other than ``NO_SHARD``), then you should use this method
-            instead of :func:`torch.nn.utils.clip_grad_norm_` since this method
-            handles the fact that gradients are sharded across ranks.
+        If at least some FSDP instance uses a sharded strategy (i.e.
+        one other than ``NO_SHARD``), then you should use this method
+        instead of :func:`torch.nn.utils.clip_grad_norm_` since this method
+        handles the fact that gradients are sharded across ranks.
 
-            The total norm returned will have the "largest" dtype across
-            all parameters/gradients as defined by PyTorch's type promotion
-            semantics. For example, if *all* parameters/gradients use a low
-            precision dtype, then the returned norm's dtype will be that low
-            precision dtype, but if there exists at least one parameter/
-            gradient using FP32, then the returned norm's dtype will be FP32.
+        The total norm returned will have the "largest" dtype across
+        all parameters/gradients as defined by PyTorch's type promotion
+        semantics. For example, if *all* parameters/gradients use a low
+        precision dtype, then the returned norm's dtype will be that low
+        precision dtype, but if there exists at least one parameter/
+        gradient using FP32, then the returned norm's dtype will be FP32.
 
         .. warning:: This needs to be called on all ranks since it uses
             collective communications.
