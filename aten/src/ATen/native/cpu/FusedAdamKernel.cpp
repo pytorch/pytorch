@@ -11,7 +11,7 @@ namespace at::native {
 
 namespace{
 
-template <typename scalar_t, typename opmath_t>
+template <typename scalar_t, typename opmath_t, ADAM_MODE adam_mode>
 typename std::enable_if<
     std::is_same<scalar_t, Half>::value || std::is_same<scalar_t, BFloat16>::value,
     void>::
@@ -21,6 +21,7 @@ typename std::enable_if<
   scalar_t* exp_avg_sq_ptr,
   scalar_t* grad_ptr,
   scalar_t* max_exp_avg_sq_ptr,
+  opmath_t lr,
   opmath_t step_size,
   opmath_t bias_correction2,
   opmath_t exp_avg_grad_coefficient,
@@ -59,8 +60,13 @@ typename std::enable_if<
       grad_vec2 = grad_vec2 * fVec(opmath_t(-1.0));
     }
     if (weight_decay != 0.f){
-      grad_vec1 += param_vec1 * fVec(opmath_t(weight_decay));
-      grad_vec2 += param_vec2 * fVec(opmath_t(weight_decay));
+      if constexpr (adam_mode == ADAM_MODE::ORIGINAL) {
+        grad_vec1 += param_vec1 * fVec(opmath_t(weight_decay));
+        grad_vec2 += param_vec2 * fVec(opmath_t(weight_decay));
+       } else if constexpr (adam_mode == ADAM_MODE::ADAMW) {
+        param_vec1 -= fVec(opmath_t(lr)) * fVec(opmath_t(weight_decay)) * param_vec1;
+        param_vec2 -= fVec(opmath_t(lr)) * fVec(opmath_t(weight_decay)) * param_vec2;
+      }
     }
 
     lpVec exp_avg_lpvec = lpVec::loadu(exp_avg_ptr + d);
@@ -102,6 +108,7 @@ typename std::enable_if<
   scalar_t grad_val_to_store;
   for (; d < size; d++) {
     opmath_t grad_val = grad_ptr[d];
+    opmath_t param_val = param_ptr[d];
     if (grad_scale_ptr) {
       grad_val = grad_ptr[d] / float(*grad_scale_ptr);
       grad_val_to_store = scalar_t(grad_val);
@@ -109,7 +116,11 @@ typename std::enable_if<
     }
     if (maximize) grad_val = -grad_val;
     if (weight_decay != 0.f){
-      grad_val += opmath_t(param_ptr[d]) * opmath_t(weight_decay);
+      if constexpr (adam_mode == ADAM_MODE::ORIGINAL) {
+        grad_val += param_ptr[d] * opmath_t(weight_decay);
+      } else if constexpr (adam_mode == ADAM_MODE::ADAMW) {
+        param_val -= opmath_t(lr) * opmath_t(weight_decay) * param_val;
+      }
     }
     opmath_t exp_avg_var = exp_avg_ptr[d];
     exp_avg_var = exp_avg_var + exp_avg_grad_coefficient * (grad_val - exp_avg_var);
@@ -130,12 +141,12 @@ typename std::enable_if<
     } else {
       demon_val = std::sqrt(exp_avg_sq_var) / bias_correction2_sqrt + opmath_t(eps);
     }
-    param_ptr[d] = opmath_t(param_ptr[d]) - step_size * exp_avg_var / demon_val;
+    param_ptr[d] = param_val - step_size * exp_avg_var / demon_val;
   }
 }
 
 
-template <typename scalar_t, typename opmath_t>
+template <typename scalar_t, typename opmath_t, ADAM_MODE adam_mode>
 typename std::enable_if<
     std::is_same<scalar_t, float>::value || std::is_same<scalar_t, double>::value,
     void>::
@@ -145,6 +156,7 @@ typename std::enable_if<
   scalar_t* exp_avg_sq_ptr,
   scalar_t* grad_ptr,
   scalar_t* max_exp_avg_sq_ptr,
+  opmath_t lr,
   opmath_t step_size,
   opmath_t bias_correction2,
   opmath_t exp_avg_grad_coefficient,
@@ -171,7 +183,11 @@ typename std::enable_if<
     }
     if (maximize) grad_vec = grad_vec * Vec(scalar_t(-1.0));
     if (weight_decay != 0.f){
-      grad_vec += param_vec * Vec(scalar_t(weight_decay));
+      if constexpr (adam_mode == ADAM_MODE::ORIGINAL) {
+        grad_vec += param_vec * Vec(scalar_t(weight_decay));
+      } else if constexpr (adam_mode == ADAM_MODE::ADAMW) {
+        param_vec -= Vec(scalar_t(lr)) * Vec(scalar_t(weight_decay)) * param_vec;
+      }
     }
     Vec exp_avg_vec = Vec::loadu(exp_avg_ptr + d);
     exp_avg_vec = exp_avg_vec + Vec(scalar_t(exp_avg_grad_coefficient)) * (grad_vec - exp_avg_vec);
@@ -206,7 +222,11 @@ typename std::enable_if<
     }
     if (maximize) grad_val = -grad_val;
     if (weight_decay != 0.f){
-      grad_val += param_ptr[d] * scalar_t(weight_decay);
+      if constexpr (adam_mode == ADAM_MODE::ORIGINAL) {
+        grad_val += param_ptr[d] * scalar_t(weight_decay);
+      } else if constexpr (adam_mode == ADAM_MODE::ADAMW) {
+        param_ptr[d] -= scalar_t(lr) * scalar_t(weight_decay) * param_ptr[d];
+      }
     }
     exp_avg_ptr[d] = exp_avg_ptr[d] + exp_avg_grad_coefficient * (grad_val - exp_avg_ptr[d]);
     exp_avg_sq_ptr[d] = exp_avg_sq_ptr[d] * beta2;
@@ -226,7 +246,7 @@ typename std::enable_if<
 }
 
 
-template <typename scalar_t>
+template <typename scalar_t, ADAM_MODE adam_mode>
 void adam_fused_step_impl(
     const at::Tensor& param,
     const at::Tensor& grad,
@@ -270,12 +290,13 @@ void adam_fused_step_impl(
         scalar_t* max_exp_avg_sq_ptr = amsgrad ? max_exp_avg_sq_data + begin : nullptr;
 
         const int64_t size = end - begin;
-        adam_math<scalar_t, opmath_t>(
+        adam_math<scalar_t, opmath_t, adam_mode>(
           param_ptr,
           exp_avg_ptr,
           exp_avg_sq_ptr,
           grad_ptr,
           max_exp_avg_sq_ptr,
+          lr,
           step_size,
           bias_correction2,
           exp_avg_grad_coefficient,
@@ -306,10 +327,17 @@ void fused_adam_kernel(
     const double eps,
     const bool amsgrad,
     const bool maximize,
-    const float* grad_scale_ptr) {
+    const float* grad_scale_ptr,
+    const ADAM_MODE adam_mode
+  ) {
   Tensor grad_contiguous = grad.contiguous();
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, param.scalar_type(), "fused_adam_kernel", [&] {
-    adam_fused_step_impl<scalar_t>(param, grad, exp_avg, exp_avg_sq, max_exp_avg_sq, state_step, lr, beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale_ptr);
+    if(adam_mode == ADAM_MODE::ORIGINAL){
+      adam_fused_step_impl<scalar_t, ADAM_MODE::ORIGINAL>(param, grad, exp_avg, exp_avg_sq, max_exp_avg_sq, state_step, lr, beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale_ptr);
+    } else {
+      adam_fused_step_impl<scalar_t, ADAM_MODE::ADAMW>(param, grad, exp_avg, exp_avg_sq, max_exp_avg_sq, state_step, lr, beta1, beta2, weight_decay, eps, amsgrad, maximize, grad_scale_ptr);
+    }
+
   });
 }
 
