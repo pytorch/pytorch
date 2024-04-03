@@ -130,7 +130,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
     .. _`Xu et al.`: https://arxiv.org/abs/2004.13336
     .. _DeepSpeed: https://www.deepspeed.ai/
 
-    To understand its FSDP internals, refer to the
+    To understand FSDP internals, refer to the
     :ref:`fsdp_notes`.
 
     Example::
