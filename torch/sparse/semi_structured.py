@@ -530,9 +530,9 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
     def prune_dense_static_sort(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
         """
         This function does the same thing as described in SparseSemiStructuredCUTLASS, but uses the cuSPASRELt metadata
-        and sparase matmul.
+        layout and sparse matmul.
 
-        The only difference is that cuSPARSELt combines the metadata and packed tensor together into a single tensor.
+        The only functional difference is that cuSPARSELt stores `metadata` and `packed` together into a single tensor.
 
         [9 1 7 4]                       [9 0 7 0]
         [1 2 3 0]                       [0 2 0 0]
