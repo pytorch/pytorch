@@ -17,7 +17,7 @@ struct PaddingParams {
   int64_t nbatch;
   int64_t channels;
 
-  // use vectorized logic on width when output index is in [pad, input_witdh + pad),
+  // use vectorized logic on width when output index is in [pad, input_width + pad),
   // applies only to Channels First format when pad_l and pad_r are both positive.
   bool is_padding_positive_width;
 
@@ -136,7 +136,7 @@ void cpu_padding(
   auto input = input_.contiguous();
   auto output = output_.contiguous();
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   // fold nbatch and channels into single dimension for channels first.
@@ -158,7 +158,7 @@ void cpu_padding(
 
   // do vectorized copy whe output is overlapped with input on W,
   // only applies to positive padding
-  auto loop = [=](scalar_t* out, scalar_t* in, bool positive_padding) {
+  auto loop = [=](scalar_t* out, const scalar_t* in, bool positive_padding) {
     if (positive_padding) {
       for (const auto ow : c10::irange(pad_w)) {
         int64_t iw = PaddingType::index(ow, input_width, pad_w, offset_w);
@@ -198,7 +198,7 @@ void cpu_padding(
       for (const auto i : c10::irange(begin, end)) {
         int64_t ih = PaddingType::index(oh, input_height, pad_h, offset_h);
         scalar_t* output_ptr = output_data + i * output_width;
-        scalar_t* input_ptr = input_data + c * input_height * input_width + ih * input_width;
+        const scalar_t* input_ptr = input_data + c * input_height * input_width + ih * input_width;
 
         loop(output_ptr, input_ptr, p.is_padding_positive_width);
         data_index_step(c, channels, oh, output_height);
@@ -214,7 +214,7 @@ void cpu_padding(
         int64_t id = PaddingType::index(od, input_depth, pad_d, offset_d);
         int64_t ih = PaddingType::index(oh, input_height, pad_h, offset_h);
         scalar_t* output_ptr = output_data + i * output_width;
-        scalar_t* input_ptr = input_data + c * input_depth * input_height * input_width +
+        const scalar_t* input_ptr = input_data + c * input_depth * input_height * input_width +
             id * input_height * input_width + ih * input_width;
 
         loop(output_ptr, input_ptr, p.is_padding_positive_width);
@@ -243,7 +243,7 @@ void cpu_padding_channels_last(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = p.nbatch;
@@ -274,7 +274,7 @@ void cpu_padding_channels_last(
         int64_t iw = PaddingType::index(ow, input_width, pad_w, offset_w);
 
         scalar_t* output_ptr = output_data + i * channels;
-        scalar_t* input_ptr = input_data + (n * input_height * input_width + ih * input_width + iw) * channels;
+        const scalar_t* input_ptr = input_data + (n * input_height * input_width + ih * input_width + iw) * channels;
         copy_stub(output_ptr, input_ptr, channels);
 
         data_index_step(n, nbatch, oh, output_height, ow, output_width);
@@ -292,7 +292,7 @@ void cpu_padding_channels_last(
         int64_t iw = PaddingType::index(ow, input_width, pad_w, offset_w);
 
         scalar_t* output_ptr = output_data + i * channels;
-        scalar_t* input_ptr = input_data + (n * input_depth * input_height * input_width +
+        const scalar_t* input_ptr = input_data + (n * input_depth * input_height * input_width +
             id * input_height * input_width + ih * input_width + iw) * channels;
         copy_stub(output_ptr, input_ptr, channels);
 

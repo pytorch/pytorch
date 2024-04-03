@@ -1,4 +1,5 @@
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -76,7 +77,7 @@ using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle
 } // namespace
 
 void clearCublasWorkspaces() {
-  #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12200
+  #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12020
       cublas_handle_stream_to_workspace().clear();
   #endif
 }
@@ -122,8 +123,20 @@ at::DataPtr getNewWorkspace() {
 }
 
 cublasHandle_t getCurrentCUDABlasHandle() {
-  int device;
+  c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+
+#if !defined(USE_ROCM)
+  CUcontext pctx = nullptr;
+  at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
+  if (C10_UNLIKELY(!pctx)) {
+    // workaround for corner case where a primary context exists but is not
+    // the current context, seen in multithreaded use-cases
+    TORCH_WARN_ONCE("Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context...");
+    at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, device);
+    at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
+  }
+#endif
 
   // Thread local PoolWindows are lazily-initialized
   // to avoid initialization issues that caused hangs on Windows.
@@ -143,7 +156,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
-#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12200
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12020
   // cuBLAS should not need an explicitly allocated workspace after CUDA 12.2
   // to avoid increasing memory usage during graph captures
   // original issue: https://github.com/pytorch/pytorch/pull/83461
@@ -180,7 +193,7 @@ cublasHandle_t getCurrentCUDABlasHandle() {
 #if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
 cublasLtHandle_t getCurrentCUDABlasLtHandle() {
 #ifdef USE_ROCM
-  int device;
+  c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
 
   // Thread local PoolWindows are lazily-initialized

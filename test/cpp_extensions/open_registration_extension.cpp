@@ -43,12 +43,79 @@ C10_REGISTER_GUARD_IMPL(
 
 namespace {
 
-void abs_kernel(::at::TensorIteratorBase& iter) {
-  // Since this custom device is just for testing, not bothering to implement kernels.
-  abs_counter += 1;
+// Using the simplest way to obtain continuous Tensor data and process it.
+// This is a demo for using operand API, and you can add more complex logic
+// for input and output tensor based on your custom device kernel.
+void abs_kernel(at::TensorIteratorBase& iter) {
+  // Abs only have a input tensor and a output tensor.
+  auto& output_operand = iter.operand(0);
+  auto& input_operand = iter.operand(1);
+  auto& output_tensor_base = output_operand.tensor_base();
+  auto& input_tensor_base = input_operand.tensor_base();
+  TORCH_CHECK(!input_operand.original_tensor_base().defined(),
+    "input original tensor is defined.");
+  TORCH_CHECK(!output_operand.original_tensor_base().defined(),
+    "output original tensor is defined.");
+  // For easy test, only accept contiguous input tensor for calculate.
+  auto memory_format = input_tensor_base.suggest_memory_format();
+  TORCH_CHECK(input_tensor_base.is_contiguous(memory_format),
+    "Input tensor need be contiguous.");
+  // Add necessary restrictions to ensure the security of the demo.
+  TORCH_CHECK(input_tensor_base.sizes() == output_tensor_base.sizes(),
+    "Intput and output tensor size are not equal.");
+  // Common dtype is calculate in TensorIteratorBase.
+  TORCH_CHECK(iter.common_dtype() == at::ScalarType::Float,
+    "Only support float type.")
+  // Using for loop for abs calculate.
+  auto abs_function = [](float* output_ptr, const float* input_ptr,
+                         const int64_t NUM) {
+    for (int64_t i = 0; i < NUM; ++i) {
+      *(output_ptr + i) = std::abs(*(input_ptr + i));
+    }
+  };
+  // To simplify the logic of the test demo code,
+  // we only use contiguous tensor to calculate on device side.
+  // And using input tensor memory format.
+  if (iter.is_contiguous()) {
+    // Add for will_resize flag check. You can convert to differernt
+    // tensor memory format when will_resize is True.
+    // If TensorIteratorConfig resize_outputs_ flag is true, and there are two
+    // situations:
+    // 1) Out tensor is undefined, and TensorIterator set will_resize to true;
+    // 2) Out tensor is defined and tensor size is not equal to input tensor size;
+    //    TensorIterator set will_resize to true, and call set_output_raw_strided
+    //    to resize output tensor.
+    // When output operand will_resize flag is ture, dummy
+    // device can convert tensor to dummy device preferred memory format.
+    // Here we don't convert tensor memory format, because it will become complex
+    // when dummy device want keep same memory format for training network.
+    TORCH_CHECK(output_operand.will_resize,
+      "output operand will_resize flag need be True.");
+    abs_function((float*)iter.data_ptr(0), (float*)iter.data_ptr(1), iter.numel());
+  } else {
+    // Stride copy is not support for foo device, using cpu device instead.
+    // For abs op, the last situation is: output tensor is not contiguous with
+    // operand will_resize is False.
+    TORCH_CHECK(!output_operand.will_resize, "output operand will_resize is True.");
+    // Get a contiguous tensor with input memory format.
+    at::Tensor output = at::empty(output_tensor_base.sizes(),
+                                  input_tensor_base.options()
+                                                   .memory_format(memory_format));
+    // For structured op which inheried from TensorIteratorBase, maybe you need to
+    // call set_output_raw_strided function to update output stored in op sturctured.
+    // abs op is no need to do this.
+    output_operand.exchange_tensor(c10::MaybeOwned<at::TensorBase>::owned(std::in_place, output));
+    abs_function((float*)output_operand.tensor_base().mutable_data_ptr(),
+                 (float*)iter.data_ptr(1), iter.numel());
+    // Copy tensor base to original tensor base, and keep same scalar type and
+    // stride with cpu and gpu.
+    if (output_operand.original_tensor_base().defined() &&
+        !output_operand.original_tensor_base().is_same(output_operand.tensor_base())) {
+      output_operand.original_tensor().copy_(output_operand.tensor());
+      output_operand.restore_original_tensor();
+    }
+  }
 }
-
-} // namespace
 
 void quantize_tensor_per_tensor_affine_privateuse1(
     const at::Tensor& rtensor,
@@ -57,6 +124,8 @@ void quantize_tensor_per_tensor_affine_privateuse1(
     int64_t zero_point) {
     // do nothing
 }
+
+} // namespace
 
 namespace at::native {
 
@@ -137,10 +206,17 @@ void custom_set_backend_meta(const at::Tensor& t) {
 // A dummy storageImpl for our custom device, that secretly uses the CPU
 c10::intrusive_ptr<c10::StorageImpl> make_custom_storage_impl(c10::StorageImpl::use_byte_size_t,
                                                               c10::SymInt size_bytes,
+                                                              c10::DataPtr data_ptr,
                                                               c10::Allocator* allocator,
                                                               bool resizable) {
-  c10::intrusive_ptr<c10::StorageImpl> custom_storage_impl = c10::make_intrusive<c10::StorageImpl>(
+  c10::intrusive_ptr<c10::StorageImpl> custom_storage_impl;
+  if (data_ptr == nullptr){
+    custom_storage_impl = c10::make_intrusive<c10::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(), size_bytes, allocator, resizable);
+  } else {
+    custom_storage_impl = c10::make_intrusive<c10::StorageImpl>(
+      c10::StorageImpl::use_byte_size_t(), size_bytes, std::move(data_ptr), allocator, resizable);
+  }
   storageImpl_counter += 1;
   return custom_storage_impl;
 }
@@ -173,7 +249,7 @@ at::Tensor& custom_abs_out(const at::Tensor& self, at::Tensor& out) {
 // A dummy allocator for our custom device, that secretly uses the CPU
 struct DummyCustomAllocator final : at::Allocator {
   DummyCustomAllocator() = default;
-  at::DataPtr allocate(size_t nbytes) const override {
+  at::DataPtr allocate(size_t nbytes) override {
     void* data = c10::alloc_cpu(nbytes);
     return {data, data, &ReportAndDelete, at::Device(at::DeviceType::PrivateUse1, custom_device_index)};
   }
@@ -229,6 +305,36 @@ at::Tensor & custom_fill__scalar(at::Tensor & self, const at::Scalar & value) {
   return self;
 }
 
+// Unsafe using dummy device data_ptr to creat a cpu tensor, and shared data_ptr.
+at::Tensor unsafe_create_cpu_tensor_from_dummy_tensor(const at::Tensor& src) {
+  TORCH_CHECK(src.device().type() == c10::DeviceType::PrivateUse1,
+              "Only support dummy device.");
+  const auto& sizes_ = src.sizes();
+  const auto& strides_ = src.strides();
+  auto storage_offset_ = src.storage_offset();
+  at::detail::check_size_nonnegative(sizes_);
+
+  size_t size_bytes = at::detail::computeStorageNbytes(sizes_, strides_,
+                                                       src.element_size(),
+                                                       storage_offset_);
+
+  at::DataPtr data_ptr =
+    c10::InefficientStdFunctionContext::makeDataPtr(src.storage().mutable_data_ptr().get(),
+                                                    [](void*){}, at::kCPU);
+
+  c10::Storage storage{c10::Storage::use_byte_size_t{}, size_bytes, std::move(data_ptr),
+    /*allocator=*/&global_custom_alloc, /*resizeable=*/false};
+
+  constexpr c10::DispatchKeySet cpu_ks(c10::DispatchKey::CPU);
+  at::Tensor tensor = at::detail::make_tensor<c10::TensorImpl>(
+       std::move(storage), cpu_ks, src.dtype());
+
+  c10::TensorImpl* tensor_impl = tensor.unsafeGetTensorImpl();
+  tensor_impl->set_sizes_and_strides(sizes_, strides_);
+  tensor_impl->set_storage_offset(storage_offset_);
+  return tensor;
+}
+
 // basic dummy copy_() function, so we can copy from the custom device to/from CPU
 at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool non_blocking) {
   TORCH_CHECK(
@@ -241,9 +347,18 @@ at::Tensor custom__copy_from(const at::Tensor& self, const at::Tensor& dst, bool
   // Some dummy asserts for the basic use case: inputs are the same size / dtype, all contiguous.
   TORCH_CHECK(self.sizes() == dst.sizes());
   TORCH_CHECK(self.scalar_type() == dst.scalar_type());
-  TORCH_CHECK(self.is_contiguous() && dst.is_contiguous());
 
-  std::memcpy(dst.storage().data_ptr().get(), self.storage().data_ptr().get(), self.storage().nbytes());
+  if (self.is_contiguous() && dst.is_contiguous()) {
+    std::memcpy(dst.storage().data_ptr().get(),
+                self.storage().data_ptr().get(),
+                self.storage().nbytes());
+  } else {
+    // Using cpu tensor to accomplishment stride copy.
+    at::Tensor cpu_self = unsafe_create_cpu_tensor_from_dummy_tensor(self);
+    at::Tensor cpu_dst = unsafe_create_cpu_tensor_from_dummy_tensor(dst);
+    cpu_dst.copy_(cpu_self);
+  }
+
   return dst;
 }
 
@@ -322,15 +437,24 @@ bool custom_is_pinned(const at::Tensor& self, c10::optional<at::Device> device) 
 
 const at::Tensor& custom_resize_(const at::Tensor& self, at::IntArrayRef size,
                           c10::optional<at::MemoryFormat> optional_memory_format) {
-  self.unsafeGetTensorImpl()->set_sizes_contiguous(size);
-  const auto itemsize = self.unsafeGetTensorImpl()->dtype().itemsize();
-  const auto offset = self.unsafeGetTensorImpl()->storage_offset();
+  at::TensorImpl* tensor_impl = self.unsafeGetTensorImpl();
+  tensor_impl->set_sizes_contiguous(size);
+  const auto itemsize = tensor_impl->dtype().itemsize();
+  const auto offset = tensor_impl->storage_offset();
   const auto storage_size = at::detail::computeStorageNbytesContiguous(size, itemsize, offset);
-  const auto &storage = self.unsafeGetTensorImpl()->unsafe_storage();
-  if (storage_size > storage.nbytes()) {
-    storage.unsafeGetStorageImpl()->set_nbytes(storage_size);
+  // Dummy device is using cpu allocator, so here just call cpu
+  // function maybe_resize_storage_cpu in aten/src/ATen/native/Resize.h
+  // to get a sufficient memory space.
+  at::native::maybe_resize_storage_cpu(tensor_impl, storage_size);
+  if (optional_memory_format.has_value()) {
+    auto memory_format =
+        optional_memory_format.value();
+    TORCH_CHECK(
+        memory_format != at::MemoryFormat::Preserve,
+        "Unsupported memory format",
+        memory_format);
+    tensor_impl->empty_tensor_restride(memory_format);
   }
-
   return self;
 }
 
@@ -356,6 +480,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("_pin_memory", &custom__pin_memory);
   m.impl("is_pinned", &custom_is_pinned);
   m.impl("resize_", &custom_resize_);
+  m.impl("as_strided", at::native::as_strided_tensorimpl);
   m.impl("quantize_per_tensor", at::native::quantize_per_tensor);
 }
 
@@ -366,6 +491,8 @@ void custom_cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack
 TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("sub.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
   m.impl("_foreach_add.List", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
+  m.impl("index.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
+  m.impl("triu.indices", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
 }
 
 // This basic implementation doesn't bother dealing with different device indices
@@ -382,15 +509,6 @@ bool custom_add_called() {
   if (add_counter > last_saved_value) {
     called = true;
     last_saved_value = add_counter;
-  }
-  return called;
-}
-
-bool custom_abs_called() {
-  bool called = false;
-  if (abs_counter > last_abs_saved_value) {
-    called = true;
-    last_abs_saved_value = abs_counter;
   }
   return called;
 }
@@ -495,7 +613,6 @@ at::Tensor custom_autograd_fn_aliasing(at::Tensor x) {
 PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
     m.def("custom_device", &get_custom_device, "get custom device object");
     m.def("custom_add_called", &custom_add_called, "check if our custom add function was called");
-    m.def("custom_abs_called", &custom_abs_called, "check if our custom abs function was called");
     m.def("register_generator_first", &register_generator_first, "register generator for custom device firstly");
     m.def("register_generator_second", &register_generator_second, "register generator for custom device secondly");
     m.def("set_custom_device_index", &set_custom_device_index, "set custom device index");

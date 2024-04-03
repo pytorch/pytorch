@@ -8,6 +8,8 @@ import inspect
 import re
 import contextlib
 import sys
+from torch._library.custom_ops import custom_op
+
 
 __all__ = [
     'Library',
@@ -16,6 +18,7 @@ __all__ = [
     'fallthrough_kernel',
     'impl_abstract',
     'get_ctx',
+    'custom_op',
 ]
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
@@ -178,6 +181,8 @@ class Library:
         for handle in self._registration_handles:
             handle.destroy()
         self._registration_handles.clear()
+        global _impls
+        _impls -= self._op_impls
         for name in self._op_defs:
             # Delete the cached torch.ops.ns.foo if it was registered.
             # Otherwise, accessing it leads to a segfault.
@@ -494,20 +499,23 @@ def _check_pystubs_once(func, qualname, actual_module_name):
             op._schema.name,
             op._schema.overload_name)
         if not maybe_pystub:
+            namespace = op.namespace
+            cpp_filename = op._handle().debug()
             raise RuntimeError(
                 f"Operator '{qualname}' was defined in C++ and has a Python "
-                f"abstract impl. In this situation, it is required to have a "
-                f"C++ `m.impl_abstract_pystub` call, but we could not find one."
-                f"Please add a call to `m.impl_abstract_pystub(\"{actual_module_name}\");` "
-                f"to the C++ TORCH_LIBRARY block the operator was "
-                f"defined in.")
+                f"abstract impl. In this situation, we require there to also be a "
+                f"companion C++ `m.impl_abstract_pystub(\"{actual_module_name}\")` "
+                f"call, but we could not find one. Please add that to "
+                f"to the top of the C++ TORCH_LIBRARY({namespace}, ...) block the "
+                f"operator was registered in ({cpp_filename})")
         pystub_module = maybe_pystub[0]
         if actual_module_name != pystub_module:
+            cpp_filename = op._handle().debug()
             raise RuntimeError(
                 f"Operator '{qualname}' specified that its python abstract impl "
                 f"is in the Python module '{pystub_module}' but it was actually found "
                 f"in '{actual_module_name}'. Please either move the abstract impl "
-                f"or correct the m.impl_abstract_pystub call.")
+                f"or correct the m.impl_abstract_pystub call ({cpp_filename})")
         checked = True
         return func(*args, **kwargs)
     return inner

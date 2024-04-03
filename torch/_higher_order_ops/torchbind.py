@@ -1,14 +1,18 @@
+import logging
 from contextlib import contextmanager
 
 import torch
 from torch._C import DispatchKey  # @manual
 from torch._functorch._aot_autograd.utils import KNOWN_TYPES
 from torch._higher_order_ops.utils import autograd_not_implemented
+from torch._library.fake_class_registry import _ns_and_class_name, FakeScriptObject
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.fx.node import has_side_effect
 from torch.utils import _pytree as pytree
+
+log = logging.getLogger(__name__)
 
 # The call_torchbind operator represents a method invocation on a torchbind
 # object. The calling convention is:
@@ -28,8 +32,8 @@ _orig_scriptmethod_call = torch.ScriptMethod.__call__
 
 
 def torchbind_method_redispatch(self, *args, **kwargs):
-    if isinstance(self.owner, torch.ScriptObject):
-        return call_torchbind(self.owner, self.name, *args, **kwargs)
+    if isinstance(self.raw_owner, torch.ScriptObject):
+        return call_torchbind(self.raw_owner, self.name, *args, **kwargs)
     return _orig_scriptmethod_call(self, *args, **kwargs)
 
 
@@ -52,7 +56,12 @@ def enable_torchbind_tracing():
 
 @call_torchbind.py_impl(DispatchKey.CompositeExplicitAutograd)
 def call_torchbind_impl(obj, method, *args, **kwargs):
-    return _orig_scriptmethod_call(getattr(obj, method), *args, **kwargs)
+    if isinstance(obj, torch.ScriptObject):
+        return _orig_scriptmethod_call(getattr(obj, method), *args, **kwargs)
+    elif isinstance(obj, FakeScriptObject):
+        return getattr(obj.wrapped_obj, method)(*args, **kwargs)
+    else:
+        raise RuntimeError(f"Unsupported first arg type {type(obj)} for call_torchbind")
 
 
 @call_torchbind.py_impl(ProxyTorchDispatchMode)
@@ -67,7 +76,22 @@ def inner(mode, *args, **kwargs):
             proxy_args,
             proxy_kwargs,
         )
-        out = call_torchbind_impl(*args, **kwargs)
+        out = call_torchbind(*args, **kwargs)
+
+        obj, method, *rest_args = args
+        if isinstance(obj, torch.ScriptObject):
+            ns, class_name = _ns_and_class_name(
+                obj._type().qualified_name()  # type: ignore[attr-defined]
+            )
+            log.warning(
+                "Tracing torchbind method %s.%s with real ScriptObject. This may"
+                " cause the original object being mutated. If this is not intended,"
+                ' You can register a fake class with torch._library.register_fake_class("%s::%s").',
+                class_name,
+                method,
+                ns,
+                class_name,
+            )
 
         return track_tensor_tree(out, out_proxy, constant=None, tracer=mode.tracer)
     else:

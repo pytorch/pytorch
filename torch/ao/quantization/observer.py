@@ -762,7 +762,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         error_msgs: List[str],
     ):
         version = local_metadata.get("version", None)
-        if version is None or version < 3:
+        if version is not None and version < 3:
             local_state = ["min_vals", "max_vals"]
             expected_min_name = "min_vals"
             expected_max_name = "max_vals"
@@ -1206,8 +1206,11 @@ class HistogramObserver(UniformQuantizationObserverBase):
         min_val = self.min_val
         max_val = self.max_val
         same_values = min_val.item() == max_val.item()
+        # When (max_val - min_val) is very small, downsample_rate will be large.
+        # This can cause OOM issue in the allocation of histogram_with_output_range tensor.
+        close_values = (self.max_val - self.min_val) < 1e-6
         is_uninitialized = min_val == float("inf") and max_val == float("-inf")
-        if is_uninitialized or same_values:
+        if is_uninitialized or same_values or close_values:
             min_val, max_val = x_min, x_max
             self.min_val.resize_(min_val.shape)
             self.min_val.copy_(min_val)

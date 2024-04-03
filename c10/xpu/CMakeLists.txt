@@ -5,12 +5,19 @@
 include(../../cmake/public/xpu.cmake)
 
 set(C10_XPU_SRCS
+    XPUCachingAllocator.cpp
     XPUFunctions.cpp
+    XPUStream.cpp
+    impl/XPUGuardImpl.cpp
 )
 set(C10_XPU_HEADERS
+    XPUCachingAllocator.h
     XPUDeviceProp.h
+    XPUException.h
     XPUFunctions.h
     XPUMacros.h
+    XPUStream.h
+    impl/XPUGuardImpl.h
 )
 
 add_library(c10_xpu ${C10_XPU_SRCS} ${C10_XPU_HEADERS})

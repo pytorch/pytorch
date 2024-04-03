@@ -65,7 +65,7 @@ C10_LAUNCH_BOUNDS_1(cuda::getApplyBlockSize())
 __global__ void kernelHistogram1D(
     detail::TensorInfo<output_t, IndexType> a, /* output */
     detail::TensorInfo<output_t, IndexType> p, /* partial output */
-    detail::TensorInfo<input_t, IndexType> b, /* input */
+    detail::TensorInfo<const input_t, IndexType> b, /* input */
     int64_t nbins,
     at::acc_type<input_t, /*is_cuda=*/true> minvalue,
     at::acc_type<input_t, /*is_cuda=*/true> maxvalue,
@@ -86,7 +86,7 @@ __global__ void kernelHistogram1D(
     FOR_KERNEL_LOOP(linearIndex, totalElements) {
       // Convert `linearIndex` into an offset of `b`
       const IndexType bOffset =
-          detail::IndexToOffset<input_t, IndexType, BDims>::get(linearIndex, b);
+          detail::IndexToOffset<const input_t, IndexType, BDims>::get(linearIndex, b);
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `smem`
@@ -112,7 +112,7 @@ __global__ void kernelHistogram1D(
     FOR_KERNEL_LOOP(linearIndex, totalElements) {
       // Convert `linearIndex` into an offset of `b`
       const IndexType bOffset =
-          detail::IndexToOffset<input_t, IndexType, BDims>::get(linearIndex, b);
+          detail::IndexToOffset<const input_t, IndexType, BDims>::get(linearIndex, b);
       const auto bVal = b.data[bOffset];
       if (bVal >= minvalue && bVal <= maxvalue) {
         // Use value at `b` as an offset of `a`
@@ -192,7 +192,7 @@ bool CUDA_tensor_histogram(
 
   const dim3 block = getApplyBlock();
   dim3 grid;
-  int64_t curDevice = current_device();
+  auto curDevice = current_device();
   if (curDevice == -1 || !getApplyGrid(totalElements, grid, curDevice)) {
     return false;
   }
@@ -219,7 +219,7 @@ bool CUDA_tensor_histogram(
 
   using IndexType = int64_t;
   auto aInfo = detail::getTensorInfo<output_t, IndexType>(a);
-  auto bInfo = detail::getTensorInfo<input_t, IndexType>(b);
+  auto bInfo = detail::getTensorInfo<const input_t, IndexType>(b);
   detail::TensorInfo<output_t, IndexType> pInfo(nullptr, 0, {}, {});
 
   if (HasWeights) {

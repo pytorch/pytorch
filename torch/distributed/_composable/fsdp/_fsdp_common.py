@@ -1,3 +1,4 @@
+import math
 import traceback
 
 from dataclasses import dataclass
@@ -53,8 +54,8 @@ class DDPMeshInfo(DataParallelMeshInfo):
 @dataclass
 class HSDPMeshInfo(FSDPMeshInfo, DDPMeshInfo):
     def __post_init__(self):
-        super(FSDPMeshInfo, self).__post_init__()
-        super(DDPMeshInfo, self).__post_init__()
+        # Calls `FSDPMeshInfo` -> `DDPMeshInfo` -> `DataParallelMeshInfo`
+        super().__post_init__()
 
 
 class TrainingState(Enum):
@@ -85,6 +86,11 @@ def _is_composable_with_fsdp(module: nn.Module) -> bool:
     return "replicate" not in registry
 
 
+def _get_dim0_padded_size(tensor_size: torch.Size, dim0_factor: int) -> torch.Size:
+    padded_dim0 = math.ceil(tensor_size[0] / dim0_factor) * dim0_factor
+    return cast(torch.Size, torch.Size([padded_dim0]) + tensor_size[1:])
+
+
 def _chunk_with_empty(
     tensor: torch.Tensor, num_chunks: int, dim: int
 ) -> List[torch.Tensor]:
@@ -92,6 +98,15 @@ def _chunk_with_empty(
     while len(chunks) < num_chunks:
         chunks.append(chunks[0].new_empty(0))
     return chunks
+
+
+def _get_dim0_chunked_size(
+    chunk: torch.Tensor, unchunked_size: torch.Size
+) -> torch.Size:
+    if chunk.numel() > 0:
+        return chunk.size()
+    # For 0 numel, we need to preserve trailing dims for DTensor APIs
+    return cast(torch.Size, torch.Size([0]) + unchunked_size[1:])
 
 
 def _from_local_no_grad(
@@ -116,3 +131,21 @@ def _from_local_no_grad(
         requires_grad=local_tensor.requires_grad,
         stride=global_stride,
     )
+
+
+def _to_dtype_if_needed(
+    tensor: torch.Tensor, dtype: Optional[torch.dtype]
+) -> torch.Tensor:
+    if dtype is not None and tensor.dtype != dtype:
+        return tensor.to(dtype)
+    return tensor
+
+
+def _cast_fp_tensor(dtype: torch.dtype, x: torch.Tensor) -> torch.Tensor:
+    if (
+        not isinstance(x, torch.Tensor)
+        or not torch.is_floating_point(x)
+        or x.dtype == dtype
+    ):
+        return x
+    return x.to(dtype)
