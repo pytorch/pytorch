@@ -1620,10 +1620,6 @@ static at::Tensor _quantized_convolution_onednn(
   // oneDNN version >= 3.1.0 is required.
   using ideep::tensor;
   static tensor empty_tensor;
-  bool has_postop_add = has_binary_post_op && binary_attr.value() == "add";
-  tensor src1 = has_postop_add ?
-      at::native::itensor_view_from_dense(accum.value().reshape({-1, accum.value().size(-1)})) :
-      empty_tensor;
   auto weights_desc = packed_weight.get_desc();
   auto dst_desc = dst.get_desc();
   auto bias_desc = with_bias ?
@@ -1690,9 +1686,6 @@ static at::Tensor _quantized_convolution_onednn(
   }
   if (output_zero_point != 0) {
     args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_DST, dst_zp_t});
-  }
-  if (has_postop_add) {
-    args.insert({DNNL_ARG_ATTR_MULTIPLE_POST_OP(0) | DNNL_ARG_SRC_1, src1});
   }
   primitive.execute(ideep::stream::default_stream(), args);
 #else
