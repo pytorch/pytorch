@@ -1,6 +1,6 @@
 import copy
 import logging
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -28,32 +28,8 @@ from .misc_patterns import numpy_compat_normalization
 
 log = logging.getLogger(__name__)
 
-normalization_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="normalization_pass"
-)
-merge_splits_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="merge_splits_pass"
-)
-split_cat_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="split_cat_pass"
-)
-unbind_stack_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="unbind_stack_pass"
-)
 efficient_conv_bn_eval_pass = PatternMatcherPass(
     prevent_match_across_mutations=True, pass_name="efficient_conv_bn_eval_pass"
-)
-merge_getitem_cat_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="merge_getitem_cat_pass"
-)
-merge_stack_tahn_unbind_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="merge_stack_tahn_unbind_pass"
-)
-mutate_cat_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="mutate_cat_pass"
-)
-remove_split_with_size_one_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="remove_split_with_size_one_pass"
 )
 
 fuse_split_linear_add_pass = PatternMatcherPass(
@@ -99,6 +75,10 @@ def is_same_dict(inductor_dict, optimus_dict):
     return True
 
 
+def construct_pattern_matcher_pass(pass_name):
+    return PatternMatcherPass(prevent_match_across_mutations=True, pass_name=pass_name)
+
+
 def fuse_parallel_linear_pass(graph):
     return None
 
@@ -107,17 +87,26 @@ def remove_split_ops(graph, shape_prop):
     return None
 
 
-pattern_matcher_passes: List[PatternMatcherPass] = [
-    normalization_pass,
-    remove_split_with_size_one_pass,
-    merge_getitem_cat_pass,
-    merge_stack_tahn_unbind_pass,
-    merge_splits_pass,
-    mutate_cat_pass,
-    split_cat_pass,
-    unbind_stack_pass,
-    efficient_conv_bn_eval_pass,
+PRE_GRAD_PATTERNS: Dict[str, PatternMatcherPass] = dict()
+pass_names = [
+    "normalization_pass",
+    "remove_split_with_size_one_pass",
+    "merge_getitem_cat_pass",
+    "merge_stack_tahn_unbind_pass",
+    "merge_splits_pass",
+    "mutate_cat_pass",
+    "split_cat_pass",
+    "unbind_stack_pass",
 ]
+
+for pass_name in pass_names:
+    PRE_GRAD_PATTERNS[pass_name] = construct_pattern_matcher_pass(pass_name)
+# split_cat related fusions
+pattern_matcher_passes = list(PRE_GRAD_PATTERNS.values())
+# non-split_cat related fusions
+# TODO: move them to the fusions dict too.
+pattern_matcher_passes.append(efficient_conv_bn_eval_pass)
+
 pattern_matcher_passes_aten: List[PatternMatcherPass] = [
     remove_split_with_size_one_pass_aten,
     merge_getitem_cat_pass_aten,
