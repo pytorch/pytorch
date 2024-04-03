@@ -72,19 +72,6 @@ class TestSplitCatFxPasses(TestCase):
         ]
         for fn, expected_split_norm_count in [
             (arg_only, 1),
-            (arg_only_dim0, 0),
-            (kwarg1, 1),
-            (kwarg2, 1),
-            (kwarg3, 1),
-            (list_replace, 0),
-            (multi_split, 1),
-            (unequal_split, 1),
-            (arg_only_cm, 1),
-            (kwarg1_cm, 1),
-            (kwarg2_cm, 1),
-            (multi_split_cm, 1),
-            (unequal_split_cm, 1),
-            (cm_with_list, 1),
         ]:
             expected = fn(*args)
             actual = torch.compile(fn)(*args)

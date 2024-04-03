@@ -11,6 +11,8 @@ from torch.fx.experimental.optimization import (
     replace_node_module,
 )
 from torch.fx.passes.shape_prop import ShapeProp
+from torch.fx.graph import GraphTransformObserver
+
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
 
@@ -75,7 +77,7 @@ def fuse_parallel_linear_pass(graph):
 def remove_split_ops(graph, shape_prop):
     return None
 
-
+'''
 pattern_matcher_passes: List[PatternMatcherPass] = [
     normalization_pass,
     merge_getitem_cat_pass,
@@ -84,6 +86,12 @@ pattern_matcher_passes: List[PatternMatcherPass] = [
     unbind_stack_pass,
     efficient_conv_bn_eval_pass,
 ]
+'''
+
+pattern_matcher_passes: List[PatternMatcherPass] = [
+    split_cat_pass,
+]
+
 pattern_matcher_passes_aten: List[PatternMatcherPass] = [
     merge_getitem_cat_pass_aten,
     merge_splits_pass_aten,
@@ -200,7 +208,11 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 )
             for pattern_matcher_pass in pattern_matcher_passes:
                 inductor_before_change = copy.deepcopy(counters["inductor"])
-                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                # pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                breakpoint()
+                with GraphTransformObserver(gm, pattern_matcher_pass.pass_name, log_dir="/home/shengfu/share_data"):
+                    pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                breakpoint()
                 if counters["inductor"] != inductor_before_change:
                     optimus_scuba_log[
                         f"split_cat_pattern_{pattern_matcher_pass.pass_name}_pre_grad"
