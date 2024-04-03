@@ -1503,6 +1503,9 @@ class Kernel(CodeGen):
                     ):
                         return ValueRanges.unknown()
 
+                    # We assume that the inputs come from `ops.` and are not strings. If you want to generate
+                    # intermediary strings, wrap them in CSE variables with properly initialised bounds.
+
                     # If there is no FX bound but we know how to compute one we do so
                     assert not kwargs
 
