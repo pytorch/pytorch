@@ -6000,6 +6000,7 @@ else:
         assert scaler._scale != float("inf") and scaler._scale != float("nan")
 
     @onlyNativeDeviceTypes
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/123238")
     @dtypes(*floating_types_and(torch.bfloat16, torch.half))
     @precisionOverride({torch.half : 1e-4, torch.bfloat16 : 1e-4})
     def test_fused_adam(self, device, dtype):
@@ -6023,7 +6024,7 @@ else:
         kwargs['grads'] = [torch.randn(TENSOR_SIZE, device=device, dtype=dtype) for _ in range(NPARAM)]
         kwargs['exp_avgs'] = [torch.randn(TENSOR_SIZE, device=device, dtype=dtype) for _ in range(NPARAM)]
         kwargs['exp_avg_sqs'] = [torch.randn(TENSOR_SIZE, device=device, dtype=dtype) for _ in range(NPARAM)]
-        kwargs['state_steps'] = [torch.tensor([10.0]) for _ in range(NPARAM)]
+        kwargs['state_steps'] = [torch.tensor([10.0], device=device) for _ in range(NPARAM)]
         kwargs['grad_scale'] = None
         kwargs['found_inf'] = None
         kwargs['beta1'] = 0.9
