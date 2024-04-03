@@ -1399,6 +1399,8 @@ class GuardBuilder(GuardBuilderBase):
                         code.append(f"{tensor_name}.{term} == {real_value}")
             else:
                 self.tensor_check_examples.append(value)
+                self.tensor_check_names.append(tensor_name)
+                self.tensor_check_guards.append(guard)
 
                 if config.enable_cpp_guard_manager:
                     guard_manager = self.get_guard_manager(guard)
@@ -1424,15 +1426,6 @@ class GuardBuilder(GuardBuilderBase):
                         tensor_name,
                         verbose_code_parts,
                     )
-
-                    if not is_from_optimizer_source(guard.originating_source):
-                        # Skip no tensor aliasing guard for optimizers. We know
-                        # they do not alias.
-                        self.tensor_check_names.append(tensor_name)
-                        self.tensor_check_guards.append(guard)
-                else:
-                    self.tensor_check_names.append(tensor_name)
-                    self.tensor_check_guards.append(guard)
 
             # A frame is valid for reuse with dynamic dimensions if the new
             # (user-requested) dynamic dimensions are a subset of the old
