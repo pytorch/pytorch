@@ -1484,7 +1484,8 @@ class Kernel(CodeGen):
                 If the variable comes from an FX node, we forward the bound we have already computed
                 Else, if the variable when codegen'ing another op, we try to compute its bounds
                 """
-                if (node := V.kernel.current_node) and node.is_template():
+                from ..select_algorithm import TritonTemplateKernel
+                if isinstance(V.kernel, TritonTemplateKernel):
                     return ValueRanges.unknown()
 
                 fx_node = V.interpreter.current_node
