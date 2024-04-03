@@ -250,7 +250,8 @@ class RingAttentionTest(DTensorTestBase):
     )
     @with_comms
     @sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION])
-    def test_ring_attention_custom_transformer(self) -> None:
+    @parametrize("compile", [True, False])
+    def test_ring_attention_custom_transformer(self, compile: bool) -> None:
         device_mesh = DeviceMesh(
             self.device_type,
             torch.arange(0, self.world_size),
@@ -269,6 +270,8 @@ class RingAttentionTest(DTensorTestBase):
                 for i in range(args.n_layers)
             },
         )
+        if compile:
+            model = torch.compile(model, fullgraph=True)
 
         seq = torch.randint(
             args.vocab_size, (bs, args.max_seq_len), device=self.device_type

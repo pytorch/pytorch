@@ -254,6 +254,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         protocol to inform how to flatten a DTensor to local tensor
         for PT2 tracing
         """
+        print(type(self), dir(self))
         return ["_local_tensor"], (self._spec, self.requires_grad)
 
     @staticmethod
