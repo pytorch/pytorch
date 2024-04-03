@@ -2229,6 +2229,9 @@ class FlatParamHandle:
                     f"Expects to have saved tensor for {flat_param._fqns[i]}",
                 )
             param_changed = getattr(module, param_name) is not param
+            from torch.distributed._tensor import DTensor
+            if isinstance(param, DTensor):
+                param = param._local_tensor
             needs_param_writeback = (
                 param_changed  # changed parameter variable itself
                 or not _same_storage(param, flat_param_tensor)
