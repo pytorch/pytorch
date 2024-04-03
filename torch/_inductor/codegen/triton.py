@@ -2189,10 +2189,11 @@ class TritonKernel(Kernel):
                 sum_ = ops.reduction(dtype, dtype, "sum", value)
                 self.inside_reduction = False
                 rnumel = ops.index_expr(self.numels[-1], dtype)
-                mean = ops.truediv(sum_, rnumel)
+                inv_rnumel = ops.reciprocal(rnumel)
+                mean = ops.mul(sum_, inv_rnumel)
 
                 self.inside_reduction = True
-                dx = ops.sub(value, mean)
+                dx = ops.fma(sum_, inv_rnumel, ops.neg(value))
                 dx2 = ops.mul(dx, dx)
                 m2 = ops.reduction(dtype, dtype, "sum", dx2)
                 result_var = (mean, m2, rnumel)
