@@ -25,6 +25,14 @@ from typing import *  # noqa: F403
 import numpy as np
 
 
+def requires_compile(fun):
+    fun = unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")(fun)
+    fun = unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )(fun)
+    return fun
+
+
 class CustomOpTestCaseBase(TestCase):
     test_ns = "_test_custom_op"
 
@@ -59,10 +67,7 @@ class CustomOpTestCaseBase(TestCase):
         return torch._custom_op.impl.get_op(qualname)
 
 
-@unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-@unittest.skipIf(
-    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-)
+@requires_compile
 class TestCustomOpTesting(CustomOpTestCaseBase):
     @parametrize("check_gradients", (False, "auto"))
     @parametrize("dynamic", (True, False))
@@ -266,7 +271,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         y = x.clone()
         with self.assertRaisesRegex(
             optests.OpCheckError,
-            "Getting these operators to work with functionalization requires some extra work",
+            "We only support functionalizing operators whose outputs do not have alias annotations",
         ):
             optests.opcheck(op, (y,), {})
 
@@ -456,6 +461,42 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
 
 class TestCustomOp(CustomOpTestCaseBase):
     test_ns = "_test_custom_op"
+
+    @requires_compile
+    def test_functionalize_error(self):
+        with torch.library._scoped_library(self.test_ns, "FRAGMENT") as lib:
+            lib.define("foo(Tensor(a!) x) -> Tensor(a!)")
+
+            def foo(x):
+                return x.sin_()
+
+            lib.impl("foo", foo, "CompositeExplicitAutograd")
+            foo_op = self.get_op(f"{self.test_ns}::foo")
+
+            lib.define("bar(Tensor(a) x) -> Tensor(a)")
+
+            def bar(x):
+                return x.view(-1)
+
+            lib.impl("bar", bar, "CompositeExplicitAutograd")
+            bar_op = self.get_op(f"{self.test_ns}::bar")
+
+            msg = r".*We only support functionalizing operators whose outputs do not have alias annotations"
+
+            x = torch.randn(3)
+
+            @torch.compile(backend="aot_eager", fullgraph=True)
+            def f(x):
+                return foo_op(x)
+
+            @torch.compile(backend="aot_eager", fullgraph=True)
+            def g(x):
+                return bar_op(x)
+
+            with self.assertRaisesRegex(RuntimeError, msg):
+                f(x)
+            with self.assertRaisesRegex(RuntimeError, msg):
+                g(x)
 
     def test_invalid_schemas(self):
         # function schmea validation goes through torchgen, so this is just a
