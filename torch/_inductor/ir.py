@@ -1839,31 +1839,37 @@ def is_pointwise_contiguous_or_transposed_after_perm(x):
         and isinstance(x.data.data, Pointwise)
     ):
         all_reads = x.data.data.get_reads()
+        fn_args = x.data.data.inner_fn_args()[0]
 
         def is_contiguous_or_transposed_after_perm(read):
-            def get_perm_dims(read):
-                # process perm dim if its length does not equal to reader number
-                perm_dims = x.dims
-                while len(perm_dims) != len(read.size):
-                    if perm_dims[0] != 0:
-                        return []
-                    perm_dims = [d - 1 for d in perm_dims[1:]]
-                return perm_dims
-
-            perm_dims = get_perm_dims(read)
-            if not perm_dims:
-                return False
+            perm_dims = x.dims
+            # Unsqueeze var_names and sizes of read if their number does not equal to perm_dims length
+            unsqueezed_read_var_names = read.var_names
+            unsqueezed_read_sizes = read.size
+            if len(perm_dims) != len(unsqueezed_read_sizes):
+                # pad 0 for var_name and 1 for size
+                for i in range(len(perm_dims)):
+                    if fn_args[i] == 0:
+                        unsqueezed_read_var_names = (
+                            unsqueezed_read_var_names[:i]
+                            + (0,)
+                            + unsqueezed_read_var_names[i:]
+                        )
+                        unsqueezed_read_sizes = (
+                            unsqueezed_read_sizes[:i] + (1,) + unsqueezed_read_sizes[i:]
+                        )
+                assert len(perm_dims) == len(unsqueezed_read_sizes)
 
             # var_names and sizes after permution
-            new_read_var_names = [read.var_names[i] for i in perm_dims]
-            new_read_sizes = [read.size[i] for i in perm_dims]
+            new_read_var_names = [unsqueezed_read_var_names[i] for i in perm_dims]
+            new_read_sizes = [unsqueezed_read_sizes[i] for i in perm_dims]
 
-            # expected to be contigous or transposed for last two dims
+            # expect to be contiguous or transposed for last two dims, or size=1 for one of them
             expected_contiguous_or_transposed_index_lists = [
                 new_read_var_names[-1] + new_read_var_names[-2] * new_read_sizes[-1],
                 new_read_var_names[-2] + new_read_var_names[-1] * new_read_sizes[-2],
             ]
-            if any(
+            if (new_read_sizes[-1] == 1 or new_read_sizes[-2] == 1) or any(
                 str(i) in str(read.index)
                 for i in expected_contiguous_or_transposed_index_lists
             ):
