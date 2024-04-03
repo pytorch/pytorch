@@ -363,6 +363,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   EXISTING_BDIM(pixel_shuffle);
   EXISTING_BDIM(pixel_unshuffle);
+  EXISTING_BDIM(channel_shuffle);
 
   VARIADIC_BDIMS(constant_pad_nd);
   EXISTING_BDIM(reflection_pad1d);

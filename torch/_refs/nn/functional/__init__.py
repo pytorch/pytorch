@@ -278,6 +278,9 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
     H, W = input.shape[-2:]
     g_dim = len(batches)
 
+    if input.numel() == 0 or (input.is_cuda and groups == 1):
+        return input
+
     result = torch.empty_like(input)
     result.view(*batches, Cg, groups, H, W).copy_(
         input.view(*batches, groups, Cg, H, W).transpose(g_dim, g_dim + 1)

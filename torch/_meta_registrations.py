@@ -5957,6 +5957,25 @@ def meta_pixel_shuffle(self, upscale_factor):
     return out
 
 
+@register_meta(aten.channel_shuffle.default)
+def meta_channel_shuffle(input, groups: int):
+    torch._check(
+        groups > 0,
+        lambda: f"Number of groups to divide channels in must be positive. Value of groups:{groups}",
+    )
+
+    C = input.shape[-3]
+    torch._check(
+        C % groups == 0,
+        lambda: f"Number of groups must divide channels exactly. Value of groups:{groups}",
+    )
+
+    if input.numel() == 0 or (device_hint(input) == "cuda" and groups == 1):
+        return input
+
+    return torch.empty_like(input)
+
+
 @register_meta(aten.mkldnn_rnn_layer_backward.default)
 def mkldnn_rnn_layer_backward(
     input,
