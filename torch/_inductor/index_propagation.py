@@ -131,7 +131,6 @@ class SymPyOps:
         result_type = torch.promote_types(x.dtype, y.dtype)
         if not is_integer_dtype(result_type):
             return NotImplemented
-
         x_expr = sympy.sympify(x.expr)
         y_expr = sympy.sympify(y.expr)
         # In these cases, remainder in Python == remainder in C++, so this transformation

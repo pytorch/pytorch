@@ -132,6 +132,7 @@ class ValueRanges(Generic[_T]):
     def __init__(self, lower: AllIn, upper: AllIn) -> None:
         lower = simple_sympify(lower)
         upper = simple_sympify(upper)
+
         # TODO: when the bounds have free variables, this may be
         # nontrivial to actually verify
         try:
@@ -475,11 +476,32 @@ class SymPyValueRangeAnalysis:
     def mod(x, y):
         x = ValueRanges.wrap(x)
         y = ValueRanges.wrap(y)
-        if x.is_singleton() and y.is_singleton() and y.lower != 0:
-            return ValueRanges.wrap(x.lower % y.lower)
-        if y.lower <= 0:
+        # nb. We implement C semantics
+
+        def whole_range(u):
+            if u > 0:
+                return ValueRanges(0, u)
+            else:
+                return u
+
+        def c_mod(a, b):
+            ret = abs(a) % abs(b)
+            if a < 0:
+                ret *= -1
+            return ret
+
+        if y.lower <= 0 and y.upper >= 0:
             return ValueRanges.unknown()
-        return ValueRanges(0, y.upper)
+        elif not y.is_singleton():
+            # Too difficult, we bail out
+            return whole_range(y.upper)
+        else:
+            y_val = y.lower
+            # If it wraps, we need to take the whole interval
+            if x.lower // y_val != x.upper // y_val:
+                return whole_range(y_val)
+            else:
+                return ValueRanges.increasing_map(x, lambda u: c_mod(u, y_val))
 
     @classmethod
     def modular_indexing(cls, a, b, c):
