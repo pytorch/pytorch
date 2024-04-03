@@ -7,7 +7,6 @@ import unittest
 import itertools
 import warnings
 import math
-import sys
 from math import inf, nan, isnan
 import random
 from random import randrange
@@ -6027,9 +6026,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         if TEST_WITH_ROCM:
             self.skipTest("_int4_mm not compiled for ROCM")
 
-        if sys.version_info >= (3, 12):
-            self.skipTest("Dynamo is not supported on Python 3.12+")
-
         q_group = 32
         inner_k_tiles = 2
 
@@ -6119,9 +6115,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test_compile_int8_mm(self, device, m, k, n):
-        if sys.version_info >= (3, 12):
-            self.skipTest("Dynamo is not supported on Python 3.12+")
-
         torch.manual_seed(1)
         a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
         b = torch.rand((n, k), dtype=torch.bfloat16, device=device)

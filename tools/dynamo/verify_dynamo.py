@@ -215,8 +215,8 @@ def main():
         f"ROCM version: {rocm_ver}\n"
     )
     for args in _SANITY_CHECK_ARGS:
-        if sys.version_info >= (3, 12):
-            warnings.warn("Dynamo not yet supported in Python 3.12. Skipping check.")
+        if sys.version_info >= (3, 13):
+            warnings.warn("Dynamo not yet supported in Python 3.13. Skipping check.")
             continue
         check_dynamo(*args)
     print("All required checks passed")

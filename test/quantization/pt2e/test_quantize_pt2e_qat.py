@@ -764,6 +764,7 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
 
 
 # TODO: enable this in the next PR
+# TODO: fix for 3.12
 @skipIfNoQNNPACK
 @unittest.skipIf(
     sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"

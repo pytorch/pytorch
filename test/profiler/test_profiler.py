@@ -487,7 +487,6 @@ class TestExecutionTrace(TestCase):
         assert loop_count == expected_loop_events
 
     @unittest.skipIf(IS_WINDOWS, 'torch.compile does not support WINDOWS')
-    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_execution_trace_with_pt2(self):
 
         class ConvAndRelu(nn.Module):
