@@ -865,7 +865,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             auto max_elements_per_smem = max_smem_per_block / sizeof(scalar_t) - warps;
 
             bool can_use_smem = dim_size < max_elements_per_smem;
-            //can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
+            can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
             can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
             can_use_smem &= !(dim_size % ILP);
 
@@ -899,7 +899,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             auto max_elements_per_smem = max_smem_per_block / sizeof(scalar_t) - warps;
 
             bool can_use_smem = dim_size < max_elements_per_smem;
-            //can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
+            can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
             can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
             can_use_smem &= !(dim_size % ILP);
 
