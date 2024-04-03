@@ -21,7 +21,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_optimizers import (
     optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS)
+    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS, TEST_WITH_ROCM)
 from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase
 
 
@@ -789,7 +789,15 @@ class TestOptimRenewed(TestCase):
                 # RMSprop uses avg and grads
                 nintermediates = 2
 
-            self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)
+            expected_max_mem = st_max_mem + intermediate_size * nintermediates
+            # hipcc currently can't generate efficient code for the small buffer optimization
+            # code path (see Note [small buffer optimization] for details), thus we always
+            # dynamically allocate the tensor metadata for ROCM. Adjusting the expected max
+            # memory usage to account for this.
+            if TEST_WITH_ROCM:
+                expected_max_mem *= 1.02
+
+            self.assertLessEqual(mt_max_mem, expected_max_mem)
 
 
     @onlyCUDA
