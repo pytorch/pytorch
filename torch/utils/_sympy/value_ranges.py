@@ -635,9 +635,12 @@ class SymPyValueRangeAnalysis:
         b = ValueRanges.wrap(b)
         c = ValueRanges.wrap(c)
         a = a.boolify()
-        # We sometimes write unknown without specifying the type correctly
-        # In particular, we do that when initialising the bounds for loads in bounds.py
-        assert b.is_bool == c.is_bool or ValueRanges.unknown() in (a, b)
+        # Could be removed once we track dtypes properly when setting unknown in loads/reductions etc.
+        if a == ValueRanges.unknown():
+            return b
+        if b == ValueRanges.unknown():
+            return a
+        assert b.is_bool == c.is_bool
         if b.is_bool:
             return ValueRanges(sympy.And(b.lower, c.lower), sympy.Or(b.upper, c.upper))
         else:

@@ -570,9 +570,10 @@ class OpOverrides:
     @staticmethod
     def remainder(a, b):
         r = ops.mod(a, b)
+        z = ops.constant(0, torch.int32)
         cond = ops.and_(
-            ops.ne(r, ops.constant(0, torch.int32)),
-            ops.ne(ops.signbit(r), ops.signbit(b)),
+            ops.ne(r, z),
+            ops.ne(ops.lt(r, z), ops.lt(b, 0)),
         )
         return ops.where(cond, ops.add(r, b), r)
 
@@ -1501,9 +1502,6 @@ class Kernel(CodeGen):
                         for s in ("set_indirect", "reduction", "scan")
                     ):
                         return ValueRanges.unknown()
-
-                    # We assume that the inputs come from `ops.` and are not strings. If you want to generate
-                    # intermediary strings, wrap them in CSE variables with properly initialised bounds.
 
                     # If there is no FX bound but we know how to compute one we do so
                     assert not kwargs
