@@ -587,6 +587,7 @@ def compile_fx_inner(
     return compiled_graph
 
 
+@dynamo_utils.preserve_rng_state()
 def fx_codegen_and_compile(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
