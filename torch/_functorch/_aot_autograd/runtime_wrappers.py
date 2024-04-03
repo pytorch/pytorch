@@ -69,12 +69,12 @@ def create_runtime_wrapper(
     keep_input_mutations: bool,
     disable_amp: bool,
 ):
-    num_tokens = len(runtime_metadata.tokens)
-
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
 
     def runtime_wrapper(*args):
+        num_tokens = len(runtime_metadata.tokens)
+
         # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
         if num_tokens > 0:
             args = ([None] * num_tokens, *args)
