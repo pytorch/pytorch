@@ -2407,25 +2407,6 @@ class TestFakeTensor(TestCase):
             strided_result = op(sample.input, *sample.args, **kwargs)
             self.assertEqual(strided_result.layout, torch.strided)
 
-# This prevents test runners from picking the test cases up and running them.
-class Namespace:
-    class TestCommonWrapper(TestCommon):
-        pass
-
-    class TestCompositeComplianceWrapper(TestCompositeCompliance):
-        pass
-
-    class TestMathBitsWrapper(TestMathBits):
-        pass
-
-    class TestRefsOpsInfoWrapper(TestRefsOpsInfo):
-        pass
-
-    class TestFakeTensorWrapper(TestFakeTensor):
-        pass
-
-    class TestTagsWrapper(TestTags):
-        pass
 
 
 instantiate_device_type_tests(TestCommon, globals())

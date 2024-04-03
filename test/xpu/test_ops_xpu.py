@@ -26,10 +26,10 @@ current_file_path = os.path.realpath(__file__)
 test_package = os.path.dirname(os.path.dirname(current_file_path))
 sys.path.append(test_package)
 
-from xpu.xpu_test_utils import get_wrapped_fn, XPUPatch
+from xpu.xpu_test_utils import get_wrapped_fn, XPUPatchForImport
 
-with XPUPatch():
-    from test_ops import Namespace
+with XPUPatchForImport():
+    from test_ops import TestCommon as TestCommonBase
 
 if not TEST_XPU:
     print("XPU not available, skipping tests", file=sys.stderr)
@@ -63,26 +63,35 @@ _xpu_computation_ops = [
 ]
 
 
+# NB: TestCommonProxy is a nested class. This prevents test runners from picking
+# it up and running it.
+class Namespace:
+    # When we import TestCommon, we patch the TestCase as NoTest to prevent test runners
+    # picking TestCommon up and running it. But we still need to reuse its test cases.
+    # Therefore, we build TestCommonProxy by inheriting the TestCommon and TestCase to ensure
+    # the same feature set as the TestCommon.
+    class TestCommonProxy(TestCase, TestCommonBase):
+        pass
+
+
 class TestCommonXPU(TestCase):
     @onlyXPU
     @suppress_warnings
     @ops(_xpu_computation_ops, dtypes=any_common_cpu_xpu_one)
     def test_compare_cpu(self, device, dtype, op):
-        self.proxy = Namespace.TestCommonWrapper()
+        self.proxy = Namespace.TestCommonProxy()
 
-        test_common_test_fn = get_wrapped_fn(
-            Namespace.TestCommonWrapper.test_compare_cpu
-        )
+        test_common_test_fn = get_wrapped_fn(Namespace.TestCommonProxy.test_compare_cpu)
         test_common_test_fn(self.proxy, device, dtype, op)
 
     @onlyXPU
     @ops(_xpu_computation_ops, allowed_dtypes=(torch.bool,))
     @unittest.skipIf(TEST_WITH_UBSAN, "Test uses undefined behavior")
     def test_non_standard_bool_values(self, device, dtype, op):
-        self.proxy = Namespace.TestCommonWrapper()
+        self.proxy = Namespace.TestCommonProxy()
 
         test_common_test_fn = get_wrapped_fn(
-            Namespace.TestCommonWrapper.test_non_standard_bool_values
+            Namespace.TestCommonProxy.test_non_standard_bool_values
         )
         test_common_test_fn(self.proxy, device, dtype, op)
 
