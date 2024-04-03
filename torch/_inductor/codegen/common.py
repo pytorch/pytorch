@@ -1485,6 +1485,7 @@ class Kernel(CodeGen):
                 Else, if the variable when codegen'ing another op, we try to compute its bounds
                 """
                 from ..select_algorithm import TritonTemplateKernel
+
                 if isinstance(V.kernel, TritonTemplateKernel):
                     return ValueRanges.unknown()
 
