@@ -156,7 +156,7 @@ struct TORCH_API Type {
   Type(Type&&) noexcept = default;
   Type& operator=(Type&&) noexcept = default;
 
-  virtual std::string annotation_str_impl(TypePrinter /*printer*/) const {
+  virtual std::string annotation_str_impl(const TypePrinter& /*printer*/) const {
     return str();
   }
   // a == b
@@ -453,14 +453,14 @@ struct TORCH_API Type {
   //
   // Takes a custom printer that users can pass in to customize the output of
   // this method.
-  std::string annotation_str(TypePrinter printer) const {
+  std::string annotation_str(const TypePrinter& printer) const {
     if (printer) {
       // the printer can return nullopt to fall through to the default impl
       if (auto renamed = printer(*this)) {
         return *renamed;
       }
     }
-    return annotation_str_impl(std::move(printer));
+    return annotation_str_impl(printer);
   }
   std::string annotation_str() const {
     // Overload instead of define a default value for `printer` to help
@@ -583,6 +583,7 @@ struct TORCH_API Type {
   // per-type constructor, you only need to override this if the
   // containedTypes() is not empty
   virtual TypePtr createWithContained(
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
       std::vector<TypePtr> /*contained_types*/) const {
     AT_ERROR(
         "type with contained types did not overload createWithContained: ",
