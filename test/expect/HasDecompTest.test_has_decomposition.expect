@@ -523,7 +523,10 @@ aten::_sparse_mask_projection
 aten::_sparse_mask_projection.out
 aten::_sparse_mm_reduce_impl
 aten::_sparse_mm_reduce_impl_backward
+aten::_sparse_semi_structured_apply
+aten::_sparse_semi_structured_apply_dense
 aten::_sparse_semi_structured_linear
+aten::_sparse_semi_structured_tile
 aten::_sparse_softmax
 aten::_sparse_softmax.out
 aten::_sparse_softmax_backward_data
