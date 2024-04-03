@@ -554,8 +554,6 @@ class ExportedProgram:
 
         new_range_constraints = _get_updated_range_constraints(gm)
 
-        print("NEW", new_range_constraints)
-
         constants = lift_constants_pass(gm, new_graph_signature, ConstantAttrMap())
         for k, v in constants.items():
             assert k not in self.constants
