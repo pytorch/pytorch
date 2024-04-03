@@ -1,9 +1,14 @@
 # Owner(s): ["module: inductor"]
 import operator
 
+from torch._inductor.compile_worker.subproc_pool import (
+    raise_testexc,
+    SubprocPool,
+    TestException,
+)
+
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.inductor_utils import HAS_CPU
-from torch._inductor.compile_worker.subproc_pool import SubprocPool, raise_testexc, TestException
 
 
 class TestCompileWorker(TestCase):
@@ -25,7 +30,6 @@ class TestCompileWorker(TestCase):
                 a.result()
         finally:
             pool.shutdown()
-
 
 
 if __name__ == "__main__":

@@ -203,16 +203,13 @@ def check_optim(
 
     self.assertEqual(list(params_eager), list(params_compiled), atol=atol, rtol=rtol)
 
-    # currently we don't mutate step properly until we resolve
-    # https://github.com/pytorch/pytorch/issues/115679
-    if optim_cls not in (Rprop, RMSprop):
-        for p_eager, p_compiled in zip(params_eager, params_compiled):
-            self.assertEqual(
-                state_eager[p_eager],
-                state_compiled[p_compiled],
-                atol=atol,
-                rtol=rtol,
-            )
+    for p_eager, p_compiled in zip(params_eager, params_compiled):
+        self.assertEqual(
+            state_eager[p_eager],
+            state_compiled[p_compiled],
+            atol=atol,
+            rtol=rtol,
+        )
 
 
 def make_test(
