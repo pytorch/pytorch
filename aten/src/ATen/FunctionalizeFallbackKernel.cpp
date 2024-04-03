@@ -30,17 +30,29 @@
 namespace {
   void functionalizeFallback(const c10::OperatorHandle& op, c10::DispatchKeySet dispatchKeySet, torch::jit::Stack* stack) {
     const auto& schema = op.schema();
+    // NB: auto_functionalize handles the case where outputs do not have alias info.
+    // This error message therefore suggests users to modify their custom op to the
+    // point where auto_functionalize works instead of asking them to try the raw
+    // functionalization API (because that is a bit difficult to use).
+    // If you're here and want to try the raw functionalizaton kernel approach,
+    // see https://gist.github.com/bdhirsh/7dadbf6296f8f7d1abcf4c482f438aaa
     TORCH_CHECK(
       !schema.hasAnyAliasInfo(),
-      "Found a custom (non-ATen) operator that either mutates or its inputs: ",
-      op.operator_name().name, ".", op.operator_name().overload_name,
-      ". Getting these operators to work with functionalization requires some extra work",
-      ". For mutable ops you need to register a corresponding out-of-place variant of the op,",
-      " and you also need to register a Functionalization kernel that performs some boilerplate,",
-      " telling functionalization to map from the mutable op to the out-of-place op",
-      ". See a more complete example of how to do this at ",
-      "https://gist.github.com/bdhirsh/7dadbf6296f8f7d1abcf4c482f438aaa.",
-      " Please file a GitHub issue if you run into any problems.");
+      "Found a custom (non-ATen) operator whose output has alias annotations: ",
+      op.schema(),
+      ". We only support functionalizing operators whose outputs do not have alias ",
+      "annotations (e.g. 'Tensor(a)' is a Tensor with an alias annotation whereas ",
+      "'Tensor' is a Tensor without. The '(a)' is the alias annotation). "
+      "The alias annotation specifies that the output ",
+      "Tensor shares storage with an input that has the same annotation. ",
+      "Please check if ",
+      "(1) the output needs to be an output (if not, don't return it), ",
+      "(2) if the output doesn't share storage with any inputs, then ",
+      "delete the alias annotation. ",
+      "(3) if the output indeed shares storage with an input, then add a ",
+      ".clone() before returning it to prevent storage sharing and then "
+      "delete the alias annotation. ",
+      "Otherwise, please file an issue on GitHub.");
     const auto num_arguments = schema.arguments().size();
     const auto arguments_begin = stack->size() - num_arguments;
     auto arguments = torch::jit::last(stack, num_arguments);
