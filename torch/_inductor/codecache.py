@@ -2595,7 +2595,7 @@ def _worker_compile(
     source_code: str,
     cc: int,
     device: torch.device,
-    device_interface: DeviceInterface,
+    device_interface: type[DeviceInterface],
 ) -> None:
     device_interface.Worker.set_device(device.index)
     kernel = TritonCodeCache.load(kernel_name, source_code)
