@@ -280,6 +280,8 @@ def _get_optimize_ddp_mode():
 # This feature is not hardened yet and it's known to cause issues to some models, so False by default.
 optimize_ddp_lazy_compile = False
 
+lazy_scheduler_compile_fn = None
+
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
 

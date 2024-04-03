@@ -1335,6 +1335,8 @@ class GuardBuilder(GuardBuilderBase):
         else:
             if isinstance(value, TensorWeakRef):
                 value = value()
+            if isinstance(value, torch._subclasses.async_tensor.AsyncTensor):
+                value = value.get_materialized_tensor()
 
             value = value if value is not None else self.get(guard.name)
             assert isinstance(value, torch.Tensor)
@@ -1706,7 +1708,11 @@ class CheckFunctionManager:
             ):
                 continue
 
-            guard.create(builder)
+            try:
+                guard.create(builder)
+            except Exception as e:
+                print(f"guard: {guard}, builder: {builder}")
+                raise
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to

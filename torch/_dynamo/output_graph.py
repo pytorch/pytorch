@@ -11,6 +11,8 @@ import traceback
 import weakref
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
+from types import FunctionType
+import gc
 
 import sympy
 
@@ -1918,6 +1920,19 @@ class SubgraphTracer(fx.Tracer):
 
         node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
+        # Store the corresponding nn.Module instance bound method for this node,
+        # so that we can use it later to determine whether this node comes from
+        # a specific NN method.
+        if node.op in ("call_function", "call_method", "call_module") and len(self.output_graph._current_tx) > 0:
+            """
+            NOTE Problem:
+            - torch.compile(module.func1) doesn't keep the `module` info, and there is no way to get it. We need to pass it in from higher level.
+            """
+            instance_bound_nn_method = None
+            if len(torch._dynamo.symbolic_convert.tls.instance_bound_nn_method_stack) > 0:
+                instance_bound_nn_method = torch._dynamo.symbolic_convert.tls.instance_bound_nn_method_stack[-1]
+                # assert instance_bound_nn_method is not None
+                node.meta['nn_module_method'] = instance_bound_nn_method
         return node
 
     # Note: we did not override erase_node since
