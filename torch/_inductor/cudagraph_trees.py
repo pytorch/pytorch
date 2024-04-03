@@ -1785,6 +1785,13 @@ class CUDAGraphTreeManager:
     def set_to_running_backward(self):
         self.running_forwards_with_pending_backwards = False
 
+    def _get_cuda_graph_recorded_tensor_checker(self):
+        return (
+            self.current_node._is_cuda_graph_recorded_tensor
+            if isinstance(self.current_node, CUDAGraphNode)
+            else lambda _: False
+        )
+
     def _run(self, new_inputs: List[Tensor], function_id: FunctionID):
         # we will try to end the current execution lazily, since
         # we dont want to do unnecessary checking of the existing outputs
@@ -1804,7 +1811,7 @@ class CUDAGraphTreeManager:
         if has_mutation_str := check_for_mutation(
             wrapped_function,
             new_inputs,
-            self.current_node._is_cuda_graph_recorded_tensor,
+            self._get_cuda_graph_recorded_tensor_checker(),
         ):
             perf_hint_log.warning(has_mutation_str)
             return wrapped_function.model(new_inputs)
@@ -1866,7 +1873,7 @@ class CUDAGraphTreeManager:
             has_mutation_str := check_for_mutation(
                 wrapped_function,
                 new_inputs,
-                self.current_node._is_cuda_graph_recorded_tensor,
+                self._get_cuda_graph_recorded_tensor_checker(),
             )
         ):
             perf_hint_log.warning(has_mutation_str)
