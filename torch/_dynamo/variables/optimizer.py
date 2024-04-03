@@ -9,7 +9,13 @@ from torch.utils._pytree import tree_map_only
 from ..exc import unimplemented, Unsupported
 
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ConstDictKeySource, GetItemSource, GlobalWeakRefSource
+from ..source import (
+    AttrSource,
+    ConstDictKeySource,
+    GetItemSource,
+    GlobalWeakRefSource,
+    GradSource,
+)
 from ..utils import GLOBAL_KEY_PREFIX
 
 from .base import VariableTracker
@@ -70,7 +76,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 group["capturable"] = True
 
             for p in group["params"]:
-                mark_static_address(p, guard=False)
+                mark_static_address(p)
 
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
@@ -167,7 +173,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # to be done first because the variable builder relies on the static
         # address annotation.
         def mark_static(x):
-            mark_static_address(x, guard=False)
+            mark_static_address(x)
 
         tree_map_only(torch.Tensor, mark_static, self.value.state)
 
@@ -202,10 +208,11 @@ class OptimizerVariable(UserDefinedObjectVariable):
             ):
                 param_source = p_vt.source
                 self.tensor_to_source[p] = param_source
-                grad_source = AttrSource(
+                grad_source = GradSource(
                     param_source,
                     "grad",
                 )
+
                 if p.grad is not None:
                     self.grad_to_source[p.grad] = grad_source
                 else:
@@ -238,14 +245,14 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         if tensor_value in self.tensor_to_source:
             # mark these tensors as static for cudagraphs
-            mark_static_address(tensor_value, guard=False)
+            mark_static_address(tensor_value)
             builder = VariableBuilder(tx, self.tensor_to_source[tensor_value])
             self.static_tensor_names.add(tx.output.module_key_name(builder.name))
         elif tensor_value in self.grad_to_source:
             builder = VariableBuilder(tx, self.grad_to_source[tensor_value])
         else:
             # mark these tensors as static for cudagraphs
-            mark_static_address(tensor_value, guard=False)
+            mark_static_address(tensor_value)
 
             global_name = tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, tensor_value)
             builder = VariableBuilder(tx, GlobalWeakRefSource(global_name))
