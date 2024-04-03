@@ -241,7 +241,8 @@ void initDispatchBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
 
   py::class_<c10::OperatorHandle>(m, "_DispatchOperatorHandle")
-      .def("schema", &c10::OperatorHandle::schema);
+      .def("schema", &c10::OperatorHandle::schema)
+      .def("debug", &c10::OperatorHandle::debug);
 
   m.def("_dispatch_call_boxed", &ophandle_call_boxed);
 
@@ -835,6 +836,20 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_non_sym_sizes", [](const at::Tensor& a) {
     return a.sizes(); // NB: NOT sym_size
+  });
+
+  m.def("_set_throw_on_mutable_data_ptr", [](const at::Tensor& t) {
+    if (!t.unsafeGetTensorImpl()->has_storage()) {
+      // If the Tensor doesn't have a storage, then accessing .data_ptr()
+      // will already raise an error.
+      return;
+    }
+    // Otherwise, set (on the StorageImpl) that accessing (mutable) data_ptr
+    // will throw.
+    t.unsafeGetTensorImpl()
+        ->storage()
+        .unsafeGetStorageImpl()
+        ->set_throw_on_mutable_data_ptr();
   });
 
   using c10::impl::TorchDispatchModeKey;

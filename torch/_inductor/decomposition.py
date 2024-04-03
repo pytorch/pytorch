@@ -31,6 +31,7 @@ from . import config, inductor_prims
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
+quantized = torch.ops.quantized
 quantized_decomposed = torch.ops.quantized_decomposed
 
 inductor_decompositions = get_decompositions(
@@ -54,9 +55,14 @@ inductor_decompositions = get_decompositions(
         aten._native_batch_norm_legit,
         aten._native_batch_norm_legit_functional,
         aten._native_batch_norm_legit_no_training,
+        aten._batch_norm_with_update,
+        aten._batch_norm_with_update_functional,
+        aten._batch_norm_no_update,
+        aten.batch_norm_backward,
         aten.native_batch_norm,
         aten.native_group_norm,
         aten.native_layer_norm,
+        aten.nll_loss2d_backward,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
@@ -65,6 +71,7 @@ inductor_decompositions = get_decompositions(
         aten.tril_indices,
         aten.triu_indices,
         aten.upsample_bilinear2d.vec,
+        quantized.linear_dynamic_fp16_unpacked_weight,
     ]
 )
 decompositions = {**core_aten_decompositions(), **inductor_decompositions}
@@ -173,11 +180,6 @@ def convolution_backward(
         [output_mask[0], output_mask[1], False],
     )
     return (grad_inp, grad_weight, grad_bias)
-
-
-@register_decomposition([aten.log2])
-def log2(x):
-    return torch.log(x) * (1.0 / math.log(2.0))
 
 
 @register_decomposition([aten.round.decimals])
@@ -462,6 +464,16 @@ def randint(high, size, **kwargs):
     return aten.randint.low(0, high, size, **kwargs)
 
 
+@register_decomposition(quantized.linear_dynamic_fp16_unpacked_weight.default)
+def linear_dynamic_fp16_unpacked_weight(
+    input: torch.Tensor, weight: torch.Tensor, bias: torch.Tensor
+) -> torch.Tensor:
+    packed_weight = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16(weight)
+    return torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight(
+        input, packed_weight, bias, weight.size()[0]
+    )
+
+
 # The difference between quantize_per_tensor.default and quantize_per_tensor.tensor is
 # scale and zero_point is scalar or scalar tensor
 @register_decomposition(quantized_decomposed.quantize_per_tensor.default)
@@ -521,7 +533,9 @@ def dequantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    return (input.to(torch.float32) - zero_point) * scale
+    return (input.to(torch.float32) - zero_point.to(torch.int32)) * scale.to(
+        torch.float32
+    )
 
 
 @register_decomposition(torch.ops.quantized.embedding_bag_byte_unpack)
@@ -646,3 +660,30 @@ def masked_scatter(self, mask, source):
         source_idx = mask.reshape(-1).cumsum(0) - 1
         return inductor_prims.masked_scatter_with_index(self, mask, source_idx, source)
     return NotImplemented
+
+
+@register_decomposition(quantized_decomposed.choose_qparams.tensor)
+def choose_qparams_tensor(
+    input: torch.Tensor, quant_min: int, quant_max: int, eps: float, dtype: torch.dtype
+):
+    min_val, max_val = torch.aminmax(input)
+    scale = (max_val - min_val) / float(quant_max - quant_min)
+    scale = torch.max(scale, torch.Tensor([eps]))
+    zero_point = quant_min - torch.round(min_val / scale).to(torch.int)
+    zero_point = torch.clamp(zero_point, quant_min, quant_max)
+    return scale.to(torch.float64), zero_point.to(torch.int64)
+
+
+@register_decomposition(aten.put)
+def put(self, index, source, accumulate=False):
+    flattened = self.flatten()
+    flattened = torch.index_put(
+        flattened, [index], source.reshape(index.shape), accumulate
+    )
+    return flattened.reshape(self.shape)
+
+
+@register_decomposition(aten.put_)
+def put_(self, index, source, accumulate=False):
+    out = aten.put(self, index, source, accumulate=accumulate)
+    return self.copy_(out)

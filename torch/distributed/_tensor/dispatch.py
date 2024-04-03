@@ -164,9 +164,9 @@ class OpDispatcher:
         else:
             if output_sharding.needs_redistribute:
                 # compute locally with redistribute first if needed
-                assert output_sharding.schema_suggestions is not None
+                assert output_sharding.redistribute_schema is not None
                 self.redistribute_local_args(
-                    op_info, output_sharding.schema_suggestions[0]
+                    op_info, output_sharding.redistribute_schema
                 )
 
             local_tensor_args = (
@@ -181,12 +181,9 @@ class OpDispatcher:
             local_tensor_args = cast(Tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops and is_rng_supported_mesh(mesh):
                 if not random._rng_tracker:
-                    raise RuntimeError(
-                        "A CudaRNGStateTracker instance must be instantiated "
-                        "before executing a random op over a DTensor. "
-                        "Try calling random.manual_seed() or distribute_tensor() "
-                        "before executing a DTensor random op."
-                    )
+                    # Default to `OffsetBasedRNGTracker` if the parallelism API
+                    # did not already construct one
+                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh.device_type)
                 # For DTensor random operator, run it within a distribute region
                 with random._rng_tracker._distribute_region(
                     cast(dtensor.DTensor, args[0])._spec

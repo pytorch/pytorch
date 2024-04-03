@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <condition_variable>
 #include <csignal>
 #include <cstdint>
 #include <mutex>
@@ -89,8 +90,10 @@ class C10_API FatalSignalHandler {
   // This wait condition is used to wait for other threads to finish writing
   // their stack trace when in fatal sig handler (we can't use pthread_join
   // because there's no way to convert from a tid to a pthread_t).
-  pthread_cond_t writingCond;
-  pthread_mutex_t writingMutex;
+  std::condition_variable writingCond;
+  std::mutex writingMutex;
+  // used to indicate if the other thread responded to the signal
+  bool signalReceived;
 
   struct signal_handler {
     const char* name;

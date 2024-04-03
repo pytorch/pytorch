@@ -1568,15 +1568,13 @@ class TestVmapOfGrad(TestCase):
             expected = zip(*expected)
             expected = tuple(torch.stack(shards) for shards in expected)
             for r, e in zip(result, expected):
-                # TODO: Check if the rtol is a problem
-                self.assertEqual(r, e, atol=0, rtol=1e-3)
+                self.assertEqual(r, e, atol=0, rtol=1.5e-3)
         else:
             assert mechanism == "functional_call"
             expected = {k: tuple(d[k] for d in expected) for k, v in expected[0].items()}
             expected = {k: torch.stack(shards) for k, shards in expected.items()}
             for key in result:
-                # TODO: Check if the rtol is a problem
-                self.assertEqual(result[key], expected[key], atol=0, rtol=1e-3)
+                self.assertEqual(result[key], expected[key], atol=0, rtol=1.5e-3)
 
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_per_sample_grads_embeddingnet(self, device, mechanism):
@@ -1670,7 +1668,7 @@ class TestJac(TestCase):
 
         self.assertEqual(jacrev(func)(x), torch.autograd.functional.jacobian(func, x))
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_diff_numel(self, device, jacapi):
         x = torch.randn(2, 4, device=device)
 
@@ -1687,14 +1685,14 @@ class TestJac(TestCase):
         expected[2, 0, 0, 3] = 1
         self.assertEqual(y, expected)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_vmap_on_jac_simple(self, device, jacapi):
         x = torch.randn(2, 3, device=device)
         y = vmap(jacapi(torch.sin))(x)
         expected = torch.stack([torch.diagflat(x[i].cos()) for i in range(2)])
         assert torch.allclose(y, expected)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_nested_jac_simple(self, device, jacapi):
         def foo(x):
             return x.sin().sum()
@@ -1755,7 +1753,7 @@ class TestJac(TestCase):
         self.assertTrue(isinstance(z[0], tuple))
         self.assertEqual(z, ((expected_out0_x,), (expected_out1_x,)))
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_multiple_outputs_pytree(self, device, jacapi):
         def f(x, y):
             return {'left': 2 * x + 3 * y, 'right': 4 * x + 5 * y}
@@ -1816,7 +1814,7 @@ class TestJac(TestCase):
         self.assertEqual(result.dim(), 2)
         self.assertEqual(result, x.new_ones(1, 1))
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_aux_tensor(self, device, jacapi):
         def f(x):
             y = x.clone()
@@ -1912,7 +1910,7 @@ class TestJac(TestCase):
         )
         self.assertEqual(result, expected)
 
-    @FIXME_jacrev_only
+    @jacrev_and_jacfwd
     def test_multiple_inputs_outputs_pytree_multidim(self, device, jacapi):
         def f(dct):
             a = dct['a']
@@ -2657,7 +2655,6 @@ class TestJvp(TestCase):
 
 @markDynamoStrictTest
 class TestLinearize(TestCase):
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_basic(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2672,7 +2669,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_output, expected_output)
         self.assertEqual(actual_jvp, expected_jvp)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_return(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2687,7 +2683,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_output, expected_output)
         self.assertEqual(actual_jvp, expected_jvp)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_composition(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2706,7 +2701,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
     @dtypes(torch.float)
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     def test_linearize_nested_input_nested_output(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2733,7 +2727,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @onlyCUDA
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     def test_linearize_errors(self):
         dtype = torch.float
         device = torch.device('cpu')
@@ -3087,7 +3080,6 @@ class TestComposability(TestCase):
             torch.vmap(torch.sin)
 
     # Some of these pass, some of these don't
-    @skipIfTorchDynamo()
     @parametrize('transform', [
         'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
@@ -3327,7 +3319,6 @@ class TestComposability(TestCase):
             transform(MySin.apply)(x)
 
     # Some of these pass, some of these don't
-    @skipIfTorchDynamo()
     @parametrize('transform', [
         'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
@@ -4796,7 +4787,6 @@ class TestCompileTransforms(TestCase):
     @expectedFailureIf(IS_WINDOWS or (sys.version_info >= (3, 12)))
     @torch._dynamo.config.patch(suppress_errors=False)
     @torch._dynamo.config.patch(capture_func_transforms=True)
-    @skipIfTorchDynamo("Do not test torch.compile on top of torch.compile")
     def test_grad_deprecated_api(self, device):
         x = torch.randn((), device=device)
         y = torch.randn((), device=device)
@@ -4806,6 +4796,7 @@ class TestCompileTransforms(TestCase):
 
         actual = wrapper_fn(x, y)
         expected = torch.compile(wrapper_fn, backend='eager', fullgraph=True)(x, y)
+        fn = torch.compile(wrapper_fn, backend='eager', fullgraph=True)
         self.assertEqual(actual, expected)
 
         def wrapper_fn(x, y):

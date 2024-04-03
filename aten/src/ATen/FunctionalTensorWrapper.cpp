@@ -129,7 +129,7 @@ void FunctionalTensorWrapper::freeze_storage() const {
 // - view_value: The output tensor that we need to wrap.
 // - base: The "base" of the view that `view_value` was generated from.
 // See Note [Functionalization: Alias Removal Part 2] for more details on the mutation replay logic.
-FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const FunctionalTensorWrapper* base, functionalization::ViewMeta meta)
+FunctionalTensorWrapper::FunctionalTensorWrapper(const Tensor& view_value, const FunctionalTensorWrapper* base, const functionalization::ViewMeta& meta)
   : c10::TensorImpl(
       c10::DispatchKeySet(DispatchKey::Functionalize),
       view_value.dtype(),
@@ -174,7 +174,7 @@ bool FunctionalTensorWrapper::is_up_to_date() const {
 }
 
 // See Note [Functionalization Pass - Inplace View Ops]
-void FunctionalTensorWrapper::mutate_view_meta(at::functionalization::ViewMeta meta) {
+void FunctionalTensorWrapper::mutate_view_meta(const at::functionalization::ViewMeta& meta) {
   view_metas_.push_back(meta);
   // Manually track the fact that this tensor recieved a metadata mutation!
   has_metadata_mutation_ = true;
@@ -484,8 +484,8 @@ c10::optional<Tensor> to_functional_tensor(const c10::optional<Tensor>& tensor) 
   }
   return c10::nullopt;
 }
-c10::List<c10::optional<Tensor>> to_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list) {
-  c10::List<c10::optional<Tensor>> outputs;
+c10::List<::std::optional<Tensor>> to_functional_tensor(const c10::List<::std::optional<Tensor>>& t_list) {
+  c10::List<::std::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(to_functional_tensor(t_list[i]));
@@ -536,8 +536,8 @@ std::vector<Tensor> from_functional_tensor(ITensorListRef t_list) {
   }
   return outputs;
 }
-c10::List<c10::optional<Tensor>> from_functional_tensor(const c10::List<c10::optional<Tensor>>& t_list) {
-  c10::List<c10::optional<Tensor>> outputs;
+c10::List<::std::optional<Tensor>> from_functional_tensor(const c10::List<::std::optional<Tensor>>& t_list) {
+  c10::List<::std::optional<Tensor>> outputs;
   outputs.reserve(t_list.size());
   for (const auto i : c10::irange(t_list.size())) {
     outputs.push_back(from_functional_tensor(t_list[i], /*assert_functional=*/false));
@@ -572,7 +572,7 @@ void sync(ITensorListRef t_list) {
     sync(t);
   }
 }
-void sync(const c10::List<c10::optional<Tensor>>& t_list) {
+void sync(const c10::List<::std::optional<Tensor>>& t_list) {
   for (const auto i : c10::irange(t_list.size())) {
     sync(t_list[i]);
   }
@@ -652,7 +652,7 @@ bool isFunctionalTensor(const c10::optional<Tensor>& t) {
   }
 }
 
-bool isFunctionalTensor(const c10::List<c10::optional<Tensor>>& t_list) {
+bool isFunctionalTensor(const c10::List<::std::optional<Tensor>>& t_list) {
   if (t_list.empty()) return false;
   auto functional_count = 0;
   for (const auto i : c10::irange(t_list.size())) {
@@ -700,7 +700,7 @@ Tensor create_functional_tensor_with_view_meta(const at::Tensor& view_to_wrap, c
   return at::detail::make_tensor<FunctionalTensorWrapper>(view_to_wrap, functional_base_impl, meta);
 }
 
-std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorListRef view_to_wrap, const at::Tensor& base, functionalization::ViewMeta meta) {
+std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorListRef view_to_wrap, const at::Tensor& base, const functionalization::ViewMeta& meta) {
   std::vector<Tensor> outputs(view_to_wrap.size());
   int64_t i = 0;
   for (const auto& tensor : view_to_wrap) {
@@ -710,10 +710,10 @@ std::vector<Tensor> create_functional_tensor_with_view_meta(ITensorListRef view_
   return outputs;
 }
 
-void mutate_view_meta(const at::Tensor& self, functionalization::ViewMeta meta) {
+void mutate_view_meta(const at::Tensor& self, const functionalization::ViewMeta& meta) {
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
   auto self_impl = at::functionalization::impl::unsafeGetFunctionalWrapper(self);
-  self_impl->mutate_view_meta(std::move(meta));
+  self_impl->mutate_view_meta(meta);
 }
 
 // Note [Propagating strides in the functionalization pass]
