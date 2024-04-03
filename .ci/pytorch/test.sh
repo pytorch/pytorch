@@ -595,6 +595,12 @@ test_inductor_torchbench_cpu_smoketest_perf(){
   done
 }
 
+test_torchbench_gcp_smoketest(){
+  pushd "${TORCHBENCHPATH}"
+  python test.py -v
+  popd
+}
+
 test_python_gloo_with_tls() {
   source "$(dirname "${BASH_SOURCE[0]}")/run_glootls_test.sh"
   assert_git_not_dirty
@@ -1174,6 +1180,9 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
       llama_v2_7b_16h resnet50 timm_efficientnet mobilenet_v3_large timm_resnest \
       shufflenet_v2_x1_0 hf_GPT2
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_cpu_smoketest_perf
+  elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
+    checkout_install_torchbench
+    TORCHBENCHPATH=$(pwd)/torchbench test_torchbench_gcp_smoketest
   else
     checkout_install_torchbench
     # Do this after checkout_install_torchbench to ensure we clobber any
