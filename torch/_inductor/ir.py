@@ -1843,8 +1843,16 @@ def is_pointwise_contiguous_or_transposed_after_perm(x):
         fn_args = x.data.data.inner_fn_args()[0]
 
         def is_contiguous_or_transposed_after_perm(read):
+            # check if index is a part of read_index
+            def is_in_read_index(index):
+                if len(read.index.args) > 0:
+                    return index in read.index.args
+                else:
+                    return index == read.index
+
             perm_dims = x.dims
-            # Unsqueeze var_names and sizes of read if their number does not equal to perm_dims length
+            # Unsqueeze var_names and sizes of read
+            # if their number does not equal to perm_dims length
             unsqueezed_read_var_names = read.var_names
             unsqueezed_read_sizes = read.size
             if len(perm_dims) != len(unsqueezed_read_sizes):
@@ -1872,18 +1880,16 @@ def is_pointwise_contiguous_or_transposed_after_perm(x):
             # - d0 with s1 == 1
             # - d1 with s0 == 1
             if (
-                new_read_var_names[-1] == any(read.index.args)
+                is_in_read_index(new_read_var_names[-1])
                 and (
                     new_read_sizes[-2] == 1
-                    or new_read_var_names[-2] * new_read_sizes[-1]
-                    == any(read.index.args)
+                    or is_in_read_index(new_read_var_names[-2] * new_read_sizes[-1])
                 )
             ) or (
-                new_read_var_names[-2] == any(read.index.args)
+                is_in_read_index(new_read_var_names[-2])
                 and (
                     new_read_sizes[-1] == 1
-                    or new_read_var_names[-1] * new_read_sizes[-2]
-                    == any(read.index.args)
+                    or is_in_read_index(new_read_var_names[-1] * new_read_sizes[-2])
                 )
             ):
                 return True
