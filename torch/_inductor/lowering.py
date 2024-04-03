@@ -2274,12 +2274,6 @@ make_fallback(aten.searchsorted)  # bucketized is implemented (see eager impl)
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
-# See resize_storage_bytes
-make_fallback(aten.resize)
-make_fallback(aten.resize_)
-make_fallback(aten.resize_as)
-make_fallback(aten.resize_as_)
-
 
 # 2) Medium
 make_fallback(aten.max_unpool2d)
@@ -2349,6 +2343,9 @@ make_fallback(aten.mode)
 make_fallback(aten.median)
 make_fallback(aten.nanmedian)
 make_fallback(aten.randperm)
+# see: https://github.com/pytorch/pytorch/pull/121354
+make_fallback(aten.resize_)
+make_fallback(aten.resize_as_)
 
 # Linalg
 make_fallback(aten._linalg_det)
@@ -5857,6 +5854,71 @@ def resize_storage_bytes_(variable, new_size):
 def create_nn_parameter(self, placeholder):
     self.realize()
     return TensorBox.create(ir.BindNNParameter(self, placeholder))
+
+
+@register_lowering(torch.ops.aten.resize)
+def resize(x, size, *, memory_format=None):
+    assert isinstance(x, TensorBox)
+    assert isinstance(size, (list, tuple))
+
+    if memory_format is None:
+        memory_format = torch.contiguous_format
+    if memory_format == torch.preserve_format:
+        raise RuntimeError(f"unsupported memory format: {memory_format}")
+
+    if memory_format == torch.channels_last:
+        assert len(size) == 4
+    if memory_format == torch.channels_last_3d:
+        assert len(size) == 5
+
+    old_numel = x.get_numel()
+    dtype = x.get_dtype()
+    device = x.get_device()
+
+    if isinstance(x.data, ir.BaseView):
+        x.data = x.data.unwrap_view()
+
+    if (
+        torch.are_deterministic_algorithms_enabled()
+        and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+    ):
+        if is_float_dtype(dtype):
+            uninitalized_val = float("nan")
+        elif is_integer_dtype(dtype):
+            uninitalized_val = torch.iinfo(dtype).max
+        else:
+            uninitalized_val = True
+    else:
+        # using zero as that is what empty does
+        uninitalized_val = 0.0
+
+    if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
+        return full(size, uninitalized_val, dtype=dtype, device=device)
+
+    x_flat = as_strided(
+        x,
+        [
+            old_numel,
+        ],
+        [
+            1,
+        ],
+    )
+    flat_loader = x_flat.make_loader()
+    out_stride = ir.FlexibleLayout.stride_ordered_for_memory_format(size, memory_format)
+    out_indexer = ir.FixedLayout(device, dtype, size, out_stride).make_indexer()
+
+    def inner_fn(idx):
+        flat_index = out_indexer(idx)
+        flat_index_expr = ops.index_expr(flat_index, torch.int64)
+        limit = ops.index_expr(old_numel, torch.int64)
+        mask = ops.lt(flat_index_expr, limit)
+        return ops.masked(mask, lambda: flat_loader([flat_index]), uninitalized_val)
+
+    out = Pointwise.create(
+        device=device, dtype=dtype, inner_fn=inner_fn, ranges=list(size)
+    )
+    return out
 
 
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
