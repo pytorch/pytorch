@@ -4168,6 +4168,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cudaStreamDefault", ("hipStreamDefault", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamNonBlocking", ("hipStreamNonBlocking", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamGetCaptureInfo", ("hipStreamGetCaptureInfo", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamGetCaptureInfo_v2", ("hipStreamGetCaptureInfo_v2", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureStatus", ("hipStreamCaptureStatus", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureStatusActive", ("hipStreamCaptureStatusActive", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureMode", ("hipStreamCaptureMode", CONV_TYPE, API_RUNTIME)),
@@ -4182,6 +4183,11 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cudaGraphLaunch", ("hipGraphLaunch", CONV_TYPE, API_RUNTIME)),
         ("cudaGraphGetNodes", ("hipGraphGetNodes", CONV_TYPE, API_RUNTIME)),
         ("cudaGraphDebugDotPrint", ("hipGraphDebugDotPrint", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphRetainUserObject", ("hipGraphRetainUserObject", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphUserObjectMove", ("hipGraphUserObjectMove", CONV_TYPE, API_RUNTIME)),
+        ("cudaUserObject_t", ("hipUserObject_t", CONV_TYPE, API_RUNTIME)),
+        ("cudaUserObjectCreate", ("hipUserObjectCreate", CONV_TYPE, API_RUNTIME)),
+        ("cudaUserObjectNoDestructorSync", ("hipUserObjectNoDestructorSync", CONV_TYPE, API_RUNTIME)),
         ("cudaThreadExchangeStreamCaptureMode", ("hipThreadExchangeStreamCaptureMode", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamIsCapturing", ("hipStreamIsCapturing", CONV_TYPE, API_RUNTIME)),
         ("cudaDeviceSynchronize", ("hipDeviceSynchronize", CONV_DEVICE, API_RUNTIME)),
@@ -8704,6 +8710,8 @@ C10_MAPPINGS = collections.OrderedDict(
         ("pinned_use_cuda_host_register", ("pinned_use_hip_host_register", API_C10)),
         ("c10::cuda::CUDAAllocator", ("c10::hip::HIPAllocator", API_C10)),
         ("cuda::CUDAAllocator", ("hip::HIPAllocator", API_C10)),
+        ("CUDAStreamCaptureModeGuard", ("HIPStreamCaptureModeGuard", API_C10)),
+        ("cuda::CUDAStreamCaptureModeGuard", ("cuda::HIPStreamCaptureModeGuard", API_C10)),
         ("CUDAAllocator", ("HIPAllocator", API_C10)),
         ("C10_CUDA_KERNEL_LAUNCH_CHECK", ("C10_HIP_KERNEL_LAUNCH_CHECK", API_C10))
     ]

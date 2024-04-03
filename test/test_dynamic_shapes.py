@@ -377,6 +377,21 @@ class TestPySymInt(TestCase):
         self.assertEqual(guard_int(a0), 2)
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
 
+    def test_prefer_deferred_runtime_assertions_over_guards(self):
+        shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
+        s0 = create_symint(shape_env, 2)
+        self.assertEqual(guard_int(s0), 2)
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
+
+        shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
+        s0 = create_symint(shape_env, 2)
+        self.assertTrue(expect_true(s0 == 2))
+        self.assertEqual(len(shape_env.guards), 0)
+        self.assertExpectedInline(
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[None]]),
+            """[Eq(s0, 2)]"""
+        )
+
     def test_sym_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -403,7 +418,7 @@ class TestPySymInt(TestCase):
         r = torch._sym_sqrt(a0)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s0), 2)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(s0), 2)""")
 
     def test_sym_floor(self):
         shape_env = ShapeEnv()
@@ -535,14 +550,14 @@ def forward(self, x_1):
         _constrain_range_for_size(i0)
         _constrain_range_for_size(i1)
         self.assertTrue(expect_true(i0 == i1 * 4))
-        self.assertExpectedInline(str(i0), """u0""")
+        self.assertExpectedInline(str(i0), """4*u1""")
 
         i2 = shape_env.create_unbacked_symint()
         i3 = shape_env.create_unbacked_symint()
         _constrain_range_for_size(i2)
         _constrain_range_for_size(i3)
         self.assertTrue(expect_true(i2 * 4 == i3))
-        self.assertExpectedInline(str(i3), """u3""")
+        self.assertExpectedInline(str(i3), """4*u2""")
 
     def test_avoid_unbacked_substitution(self):
         shape_env = ShapeEnv()
