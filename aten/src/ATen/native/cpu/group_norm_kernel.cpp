@@ -43,9 +43,9 @@ void GroupNormKernelImplInternal(
   TORCH_CHECK(!beta.defined() || beta.numel() == C);
   const int64_t G = group;
   const int64_t D = C / G;
-  const T* X_data = X.data_ptr<T>();
-  const PT* gamma_data = gamma.defined() ? gamma.data_ptr<PT>() : nullptr;
-  const PT* beta_data = beta.defined() ? beta.data_ptr<PT>() : nullptr;
+  const T* X_data = X.const_data_ptr<T>();
+  const PT* gamma_data = gamma.defined() ? gamma.const_data_ptr<PT>() : nullptr;
+  const PT* beta_data = beta.defined() ? beta.const_data_ptr<PT>() : nullptr;
   T* Y_data = Y.data_ptr<T>();
   PT* mean_data = mean.data_ptr<PT>();
   PT* rstd_data = rstd.data_ptr<PT>();
@@ -298,9 +298,9 @@ void GroupNormKernelImplChannelsLastInternal(
   TORCH_CHECK(!beta.defined() || beta.numel() == C);
   const int64_t G = group;
   const int64_t D = C / G;
-  const T* X_data = X.data_ptr<T>();
-  const PT* gamma_data = gamma.defined() ? gamma.data_ptr<PT>() : nullptr;
-  const PT* beta_data = beta.defined() ? beta.data_ptr<PT>() : nullptr;
+  const T* X_data = X.const_data_ptr<T>();
+  const PT* gamma_data = gamma.defined() ? gamma.const_data_ptr<PT>() : nullptr;
+  const PT* beta_data = beta.defined() ? beta.const_data_ptr<PT>() : nullptr;
   T* Y_data = Y.data_ptr<T>();
   PT* mean_data = mean.data_ptr<PT>();
   PT* rstd_data = rstd.data_ptr<PT>();
@@ -442,7 +442,7 @@ void GroupNormKernelImplChannelsLastInternal(
     //
     // We could fuse step 3 and 4 into a single session but this way is better:
     //   a. D might be too small for vectorization;
-    //   b. Avoid duplicate caculation of scale/bias, each HxW plain share the same scale/bias
+    //   b. Avoid duplicate calculation of scale/bias, each HxW plain share the same scale/bias
     //
     for (const auto n : c10::irange(N)) {
       for (const auto g : c10::irange(G)) {

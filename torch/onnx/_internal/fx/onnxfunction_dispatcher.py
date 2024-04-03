@@ -325,8 +325,6 @@ class OnnxFunctionDispatcher:
                     isinstance(node_arg, torch.fx.Node)
                     and not fx_type_utils.is_torch_symbolic_type(node_arg.meta["val"])
                 ):
-                    # TODO: reduce number of explicit initializations.
-                    # TODO: Log location, stack.
                     diagnostic = diagnostics.UnsupportedFxNodeDiagnostic(
                         diagnostics.rules.no_symbolic_function_for_call_function,
                         diagnostics.levels.ERROR,
@@ -387,7 +385,6 @@ class OnnxFunctionDispatcher:
         )
 
         # NOTE: Fall back to default overload if the ONNX registry doesn't have the overload.
-        # TODO: Should we have a better fallback mechanism?
         if function_group is None:
             function_group = self.onnx_registry.get_op_functions(
                 namespace=internal_opname.namespace,
@@ -808,7 +805,6 @@ class _OnnxSchemaChecker:
         # args, kwargs and param_schemas should be all in order
         # user may not specify all inputs or attributes
 
-        # TODO: avoid circular dependency
         import onnx
 
         onnx_inputs: List[Any] = []
@@ -843,7 +839,6 @@ class _OnnxSchemaChecker:
                     onnx_attributes[param.name] = param.default
             # optional input
             elif param.is_input:
-                # TODO: support optional input default in onnx-script?
                 if fill_defaults:
                     onnx_inputs.append(None)
 
@@ -886,7 +881,10 @@ def _find_onnx_data_type(
     if isinstance(torch_input, (int, float, bool, str, complex)):
         return fx_type_utils.from_torch_dtype_to_onnx_dtype_str(type(torch_input))
     if isinstance(torch_input, (list, tuple)) and torch_input:  # [Tensor, Tensor]
-        set_dtype = _find_onnx_data_type(torch_input[0])
+        the_first_non_none_item = next(
+            (item for item in torch_input if item is not None), None
+        )
+        set_dtype = _find_onnx_data_type(the_first_non_none_item)
         if any(isinstance(input, fx_type_utils.TensorLike) for input in torch_input):
             # NOTE: Any Tensor involved in a list would make it a seq(tensor(onnx_type))
             return {f"seq({dtype})" for dtype in set_dtype}

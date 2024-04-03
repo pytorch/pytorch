@@ -47,6 +47,19 @@ class MaskBuffer:
             raise RuntimeError("MaskBuffer has not been materialized")
         self.data = None
 
+    def apply_mask(self, tensor):
+        if self.data is None:
+            raise RuntimeError("MaskBuffer has not been materialized")
+
+        # NOTE: _MaskPartial is being used by the embedding op and the gather op.
+        # For gather, the mask has the same dimension as the output tensor, whereas
+        # the output of the embedding op has an additional dimension compare to the input,
+        # hence the output masking logic below having two different cases.
+        if tensor.ndim == self.data.ndim:
+            tensor[self.data] = 0.0
+        else:
+            tensor[self.data, :] = 0.0
+
 
 @dataclass(frozen=True)
 class _MaskPartial(_Partial):
@@ -94,7 +107,7 @@ class _MaskPartial(_Partial):
         assert self.mask_buffer.data is not None
 
         # apply the mask to the tensor that pending reduction
-        tensor[self.mask_buffer.data, :] = 0.0
+        self.mask_buffer.apply_mask(tensor)
 
         # clear the mask buffer
         self.mask_buffer.release_mask()
@@ -115,7 +128,7 @@ class _MaskPartial(_Partial):
         assert self.mask_buffer.data is not None
 
         # apply the mask to the tensor that pending reduction
-        tensor[self.mask_buffer.data, :] = 0.0
+        self.mask_buffer.apply_mask(tensor)
 
         # clear the mask buffer
         self.mask_buffer.release_mask()

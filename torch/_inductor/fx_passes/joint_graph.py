@@ -156,10 +156,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
 
     # Clean up unused views.
     while True:
-        unused_views = []
-        for alias in views:
-            if not alias.users:
-                unused_views.append(alias)
+        unused_views = [alias for alias in views if not alias.users]
         if len(unused_views) == 0:
             break
         for unused in unused_views:
@@ -234,6 +231,10 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
     for node, value in node_replacements.items():
         # we dont have a functional way right now of instantiating a non-contiguous tensor with full/zeros/ones right now
         # hasn't shown up to be important yet
+        if "val" not in node.meta:
+            # This can only happen in AOTI
+            continue
+
         fake_tensor = node.meta["val"]
         if not fake_tensor.is_contiguous(memory_format=torch.contiguous_format):
             continue

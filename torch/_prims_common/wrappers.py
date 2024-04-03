@@ -204,7 +204,7 @@ def _safe_copy_out(
     return copy_to.copy_(copy_from)
 
 
-def out_wrapper(*out_names: str, exact_dtype: bool = False):
+def out_wrapper(*out_names: str, exact_dtype: bool = False, pass_is_out: bool = False):
     # The wrapped function needs to convert the output parameters to ensure
     # compatibility between the Python API (which always uses "out" as the
     # parameter name and may be a tuple) and the Aten API (which may have
@@ -246,8 +246,10 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False):
                     out_attr = getattr(out, k)
                     if k not in kwargs:
                         kwargs[k] = out_attr
-
-            result = fn(*args, **kwargs)
+            if pass_is_out:
+                result = fn(*args, is_out=(out is not None), **kwargs)
+            else:
+                result = fn(*args, **kwargs)
             assert (
                 isinstance(result, TensorLike)
                 and is_tensor

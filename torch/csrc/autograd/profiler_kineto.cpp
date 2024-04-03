@@ -22,9 +22,6 @@
 
 #include <ATen/Context.h>
 
-#include <deque>
-#include <limits>
-#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -784,16 +781,16 @@ int64_t KinetoEvent::debugHandle() const {
       [](const auto&) -> int64_t { return -1; }));
 }
 
-uint8_t KinetoEvent::deviceIndex() const {
+int KinetoEvent::deviceIndex() const {
   return result_->visit(c10::overloaded(
       [](const ExtraFields<EventType::Allocation>& i) {
-        return static_cast<uint8_t>(i.device_index_);
+        return static_cast<int>(i.device_index_);
       },
       [](const ExtraFields<EventType::OutOfMemory>& i) {
-        return static_cast<uint8_t>(i.device_index_);
+        return static_cast<int>(i.device_index_);
       },
       [&](const auto&) {
-        return static_cast<uint8_t>(result_->kineto_info_.device);
+        return static_cast<int>(result_->kineto_info_.device);
       }));
 }
 

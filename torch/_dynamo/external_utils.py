@@ -12,7 +12,18 @@ except ModuleNotFoundError:
 
 
 def is_compiling() -> bool:
-    return False
+    """
+    Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+
+    If need to check specifically that TorchDynamo is used, then use
+    torch.compiler.is_dynamo_compiling().
+
+    TODO(khabinov): we should deprecate this function and use one of these two:
+    * torch.compiler.is_compiling(),
+    * torch.compiler.is_dynamo_compiling().
+    It will depend on the context where to use what.
+    """
+    return torch.compiler.is_compiling()
 
 
 def wrap_inline(fn):
@@ -70,3 +81,23 @@ def call_backward(backward_fn, saved_tensors, *args):
         grads = (grads,)
 
     return grads
+
+
+def untyped_storage_size(x: torch.Tensor):
+    return x.untyped_storage().size()
+
+
+def call_hook_from_backward_state(*args, bw_state, hook_name: str, **kwargs):
+    return getattr(bw_state, hook_name)(*args, **kwargs)
+
+
+def call_module_hooks_from_backward_state(
+    _, result, *args, bw_state, hooks_name: str, module_name: str
+):
+    module = getattr(bw_state, module_name)
+    hooks = getattr(bw_state, hooks_name)
+    for hook in hooks:
+        new_result = hook(module, result, *args)
+        if new_result is not None:
+            result = new_result
+    return result

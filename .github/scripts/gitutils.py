@@ -165,6 +165,9 @@ class GitRepo:
     def checkout(self, branch: str) -> None:
         self._run_git("checkout", branch)
 
+    def create_branch_and_checkout(self, branch: str) -> None:
+        self._run_git("checkout", "-b", branch)
+
     def fetch(self, ref: Optional[str] = None, branch: Optional[str] = None) -> None:
         if branch is None and ref is None:
             self._run_git("fetch", self.remote)

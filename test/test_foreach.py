@@ -13,7 +13,7 @@ from torch.testing import make_tensor
 from torch.testing._comparison import default_tolerances
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import \
-    TestCase, run_tests, TEST_WITH_ROCM, skipIfTorchDynamo, parametrize, gradcheck
+    TestCase, run_tests, TEST_WITH_ROCM, skipIfTorchDynamo, parametrize, gradcheck, skipIfRocmVersionLessThan
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, onlyCUDA, ops, OpDTypes)
 from torch.testing._internal.common_methods_invocations import (
@@ -66,8 +66,9 @@ class ForeachFuncWrapper:
             assert mta_called == (expect_fastpath and (not zero_size))
         else:
             actual = self.func(*inputs, **kwargs)
-        # note(mkozuki): inplace foreach functions are void functions.
-        return inputs[0] if self.is_inplace else actual
+        if self.is_inplace:
+            assert id(inputs[0]) == id(actual)
+        return actual
 
 
 class InplaceForeachVersionBumpCheck:
@@ -134,7 +135,7 @@ class TestForeach(TestCase):
             with InplaceForeachVersionBumpCheck(self, sample.input):
                 inplace_op((sample.input, *sample.args), is_cuda=self.is_cuda, expect_fastpath=True, zero_size=True)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "Skipped on ROCm, since it is failing on ROCm 5.7")
+    @skipIfRocmVersionLessThan((6, 0))
     @ops(
         foreach_unary_op_db + foreach_binary_op_db + foreach_pointwise_op_db + foreach_reduce_op_db + foreach_other_op_db,
     )
@@ -630,7 +631,7 @@ class TestForeach(TestCase):
         scaler = torch.tensor([max_value]).sqrt().to(device=device, dtype=dtype)
         inputs = ([
             t * scaler for t in next(iter(op.sample_inputs(device, dtype, requries_grad=True, num_input_tensors=[N], low=1))).input
-        ],)
+        ][:-1],)
         # make sure that the min. of squared L2 norm value per tensor is greater than the max value of `dtype`.
         self.assertTrue(scaler * scaler * N > max_value)
         fn, ref_fn, *_ = self._get_funcs(op)
@@ -645,6 +646,32 @@ class TestForeach(TestCase):
                 inputs[0][i].numel() == 0 or torch.isinf(e)
                 for i, e in enumerate(expect)))
         self.assertEqual(expect, actual, equal_nan=False)
+
+    @onlyCUDA
+    @ops(foreach_reduce_op_db, allowed_dtypes=floating_types())
+    @parametrize("use_cuda_graph", (False, True))
+    def test_big_num_tensors(self, device, dtype, op, use_cuda_graph):
+        N = 600
+        tensorlist = [make_tensor((2, 3), dtype=dtype, device=device, noncontiguous=False) for _ in range(N)]
+        fn, ref_fn, *_ = self._get_funcs(op)
+
+        import math
+        for ord in (1, 2, math.inf):
+            if not use_cuda_graph:
+                actual = fn(inputs=[tensorlist], is_cuda=True, expect_fastpath=True, ord=ord, zero_size=False)
+            else:
+                # When using CUDA graphs and the tensor metadata doesn't fit in
+                # the static kernel argument space, multi_tensor_apply creates
+                # the launch arguments once, uses cudaUserObject_t to tie its
+                # lifetime to the graph, and reuses it throughout replays. This
+                # test verifies multi_tensor_apply's behavior in the scenario.
+                g = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(g):
+                    actual = fn.func(tensorlist, ord=ord)
+                g.replay()
+            expect = ref_fn(inputs=[tensorlist], ord=ord)
+
+            self.assertEqual(expect, actual, equal_nan=True)
 
     @onlyCUDA
     @ops(foreach_reduce_op_db)

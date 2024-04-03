@@ -184,8 +184,7 @@ static void basicAutogradNotImplementedFallbackImpl(
             // users typically call .backward() and backprop through
             // the entire program).
             if (t.is_view() && is_mutable_output) {
-              // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              auto& base = const_cast<at::TensorBase&>(t._base());
+              const auto& base = t._base();
               if (base.requires_grad()) {
                 // Can only register_hook on tensors that require grad.
                 base.register_hook([op_name](const at::TensorBase& grad) {
@@ -210,8 +209,7 @@ static void basicAutogradNotImplementedFallbackImpl(
           // rebase_history assumes single Tensor(a!) return, and in general
           // custom ops don't have a good in-place story.
           if (!is_mutable_output) {
-            // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-            set_history(const_cast<at::Tensor&>(t), grad_fn);
+            set_history(t, grad_fn);
           }
         },
         stack,
@@ -301,11 +299,26 @@ static void autogradNotImplementedFallbackImpl(
       num_arguments);
 
   const bool any_requires_grad = !tensors_requiring_grad_on_stack.empty();
+  const bool has_out_arg = std::any_of(
+      schema.arguments().begin(),
+      schema.arguments().end(),
+      [](const c10::Argument& arg) { return arg.is_out(); });
 
   _foreach_tensor(
       [&](size_t _, size_t i, const at::Tensor& t) {
         if (schema.is_mutable({c10::SchemaArgType::input, i})) {
-          check_inplace(t, any_requires_grad);
+          if (has_out_arg) {
+            // Normally out argument overloads would not support any arguments
+            // that require grad. However, we loosen this check to maintain
+            // backward compatibility.
+            // See https://github.com/pytorch/pytorch/issues/120988
+            if (can_mutate_inplace(t, any_requires_grad) !=
+                can_mutate_inplace_result::success) {
+              throw_error_out_requires_grad(schema.name().c_str());
+            }
+          } else {
+            check_inplace(t, any_requires_grad);
+          }
         }
       },
       stack,
@@ -365,7 +378,9 @@ static void autogradNotImplementedFallbackImpl(
   _foreach_tensor(
       [&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
         if (at::impl::tensor_has_dispatch(t) ||
-            at::impl::dispatch_mode_enabled())
+            at::impl::dispatch_mode_enabled() ||
+            // NJT offsets are expected to be reused; skip use_count() check
+            op_name == "aten::_nested_get_offsets")
           return;
         if (!is_inplace_output[idx_ret])
           TORCH_INTERNAL_ASSERT(
@@ -418,11 +433,9 @@ static void autogradNotImplementedFallbackImpl(
         [&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
           if (isDifferentiableType(t.scalar_type())) {
             if (is_inplace_output[idx_ret]) {
-              // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              rebase_history(const_cast<at::Tensor&>(t), grad_fn);
+              rebase_history(t, grad_fn);
             } else {
-              // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
-              set_history(const_cast<at::Tensor&>(t), grad_fn);
+              set_history(t, grad_fn);
             }
           }
         },
@@ -530,18 +543,14 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
         (*stack)[stack->size() - num_returns + aliased_output_idx];
 
     // See NOTE [ View + Inplace detection ] for more details about this logic
-    const auto erroring_view_func = [op_name = op_name](const at::Tensor&) {
-      // We always need this view_func because otherwise if we do in-place
-      // on this view, we would implicitly use AsStridedBackward instead
-      // of the NotImplemented node. For the cross-dtype/non-strided
-      // cases, we would create something like this anyway
-      TORCH_CHECK(
-          false,
-          "Mutating the view ",
-          op_name,
-          " which does not have a derivative implemented is forbidden.");
-      return at::Tensor();
-    };
+    // We always need this view_func because otherwise if we do in-place
+    // on this view, we would implicitly use AsStridedBackward instead
+    // of the NotImplemented node. For the cross-dtype/non-strided
+    // cases, we would create something like this anyway
+    auto error_msg =
+        ("Mutating the view " + op_name +
+         "which does not have a derivative implemented is forbidden.");
+    auto erroring_view_func = std::make_unique<ErroringViewFunc>(error_msg);
 
     const auto erroring_rev_view_func = [op_name = op_name](const at::Tensor&) {
       TORCH_CHECK(
@@ -560,7 +569,7 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
             /* tensor=*/sub_output,
             /* is_bw_differentiable=*/true,
             /* is_fw_differentiable=*/true,
-            /* view_func=*/erroring_view_func,
+            /* view_func=*/std::move(erroring_view_func),
             /* rev_view_func=*/erroring_rev_view_func,
             /* creation_meta=*/
             InferenceMode::is_enabled()
@@ -577,7 +586,7 @@ static void autogradNotImplementedInplaceOrViewFallbackImpl(
           /* tensor=*/std::move(aliased_output_iv).toTensor(),
           /* is_bw_differentiable=*/true,
           /* is_fw_differentiable=*/true,
-          /* view_func=*/erroring_view_func,
+          /* view_func=*/std::move(erroring_view_func),
           /* rev_view_func=*/erroring_rev_view_func,
           /* creation_meta=*/
           InferenceMode::is_enabled()

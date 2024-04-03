@@ -137,8 +137,7 @@
       AT_DISPATCH_CASE_ALL_TYPES_AND_COMPLEX_AND4(      \
           kComplexHalf, kHalf, kBool, kBFloat16, __VA_ARGS__))
 
-namespace at {
-namespace sparse_csr {
+namespace at::sparse_csr {
 
 using SparseCsrTensor = Tensor;
 
@@ -244,22 +243,22 @@ inline std::string plainDimName(Layout layout) {
   }
 }
 
-inline int rowDimension(Layout layout, IntArrayRef size) {
+inline size_t rowDimension(Layout layout, IntArrayRef size) {
   return size.size() - (isCompressedRow(layout) ? 2 : 1);
 }
 
-inline int columnDimension(Layout layout, IntArrayRef size) {
+inline size_t columnDimension(Layout layout, IntArrayRef size) {
   return size.size() - (isCompressedColumn(layout) ? 2 : 1);
 }
 
-inline int compressedDimension(
+inline size_t compressedDimension(
     Layout layout,
     IntArrayRef size,
     size_t dense_ndim = 0) {
   return size.size() - dense_ndim - (isCompressedRow(layout) ? 2 : 1);
 }
 
-inline int plainDimension(
+inline size_t plainDimension(
     Layout layout,
     IntArrayRef size,
     size_t dense_ndim = 0) {
@@ -284,6 +283,21 @@ inline std::pair<Tensor, Tensor> getCompressedPlainIndices(Tensor const& self) {
       [&self] {
         return std::make_pair(self.ccol_indices(), self.row_indices());
       });
+}
+
+inline ScalarType getIndexDtype(Tensor const& self) {
+  switch (self.layout()) {
+    case kSparseCsr:
+    case kSparseBsr:
+      return self.crow_indices().scalar_type();
+    case kSparseCsc:
+    case kSparseBsc:
+      return self.ccol_indices().scalar_type();
+    case kSparse:
+      return self._indices().scalar_type();
+    default:
+      return ScalarType::Long;
+  }
 }
 
 inline Layout flip_compressed_layout(Layout layout) {
@@ -335,8 +349,7 @@ inline bool only_sparse_compressed_binary_op_trivial_cases(
     return true;
   }
   if (self.is_same(other)) {
-    Tensor compressed_indices, plain_indices;
-    std::tie(compressed_indices, plain_indices) =
+    auto [compressed_indices, plain_indices] =
         at::sparse_csr::getCompressedPlainIndices(self);
     static_cast<SparseCsrTensorImpl*>(out.unsafeGetTensorImpl())
         ->set_member_tensors(
@@ -367,13 +380,12 @@ inline bool only_sparse_compressed_add_trivial_cases(
       });
 }
 
-inline Tensor to_type(Tensor input, ScalarType dtype) {
-  Tensor compressed_indices, plain_indices;
-  std::tie(compressed_indices, plain_indices) =
+inline Tensor to_type(const Tensor& input, ScalarType dtype) {
+  auto [compressed_indices, plain_indices] =
       at::sparse_csr::getCompressedPlainIndices(input);
   return at::_sparse_compressed_tensor_unsafe(
-      std::move(compressed_indices),
-      std::move(plain_indices),
+      compressed_indices,
+      plain_indices,
       std::move(input.values()).to(dtype),
       input.sizes(),
       dtype,
@@ -388,7 +400,7 @@ inline std::tuple<Tensor, Tensor> create_acc_buffer(
     ScalarType type,
     int64_t nnz = -1) {
   Tensor new_values, new_values_acc;
-  constexpr bool need_acc = !std::is_same<scalar_t, acc_t>::value;
+  constexpr bool need_acc = !std::is_same_v<scalar_t, acc_t>;
   bool is_integral = at::isIntegralType(type, /*includeBool=*/true);
   if constexpr (need_acc) {
     auto acc_dtype = CppTypeToScalarType<acc_t>::value;
@@ -411,5 +423,4 @@ inline void copy_from_acc_buffer(Tensor& new_values, Tensor& new_values_acc) {
   }
 }
 
-} // namespace sparse_csr
-} // namespace at
+} // namespace at::sparse_csr

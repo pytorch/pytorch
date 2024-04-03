@@ -5,7 +5,6 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
-#include <iostream>
 #include <utility>
 
 #include <ATen/Operators.h>
@@ -17,7 +16,7 @@
 #include <c10/util/SmallBuffer.h>
 #include <ATen/InferSize.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // Note [Adding vmap support for an operator]
 // Hey there! So you have an operator and you want to get it to work with vmap.
@@ -163,9 +162,7 @@ const Tensor& resize__plumbing(
     return self.resize_(size, optional_memory_format);
   }
 
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   TORCH_INTERNAL_ASSERT(self_bdim.has_value());
 
   // TODO: The following algorithm only works for batch dim == 0.
@@ -204,7 +201,7 @@ std::tuple<Tensor, optional<int64_t>> squeeze_batch_rule(const Tensor& self, opt
   int64_t new_batch_idx = 0;
   int64_t original_idx = 0;
 
-  for (auto it : shape) {
+  for (const auto& it : shape) {
     // Keep only dimensions != 1 and the batch dimension (irrespective of size).
     if (it != 1 || original_idx == bdim) {
       squeezed_sizes.push_back(it);
@@ -454,7 +451,7 @@ std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto self_sizes = self_.sym_sizes();
-  auto batch_size = self_sizes[0];
+  const auto& batch_size = self_sizes[0];
 
   c10::SmallVector<c10::SymInt> size_(size.size() + 1);
   size_[0] = batch_size;
@@ -589,4 +586,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(unsafe_split, Tensor, unsafe_split_batch_rule);
 }
 
-}}
+} // namespace at::functorch

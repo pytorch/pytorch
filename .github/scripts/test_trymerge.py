@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
+from github_utils import gh_graphql
+
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 
 from trymerge import (
@@ -26,7 +28,6 @@ from trymerge import (
     get_drci_classifications,
     get_rockset_results,
     gh_get_team_members,
-    gh_graphql,
     GitHubPR,
     JobCheckState,
     main as trymerge_main,
@@ -204,7 +205,6 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
             approved_by=["pytorch/metamates", "ngimel"],
             mandatory_checks_name=[
                 "Lint",
-                "Facebook CLA Check",
                 "pull / linux-xenial-cuda11.3-py3.7-gcc7 / build",
             ],
             ignore_flaky_failures=True,
