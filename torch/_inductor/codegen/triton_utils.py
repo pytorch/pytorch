@@ -63,7 +63,37 @@ def signature_to_meta(
     }
 
 
-def config_of(args: List[KernelArgType], *, indices: Optional[List[int]] = None) -> Any:
+def is_unaligned_buffer(arg: TensorArg):
+    buf_name = arg.buffer
+    if buf_name in V.graph.graph_inputs:
+        return not config.assume_aligned_inputs
+
+    if buf_name in V.graph.constants:
+        # all constants are assumed to be aligned
+        return False
+
+    if V.graph.scheduler:
+        layout = V.graph.scheduler.get_buffer_layout(buf_name)
+    else:
+        buffer = V.graph.get_buffer(buf_name)
+        # output arg
+        if not buffer:
+            assert buf_name == V.kernel.output_node.name
+            layout = V.kernel.output_node.layout
+        else:
+            layout = buffer.get_layout()
+
+    if isinstance(layout, torch._inductor.ir.NonOwningLayout):
+        return not layout.maybe_guard_aligned()
+    else:
+        return False
+
+
+def config_of(
+    args: List[KernelArgType],
+    *,
+    indices: Optional[List[int]] = None,
+) -> Any:
     if indices is None:
         indices = list(range(len(args)))
 
@@ -77,9 +107,7 @@ def config_of(args: List[KernelArgType], *, indices: Optional[List[int]] = None)
                 offset_aligned = V.graph.sizevars.statically_known_multiple_of(
                     x.offset * x.dtype.itemsize, alignment  # type: ignore[arg-type]
                 )
-                return offset_aligned and not V.graph.scheduler.is_unaligned_buffer(
-                    x.buffer
-                )
+                return offset_aligned and not is_unaligned_buffer(x)
             else:
                 return False
         if isinstance(x, SizeArg):
@@ -109,4 +137,18 @@ def config_of(args: List[KernelArgType], *, indices: Optional[List[int]] = None)
         for i, arg in zip(indices, args)
         if is_aligned(arg, alignment=8, include_tensor=False)
     )
-    return instance_descriptor(divisible_by_16, (), (), divisible_by_8)
+
+    equal_to_1 = tuple(
+        i
+        for i, arg in zip(indices, args)
+        if isinstance(arg, SizeArg)
+        and arg.expr is not None
+        and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
+    )
+    # ids_of_folded_args is set from equal_to_1
+    # and None args by the Triton compiler
+    ids_of_folded_args = tuple(equal_to_1)
+
+    return instance_descriptor(
+        divisible_by_16, equal_to_1, ids_of_folded_args, divisible_by_8
+    )

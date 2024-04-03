@@ -317,8 +317,8 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<SparseTensorImpl>(key_set(), dtype());
     copy_tensor_metadata(
-        /*src_impl=*/this,
-        /*dest_impl=*/impl.get(),
+        /*src_sparse_impl=*/this,
+        /*dest_sparse_impl=*/impl.get(),
         /*version_counter=*/version_counter,
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     impl->refresh_numel();
@@ -336,8 +336,8 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
       bool allow_tensor_metadata_change) const override {
     auto impl = c10::make_intrusive<SparseTensorImpl>(key_set(), dtype());
     copy_tensor_metadata(
-        /*src_impl=*/this,
-        /*dest_impl=*/impl.get(),
+        /*src_sparse_impl=*/this,
+        /*dest_sparse_impl=*/impl.get(),
         /*version_counter=*/std::move(version_counter),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     impl->refresh_numel();
@@ -354,8 +354,8 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
     AT_ASSERT(has_compatible_shallow_copy_type(impl->key_set()));
     auto sparse_impl = static_cast<const SparseTensorImpl*>(impl.get());
     copy_tensor_metadata(
-        /*src_impl=*/sparse_impl,
-        /*dest_impl=*/this,
+        /*src_sparse_impl=*/sparse_impl,
+        /*dest_sparse_impl=*/this,
         /*version_counter=*/version_counter(),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change());
     refresh_numel();
@@ -378,12 +378,12 @@ struct TORCH_API SparseTensorImpl : public TensorImpl {
   static void copy_tensor_metadata(
       const SparseTensorImpl* src_sparse_impl,
       SparseTensorImpl* dest_sparse_impl,
-      const c10::VariableVersion& version_counter,
+      c10::VariableVersion version_counter,
       bool allow_tensor_metadata_change) {
     TensorImpl::copy_tensor_metadata(
         src_sparse_impl,
         dest_sparse_impl,
-        version_counter,
+        std::move(version_counter),
         allow_tensor_metadata_change);
 
     // Sparse-specific fields

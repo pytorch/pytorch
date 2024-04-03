@@ -30,6 +30,7 @@ static PyObject* THXPStream_pynew(
           args,
           kwargs,
           "|iLLL",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &priority,
           &stream_id,
@@ -45,11 +46,14 @@ static PyObject* THXPStream_pynew(
 
   at::xpu::XPUStream stream = (stream_id || device_index || device_type)
       ? at::xpu::XPUStream::unpack3(
-            stream_id, device_index, static_cast<c10::DeviceType>(device_type))
+            stream_id,
+            static_cast<c10::DeviceIndex>(device_index),
+            static_cast<c10::DeviceType>(device_type))
       : at::xpu::getStreamFromPool(priority, current_device);
 
   THXPStream* self = (THXPStream*)ptr.get();
   self->stream_id = static_cast<int64_t>(stream.id());
+  // NOLINTNEXTLINE(bugprone-signed-char-misuse)
   self->device_index = static_cast<int64_t>(stream.device_index());
   self->device_type = static_cast<int64_t>(stream.device_type());
   new (&self->xpu_stream) at::xpu::XPUStream(stream);
@@ -116,14 +120,10 @@ static PyObject* THXPStream_eq(PyObject* _self, PyObject* _other) {
   END_HANDLE_TH_ERRORS
 }
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables,
-// cppcoreguidelines-avoid-c-arrays)
+// NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyMemberDef THXPStream_members[] = {{nullptr}};
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables,
-// cppcoreguidelines-avoid-c-arrays)
+// NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyGetSetDef THXPStream_properties[] = {
     {"sycl_queue",
      (getter)THXPStream_get_sycl_queue,
@@ -133,17 +133,15 @@ static struct PyGetSetDef THXPStream_properties[] = {
     {"priority", (getter)THXPStream_get_priority, nullptr, nullptr, nullptr},
     {nullptr}};
 
-// NOLINTNEXTLINE(modernize-avoid-c-arrays,
-// cppcoreguidelines-avoid-non-const-global-variables,
-// cppcoreguidelines-avoid-c-arrays)
+// NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static PyMethodDef THXPStream_methods[] = {
-    {(char*)"query", THXPStream_query, METH_NOARGS, nullptr},
-    {(char*)"synchronize", THXPStream_synchronize, METH_NOARGS, nullptr},
-    {(char*)"priority_range",
+    {"query", THXPStream_query, METH_NOARGS, nullptr},
+    {"synchronize", THXPStream_synchronize, METH_NOARGS, nullptr},
+    {"priority_range",
      THXPStream_priority_range,
      METH_STATIC | METH_NOARGS,
      nullptr},
-    {(char*)"__eq__", THXPStream_eq, METH_O, nullptr},
+    {"__eq__", THXPStream_eq, METH_O, nullptr},
     {nullptr}};
 
 PyTypeObject THXPStreamType = {

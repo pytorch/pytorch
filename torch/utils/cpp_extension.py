@@ -1350,7 +1350,13 @@ def check_compiler_is_gcc(compiler):
 
     env = os.environ.copy()
     env['LC_ALL'] = 'C'  # Don't localize output
-    version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+    try:
+        version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+    except Exception as e:
+        try:
+            version_string = subprocess.check_output([compiler, '--version'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
+        except Exception as e:
+            return False
     # Check for 'gcc' or 'g++' for sccache wrapper
     pattern = re.compile("^COLLECT_GCC=(.*)$", re.MULTILINE)
     results = re.findall(pattern, version_string)
@@ -1847,8 +1853,7 @@ def verify_ninja_availability():
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
     if IS_WINDOWS:
-        python_path = os.path.dirname(sys.executable)
-        python_lib_path = os.path.join(python_path, 'libs')
+        python_lib_path = os.path.join(sys.base_exec_prefix, 'libs')
 
         extra_ldflags.append('c10.lib')
         if with_cuda:
@@ -2170,11 +2175,6 @@ def _write_ninja_file_to_build_library(path,
     if python_include_path is not None:
         system_includes.append(python_include_path)
 
-    # Windows does not understand `-isystem`.
-    if IS_WINDOWS:
-        user_includes += system_includes
-        system_includes.clear()
-
     common_cflags = []
     if not is_standalone:
         common_cflags.append(f'-DTORCH_EXTENSION_NAME={name}')
@@ -2182,8 +2182,12 @@ def _write_ninja_file_to_build_library(path,
 
     common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
 
-    common_cflags += [f'-I{include}' for include in user_includes]
-    common_cflags += [f'-isystem {include}' for include in system_includes]
+    # Windows does not understand `-isystem` and quotes flags later.
+    if IS_WINDOWS:
+        common_cflags += [f'-I{include}' for include in user_includes + system_includes]
+    else:
+        common_cflags += [f'-I{shlex.quote(include)}' for include in user_includes]
+        common_cflags += [f'-isystem {shlex.quote(include)}' for include in system_includes]
 
     common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
 

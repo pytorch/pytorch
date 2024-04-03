@@ -287,6 +287,7 @@ def split_by_tags(
 
     main_g.output(map_arg(output_node.args[0], main_remapping.__getitem__))
     main_root = HolderModule({comp.name: comp.gm for comp in all_components})
+    main_g._codegen = gm.graph._codegen
 
     # If the output nodes consumes get_attr directly in the original graph,
     # then we need to make sure get_attr is copied to the new graph.

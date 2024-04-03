@@ -210,9 +210,7 @@ struct TORCH_CUDA_CPP_API ConvolutionDescriptor
     if(dataType == CUDNN_DATA_HALF) {
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_TENSOR_OP_MATH));
     } else if (dataType == CUDNN_DATA_FLOAT && !allow_tf32) {
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_FMA_MATH));
-#endif
     }
   }
 };
@@ -304,13 +302,9 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
       if (input_type == CUDNN_DATA_HALF) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);
       }
-#endif
-#if !defined(USE_CUDNN_RNN_V8_API) && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
       else if (input_type == CUDNN_DATA_FLOAT && !allow_tf32) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_FMA_MATH);
       }
-#endif
-#ifndef USE_CUDNN_RNN_V8_API
       else {
         // Technically, as the default it's not necessary to explicitly
         // set this.
