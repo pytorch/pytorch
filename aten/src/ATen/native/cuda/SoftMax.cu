@@ -664,6 +664,42 @@ WriteBpropResults(
 
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue>
 __global__ void
+cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
+{
+  extern __shared__ unsigned char smem[];
+  auto sdata = reinterpret_cast<accscalar_t*>(smem);
+
+  // forward pointers to batch[blockIdx.x]
+  // each block handles a sample in the mini-batch
+  input += static_cast<int64_t>(blockIdx.x) * classes;
+  output += static_cast<int64_t>(blockIdx.x) * classes;
+
+  const int shift = ((uint64_t)input) % ALIGN_BYTES / sizeof(scalar_t);
+  const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
+
+  // find the max
+  accscalar_t threadMax = ilpReduce<MaxFloat, ILP, scalar_t, accscalar_t>(
+    shift, input, classes, MaxFloat<scalar_t, accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
+  accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(sdata, threadMax,
+    Max<accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
+
+  // reduce all values
+  accscalar_t threadExp = ilpReduce<SumExpFloat, ILP, scalar_t, accscalar_t>(
+    shift, input, classes, SumExpFloat<scalar_t, accscalar_t>(max_k), static_cast<accscalar_t>(0));
+  accscalar_t sumAll = blockReduceWarp<Add, accscalar_t>(sdata, threadExp,
+    Add<accscalar_t>(), static_cast<accscalar_t>(0));
+
+  Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
+
+  if (shift == output_shift) {
+    WriteFpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, input, output, epilogue);
+  } else {
+    WriteFpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, input, output, epilogue);
+  }
+}
+
+template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue>
+__global__ void
 cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, int classes)
 {
   // Each thread block processes a sample in the batch
@@ -731,42 +767,6 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, int classes)
     }
 
     output_vec_ptr[offset] = out_vec;
-  }
-}
-
-template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue>
-__global__ void
-cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
-{
-  extern __shared__ unsigned char smem[];
-  auto smem_reduction_cache = reinterpret_cast<accscalar_t*>(smem);
-
-  // forward pointers to batch[blockIdx.x]
-  // each block handles a sample in the mini-batch
-  input += static_cast<int64_t>(blockIdx.x) * classes;
-  output += static_cast<int64_t>(blockIdx.x) * classes;
-
-  const int shift = ((uint64_t)input) % ALIGN_BYTES / sizeof(scalar_t);
-  const int output_shift = ((uint64_t)output) % ALIGN_BYTES / sizeof(outscalar_t);
-
-  // find the max
-  accscalar_t threadMax = ilpReduce<MaxFloat, ILP, scalar_t, accscalar_t>(
-    shift, input, classes, MaxFloat<scalar_t, accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
-  accscalar_t max_k = blockReduceWarp<Max, accscalar_t>(smem_reduction_cache, threadMax,
-    Max<accscalar_t>(), -at::numeric_limits<accscalar_t>::max());
-
-  // reduce all values
-  accscalar_t threadExp = ilpReduce<SumExpFloat, ILP, scalar_t, accscalar_t>(
-    shift, input, classes, SumExpFloat<scalar_t, accscalar_t>(max_k), static_cast<accscalar_t>(0));
-  accscalar_t sumAll = blockReduceWarp<Add, accscalar_t>(smem_reduction_cache, threadExp,
-    Add<accscalar_t>(), static_cast<accscalar_t>(0));
-
-  Epilogue<scalar_t, accscalar_t, outscalar_t> epilogue(max_k, sumAll);
-
-  if (shift == output_shift) {
-    WriteFpropResultsVectorized<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, shift, input, output, epilogue);
-  } else {
-    WriteFpropResults<ILP, scalar_t, accscalar_t, outscalar_t, Epilogue>(classes, input, output, epilogue);
   }
 }
 
