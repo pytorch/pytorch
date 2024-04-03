@@ -23,11 +23,7 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
-from torch.fx.experimental.symbolic_shapes import (
-    definitely_false,
-    rename_unbacked_to,
-    sym_eq,
-)
+from torch.fx.experimental.symbolic_shapes import definitely_false, sym_eq
 from torch.nn.utils import stateless
 
 from .. import config
@@ -356,26 +352,20 @@ def create_functionalized_fn(
 
         with disable_above:
             # See Note [Side-Effectful Tokens in AOTAutograd]
-            if aot_config.backend_name == "inductor":
-                f_tokens = [
-                    torch.ops.aten._make_dep_token() for _ in range(len(meta.tokens))
-                ]
-
+            if trace_joint:
+                assert (
+                    isinstance(args, tuple)
+                    and len(args) == 2
+                    and isinstance(args[0], (list, tuple))
+                )
+                tokens = args[0][: len(meta.tokens)]
+                actual_args = args[0][len(meta.tokens) :]
+                args = (actual_args, args[1])
             else:
-                if trace_joint:
-                    assert (
-                        isinstance(args, tuple)
-                        and len(args) == 2
-                        and isinstance(args[0], (list, tuple))
-                    )
-                    tokens = args[0][: len(meta.tokens)]
-                    actual_args = args[0][len(meta.tokens) :]
-                    args = (actual_args, args[1])
-                else:
-                    tokens = args[: len(meta.tokens)]
-                    args = args[len(meta.tokens) :]
+                tokens = args[: len(meta.tokens)]
+                args = args[len(meta.tokens) :]
 
-                f_tokens = pytree.tree_map(to_fun, tokens)
+            f_tokens = pytree.tree_map(to_fun, tokens)
 
             assert all(token.numel() == 0 for token in f_tokens)
 
@@ -396,17 +386,7 @@ def create_functionalized_fn(
 
             # Return both the tokens and the outputs
             # See Note [Side-Effectful Tokens in AOTAutograd]
-            if aot_config.backend_name == "inductor":
-                torch.ops.aten._sink_tokens(
-                    list(functional_tensor_mode._tokens.values())
-                )
-                # Do not keep the concept of tokens around after this, since
-                # inductor does not want tokens as inputs/outputs
-                meta.num_forward_returns -= len(meta.tokens)
-                meta.num_forward -= len(meta.tokens)
-                meta.tokens = {}
-            else:
-                f_outs = (*functional_tensor_mode._tokens.values(), *f_outs)
+            f_outs = (*functional_tensor_mode._tokens.values(), *f_outs)
 
         if trace_joint:
             # We support a limited amount of mutation of graph inputs during the backward pass.
@@ -545,10 +525,7 @@ def create_functionalized_fn(
 
     # Additionally pass in tokens as inputs
     # See Note [Side-Effectful Tokens in AOTAutograd]
-    if aot_config.backend_name == "inductor":
-        additional_token_inputs = []
-    else:
-        additional_token_inputs = [torch.tensor([])] * len(meta.tokens)
+    additional_token_inputs = [torch.tensor([])] * len(meta.tokens)
 
     if trace_joint:
         args = ([*additional_token_inputs, *args[0]], *args[1:])
@@ -680,7 +657,7 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
             if isinstance(result, torch.SymInt) and isinstance(
                 result.node.expr, sympy.Symbol
             ):
-                rename_unbacked_to(n.meta["example_value"], result)
+                torch._check(result == n.meta["example_value"])
 
         return result
 

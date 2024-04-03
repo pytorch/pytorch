@@ -82,7 +82,6 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_fused_sdp_choice",  # returns an int
     "_print",  # no return
     "_sink_tokens",  # no return
-    "_create_tokens",  # don't care
     "_nested_get_ragged_idx",  # returns an int
 ]
 
