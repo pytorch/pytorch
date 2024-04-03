@@ -770,6 +770,10 @@ class MetaConverter:
                 if shape_env is None:
                     return s
 
+                # if it's already symbolic, just return it
+                if isinstance(s, torch.SymInt):
+                    return s
+
                 # NB: The symbol here is expected to be simplified out because we a priori
                 # allocate inner and outer symbols according to the appropriate symbolic
                 # contexts and prefer those over this symbol during symbol simplification
@@ -778,7 +782,7 @@ class MetaConverter:
                 # assumption of it being simplified out will fail and it may be guarded on,
                 # which will hard error.
                 sym_source = EphemeralSource("symint_visitor_fn")
-                symbol = shape_env.create_symbol(s, sym_source)
+                symbol = shape_env.create_symbol(s, sym_source, positive=False)
                 return shape_env.create_symintnode(symbol, hint=s, source=sym_source)
 
             real_to_fake_mapping = {}
