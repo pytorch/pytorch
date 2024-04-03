@@ -97,6 +97,9 @@ class PaddingTest(TestCase):
         if "LongformerMaskedLMOutput" in str(type(ref)):
             ref = ref.loss
             act = act.loss
+        if isinstance(ref, dict) and "loss" in ref:
+            ref = ref["loss"]
+            act = act["loss"]
         self.assertTrue(
             torch.allclose(ref, act, atol=tol, rtol=tol), f"ref:\n{ref}\nact:\n{act}"
         )
@@ -322,6 +325,8 @@ class PaddingTest(TestCase):
                         optim.zero_grad(True)
                         with torch.cuda.amp.autocast():
                             pred = m(*args, **kwargs)
+                            if isinstance(pred, dict):
+                                pred = pred["loss"]
                             loss = pred.sum()
                         loss.backward()
                         optim.step()
@@ -355,7 +360,7 @@ class PaddingTest(TestCase):
             )
 
             # profiling
-            self.do_profiling(opt_f_with_padding, opt_f_without_padding, perf_args, perf_kwargs)
+            self.do_profiling(opt_f_with_padding, opt_f_without_padding, args=perf_args, kwargs=perf_kwargs)
 
     def do_profiling(self, f_lhs, f_rhs, tag_lhs="With padding", tag_rhs="Without padding", args=(), kwargs={}):
        torch.cuda.synchronize()
@@ -505,6 +510,54 @@ class PaddingTest(TestCase):
 
         perf_inputs = torch.randn(256, layer_sizes[0])
         self.run_acc_and_perf_test(m, x, perf_inputs)
+
+    def test_efficient_det(self):
+        import sys
+        # Will cleanup
+        sys.path.append("/home/shunting/ws/pytorch/torchbenchmark")
+
+        from torchbenchmark.models import timm_efficientdet
+        try:
+            torch.set_default_device("cpu")
+            benchmark = timm_efficientdet.Model(
+                test="train",
+                device="cuda",
+                batch_size=1,
+            )
+        finally:
+            torch.set_default_device("cuda")
+        model, inputs = benchmark.get_module()
+
+        self.run_acc_and_perf_test(model, inputs)
+
+    def skip_test_efficient_det(self):
+        """
+        Tried to construct the model and input using effdet package directly.
+        But there are too many arguments to setup..
+        """
+        from effdet import create_model, create_loader, create_dataset
+
+        model = create_model(
+            model_name="tf_efficientdet_d1",
+            bench_task="train",
+            num_classes=None,
+            pretrained=False,
+            pretrained_backbone=True,
+            redundant_bias=None,
+            label_smoothing=None,
+            legacy_focal=None,
+            jit_loss=None,
+            soft_nms=None,
+            bench_labeler=False,
+            checkpoint_path="",
+        )
+        dataset_train, _ = create_dataset(
+            "coco",
+            root=root,
+            custom_dataset_cfg=Coco2017MinimalCfg())
+        loader = create_loader(
+        )
+        pass
 
     def test_conv(self):
         x_shape = (1, 128, 640, 959)
