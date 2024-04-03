@@ -171,8 +171,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # and the original complex tensor will share their data_ptr
         # so we should guard on the dtype in this case.
         def mark_static(x):
-            if not x.is_complex():
-                mark_static_address(x)
+            mark_static_address(x)
 
         tree_map_only(torch.Tensor, mark_static, self.value.state)
 
