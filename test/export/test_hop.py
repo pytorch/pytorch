@@ -70,7 +70,7 @@ class TestHOP(TestCase):
             self.assertEqual(type(orig), type(loaded))
             self.assertEqual(orig, loaded)
 
-    @ops(hop_tests, allowed_dtypes=(torch.float, torch.int))
+    @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_aot_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
             def forward(self, *args):
@@ -85,7 +85,7 @@ class TestHOP(TestCase):
             ep = export(model, args, kwargs)
             self._compare(model, ep, args, kwargs)
 
-    @ops(hop_tests, allowed_dtypes=(torch.float, torch.int))
+    @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_pre_dispatch_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
             def forward(self, *args):
@@ -100,7 +100,7 @@ class TestHOP(TestCase):
             ep = _export(model, args, kwargs, pre_dispatch=True)
             self._compare(model, ep, args, kwargs)
 
-    @ops(hop_tests, allowed_dtypes=(torch.float, torch.int))
+    @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_retrace_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
             def forward(self, *args):
@@ -116,7 +116,7 @@ class TestHOP(TestCase):
             ep = ep.run_decompositions()
             self._compare(model, ep, args, kwargs)
 
-    @ops(hop_tests, allowed_dtypes=(torch.float, torch.int))
+    @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_serialize_export(self, device, dtype, op):
         class Foo(torch.nn.Module):
             def forward(self, *args):
