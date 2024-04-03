@@ -480,9 +480,9 @@ class SymPyValueRangeAnalysis:
 
         def whole_range(u):
             if u > 0:
-                return ValueRanges(0, u)
+                return ValueRanges(0, u - 1)
             else:
-                return u
+                return ValueRanges(u + 1, 0)
 
         def c_mod(a, b):
             ret = abs(a) % abs(b)
