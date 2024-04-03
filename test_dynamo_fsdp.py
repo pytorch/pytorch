@@ -146,6 +146,81 @@ def handle_exception(exc_type, exc_value, exc_traceback):
 
 sys.excepthook = handle_exception
 
+# NOTE: copied from TorchTrain
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper as ptd_checkpoint_wrapper
+
+class ACConfigClass:
+    mode: str = "selective"
+    selective_ac_option: str = "2"
+
+def checkpoint_wrapper(module, config):
+    if config.mode == "selective" and config.selective_ac_option == "op":
+
+        def _get_custom_policy(meta):
+            def _custom_policy(mode, func, *args, **kwargs):
+                mm_count_key = f"{mode}_mm_count"
+                if func == torch.ops.aten.mm.default:
+                    meta[mm_count_key] += 1
+                # Saves output of all compute ops, except every second mm
+                return func in no_recompute_list and not (
+                    func == torch.ops.aten.mm.default and meta[mm_count_key] % 2 == 0
+                )
+
+            return _custom_policy
+
+        def selective_checkpointing_context_fn():
+            meta = defaultdict(int)
+            return _pt2_selective_checkpoint_context_fn_gen(_get_custom_policy(meta))
+
+        return ptd_checkpoint_wrapper(
+            module,
+            checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+            checkpoint_fn=checkpoint,
+            context_fn=selective_checkpointing_context_fn,
+            use_reentrant=False,
+            preserve_rng_state=False,
+        )
+    elif config.mode == "full":
+        return ptd_checkpoint_wrapper(
+            module,
+            checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+            checkpoint_fn=checkpoint,
+            use_reentrant=False,
+            preserve_rng_state=False,
+        )
+
+    elif config.mode == "selective" and config.selective_ac_option.isdigit():
+        """enables selective checkpointing of candidate layers.
+        Usage:
+        'selective_ac_option' with a positive 'int' value in config controls which layers to checkpoint.
+        1 == checkpointing every one (all).
+        2 == checkpoint every 2nd one
+        """
+        every_x_layer = int(config.selective_ac_option)
+        assert (
+            every_x_layer >= 0
+        ), f"selective layer AC policy (every_x_layer) expects a positive integer, received {every_x_layer}"
+
+        checkpoint_wrapper.__dict__.setdefault("_count", 0)
+
+        checkpoint_wrapper._count += 1
+        if not every_x_layer or checkpoint_wrapper._count % every_x_layer == 0:
+            return ptd_checkpoint_wrapper(
+                module,
+                checkpoint_impl=CheckpointImpl.NO_REENTRANT,
+                checkpoint_fn=checkpoint,
+                use_reentrant=False,
+                preserve_rng_state=False,
+            )
+        # skip activation checkpointing and store activations for this layer
+        else:
+            return module
+
+    else:
+        raise NotImplementedError(
+            "Unknown AC type or AC config. Only selective op and selective layer ac implemented currently."
+        )
+
 
 def init():
     from torch.testing._internal.common_fsdp import MLP
@@ -153,9 +228,10 @@ def init():
     # simple_mlp + unbalanced -> works
     # nested_fully_shard + balanced -> works
     # nested_fully_shard + unbalanced -> works
-    test_case = "nested_fully_shard"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
+    test_case = "simple_mlp"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
     balanced = False
     mixed_precision = True
+    activation_checkpoint = False
     if balanced:
         hidden_dim = 1234
     else:
@@ -167,6 +243,10 @@ def init():
         fsdp_config = {"mp_policy": mp_policy}
     else:
         fsdp_config = {}
+    if activation_checkpoint:
+        ac_config = ACConfigClass()
+        ac_config.mode = "selective"
+        ac_config.selective_ac_option = "2"
     mesh = init_device_mesh("cuda", (world_size,))
 
     torch.manual_seed(0)
@@ -178,6 +258,8 @@ def init():
             nn.ReLU(),
             nn.Linear(hidden_dim, hidden_dim, device=device_type),
         )
+        if activation_checkpoint:
+            model = checkpoint_wrapper(model, ac_config)
         fully_shard(model, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
     elif test_case == "simple_seq_module":  # this causes `len(splits) == 1` which is an interesting case for `replace_foreach_all_gather_copy_out_pattern` FX pass.
         class SimpleModule(nn.Module):
@@ -189,11 +271,15 @@ def init():
                 return torch.matmul(x, self.param)
 
         model = nn.Sequential(*[SimpleModule(torch.device("cuda")) for _ in range(1)])
+        if activation_checkpoint:
+            model = checkpoint_wrapper(model, ac_config)
         for mod in model:
             fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
         fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
     elif test_case == "nested_fully_shard":
         model = nn.Sequential(*[MLP(hidden_dim) for _ in range(3)])
+        if activation_checkpoint:
+            model = checkpoint_wrapper(model, ac_config)
         for mlp in model:
             fully_shard(mlp, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
         fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
