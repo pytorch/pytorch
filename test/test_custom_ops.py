@@ -26,9 +26,9 @@ from typing import *  # noqa: F403
 
 def requires_compile(fun):
     fun = unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")(fun)
-    if sys.version_info >= (3, 12):
-        # torch.compile is not supported on python 3.12+
-        fun = unittest.expectedFailure(fun)
+    fun = unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )(fun)
     return fun
 
 
