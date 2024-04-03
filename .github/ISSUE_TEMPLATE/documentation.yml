@@ -6,7 +6,7 @@ body:
   attributes:
     label: 📚 The doc issue
     description: >
-      A clear and concise description of what content in https://pytorch.org/docs/stable/index.html is an issue. If this has to do with the general https://pytorch.org website, please file an issue at https://github.com/pytorch/pytorch.github.io/issues/new/choose  instead. If this has to do with https://pytorch.org/tutorials, please file an issue at https://github.com/pytorch/tutorials/issues/new.
+      A clear and concise description of what content in https://pytorch.org/docs/stable/index.html is an issue. If this has to do with the general https://pytorch.org website, please file an issue at https://github.com/pytorch/pytorch.github.io/issues/new/choose instead. If this has to do with https://pytorch.org/tutorials, please file an issue at https://github.com/pytorch/tutorials/issues/new.
   validations:
     required: true
 - type: textarea
