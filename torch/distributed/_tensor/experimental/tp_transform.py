@@ -236,8 +236,8 @@ def _mark_sharding(
                     )
                 placement_strategies[node] = PlacementStrategy(
                     output_specs=_get_output_spec_from_output_sharding(output_sharding),
-                    input_specs=output_sharding.schema_suggestions[0].args_spec
-                    if output_sharding.schema_suggestions is not None
+                    input_specs=output_sharding.redistribute_schema.args_spec
+                    if output_sharding.redistribute_schema is not None
                     else _get_input_node_specs(node, placement_strategies),
                 )
                 node.meta["sharding"] = placement_strategies[node]
@@ -345,7 +345,7 @@ def _generate_default_output_sharding(
         output_spec=pytree.tree_map_only(
             FakeTensor, create_output_spec, node.meta["val"]
         ),
-        schema_suggestions=[new_op_schema],
+        redistribute_schema=new_op_schema,
         failed_reason=f"{node.op} does not have sharding strategy registered",
         needs_redistribute=True,
     )
@@ -458,6 +458,14 @@ def _insert_reshard_gm(
     reshard_gm_nodes = list(reshard_gm.graph.nodes)
     input_node = reshard_gm_nodes[0]
     with gm.graph.inserting_before(node):
+        # copy nn_module_stack metadata for output, all-reduce nodes
+        for reshard_node in reshard_gm.graph.nodes:
+            if reshard_node.op not in ["placeholder", "output"]:
+                reshard_node.meta["nn_module_stack"] = (
+                    copy.copy(input_arg.meta["nn_module_stack"])
+                    if not input_arg.op == "placeholder"
+                    else copy.copy(node.meta["nn_module_stack"])
+                )
         output_node = gm.graph.graph_copy(
             reshard_gm.graph,
             val_map={

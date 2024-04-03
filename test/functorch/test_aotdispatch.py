@@ -35,8 +35,8 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import parametrize, instantiate_parametrized_tests
-from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
 from torch.testing._internal.optests import _test_aot_autograd_forwards_backwards_helper, aot_autograd_check
+from torch.testing._internal.hop_db import hop_db
 from torch._higher_order_ops.out_dtype import out_dtype
 from functorch import (
     grad, vjp, vmap, jacrev,
@@ -3040,9 +3040,6 @@ def forward(self, arg0_1, arg1_1):
         gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_2 = torch._C._set_grad_enabled(False)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
@@ -3096,9 +3093,6 @@ def forward(self, arg0_1):
         gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_2 = torch._C._set_grad_enabled(False)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
@@ -4612,12 +4606,12 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info,
 
 
 class TestEagerFusionOpInfo(AOTTestCase):
-    @ops(op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', aot_autograd_failures)
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 
-    @ops(op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
              aot_autograd_failures | symbolic_aot_autograd_failures)

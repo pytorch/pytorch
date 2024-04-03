@@ -14,6 +14,7 @@ import torch.nn as nn
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 
@@ -27,7 +28,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
-    TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -80,7 +80,7 @@ def cdata(t):
     return t.untyped_storage()._cdata
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -278,6 +278,19 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             FileCheck().check("skipping cudagraphs due to multiple devices").run(
                 captured_output[0]
             )
+
+        @torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True)
+        def test_skip_symbolic(self):
+            @torch.compile(dynamic=True)
+            def foo(x, y):
+                return x + y
+
+            with capture_stderr() as captured_output:
+                foo(torch.rand([10], device="cuda"), torch.rand([10], device="cuda"))
+
+            FileCheck().check(
+                "skipping cudagraphs due to graph with symbolic shapes inputs"
+            ).check("x + y").run(captured_output[0])
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
@@ -1245,6 +1258,23 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             node = self.get_manager().current_node
             self.assertEqual(len(list(node.path_live_weakrefs())), 1)
 
+        def test_unstable_ptr(self):
+            import torch
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(m, inp):
+                return m(inp)
+
+            def f():
+                l = []
+                m = torch.nn.Linear(20, 20).cuda()
+                for _ in range(4):
+                    inp = torch.rand([20, 20], device="cuda")
+                    foo(m, inp)
+                    m.weight.data = torch.rand([20, 20], device="cuda")
+
+            self.assertRaises(RuntimeError, f)
+
         @requires_multigpu()
         def test_manager_per_device(self):
             def test():
@@ -1472,7 +1502,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
     instantiate_parametrized_tests(CudaGraphTreeTests)
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if not TEST_CUDA_GRAPH:
         if __name__ == "__main__":
