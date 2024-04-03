@@ -1,10 +1,23 @@
 """This module implements the user facing API for templated attention in PyTorch."""
+import functools
 from typing import Callable
 
 import torch
 from torch._higher_order_ops.templated_attention import (
     templated_attention as templated_attention_hop,
 )
+
+
+def _compose(*fs):
+    """Compose a sequence of score_mod functions."""
+
+    def compose2(f, g):
+        def inner(score, b, h, m, n):
+            return f(g(score, b, h, m, n), b, h, m, n)
+
+        return inner
+
+    return functools.reduce(compose2, fs)
 
 
 _score_mod_signature = Callable[

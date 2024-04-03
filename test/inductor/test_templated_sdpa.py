@@ -8,7 +8,7 @@ from unittest import expectedFailure
 
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch.nn.attention.templated_attention import templated_attention
+from torch.nn.attention.templated_attention import _compose, templated_attention
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.testing._internal.common_utils import requires_cuda
@@ -19,18 +19,6 @@ Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 
 def create_attention(score_mod):
     return functools.partial(templated_attention, score_mod=score_mod)
-
-
-# Function composition helpers
-def compose2(f, g):
-    def inner(score, b, h, m, n):
-        return f(g(score, b, h, m, n), b, h, m, n)
-
-    return inner
-
-
-def compose(*fs):
-    return functools.reduce(compose2, fs)
 
 
 test_dtypes = (
@@ -121,10 +109,11 @@ class TestTemplatedSDPA(InductorTestCase):
         def score_mod_2(score, b, h, m, n):
             return torch.where(m <= n, score, float("-inf"))
 
-        composed_score_mod = compose(score_mod_1, score_mod_2)
+        composed_score_mod = _compose(score_mod_1, score_mod_2)
 
         self.run_test(composed_score_mod, dtype)
 
+    # TODO We are currently not capturing free variables in the closure correctly
     @expectedFailure
     @requires_cuda
     @common_utils.parametrize("dtype", test_dtypes)

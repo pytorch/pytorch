@@ -1352,10 +1352,8 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_name = add_subgraph(
             tx,
-            self.source,
             "templated_attention",
             torch.fx.GraphModule(tx.output.nn_modules, body_graph),
-            # torch.fx.GraphModule({}, body_graph)
         )
 
         body_node = make_attr(tx, body_name)
