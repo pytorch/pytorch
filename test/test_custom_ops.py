@@ -270,7 +270,7 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         y = x.clone()
         with self.assertRaisesRegex(
             optests.OpCheckError,
-            "Getting these operators to work with functionalization requires some extra work",
+            "We only support functionalizing operators whose outputs do not have alias annotations",
         ):
             optests.opcheck(op, (y,), {})
 
