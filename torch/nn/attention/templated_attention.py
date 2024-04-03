@@ -1,3 +1,4 @@
+"""This module implements the user facing API for templated attention in PyTorch."""
 from typing import Callable
 
 import torch
@@ -17,19 +18,51 @@ def templated_attention(
     value: torch.Tensor,
     score_mod: _score_mod_signature,
 ) -> torch.Tensor:
-    """This function implements scaled dot product attention with an arbitrary attention score modification function.
+    r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
+
+    This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
+    attention score modification function. The attention score modification function will be applied after the attention
+    scores have been calculated between the query and key tensors. The attention scores are calculated as follows:
+
+    The ``score_mod`` function should have the following signature:
+
+    .. code-block:: python
+
+        def score_mod(
+            score: torch.Tensor,
+            batch: torch.Tensor,
+            head: torch.Tensor,
+            token_q: torch.Tensor,
+            token_kv: torch.Tensor
+        ) -> torch.Tensor:
+
+    Where:
+        - ``score``: A scalar tensor representing the attention score,
+          with the same data type and device as the query, key, and value tensors.
+        - ``batch``, ``head``, ``token_q``, ``token_kv``: Scalar tensors indicating
+          the batch index, head index, query index, and key/value index, respectively.
+          These should have the ``torch.int`` data type and be located on the same device as the score tensor.
+
+    Args:
+        query (Tensor): Query tensor; shape :math:`(B, H, L, E)`.
+        key (Tensor): Key tensor; shape :math:`(B, H, S, E)`.
+        value (Tensor): Value tensor; shape :math:`(B, H, S, Ev)`.
+        score_mod (Callable): Function to modify attention scores
+
+    Returns:
+        output (Tensor): Attention output; shape :math:`(B, H, L, Ev)`.
+
+    Shape legend:
+        - :math:`N: \text{Batch size} ... : \text{Any number of other batch dimensions (optional)}`
+        - :math:`S: \text{Source sequence length}`
+        - :math:`L: \text{Target sequence length}`
+        - :math:`E: \text{Embedding dimension of the query and key}`
+        - :math:`Ev: \text{Embedding dimension of the value}`
 
     .. warning::
         `torch.nn.attention.templated_attention` is a prototype feature in PyTorch. It doesn't support training currently.
         Please look forward to a more stable implementation in a future version of PyTorch.
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
-    Args:
-        query (Tensor): Query tensor; shape :math:`(B, H, L, E)`.
-        key (Tensor): Key tensor; shape :math:`(B, H, S, E)`.
-        value (Tensor): Value tensor; shape :math:`(B, H, S, Ev)`.
-        score_mod (Callable): Function to modify attention scores; signature :math:`(score, b, h, m, n, *other_buffers) -> score`.
-    Returns:
-        output (Tensor): Attention output; shape :math:`(B, H, L, Ev)`.
     """
     return templated_attention_hop(query, key, value, score_mod)

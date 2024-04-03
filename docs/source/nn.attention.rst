@@ -17,12 +17,15 @@ Utils
 
 Submodules
 ----------
+
 .. autosummary::
     :nosignatures:
 
+    templated_attention
     bias
 
 .. toctree::
     :hidden:
 
+    nn.attention.templated_attention
     nn.attention.bias

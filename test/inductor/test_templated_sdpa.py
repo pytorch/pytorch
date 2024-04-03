@@ -75,8 +75,8 @@ class TestTemplatedSDPA(InductorTestCase):
     @requires_cuda
     @common_utils.parametrize("dtype", test_dtypes)
     def test_causal_mask(self, dtype: torch.dtype):
-        def score_mod(score, b, h, seq_len_q, seq_len_kv):
-            return torch.where(seq_len_q >= seq_len_kv, score, float("-inf"))
+        def score_mod(score, b, h, token_q, token_kv):
+            return torch.where(token_q >= token_kv, score, float("-inf"))
 
         self.run_test(score_mod, dtype)
 
