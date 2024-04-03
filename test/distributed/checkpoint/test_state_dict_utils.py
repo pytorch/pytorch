@@ -120,7 +120,6 @@ class TestStateDictUtils(DTensorTestBase):
         }
         self.assertEqual(state_dict, _gather_state_dict(dist_state_dict))
 
-    @with_comms
     @skip_if_lt_x_gpu(2)
     def test_create_cpu_state_dict(self):
         device = torch.device("cuda")
@@ -168,10 +167,10 @@ class TestStateDictUtils(DTensorTestBase):
         _verify(cpu_state_dict)
         cpu_state_dict = _create_cpu_state_dict(state_dict, share_memory=True)
         _verify(cpu_state_dict)
-        # cpu_state_dict = _create_cpu_state_dict(
-        #     state_dict, share_memory=True, pin_memory=True
-        # )
-        # _verify(cpu_state_dict)
+        cpu_state_dict = _create_cpu_state_dict(
+            state_dict, share_memory=True, pin_memory=True
+        )
+        _verify(cpu_state_dict)
 
 
 if __name__ == "__main__":
