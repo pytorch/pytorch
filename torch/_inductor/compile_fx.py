@@ -38,7 +38,7 @@ from torch._dynamo.utils import (
 )
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
-from torch._inductor.cudagraph_utils import BoxedDeviceIndex
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex, get_placeholders
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.utils import BoxedBool, count_tangents
@@ -522,7 +522,6 @@ def compile_fx_inner(
             ):
                 boxed_forward_device_index.set(next(iter(compiled_graph.device_idxs)))
 
-            placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
             compiled_graph.current_callable = cudagraphify(
                 compiled_graph.current_callable,
                 example_inputs,
@@ -532,7 +531,7 @@ def compile_fx_inner(
                 is_backward=is_backward,
                 is_inference=is_inference,
                 constants=tuple(compiled_graph.constants.values()),
-                placeholders=tuple(placeholders),
+                placeholders=tuple(get_placeholders(gm.graph)),
                 mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
             )
         else:

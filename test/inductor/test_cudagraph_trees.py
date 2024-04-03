@@ -337,17 +337,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertIsNotNone(self.get_manager())
 
-        def test_mutation_cudagraph_managed_tensors(self):
-            @torch.compile(mode="reduce-overhead")
+        @parametrize("backend", ("inductor", "cudagraphs"))
+        @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
+        def test_mutation_cudagraph_managed_tensors(self, backend):
             def foo(x):
                 return x + 1
 
-            @torch.compile(mode="reduce-overhead")
             def mut(x):
-                return x.add_(2)
+                x.add_(2)
+                return x
 
             def non_mut(x):
                 return x.add(2)
+
+            mut = get_compile_fn(backend)(mut)
+            foo = get_compile_fn(backend)(foo)
 
             for i in range(3):
                 torch.compiler.cudagraph_mark_step_begin()
@@ -358,8 +362,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     mut_out = mut(tmp)
                 if i == 0:
                     FileCheck().check(
-                        "skipping cudagraphs due to mutaton on input."
-                    ).check(".add_(2)").run(captured_output[0])
+                        "skipping cudagraphs due to mutation on input."
+                    ).check("x.add_(2)").run(captured_output[0])
                 else:
                     self.assertEqual(mut_out, non_mut(foo(inp)))
 
@@ -370,9 +374,9 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # now its an input from eager we should fallback to inductor without cudagraphs
             with capture_stderr() as captured_output:
                 mut(tmp.clone())
-            FileCheck().check(
-                "skipping cudagraphs due to mutaton on input."
-            ).check(".add_(2)").run(captured_output[0])
+            FileCheck().check("skipping cudagraphs due to mutation on input.").check(
+                "x.add_(2)"
+            ).run(captured_output[0])
 
         def test_function_compiled_multiple_times(self):
             def foo(x):

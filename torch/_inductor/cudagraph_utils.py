@@ -1,5 +1,5 @@
 import dataclasses
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import torch
 
@@ -26,6 +26,10 @@ class WrappedFunction:
     mutated_input_idxs: List[int]
 
 
+def get_placeholders(graph: torch.fx.Graph) -> List[torch.fx.Node]:
+    return [node for node in graph.nodes if node.op == "placeholder"]
+
+
 def get_mutating_use_stack_trace(placeholder_node: torch.fx.Node) -> Optional[str]:
     # reinplaced uses might have a single, non-copy_ use
     if len(placeholder_node.users) == 1:
@@ -44,10 +48,9 @@ def format_default_skip_message(reason: str) -> str:
 
 
 def get_mutation_stack_trace(
-    gm: torch.fx.GraphModule, mutation_indices: Iterable[int]
+    placeholders: Iterable[torch.fx.Node], mutation_indices: Iterable[int]
 ) -> str:
     stack_trace: Optional[str] = ""
-    placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
 
     for idx in mutation_indices:
         placeholder = placeholders[idx]
@@ -83,19 +86,7 @@ def check_for_mutation(
         if not has_mutation:
             return None
 
-        stack_trace: Optional[str] = ""
-
-        for idx in mutation_indices:
-            placeholder = func.placeholders[idx]
-            if stack_trace := get_mutating_use_stack_trace(placeholder):
-                break
-
-        if stack_trace:
-            msg = f"skipping cudagraphs due to mutaton on input. Found from : \n {stack_trace}"
-            return msg
-
-        return default_msg
-        #return get_mutation_stack_trace(gm, mutation_indices)
+        return get_mutation_stack_trace(func.placeholders, mutation_indices)
 
     else:
         has_mutation = len(func.mutated_input_idxs) != 0
