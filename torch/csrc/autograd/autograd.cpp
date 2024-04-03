@@ -128,7 +128,7 @@ static variable_list run_backward(
           input.requires_grad(),
           "element ",
           i,
-          " of input tensors does not require grad");        
+          " of the input tensors does not require grad");        
       if (!grad_fn) {
         // See NOTE [ Autograd Unreachable Input ] for details
         output_edges.emplace_back(std::make_shared<Identity>(), 0);
