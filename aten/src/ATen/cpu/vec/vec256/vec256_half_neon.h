@@ -22,17 +22,10 @@ inline namespace CPU_CAPABILITY {
 //    https://github.com/android/ndk/issues/1248
 //    https://bugs.llvm.org/show_bug.cgi?id=45824
 // Most likely we will do aarch32 support with inline asm.
-#if defined(__aarch64__)
-#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+#if !defined(C10_MOBILE) && defined(__aarch64__) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
 
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
-#endif
-
-#if defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
-#define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
-#else
-#define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
 
 template <int index, bool mask_val>
@@ -821,8 +814,7 @@ Vectorized<c10::Half> inline fmsub(
   return Vectorized<c10::Half>(r0, r1);
 }
 
-#endif /* __ARM_FEATURE_FP16_VECTOR_ARITHMETIC */
-#endif /* defined(aarch64) */
+#endif /* defined(aarch64) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) && !defined(C10_MOBILE) */
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec
