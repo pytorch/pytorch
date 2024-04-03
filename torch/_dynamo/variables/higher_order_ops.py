@@ -756,9 +756,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"torch.while_loop: Got unexpected kwargs: {list(kwargs.keys())}"
             )
 
-        if len(args) != 3:
+        if len(args) != 4:
             unimplemented(
-                f"Expected 3 arguments but got {len(args)}.\n"
+                f"Expected 4 arguments but got {len(args)}.\n"
                 f"Usage: while_loop(cond_fn, body_fn, operands)",
             )
 
@@ -781,12 +781,18 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             unimplemented(
                 f"Expected a tuple but got {args[2].python_type()}",
             )
-
         operands = args[2].unpack_var_sequence(tx)
         if not only_consist_of(args[2], (TensorVariable,)):
             unimplemented(
                 "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )
+
+        # additional inputs check
+        if not isinstance(args[3], (ListVariable, TupleVariable)):
+            unimplemented(
+                f"Expected a tuple but got {args[3].python_type()}",
+            )
+        additional_inputs = args[3].unpack_var_sequence(tx)
 
         (
             (cond_r, cond_treespec),
@@ -795,18 +801,12 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             args[0],
-            operands,
+            operands + additional_inputs,
             {},
             "while_loop",
             source_target=self.value,
             set_subgraph_inputs="manual",
         )
-        if len(cond_lifted_freevars) > 0:
-            unimplemented(
-                f"while_loop's cond_fn doesn't support capturing free variables yet."
-                f" All used inputs must be passed in as arguments explicitly."
-                f" Proxies for the lifted vars:{cond_lifted_freevars}."
-            )
         cond_nn_modules = dict(tx.output.nn_modules)
         if not isinstance(cond_r, TensorVariable):
             unimplemented(
@@ -830,21 +830,35 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             args[1],
-            operands,
+            operands + additional_inputs,
             {},
             "while_loop",
             source_target=self.value,
             set_subgraph_inputs="manual",
             should_flatten_outputs=True,
         )
+        (
+            cond_graph,
+            body_graph,
+            cond_shared,
+            body_shared,
+            cond_unique,
+            body_unique,
+        ) = _merge_graph_inputs(
+            cond_graph,
+            cond_lifted_freevars,
+            "cond_fn",
+            body_graph,
+            body_lifted_freevars,
+            "body_fn",
+        )
+
+        # Note: cond_shared and body_shared refer to the same proxy in parent graph
+        # so using either of them is OK. Use cond_shared as it doesnt matter.
+        additional_lifted_inputs = cond_shared + cond_unique + body_unique
+
         body_nn_modules = dict(tx.output.nn_modules)
 
-        if len(body_lifted_freevars) > 0:
-            unimplemented(
-                f"while_loop's body_fn doesn't support capturing free variables yet."
-                f" All used inputs must be passed in as arguments explicitly."
-                f" Proxies for the lifted vars:{body_lifted_freevars}."
-            )
         cond_name = add_subgraph(
             tx,
             "cond_fn",
@@ -863,6 +877,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             cond_node,
             body_node,
             tuple([operand.as_proxy() for operand in operands]),
+            tuple(
+                [inp.as_proxy() for inp in additional_inputs] + additional_lifted_inputs
+            ),
         )
 
         return _call_function_and_unflatten_output(
