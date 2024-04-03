@@ -159,7 +159,7 @@ static void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, t
         "please file a bug report instead.");
     }
     batched_tensor_inputs.push_back(tensor);
-    batched_tensor_inputs_position.push_back(idx);
+    batched_tensor_inputs_position.push_back(static_cast<int64_t>(idx));
   }
   TORCH_INTERNAL_ASSERT(!batched_tensor_inputs.empty());
 
@@ -304,7 +304,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
       continue;
     }
     batched_tensor_inputs.push_back(tensor);
-    batched_tensor_inputs_position.push_back(idx);
+    batched_tensor_inputs_position.push_back(static_cast<int64_t>(idx));
   }
   TORCH_INTERNAL_ASSERT(!batched_tensor_inputs.empty());
 
@@ -445,7 +445,7 @@ void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::ji
       continue;
     }
     batched_tensor_inputs.push_back(tensor);
-    batched_tensor_inputs_position.push_back(idx);
+    batched_tensor_inputs_position.push_back(static_cast<int64_t>(idx));
   }
   TORCH_INTERNAL_ASSERT(!batched_tensor_inputs.empty());
 

@@ -89,6 +89,8 @@ else:
         return False
 
 
+output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+
 LOCK_TIMEOUT = 600
 
 # timing metrics for time spent in the compilation
@@ -1661,6 +1663,7 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+        output_code_log.info("Output code written to: %s", input_path)
 
         def _compile_consts_linux(consts: bytes) -> str:
             _, consts_path = write(
@@ -1678,14 +1681,6 @@ class AotCodeCompiler:
                 cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
-
-            cmd = (
-                f"{objcopy_command} --rename-section"
-                " .data=.lrodata,alloc,load,readonly,data,contents"
-                f" {consts_o} {consts_o}"
-            )
-            log.debug("aot constant obj command: %s", cmd)
-            run_command_and_check(cmd)
 
             cmd = f"rm {consts_path}"
             log.debug("aot constant bin removal command: %s", cmd)
@@ -1713,7 +1708,7 @@ class AotCodeCompiler:
 
         def _compile_consts_darwin(consts: bytes) -> str:
             is_large_consts = len(consts) > 1024
-            consts_asm = "\t.section\t__TEXT,__const\n"
+            consts_asm = "\t.section\t__DATA,__data\n"
             consts_asm += "\t.globl\t__binary_constants_bin_start\n"
             consts_asm += "__binary_constants_bin_start:\n"
             if not is_large_consts:
@@ -1802,8 +1797,8 @@ class AotCodeCompiler:
                 return bytes(raw_array.contents)
 
             aot_constants = b"".join(
-                _to_bytes(tensor)
-                for name, tensor in graph.constants.items()
+                _to_bytes(graph.get_original_value_of_constant(name))
+                for name in graph.constants.keys()
                 if name not in graph.folded_constants
             )
             consts_o = {
@@ -2731,12 +2726,6 @@ class AsyncCompile:
             return task()
         return cls.pool().submit(task)
 
-    @classmethod
-    def map(cls, fn: Callable[..., Any], seq: List[Any]) -> List[Any]:
-        if config.compile_threads <= 1 or len(seq) <= 1:
-            return list(map(fn, seq))
-        return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
-
     def triton(
         self, kernel_name: str, source_code: str, device_str: str = "cuda"
     ) -> Union[TritonFuture, ModuleType]:
@@ -2753,17 +2742,11 @@ class AsyncCompile:
         else:
             return _load_kernel(kernel_name, source_code)
 
-    def multi_kernel(self, *args, **kwargs) -> ModuleType:
-        """
-        Async compile the python shim for multi-kernel.
-        """
+    def multi_kernel(self, *args, **kwargs) -> Any:
+        from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
-        def task():
-            from torch._inductor.codegen.multi_kernel import MultiKernelCall
-
-            return MultiKernelCall(*args, **kwargs)
-
-        return self.submit(task)
+        # no need to call this in parallel since the sub-kernels are already parallel tasks
+        return MultiKernelCall(*args, **kwargs)
 
     def cpp(self, source_code: str) -> ModuleType:
         def task():
