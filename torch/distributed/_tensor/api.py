@@ -593,8 +593,10 @@ def distribute_tensor(
             f"Found placements length: {len(placements)}, and device_mesh.ndim: {device_mesh.ndim}."
         )
     if isinstance(tensor, DTensor):
-        # if the tensor is already a DTensor, we just need to check if the
-        # device mesh and placements are the same
+        # if the tensor is already a DTensor, we need to check:
+        # 1. if the we can further shard this DTensor if the two device mesh belong to
+        #   the same parenet mesh and further sharding is possible.
+        # 2. check if device mesh and placements are the same
         if tensor.device_mesh != device_mesh:
             raise ValueError(
                 f"Cannot distribute a DTensor with device mesh {tensor.device_mesh} "
