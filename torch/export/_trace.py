@@ -1084,6 +1084,8 @@ def _export(
         flat_args,
     )
 
+    print("RANGE CONSTRAINTS", range_constraints)
+
     # Do some cleanups on the graph module to restore the state dict to the
     # expected form. Each of these steps should probably get fixed upstream.
     # 1. Remove tensor constants that were added as buffers.

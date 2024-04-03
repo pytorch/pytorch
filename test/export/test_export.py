@@ -225,7 +225,6 @@ class TestExport(TestCase):
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183702824
     def test_conv_dynamic(self):
         # Simple module for demonstration
         class M(torch.nn.Module):
