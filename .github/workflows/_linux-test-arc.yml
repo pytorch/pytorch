@@ -141,8 +141,6 @@ jobs:
       - name: Download TD artifacts
         continue-on-error: true
         uses: ./.github/actions/download-td-artifacts
-        with:
-          s3-bucket: ${{ inputs.s3-bucket }}
 
       - name: Parse ref
         id: parse-ref
@@ -220,9 +218,6 @@ jobs:
           else
             TEST_COMMAND=.ci/pytorch/test.sh
           fi
-          
-          pwd
-          whoami
           
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
