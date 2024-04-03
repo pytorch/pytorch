@@ -531,8 +531,8 @@ def add_workflow_conclusions(
                 if workflow_name not in workflows:
                     workflows[workflow_name] = WorkflowCheckState(
                         name=workflow_name,
-                        url=workflow_run["url"],
                         status=workflow_conclusion,
+                        url=workflow_run["url"],
                     )
                 workflow_obj = workflows[workflow_name]
 
