@@ -724,7 +724,7 @@ class OutputGraph:
                 tracer = self.root_tracer
 
             if get_static_address_type(target) == "guarded":
-                install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+                install_guard(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
             elif not is_constant_source(source):
                 install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
