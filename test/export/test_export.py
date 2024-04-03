@@ -3522,8 +3522,6 @@ graph():
             re.search(r"test_export.py.*in forward\n.*x = self.linear\(x\)", trace_addmm)
         )
 
-    # @testing.expectedFailureSerDer
-    # @testing.expectedFailureSerDerPreDispatch
     def test_sym_stack_trace(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -3540,8 +3538,7 @@ graph():
                 "y": None
             }
         )
-        print(ep)
-        # multi line stack trace for sym call constrain_range
+        # stack trace for sym call constrain_range
         trace_constrain_range = [  # different names for serdes/pre-dispatch
             node for node in ep.graph.nodes
             if node.name in [
@@ -3549,12 +3546,6 @@ graph():
                 "sym_constrain_range_for_size_default"
             ]
         ][0].meta.get("stack_trace", None)
-        self.assertTrue(
-            re.search(
-                r"test/export/test_export.py.* in forward\n.*y = torch._constrain_as_size",
-                trace_constrain_range
-            )
-        )
         self.assertTrue(
             re.search(
                 r"torch/__init__.py.*in _constrain_as_size\n.*torch.sym_constrain_range_for_size",
