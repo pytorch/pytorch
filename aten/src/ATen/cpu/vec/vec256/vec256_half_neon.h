@@ -545,14 +545,13 @@ class Vectorized<c10::Half> {
         vsqrtq_f16(values.val[0]), vsqrtq_f16(values.val[1]));
   }
   Vectorized<c10::Half> reciprocal() const {
-    auto r0 = vrecpeq_f16(values.val[0]);
-    auto r1 = vrecpeq_f16(values.val[1]);
+    auto ones = vdupq_n_f16(1.0f);
+    auto r0 = vdivq_f16(ones, values.val[0]);
+    auto r1 = vdivq_f16(ones, values.val[1]);
     return Vectorized<c10::Half>(r0, r1);
   }
   Vectorized<c10::Half> rsqrt() const {
-    auto r0 = vrsqrteq_f16(values.val[0]);
-    auto r1 = vrsqrteq_f16(values.val[1]);
-    return Vectorized<c10::Half>(r0, r1);
+    return this->sqrt().reciprocal();
   }
   Vectorized<c10::Half> pow(const Vectorized<c10::Half>& exp) const {
     return map2_with_vec_float_method(exp, &Vectorized<float>::pow);
