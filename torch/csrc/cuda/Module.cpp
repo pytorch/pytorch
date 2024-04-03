@@ -584,6 +584,9 @@ PyObject* THCPModule_memoryStats(PyObject* _unused, PyObject* arg) {
   result["num_alloc_retries"] = stats.num_alloc_retries;
   result["num_ooms"] = stats.num_ooms;
   result["max_split_size"] = stats.max_split_size;
+  result["num_sync_all_streams"] = stats.num_sync_all_streams;
+  result["num_device_alloc"] = stats.num_device_alloc;
+  result["num_device_free"] = stats.num_device_free;
   result["allocation"] = statArrayToDict(stats.allocation);
   result["segment"] = statArrayToDict(stats.segment);
   result["active"] = statArrayToDict(stats.active);
@@ -1187,6 +1190,20 @@ static void registerCudaPluggableAllocator(PyObject* module) {
     c10::StorageImpl* storage_impl = (c10::StorageImpl*)storage_impl_ptr;
     return c10::raw::weak_intrusive_ptr::use_count(storage_impl);
   });
+
+  m.def(
+      "_tensors_data_ptrs_at_indices_equal",
+      [](py::list& tensors, py::list& data_ptrs, py::list& indices) {
+        for (size_t i = 0, end = indices.size(); i < end; ++i) {
+          auto index = indices[i].cast<int64_t>();
+          auto t = tensors[index].cast<at::Tensor>();
+          auto data_ptr = data_ptrs[index].cast<int64_t>();
+          if (reinterpret_cast<int64_t>(t.data_ptr()) != data_ptr) {
+            return false;
+          }
+        }
+        return true;
+      });
 
   m.def(
       "_construct_CUDA_Tensor_From_Storage_And_Metadata",

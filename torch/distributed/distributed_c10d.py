@@ -13,7 +13,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Callable, Dict, Optional, Tuple, Union, List
+from typing import Any, Callable, Dict, Optional, Tuple, Union, List, TYPE_CHECKING
 
 import torch
 from torch._C._distributed_c10d import (
@@ -54,7 +54,7 @@ __all__ = [
     'all_to_all_single', 'barrier', 'batch_isend_irecv', 'broadcast',
     'broadcast_object_list', 'destroy_process_group',
     'gather', 'gather_object', 'get_backend_config', 'get_backend', 'get_rank',
-    'get_world_size', 'group', 'init_process_group', 'irecv',
+    'get_world_size', 'get_pg_count', 'group', 'init_process_group', 'irecv',
     'is_gloo_available', 'is_initialized', 'is_mpi_available', 'is_backend_available',
     'is_nccl_available', 'is_torchelastic_launched', 'is_ucc_available',
     'isend', 'monitored_barrier', 'new_group', 'new_subgroups',
@@ -336,7 +336,7 @@ class BackendConfig:
             }
 
         logger.info(
-            f"Using backend config: {self.device_backend_map}"  # noqa: G004
+            "Using backend config: %s", self.device_backend_map
         )
 
     def __repr__(self):
@@ -562,6 +562,7 @@ class _World:
             config_info.append(
                 {
                     "pg_name": self.pg_names[pg],
+                    "uid": _get_process_group_uid(pg),
                     "backend_config": self.pg_backend_config[pg],
                     "ranks": list(ranks.keys())
                     if len(ranks) != default_pg_size
@@ -688,8 +689,8 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
         _world.pg_default_device[group] = devices[0]
 
     logger.info(
-        f"Using device {_world.pg_default_device[group]} for object "  # noqa: G004
-        "collectives."
+        "Using device %s for object "
+        "collectives.", _world.pg_default_device[group]
     )
     return _world.pg_default_device[group]
 
@@ -705,7 +706,7 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
     """
     store_key = f"{STORE_BASED_BARRIER_PREFIX}:{group_name}"
     store.add(store_key, 1)
-    logger.info("Added key: %s to store for rank: %s", store_key, rank)
+    logger.debug("Added key: %s to store for rank: %s", store_key, rank)
 
     # Now wait for all workers to check in with the store.
     world_size = rendezvous_count
@@ -729,17 +730,17 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
         except RuntimeError as e:
             worker_count = store.add(store_key, 0)
             # Print status periodically to keep track.
-            logger.info(
+            logger.debug(
                 "Waiting in store based barrier to initialize process group for "
-                "rank: %s, key: %s (world_size=%s, num_workers_joined=%s, timeout=%s)",
-                rank, store_key, world_size, worker_count, timeout
+                "rank: %s, key: %s (world_size=%s, num_workers_joined=%s, timeout=%s error=%s)",
+                rank, store_key, world_size, worker_count, timeout, e
             )
 
             if timedelta(seconds=(time.time() - start)) > timeout:
                 raise DistStoreError(  # noqa: TRY200
                     "Timed out initializing process group in store based barrier on "
-                    "rank {}, for key: {} (world_size={}, num_workers_joined={}, timeout={})".format(
-                        rank, store_key, world_size, worker_count, timeout
+                    "rank {}, for key: {} (world_size={}, num_workers_joined={}, timeout={} error={})".format(
+                        rank, store_key, world_size, worker_count, timeout, e
                     )
                 )
 
@@ -1008,7 +1009,10 @@ def _get_default_group() -> ProcessGroup:
             "Default process group has not been initialized, "
             "please make sure to call init_process_group."
         )
-    return not_none(GroupMember.WORLD)
+    if TYPE_CHECKING:
+        return not_none(GroupMember.WORLD)
+    else:
+        return GroupMember.WORLD
 
 
 def _get_default_store() -> Store:
@@ -1072,6 +1076,50 @@ def get_backend(group: Optional[ProcessGroup] = None) -> Backend:
     pg_store = _world.pg_map[pg] if pg in _world.pg_map else None
     return Backend(not_none(pg_store)[0])
 
+def _get_process_group_uid(pg: ProcessGroup) -> int:
+    backend = None
+    try:
+        backend = pg._get_backend(torch.device("cuda"))
+    except RuntimeError:
+        pass
+    if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+        return backend.uid
+    return -1
+
+def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
+    """
+    Return the pg configuration of the given process group.
+
+    """
+    if group is None:
+        pg = _get_default_group()
+    else:
+        pg = group
+    return {
+        "pg_name": _get_process_group_name(pg),
+        "uid": _get_process_group_uid(pg),
+        "backend_config": get_backend_config(pg),
+        "pg_size": _get_group_size(pg),
+        "ranks": get_process_group_ranks(pg),
+    }
+
+def _get_all_pg_configs() -> List[Dict[str, Any]]:
+    """
+    Return the pg configuration of all the process groups.
+
+    """
+    config_info: List[Dict[str, Any]] = []
+    for pg in _world.pg_map.keys():
+        config_info.append(_get_pg_config(pg))
+    return config_info
+
+def get_pg_count() -> int:
+    """
+    Return the number of process groups.
+
+    """
+    return _world.group_count
+
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
     """
     Set the timeout for the given process group when users want to use a different timeout instead of
@@ -1093,20 +1141,18 @@ def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) ->
         None
     """
     if group is None:
-        pg = _get_default_group()
-    else:
-        pg = group
-    if _rank_not_in_group(pg):
+        group = _get_default_group()
+    if _rank_not_in_group(group):
         raise ValueError("Invalid process group specified")
     assert isinstance(group, ProcessGroup)
     devices = group._device_types
     backends = set()
     if torch.device("cpu") in devices and is_gloo_available():
-        backend = pg._get_backend(torch.device("cpu"))
+        backend = group._get_backend(torch.device("cpu"))
         if isinstance(backend, ProcessGroupGloo):
             backends.add(backend)
-    elif torch.device("cuda") in devices:
-        backend = pg._get_backend(torch.device("cuda"))
+    if torch.device("cuda") in devices:
+        backend = group._get_backend(torch.device("cuda"))
         if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
             backends.add(backend)  # type: ignore[arg-type]
         elif is_gloo_available() and isinstance(backend, ProcessGroupGloo):
@@ -1204,7 +1250,6 @@ def init_process_group(
         "cpu:gloo,cuda:custom_backend".
 
     """
-    set_pytorch_distributed_envs_from_justknobs()
 
     global _world
 
@@ -1213,6 +1258,8 @@ def init_process_group(
 
     if GroupMember.WORLD is not None:
         raise ValueError("trying to initialize the default process group twice!")
+
+    set_pytorch_distributed_envs_from_justknobs()
 
     assert (store is None) or (
         init_method is None
@@ -1308,7 +1355,7 @@ def init_process_group(
         # these barriers may be unnecessary, as proven by a green CI after
         # removal. An environment variable `TORCH_DIST_INIT_BARRIER` has been
         # added which enables this barrier only when set to 1.
-        logger.info(
+        logger.debug(
             "Performing barrier after ProcessGroup initialization since "
             "TORCH_DIST_INIT_BARRIER = 1"
         )
@@ -1753,6 +1800,9 @@ def isend(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, 
         _warn_not_in_group("isend")
         return None
 
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
+
     if group is None or group is GroupMember.WORLD:
         pg = _get_default_group()
     else:
@@ -1785,6 +1835,9 @@ def irecv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proce
     if _rank_not_in_group(group):
         _warn_not_in_group("irecv")
         return None
+
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
 
     if group is None or group is GroupMember.WORLD:
         pg = _get_default_group()
@@ -1825,6 +1878,9 @@ def send(tensor: torch.Tensor, dst: int, group: Optional[ProcessGroup] = None, t
         _warn_not_in_group("send")
         return None
 
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
+
     if group is None or group is GroupMember.WORLD:
         default_pg = _get_default_group()
         default_pg.send([tensor], dst, tag).wait()
@@ -1854,6 +1910,9 @@ def recv(tensor: torch.Tensor, src: Optional[int] = None, group: Optional[Proces
     if _rank_not_in_group(group):
         _warn_not_in_group("recv")
         return -1
+
+    if tensor.is_complex():
+        tensor = torch.view_as_real(tensor)
 
     if group is None:
         pg = _get_default_group()
@@ -2205,7 +2264,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     warnings.warn(
         "torch.distributed.all_reduce_coalesced will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#collective-functions"
+        "https://pytorch.org/docs/main/distributed.html#collective-functions"
     )
     if isinstance(tensors, torch.Tensor):
         tensors = [tensors]
@@ -2290,7 +2349,7 @@ def _object_to_tensor(obj, device, group):
         backend = get_backend(group)
         if backend == Backend.NCCL:
             hash = torch._C._distributed_c10d._hash_tensors([byte_tensor])
-            logger.warning(f"_object_to_tensor size: {byte_tensor.numel()} hash value: {hash}")  # noqa: G004
+            logger.warning("_object_to_tensor size: %s hash value: %s", byte_tensor.numel(), hash)
     local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
     return byte_tensor, local_size
 
@@ -2300,7 +2359,7 @@ def _tensor_to_object(tensor, tensor_size, group):
         backend = get_backend(group)
         if backend == Backend.NCCL:
             hash = torch._C._distributed_c10d._hash_tensors([tensor])
-            logger.warning(f"_tensor_to_object size: {tensor.numel()} hash value: {hash}")  # noqa: G004
+            logger.warning("_tensor_to_object size: %s hash value: %s", tensor.numel(), hash)
     tensor = tensor.cpu()
     buf = tensor.numpy().tobytes()[:tensor_size]
     return _unpickler(io.BytesIO(buf)).load()
@@ -2977,7 +3036,7 @@ def all_gather_coalesced(
     warnings.warn(
         "torch.distributed.all_gather_coalesced will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#collective-functions"
+        "https://pytorch.org/docs/main/distributed.html#collective-functions"
     )
     # We only check basic compatibility with C++ params here, C++ code will
     # do shape and type checking.

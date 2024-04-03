@@ -12,6 +12,7 @@ from torch.distributed._tensor import (
     DTensor,
     init_device_mesh,
 )
+from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import _Partial, Replicate, Shard
 from torch.distributed.tensor.parallel import (
     ColwiseParallel,
@@ -28,6 +29,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+
+
+c10d_functional = torch.ops.c10d_functional
 
 
 class DummyMLP(torch.nn.Module):
@@ -335,10 +339,20 @@ class DTensorTest(DTensorTestBase):
         global_tensor = torch.ones(8, 3, requires_grad=True)
 
         sharded_dtensor = distribute_tensor(global_tensor, device_mesh, placements)
-        local_out = sharded_dtensor.redistribute(placements=[Replicate()]).to_local(
-            grad_placements=[_Partial()]
+        comm_mode = CommDebugMode()
+
+        with comm_mode:
+            local_out = sharded_dtensor.redistribute(placements=[Replicate()]).to_local(
+                grad_placements=[_Partial()]
+            )
+            local_out.backward(torch.ones_like(local_out))
+
+        self.assertEqual(
+            comm_mode.comm_counts[c10d_functional.all_gather_into_tensor], 1
         )
-        local_out.sum().backward()
+        self.assertEqual(
+            comm_mode.comm_counts[c10d_functional.reduce_scatter_tensor], 1
+        )
 
         replica_grad = sharded_dtensor.grad.full_tensor()
         self.assertEqual(replica_grad, global_tensor * self.world_size)
@@ -402,7 +416,7 @@ class DTensorTest(DTensorTestBase):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         def fn(dt):
-            dt_out_redistribute = dt.redistribute(mesh, [Replicate()])
+            dt_out_redistribute = dt.redistribute(mesh, [Replicate()], async_op=True)
             # Make sure we haven't synced yet
             # TODO: figure out why this is returning None
             # self.assertTrue(_tensor_needs_wait(dt_out_redistribute))
@@ -430,6 +444,11 @@ class DTensorTest(DTensorTestBase):
         out_data = out_view + 1
         self.assertEqual(type(out_data), torch.Tensor)
         self.assertEqual(out_data, ref)
+
+        # test async_op = False default
+        sync_out = dt.redistribute(mesh, [Replicate()])
+        self.assertFalse(isinstance(sync_out, AsyncCollectiveTensor))
+        self.assertEqual(sync_out.to_local(), x)
 
     @with_comms
     @run_with_both_funcol_impls
