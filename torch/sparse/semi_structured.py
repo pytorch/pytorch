@@ -4,7 +4,8 @@ from typing import Any, Optional, Tuple, List, Callable, Dict
 
 import torch
 from torch.sparse._semi_structured_conversions import (
-    sparse_semi_structured_from_dense_cutlass
+    sparse_semi_structured_from_dense_cutlass,
+    sparse_semi_structured_to_dense_cutlass
 )
 from torch.sparse._semi_structured_ops import (
     fallback_dispatcher,
@@ -408,6 +409,13 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
             compressed_swizzled_bitmask=None,
             requires_grad=original_tensor.requires_grad,
         )
+
+    def to_dense(self):
+        assert self.meta is not None and self.packed is not None
+        return sparse_semi_structured_to_dense_cutlass(
+            self.packed,
+            self.meta,
+        ) if self.meta.ndim == 2 else super().to_dense()
 
     @classmethod
     def prune_dense_static_sort(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
