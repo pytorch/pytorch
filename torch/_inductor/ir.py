@@ -180,6 +180,7 @@ def fuse_reindexing(reindex1, reindex2):
 
 
 NHWC_STRIDE_ORDER = [3, 0, 2, 1]
+NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
 def stride_order2fill_order(order):
@@ -2675,6 +2676,31 @@ class FlexibleLayout(Layout):
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
     @staticmethod
+    def stride_ordered_for_memory_format(sizes, memory_format):
+        """
+        Create a stride based on a memory format.
+
+        Memory format is translasted into a stride order,
+        so channels_last is the same as:
+            FlexibleLayout.stride_ordered(sizes, [3, 0, 2, 1])
+
+        This interface does not support memory_format `torch.preserve_format`
+        which should be used to deduce a format from another source
+        """
+        if memory_format == torch.channels_last:
+            return FlexibleLayout.stride_ordered(sizes, NHWC_STRIDE_ORDER)
+        elif memory_format == torch.channels_last_3d:
+            return FlexibleLayout.stride_ordered(sizes, NHWDC_STRIDE_ORDER)
+        elif memory_format == torch.contiguous_format:
+            return FlexibleLayout.contiguous_strides(sizes)
+        else:
+            log.debug(
+                "stride_ordered_for_memory_format, unsuppored memory_format: %s",
+                memory_format,
+            )
+            raise NotImplementedError()
+
+    @staticmethod
     def same_ordered(sizes, stride):
         """
         Create a stride that has the same stride order as given stride
@@ -4098,6 +4124,10 @@ class ExternKernel(InputsKernel):
     @classmethod
     def require_channels_last(cls, x):
         return cls.require_stride_order(x, NHWC_STRIDE_ORDER)
+
+    @classmethod
+    def require_channels_last_3d(cls, x):
+        return cls.require_stride_order(x, NHWDC_STRIDE_ORDER)
 
     @classmethod
     def require_contiguous(cls, x):
