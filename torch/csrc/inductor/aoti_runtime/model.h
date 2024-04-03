@@ -26,8 +26,9 @@
 // the "binary-architecture" flag:
 // https://man7.org/linux/man-pages/man1/objcopy.1.html
 // todo: use #embed in C++ 23 once available
-extern const uint8_t _binary_constants_bin_start[];
-extern const uint8_t _binary_constants_bin_end[];
+// The constants are NOT readonly because they may be mutated.
+extern uint8_t _binary_constants_bin_start[];
+extern uint8_t _binary_constants_bin_end[];
 
 #define AOTI_CONST_GPU_ALIGNMENT 64
 
@@ -160,15 +161,21 @@ class AOTInductorModelBase {
       AOTI_RUNTIME_DEVICE_CHECK(cudaEventCreate(&run_finished));
       run_finished_.emplace(run_finished);
     }
+#else // USE_CUDA
+    run_finished_ = false;
+#endif // USE_CUDA
 
     auto* model = static_cast<Model*>(this);
     auto folded_constants =
         model->const_run_impl(stream, proxy_executor, initialization);
+
+#ifdef USE_CUDA
     AOTI_RUNTIME_DEVICE_CHECK(cudaEventRecord(*run_finished_, stream));
-    return folded_constants;
-#else // !USE_CUDA
-    return {};
+#else // USE_CUDA
+    run_finished_ = true;
 #endif // USE_CUDA
+
+    return folded_constants;
   }
 
   void load_constants() {
@@ -186,9 +193,15 @@ class AOTInductorModelBase {
 
     size_t bytes_read = 0;
     for (size_t i = 0; i < num_constants; i++) {
+      bool from_folded = this->constant_from_folded(i);
+#ifndef USE_CUDA
+      if (from_folded) {
+        // We do not reallocate and copy for CPU.
+        continue;
+      }
+#endif // USE_CUDA
       std::string name = this->constant_name(i);
       size_t data_size = this->constant_data_size(i);
-      bool from_folded = this->constant_from_folded(i);
       uint8_t* internal_ptr = (data_size != 0)
           ? constant_ptr(
                 constants_internal_offset[i],
