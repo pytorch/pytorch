@@ -4,8 +4,7 @@ from typing import Any, Optional, Tuple, List, Callable, Dict
 
 import torch
 from torch.sparse._semi_structured_conversions import (
-    sparse_semi_structured_from_dense_cutlass,
-    sparse_semi_structured_to_dense_cutlass,
+    sparse_semi_structured_from_dense_cutlass
 )
 from torch.sparse._semi_structured_ops import (
     fallback_dispatcher,
@@ -96,8 +95,8 @@ class SparseSemiStructuredTensor(torch.Tensor):
             meta: The metadata of the original dense tensor, if it is stored separately
             packed_t: The compressed representation of the transposed original dense tensor
             meta_t: The metadata of the transposed original dense tensor, if it is stored separately
-            compressed_swizzeld_bitmask: The masks used by the CUTLASS backend to determine which threads should participate in the computation.
-                           Used for pointwise ops.
+            compressed_swizzled_bitmask: The masks used by the CUTLASS backend to determine which threads should
+                                         participate in the computation. Used for pointwise ops.
             fuse_transpose_cusparselt: When running with cuSPARSELt, we have the option to fuse a transposition
                                        with a matmul, which is useful in the case of 2:4 sparse training.
             alg_id_cusparselt: The algorithm id to use when using cuSPARSELT, will have effect on performance
@@ -415,14 +414,16 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
         """
         This function takes in a unpruned dense tensor and runs a (branchless) static sort across a 4x4 tile.
 
-        It greedily picks the largest values in the tile, upholding the 2:4 sparsity constraint across both the rows and the columns.
+        It greedily picks the largest values in the tile, upholding the 2:4 sparsity constraint across both rows and columns.
         The algorithm used to prune the matrix is implemented in `_sparse_semi_structured_tile`.
 
         Then it creates the packed and meta tensors for the compressed sparse representation of the pruned dense tensor.
-        It also calculates the packed_t and meta_t tensors for the compressed sparse representation of the transpose of the pruned dense tensor.
-        Since we cannot transpose the compressed representation, it is necessary to store both - for the fw and bw pass respectively.
+        It also calculates the packed_t and meta_t tensors for the compressed sparse representation of the transposed
+        pruned dense tensor.
+        Since we cannot transpose the compressed representations, we store both for the fw/bw pass respectively.
 
-        Finally, this function also computes a compressed swizzled bitmask that encodes the sparsity pattern, to be used in the backward pass.
+        Finally, this function also computes a compressed swizzled bitmask that encodes the sparsity pattern
+        This can be used in the backward pass to mask the gradients.
 
         [9 1 7 4]                       [9 0 7 0]
         [1 2 3 0]                       [0 2 0 0]

@@ -288,8 +288,8 @@ def _sparse_semi_structured_tile(dense):
     Since we take the largest values greedily, how the sorting algorithm handles duplicates affects
     the ultimate sparsity pattern.
 
-    Note that this function does not have the same sorting semantics as our CUDA backend, which is exposed via `torch._sparse_semi_structured_tile`.
-    On CUDA, we use a sorting netowrk to sort the values without branching.
+    Note that this function does not have the same sorting semantics as our CUDA backend,
+    which is exposed via `torch._sparse_semi_structured_tile` and thus returns a different pattern.
     """
 
     def greedy_prune_tile(tile):
