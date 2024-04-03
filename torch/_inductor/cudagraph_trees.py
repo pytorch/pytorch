@@ -1796,9 +1796,9 @@ class CUDAGraphTreeManager:
         if self.in_warmup:
             self.try_end_curr_warmup(function_id)
 
-        # Runtime check to ensure that the function only mutates inputs from parameters/buffers
-        # or cudagraph recorded tensors. Otherwise execute the eager function. This check should
-        # happen after `try_end_curr_recording` and `try_end_curr_warmup` which may change self.current_node.
+        # Early exit if the function mutates inputs which are neither parameters/buffers nor
+        # cudagraph recorded tensors. This check should happen after `try_end_curr_recording`
+        # and `try_end_curr_warmup` which may change self.current_node.
         wrapped_function = self.ids_to_funcs[function_id]
         _checked_node = self.current_node
         if has_mutation_str := check_for_mutation(
