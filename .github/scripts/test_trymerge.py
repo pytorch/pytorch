@@ -846,7 +846,6 @@ class TestBypassFailures(TestCase):
             checks[check_name].status,
             checks[check_name].classification,
             checks[check_name].job_id,
-            checks[check_name].workflow_id,
             checks[check_name].title,
             checks[check_name].summary,
         )
@@ -916,7 +915,6 @@ class TestBypassFailuresOnSandCastle(TestCase):
             "NEUTRAL",
             None,
             1,
-            1,
             "",
             None,
         )
@@ -937,7 +935,6 @@ class TestBypassFailuresOnSandCastle(TestCase):
             "",
             "NEUTRAL",
             None,
-            1,
             1,
             "",
             "",
