@@ -11,13 +11,21 @@ registration APIs (e.g. aten operators).
 For a detailed guide on effectively using these APIs, please see
 `this gdoc <https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ/edit>`_
 
-Use :func:`torch.library.define` to define new custom operators. Use the
-impl methods, such as :func:`torch.library.impl` and
+Creating new custom ops in Python
+---------------------------------
+
+Use :func:`torch.library.custom_op` to create new custom ops.
+
+.. autofunction:: custom_op
+
+Extending custom ops created from C++
+-------------------------------------
+
+Use the impl methods, such as :func:`torch.library.impl` and
 func:`torch.library.impl_abstract`, to add implementations
-for any operators (they may have been created using :func:`torch.library.define` or
+for any operators (they may have been created using :func:`torch.library.custom_op` or
 via PyTorch's C++ operator registration APIs).
 
-.. autofunction:: define
 .. autofunction:: impl
 .. autofunction:: impl_abstract
 .. autofunction:: get_ctx
@@ -41,3 +49,5 @@ A tutorial that walks you through some examples on how to use this API is availa
   :members:
 
 .. autofunction:: fallthrough_kernel
+
+.. autofunction:: define

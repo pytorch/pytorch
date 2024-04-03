@@ -53,7 +53,7 @@ def parse_namespace(qualname: str) -> Tuple[str, str]:
     return splits[0], splits[1]
 
 
-def lookup_op(qualname: str) -> torch._ops.OpOverloadPacket:
+def lookup_op(qualname: str) -> torch._ops.OpOverload:
     namespace, name = parse_namespace(qualname)
     if "." in name:
         name, overload = name.split(".")
