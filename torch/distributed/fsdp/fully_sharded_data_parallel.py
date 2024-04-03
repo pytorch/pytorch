@@ -100,7 +100,7 @@ from ._unshard_param_utils import (
     _register_flat_param,
     _register_orig_params,
     _unshard_params,
-    _unshard_params_recurse,
+    _unshard_params_for_summon,
 )
 from .wrap import CustomPolicy, ModuleWrapPolicy
 
@@ -581,14 +581,13 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         """
         uninitialized = self._is_root is None
         self._assert_state(TrainingState.IDLE)
-        # Use `_unshard_params_recurse()` with `recurse=False` instead of
+        # Use `_unshard_params_for_summon()` with `recurse=False` instead of
         # `_unshard_fsdp_state_params()` directly to perform lazy
         # initialization, which is needed to initialize `FlatParameter`
         # parameter attributes as required by the unshard logic
-        with _unshard_params_recurse(
+        with _unshard_params_for_summon(
             self,
             self,
-            recurse=False,
             writeback=True,
             rank0_only=False,
             offload_to_cpu=False,
@@ -596,9 +595,9 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         ):
             ret = super().apply(fn)
 
-        # Reset lazy init called in `_unshard_params_recurse()` since `apply()`
-        # may have been called on FSDP instance that is not truly a root, in
-        # which case it will be incorrectly marked as one.
+        # Reset lazy init called in `_unshard_params_for_summon()` since
+        # `apply()` may have been called on FSDP instance that is not truly a
+        # root, in which case it will be incorrectly marked as one.
         if uninitialized and self._is_root:
             for module in traversal_utils._get_fsdp_states(self):
                 module._reset_lazy_init()
