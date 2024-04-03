@@ -76,7 +76,29 @@ def _iterate_state_dict(
     companion_obj: Any = None,
     ranks_only: Tuple[int, ...] = tuple(),
     type_check: bool = True,
+    non_blocking: bool = True,
 ) -> Dict[str, Any]:
+    """Iterate through the state dict, applying the given functions to each tensor type.
+
+    Args:
+        iter_object (Any): the target state_dict.
+        sharded_tensor_func (Callable): the function to apply to ShardedTensor
+        dtensor_func (Callable): the function to apply to DTensor
+        tensor_func (Callable): the function to apply to Tensor
+        pg (Optional[dist.ProcessGroup]): process group passed to tensor functions
+        device (Optional[torch.device]): device passed to tensor functions
+        cpu_offload (bool): whether to offload the tensors to CPU memory. This option is ignored
+            if a companion_obj is supplied.
+        companion_obj (Any): A companion object to the state dict. If this object
+            is supplied, we attempt to copy the tensor to the companion object.
+        ranks_only (Tuple[int, ...]): if this tuple is empty, all ranks will
+            have the same state_dicts. Otherwise only ranks that in ``ranks_only``
+            have the same state_dicts. Other ranks will get empty state_dicts.
+        type_check (bool): check if the instance data type is a supported type
+            that can be saved by DCP.  The current supported data types are
+            torch.Tensor, DTensor, int, float, str, list, dict, None.
+        non_blocking (bool): whether to use non-blocking copy when copying to the companion object.
+    """
     # TODO: should we use pytree?
     cpu_device = torch.device("cpu")
     if isinstance(iter_object, ShardedTensor):
@@ -109,6 +131,7 @@ def _iterate_state_dict(
                 companion_obj=companion_obj[key] if companion_obj is not None else None,
                 ranks_only=ranks_only,
                 type_check=type_check,
+                non_blocking=non_blocking,
             )
             for key, value in iter_object.items()
         }
@@ -131,6 +154,7 @@ def _iterate_state_dict(
                 companion_obj=companion_obj[idx] if companion_obj is not None else None,
                 ranks_only=ranks_only,
                 type_check=type_check,
+                non_blocking=non_blocking,
             )
             for idx, v in enumerate(iter_object)
         ]
@@ -142,12 +166,13 @@ def _iterate_state_dict(
         raise ValueError(f"Unexpected value type {type(iter_object)}")
 
     if not ranks_only or dist.get_rank(pg) in ranks_only:
-        if isinstance(ret, torch.Tensor) and cpu_offload:
-            if companion_obj is None:
+        if isinstance(ret, torch.Tensor):
+            if cpu_offload and companion_obj is None:
                 ret = ret.to(cpu_device)
-            else:
+
+            if companion_obj is not None:
                 # TODO: support DTensor
-                companion_obj.copy_(ret, non_blocking=True)
+                companion_obj.copy_(ret, non_blocking=non_blocking)
                 ret = companion_obj
     else:
         ret = {} if isinstance(ret, dict) else None
@@ -247,8 +272,6 @@ def _offload_state_dict_to_cpu(
     state_dict: Dict[str, Any],
     *,
     ranks_only: Tuple[int, ...] = tuple(),
-    cpu_offload_state_dict: Optional[Dict[str, Any]] = None,
-    cpu_offload_sync: bool = True,
     type_check: bool = True,
 ) -> Dict[str, Any]:
     """
@@ -263,14 +286,6 @@ def _offload_state_dict_to_cpu(
         ranks_only: (Tuple[int, ...]): if this tuple is empty, all ranks will
             have the same state_dicts. Otherwise only ranks that in ``ranks_only``
             have the same state_dicts. Other ranks will get empty state_dicts.
-        cpu_offload_state_dict (Optional[Dict[str, Any]]): the CPU state_dict
-            that will be returned. If this is not None, this API will use
-            `copy_` to copy the GPU tensor to the tensor in this CPU state_dict.
-            This CPU state_dict must have exactly the same structure as the
-            `state_dict` the only difference is that all the tensors in this
-            CPU state_dict are on CPU memory.
-        cpu_offload_sync: (bool): flag to decide whether to call `synchronize()`
-            before this API returns.
         type_check: (bool): check if the instance data type is a supported type
             that can be saved by DCP.  The current supported data types are
             torch.Tensor, DTensor, int, float, str, list, dict, None.
@@ -288,12 +303,49 @@ def _offload_state_dict_to_cpu(
         device=None,
         cpu_offload=True,
         ranks_only=ranks_only,
-        companion_obj=cpu_offload_state_dict,
         type_check=type_check,
     )
-    if cpu_offload_state_dict is not None and cpu_offload_sync:
-        torch.cuda.synchronize()
     return ret
+
+
+def _copy_state_dict(
+    state_dict: Dict[str, Any],
+    copy_state_dict: Dict[str, Any],
+    non_blocking: bool = False,
+):
+    """
+    Copies all tensors in a given state dict into a different state_dict with the
+    same structure.
+
+    .. warning::
+        It is expected by this function that state_dict and copy_state_dict share
+        the same structure and data types.
+
+    .. warning::
+        The current supported data types are
+            torch.Tensor, DTensor, int, float, str, list, dict, None.
+
+    Args:
+        state_dict (Dict[str, Any]): the target state_dict.
+        copy_state_dict (Dict[str, Any]):
+            The state dict we are copying into. This state_dict must have exactly
+             the same structure as the source `state_dict`.
+        non_blocking: (bool): Whether copy ops should be performed asynchronously
+    """
+
+    _iterate_state_dict(
+        state_dict,
+        _identity_func,
+        _identity_func,
+        _identity_func,
+        pg=None,
+        device=None,
+        cpu_offload=False,
+        ranks_only=tuple(),
+        companion_obj=copy_state_dict,
+        type_check=True,
+        non_blocking=non_blocking,
+    )
 
 
 def _create_cpu_state_dict(
@@ -303,30 +355,42 @@ def _create_cpu_state_dict(
     Given a state_dict, create another state_dict with the same structure and elements.
     However, all tensors in the returned state_dict are new tensors on CPU. These
     tensors can be placed on pin_memory or share_memory based on the provided arguments.
-    """
 
-    if pin_memory and share_memory:
-        raise ValueError(
-            "Cannot allocate both memory on both pin_memory and share_memory"
-        )
+    .. warning::
+        Setting both `pin_memory` and `share_memory` to True significantly increases the
+        latency of this method because of the nuances which require us to register memory
+        as pinned directly as opposed to relying on the pin_memory cache allocator. This
+        option should only be used for long lived tensors which are required to be shared.
+        This is not the case as long as at least one of `pin_memory` or `share_memory` is
+         set to False.
+
+    """
 
     def tensor_func(
         obj: torch.Tensor,
         pg: Optional[dist.ProcessGroup],
         device: Optional[torch.device],
-        companion_obj: Any,
+        _: Any,
     ) -> torch.Tensor:
         if len(obj.size()) == 0:
             return torch.tensor(0, dtype=obj.dtype)
 
         if share_memory:
-            return torch.empty(
-                *tuple(companion_obj.size()), dtype=companion_obj.dtype
-            ).share_memory_()
+            t = torch.empty(*tuple(obj.size()), dtype=obj.dtype).share_memory_()
+            if pin_memory:
+                succ = torch.cuda.cudart().cudaHostRegister(
+                    t.data_ptr(),
+                    t.numel() * t.element_size(),
+                    1,  # lines up with 'cudaHostRegisterPortable'
+                )
+                assert (
+                    succ == 0
+                ), f"Pinning shared memory failed with error-code: {succ}"
+            return t
+        elif pin_memory:
+            return torch.empty(*tuple(obj.size()), dtype=obj.dtype).pin_memory()
         else:
-            return torch.empty(
-                *tuple(companion_obj.size()), dtype=companion_obj.dtype
-            ).pin_memory()
+            return torch.empty(*tuple(obj.size()), dtype=obj.dtype)
 
     ret = _iterate_state_dict(
         state_dict,
@@ -337,7 +401,6 @@ def _create_cpu_state_dict(
         device=None,
         cpu_offload=False,
         ranks_only=tuple(),
-        companion_obj=state_dict,
         type_check=False,
     )
     return ret
