@@ -1,4 +1,6 @@
 import copy
+import os
+import sys
 
 import torch
 
@@ -11,16 +13,42 @@ def get_wrapped_fn(fn):
         return fn
 
 
-class XPUPatch:
+def DO_NOTHING(*args, **kwargs):
+    # Do nothing
+    pass
+
+
+class XPUPatchForImport:
+    def __init__(self) -> None:
+        current_file_path = os.path.realpath(__file__)
+        self.test_package = os.path.dirname(os.path.dirname(current_file_path))
+        self.original_path = sys.path.copy()
+        self.test_case_cls = torch.testing._internal.common_utils.TestCase
+        self.only_cuda_fn = torch.testing._internal.common_device_type.onlyCUDA
+        self.instantiate_fn = (
+            torch.testing._internal.common_device_type.instantiate_device_type_tests
+        )
+
     def __enter__(self):
-        self.onlyCUDA_fn = torch.testing._internal.common_device_type.onlyCUDA
+        torch.testing._internal.common_device_type.instantiate_device_type_tests = (
+            DO_NOTHING
+        )
+        torch.testing._internal.common_utils.TestCase = (
+            torch.testing._internal.common_utils.NoTest
+        )
         torch.testing._internal.common_device_type.onlyCUDA = (
             torch.testing._internal.common_device_type.onlyXPU
         )
+        sys.path.append(self.test_package)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
-        torch.testing._internal.common_device_type.onlyCUDA = self.onlyCUDA_fn
+        sys.path = self.original_path
+        torch.testing._internal.common_device_type.instantiate_device_type_tests = (
+            self.instantiate_fn
+        )
+        torch.testing._internal.common_device_type.onlyCUDA = self.only_cuda_fn
+        torch.testing._internal.common_utils.TestCase = self.test_case_cls
 
 
 # Copy the test cases from generic_base_class to generic_test_class.
@@ -49,8 +77,7 @@ def copy_tests(
     # We need to wrap TestCommon as TestCommonWrapper to avoid instantiate_device_type_tests
     # changing its meta information and moving it under Namespace class to prevent test runners
     # from picking it up and running it.
-    base_class, *_ = generic_base_class.__bases__
-    generic_base_class_members = set(base_class.__dict__.keys()) - set(
+    generic_base_class_members = set(generic_base_class.__dict__.keys()) - set(
         generic_test_class.__dict__.keys()
     )
     assert not (
@@ -69,8 +96,8 @@ def copy_tests(
 
     for name in generic_base_class_members:
         if name in generic_base_tests:  # Instantiates test member
-            test = getattr(base_class, name)
+            test = getattr(generic_base_class, name)
             setattr(generic_test_class, name, copy.deepcopy(test))
         else:  # Ports non-test member
-            nontest = getattr(base_class, name)
+            nontest = getattr(generic_base_class, name)
             setattr(generic_test_class, name, nontest)
