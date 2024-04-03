@@ -42,7 +42,7 @@ def wrap_combine_fn_flat(*args, combine_fn, spec, num_leaves):
 def associative_scan(
     input: pytree.PyTree,
     dim: int,
-    combine_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
+    combine_fn: Callable[[pytree.PyTree, pytree.PyTree], pytree.PyTree],
 ) -> torch.Tensor:
     r"""
     Performs an inclusive scan with an associative pointwise combine function.
@@ -57,11 +57,14 @@ def associative_scan(
     ``torch.compile``. Further, only CUDA device codegen is supported at the moment.
 
     Args:
-        input (torch.Tensor): The input tensor
+        input (torch.Tensor): The input tensor, or nested pytree of tensors.
+            All inputs are expected to have the same shape.
         dim (int): the dimension to scan over
-        combine_fn (Callable): A binary callable with type (Tensor, Tensor) -> Tensor,
-            which is pure, pointwise, and satisfies the associative property.
+        combine_fn (Callable): A binary callable with type ``(Tensor, Tensor) -> Tensor``,
+            or if input is a pytree ``(pytree, pytree) -> pytree``.
+            This function must be pure, pointwise, and satisfy the associative property.
             i.e. ``combine_fn(a, combine_fn(b, c)) == combine_fn(combine_fn(a, b), c)``
+
 
     Example::
 
