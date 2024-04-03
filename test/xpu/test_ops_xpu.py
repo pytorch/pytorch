@@ -1,6 +1,5 @@
 # Owner(s): ["module: intel"]
 
-import os
 import sys
 import unittest
 
@@ -21,12 +20,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
-# Add test folder to path
-current_file_path = os.path.realpath(__file__)
-test_package = os.path.dirname(os.path.dirname(current_file_path))
-sys.path.append(test_package)
-
-from xpu.xpu_test_utils import get_wrapped_fn, XPUPatchForImport
+from xpu_test_utils import get_wrapped_fn, XPUPatchForImport
 
 with XPUPatchForImport():
     from test_ops import TestCommon as TestCommonBase
