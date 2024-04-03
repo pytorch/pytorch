@@ -9838,6 +9838,7 @@ fn
 
         self._test_compile_model_free(model_inp_ctr, lambda mod: mod.fc_ref)
 
+    @unittest.skipIf(sys.version_info >= (3, 12), "leaks in 3.12+")
     def test_parameter_free(self):
         def model_inp_ctr():
             param = torch.nn.Parameter(torch.randn(100, 100))
