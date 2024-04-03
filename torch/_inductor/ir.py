@@ -1839,6 +1839,7 @@ def is_pointwise_contiguous_or_transposed_after_perm(x):
         and isinstance(x.data.data, Pointwise)
     ):
         all_reads = x.data.data.get_reads()
+        assert len(x.data.data.inner_fn_args()) == 1
         fn_args = x.data.data.inner_fn_args()[0]
 
         def is_contiguous_or_transposed_after_perm(read):
@@ -1864,14 +1865,26 @@ def is_pointwise_contiguous_or_transposed_after_perm(x):
             new_read_var_names = [unsqueezed_read_var_names[i] for i in perm_dims]
             new_read_sizes = [unsqueezed_read_sizes[i] for i in perm_dims]
 
-            # expect to be contiguous or transposed for last two dims, or size=1 for one of them
-            expected_contiguous_or_transposed_index_lists = [
-                new_read_var_names[-1] + new_read_var_names[-2] * new_read_sizes[-1],
-                new_read_var_names[-2] + new_read_var_names[-1] * new_read_sizes[-2],
-            ]
-            if (new_read_sizes[-1] == 1 or new_read_sizes[-2] == 1) or any(
-                str(i) in str(read.index)
-                for i in expected_contiguous_or_transposed_index_lists
+            # expect to be contiguous or transposed for last two dims,
+            # or size = 1 for one of them and contiguous for another dim:
+            # - d0 + d1 * s0
+            # - d1 + d0 * s1
+            # - d0 with s1 == 1
+            # - d1 with s0 == 1
+            if (
+                new_read_var_names[-1] == any(read.index.args)
+                and (
+                    new_read_sizes[-2] == 1
+                    or new_read_var_names[-2] * new_read_sizes[-1]
+                    == any(read.index.args)
+                )
+            ) or (
+                new_read_var_names[-2] == any(read.index.args)
+                and (
+                    new_read_sizes[-1] == 1
+                    or new_read_var_names[-1] * new_read_sizes[-2]
+                    == any(read.index.args)
+                )
             ):
                 return True
             return False
