@@ -1,0 +1,52 @@
+load("//tools/build_defs:glob_defs.bzl", "subdir_glob")
+
+cxx_library(
+    name = "c10",
+    srcs = glob(
+        ["**/*.cpp"],
+        exclude = [
+            "test/**/*.cpp",
+            "benchmark/**/*.cpp",
+            "cuda/**/*.cpp",
+            "xpu/**/*.cpp",
+        ],
+    ),
+      deps = [
+        "//third_party:cpuinfo",
+        "//third_party:fmt",
+        "//third_party:glog",
+    ],
+    exported_deps = [],
+    compiler_flags = [
+        "-Werror",
+        "-Wno-global-constructors",
+        "-DDISABLE_NAMEDTENSOR",
+        "-DSUPPORTS_BACKTRACE=0"
+    ],
+    exported_headers = subdir_glob(
+        [
+            ("", "**/*.h"),
+        ],
+        exclude = [
+            "test/**/*.h",
+            "benchmark/**/*.h",
+            "cuda/**/*.h",
+            "xpu/**/*.h",
+        ],
+    ),
+    exported_linker_flags = [],
+    exported_preprocessor_flags = [
+        '-DC10_USING_CUSTOM_GENERATED_MACROS',
+        '-DC10_USE_GLOG',
+        '-DC10_USE_MINIMAL_GLOG',
+        '-DC10_MOBILE',
+        '-fexceptions',
+        '-Wno-global-constructors'
+    ],
+    header_namespace = "c10",
+    link_whole = True,
+    platform_preprocessor_flags = [['windows', ['-D_WINDOWS', '-D_WIN32', '-DWIN32', '-DNOMINMAX', '-D_CRT_SECURE_NO_WARNINGS', '-D_USE_MATH_DEFINES']], ['windows.*64$', ['-D_WIN64']]],
+    preprocessor_flags = ['-DC10_BUILD_MAIN_LIB'],
+    reexport_all_header_dependencies = True,
+    visibility = ['PUBLIC'],
+)
