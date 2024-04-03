@@ -95,8 +95,12 @@
 
 #ifdef USE_CUDA
 #include <ATen/cuda/CUDAConfig.h>
-#include <ATen/native/cudnn/BatchNorm.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
+#ifdef __HIP_PLATFORM_AMD__
+#include <ATen/native/cudnn/hip/BatchNorm.h>
+#else
+#include <ATen/native/cudnn/BatchNorm.h>
+#endif
 #endif
 
 #ifdef USE_DISTRIBUTED

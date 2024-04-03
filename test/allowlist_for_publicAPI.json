@@ -1519,7 +1519,6 @@
     "SharedQuantizationSpec",
     "Tuple",
     "fold_bn_weights_into_conv_node",
-    "get_aten_graph_module",
     "replace_pattern_with_filters"
   ],
   "torch.ao.quantization.quantize_fx": [

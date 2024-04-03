@@ -58,3 +58,13 @@ def expectedFailureRetraceability(fn):
 def expectedFailureSerDer(fn):
     fn._expected_failure_serdes = True
     return fn
+
+
+def expectedFailureSerDerPreDispatch(fn):
+    fn._expected_failure_serdes_pre_dispatch = True
+    return fn
+
+
+def expectedFailurePreDispatchRunDecomp(fn):
+    fn._expected_failure_pre_dispatch = True
+    return fn

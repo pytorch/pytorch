@@ -1,4 +1,5 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import math
 from dataclasses import dataclass
 from enum import Enum
 from typing import cast, List, Optional, Sequence, Tuple, Union
@@ -84,10 +85,24 @@ class _NormPartial(_Partial):
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
+        """
+        For example, consider 4 ranks, a (3,) replicated tensor, and 2-norm:
+            Ranks 0 and 1: sqrt(t1^2 + t2^2 + t3^3)
+        To convert from replicated to partial, we want f(x) such that
+            sqrt(t1^2 + t2^2 + t3^3) = sqrt(4f(t1)^2 + 4f(t2)^2 + 4f(t3)^2)
+                                     = sqrt(4) sqrt(f(t1)^2 + f(t2)^2 + f(t3)^2).
+        One such f(x) is f(x) = x / sqrt(4). This generalizes to d ranks and
+        p-norm as f(x) = x / d^(1/p).
+        """
         if self.reduce_op in (c10d.ReduceOp.MAX, c10d.ReduceOp.MIN):
             return tensor
         elif self.reduce_op == c10d.ReduceOp.SUM:
-            return tensor / mesh.size(mesh_dim=mesh_dim)
+            if self.norm_type == 0:
+                raise NotImplementedError(f"Unsupported norm type:: {self.norm_type}")
+            elif self.norm_type == 1:
+                return tensor / mesh.size(mesh_dim)
+            assert isinstance(self.norm_type, (int, float))
+            return tensor / math.pow(mesh.size(mesh_dim), 1 / self.norm_type)
         raise NotImplementedError(self.reduce_op)
 
     def _reduce_shard_value(
@@ -122,6 +137,14 @@ class _NormPartial(_Partial):
             if self.norm_type != 0 and self.norm_type != 1:
                 return tensor ** (1.0 / self.norm_type)
         return tensor
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, _NormPartial):
+            return False
+        return self.norm_type == other.norm_type
+
+    def __hash__(self) -> int:
+        return 1 + hash(self.norm_type)
 
 
 def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[List[int]]:
