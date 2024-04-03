@@ -416,7 +416,7 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
         This function takes in a unpruned dense tensor and runs a (branchless) static sort across a 4x4 tile.
 
         It greedily picks the largest values in the tile, upholding the 2:4 sparsity constraint across both the rows and the columns.
-        The algorithm used to prune the matrix is implemented `_sparse_semi_structured_tile`.
+        The algorithm used to prune the matrix is implemented in `_sparse_semi_structured_tile`.
 
         Then it creates the packed and meta tensors for the compressed sparse representation of the pruned dense tensor.
         It also calculates the packed_t and meta_t tensors for the compressed sparse representation of the transpose of the pruned dense tensor.
@@ -424,10 +424,10 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
 
         Finally, this function also computes a compressed swizzled bitmask that encodes the sparsity pattern, to be used in the backward pass.
 
-        [9 1 7 4]                       [1 2 3 4]
-        [1 2 3 0]                       [1 2 3 4]
-        [8 3 5 4] -> prune 4x4 tile  -> [1 2 3 4] -> pack to CUTLASS semi-structured -> packed
-        [1 2 6 2]                       [1 2 3 4]                                    -> metadata
+        [9 1 7 4]                       [9 0 7 0]
+        [1 2 3 0]                       [0 2 0 0]
+        [8 3 5 4] -> prune 4x4 tile  -> [8 0 0 4] -> pack to CUTLASS semi-structured -> packed
+        [1 2 6 2]                       [0 0 6 2]                                    -> metadata
 
                                                   -> pack to transposed CUTLASS      -> packed_t
                                                      semi-structured representation  -> metadata_t
@@ -448,7 +448,6 @@ class SparseSemiStructuredTensorCUTLASS(SparseSemiStructuredTensor):
         SparseSemiStructuredTensorCUTLASS(dense.shape, packed_cutlass, meta_cutlass, packed_t_cutlass, meta_t_cutlass, bitmask)
         ```
         """
-        # torch._sparse_semi_structured_tile can be passed one of three algorithms ["", "causal1122"]
         # We can either pack to the CUTLASS or cuSPARSELt representation, depending on the use_cutlass flag.
         (packed, meta, packed_t, meta_t, compressed_swizzled_bitmask) = torch._sparse_semi_structured_tile(
             original_tensor,
@@ -528,6 +527,36 @@ class SparseSemiStructuredTensorCUSPARSELT(SparseSemiStructuredTensor):
 
     @classmethod
     def prune_dense_static_sort(cls, original_tensor : torch.Tensor, algorithm="") -> "SparseSemiStructuredTensor":
+        """
+        This function does the same thing as described in SparseSemiStructuredCUTLASS, but uses the cuSPASRELt metadata
+        and sparase matmul.
+
+        The only difference is that cuSPARSELt combines the metadata and packed tensor together into a single tensor.
+
+        [9 1 7 4]                       [9 0 7 0]
+        [1 2 3 0]                       [0 2 0 0]
+        [8 3 5 4] -> prune 4x4 tile  -> [8 0 0 4] -> pack to cuSPARSELT semi-structured -> packed
+        [1 2 6 2]                       [0 0 6 2]
+
+                                                  -> pack to transposed cuSPARSELt      -> packed_t
+                                                     semi-structured representation
+
+                                                  -> compute swizzled bitmask           -> compressed_swizzled_bitmask
+
+
+        The equivalent PyTorch code to create the same three outputs from the dense tensor can be found below:
+        ```
+        from torch.sparse import SparseSemiStructuredTensorCUSPARSELT
+        from torch.sparse._semi_structured_conversions import _sparse_semi_structured_tile, _compute_compressed_swizzled_bitmask
+
+        pruned = _sparse_semi_structured_tile(dense)
+        packed_cusparselt = torch._cslt_compress(pruned)
+        packed_t_cusparselt = torch._cslt_compress(pruned.t().contiguous())
+        bitmask = _compute_compressed_swizzled_bitmask(pruned)
+
+        SparseSemiStructuredTensorCUSPARSELT(dense.shape, packed_cutlass, None, packed_t_cutlass, None, bitmask)
+        ```
+        """
         (packed, meta, packed_t, meta_t, compressed_swizzled_bitmask) = torch._sparse_semi_structured_tile(
             original_tensor,
             algorithm=algorithm,
