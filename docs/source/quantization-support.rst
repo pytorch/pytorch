@@ -55,6 +55,7 @@ torch.ao.quantization.quantize_fx
 This module contains FX graph mode quantization APIs (prototype).
 
 .. currentmodule:: torch.ao.quantization.quantize_fx
+   :noindex:
 
 .. autosummary::
     :toctree: generated
