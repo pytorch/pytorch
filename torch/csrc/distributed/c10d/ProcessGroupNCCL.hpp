@@ -104,7 +104,7 @@ static std::vector<std::string> TORCH_NCCL_ABORT_IN_DESTROY_PG = {
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
-constexpr const char* TIMEOUT_DUMP = "timeout_dump";
+constexpr const char* EXCEPTION_DUMP = "exception_dump";
 
 constexpr const int kWorkStatusUpdatePeriodMs = 30 * 1000; // 30 seconds
 
@@ -1026,8 +1026,9 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
 
-  // Whether or not to dump debug info on timeout
-  bool dumpOnTimeout_;
+  // Whether or not to dump debug info on exception including both watchdog
+  // timeout and nccl errors.
+  bool dumpOnException_;
 
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_
