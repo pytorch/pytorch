@@ -346,6 +346,7 @@ Shuffle Layers
 DataParallel Layers (multi-GPU, distributed)
 --------------------------------------------
 .. automodule:: torch.nn.parallel
+.. automodule:: torch.nn.parallel.data_parallel
 .. currentmodule:: torch
 
 .. autosummary::
@@ -359,6 +360,8 @@ DataParallel Layers (multi-GPU, distributed)
 Utilities
 ---------
 .. automodule:: torch.nn.utils
+.. automodule:: torch.nn.utils.spectral_norm
+.. automodule:: torch.nn.utils.weight_norm
 
 From the ``torch.nn.utils`` module:
 

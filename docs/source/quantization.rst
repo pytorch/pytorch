@@ -5,6 +5,7 @@ Quantization
 
 .. automodule:: torch.ao.quantization
 .. automodule:: torch.ao.quantization.fx
+.. automodule:: torch.ao.quantization.quantize
 
 .. warning ::
      Quantization is in beta and subject to change.
