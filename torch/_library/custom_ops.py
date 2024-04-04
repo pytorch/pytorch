@@ -45,7 +45,7 @@ def custom_op(
             e.g. "mylib::my_linear". The name is used as a stable identifier for
             if you wish to serialize the custom op, e.g., via torch.save/torch.export.
             To avoid name collisions, please use your project name as the namespace.
-        mutated_args (Sequence[str]): The names of args that the function mutates.
+        mutated_args (Iterable[str]): The names of args that the function mutates.
             This MUST be accurate, otherwise, the behavior is undefined.
         device_types (None | str | Sequence[str]): The device type(s) the function
             is valid for. If no device type is provided, then the function
@@ -329,7 +329,8 @@ class CustomOpDef:
 
         Both ``setup_context_fn`` and ``backward_fn`` must be traceable. That is,
         they may not directly access Tensor.data_ptr and they must not depend on
-        or mutate global state.
+        or mutate global state. If you need a non-traceable backward, you can make
+        it a separate custom_op that you call inside ``backward_fn``.
 
         Examples:
             >>> import torch
@@ -344,7 +345,7 @@ class CustomOpDef:
             >>>
             >>> def setup_context(ctx, inputs, output) -> Tensor:
             >>>     x, = inputs
-            >>      ctx.save_for_backward(x)
+            >>>     ctx.save_for_backward(x)
             >>>
             >>> def backward(ctx, grad):
             >>>     x, = ctx.saved_tensors
@@ -352,9 +353,9 @@ class CustomOpDef:
             >>>
             >>> numpy_sin.register_autograd(setup_context, backward)
             >>>
-            >>> x = torch.randn([], requires_grad=True)
+            >>> x = torch.randn(3, requires_grad=True)
             >>> y = numpy_sin(x)
-            >>> grad_x, = torch.autograd.grad(y, x)
+            >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
             >>> assert torch.allclose(grad_x, x.cos())
 
         """

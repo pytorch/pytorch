@@ -2135,6 +2135,20 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(z, x + y)
         self.assertTrue(cpu_called)
 
+    def test_mutated_error(self):
+        with self.assertRaisesRegex(
+            ValueError, r".*{'y'} in mutated_args were not found"
+        ):
+
+            @torch.library.custom_op(
+                "_torch_testing::numpy_sin_inplace",
+                mutated_args={"y"},
+                device_types="cpu",
+            )
+            def numpy_sin_inplace(x: Tensor) -> None:
+                x_np = x.numpy()
+                np.sin(x_np, out=x_np)
+
     def test_mutated(self):
         @torch.library.custom_op(
             "_torch_testing::numpy_sin_inplace", mutated_args={"x"}, device_types="cpu"
@@ -2150,7 +2164,7 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(x, expected)
         self.assertGreater(x._version, version)
 
-        @torch.library.custom_op("_torch_testing::f", mutated_args="yzwv")
+        @torch.library.custom_op("_torch_testing::f", mutated_args={"y", "z", "w"})
         def f(
             x: Tensor, y: Optional[Tensor], z: List[Tensor], w: List[Optional[Tensor]]
         ) -> None:
