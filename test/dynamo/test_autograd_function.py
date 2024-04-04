@@ -2,8 +2,6 @@
 
 import copy
 import math
-import sys
-import unittest
 
 import torch
 
@@ -528,7 +526,6 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
     # I pulled all of these test cases from test_autograd.py
     # In the future, we should make the Dynamo test suite actually
     # run on test_autograd.py (it's disabled right now) and delete these.
-    @unittest.skipIf(sys.version_info >= (3, 12), "invalid free in 3.12+")
     def test_smoke_from_test_autograd(self):
         class Func(torch.autograd.Function):
             @staticmethod
