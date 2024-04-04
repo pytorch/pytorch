@@ -268,6 +268,8 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
     """
     Reference implementation of :func:`torch.nn.functional.channel_shuffle`.
     """
+    from torch._meta_registrations import device_hint
+
     torch._check(
         groups > 0,
         lambda: f"Number of groups to divide channels in must be positive. Value of groups:{groups}",
@@ -278,8 +280,10 @@ def channel_shuffle(input: TensorLikeType, groups: int) -> TensorLikeType:
     H, W = input.shape[-2:]
     g_dim = len(batches)
 
-    if input.numel() == 0 or (input.device.type == "cuda" and groups == 1):
-        return input
+    if input.numel() == 0 or (
+        device_hint(input) == "cuda" and (groups == 1 or groups == C)
+    ):
+        return aten.alias(input)
 
     result = torch.empty_like(input)
     result.view(*batches, Cg, groups, H, W).copy_(
