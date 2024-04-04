@@ -72,6 +72,8 @@ class StructuredTraceTestingFormatter(logging.Formatter):
             metadata["dynamo_start"]["stack"] = "STACK"
         if "inductor_output_code" in metadata:
             metadata["inductor_output_code"]["filename"] = "FILENAME"
+        if "stack" in metadata:
+            metadata["stack"] = "STACK"
         if "compilation_metrics" in metadata:
             metadata["compilation_metrics"] = "METRICS"
 
