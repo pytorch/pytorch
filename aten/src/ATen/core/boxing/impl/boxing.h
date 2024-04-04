@@ -48,7 +48,6 @@ using ivalue_to_helper_t = typename ivalue_to_helper<T>::type;
 
 template <class T>
 struct has_ivalue_to<T, guts::void_t<ivalue_to_helper_t<T>>>
-
 : std::true_type
 {};
 
