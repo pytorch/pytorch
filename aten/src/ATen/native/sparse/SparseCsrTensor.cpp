@@ -53,6 +53,7 @@
 #include <ATen/ops/sparse_bsc_tensor_native.h>
 #include <ATen/ops/sparse_dim_native.h>
 #include <ATen/ops/values_native.h>
+#include <ATen/ops/_values_native.h>
 #include <ATen/ops/_validate_compressed_sparse_indices.h>
 #include <ATen/ops/where.h>
 #endif
