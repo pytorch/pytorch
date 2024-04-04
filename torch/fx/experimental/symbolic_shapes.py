@@ -3526,6 +3526,19 @@ class ShapeEnv:
         return bound_sympy(expr, var_to_range)
 
     @_lru_cache
+    def _get_axioms(self, symbols: Optional[Iterable["sympy.Symbol"]] = None) -> Tuple["sympy.Expr"]:
+        if symbols is None:
+            runtime_asserts = (r.expr
+                               for rs in self.deferred_runtime_asserts.values()
+                               for r in rs)
+        else:
+            runtime_asserts = (r.expr
+                               for s in symbols if s not in self.var_to_val
+                               for r in self.deferred_runtime_asserts.get(s, ()))
+        guards = (g.expr for g in self.guards)
+        return tuple(itertools.chain(guards, runtime_asserts))
+
+    @_lru_cache
     def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
         expect_rational=True, size_oblivious: bool = False
@@ -3549,41 +3562,34 @@ class ShapeEnv:
 
         expr = canonicalize_bool_expr(expr)
 
-        symbols = list(expr.free_symbols)
+        # Pattern matching
+        subst = {}
 
-        # Apply known runtime asserts
-        for s in symbols:
-            # Unbacked symints only
-            if s in self.var_to_val:
-                continue
+        def add_expr(expr):
+            # Expr and negation
+            subst[canonicalize_bool_expr(expr)] = sympy.true
+            subst[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
+            if isinstance(expr, sympy.Rel):
+                # multiplying by -1 changes the direction of the inequality
+                dual = type(expr)(-expr.rhs, -expr.lhs)
+                subst[canonicalize_bool_expr(dual)] = sympy.true
+                subst[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
 
-            subst = {}
+        symbols = tuple(expr.free_symbols)
+        axioms = self._get_axioms(symbols)
+        for e in axioms:
+            if compute_hint:
+                e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
+            add_expr(e)
+            # Other relational expressions this expression implies
+            if isinstance(e, sympy.Eq):
+                add_expr(sympy.Le(e.lhs, e.rhs))
+                add_expr(sympy.Ge(e.lhs, e.rhs))
+            elif isinstance(e, sympy.Lt):
+                add_expr(sympy.Le(e.lhs, e.rhs))
+                add_expr(sympy.Ne(e.lhs, e.rhs))
 
-            def add_expr(expr):
-                # Expr and negation
-                subst[canonicalize_bool_expr(expr)] = sympy.true
-                subst[canonicalize_bool_expr(sympy.Not(expr))] = sympy.false
-                if isinstance(expr, sympy.Rel):
-                    # multiplying by -1 changes the direction of the inequality
-                    dual = type(expr)(-expr.rhs, -expr.lhs)
-                    subst[canonicalize_bool_expr(dual)] = sympy.true
-                    subst[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
-
-            for e in itertools.chain(self.guards, self.deferred_runtime_asserts.get(s, ())):
-                e = e.expr
-                if compute_hint:
-                    e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
-                add_expr(e)
-                # Other relational expressions this expression implies
-                if isinstance(e, sympy.Eq):
-                    add_expr(sympy.Le(e.lhs, e.rhs))
-                    add_expr(sympy.Ge(e.lhs, e.rhs))
-                elif isinstance(e, sympy.Lt):
-                    add_expr(sympy.Le(e.lhs, e.rhs))
-                    add_expr(sympy.Ne(e.lhs, e.rhs))
-
-            # NB: this helps us deal with And/Or connectives
-            expr = expr.subs(subst)
+        expr = expr.subs(subst)
 
         # Simplify making use of value range lower bound
         new_shape_env = {}
