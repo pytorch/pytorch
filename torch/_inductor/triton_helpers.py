@@ -114,7 +114,7 @@ def welford_reduce(value, mean, m2, weight, first_iteration):
         delta = value - mean
         new_weight = weight + 1
         new_mean = mean + delta / new_weight
-        new_m2 = m2 + delta * (value - new_mean)
+        new_m2 = libdevice.fma(delta, value - new_mean, m2)
     return new_mean, new_m2, new_weight
 
 
@@ -124,7 +124,7 @@ def welford_combine(mean_1, m2_1, weight_1, mean_2, m2_2, weight_2):
     new_weight = weight_1 + weight_2
     w2_over_w = tl.where(new_weight == 0.0, 0.0, weight_2 / new_weight)
     return (
-        mean_1 + delta * w2_over_w,
+        libdevice.fma(delta, w2_over_w, mean_1),
         m2_1 + m2_2 + delta * delta * weight_1 * w2_over_w,
         new_weight,
     )
