@@ -1500,7 +1500,11 @@ NvrtcFunction jit_pwise_function(
     std::stringstream ss;
     ss << *cache_dir << "/";
     ss << kernel_name;
+#ifdef USE_ROCM
+    ss << "_arch" << prop->gcnArchName;
+#else
     ss << "_arch" << cuda_major << "." << cuda_minor;
+#endif
     ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
     ss << (compile_to_sass ? "_sass" : "_ptx");
     ss << "_" << code.length();
