@@ -1286,6 +1286,8 @@ class GraphLowering(torch.fx.Interpreter):
                 real_inputs = [materialize(x) for x in V.real_inputs]
 
             if self.mutated_inputs:
+                from .compile_fx import clone_preserve_strides
+
                 mutated_input_idxs = [
                     idx
                     for idx, name in enumerate(self.graph_inputs)
@@ -1300,7 +1302,7 @@ class GraphLowering(torch.fx.Interpreter):
                     # f, the inputs x will be mutated twice in the process:
                     # once here, and again when running the compiled model;
                     # this will also lead to a numerically incorrect output
-                    real_inputs[idx] = real_inputs[idx].clone()
+                    real_inputs[idx] = clone_preserve_strides(real_inputs[idx])
 
             with torch.utils._python_dispatch._disable_current_modes():
                 assert self.example_inputs is not None
