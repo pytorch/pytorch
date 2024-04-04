@@ -10,6 +10,7 @@ import io
 import logging
 import os
 
+import tempfile
 import warnings
 from collections import defaultdict
 from typing import (
@@ -705,25 +706,53 @@ class ONNXProgram:
         Returns:
             The model output as computed by ONNX Runtime
         """
-        import onnxruntime  # type: ignore[import]
 
-        # model specified by the user has precedence, when specified
-        model_with_state_dict = model_with_state_dict or self._model_torch
+        # TODO: If ONNX used absolute paths on the initializers external data files,
+        # users could call ONNXProgram.save and use ONNXProgram.__call__ without the internal save below
+        with contextlib.ExitStack() as stack:
+            # model specified by the user has precedence, when specified
+            model_with_state_dict = model_with_state_dict or self._model_torch
 
-        onnx_input = self.adapt_torch_inputs_to_onnx(
-            *args, model_with_state_dict=model_with_state_dict, **kwargs
-        )
-        options = options or ONNXRuntimeOptions()
-        providers = options.execution_providers or onnxruntime.get_available_providers()
-        onnx_model = self.model_proto.SerializeToString()
-        ort_session = onnxruntime.InferenceSession(onnx_model, providers=providers)
+            if self.fake_context:
+                tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
+                warnings.warn(
+                    "Cannot run model directly from `ONNXProgram` because"
+                    " the model was exported using `enable_fake_mode`."
+                    " The model will be serialized to disk using a temporary folder ({tmpdir_path})"
+                    " to populate the model with initializers before being execution."
+                )
+                # TODO: Revisit the need of `model_with_state_dict` being a real model and not just its state
+                onnx_model = os.path.join(tmpdir_path, "model.onnx")
+                if isinstance(model_with_state_dict, torch.nn.Module):
+                    model_state = model_with_state_dict.state_dict()
+                elif isinstance(model_with_state_dict, torch_export.ExportedProgram):
+                    model_state = model_with_state_dict.state_dict
+                else:
+                    model_state = None
+                self.save(
+                    onnx_model,
+                    model_state=model_state,
+                )
+            else:
+                onnx_model = self.model_proto.SerializeToString()  # type: ignore[assignment]
 
-        onnxruntime_input = {
-            k.name: v.numpy(force=True)
-            for k, v in zip(ort_session.get_inputs(), onnx_input)
-        }
+            import onnxruntime  # type: ignore[import]
 
-        return ort_session.run(None, onnxruntime_input)
+            onnx_input = self.adapt_torch_inputs_to_onnx(
+                *args, model_with_state_dict=model_with_state_dict, **kwargs
+            )
+            options = options or ONNXRuntimeOptions()
+            providers = (
+                options.execution_providers or onnxruntime.get_available_providers()
+            )
+            ort_session = onnxruntime.InferenceSession(onnx_model, providers=providers)
+
+            onnxruntime_input = {
+                k.name: v.numpy(force=True)
+                for k, v in zip(ort_session.get_inputs(), onnx_input)
+            }
+
+            return ort_session.run(None, onnxruntime_input)
 
     @property
     def model_proto(self) -> onnx.ModelProto:  # type: ignore[name-defined]

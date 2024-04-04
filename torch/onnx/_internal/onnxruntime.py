@@ -182,7 +182,7 @@ class OrtOperatorSupport(OperatorSupport):
             return False
         # This is the and the only place to decide if aten op is supported.
         if node.op == "call_function" and node.target in self._onnx_support_dict:
-            logger.warning(
+            logger.info(
                 "support_dict supports node.target: %s (type: %s)",
                 node.target,
                 type(node.target),
@@ -192,7 +192,7 @@ class OrtOperatorSupport(OperatorSupport):
         # can convert it to ONNX equivalence. Let's use base mechanism to do this.
         # See extra_support_dict  for supported ops.
         if super().is_node_supported(submodules, node):
-            logger.warning(
+            logger.info(
                 "extra_support_dict supports node.target: %s (type: %s)",
                 node.target,
                 type(node.target),

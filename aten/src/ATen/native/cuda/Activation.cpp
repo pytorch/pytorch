@@ -80,7 +80,7 @@ std::tuple<Tensor&, Tensor&> log_sigmoid_forward_out_cuda(const Tensor& input, T
   // NOTE: buffer is only used by CPU dispatch, we just ignore it here
   auto iter = TensorIteratorConfig()
     .add_output(result)
-    .add_input(input)
+    .add_const_input(input)
     .build();
   launch_log_sigmoid_forward_kernel(iter);
   return std::forward_as_tuple(result, buffer);
