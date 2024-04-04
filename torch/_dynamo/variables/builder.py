@@ -876,6 +876,7 @@ class VariableBuilder:
             # e.g. instead of `def forward(self, L_inputs_0_, L_inputs_1_, ...):`, we have
             # `def forward(self, L_inputs_):`
             source = self.source
+            assert isinstance(value, list)
             tensor_list_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
             )
@@ -896,8 +897,7 @@ class VariableBuilder:
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
 
                 guard = functools.partial(
-                    GuardBuilder.TENSOR_MATCH,
-                    value=TensorWeakRef(value[i])
+                    GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
                 )
                 guards.append(source_i.make_guard(guard))
 
