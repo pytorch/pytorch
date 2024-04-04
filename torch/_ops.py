@@ -782,6 +782,20 @@ class OpOverload(OperatorBase):
     # TODO: add more methods to expose information about input and output arguments
 
 
+# TorchBindOpOverload are those custom ops which have at least one overload's
+# schema consists of torch.ScriptObject (i.e. custom class) input.
+# TorchBindOpOverload will skip C++ dispatcher and purely dispatched in python
+# when its inputs contain FakeScriptObject.
+class TorchBindOpOverload(OpOverload):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._is_torchbind_op = True
+
+
+def _has_script_object_arg(schema: torch.FunctionSchema) -> bool:
+    return any(isinstance(arg.type, torch.ClassType) for arg in schema.arguments)
+
+
 # OpOverloadPacket class contains pointer to a base unresolved operator that doesn't correspond to a specific operator
 # You can obtain an OpOverload object through attribute query.
 class OpOverloadPacket:
@@ -793,6 +807,15 @@ class OpOverloadPacket:
         self._op = op
         self._overload_names = overload_names
         self._dir = []
+        self._schemas = {
+            overload_name: torch._C._get_schema(qualified_op_name, overload_name)
+            for overload_name in self._overload_names
+        }
+
+        self._overload_has_script_obj_arg = {
+            overload_name: _has_script_object_arg(schema)
+            for overload_name, schema in self._schemas.items()
+        }
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
@@ -845,8 +868,18 @@ class OpOverloadPacket:
             op_, op_dk_, tags = torch._C._get_operation_overload(
                 self._qualified_op_name, use_key
             )
-            schema = torch._C._get_schema(self._qualified_op_name, use_key)
-            overload = OpOverload(self, op_, op_dk_, schema, tags)
+
+            if use_key not in self._schemas:
+                # Raise Runtime error is to be consistant with the error raised by torch._C._get_schema
+                raise RuntimeError(f"Found no matching schema for {use_key}")
+
+            schema = self._schemas[use_key]
+
+            overload = (
+                OpOverload(self, op_, op_dk_, schema, tags)
+                if not self._overload_has_script_obj_arg[use_key]
+                else TorchBindOpOverload(self, op_, op_dk_, schema, tags)
+            )
             # cache the overload object
             setattr(self, key, overload)
             self._dir.append(key)
