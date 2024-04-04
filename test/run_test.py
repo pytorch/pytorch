@@ -1187,7 +1187,7 @@ def parse_args():
             TEST_WITH_CROSSREF
             or TEST_WITH_ASAN
             or (
-                os.getenv("TD_DISTRIBUTED")
+                strtobool(os.environ.get("TD_DISTRIBUTED", "False"))
                 and os.getenv("TEST_CONFIG") == "distributed"
                 and TEST_CUDA
             )
