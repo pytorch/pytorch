@@ -38,7 +38,7 @@ IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 __all__ = [
     "DefaultLogsSpecs",
@@ -260,7 +260,7 @@ class DefaultLogsSpecs(LogsSpecs):
         base_log_dir = log_dir or tempfile.mkdtemp(prefix="torchelastic_")
         os.makedirs(base_log_dir, exist_ok=True)
         dir = tempfile.mkdtemp(prefix=f"{rdzv_run_id}_", dir=base_log_dir)
-        log.info("log directory set to: %s", dir)
+        logger.info("log directory set to: %s", dir)
         return dir
 
     def reify(self, envs: Dict[int, Dict[str, str]],) -> LogsDest:
@@ -276,7 +276,7 @@ class DefaultLogsSpecs(LogsSpecs):
         if nprocs > 0:
             global_env = envs[0]
         else:
-            log.warning("Empty envs map provided when defining logging destinations.")
+            logger.warning("Empty envs map provided when defining logging destinations.")
         # Keys are always defined, but values can be missing in unit tests
         run_id = global_env.get("TORCHELASTIC_RUN_ID", "test_run_id")
         restart_count = global_env.get("TORCHELASTIC_RESTART_COUNT", "0")
@@ -355,7 +355,7 @@ class DefaultLogsSpecs(LogsSpecs):
 
                 error_file = os.path.join(clogdir, "error.json")
                 error_files[local_rank] = error_file
-                log.info("Setting worker%s reply file to: %s", local_rank, error_file)
+                logger.info("Setting worker%s reply file to: %s", local_rank, error_file)
                 envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
 
         return LogsDest(stdouts, stderrs, tee_stdouts, tee_stderrs, error_files)
@@ -692,7 +692,7 @@ class MultiprocessContext(PContext):
             failed_proc = self._pc.processes[failed_local_rank]
             error_filepath = self.error_files[failed_local_rank]
 
-            log.exception(
+            logger.exception(
                 "failed (exitcode: %s)"
                 " local_rank: %s (pid: %s)"
                 " of fn: %s (start_method: %s)",
@@ -724,7 +724,7 @@ class MultiprocessContext(PContext):
             return
         for proc in self._pc.processes:
             if proc.is_alive():
-                log.warning("Closing process %s via signal %s", proc.pid, death_sig.name)
+                logger.warning("Closing process %s via signal %s", proc.pid, death_sig.name)
                 try:
                     os.kill(proc.pid, death_sig)
                 except ProcessLookupError:
@@ -739,7 +739,7 @@ class MultiprocessContext(PContext):
             proc.join(time_to_wait)
         for proc in self._pc.processes:
             if proc.is_alive():
-                log.warning(
+                logger.warning(
                     "Unable to shutdown process %s via %s, forcefully exiting via %s",
                     proc.pid, death_sig, _get_kill_signal()
                 )
@@ -823,7 +823,7 @@ class SubprocessContext(PContext):
             )
             if result.is_failed():
                 first_failure = min(result.failures.values(), key=lambda f: f.timestamp)
-                log.error(
+                logger.error(
                     "failed (exitcode: %s)"
                     " local_rank: %s (pid: %s)"
                     " of binary: %s",
@@ -848,7 +848,7 @@ class SubprocessContext(PContext):
             return
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
-                log.warning(
+                logger.warning(
                     "Sending process %s closing signal %s", handler.proc.pid, death_sig.name
                 )
                 handler.close(death_sig=death_sig)
@@ -865,7 +865,7 @@ class SubprocessContext(PContext):
                 pass
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
-                log.warning(
+                logger.warning(
                     "Unable to shutdown process %s via %s, forcefully exiting via %s",
                     handler.proc.pid, death_sig, _get_kill_signal()
                 )

@@ -67,9 +67,7 @@ c10::SymNode NestedIntSymNodeImpl::le(const c10::SymNode& other) {
 }
 
 c10::SymNode NestedIntSymNodeImpl::mul(const c10::SymNode& other) {
-  if (auto mb_si = other->nested_int()) {
-    TORCH_CHECK(false, "nested int cannot be multiplied by nested int");
-  }
+  TORCH_CHECK(!other->nested_int(), "nested int cannot be multiplied by nested int");
   c10::optional<int64_t> c = other->constant_int();
   TORCH_CHECK(c.has_value());
   return SymNode(c10::make_intrusive<NestedIntSymNodeImpl>(val_, coeff_ * *c));
