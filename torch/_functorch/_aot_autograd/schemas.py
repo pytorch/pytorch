@@ -685,7 +685,6 @@ class AOTConfig:
     enable_log: bool = True
     # this is always false outside of export.
     pre_dispatch: bool = False
-    backend_name: str = ""
 
     def __post_init__(self):
         if self.pre_dispatch:

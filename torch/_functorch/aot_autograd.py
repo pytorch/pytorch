@@ -826,7 +826,6 @@ def aot_module_simplified(
     decompositions: Optional[Dict] = None,
     keep_inference_input_mutations=False,
     inference_compiler: Optional[Callable] = None,
-    backend_name: Optional[str] = None,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -914,7 +913,6 @@ def aot_module_simplified(
         aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
         is_export=False,
         no_tangents=False,
-        backend_name=backend_name,
     )
 
     with compiled_autograd.disable():

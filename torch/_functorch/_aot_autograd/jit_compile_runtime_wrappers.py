@@ -286,7 +286,7 @@ def aot_dispatch_autograd(
             )
 
             # See Note [Side-Effectful Tokens in AOTAutograd]
-            if num_tokens != 0 and aot_config.backend_name == "inductor":
+            if num_tokens != 0 and config.unlift_effect_tokens:
                 unlift_tokens(fw_module, fw_metadata)
                 num_inner_fwd_outputs -= num_tokens
                 joint_inputs = (joint_inputs[0][num_tokens:], joint_inputs[1])
