@@ -98,7 +98,7 @@ sdpa_template = TritonTemplate(
     q = (q * qk_scale).to(MATMUL_PRECISION)
     # loop over k, v and update accumulator
     lo = 0
-    hi = (start_m + 1) * BLOCK_M if IS_CAUSAL else N_CTX
+    hi = N_CTX
     for start_n in range(lo, hi, BLOCK_N):
         start_n = tl.multiple_of(start_n, BLOCK_N)
         # -- load k, v --
