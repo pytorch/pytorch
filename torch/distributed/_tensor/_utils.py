@@ -39,7 +39,8 @@ def compute_local_shape(
                 local_shard_size, _ = placement._local_shard_size_on_dim(
                     local_shape[shard_dim], mesh_dim_size, my_coordinate[idx]
                 )
-                assert isinstance(local_shard_size, int)
+                # For now, if there are symints from torch.compile we force specialization.
+                # Can lift this restriction later.
                 local_shape[shard_dim] = local_shard_size
 
         return tuple(local_shape)

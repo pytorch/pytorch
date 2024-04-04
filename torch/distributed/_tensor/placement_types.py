@@ -406,6 +406,16 @@ class DTensorSpec:
         if not isinstance(self.placements, tuple):
             self.placements = tuple(self.placements)
         self._hash: Optional[int] = None
+        if self.tensor_meta is not None:
+            size_symints = any(
+                isinstance(x, torch.SymInt) for x in self.tensor_meta.shape
+            )
+            stride_symints = any(
+                isinstance(x, torch.SymInt) for x in self.tensor_meta.stride
+            )
+            self.has_symints = size_symints or stride_symints
+        else:
+            self.has_symints = False
 
     def __setattr__(self, attr: str, value: Any):
         super().__setattr__(attr, value)

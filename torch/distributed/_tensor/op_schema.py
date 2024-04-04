@@ -279,6 +279,14 @@ class OpSchema:
                 if any(isinstance(s, torch.SymInt) for s in a.tensor_meta.shape):
                     has_symints = True
                     break
+            if isinstance(a, torch.SymInt):
+                has_symints = True
+                break
+            if isinstance(a, (list, tuple)) and any(
+                isinstance(x, torch.SymInt) for x in a
+            ):
+                has_symints = True
+                break
         self.has_symints = has_symints
 
     def arg_type_tensor_or_tensor_list_like(self, arg_idx: int) -> bool:
