@@ -308,7 +308,8 @@ class CustomOpDef:
 
         Both ``setup_context_fn`` and ``backward_fn`` must be traceable. That is,
         they may not directly access Tensor.data_ptr and they must not depend on
-        or mutate global state.
+        or mutate global state. If you need a non-traceable backward, you can make
+        it a separate custom_op that you call inside ``backward_fn``.
 
         Examples:
             >>> import torch
@@ -323,7 +324,7 @@ class CustomOpDef:
             >>>
             >>> def setup_context(ctx, inputs, output) -> Tensor:
             >>>     x, = inputs
-            >>      ctx.save_for_backward(x)
+            >>>     ctx.save_for_backward(x)
             >>>
             >>> def backward(ctx, grad):
             >>>     x, = ctx.saved_tensors
@@ -331,9 +332,9 @@ class CustomOpDef:
             >>>
             >>> numpy_sin.register_autograd(setup_context, backward)
             >>>
-            >>> x = torch.randn([], requires_grad=True)
+            >>> x = torch.randn(3, requires_grad=True)
             >>> y = numpy_sin(x)
-            >>> grad_x, = torch.autograd.grad(y, x)
+            >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
             >>> assert torch.allclose(grad_x, x.cos())
 
         """
