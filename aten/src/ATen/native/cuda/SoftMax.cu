@@ -697,7 +697,7 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
 template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t,
   template <typename, typename, typename> class Epilogue, typename index_t = int32_t>
 __global__ void
-cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, index_t classes, size_t max_smem_per_block)
+cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, index_t classes)
 {
   // Each thread block processes a sample in the batch
   input += static_cast<int64_t>(blockIdx.x) * classes;
@@ -710,9 +710,8 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, index_t clas
   // segment is used for thread block reductions
   extern __shared__ unsigned char smem[];
   auto smem_input_cache = reinterpret_cast<scalar_t*>(smem);
-  auto max_cache_elements = (max_smem_per_block -
-    blockDim.x / C10_WARP_SIZE * sizeof(accscalar_t)) / sizeof(scalar_t);
-  auto smem_reduction_cache = reinterpret_cast<accscalar_t*>(smem + max_cache_elements * sizeof(scalar_t));
+  auto smem_reduction_cache = reinterpret_cast<accscalar_t*>(smem +
+    classes * sizeof(scalar_t));
 
   using LoadT = at::native::memory::aligned_vector<scalar_t, ILP>;
   const LoadT* const input_vec_ptr = reinterpret_cast<const LoadT*>(input);
@@ -859,10 +858,12 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             }
           } else {
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
+
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
             auto warps = block.x / C10_WARP_SIZE;
-            size_t max_smem_per_block = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
-            auto max_elements_per_smem = (max_smem_per_block - warps * sizeof(accscalar_t)) / sizeof(scalar_t);
+            size_t smem_reduction_sz = warps * sizeof(accscalar_t);
+            auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
+              smem_reduction_sz) / sizeof(scalar_t);
 
             bool can_use_smem = dim_size < max_elements_per_smem;
             can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
@@ -870,8 +871,9 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             can_use_smem &= !(dim_size % ILP);
 
             if (can_use_smem) {
+              size_t smem_sz = dim_size * sizeof(scalar_t) + smem_reduction_sz;
               cunn_SoftMaxForwardSmem<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
-                <<<grid, block, max_smem_per_block, stream>>>(output_ptr, input_ptr, dim_size, max_smem_per_block);
+                <<<grid, block, smem_sz, stream>>>(output_ptr, input_ptr, dim_size);
             } else {
               cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
                 <<<grid, block, warps * sizeof(accscalar_t), stream>>>(output_ptr, input_ptr, dim_size);
@@ -894,10 +896,12 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             }
           } else {
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
+
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
             auto warps = block.x / C10_WARP_SIZE;
-            size_t max_smem_per_block = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
-            auto max_elements_per_smem = (max_smem_per_block - warps * sizeof(accscalar_t)) / sizeof(scalar_t);
+            size_t smem_reduction_sz = warps * sizeof(accscalar_t);
+            auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
+              smem_reduction_sz) / sizeof(scalar_t);
 
             bool can_use_smem = dim_size < max_elements_per_smem;
             can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
@@ -905,8 +909,9 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             can_use_smem &= !(dim_size % ILP);
 
             if (can_use_smem) {
+              size_t smem_sz = dim_size * sizeof(scalar_t) + smem_reduction_sz;
               cunn_SoftMaxForwardSmem<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
-                <<<grid, block, max_smem_per_block, stream>>>(output_ptr, input_ptr, dim_size, max_smem_per_block);
+                <<<grid, block, smem_sz, stream>>>(output_ptr, input_ptr, dim_size);
             } else {
               cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
                 <<<grid, block, warps * sizeof(accscalar_t), stream>>>(output_ptr, input_ptr, dim_size);
