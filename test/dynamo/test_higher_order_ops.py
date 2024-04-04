@@ -2655,7 +2655,6 @@ class FuncTorchHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         wrapped_gm = backend.graphs[graph_idx]
         return wrapped_gm
 
-    @config.patch(capture_func_transforms=True)
     def test_hessian(self):
         counters.clear()
 
@@ -2790,7 +2789,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @config.patch(capture_func_transforms=True)
     def test_hessian_argnums(self):
         counters.clear()
 
@@ -2943,7 +2941,32 @@ class GraphModule(torch.nn.Module):
                 """        return (unflatten, child_3, child_2, _wrap_for_grad_1, child_4, o)""",
             )
 
-    @config.patch(capture_func_transforms=True)
+    def test_hessian_disable_capture(self):
+        counters.clear()
+
+        with config.patch(capture_func_transforms=False):
+            # We have verified above that this
+            # function compiles
+            def wrapper_fn(x):
+                return torch.func.hessian(torch.sin)(x)
+
+            x = torch.randn(3, 3, 3)
+            actual = wrapper_fn(x)
+            expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+                x
+            )
+            self.assertEqual(len(counters["graph_break"]), 2)
+            self.assertEqual(
+                {
+                    "torch.func.vmap capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 2,
+                    "torch.func.hessian capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 1,
+                },
+                dict(counters["graph_break"]),
+            )
+            self.assertEqual(actual, expected)
+
     def test_jacrev(self):
         counters.clear()
 
@@ -3186,6 +3209,32 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
+    def test_jacrev_disable_capture(self):
+        counters.clear()
+
+        with config.patch(capture_func_transforms=False):
+            # We have verified above that this
+            # function compiles
+            def wrapper_fn(x):
+                return torch.func.jacrev(torch.sin)(x)
+
+            x = torch.randn(3, 3, 3)
+            actual = wrapper_fn(x)
+            expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+                x
+            )
+            self.assertEqual(len(counters["graph_break"]), 2)
+            self.assertEqual(
+                dict(counters["graph_break"]),
+                {
+                    "torch.func.vmap capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 2,
+                    "torch.func.jacrev capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 1,
+                },
+            )
+            self.assertEqual(actual, expected)
+
     def test_vjp(self):
         counters.clear()
 
@@ -3393,6 +3442,31 @@ class GraphModule(torch.nn.Module):
         return (results,)
 """,
         )
+
+    def test_vjp_disable_capture(self):
+        counters.clear()
+
+        with config.patch(capture_func_transforms=False):
+            # We have verified above that this
+            # function compiles
+            def wrapper_fn(x):
+                (out, vjpfunc) = torch.func.vjp(torch.sin, x)
+                return out
+
+            x = torch.randn(3, 3, 3)
+            actual = wrapper_fn(x)
+            expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+                x
+            )
+            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertEqual(
+                dict(counters["graph_break"]),
+                {
+                    "torch.func.vjp capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 1
+                },
+            )
+            self.assertEqual(actual, expected)
 
     def test_grad(self):
         counters.clear()
@@ -4081,7 +4155,6 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(counters["graph_break"]), 0)
         self.assertEqual(actual, expected)
 
-    @config.patch(capture_func_transforms=True)
     def test_jacfwd(self):
         counters.clear()
 
@@ -4165,7 +4238,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @config.patch(capture_func_transforms=True)
     def test_jacfwd_two_tensors_argnums(self):
         counters.clear()
 
@@ -4255,7 +4327,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @config.patch(capture_func_transforms=True)
     def test_jacfwd_has_aux(self):
         counters.clear()
 
@@ -4350,7 +4421,6 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @config.patch(capture_func_transforms=True)
     def test_jacfwd_randomness(self):
         counters.clear()
 
@@ -4454,7 +4524,32 @@ class GraphModule(torch.nn.Module):
 """,
         )
 
-    @config.patch(capture_func_transforms=True)
+    def test_jacfwd_disable_capture(self):
+        counters.clear()
+
+        with config.patch(capture_func_transforms=False):
+            # We have verified above that this
+            # function compiles
+            def wrapper_fn(x):
+                return torch.func.jacfwd(torch.sin)(x)
+
+            x = torch.randn(3, 3, 3)
+            actual = wrapper_fn(x)
+            expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+                x
+            )
+            self.assertEqual(len(counters["graph_break"]), 2)
+            self.assertEqual(
+                dict(counters["graph_break"]),
+                {
+                    "torch.func.vmap capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 2,
+                    "torch.func.jacfwd capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 1,
+                },
+            )
+            self.assertEqual(actual, expected)
+
     def test_jvp_simple(self):
         counters.clear()
 
@@ -4886,6 +4981,30 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3, 3)
         expected = wrapper_fn(x)
         actual = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=True)(x)
+        self.assertEqual(actual, expected)
+
+    def test_jvp_disable_capture(self):
+        counters.clear()
+
+        with config.patch(capture_func_transforms=False):
+            # We have verified above that this
+            # function compiles
+            def wrapper_fn(x):
+                return torch.func.jvp(torch.sin, (x,), (x,))
+
+            x = torch.randn(3, 3, 3)
+            actual = wrapper_fn(x)
+            expected = torch.compile(wrapper_fn, backend="aot_eager", fullgraph=False)(
+                x
+            )
+            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertEqual(
+                dict(counters["graph_break"]),
+                {
+                    "torch.func.jvp capture is disabled, it can be "
+                    "turned on by setting `torch._dynamo.config.capture_func_transforms=True`": 1
+                },
+            )
         self.assertEqual(actual, expected)
 
     @config.patch(error_on_recompile=True)
