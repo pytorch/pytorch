@@ -268,6 +268,17 @@ static inline PyObject* call_callback(
   return res;
 }
 
+static inline void clear_old_frame_if_python_312_plus(
+  PyThreadState* tstate,
+  THP_EVAL_API_FRAME_OBJECT* frame) {
+#if IS_PYTHON_3_12_PLUS
+
+  THP_PyFrame_Clear(frame);
+  THP_PyThreadState_PopFrame(tstate, frame);
+
+#endif
+}
+
 inline static PyObject* eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
@@ -278,27 +289,24 @@ inline static PyObject* eval_custom_code_impl(
   DEBUG_NULL_CHECK(frame);
   DEBUG_NULL_CHECK(code);
 
-  #if IS_PYTHON_3_11_PLUS
+#if IS_PYTHON_3_11_PLUS
 
   // Generate Python function object and _PyInterpreterFrame in a way similar to
   // https://github.com/python/cpython/blob/e715da6db1d1d70cd779dc48e1ba8110c51cc1bf/Python/ceval.c#L1130
-  #if IS_PYTHON_3_12_PLUS
-  // Most of these don't exist in 3.12 anymore.
-  // _PyFunction_CopyWithNewCode and _PyFrame_InitializeSpecials in particular
-  PyFunctionObject* func;
-  PyErr_SetString(PyExc_RuntimeError, "Dynamo is not supported in Python 3.12 yet");
-  return NULL;
-  #else
-  PyFunctionObject* func = _PyFunction_CopyWithNewCode((PyFunctionObject*) frame->f_func, code);
+#if IS_PYTHON_3_12_PLUS
+  PyFunctionObject* old_func = (PyFunctionObject*) frame->f_funcobj;
+  size_t size = code->co_framesize;
+#else
+  PyFunctionObject* old_func = frame->f_func;
+  size_t size = code->co_nlocalsplus + code->co_stacksize + FRAME_SPECIALS_SIZE;
+#endif
+
+  PyFunctionObject* func = _PyFunction_CopyWithNewCode(old_func, code);
   if (func == NULL) {
     return NULL;
   }
-  #endif
 
-  size_t size = code->co_nlocalsplus + code->co_stacksize + FRAME_SPECIALS_SIZE;
-  // THP_EVAL_API_FRAME_OBJECT (_PyInterpreterFrame) is a regular C struct, so
-  // it should be safe to use system malloc over Python malloc, e.g. PyMem_Malloc
-  THP_EVAL_API_FRAME_OBJECT* shadow = malloc(size * sizeof(PyObject*));
+  THP_EVAL_API_FRAME_OBJECT* shadow = THP_PyThreadState_BumpFramePointerSlow(tstate, size);
   if (shadow == NULL) {
     Py_DECREF(func);
     return NULL;
@@ -306,9 +314,11 @@ inline static PyObject* eval_custom_code_impl(
 
   Py_INCREF(func);
   // consumes reference to func
-  #if !(IS_PYTHON_3_12_PLUS)
+#if IS_PYTHON_3_12_PLUS
+  _PyFrame_Initialize(shadow, func, NULL, code, 0);
+#else
   _PyFrame_InitializeSpecials(shadow, func, NULL, code->co_nlocalsplus);
-  #endif
+#endif
 
   PyObject** fastlocals_old = frame->localsplus;
   PyObject** fastlocals_new = shadow->localsplus;
@@ -316,11 +326,14 @@ inline static PyObject* eval_custom_code_impl(
   Py_ssize_t n_new = code->co_nlocalsplus;
 
   // localsplus are XINCREF'd by default eval frame, so all values must be valid.
+#if !(IS_PYTHON_3_12_PLUS)
+  // _PyFrame_Initialize in 3.12 already does this
   for (int i = 0; i < code->co_nlocalsplus; i++) {
     fastlocals_new[i] = NULL;
   }
+#endif
 
-  #else
+#else
 
   THP_EVAL_API_FRAME_OBJECT* shadow = PyFrame_New(tstate, code, frame->f_globals, NULL);
   if (shadow == NULL) {
@@ -332,7 +345,7 @@ inline static PyObject* eval_custom_code_impl(
   Py_ssize_t n_old = frame->f_code->co_nlocals + PyCode_GetNFreevars(frame->f_code) + PyCode_GetNCellvars(frame->f_code);
   Py_ssize_t n_new = code->co_nlocals + PyCode_GetNFreevars(code) + PyCode_GetNCellvars(code);
 
-  #endif
+#endif
 
   // ============== Initialize new frame from old frame ============
   // Python internal for executing a function:
@@ -399,17 +412,17 @@ inline static PyObject* eval_custom_code_impl(
   // conditional test to tell if a variable is not a cell variable
   // this is straightforward in Python 3.11 and higher, as there are bit flags in `co_localspluskinds` to tell if a variable is a cell variable.
   // in Python 3.10 and lower, essentially we are checking if a variable is a new local variable (because of the layout mentioned above, the first variable that is not cell variable is the first new local variable). the corresponding slot in `flocalsplus` is NULL for new local variables.
-  #if IS_PYTHON_3_11_PLUS
+#if IS_PYTHON_3_11_PLUS
     if(!(_PyLocals_GetKind(frame->f_code->co_localspluskinds, i) & CO_FAST_CELL))
     {
       break;
     }
-  #else
+#else
     if(fastlocals_old[i] == NULL)
     {
       break;
     }
-  #endif
+#endif
 
     Py_XINCREF(fastlocals_old[i]);
     fastlocals_new[j] = fastlocals_old[i];
@@ -417,17 +430,27 @@ inline static PyObject* eval_custom_code_impl(
 
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
 
-  #if IS_PYTHON_3_11_PLUS
+#if IS_PYTHON_3_12_PLUS
 
-  THP_PyFrame_Clear(shadow);
-  free(shadow);
+  // In 3.12, the frame evaluation function is responsible for
+  // clearing and popping the frame, so we manually do that on the
+  // old frame.
+  clear_old_frame_if_python_312_plus(tstate, frame);
   Py_DECREF(func);
 
-  #else
+#elif IS_PYTHON_3_11_PLUS
+
+  // In 3.11, shadow has is_entry set to true, so _PyEvalFrameClearAndPop is not called,
+  // so we manually clear and pop the shadow frame.
+  THP_PyFrame_Clear(shadow);
+  THP_PyThreadState_PopFrame(tstate, shadow);
+  Py_DECREF(func);
+
+#else
 
   Py_DECREF(shadow);
 
-  #endif
+#endif
 
   return result;
 }
@@ -467,19 +490,23 @@ static PyObject* _custom_eval_frame_shim(
   return _custom_eval_frame(tstate, frame, throw_flag, callback);
 }
 
+// NOTE: In 3.12+, any return NULL; statements must be preceded by
+// clear_old_frame_if_python_312_plus(tstate, frame); since the eval frame function
+// is now responsible for clearing/popping the frame.
+// eval_frame_default/eval_custom_code will clear/pop the frame.
 static PyObject* _custom_eval_frame(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
     PyObject* callback) {
-  #if IS_PYTHON_3_11_PLUS
+#if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
       "begin %s %s %i %i",
       get_frame_name(frame),
       PyUnicode_AsUTF8(frame->f_code->co_filename),
       frame->f_code->co_firstlineno,
       _PyInterpreterFrame_LASTI(frame));
-  #else
+#else
   DEBUG_TRACE(
       "begin %s %s %i %i %i",
       get_frame_name(frame),
@@ -487,7 +514,7 @@ static PyObject* _custom_eval_frame(
       frame->f_lineno,
       frame->f_lasti,
       frame->f_iblock);
-  #endif
+#endif
 
   if (throw_flag) {
     // When unwinding generators, eval frame is called with throw_flag ==
@@ -527,6 +554,7 @@ static PyObject* _custom_eval_frame(
   // TODO(jansel): investigate directly using the "fast" representation
   if (THP_PyFrame_FastToLocalsWithError(frame) < 0) {
     DEBUG_TRACE("error %s", get_frame_name(frame));
+    clear_old_frame_if_python_312_plus(tstate, frame);
     return NULL;
   }
 
@@ -542,6 +570,7 @@ static PyObject* _custom_eval_frame(
 
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
+      clear_old_frame_if_python_312_plus(tstate, frame);
       return NULL;
     } else if (maybe_cached_code == Py_None) {
       DEBUG_TRACE("cache miss %s", get_frame_name(frame));
@@ -566,6 +595,7 @@ static PyObject* _custom_eval_frame(
   _pytorch_record_function_exit(rf);
   if (maybe_cached_code == NULL) {
     // Python error
+    clear_old_frame_if_python_312_plus(tstate, frame);
     return NULL;
   } else if (maybe_cached_code != Py_None) {
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
@@ -588,6 +618,7 @@ static PyObject* _custom_eval_frame(
     // cascading failure from internal exceptions.  The upshot is if
     // Dynamo barfs, that's it for Dynamo, even if you catch the exception
     // inside the torch.compile block we won't try to Dynamo anything else.
+    clear_old_frame_if_python_312_plus(tstate, frame);
     return NULL;
   } else if (result != Py_None) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
@@ -598,6 +629,7 @@ static PyObject* _custom_eval_frame(
     // extra->cache_entry. extra wont be NULL here.
     CacheEntry* new_cache_entry = create_cache_entry(extra, result, backend);
     Py_DECREF(result);
+
     // Update the existing cache_entry on the extra object. This extra object is
     // sitting on the extra scratch space, we are just changing the cache_entry
     // ptr. As a result, extra now becomes the owner of CacheEntry object. This
@@ -732,6 +764,9 @@ static struct PyModuleDef _module = {
     -1,
     _methods};
 
+#if IS_PYTHON_3_12_PLUS
+#define _PyEval_RequestCodeExtraIndex PyUnstable_Eval_RequestCodeExtraIndex
+#endif
 
 PyObject* torch_c_dynamo_eval_frame_init(void) {
   extra_index = _PyEval_RequestCodeExtraIndex(destroy_extra_state);
