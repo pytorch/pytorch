@@ -1008,18 +1008,13 @@ class OpOverloadPacket:
         # the schema and cause an error for torchbind op when inputs FakeScriptObject so we
         # intercept it here and call TorchBindOpverload instead.
         if self_._has_torchbind_op_overload:
-            if len(self_._schemas) > 1:
-                raise RuntimeError(
-                    f"{self_} has multiple overloads and one or more of the overloads' "
-                    " has custom objects args. Currently, we only support the case"
-                    " where the custom op has no overloads except default."
-                )
-
-            assert isinstance(
-                self_.default, TorchBindOpOverload
-            ), f"{self_.default} is not TorchBindOpOverload."
-
-            return self_.default(*args, **kwargs)
+            # Try the overloads one by one to match an op.
+            for overload_name in self_._schemas.keys():
+                try:
+                    ret = getattr(self_, overload_name)(*args, **kwargs)
+                except RuntimeError as e:
+                    continue
+                return ret
 
         return self_._op(*args, **(kwargs or {}))
 
