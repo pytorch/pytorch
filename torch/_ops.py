@@ -770,11 +770,10 @@ class OpOverload(OperatorBase):
                     # TODO: This path is slow, should generally encourage this
                     # case to not happen
                     return self._op_dk(key, *args, **kwargs)
-                # TODO(voz): The idea behind this is that we do not yet support dispatch by key + mode, only key.
-                return self.python_key_mode_table[curr_mode](*args, **kwargs)
 
-            self._dispatch_cache[key] = handler
-            add_cached_op(self)
+                with torch.utils._python_dispatch._pop_mode_temporarily() as mode:
+                    return self.python_key_mode_table[curr_mode](mode, *args, **kwargs)
+
             return handler
 
         functionality_key = torch._C._to_functionality_key(key)  # type: ignore[attr-defined]
@@ -856,11 +855,43 @@ class OpOverload(OperatorBase):
 # TorchBindOpOverload are those custom ops which have at least one overload's
 # schema consists of torch.ScriptObject (i.e. custom class) input.
 # TorchBindOpOverload will skip C++ dispatcher and purely dispatched in python
-# when its inputs contain FakeScriptObject.
+# when its inputs contain FakeScriptObject in a similar way as higher order ops.
 class TorchBindOpOverload(OpOverload):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._is_torchbind_op = True
+        # All torchbind op are considered as having side-effects
+        torch._higher_order_ops.effects.register_side_effect_op(self)
+
+        def wrapper(mode, *args, **kwargs):
+            return _mannually_invoke_dispatch_mode_in_python(
+                mode, self, *args, **kwargs
+            )
+
+        self.py_impl(torch._subclasses.functional_tensor.FunctionalTensorMode)(wrapper)
+        self.py_impl(torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode)(wrapper)
+        self.py_impl(torch._subclasses.fake_tensor.FakeTensorMode)(wrapper)
+
+        self.non_fallthrough_keys = torch._C.DispatchKeySet(
+            DispatchKey.PreDispatch
+        ).add(DispatchKey.Python)
+
+    # use `self_` to avoid naming collide with arguments that
+    # are named "self". This way, they can be called by kwargs.
+    def __call__(self_, *args, **kwargs):  # noqa: B902
+        # The path when any inputs are FakeScriptObject, we need to
+        # skip c++ dispatcher and dispatch in python like a higher order op.
+        if pytree.tree_any(
+            lambda obj: isinstance(
+                obj, torch._library.fake_class_registry.FakeScriptObject
+            ),
+            (args, kwargs),
+        ):
+            dispatch_key_set = _compute_keyset(args, kwargs, self_.non_fallthrough_keys)
+            return dispatch_in_python(
+                dispatch_key_set.highestPriorityTypeId(), self_, *args, **kwargs
+            )
+        # The normal path when we're not tracing: go through C++ Dispatcher
+        return self_._op(*args, **kwargs)
 
 
 def _has_script_object_arg(schema: torch.FunctionSchema) -> bool:
@@ -887,6 +918,9 @@ class OpOverloadPacket:
             overload_name: _has_script_object_arg(schema)
             for overload_name, schema in self._schemas.items()
         }
+        self._has_torchbind_op_overload = any(
+            self._overload_has_script_obj_arg.values()
+        )
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
@@ -971,6 +1005,24 @@ class OpOverloadPacket:
         # is still callable from JIT
         # We save the function ptr as the `op` attribute on
         # OpOverloadPacket to access it here.
+
+        # Directly calling OverloadPacket goes into C++, which will check
+        # the schema and cause an error for torchbind op when inputs FakeScriptObject so we
+        # intercept it here and call TorchBindOpverload instead.
+        if self_._has_torchbind_op_overload:
+            if len(self_._schemas) > 1:
+                raise RuntimeError(
+                    f"{self_} has multiple overloads and one or more of the overloads' "
+                    " has custom objects args. Currently, we only support the case"
+                    " where the custom op has no overloads except default."
+                )
+
+            assert isinstance(
+                self_.default, TorchBindOpOverload
+            ), f"{self_.default} is not TorchBindOpOverload."
+
+            return self_.default(*args, **kwargs)
+
         return self_._op(*args, **(kwargs or {}))
 
     # TODO: use this to make a __dir__

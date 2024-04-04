@@ -3,7 +3,7 @@ import torch
 
 def register_if_not(qualname):
     entry = torch._library.simple_registry.singleton.find(qualname)
-    if entry.abstract_impl.kernel is not None:
+    if entry.abstract_impl.kernel is None:
         return torch.library.impl_abstract(qualname)
     else:
 

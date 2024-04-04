@@ -576,6 +576,50 @@ def forward(self, arg0_1, arg1_1):
         ]:
             self.assertFalse(any(op._overload_has_script_obj_arg.values()))
 
+    def test_make_fx_tensor_queue_operators(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, tq, x):
+                torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+                x_sin = torch.ops._TorchScriptTesting.queue_pop(tq)
+                x_cos = torch.ops._TorchScriptTesting.queue_pop(tq)
+                return x_sin, x_cos, tq
+
+        mod = Model()
+
+        tq1 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq2 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        x = torch.ones(2, 3)
+
+        mod(tq1, x)
+
+        gm = make_fx(mod, tracing_mode="fake")(tq1, x)
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg1_1)
+    queue_push = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, cos);  cos = None
+    sin = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
+    queue_push_1 = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, sin);  sin = None
+    queue_pop = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
+    queue_pop_1 = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
+    return (queue_pop, queue_pop_1, arg0_1)""",
+        )
+        self._assertEqualSkipScriptObject(gm(tq1, x), mod(tq2, x))
+
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestRegisterFakeClass(TestCase):
