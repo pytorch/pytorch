@@ -250,6 +250,14 @@ class BaseTorchDispatchMode(TorchDispatchMode):
             kwargs = {}
         return func(*args, **kwargs)
 
+# Similar to is_traceable_wrapper_subclass, but for the underlying tensor type
+# E.g `is_traceable_wrapper_subclass_type(torch.testing._internal.two_tensor.TwoTensor) == True`
+def is_traceable_wrapper_subclass_type(type_obj):
+    return (
+        type(type_obj) is torch._C._TensorMeta
+        and hasattr(type_obj, "__tensor_flatten__")
+        and hasattr(type_obj, "__tensor_unflatten__")
+    )
 
 def is_traceable_wrapper_subclass(t):
     """

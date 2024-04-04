@@ -285,6 +285,10 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def inspect_parameter_names(self) -> List[str]:
         unimplemented(f"inspect_parameter_names: {self}")
 
+    # Overridden by VariableTrackers that cannot be proxied into the dynamo graph
+    def can_be_proxied_in_fx(self):
+        return True
+
     def call_hasattr(self, tx, name: str) -> "VariableTracker":
         unimplemented(f"hasattr {self.__class__.__name__} {name}")
 
