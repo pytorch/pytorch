@@ -5,11 +5,14 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/StringUtil.h>
 
+#include <atomic>
 #include <cstdint>
 #include <exception>
+#include <optional>
 #include <string>
 #include <variant>
 #include <vector>
+#include <memory>
 
 #if defined(_MSC_VER) && _MSC_VER <= 1900
 #define __func__ __FUNCTION__
@@ -25,6 +28,50 @@ namespace c10 {
 /// NB: c10::Error is handled specially by the default torch to suppress the
 /// backtrace, see torch/csrc/Exceptions.h
 class C10_API Error : public std::exception {
+public:
+  // NB: we wrap this in a shared_ptr to ensure this class stays aligned(8).
+  using BacktraceGenerator = std::shared_ptr<std::function<std::string()>>;
+
+  template<typename F>
+  static BacktraceGenerator makeBacktraceGenerator(F&& f) {
+    return std::make_shared<std::function<std::string()>>(std::forward<F>(f));
+  }
+
+private:
+  template <class T>
+  class OptimisticLazy {
+  public:
+    OptimisticLazy() = default;
+    OptimisticLazy(const OptimisticLazy& other) {
+      if (auto value = other.value_.load(std::memory_order_acquire)) {
+        value_ = new T(*value);
+      }
+    }
+    OptimisticLazy(OptimisticLazy&& other) : value_(other.value_.exchange(nullptr, std::memory_order_acq_rel)) {}
+    ~OptimisticLazy() { delete value_.load(std::memory_order_acquire); }
+
+    template <class F, class E>
+    T& ensure(const F& factory, const E& extraActions) {
+      if (auto* value = value_.load(std::memory_order_acquire)) {
+        return *value;
+      }
+      auto* value = new T(factory());
+      T* old = nullptr;
+      if (!value_.compare_exchange_strong(old, value, std::memory_order_release, std::memory_order_acquire)) {
+        delete value;
+        value = old;
+      }
+      extraActions();
+      return *value;
+    }
+
+    bool isSet() {
+      return value_.load(std::memory_order_acquire) != nullptr;
+    }
+  private:
+    std::atomic<T*> value_{nullptr};
+  };
+
   // The actual error message.
   std::string msg_;
 
@@ -33,18 +80,23 @@ class C10_API Error : public std::exception {
   // extra leading/trailing newlines to strings inside this vector
   std::vector<std::string> context_;
 
-  // The C++ backtrace at the point when this exception was raised.  This
-  // may be empty if there is no valid backtrace.  (We don't use optional
-  // here to reduce the dependencies this file has.)
-  std::string backtrace_;
+  // The C++ backtrace at the point when this exception was raised. This will be
+  // populated via the supplied generator, precisely the first time it's actually
+  // needed (e.g., when what() or backtrace() is called). Afterwards, the cached
+  // value avoids recomputation.
+  // If a generator is not provided, the backtrace will be an empty string.
+  mutable OptimisticLazy<std::string> backtrace_;
+  BacktraceGenerator backtraceCallback_;
 
   // These two are derived fields from msg_stack_ and backtrace_, but we need
   // fields for the strings so that we can return a const char* (as the
   // signature of std::exception requires).  Currently, the invariant
-  // is that these fields are ALWAYS populated consistently with respect
-  // to msg_stack_ and backtrace_.
-  std::string what_;
-  std::string what_without_backtrace_;
+  // is that these fields are populated consistently with respect to msg_stack_
+  // and backtrace_.
+  // On the first call to what(), we compute the actual backtrace string.
+  // Accessing what_without_backtrace does not trigger a backtrace computation.
+  mutable std::string what_;
+  std::string whatWithoutBacktrace_;
 
   // This is a little debugging trick: you can stash a relevant pointer
   // in caller, and then when you catch the exception, you can compare
@@ -64,11 +116,14 @@ class C10_API Error : public std::exception {
       const uint32_t line,
       const char* condition,
       const std::string& msg,
-      const std::string& backtrace,
+      std::optional<BacktraceGenerator> backtraceCallback = std::nullopt,
       const void* caller = nullptr);
 
   // Base constructor
-  Error(std::string msg, std::string backtrace = "", const void* caller = nullptr);
+  explicit Error(
+    std::string msg,
+    std::optional<BacktraceGenerator> backtraceCallback = std::nullopt,
+    const void* caller = nullptr);
 
   // Add some new context to the message stack.  The last added context
   // will be formatted at the end of the context list upon printing.
@@ -85,14 +140,20 @@ class C10_API Error : public std::exception {
   }
 
   const std::string& backtrace() const {
-    return backtrace_;
+    return ensureBacktrace();
   }
 
-  /// Returns the complete error message, including the source location.
+  /// Returns the complete error message, including the source location. If
+  /// the backtrace is not yet available, it will be put together for the first time.
   /// The returned pointer is invalidated if you call add_context() on
   /// this object.
   const char* what() const noexcept override {
+    ensureBacktrace();
     return what_.c_str();
+  }
+
+  const BacktraceGenerator& backtraceCallback() const {
+    return backtraceCallback_;
   }
 
   const void* caller() const noexcept {
@@ -103,12 +164,13 @@ class C10_API Error : public std::exception {
   /// The returned pointer is invalidated if you call add_context() on
   /// this object.
   virtual const char* what_without_backtrace() const noexcept {
-    return what_without_backtrace_.c_str();
+    return whatWithoutBacktrace_.c_str();
   }
 
  private:
   void refresh_what();
   std::string compute_what(bool include_backtrace) const;
+  const std::string& ensureBacktrace() const;
 };
 
 class C10_API Warning {

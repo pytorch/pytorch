@@ -8,9 +8,21 @@
 
 namespace c10 {
 
-Error::Error(std::string msg, std::string backtrace, const void* caller)
-    : msg_(std::move(msg)), backtrace_(std::move(backtrace)), caller_(caller) {
-  refresh_what();
+static std::function<std::string()> noBacktrace = []() {
+  return "";
+};
+
+Error::Error(
+  std::string msg,
+  std::optional<BacktraceGenerator> backtraceCallback,
+  const void* caller)
+    : msg_(std::move(msg)), caller_(caller) {
+  whatWithoutBacktrace_ = compute_what(false);
+  if (!backtraceCallback.has_value()) {
+    backtraceCallback_ = makeBacktraceGenerator(noBacktrace);
+  } else {
+    backtraceCallback_ = std::move(*backtraceCallback);
+  }
 }
 
 // PyTorch-style error message
@@ -23,7 +35,7 @@ Error::Error(
     const uint32_t line,
     const char* condition,
     const std::string& msg,
-    const std::string& backtrace,
+    std::optional<BacktraceGenerator> backtraceCallback,
     const void* caller)
     : Error(
           str("[enforce fail at ",
@@ -34,7 +46,7 @@ Error::Error(
               condition,
               ". ",
               msg),
-          backtrace,
+          std::move(backtraceCallback),
           caller) {}
 
 std::string Error::compute_what(bool include_backtrace) const {
@@ -52,7 +64,7 @@ std::string Error::compute_what(bool include_backtrace) const {
   }
 
   if (include_backtrace) {
-    oss << "\n" << backtrace_;
+    oss << "\n" << backtrace();
   }
 
   return oss.str();
@@ -60,7 +72,21 @@ std::string Error::compute_what(bool include_backtrace) const {
 
 void Error::refresh_what() {
   what_ = compute_what(/*include_backtrace*/ true);
-  what_without_backtrace_ = compute_what(/*include_backtrace*/ false);
+  whatWithoutBacktrace_ = compute_what(/*include_backtrace*/ false);
+}
+
+const std::string& Error::ensureBacktrace() const {
+  // With a new backtrace, we have to update what_ (which includes the backtrace
+  // contents).
+  // We pass this to the OptimisticLazy object to ensure it is executed only after
+  // we have a backtrace (otherwise it would lead to infinite recursion).
+  // If the backtrace is already set, no backtrace will be created and what_ won't
+  // be refreshed.
+  auto setWhatAfterBacktrace = [this]() {
+    what_ = compute_what(true);
+  };
+
+  return backtrace_.ensure(*backtraceCallback_, setWhatAfterBacktrace);
 }
 
 void Error::add_context(std::string new_msg) {

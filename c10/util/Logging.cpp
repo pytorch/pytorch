@@ -3,6 +3,7 @@
 #include <c10/util/Logging.h>
 #ifdef FBCODE_CAFFE2
 #include <folly/synchronization/SanitizeThread.h>
+#include <common/process/StackTrace.h>
 #endif
 
 #ifndef _WIN32
@@ -24,16 +25,42 @@ C10_DEFINE_bool(
 namespace c10 {
 
 namespace {
-std::function<string()>* GetFetchStackTrace() {
-  static std::function<string()> func = []() {
-    return get_backtrace(/*frames_to_skip=*/1);
+
+// Returns a function that provides a generator of a backtrace.
+// Calling this snapshots a facebook::process::StackTrace to be processed by
+// a c10::Error into a string if and when it's needed.
+// Alternatively, if facebook::process::StackTrace is not in the build flavour,
+// returns a function that always returns the backtrace. This means the cost of
+// backtrace generation will always be paid upfront.
+// This method's return value can be overwritten by SetStackTraceFetcher().
+std::function<c10::Error::BacktraceGenerator()>* GetFetchStackTrace() {
+  static std::function<c10::Error::BacktraceGenerator()> func = []() {
+#ifdef FBCODE_CAFFE2
+    auto capturedTrace = facebook::process::StackTrace();
+    std::function<std::string()> processStackTrace = [trace = std::move(capturedTrace)]() {
+      return trace.toString();
+    };
+    return c10::Error::makeBacktraceGenerator(std::move(processStackTrace));
+#else
+    std::string backtrace = get_backtrace(/*frames_to_skip=*/1);
+    std::function<std::string()> readyBacktrace = [bt = std::move(backtrace)]() { return bt; };
+    return c10::Error::makeBacktraceGenerator(readyBacktrace);
+#endif
   };
   return &func;
 };
 } // namespace
 
-void SetStackTraceFetcher(std::function<string(void)> fetcher) {
+void SetStackTraceFetcher(std::function<c10::Error::BacktraceGenerator()> fetcher) {
   *GetFetchStackTrace() = std::move(fetcher);
+}
+
+void SetStackTraceFetcher(c10::Error::BacktraceGenerator fetcher) {
+  *GetFetchStackTrace() = [fetcher]() { return fetcher; };
+}
+
+void SetStackTraceFetcher(std::function<std::string()> fetcher) {
+  SetStackTraceFetcher(c10::Error::makeBacktraceGenerator(std::move(fetcher)));
 }
 
 void ThrowEnforceNotMet(
@@ -81,10 +108,7 @@ void ThrowEnforceFiniteNotMet(
 Error::Error(SourceLocation source_location, std::string msg)
     : Error(
           std::move(msg),
-          str("Exception raised from ",
-              source_location,
-              " (most recent call first):\n",
-              (*GetFetchStackTrace())())) {}
+          (*GetFetchStackTrace())()) {}
 
 using APIUsageLoggerType = std::function<void(const std::string&)>;
 using APIUsageMetadataLoggerType = std::function<void(

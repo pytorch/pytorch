@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <optional>
 
 #include <c10/util/ArrayRef.h>
 #include <c10/util/Logging.h>
@@ -155,5 +156,90 @@ TEST(LoggingDeathTest, TestEnforceUsingFatal) {
   std::swap(FLAGS_caffe2_use_fatal_for_enforce, kTrue);
 }
 #endif
+
+TEST(LoggingTest, TestBacktrace) {
+  int x = 4;
+  int y = 5;
+  int z = 0;
+  try {
+    CAFFE_ENFORCE_THAT(std::equal_to<void>(), ==, ++x, ++y, "Message: ", z++);
+    // This should never be triggered.
+    ADD_FAILURE();
+  } catch (const ::c10::Error& err) {
+    // Message contents should follow a specific formatting with the assertion / file name / line number etc.
+    auto errMsg = std::string(err.msg());
+    EXPECT_EQ(errMsg, "[enforce fail at logging_test.cpp:165] ++x == ++y. 5 vs 6. Message: 0");
+
+    // Check what_without_backtrace
+    auto errWhatWithoutBacktrace = std::string(err.what_without_backtrace());
+    EXPECT_EQ(errWhatWithoutBacktrace, errMsg);
+    EXPECT_TRUE(errWhatWithoutBacktrace.find("LoggingTest") == std::string::npos);
+    EXPECT_TRUE(errWhatWithoutBacktrace.find("TestBacktrace") == std::string::npos);
+
+    // Check what
+    auto errWhat = std::string(err.what());
+    EXPECT_TRUE(errWhat.find(errMsg) != std::string::npos);
+    auto backtrace = err.backtrace();
+    EXPECT_TRUE(errWhat.find(backtrace) != std::string::npos);
+    // Not going to assert the whole stack trace, but at least this test name should appear.
+    bool hasNoBacktrace = errWhat.find("(no backtrace available)") != std::string::npos;
+    EXPECT_TRUE(hasNoBacktrace || errWhat.find("LoggingTest") != std::string::npos);
+    EXPECT_TRUE(hasNoBacktrace || errWhat.find("TestBacktrace") != std::string::npos);
+  }
+}
+
+TEST(LoggingTest, TestNoBacktrace) {
+  // Manually constructing an error, without the macros; explicitly not supplying
+  // a backtrace provider should lead to no backtrace.
+
+  const std::string kErrorMessage = "This is an error";
+
+  {
+    try {
+      throw c10::Error(kErrorMessage);
+    }
+    catch (const c10::Error& err) {
+      EXPECT_EQ(std::string(err.what_without_backtrace()), kErrorMessage);
+      EXPECT_EQ(std::string(err.what()), kErrorMessage + "\n");
+      EXPECT_EQ(err.backtrace(), "");
+    }
+  }
+
+  {
+    try {
+      throw c10::Error(kErrorMessage, std::nullopt, nullptr);
+    }
+    catch (const c10::Error& err) {
+      EXPECT_EQ(std::string(err.what_without_backtrace()), kErrorMessage);
+      EXPECT_EQ(std::string(err.what()), kErrorMessage + "\n");
+      EXPECT_EQ(err.backtrace(), "");
+    }
+  }
+}
+
+TEST(LoggingTest, TestCustomBacktraceProvider) {
+  // Manually constructing an error, without the macros; explicitly not supplying
+  // a backtrace provider should lead to no backtrace.
+
+  const std::string kErrorMessage = "This is an error";
+  const std::string kBacktrace = "An amazing backtrace";
+
+  std::function<std::string()> backtraceProviderFunc = [kBacktrace]() {
+    return kBacktrace;
+  };
+  c10::Error::BacktraceGenerator backtraceProvider =
+    c10::Error::makeBacktraceGenerator(std::move(backtraceProviderFunc));
+
+  try {
+    throw c10::Error(kErrorMessage, backtraceProvider);
+  }
+  catch (const c10::Error& err) {
+    EXPECT_EQ(std::string(err.what_without_backtrace()), kErrorMessage);
+    EXPECT_EQ(err.backtrace(), kBacktrace);
+    auto errWhat = std::string(err.what());
+    EXPECT_TRUE(errWhat.find(kErrorMessage) != std::string::npos);
+    EXPECT_TRUE(errWhat.find(kBacktrace) != std::string::npos);
+  }
+}
 
 } // namespace c10_test
