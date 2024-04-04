@@ -166,7 +166,7 @@ class FSDPParamGroup:
         data_parallel_world_size *= self.mesh_info.shard_mesh_size
         if isinstance(self.mesh_info, HSDPMeshInfo):
             data_parallel_world_size *= self.mesh_info.replicate_mesh_size
-        if self._reduce_dtype == torch.float32:
+        if self._reduce_dtype in (torch.float32, torch.bfloat16):
             # Use NCCL's AVG op to divide after reduction since it is more
             # performant and fp32 has sufficient precision
             self._grad_divide_factors: Union[Tuple[None, None], Tuple[float, float]] = (
@@ -174,9 +174,10 @@ class FSDPParamGroup:
                 None,
             )
             return
-        # For N data parallel workers, each worker computes g_i, and they
-        # collectively reduce (g_1 + ... + g_N) / N. To avoid overflow and
-        # underflow, we divide by ~sqrt(N) before and after the reduction.
+        # Since fp16 has smaller dynamic range than fp32/bf16, we want to avoid
+        # overflow/underflow. For N data parallel workers, each worker computes
+        # g_i, and they collectively reduce (g_1 + ... + g_N) / N. To avoid
+        # overflow/underflow, we divide by ~sqrt(N) before/after the reduction.
         factor: int = 1
         while (
             data_parallel_world_size % factor == 0
