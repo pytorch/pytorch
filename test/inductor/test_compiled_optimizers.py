@@ -606,6 +606,19 @@ class CompiledOptimizerTests(TestCase):
 
         self.assertEqual(param, param_c)
 
+    def test_get_value_on_static_address(self):
+        from torch._dynamo.decorators import mark_static_address
+        from torch.optim.optimizer import _get_value
+
+        compiled = torch.compile(_get_value)
+
+        x = torch.ones(2, 2)
+        mark_static_address(x)
+
+        ret_val = compiled(x)
+
+        self.assertEqual(ret_val, x)
+
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
     setattr(CompiledOptimizerTests, name, make_test(optim_cls, **kwargs))
