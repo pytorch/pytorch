@@ -342,7 +342,7 @@ class IndexPropagation:
 
                 # If they don't have the same symbols, you could have something like 4 < s0 and we
                 # would not be able to use the upper bound of s0 just on the LHS.
-                expr_upper = sympy_subs(expr, self.iter_ranges)
+                expr_upper = sympy_subs(expr, self.iter_ranges)  # type: ignore[arg-type]
                 if (
                     isinstance(expr_upper, sympy.Expr)
                     and expr_upper.free_symbols == size.free_symbols

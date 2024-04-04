@@ -1251,7 +1251,16 @@ class CSE:
 
 
 class IndirectAssertLine(DeferredLineBase):
-    def __init__(self, line, indirect_assert, var, mask, size_map):
+    def __init__(
+        self,
+        line: str,
+        indirect_assert: Callable[
+            [CSEVariable, Optional[str], Optional[str], Optional[str]], str
+        ],
+        var: CSEVariable,
+        mask: str,
+        size_map: Dict[Tuple[CSEVariable, str], Tuple[sympy.Expr, str]],
+    ):
         super().__init__(line)
         self.var = var
         self.mask = mask
@@ -1331,7 +1340,7 @@ class Kernel(CodeGen):
         # NB: None, None is never stored in map, but it is the assumed
         # "not set" value for the dict
         self.indirect_max_sizes: Dict[
-            Tuple[CSEVariable, str], Union[Tuple[sympy.Expr, str], Tuple[None, None]]
+            Tuple[CSEVariable, str], Tuple[sympy.Expr, str]
         ] = {}
 
         self.removed_buffers = set()
@@ -1435,7 +1444,13 @@ class Kernel(CodeGen):
     def assert_function(self) -> str:
         raise NotImplementedError()
 
-    def indirect_assert(self, var, lower, upper, mask=None):
+    def indirect_assert(
+        self,
+        var: CSEVariable,
+        lower: Optional[str],
+        upper: Optional[str],
+        mask: Optional[str] = None,
+    ) -> str:
         if lower and upper:
             # The conditions need to be in parens because of Python's operator precedence.
             # It'd be less error-prone to use and/or/not, which is suported by triton
@@ -1487,8 +1502,9 @@ class Kernel(CodeGen):
 
             @staticmethod
             def indirect_indexing(
-                var: CSEVariable, size: Union[sympy.Expr, int], check: bool = True
+                var: CSEVariable, size: sympy.Expr, check: bool = True
             ):
+                assert isinstance(size, sympy.Expr), size
                 # Skip CSE since this doesn't return an expression
 
                 if var.bounds.lower < 0:  # type: ignore[operator]
@@ -1499,8 +1515,10 @@ class Kernel(CodeGen):
                         # Take the negative part of the bound and add size to it
                         # Then take union of that and the positive part
                         # This is a tighter bound than that of a generic ops.where, as we have info on the cond
-                        neg = var.bounds & ValueRanges(-sympy.oo, -1)
-                        new_bounds = ValueRanges(neg.lower + size, neg.upper + size)
+                        neg_bounds = var.bounds & ValueRanges(-sympy.oo, -1)
+                        new_bounds = ValueRanges(
+                            neg_bounds.lower + size, neg_bounds.upper + size
+                        )
                         # We don't have a good way of representing the empty range
                         if var.bounds.upper >= 0:  # type: ignore[operator]
                             pos = var.bounds & ValueRanges(0, sympy.oo)

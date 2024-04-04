@@ -1808,9 +1808,6 @@ class TritonKernel(Kernel):
         finally:
             self._load_mask = prior
 
-    def generate_assert(self, check):
-        return torch.version.hip is None and super().generate_assert(check)
-
     def load_mask(self, var):
         mask = ""
         mask_vars = set(var.mask_vars)
