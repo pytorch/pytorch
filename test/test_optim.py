@@ -1057,7 +1057,11 @@ class TestOptimRenewed(TestCase):
 
             # Prime the optimizer
             for _ in range(10):
-                optimizer.step(closure)
+                if torch._dynamo.is_compiling() and optim_cls != torch.optim.LBFGS:
+                    closure()
+                    optimizer.step()
+                else:
+                    optimizer.step(closure)
 
             # Clone the weights and construct a new optimizer for them
             with torch.no_grad():
@@ -1072,8 +1076,14 @@ class TestOptimRenewed(TestCase):
 
             # Run both optimizers in parallel
             for _ in range(10):
-                optimizer.step(closure)
-                optimizer_c.step(closure_c)
+                if torch._dynamo.is_compiling() and optim_cls != torch.optim.LBFGS:
+                    closure()
+                    closure_c()
+                    optimizer.step()
+                    optimizer_c.step()
+                else:
+                    optimizer.step(closure)
+                    optimizer_c.step(closure_c)
                 self.assertEqual(weight, weight_c)
                 self.assertEqual(bias, bias_c)
 
