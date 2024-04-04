@@ -4070,6 +4070,28 @@ def forward(self, arg0_1):
     return (add, add_1)""",
         )
 
+    def test_logging_logger(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                print("start")
+                x1 = x + x
+                print(x1)
+                x2 = x1 * x1
+                print(1, 2, 3)
+                x3 = x2 + x2
+                return (x1, x3)
+
+        gm = export(M(), (torch.randn(3, 3),)).graph_module
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
+    mul = torch.ops.aten.mul.Tensor(add, add)
+    add_1 = torch.ops.aten.add.Tensor(mul, mul);  mul = None
+    return (add, add_1)""",
+        )
+
     def test_warning(self):
         class M(torch.nn.Module):
             def forward(self, x):

@@ -137,6 +137,7 @@ from .misc import (
     GetSetDescriptorVariable,
     InspectSignatureVariable,
     LambdaVariable,
+    LoggingLoggerVariable,
     MethodWrapperVariable,
     NumpyVariable,
     PythonModuleVariable,
@@ -512,6 +513,9 @@ class VariableBuilder:
             # along with other builtin debugging functions
             self.install_guards(GuardBuilder.BUILTIN_MATCH)
             return DebuggingVariable(value, source=self.source)
+        elif isinstance(value, logging.Logger):
+            self.install_guards(GuardBuilder.FUNCTION_MATCH)
+            return LoggingLoggerVariable(value, source=self.source)
         elif is_utils_checkpoint(value):
             return build_checkpoint_variable(source=self.source)
         elif isinstance(value, functools.partial):
