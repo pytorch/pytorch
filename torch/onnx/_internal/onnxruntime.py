@@ -2,6 +2,7 @@ import dataclasses
 import importlib
 import logging
 import os
+import warnings
 
 from typing import (
     Any,
@@ -921,6 +922,18 @@ class OrtBackend:
             onnx_model = exported.to_model_proto(
                 opset_version=self._resolved_onnx_exporter_options.onnx_registry.opset_version,
             )
+
+            try:
+                from onnxscript import optimizer
+                from onnxscript.rewriter import onnxruntime as ort_rewriter
+
+                onnx_model = optimizer.optimize(onnx_model)
+                onnx_model = ort_rewriter.rewrite(onnx_model)
+            except ImportError:
+                warnings.warn(
+                    "ONNXScript optimizer is not available. Skipping optimization. "
+                    "Please `pip install onnxscript -U` to enable post-export optimization."
+                )
 
             # Modify ONNX model using pre-registered graph transforms.
             # They are in-place modifications for avoiding unnecessary

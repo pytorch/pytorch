@@ -1239,7 +1239,7 @@ class Exporter:
             except ImportError:
                 warnings.warn(
                     "ONNXScript optimizer is not available. Skipping optimization. "
-                    "Please install latest onnxscript to enable post export optimization."
+                    "Please `pip install onnxscript -U` to enable post-export optimization."
                 )
 
             return torch.onnx.ONNXProgram(
