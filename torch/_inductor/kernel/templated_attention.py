@@ -9,9 +9,10 @@ aten = torch.ops.aten
 
 
 def sdpa_grid(batch_size, num_heads, num_queries, d_model, meta):
-    """#How is this kernel parallelized?
-    We launch Bsz * num_heads independent programs and
-    they work work over blocks of queries
+    """How is this kernel parallelized?
+    We create a grid of (batch_size * num_heads, ceil_div(n_queries, query_block_size), 1)
+    Each block is responsible for iterating over blocks of keys and values calculating
+    the final attention output.
     """
     import triton
 
@@ -48,8 +49,8 @@ sdpa_template = TritonTemplate(
     H = {{size("Q", 1)}}
     N_CTX = {{size("Q", 2)}}
 
-    # TODO these need to be plumbed correctly
-    IS_CAUSAL = False
+    # TODO I think we should do some performance work
+    # to find the optimal calls for perf/accuracy to tl.dot
     qk_scale = 1.0
     MATMUL_PRECISION = tl.float16
 
@@ -117,8 +118,6 @@ sdpa_template = TritonTemplate(
             out="qk"
         ) | indent_except_first(2) }}
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        if IS_CAUSAL:
-            qk = tl.where(offs_m[:, None] >= (start_n + offs_n[None, :]), qk, float("-inf"))
 
         # -- compute scaling constant ---
         row_max = tl.max(qk, 1)

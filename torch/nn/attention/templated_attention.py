@@ -6,6 +6,7 @@ import torch
 from torch._higher_order_ops.templated_attention import (
     templated_attention as templated_attention_hop,
 )
+from torch.nn.attention._utils import _validate_sdpa_input
 
 
 def _compose(*fs):
@@ -78,4 +79,6 @@ def templated_attention(
         Read more about feature classification at: https://pytorch.org/blog/pytorch-feature-classification-changes/#prototype
 
     """
+    # Some basic input validation
+    _validate_sdpa_input(query, key, value)
     return templated_attention_hop(query, key, value, score_mod)
