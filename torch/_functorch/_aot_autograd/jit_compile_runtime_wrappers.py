@@ -178,9 +178,6 @@ def aot_dispatch_base(
             out = functionalized_rng_runtime_epilogue(fw_metadata, out)
             return out
         else:
-            if args and isinstance(args[0], list):
-                # TODO: not the best place to unpack
-                return compiled_fw(args[0])
             return compiled_fw(args)
 
     if maybe_subclass_meta is not None:

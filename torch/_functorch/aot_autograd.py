@@ -913,9 +913,12 @@ def aot_module_simplified(
     def forward(*runtime_args):
         full_args = []
         full_args.extend(params_flat)
-        # runtime_args will be ([inputs], sizes_0)
-        # so full_args.extend will copy the list, but not its elements
-        full_args.extend(runtime_args)
+        for arg in runtime_args:
+            if isinstance(arg, list):
+                # some runtime arguments may be boxed
+                full_args.extend(arg)
+            else:
+                full_args.append(arg)
         return compiled_fn(full_args)
 
     # Just for convenience
