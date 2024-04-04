@@ -472,8 +472,8 @@ class SymPyValueRangeAnalysis:
         else:
             return ValueRanges.coordinatewise_monotone_map(a, b, operator.floordiv)
 
-    @staticmethod
-    def mod(x, y):
+    @classmethod
+    def mod(cls, x, y):
         x = ValueRanges.wrap(x)
         y = ValueRanges.wrap(y)
         # nb. We implement C semantics
@@ -510,7 +510,7 @@ class SymPyValueRangeAnalysis:
                 return ValueRanges(lower, upper)
         else:
             # Too difficult, we bail out
-            upper = abs(y.upper) - 1
+            upper = cls.abs(y).upper - 1
             return ValueRanges(-upper, upper)
 
     @classmethod
