@@ -1106,9 +1106,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
          compute_logsumexp ? ceil_div(max_seqlen_q, kAlignLSE) * kAlignLSE : 0},
         query.options().dtype(at::ScalarType::Float));
     typename Kernel::Params p;
-    p.query_ptr = (scalar_t*)query.data_ptr();
-    p.key_ptr = (scalar_t*)key.data_ptr();
-    p.value_ptr = (scalar_t*)value.data_ptr();
+    p.query_ptr = (const scalar_t*)query.const_data_ptr();
+    p.key_ptr = (const scalar_t*)key.const_data_ptr();
+    p.value_ptr = (const scalar_t*)value.const_data_ptr();
     p.logsumexp_ptr = compute_logsumexp
         ? (typename Kernel::lse_scalar_t*)logsumexp.data_ptr()
         : nullptr;
@@ -1127,8 +1127,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     p.output_ptr = (typename Kernel::output_t*)res.data_ptr();
 
     if (seqstart_q.has_value()) {
-      p.seqstart_q_ptr = (int32_t*)seqstart_q->data_ptr();
-      p.seqstart_k_ptr = (int32_t*)seqstart_k->data_ptr();
+      p.seqstart_q_ptr = (const int32_t*)seqstart_q->const_data_ptr();
+      p.seqstart_k_ptr = (const int32_t*)seqstart_k->const_data_ptr();
     }
 
     p.num_heads = num_heads;
@@ -1142,14 +1142,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     if (causal_diagonal.has_value()) {
       CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(causal_diagonal.value());
       TORCH_CHECK(causal_diagonal->scalar_type() == at::ScalarType::Int);
-      p.causal_diagonal_ptr = (int32_t*)causal_diagonal->data_ptr();
+      p.causal_diagonal_ptr = (const int32_t*)causal_diagonal->const_data_ptr();
     }
 
     p.seqlen_k_ptr = nullptr;
     if (seqlen_k.has_value()) {
       CHECK_NOSPARSE_LASTCONTIGUOUS_CUDA(seqlen_k.value());
       TORCH_CHECK(seqlen_k->scalar_type() == at::ScalarType::Int);
-      p.seqlen_k_ptr = (int32_t*)seqlen_k->data_ptr();
+      p.seqlen_k_ptr = (const int32_t*)seqlen_k->const_data_ptr();
     }
     p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
 
@@ -1169,7 +1169,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
       TORCH_CHECK(
           bias->scalar_type() == CutlassToAtenDtype<scalar_t>::atScalarType(),
           "invalid dtype for bias - should match query's dtype");
-      p.attn_bias_ptr = (scalar_t*)bias->data_ptr();
+      p.attn_bias_ptr = (const scalar_t*)bias->const_data_ptr();
 
       TORCH_CHECK(bias->dim() == 4, "Bias expected in BMHK format");
       TORCH_CHECK(

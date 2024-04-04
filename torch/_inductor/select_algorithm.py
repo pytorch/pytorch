@@ -94,7 +94,7 @@ class TritonTemplateKernel(TritonKernel):
         grid_fn,
         meta,
         call_sizes,
-        use_jit=True,
+        use_jit=False,
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
@@ -150,13 +150,17 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
-            "device": V.graph.scheduler.current_device.index,
-            "device_type": V.graph.scheduler.current_device.type,
+            "device": self.output_node.get_device().index,
+            "device_type": self.output_node.get_device().type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
             triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+        matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
+        if matrix_instr_nonkdim != 0:
+            triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
+
         self.triton_meta = triton_meta
 
         inductor_meta = {
@@ -498,7 +502,7 @@ class TritonTemplate(KernelTemplate):
         ), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
-            use_jit=True,
+            use_jit=False,
             **kernel_options,
         ) as kernel:
             try:
@@ -684,6 +688,10 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         assert self.bmreq is not None
         return self.bmreq.benchmark(*args, output_tensor=out)
 
+    def precompile(self):
+        assert self.bmreq is not None
+        self.bmreq.precompile()
+
     def __str__(self):
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
 
@@ -734,6 +742,9 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
+        if out.numel() == 0:
+            # no need to run the kerrnel of do benchmarking
+            return 0.0
         if self.has_out_variant:
             return super().benchmark(*args, out=out)
         else:
@@ -821,6 +832,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
+
         if len(choices) == 0:
             raise RuntimeError(
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
