@@ -24,7 +24,6 @@
 #include <ATen/ops/_assert_async_native.h>
 #include <ATen/ops/_functional_assert_async_native.h>
 #include <ATen/ops/_print_native.h>
-#include <ATen/ops/_sink_tokens_native.h>
 #include <ATen/ops/_assert_scalar_native.h>
 #include <ATen/ops/_functional_assert_scalar_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
@@ -446,10 +445,6 @@ Tensor _functional_assert_async_msg_cpu(
 
 void _print(c10::string_view s) {
   std::cout << s << "\n";
-}
-
-void _sink_tokens(c10::ArrayRef<Tensor> tokens) {
-  return;
 }
 
 // Sorting-based algorithm for isin(); used when the number of test elements is large.

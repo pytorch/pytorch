@@ -122,7 +122,9 @@ def validate_ir(node_or_nodes):
     def _check_tensorbox(nodes):
         # Could expand this to check deeper properties
         # (e.g. TensorBox points to View or StorageBox)
-        if isinstance(nodes, (list, tuple)):
+        if nodes is None:
+            pass
+        elif isinstance(nodes, (list, tuple)):
             for node in nodes:
                 _check_tensorbox(node)
         elif isinstance(nodes, dict):
@@ -139,7 +141,6 @@ def validate_ir(node_or_nodes):
                     sympy.logic.boolalg.Boolean,
                     Expr,
                     EffectfulKernel,
-                    SinkTokens,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -4011,7 +4012,7 @@ class ExternKernel(InputsKernel):
 
     @classmethod
     def realize_input(cls, x):
-        if x is None or isinstance(x, EffectfulKernel):
+        if x is None:
             return NoneAsConstantBuffer()
         if isinstance(x, (sympy.Expr, sympy.logic.boolalg.Boolean, int)):
             return ShapeAsConstantBuffer(x)
@@ -7340,18 +7341,6 @@ class EffectfulKernel(FallbackKernel):
 
     def has_side_effects(self):
         return True
-
-
-class SinkTokens(ExternKernel):
-    def __init__(self):
-        super().__init__(
-            None,
-            NoneLayout(torch.device("cpu")),  # type: ignore[arg-type]
-            [],
-        )  # type: ignore[arg-type]
-
-    def codegen(self, wrapper):
-        pass
 
 
 class InterpreterShim(torch.fx.Interpreter):

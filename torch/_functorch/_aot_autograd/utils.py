@@ -230,7 +230,7 @@ def maybe_to_fresh_input(idx, t, meta):
 def unlift_tokens(fw_module, fw_metadata):
     # Remove the tokens from the inputs/outputs of the graph since inductor does
     # not want these extra inputs/outputs, and replace them with
-    # _make_dep_token() to create a token, and _sink_tokens() to collect the
+    # _make_token() to create a token, and _sink_tokens() to collect the
     # tokens.  See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
 
@@ -244,7 +244,7 @@ def unlift_tokens(fw_module, fw_metadata):
             if node.args[0] in input_token_nodes:
                 with fw_module.graph.inserting_before(node):
                     new_token_node = fw_module.graph.call_function(
-                        torch.ops.aten._make_dep_token.default, ()
+                        torch.ops.prims._make_token.default, ()
                     )
                     new_token_node.meta["val"] = torch.tensor([])
                     new_token_node.meta["tensor_meta"] = torch.tensor([])
@@ -265,7 +265,7 @@ def unlift_tokens(fw_module, fw_metadata):
                 )
             with fw_module.graph.inserting_before(node):
                 sink_token_node = fw_module.graph.call_function(
-                    torch.ops.aten._sink_tokens.default,
+                    torch.ops.prims._sink_tokens.default,
                     (output_token_nodes,),
                 )
                 node.args = (other_output_args,)
