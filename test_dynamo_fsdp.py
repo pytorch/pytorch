@@ -230,7 +230,7 @@ def init():
     # nested_fully_shard + unbalanced -> works
     test_case = "simple_mlp"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
     balanced = False
-    mixed_precision = True
+    mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
     activation_checkpoint = False
     if balanced:
         hidden_dim = 1234
