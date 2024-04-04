@@ -35,6 +35,10 @@ from torch.utils._triton import has_triton
 
 HAS_TRITON = has_triton()
 
+if HAS_GPU and HAS_TRITON:
+    import triton
+    from triton import language as tl
+
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
@@ -286,6 +290,50 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(fn2(a), compiled_fn2(a))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+    @requires_gpu()
+    @requires_triton()
+    @config.patch({"fx_graph_cache": True})
+    def test_higher_order_op_bypass(self):
+        """
+        Verify that we bypass the cache when we have higher order ops.
+        """
+
+        @triton.jit
+        def add_kernel(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def fn(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (
+                triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+            )  # noqa: E731
+            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=4)
+            return output
+
+        compiled_fn = torch.compile(fn, fullgraph=True)
+
+        x = torch.randn(4, device="cuda")
+        y = torch.randn(4, device="cuda")
+        compiled_fn(x, y)
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
     @config.patch({"fx_graph_cache": True})
     def test_generated_kernel_count(self):
