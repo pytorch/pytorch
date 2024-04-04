@@ -1219,6 +1219,8 @@ optim_db: List[OptimizerInfo] = [
             # Expected floating point error between fused and compiled forloop
             DecorateInfo(
                 toleranceOverride({torch.float64: tol(atol=4.5e-7, rtol=2.2e-6)}),
+                "TestOptimRenewed",
+                "test_fused_matches_forloop",
                 active_if=lambda kwargs: is_dynamo_enabled()
                 and kwargs["dtype"] == torch.float64,
             ),
@@ -1399,6 +1401,8 @@ optim_db: List[OptimizerInfo] = [
             # Expected error between compiled forloop and fused optimizers
             DecorateInfo(
                 toleranceOverride({torch.float64: tol(atol=4.5e-7, rtol=2.2e-6)}),
+                "TestOptimRenewed",
+                "test_fused_matches_forloop",
                 active_if=lambda kwargs: is_dynamo_enabled()
                 and kwargs["dtype"] == torch.float64,
             ),
