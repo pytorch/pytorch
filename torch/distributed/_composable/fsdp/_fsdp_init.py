@@ -142,7 +142,7 @@ def _move_states_to_device(
             )
         if is_traceable_wrapper_subclass(tensor):
             with torch.no_grad():  # avoid autograd increasing C++ refcount by 1
-                tensor_on_device = tensor.to(device)
+                tensor_on_device = nn.Parameter(tensor.to(device))
             torch.utils.swap_tensors(tensor, tensor_on_device)
         else:
             tensor.data = tensor.to(device)
