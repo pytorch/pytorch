@@ -1485,4 +1485,7 @@ def collect_defined_kernels(kernel_list):
 
 
 def should_assume_input_aligned(example_input):
-    return example_input.data_ptr() % ALIGNMENT == 0 or config.assume_aligned_inputs
+    return (
+        (example_input.storage_offset() * get_dtype_size(example_input.dtype)) % ALIGNMENT == 0
+        or config.assume_aligned_inputs
+    )

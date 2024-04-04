@@ -9592,6 +9592,23 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             )
             self.assertEqual(arguments_that_are_divisible_by_16, (0, 1, 2))
 
+        @config.patch(assume_aligned_inputs=False)
+        def test_config_option_dont_assume_alignment_dynamic(self):
+            def fn(x: torch.Tensor) -> torch.Tensor:
+                return x.sin() + x.cos()
+
+            # TODO(dberard) fix this comment ............................................................................................................
+            # views: since these are views, we should expect codegen that assumes
+            # unaligned inputs (even if the offset is 0).
+            # If this handling is at some point improved, it would be reasonable to
+            # remove the unaligned check for the offset-0 case.
+            for offset in (0, 1, 2, 3, 4):
+                base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
+                inps = torch.as_strided(base, (64, 64), (64, 1), offset)
+                torch._dynamo.reset()
+                torch._dynamo.mark_dynamic(inps, 0)
+                self.assertEqual(fn(inps), torch.compile(fn)(inps))
+
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return aten.upsample_bilinear2d.vec(x, None, True, [2.0, 2.0])
