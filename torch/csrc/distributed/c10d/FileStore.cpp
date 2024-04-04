@@ -17,11 +17,6 @@
 
 #include <chrono>
 #include <cstdio>
-#include <functional>
-#include <iostream>
-#include <limits>
-#include <sstream>
-#include <system_error>
 #include <thread>
 #include <utility>
 
@@ -260,7 +255,7 @@ off_t refresh(
     File& file,
     off_t pos,
     std::unordered_map<std::string, std::vector<uint8_t>>& cache,
-    const std::string deletePrefix) {
+    const std::string& deletePrefix) {
   auto size = file.size();
   if (size != pos) {
     std::string tmpKey;
@@ -429,7 +424,7 @@ int64_t FileStore::getNumKeys() {
   File file(path_, O_RDONLY, timeout_);
   auto lock = file.lockShared();
   pos_ = refresh(file, pos_, cache_, deletePrefix_);
-  return cache_.size();
+  return static_cast<int64_t>(cache_.size());
 }
 
 bool FileStore::deleteKey(const std::string& key) {
