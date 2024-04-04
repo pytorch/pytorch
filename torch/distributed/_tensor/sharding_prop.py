@@ -69,8 +69,7 @@ class ShardingPropagator:
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
 
-    # Note: not cached because this API is called by  propagate_op_sharding
-    # (which is cached)
+    @lru_cache
     def _propagate_tensor_meta(
         self, op_schema: OpSchema
     ) -> Union[None, TensorMeta, Sequence[Optional[TensorMeta]]]:

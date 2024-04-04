@@ -188,12 +188,6 @@ class _FromTorchTensor(torch.autograd.Function):
         return grad_output.to_local(), None, None, None, None, None
 
 
-metadata_handlers = {
-    torch.ops.aten.size.default: lambda x: x._spec.tensor_meta.shape,
-    torch.ops.aten.stride.default: lambda x: x._spec.tensor_meta.stride,
-}
-
-
 class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     _local_tensor: torch.Tensor
     _spec: DTensorSpec
@@ -203,7 +197,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # rules, keyed by aten op name, value is propagation func
     _op_dispatcher: op_dispatch.OpDispatcher = op_dispatch.OpDispatcher()
 
-    @torch._dynamo.disable
     @staticmethod
     def __new__(
         cls,
@@ -295,12 +288,9 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         )
 
     @classmethod
-    @torch._dynamo.disable
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        if func in metadata_handlers:
-            return metadata_handlers[func](*args, **kwargs)
         return DTensor._op_dispatcher.dispatch(
             func,
             args,

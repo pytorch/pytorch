@@ -43,7 +43,8 @@ def _replicate_then_shard(val: _TransformInfo) -> int:
         return 0
 
 
-def _gen_transform_infos_non_cached(
+@lru_cache(maxsize=None)
+def _gen_transform_infos(
     src_spec: DTensorSpec,
     dst_spec: DTensorSpec,
 ) -> List[_TransformInfo]:
@@ -135,14 +136,6 @@ def _gen_transform_infos_non_cached(
     return transform_infos
 
 
-@lru_cache(maxsize=None)
-def _gen_transform_infos(
-    src_spec: DTensorSpec,
-    dst_spec: DTensorSpec,
-) -> List[_TransformInfo]:
-    return _gen_transform_infos_non_cached(src_spec, dst_spec)
-
-
 def redistribute_local_tensor(
     local_tensor: torch.Tensor,
     current_spec: DTensorSpec,
@@ -171,10 +164,7 @@ def redistribute_local_tensor(
         # which should be an empty tensor
         return local_tensor
 
-    if current_spec.has_symints or target_spec.has_symints:
-        transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
-    else:
-        transform_infos = _gen_transform_infos(current_spec, target_spec)
+    transform_infos = _gen_transform_infos(current_spec, target_spec)
 
     for transform_info in transform_infos:
         i = transform_info.mesh_dim
