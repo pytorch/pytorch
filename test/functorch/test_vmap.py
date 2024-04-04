@@ -53,7 +53,6 @@ from common_utils import (
 )
 import types
 import os
-import sys
 from collections import namedtuple
 import contextlib
 
@@ -2156,7 +2155,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
     @unittest.skipIf(IS_WINDOWS,
                      reason="Windows not yet supported for torch.compile")
-    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_is_contiguous(self):
         def foo(x):
             if x.is_contiguous():

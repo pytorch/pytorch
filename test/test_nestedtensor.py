@@ -4184,7 +4184,6 @@ class TestNestedTensorSubclass(TestCase):
 
     @skipIfTorchDynamo("SDPA test compiles internally")
     @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
-    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     # mha_varlen_fwd not supported on ROCm
     @skipCUDAIfRocm
