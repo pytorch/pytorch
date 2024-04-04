@@ -154,7 +154,10 @@ def aot_dispatch_base(
             )
 
     # However, create_runtime_wrapper does not expect the rng offsets in the
-    # output. So, we have to create another wrapper and take out the offset.
+    # output. So, we have to create another wrapper and take out the offset. As
+    # a result, we have to account for not boxed_call compilers as well.
+    if not hasattr(compiled_fw, "_boxed_call"):
+        compiled_fw = make_boxed_func(compiled_fw)
 
     # Create a wrapper to set up the rng functionalize bits
     @wraps(compiled_fw)
@@ -175,6 +178,9 @@ def aot_dispatch_base(
             out = functionalized_rng_runtime_epilogue(fw_metadata, out)
             return out
         else:
+            if args and isinstance(args[0], list):
+                # TODO: not the best place to unpack
+                return compiled_fw(args[0])
             return compiled_fw(args)
 
     if maybe_subclass_meta is not None:
@@ -185,6 +191,9 @@ def aot_dispatch_base(
         )
     else:
         compiled_fw_func = rng_functionalization_wrapper
+
+    if not hasattr(compiled_fw_func, "_boxed_call"):
+        compiled_fw_func = make_boxed_func(compiled_fw_func)
 
     compiled_fn = create_runtime_wrapper(
         compiled_fw_func,
@@ -527,8 +536,7 @@ def aot_dispatch_autograd(
 
         @staticmethod
         def forward(ctx, *deduped_flat_tensor_args):
-            assert len(deduped_flat_tensor_args) == 1
-            args = deduped_flat_tensor_args[0]
+            args = deduped_flat_tensor_args
             if backward_state_indices:
                 bw_state = args[backward_state_indices[0]]
                 assert isinstance(bw_state, BackwardState)
