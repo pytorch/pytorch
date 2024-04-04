@@ -211,8 +211,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export LD_PRELOAD=/usr/lib/llvm-15/lib/clang/15.0.7/lib/linux/libclang_rt.asan-x86_64.so
     # Disable valgrind for asan
     export VALGRIND=OFF
-    # Increase stack size, because ASAN red zones use more stack
-    ulimit -s 81920
 
     (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
     echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
@@ -593,6 +591,12 @@ test_inductor_torchbench_cpu_smoketest_perf(){
     # The threshold value needs to be actively maintained to make this check useful.
     python benchmarks/dynamo/check_perf_csv.py -f "$output_name" -t "$speedup_target"
   done
+}
+
+test_torchbench_gcp_smoketest(){
+  pushd "${TORCHBENCHPATH}"
+  python test.py -v
+  popd
 }
 
 test_python_gloo_with_tls() {
@@ -1174,6 +1178,9 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
       llama_v2_7b_16h resnet50 timm_efficientnet mobilenet_v3_large timm_resnest \
       shufflenet_v2_x1_0 hf_GPT2
     PYTHONPATH=$(pwd)/torchbench test_inductor_torchbench_cpu_smoketest_perf
+  elif [[ "${TEST_CONFIG}" == *torchbench_gcp_smoketest* ]]; then
+    checkout_install_torchbench
+    TORCHBENCHPATH=$(pwd)/torchbench test_torchbench_gcp_smoketest
   else
     checkout_install_torchbench
     # Do this after checkout_install_torchbench to ensure we clobber any
