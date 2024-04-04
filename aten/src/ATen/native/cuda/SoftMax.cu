@@ -117,10 +117,6 @@ inline dim3 SpatialSoftMax_getGridSize(
 
 const int max_threads = 1024;
 
-// The Nvidia Kepler GPUs have 48KB of shmem per SM. Future generations
-// have more. We use the minimum here to preserve some backwards compatibility.
-const int max_smem_per_block = 48 * 1024;
-
 inline dim3 SpatialSoftMax_getBlockSize(
   uint64_t dim_size, uint64_t inner_size) {
   uint32_t inner_threads = inner_size;
@@ -698,9 +694,10 @@ cunn_SoftMaxForward(outscalar_t *output, const scalar_t *input, int classes)
   }
 }
 
-template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t, template <typename, typename, typename> class Epilogue>
+template <int ILP, typename scalar_t, typename accscalar_t, typename outscalar_t,
+  template <typename, typename, typename> class Epilogue, typename index_t = int32_t>
 __global__ void
-cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, int classes)
+cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, index_t classes, size_t max_smem_per_block)
 {
   // Each thread block processes a sample in the batch
   input += static_cast<int64_t>(blockIdx.x) * classes;
@@ -724,7 +721,7 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, int classes)
   // Download inputs to shared memory while doing the first step
   // in max calculation
   MaxFloat<scalar_t, accscalar_t> maxFunc;
-  for (int offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
+  for (index_t offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
     LoadT crnt_vec = input_vec_ptr[offset];
     smem_input_cache_vec_ptr[offset] = crnt_vec;
 
@@ -740,7 +737,7 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, int classes)
   // Reload input from shared memory to compute the sum. The previous
   // reduce has performed a __syncthreads() so the smem contents are populated.
   SumExpFloat<scalar_t, accscalar_t> sumExpFunc(max_k);
-  for (int offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
+  for (index_t offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
     LoadT crnt_vec = smem_input_cache_vec_ptr[offset];
 
     #pragma unroll
@@ -757,7 +754,7 @@ cunn_SoftMaxForwardSmem(outscalar_t *output, const scalar_t *input, int classes)
   // Use vectorized stores to save the output
   using StoreT = at::native::memory::aligned_vector<outscalar_t, ILP>;
   StoreT* output_vec_ptr = reinterpret_cast<StoreT*>(output);
-  for (int offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
+  for (index_t offset = threadIdx.x; offset * ILP < classes; offset += blockDim.x) {
     LoadT crnt_vec = smem_input_cache_vec_ptr[offset];
     StoreT out_vec;
 
@@ -864,17 +861,17 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
             auto warps = block.x / C10_WARP_SIZE;
-            auto max_elements_per_smem = (max_smem_per_block -
-              warps * sizeof(accscalar_t)) / sizeof(scalar_t);
+            size_t max_smem_per_block = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
+            auto max_elements_per_smem = (max_smem_per_block - warps * sizeof(accscalar_t)) / sizeof(scalar_t);
 
             bool can_use_smem = dim_size < max_elements_per_smem;
             can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
-            can_use_smem &= !(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES);
+            can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
             can_use_smem &= !(dim_size % ILP);
 
             if (can_use_smem) {
               cunn_SoftMaxForwardSmem<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
-                <<<grid, block, max_smem_per_block, stream>>>(output_ptr, input_ptr, dim_size);
+                <<<grid, block, max_smem_per_block, stream>>>(output_ptr, input_ptr, dim_size, max_smem_per_block);
             } else {
               cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
                 <<<grid, block, warps * sizeof(accscalar_t), stream>>>(output_ptr, input_ptr, dim_size);
@@ -899,17 +896,17 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
             auto warps = block.x / C10_WARP_SIZE;
-            auto max_elements_per_smem = (max_smem_per_block -
-              warps * sizeof(accscalar_t)) / sizeof(scalar_t);
+            size_t max_smem_per_block = at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock;
+            auto max_elements_per_smem = (max_smem_per_block - warps * sizeof(accscalar_t)) / sizeof(scalar_t);
 
             bool can_use_smem = dim_size < max_elements_per_smem;
             can_use_smem &= !(reinterpret_cast<const uintptr_t>(input_ptr) % ALIGN_BYTES);
-            can_use_smem &= !(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES);
+            can_use_smem &= (!(reinterpret_cast<uintptr_t>(output_ptr) % ALIGN_BYTES));
             can_use_smem &= !(dim_size % ILP);
 
             if (can_use_smem) {
               cunn_SoftMaxForwardSmem<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
-                <<<grid, block, max_smem_per_block, stream>>>(output_ptr, input_ptr, dim_size);
+                <<<grid, block, max_smem_per_block, stream>>>(output_ptr, input_ptr, dim_size, max_smem_per_block);
             } else {
               cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
                 <<<grid, block, warps * sizeof(accscalar_t), stream>>>(output_ptr, input_ptr, dim_size);
