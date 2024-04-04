@@ -94,7 +94,11 @@ importlib.import_module("filelock")
 
 from torch._inductor import config, test_operators
 
-from torch._inductor.compile_fx import compile_fx, compile_fx_inner
+from torch._inductor.compile_fx import (
+    compile_fx,
+    compile_fx_inner,
+    complex_memory_overlap,
+)
 from torch._inductor.utils import has_torchvision_roi_align
 
 from torch.testing._internal.common_utils import slowTest
@@ -9501,6 +9505,10 @@ class CommonTemplate:
         result = f(torch.tensor([S0, S1]), torch.randn(N))
 
         self.assertTrue(len(result) == 2)
+
+    def test_complex_memory_overlap(self):
+        t = rand_strided((8, 1500, 1), (1504, 1, 1), device=self.device)
+        self.assertFalse(complex_memory_overlap(t))
 
 
 @dataclasses.dataclass
