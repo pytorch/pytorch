@@ -211,8 +211,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export LD_PRELOAD=/usr/lib/llvm-15/lib/clang/15.0.7/lib/linux/libclang_rt.asan-x86_64.so
     # Disable valgrind for asan
     export VALGRIND=OFF
-    # Increase stack size, because ASAN red zones use more stack
-    ulimit -s 81920
 
     (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
     echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
