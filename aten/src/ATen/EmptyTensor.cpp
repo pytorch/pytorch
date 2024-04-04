@@ -198,6 +198,15 @@ TensorBase empty_generic(
   return _empty_generic(size, allocator, ks, scalar_type, memory_format_opt);
 }
 
+TensorBase empty_generic_symint(
+    SymIntArrayRef size,
+    c10::Allocator* allocator,
+    c10::DispatchKeySet ks,
+    ScalarType scalar_type,
+    c10::optional<c10::MemoryFormat> memory_format_opt) {
+  return _empty_generic(size, allocator, ks, scalar_type, memory_format_opt);
+}
+
 template <typename T>
 TensorBase _empty_strided_generic(
     T size,

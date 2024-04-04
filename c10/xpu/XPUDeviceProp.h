@@ -126,6 +126,16 @@ namespace c10::xpu {
   /* the number of hardware threads per EU of GPU. */    \
   _(gpu_hw_threads_per_eu, 8)
 
+#define AT_FORALL_XPU_DEVICE_ASPECT(_)                  \
+  /* sycl::half is supported on device. */              \
+  _(fp16)                                               \
+                                                        \
+  /* double is supported on device. */                  \
+  _(fp64)                                               \
+                                                        \
+  /* 64-bit atomic operation is supported on device. */ \
+  _(atomic64)
+
 #define _DEFINE_SYCL_PROP(ns, property, member) \
   ns::property::return_type member;
 
@@ -138,18 +148,23 @@ namespace c10::xpu {
 #define DEFINE_EXT_DEVICE_PROP(property, ...) \
   _DEFINE_SYCL_PROP(sycl::ext::intel::info::device, property, property)
 
+#define DEFINE_DEVICE_ASPECT(member) bool has_##member;
+
 struct C10_XPU_API DeviceProp {
   AT_FORALL_XPU_DEVICE_PROPERTIES(DEFINE_DEVICE_PROP);
 
   // the platform name.
   DEFINE_PLATFORM_PROP(name, platform_name);
 
-  AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP)
+  AT_FORALL_XPU_EXT_DEVICE_PROPERTIES(DEFINE_EXT_DEVICE_PROP);
+
+  AT_FORALL_XPU_DEVICE_ASPECT(DEFINE_DEVICE_ASPECT);
 };
 
 #undef _DEFINE_SYCL_PROP
 #undef DEFINE_DEVICE_PROP
 #undef DEFINE_PLATFORM_PROP
 #undef DEFINE_EXT_DEVICE_PROP
+#undef DEFINE_DEVICE_ASPECT
 
 } // namespace c10::xpu
