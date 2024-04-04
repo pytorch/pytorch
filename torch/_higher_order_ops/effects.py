@@ -22,6 +22,10 @@ SIDE_EFFECTS: Dict[torch._ops.OpOverload, _EffectType] = {
 }
 
 
+def register_side_effect_op(op: torch._ops.OpOverload) -> None:
+    SIDE_EFFECTS[op] = _EffectType.ORDERED
+
+
 class WithEffects(HigherOrderOperator):
     """
     with_effects(token, op, args, kwargs) -> (new_token, op_results)
