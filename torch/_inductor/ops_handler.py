@@ -728,12 +728,9 @@ class SimpleCSEHandler(WrapperHandler[T]):
     doesn't support stores which require load cache invalidation.
     """
 
-    cse_cache: Dict[str, Union[T, Tuple[T, ...]]]
-    mock: MockHandler
-
     def __init__(self, inner: OpsHandler[T]):
         super().__init__(inner)
-        self.cse_cache = {}
+        self.cse_cache: Dict[str, Union[T, Tuple[T, ...]]] = {}
         self.mock = MockHandler()
 
     def indirect_indexing(self, *args, **kwargs) -> sympy.Expr:
