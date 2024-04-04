@@ -814,8 +814,8 @@ def remove_jump_if_none(instructions: List[Instruction]) -> None:
             else:
                 jump_op = create_instruction("POP_JUMP_IF_TRUE", target=inst.target)
             # preserve exception table entries
-            is_op.exn_tab_entry = inst.exn_tab_entry
-            jump_op.exn_tab_entry = inst.exn_tab_entry
+            is_op.exn_tab_entry = copy.copy(inst.exn_tab_entry)
+            jump_op.exn_tab_entry = copy.copy(inst.exn_tab_entry)
             # modify inst in-place to preserve jump target
             inst.opcode = dis.opmap["LOAD_CONST"]
             inst.opname = "LOAD_CONST"
