@@ -64,6 +64,11 @@ ban_recompute_reductions = True
 # cost of some performance
 aggressive_recomputation = False
 
+# Unlifts effect tokens from the inputs/outputs in the traced graph and instead
+# inserts make_token/sink_token calls in the graph to create tokens and then
+# sink them at the end.
+unlift_effect_tokens = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
