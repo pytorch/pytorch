@@ -542,6 +542,33 @@ class TestMaxAutotune(TestCase):
         ref = f(x, y)
         self.assertTrue(torch.allclose(act, ref, atol=4 * 1e-3, rtol=4 * 1e-3))
 
+    @config.patch(max_autotune=True)
+    def test_empty_conv_input(self, kernel_size=3):
+        x = torch.randn(0, 256, 14, 14, device="cuda")
+        weight = torch.randn(256, 256, kernel_size, kernel_size, device="cuda")
+
+        def f(x, weight):
+            return torch.convolution(
+                x,
+                weight,
+                bias=None,
+                stride=[1, 1],
+                padding=[0, 0],
+                dilation=[1, 1],
+                transposed=False,
+                output_padding=[0, 0],
+                groups=1,
+            )
+
+        opt_f = torch.compile(f)
+        ref = f(x, weight)
+        act = opt_f(x, weight)
+        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+
+    @config.patch(max_autotune=True)
+    def test_empty_conv_input_with_1x1_kernel(self):
+        self.test_empty_conv_input(kernel_size=1)
+
 
 class TestBenchmarkRequest(BenchmarkRequest):
     def __init__(

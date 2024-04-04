@@ -22,9 +22,9 @@ inline namespace CPU_CAPABILITY {
 #if defined(CPU_CAPABILITY_AVX2)
 
 #ifndef SLEEF_CONST
-#if defined (__GNUC__) || defined (__clang__) || defined(__INTEL_COMPILER)
-#define SLEEF_CONST __attribute__((const))
-#elif defined(_MSC_VER)
+#if (defined(__GNUC__) || defined(__CLANG__)) && !defined(__INTEL_COMPILER)
+#define SLEEF_CONST const
+#else
 #define SLEEF_CONST
 #endif
 #define SLEEF_CONST_OLD SLEEF_CONST
@@ -43,6 +43,28 @@ static inline void cvtbf16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
   cvtbf16_fp32(lo, o1);
   cvtbf16_fp32(hi, o2);
 }
+
+static inline __m128i cvtfp32_bf16(const __m256& src) {
+  __m256i value = _mm256_castps_si256(src);
+  __m256i nan = _mm256_set1_epi32(0xffff);
+  __m256i mask = _mm256_castps_si256(_mm256_cmp_ps(src, src, _CMP_ORD_Q));
+  __m256i ones = _mm256_set1_epi32(0x1);
+  __m256i vec_bias = _mm256_set1_epi32(0x7fff);
+  // uint32_t lsb = (input >> 16) & 1;
+  auto t_value = _mm256_and_si256(_mm256_srli_epi32(value, 16), ones);
+  // uint32_t rounding_bias = 0x7fff + lsb;
+  t_value = _mm256_add_epi32(t_value, vec_bias);
+  // input += rounding_bias;
+  t_value = _mm256_add_epi32(t_value, value);
+  // input = input >> 16;
+  t_value = _mm256_srli_epi32(t_value, 16);
+  // Check NaN before converting back to bf16
+  t_value = _mm256_blendv_epi8(nan, t_value, mask);
+  t_value = _mm256_packus_epi32(t_value, t_value);   // t[4-7] t[4-7] t[0-4] t[0-4]
+  t_value = _mm256_permute4x64_epi64(t_value, 0xd8); // 11     01     10     00
+  return _mm256_castsi256_si128(t_value);
+}
+
 static inline __m256i cvtfp32_bf16(const __m256& a, const __m256& b) {
   __m256i lo = _mm256_castps_si256(a);
   __m256i hi = _mm256_castps_si256(b);
@@ -90,6 +112,11 @@ static inline void cvtfp16_fp32(const __m256i& a, __m256& o1, __m256& o2) {
   __m128i hi = _mm256_extractf128_si256(a, 1);
   cvtfp16_fp32(lo, o1);
   cvtfp16_fp32(hi, o2);
+}
+
+static inline __m128i cvtfp32_fp16(const __m256& src) {
+  return _mm256_cvtps_ph(
+      src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
 }
 
 static inline __m256i cvtfp32_fp16(const __m256& a, const __m256& b) {
@@ -1065,11 +1092,17 @@ CONVERT_NON_VECTORIZED_INIT(BFloat16, bfloat16);
 #if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
 inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(const Vectorized<Half>& a) {
   static_assert(Vectorized<Half>::size() == 2 * Vectorized<float>::size());
+#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+  float16x8x2_t arr = a;
+  float16x8_t x = arr.val[0];
+  float16x8_t y = arr.val[1];
+#else
   auto arr = reinterpret_cast<const float16_t*>(a.operator const Half*());
   float16x8_t x = vld1q_f16(arr);
+  float16x8_t y = vld1q_f16(arr + Vectorized<float>::size());
+#endif
   float32x4_t x1 = vcvt_f32_f16(vget_low_f16(x));
   float32x4_t x2 = vcvt_f32_f16(vget_high_f16(x));
-  float16x8_t y = vld1q_f16(arr + Vectorized<float>::size());
   float32x4_t y1 = vcvt_f32_f16(vget_low_f16(y));
   float32x4_t y2 = vcvt_f32_f16(vget_high_f16(y));
   return { Vectorized<float>(x1, x2), Vectorized<float>(y1, y2) };
@@ -1082,11 +1115,15 @@ inline Vectorized<Half> convert_float_half(const Vectorized<float>& a, const Vec
   float16x4_t x2 = vcvt_f16_f32(x.val[1]);
   float16x4_t y1 = vcvt_f16_f32(y.val[0]);
   float16x4_t y2 = vcvt_f16_f32(y.val[1]);
+#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+  return Vectorized<Half>(vcombine_f16(x1, x2), vcombine_f16(y1, y2));
+#else
   Vectorized<Half> rc;
   auto arr = reinterpret_cast<float16_t*>(rc.operator Half*());
   vst1q_f16(arr, vcombine_f16(x1, x2));
   vst1q_f16(arr + Vectorized<float>::size(), vcombine_f16(y1, y2));
   return rc;
+#endif
 }
 #else
 CONVERT_NON_VECTORIZED_INIT(Half, half);
