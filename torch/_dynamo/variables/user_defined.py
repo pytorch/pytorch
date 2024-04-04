@@ -10,7 +10,7 @@ import random
 import sys
 import threading
 import types
-from typing import Dict, List
+from typing import Dict, Generic, List
 
 from ..bytecode_transformation import create_call_function
 
@@ -117,8 +117,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return trace_rules.lookup(func)(func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
-        elif source and inspect.ismemberdescriptor(obj):
-            return VariableBuilder(tx, source)(obj.__get__(self.value))
+        elif source:
+            # __mro__ is a member in < 3.12, an attribute in >= 3.12
+            if inspect.ismemberdescriptor(obj) or (
+                sys.version_info >= (3, 12) and name == "__mro__"
+            ):
+                return VariableBuilder(tx, source)(obj.__get__(self.value))
 
         # Special handling of collections.OrderedDict.fromkeys()
         # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
@@ -341,7 +345,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             assert all(x is not None for x in items)
             return variables.NamedTupleVariable(items, self.value)
         elif (
-            inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
+            self.is_standard_new()
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
         ):
@@ -418,6 +422,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return tensor_variable
 
         return super().call_function(tx, args, kwargs)
+
+    def is_standard_new(self):
+        """Check for __new__ being overridden"""
+        new_fn = inspect.getattr_static(self.value, "__new__", None)
+        if isinstance(new_fn, staticmethod):
+            new_fn = new_fn.__func__
+        return new_fn in (object.__new__, Generic.__new__)
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if self.source:
+            source = AttrSource(self.source, name)
+            install_guard(source.make_guard(GuardBuilder.HASATTR))
+            return variables.ConstantVariable(hasattr(self.value, name))
+        return super().call_hasattr(tx, name)
 
     def const_getattr(self, tx, name):
         if name == "__name__":
@@ -601,6 +619,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 for k in range(len(self.value))
             ]
         return super().unpack_var_sequence(tx)
+
+    def next_variable(self, tx):
+        return self.call_method(tx, "__next__", [], {})
 
     def is_supported_random(self):
         try:
@@ -807,6 +828,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         ):
             if source:
+                install_guard(source.make_guard(GuardBuilder.HASATTR))
                 return VariableBuilder(tx, source)(subobj)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)

@@ -1476,6 +1476,7 @@ def _dispatch_pystub(name: str, overload: str) -> Optional[Tuple[str, str]]: ...
 def _dispatch_is_alias_key(dispatch: _dispatchkey) -> _bool: ...
 def _functionality_to_backend_keys(dispatch: _dispatchkey) -> List[DispatchKey]: ...
 def _functionalization_reapply_views_tls() -> _bool: ...
+def _set_throw_on_mutable_data_ptr(tensor: Tensor) -> None: ...
 
 class DispatchKey(Enum):
     ${dispatch_key_hints}
@@ -1615,6 +1616,15 @@ class TensorBase(metaclass=_TensorMeta):
     nbytes: _int
     itemsize: _int
     _has_symbolic_sizes_strides: _bool
+
+    def _view_func_unsafe(
+        self,
+        new_base: Tensor,
+        symint_visitor_fn: Optional[Callable[[_int], _int]] = None,
+        tensor_visitor_fn: Optional[Callable[[Tensor], Tensor]] = None
+    ):
+        ...
+
     ${tensor_method_hints}
 
 _TensorBase = TensorBase
@@ -1903,6 +1913,9 @@ def _xpu_emptyCache() -> None: ...
 class _XpuDeviceProperties:
     name: str
     platform_name: str
+    vendor: str
+    driver_version: str
+    version: str
     total_memory: _int
     max_compute_units: _int
     gpu_eu_count: _int
@@ -1910,6 +1923,9 @@ class _XpuDeviceProperties:
     max_work_group_size: _int
     max_num_sub_groups: _int
     sub_group_sizes: List[_int]
+    has_fp16: _bool
+    has_fp64: _bool
+    has_atomic64: _bool
     type: str
 
 # Defined in torch/csrc/xpu/Stream.cpp

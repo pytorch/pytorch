@@ -14,15 +14,18 @@ from torch._inductor.codecache import (
     CUDACodeCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
+    PyCodeCache,
     TensorMetadata,
     TensorMetadataAndValues,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import cache_dir, fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
@@ -523,6 +526,7 @@ class TestFxGraphCacheHashing(TestCase):
             FxGraphCachePickler.dumps(details3),
         )
 
+    @skipIfRocm
     @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     def test_cuda_compile_command(self):
@@ -549,6 +553,31 @@ class TestFxGraphCacheHashing(TestCase):
             assert cmd_parts[0] == "nvcc", cmd_parts
             assert "-Wsomething" in cmd_parts, cmd_parts
             assert "-DNDEBUG" in cmd_parts, cmd_parts
+
+
+class TestUtils(TestCase):
+    def test_fresh_inductor_cache(self):
+        def fn(x, y):
+            return x + y
+
+        a = torch.rand(10)
+        b = torch.rand(10)
+
+        with fresh_inductor_cache():
+            res1 = torch.compile(fn)(a, b)
+            cache_dir1 = cache_dir()
+            pycodecache_keys1 = list(PyCodeCache.cache.keys())
+
+        torch._dynamo.reset()
+        with fresh_inductor_cache():
+            res2 = torch.compile(fn)(a, b)
+            cache_dir2 = cache_dir()
+            pycodecache_keys2 = list(PyCodeCache.cache.keys())
+
+        self.assertEqual(res1, res2)
+        self.assertNotEqual(cache_dir1, cache_dir2)
+        self.assertTrue(all(k not in pycodecache_keys2 for k in pycodecache_keys1))
+        self.assertTrue(all(k not in pycodecache_keys1 for k in pycodecache_keys2))
 
 
 if __name__ == "__main__":
