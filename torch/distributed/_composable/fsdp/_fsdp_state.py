@@ -55,7 +55,9 @@ class FSDPState(_State):
         self._device = device
         self._mp_policy = mp_policy
         self._pre_forward_hook_handle = module.register_forward_pre_hook(
-            functools.partial(FSDPState._pre_forward, self), prepend=True, with_kwargs=True
+            functools.partial(FSDPState._pre_forward, self),
+            prepend=True,
+            with_kwargs=True,
         )
         self._post_forward_hook_handle = module.register_forward_hook(
             functools.partial(FSDPState._post_forward, self), prepend=False
