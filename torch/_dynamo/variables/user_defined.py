@@ -28,6 +28,7 @@ import torch._dynamo.config
 
 import torch.nn
 from torch._guards import TracingContext
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
 from .. import variables
 from ..exc import unimplemented
@@ -45,6 +46,7 @@ from ..utils import (
     namedtuple_fields,
     object_has_getattribute,
     proxy_args_kwargs,
+    proxy_fn_with_non_fx_args,
     tensortype_to_dtype,
 )
 from .base import MutableLocal, VariableTracker
@@ -72,6 +74,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def __str__(self):
         return f"UserDefinedClassVariable({self.value})"
+
+    def can_be_proxied_in_fx(self):
+        return False
 
     @staticmethod
     @functools.lru_cache(None)
@@ -421,6 +426,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             return tensor_variable
 
+        # If we see a subclass constructor call, and the subclass is traceable,
+        # proxy it into the graph
+        if is_traceable_wrapper_subclass_type(self.value):
+            return proxy_fn_with_non_fx_args(self.value, tx, args, kwargs)
         return super().call_function(tx, args, kwargs)
 
     def is_standard_new(self):
