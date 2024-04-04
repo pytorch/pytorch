@@ -103,6 +103,7 @@ def aot_dispatch_base_graph(
     copy_count2 = assert_functional_graph(fw_module.graph)
     propagate_input_mutation_stacktraces(fw_module.graph)
 
+    # See Note [Side-Effectful Tokens in AOTAutograd]
     num_tokens = len(fw_metadata.tokens)
     if num_tokens != 0 and aot_config.backend_name == "inductor":
         unlift_tokens(fw_module, fw_metadata)
