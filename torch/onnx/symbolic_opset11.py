@@ -212,7 +212,9 @@ def select(g: jit_utils.GraphContext, self, dim, index):
 def index_put(
     g: jit_utils.GraphContext, self, indices_list_value, values, accumulate=False
 ):
-    if symbolic_helper._is_packed_list(indices_list_value):
+    if isinstance(indices_list_value, list):
+        indices_list = indices_list_value
+    elif symbolic_helper._is_packed_list(indices_list_value):
         indices_list = symbolic_helper._unpack_list(indices_list_value)
     else:
         indices_list = [indices_list_value]
@@ -226,7 +228,7 @@ def index_put(
         return values
 
     inv_permutation_self = None
-    nones = [symbolic_helper._is_none(indices_list[i]) for i in range(len(indices_list))]
+    nones = [indices_list[i] is None or symbolic_helper._is_none(indices_list[i]) for i in range(len(indices_list))]
     if any(nones):
 
         # find a permutation that puts all the Nones at the end of indices_list and

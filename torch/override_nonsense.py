@@ -1,6 +1,7 @@
 import torch
 import re
-from torch.onnx import symbolic_opset11, symbolic_helper
+from torch.onnx import symbolic_opset11, symbolic_helper, _constants
+from torch.onnx._internal import jit_utils
 
 def extract_int_value(v):
     return int(re.search(r"\[value={(.*)}]", str(v)).group(1))
@@ -30,17 +31,23 @@ def slice_backward_symbolic(g, out_grad, input, dim, start, end, step):
 
     # Now we need an array mapping indices in the output
     # tensor to indices in the input, along the slicing axis:
-    input_dim_size = g.op("Gather", input_shape, dim)
+    dimval = extract_int_value(dim)
+    dimconst = g.op(
+        "Constant",
+        value_t = torch.tensor([dimval])
+    )
+    input_dim_size = g.op("Gather", input_shape, dimconst)
 
     zero = g.op("Constant", value_t=torch.tensor([0]))
     one = g.op("Constant", value_t=torch.tensor([1]))
+    scalar_shape = g.op("Constant", value_t=torch.tensor([], dtype=torch.int64))
 
     # All input inds:
     input_dim_inds = g.op(
         "Range",
-        zero,
-        input_dim_size,
-        one
+        g.op("Constant", value_t=torch.tensor(0)),
+        g.op("Reshape", input_dim_size, scalar_shape),
+        g.op("Constant", value_t=torch.tensor(1))
     )
 
     input_dim_inds = g.op(
@@ -52,20 +59,11 @@ def slice_backward_symbolic(g, out_grad, input, dim, start, end, step):
         g.op("Reshape", step, one),
     )
 
-    # we have to reshape/expand this now:
-    dimval = extract_int_value(dim)
-    padded_shape = g.op("ConstantOfShape", g.op("Shape", input_shape), value_t=torch.tensor([1], dtype=torch.int64))
-    padded_shape = g.op(
-        "ScatterElements",
-        padded_shape,
-        g.op("Reshape", dim, one),
-        g.op("Reshape", g.op("Shape", input_dim_inds), one)
-    )
-    input_dim_inds = g.op("Reshape", input_dim_inds, padded_shape)
-    input_dim_inds = g.op("Expand", input_dim_inds, g.op("Shape", out_grad))
+    input_dim_inds = [input_dim_inds]
+    while len(input_dim_inds) != dimval+1:
+        input_dim_inds = [None] + input_dim_inds
 
-    # finally use this array to scatter the gradients into the input grad:
-    return g.op("ScatterElements", in_grad, input_dim_inds, out_grad, axis_i=dimval)
+    return symbolic_opset11.index_put(g, in_grad, input_dim_inds, out_grad, False)
 
 
 # Register the symbolic function for the specific op and version
@@ -84,19 +82,17 @@ def select_backward_symbolic(g, out_grad, input, dim, index):
 
     # Add an extra dimension of size 1 to out_grad in the "dim" position.
     # Basically do out_grad = out_grad[...,None,...]
-    out_grad_extraaxis_shape = g.op("ConcatFromSequence", g.op(
-        "SequenceInsert",
-        g.op("SplitToSequence", g.op("Shape", out_grad), axis_i=0, keepdims_i=1),
-        g.op("Constant", value_t=torch.tensor([1])),
+    out_grad_extraaxis = g.op(
+        "Unsqueeze",
+        out_grad,
         dim
-    ), axis_i=0)
-    out_grad_extraaxis = g.op("Reshape", out_grad, out_grad_extraaxis_shape)
+    )
     
     # Create a tensor with the same shape, filled with the value "index"
     # so we can use a ScatterElements node:
     padded_shape = g.op("ConstantOfShape", g.op("Shape", input_shape), value_t=torch.tensor([1], dtype=torch.int64))
     indices = g.op("Reshape", index, padded_shape)
-    indices = g.op("Expand", indices, out_grad_extraaxis_shape)
+    indices = g.op("Expand", indices, g.op("Shape",out_grad_extraaxis))
 
     # ok, assume the value of "dim" is hard coded/not dynamic:
     dimval = extract_int_value(dim)
@@ -117,10 +113,6 @@ torch.onnx.register_custom_op_symbolic('aten::_index_put_impl', _index_put_impl_
 
 
 def new_empty_strided_symbolic(g, *args):
-
-    #print("new_empty_strided!!!")
-    #for a in args:
-    #    print(a)
     
     return g.op("ConstantOfShape", args[1])
 
@@ -192,15 +184,7 @@ def _softmax_backward_data_symbolic(g, out_grad, output, dim, half_to_float):
         output
     )
     
-    dimconst = g.op(
-        "Expand",
-        dim,
-        g.op(
-            "Constant",
-            value_t = torch.tensor([1])
-        )
-    )
-
+    dimval = extract_int_value(dim)
     grad_input = g.op(
         "Sub",
         new_grad_output,
@@ -209,7 +193,11 @@ def _softmax_backward_data_symbolic(g, out_grad, output, dim, half_to_float):
             output,
             g.op(
                 "ReduceSum",
-                new_grad_output, dimconst
+                new_grad_output,
+                g.op(
+                    "Constant",
+                    value_t = torch.tensor([dimval])
+                )
             )
         )
     )
@@ -220,19 +208,14 @@ torch.onnx.register_custom_op_symbolic('aten::_softmax_backward_data', _softmax_
 
 def _cat_backward_symbolic(g, out_grad, inputs, dim):
 
-    num_inputs = extract_list_len(inputs)
+    tensors = symbolic_helper._unpack_list(inputs)
 
     in_grads = []
     one = g.op("Constant", value_t=torch.tensor([1], dtype=torch.long))
     start_idx = g.op("Constant", value_t=torch.tensor([0], dtype=torch.long))
-    for i in range(num_inputs):
+    dimval = extract_int_value(dim)
+    for i, input in enumerate(tensors):
         
-        input = g.op(
-            "SequenceAt",
-            inputs,
-            g.op("Constant", value_t=torch.tensor([i], dtype=torch.long)),
-        )
-
         input_shape = g.op("Shape", input)
         input_dim_size = g.op("Gather", input_shape, dim)
 
@@ -244,13 +227,16 @@ def _cat_backward_symbolic(g, out_grad, inputs, dim):
                 out_grad,
                 start_idx,
                 end_idx,
-                g.op("Reshape", dim, one)
+                g.op(
+                    "Constant",
+                    value_t = torch.tensor([dimval])
+                )
             )
         )
 
         start_idx = end_idx
 
-    return g.op("SequenceConstruct",*in_grads)
+    return g.op("prim::ListConstruct", *in_grads)
 
 torch.onnx.register_custom_op_symbolic('aten::cat_backward', _cat_backward_symbolic, 17)
 
@@ -283,6 +269,74 @@ def index_backward_native_symbolic(g, grad, self, indices):
     return symbolic_opset11.index_put(g, in_grad, indices, grad, True)
 
 torch.onnx.register_custom_op_symbolic('aten::index_backward_native', index_backward_native_symbolic, 17)
+
+
+
+def slice_symbolic(g: jit_utils.GraphContext, input, *args):
+    if len(args) == 4:
+        # aten::slice(Tensor input, int dim, int? start=None, int? end=None, int step=1) -> Tensor
+        dims, start, end, step = args
+    elif len(args) == 3:
+        # aten::slice(t[] l, int? start=None, int? end=None, int step=1) -> t[]
+        start, end, step = args
+        dims = [0]
+    else:
+        raise errors.SymbolicValueError("Unknown aten::slice signature", input)
+
+    def is_none_value(value):
+        if value is None:
+            return True
+        return (
+            isinstance(value, torch._C.Value)
+            and value.node().kind() == "prim::Constant"
+            and isinstance(value.type(), _C.NoneType)
+        )
+
+    def to_slice_input(list_or_value, default_value=None):
+        # Convert input param into a 1D torch.Value.
+        if is_none_value(list_or_value) and default_value is not None:
+            list_or_value = [default_value]
+
+        if isinstance(list_or_value, (list, torch.Tensor)):
+            return g.op("Constant", value_t=torch.tensor(list_or_value))
+
+        rank = symbolic_helper._get_tensor_rank(list_or_value)
+        if rank == 0:
+            return symbolic_helper._unsqueeze_helper(g, list_or_value, [0])
+        if rank == 1:
+            return list_or_value
+        raise errors.SymbolicValueError(
+            f"Rank must be 0 or 1, not {rank}", list_or_value
+        )
+
+    def get_const_value(list_or_value):
+        if isinstance(list_or_value, (list, torch.Tensor)):
+            if len(list_or_value) == 1:
+                return list_or_value[0]
+            return None
+        return symbolic_helper._maybe_get_const(list_or_value, "i")
+
+    # Check if slice is a no-op
+    if (
+        get_const_value(start) == 0
+        and get_const_value(end) == _constants.INT64_MAX
+        and (step is None or get_const_value(step) == 1)
+    ):
+        return input
+
+    dimval = extract_int_value(dims)
+    dim = g.op("Constant", value_t=torch.tensor([dimval]))
+
+    start = to_slice_input(start, default_value=0)
+    end = to_slice_input(end, default_value=_constants.INT64_MAX)
+    if step is None:
+        print("return this ")
+        return g.op("Slice", input, start, end, dim)
+    step = to_slice_input(step, default_value=1)
+    return g.op("Slice", input, start, end, dim, step)
+
+torch.onnx.register_custom_op_symbolic('aten::slice', slice_symbolic, 17)
+
 
 def layer_norm(x, normalized_shape, weight, bias, eps, unused):
     # Assuming `normalized_shape` is the last 'n' dimensions of `x`
