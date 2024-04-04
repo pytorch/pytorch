@@ -2,25 +2,37 @@
 import functools
 import pickle
 import unittest
+from typing import List
+from unittest import mock
 
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
     AsyncCompile,
+    cuda_compile_command,
+    CUDACodeCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
+    PyCodeCache,
     TensorMetadata,
     TensorMetadataAndValues,
 )
 from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import cache_dir, fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_MULTIGPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CUDA,
+    HAS_GPU,
+    HAS_MULTIGPU,
+)
 from torch.utils._triton import has_triton
 
 HAS_TRITON = has_triton()
@@ -513,6 +525,59 @@ class TestFxGraphCacheHashing(TestCase):
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details3),
         )
+
+    @skipIfRocm
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_cuda_compile_command(self):
+        cmd_no_extra_args: str = cuda_compile_command(
+            ["abc.cu", "def.cu"], "output", "so"
+        )
+        assert "nvcc " in cmd_no_extra_args, cmd_no_extra_args
+        assert "abc.cu" in cmd_no_extra_args, cmd_no_extra_args
+        assert "def.cu" in cmd_no_extra_args, cmd_no_extra_args
+        assert "output" in cmd_no_extra_args, cmd_no_extra_args
+        cmd_extra_args: str = cuda_compile_command(
+            ["abc.cu", "def.cu"], "output", "so", ["-Wwhatever", "-nothing"]
+        )
+        assert "nvcc " in cmd_extra_args, cmd_extra_args
+        assert " -Wwhatever" in cmd_extra_args, cmd_extra_args
+        assert " -nothing" in cmd_extra_args, cmd_extra_args
+        assert "abc.cu" in cmd_extra_args, cmd_extra_args
+        assert "def.cu" in cmd_extra_args, cmd_extra_args
+        assert "output " in cmd_extra_args, cmd_extra_args
+        with mock.patch("subprocess.check_output") as check_output_mock:
+            CUDACodeCache.compile("test123.cu", "so", ["-Wsomething"])
+            check_output_mock.assert_called()
+            cmd_parts: List[str] = check_output_mock.call_args[0][0]
+            assert cmd_parts[0] == "nvcc", cmd_parts
+            assert "-Wsomething" in cmd_parts, cmd_parts
+            assert "-DNDEBUG" in cmd_parts, cmd_parts
+
+
+class TestUtils(TestCase):
+    def test_fresh_inductor_cache(self):
+        def fn(x, y):
+            return x + y
+
+        a = torch.rand(10)
+        b = torch.rand(10)
+
+        with fresh_inductor_cache():
+            res1 = torch.compile(fn)(a, b)
+            cache_dir1 = cache_dir()
+            pycodecache_keys1 = list(PyCodeCache.cache.keys())
+
+        torch._dynamo.reset()
+        with fresh_inductor_cache():
+            res2 = torch.compile(fn)(a, b)
+            cache_dir2 = cache_dir()
+            pycodecache_keys2 = list(PyCodeCache.cache.keys())
+
+        self.assertEqual(res1, res2)
+        self.assertNotEqual(cache_dir1, cache_dir2)
+        self.assertTrue(all(k not in pycodecache_keys2 for k in pycodecache_keys1))
+        self.assertTrue(all(k not in pycodecache_keys1 for k in pycodecache_keys2))
 
 
 if __name__ == "__main__":
