@@ -1238,6 +1238,16 @@ class Exporter:
                 self.options.onnx_registry.opset_version,
             )
 
+            try:
+                from onnxscript import optimizer
+
+                onnx_model = optimizer.optimize(onnx_model)
+            except ImportError:
+                warnings.warn(
+                    "ONNXScript optimizer is not available. Skipping optimization. "
+                    "Please `pip install onnxscript -U` to enable post-export optimization."
+                )
+
             return torch.onnx.ONNXProgram(
                 onnx_model,
                 self.options.fx_tracer.input_adapter,
