@@ -3,7 +3,7 @@
 Quantization
 ============
 
-.. automodule:: torch.ao.quantization
+.. currentmodule:: torch.ao.quantization
    :noindex:
 .. automodule:: torch.ao.quantization.fx
 
