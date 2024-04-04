@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
 import operator
-import sys
 import unittest
 from typing import Any, Optional, Tuple, Type
 
@@ -764,11 +763,7 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
 
 
 # TODO: enable this in the next PR
-# TODO: fix for 3.12
 @skipIfNoQNNPACK
-@unittest.skipIf(
-    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-)
 class TestQuantizePT2EQAT_ConvBn1d(TestQuantizePT2EQAT_ConvBn_Base):
     dim = 1
     example_inputs = (torch.randn(1, 3, 5),)
@@ -777,9 +772,6 @@ class TestQuantizePT2EQAT_ConvBn1d(TestQuantizePT2EQAT_ConvBn_Base):
 
 
 @skipIfNoQNNPACK
-@unittest.skipIf(
-    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-)
 class TestQuantizePT2EQAT_ConvBn2d(TestQuantizePT2EQAT_ConvBn_Base):
     dim = 2
     example_inputs = (torch.randn(1, 3, 5, 5),)
@@ -907,9 +899,6 @@ class ConvBnDerivedBiasQuantizer(Quantizer):
 
 
 @skipIfNoQNNPACK
-@unittest.skipIf(
-    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-)
 class TestQuantizePT2EQATModels(PT2EQATTestCase):
     @skip_if_no_torchvision
     @skipIfNoQNNPACK
