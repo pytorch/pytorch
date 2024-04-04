@@ -1298,7 +1298,8 @@ class GraphLowering(torch.fx.Interpreter):
                     # this will lead to a side effect on the example inputs:
                     # e.g. if torch.compile(f)(x) if called on input-mutating
                     # f, the inputs x will be mutated twice in the process:
-                    # once here, and again when running the compiled model
+                    # once here, and again when running the compiled model;
+                    # this will also lead to a numerically incorrect output
                     real_inputs[idx] = real_inputs[idx].clone()
 
             with torch.utils._python_dispatch._disable_current_modes():
