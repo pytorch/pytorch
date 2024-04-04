@@ -3911,6 +3911,7 @@ class TestNestedTensorSubclass(TestCase):
         nt1_t, nt2_t, nt3_t, nt4_t = (x.transpose(1, 2) for x in (nt1, nt2, nt3, nt4))
         check_size(nt1_t, nt2_t, nt3_t, nt4_t)
 
+    @skipIfTorchDynamo("Dynamo doesn't know how to trace prof.events()")
     def test_profiler_sequence_nr(self):
         # See Note [Sequence Numbers for Python Subclasses] for more context.
         with torch.profiler.profile() as prof:
