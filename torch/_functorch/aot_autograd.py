@@ -911,15 +911,16 @@ def aot_module_simplified(
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
     def forward(*runtime_args):
-        full_args = []
-        full_args.extend(params_flat)
+        flat_args = []
+        flat_args.extend(params_flat)
         for arg in runtime_args:
             if isinstance(arg, list):
-                # some runtime arguments may be boxed
-                full_args.extend(arg)
+                # tensors from user program that need to be freed by us
+                flat_args.extend(arg)
+                arg.clear()
             else:
-                full_args.append(arg)
-        return compiled_fn(full_args)
+                flat_args.append(arg)
+        return compiled_fn(flat_args)
 
     # Just for convenience
     forward.zero_grad = mod.zero_grad

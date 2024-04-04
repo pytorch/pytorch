@@ -1311,6 +1311,7 @@ known_failing_tests = {
     "test_save_for_backward_inputs_are_namedtuple",  # torch._dynamo.exc.Unsupported: 'skip function
     "test_autograd_function_backed_op",  # RuntimeError: compiled_args not implemented
     "test_setitem",  # AssertionError: Tensor-likes are not close!
+    "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
 }
 
 if not HAS_CUDA:
