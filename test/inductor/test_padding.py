@@ -97,6 +97,9 @@ class PaddingTest(TestCase):
         if "LongformerMaskedLMOutput" in str(type(ref)):
             ref = ref.loss
             act = act.loss
+        if "SequenceClassifierOutput" in str(type(ref)):
+            ref = ref.logits
+            act = act.logits
         if isinstance(ref, dict) and "loss" in ref:
             ref = ref["loss"]
             act = act["loss"]
@@ -325,8 +328,12 @@ class PaddingTest(TestCase):
                         optim.zero_grad(True)
                         with torch.cuda.amp.autocast():
                             pred = m(*args, **kwargs)
-                            if isinstance(pred, dict):
+                            if type(pred).__name__ in ("SequenceClassifierOutput"):
+                                pred = pred.logits
+                            elif isinstance(pred, dict):
                                 pred = pred["loss"]
+                            else:
+                                raise NotImplementedError("unexpected model output")
                             loss = pred.sum()
                         loss.backward()
                         optim.step()
@@ -402,6 +409,16 @@ class PaddingTest(TestCase):
             inputs = torch.randn(1, 3, 640, 959)
 
         self.run_acc_and_perf_test(model, inputs)
+
+    def test_hf_Whisper(self):
+        from transformers import WhisperConfig, AutoModelForAudioClassification
+        config = WhisperConfig()
+        model = AutoModelForAudioClassification.from_config(config)
+        bs = 8
+        feature_size = 80
+        seq_length = 3000
+        inputs = torch.randn(bs, feature_size, seq_length)
+        self.run_acc_and_perf_test(model, (inputs,))
 
     @unittest.skipIf(not DO_PERF_TEST, "Perf test not enabled")
     def test_BertForMaskedLM(self, num_layers=1):

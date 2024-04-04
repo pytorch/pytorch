@@ -1592,8 +1592,7 @@ class Scan(Loops):
     reindex: Callable[[List[Expr], List[Expr]], List[Expr]]
     reduction_hint: ReductionHint
     output_index: int
-    # output_index indexes the following three tuples
-    inits: Tuple[Union[int, float], ...]
+    # output_index indexes the following tuples
     dtypes: Tuple[torch.dtype, ...]
     inner_fns: Tuple[Callable[..., Any], ...]
 
@@ -1616,7 +1615,7 @@ class Scan(Loops):
     def store_reduction(self, output_name, indexer, vars, scan_vars):
         idx = self.reindex(vars, scan_vars)
         values = [inner_fn(idx) for inner_fn in self.inner_fns]
-        result = ops.scan(self.dtypes, self.combine_fn, values, self.inits)
+        result = ops.scan(self.dtypes, self.combine_fn, values)
         return ops.store(output_name, indexer(idx), result[self.output_index])
 
     def get_reduction_type(self):
@@ -1656,7 +1655,6 @@ class Scan(Loops):
         size: List[Expr],
         axis: int,
         combine_fn: Callable[[Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]],
-        inits: Tuple[Union[int, float], ...],
         reduction_hint: ReductionHint = ReductionHint.DEFAULT,
         **kwargs,
     ) -> List[Optional["TensorBox"]]:
@@ -1674,7 +1672,7 @@ class Scan(Loops):
         sizevars = V.graph.sizevars
         scan_numel = sizevars.simplify(sympy_product(scan_ranges))
 
-        assert len(dtypes) == len(inits) == len(inner_fns)
+        assert len(dtypes) == len(inner_fns)
 
         # Scan with a single element is just a copy
         if sizevars.is_expr_static_and_true(sympy.Le(scan_numel, 1)):  # type: ignore[arg-type]
@@ -1726,7 +1724,6 @@ class Scan(Loops):
                     scan_ranges=scan_ranges,
                     combine_fn=combine_fn,
                     reindex=reindex,
-                    inits=inits,
                     reduction_hint=reduction_hint,
                     output_index=output_index,
                     **kwargs,
@@ -5415,7 +5412,15 @@ class FallbackKernel(ExternKernelAlloc):
                     self.init_args_default_value(schema)
             else:
                 self.python_kernel_name = str(kernel)
-
+        elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
+            # Internal Quantized Fallback Ops
+            assert isinstance(kernel, torch._ops.OpOverload)
+            if V.graph.cpp_wrapper:
+                self.set_cpp_kernel(kernel)
+                if not config.abi_compatible:
+                    self.use_runtime_dispatch = True
+            else:
+                self.python_kernel_name = str(kernel)
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
         else:
@@ -7078,6 +7083,12 @@ class StorageBox(MutableBox):
             return self.data.get_name() in V.graph.graph_inputs
         return False
 
+    def is_module_buffer(self):
+        return (
+            isinstance(self.data, (ConstantBuffer))
+            and self.data.get_name() in V.graph.constants
+        )
+
     def realize(self):
         if isinstance(
             self.data,
@@ -7640,16 +7651,15 @@ class LoopBodyBlock:
                     [Tuple[Any, ...], Tuple[Any, ...]], Tuple[Any, ...]
                 ],
                 value_proxy,
-                init_proxy,
             ):
-                def shim(dtypes, values, inits):
-                    return V.ops.scan(dtypes, combine_fn, values, inits)
+                def shim(dtypes, values):
+                    return V.ops.scan(dtypes, combine_fn, values)
 
                 name = self.body.add_submodule(shim, "scan")
                 result = tracer.create_proxy(
                     "call_module",
                     name,
-                    (dtype_proxy, value_proxy, init_proxy),
+                    (dtype_proxy, value_proxy),
                     {},
                 )
                 # Proxies are iterable, but some methods expect tuples/lists

@@ -9,7 +9,13 @@ from torch.utils._pytree import tree_map_only
 from ..exc import unimplemented, Unsupported
 
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource, ConstDictKeySource, GetItemSource, GlobalWeakRefSource
+from ..source import (
+    AttrSource,
+    ConstDictKeySource,
+    GetItemSource,
+    GlobalWeakRefSource,
+    GradSource,
+)
 from ..utils import GLOBAL_KEY_PREFIX
 
 from .base import VariableTracker
@@ -202,7 +208,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             ):
                 param_source = p_vt.source
                 self.tensor_to_source[p] = param_source
-                grad_source = AttrSource(
+                grad_source = GradSource(
                     param_source,
                     "grad",
                 )

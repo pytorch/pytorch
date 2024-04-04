@@ -49,6 +49,7 @@ from functorch.compile import (
     nop, default_partition, default_decompositions,
     memory_efficient_fusion, get_aot_compilation_context, make_boxed_compiler
 )
+from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
 
 from torch.testing._internal.common_device_type import ops
@@ -3066,6 +3067,105 @@ def forward(self, arg0_1):
     add = torch.ops.aten.add.Tensor(sin, 7);  sin = None
     sin_1 = torch.ops.aten.sin.default(add);  add = None
     return (sin_1,)""")
+
+    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported")
+    def test_aot_export_predispatch_map_1(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                def true_fn(x, r):
+                    y = x.sin()
+                    y.add_(5)
+                    return y.cos() + r.sum()
+
+                def false_fn(x, r):
+                    z = x.cos()
+
+                    def f(x, y):
+                        a = x.cos()
+                        a.add_(5)
+                        return a + y
+
+                    return z + control_flow.map(f, z, r).sum() + control_flow.map(f, z, r).sum()
+
+                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x, y])
+                return (a + 3, a + 4)
+        inps = [torch.randn(2, 2), torch.ones(2)]
+        gm, _ = aot_export_module(M(), inps, trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1, arg1_1]);  true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
+    getitem = conditional[0];  conditional = None
+    add = torch.ops.aten.add.Tensor(getitem, 3)
+    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    return (add, add_1)""")  # noqa: B950
+        self.assertExpectedInline(str(gm.true_graph_0.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(sin, 5);  sin = None
+    cos = torch.ops.aten.cos.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
+    add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add_1,)""")
+        self.assertExpectedInline(str(gm.false_graph_0.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    select = torch.ops.aten.select.int(cos, 0, 0)
+    body_graph_0 = self.body_graph_0
+    map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
+    getitem = map_impl[0];  map_impl = None
+    sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
+    select_1 = torch.ops.aten.select.int(cos, 0, 0)
+    body_graph_1 = self.body_graph_1
+    map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
+    getitem_1 = map_impl_1[0];  map_impl_1 = None
+    sum_2 = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
+    add_1 = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
+    return (add_1,)""")
+        self.assertExpectedInline(str(gm.false_graph_0.body_graph_0.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(cos, 5);  cos = None
+    add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
+    return (add_1,)""")
+
+    def test_aot_export_predispatch_map_2(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                z = x.cos()
+
+                def f(x, y):
+                    a = x.cos()
+                    a.add_(5)
+                    return a + y
+
+                return (z + control_flow.map(f, z, y).sum(),)
+
+        inps = [torch.randn(2, 2), torch.ones(2)]
+        gm, _ = aot_export_module(M(), inps, trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    body_graph_0 = self.body_graph_0
+    map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = arg1_1 = None
+    getitem = map_impl[0];  map_impl = None
+    sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""")  # noqa: B950
+        self.assertExpectedInline(str(gm.body_graph_0.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(cos, 5);  cos = None
+    add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
+    return [add_1]""")
 
     @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported")
