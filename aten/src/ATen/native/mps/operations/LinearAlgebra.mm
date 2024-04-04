@@ -658,7 +658,7 @@ static void lu_factor_stub_mps(const Tensor& LU, const Tensor& pivots, const Ten
   // add 1 to pivots to match the 1-based indexing in CPU
   pivots.add_(1);
 
-  // set info to first index +1 that where the diagonal is zero
+  // set info to first index +1 where the diagonal is zero
   auto diagonal_zeros = LU_continous.diagonal(0, -2, -1).eq_(0);
   auto didFail = diagonal_zeros.any(-1);
   auto firstFailDim = diagonal_zeros.argmax(-1, false).to(info.dtype());
