@@ -224,7 +224,6 @@ class AOTInductorTestsTemplate:
         with config.patch({"aot_inductor.use_runtime_constant_folding": True}):
             self.check_model(Model(self.device), example_inputs)
 
-    @skipIfRocm
     @requires_cuda
     def test_duplicate_constant_folding(self):
         class Model(torch.nn.Module):
@@ -843,7 +842,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Repro(), example_inputs)
 
-    @skipIfRocm
     def test_cond_simple(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -861,7 +859,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm
     def test_cond_nested(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -883,7 +880,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm
     def test_cond_with_parameters(self):
         inputs = (torch.randn((10, 20), device=self.device),)
         dim0_abc = Dim("s0", min=2, max=1024)
@@ -897,7 +893,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm
     def test_cond_with_reinterpret_view_inputs_outputs(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -915,7 +910,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm
     def test_cond_with_multiple_outputs(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -936,7 +930,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm
     def test_cond_with_outer_code_before_after(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -954,7 +947,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm
     def test_cond_use_buffers_from_outer_scope(self):
         inputs = (
             torch.randn((10, 20), device=self.device),
@@ -1232,7 +1224,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(self.device), example_inputs)
 
-    @skipIfRocm
     @requires_multigpu()
     def test_replicate_on_devices(self):
         if self.device != "cuda":
@@ -1285,7 +1276,6 @@ class AOTInductorTestsTemplate:
 
         self.check_model(M(), ({"x": torch.ones(5), "y": torch.ones(5)},))
 
-    @skipIfRocm
     @requires_multigpu()
     def test_non_default_cuda_device(self):
         if self.device != "cuda":
@@ -2312,7 +2302,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm
+    @skipIfRocm #USE_MEM_EFF_ATTENTION was not enabled for build.
     def test_scaled_dot_product_efficient_attention(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -2331,7 +2321,6 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
-    @skipIfRocm
     def test_index_put_with_none_index(self):
         # index_put falls back in the deterministic mode
         with DeterministicGuard(True):
@@ -2849,6 +2838,15 @@ if TEST_WITH_ROCM:
             "test_zero_grid_with_unbacked_symbols": fail_cuda(is_skip=True),
             "test_zero_grid_with_backed_symbols": fail_cuda(is_skip=True),
             "test_reuse_kernel_dynamic": fail_cuda(is_skip=True),
+            "test_duplicate_constant_folding" : fail_cuda(is_skip=True),
+            "test_cond_simple" : fail_cuda(is_skip=True),
+            "test_cond_nested" : fail_cuda(is_skip=True),
+            "test_cond_with_parameters" : fail_cuda(is_skip=True),
+            "test_cond_with_reinterpret_view_inputs_outputs" : fail_cuda(is_skip=True),
+            "test_cond_with_multiple_outputs" : fail_cuda(is_skip=True),
+            "test_cond_with_outer_code_before_after" : fail_cuda(is_skip=True),
+            "test_cond_use_buffers_from_outer_scope" : fail_cuda(is_skip=True),
+            "test_index_put_with_none_index" : fail_cuda(is_skip=True),
         }
     )
 
