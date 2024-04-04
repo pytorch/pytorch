@@ -5931,9 +5931,9 @@ def while_loop(cond_fn, body_fn, operands):
     return list(map(TensorBox.create, result))
 
 
-@register_lowering(torch.ops.aten._sink_tokens.default)
+@register_lowering(torch.ops.prims._sink_tokens.default)
 def _sink_tokens(tokens):
-    return ir.SinkTokens()
+    return None
 
 
 @register_lowering(torch.ops.higher_order.with_effects)

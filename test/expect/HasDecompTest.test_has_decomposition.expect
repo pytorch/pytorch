@@ -496,7 +496,6 @@ aten::_scaled_mm
 aten::_scaled_mm.out
 aten::_segment_reduce_backward
 aten::_segment_reduce_backward.out
-aten::_sink_tokens
 aten::_slow_conv2d_backward.grad_input
 aten::_slow_conv2d_backward.output_mask
 aten::_slow_conv2d_backward.output_mask_out

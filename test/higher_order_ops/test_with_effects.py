@@ -203,6 +203,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         res.sum().backward()
 
+    @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
     def test_register_effectful_custom_op(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
             torch._dynamo.config.capture_scalar_outputs = True
