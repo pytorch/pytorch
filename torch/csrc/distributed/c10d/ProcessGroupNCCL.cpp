@@ -162,7 +162,7 @@ ncclRedOpRAII getNcclReduceOp(
 #endif
     }
     return ncclOp.at(reduceOp);
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     switch (reduceOp) {
       case ReduceOp::AVG:
         C10_THROW_ERROR(
