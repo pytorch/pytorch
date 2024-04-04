@@ -37,86 +37,6 @@ class FSDPStateContext:
         self.is_last_backward: bool = True
 
 
-def _fsdp_state_pre_forward(
-    self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
-) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
-    # When composing with module-hook-based activation checkpointing, the
-    # the pre-backward hook is responsible for the unshard
-    if self._training_state == TrainingState.PRE_BACKWARD:
-        return args, kwargs
-    self._training_state = TrainingState.FORWARD
-    args, kwargs = self._root_pre_forward(module, args, kwargs)
-    if self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype:
-        with torch.profiler.record_function("FSDP::cast_forward_inputs"):
-            cast_fn = functools.partial(
-                _cast_fp_tensor, self._mp_policy.param_dtype
-            )
-            args, kwargs = tree_map(cast_fn, args), tree_map(cast_fn, kwargs)
-    if self._fsdp_param_group:
-        args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
-    return args, kwargs
-
-def _fsdp_state_post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
-    # When composing with module-hook-based activation checkpointing, the
-    # post-backward hook is responsible for the reshard
-    if self._training_state == TrainingState.PRE_BACKWARD:
-        return output
-    if self._fsdp_param_group:
-        output = self._fsdp_param_group.post_forward(module, input, output)
-    output = self._register_pre_backward_hook(output)
-    self._training_state = TrainingState.IDLE
-    if self._state_ctx.iter_forward_root is self:
-        if all_gather_state := self._comm_ctx.all_gather_state:
-            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-                # Free the last all-gather result if needed; refer to
-                # [Note: Overlapping all-gather copy-in and all-gather]
-                self._comm_ctx.all_gather_copy_in_stream.wait_event(
-                    all_gather_state.event
-                )
-                self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
-            self._comm_ctx.all_gather_state = None  # free the all-gather result
-        self._state_ctx.iter_forward_root = None
-    if self._mp_policy.output_dtype is not None:
-        with torch.profiler.record_function("FSDP::cast_forward_outputs"):
-            output = tree_map(
-                functools.partial(_cast_fp_tensor, self._mp_policy.output_dtype),
-                output,
-            )
-    return output
-
-def _fsdp_state_pre_backward_compile_only(self, forward_grad_fns: Tuple[Node, ...], grad) -> None:
-    """
-    NOTE(yf225): since under compile we use `register_hook` to call pre_backward, to mimic `multi_grad_hook` "any" mode behavior
-    we only want to call pre_backward once, so doing this check here to early return if already called.
-
-    Comment from Andrew:
-    one more thing to note is that the hook should run once per call to register_multi_grad_hook, where there is one call per forward
-    so if we run multiple forward before backward, we should run the pre-backward hook multiple times (one per forward)
-    as such, the bool to guard whether the pre-backward hook is a no-op or not needs to be per call to register_multi_grad_hook, not something global to the entire backward
-    """
-    if self._training_state == TrainingState.PRE_BACKWARD:
-        return grad
-    self._training_state = TrainingState.PRE_BACKWARD
-    self._register_root_post_backward_final_callback()
-    if self._fsdp_param_group:
-        self._fsdp_param_group.pre_backward(forward_grad_fns)
-    # NOTE(yf225): this is only needed because we are using `register_hook`. Not needed if we use `register_multi_grad_hook`.
-    return grad
-
-def _fsdp_state_root_post_backward_final_callback(self, *unused) -> None:
-    with torch.profiler.record_function("FSDP::root_post_backward_callback"):
-        for state in self._state_ctx.all_states:
-            if state._fsdp_param_group and state._fsdp_param_group.is_unsharded:
-                # Run post-backward in case forward inputs did not require
-                # gradient so the autograd backward did not run
-                state._fsdp_param_group.post_backward()
-            if self._state_ctx.is_last_backward:
-                state._finalize_backward()
-        if self._state_ctx.is_last_backward:
-            self._comm_ctx.post_forward_order.clear()
-        self._state_ctx.post_backward_final_callback_queued = False
-
-
 class FSDPState(_State):
     def __init__(self):
         super().__init__()
@@ -136,10 +56,10 @@ class FSDPState(_State):
         self._device = device
         self._mp_policy = mp_policy
         self._pre_forward_hook_handle = module.register_forward_pre_hook(
-            functools.partial(_fsdp_state_pre_forward, self), prepend=True, with_kwargs=True
+            functools.partial(FSDPState._pre_forward, self), prepend=True, with_kwargs=True
         )
         self._post_forward_hook_handle = module.register_forward_hook(
-            functools.partial(_fsdp_state_post_forward, self), prepend=False
+            functools.partial(FSDPState._post_forward, self), prepend=False
         )
 
     def _root_pre_forward(
@@ -225,11 +145,92 @@ class FSDPState(_State):
             if module in module_to_fsdp_param_group:
                 module_to_fsdp_param_group[module]._module_fqn = module_name
 
+    @staticmethod
+    def _pre_forward(
+        self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+    ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
+        # When composing with module-hook-based activation checkpointing, the
+        # the pre-backward hook is responsible for the unshard
+        if self._training_state == TrainingState.PRE_BACKWARD:
+            return args, kwargs
+        self._training_state = TrainingState.FORWARD
+        args, kwargs = self._root_pre_forward(module, args, kwargs)
+        if self._mp_policy.cast_forward_inputs and self._mp_policy.param_dtype:
+            with torch.profiler.record_function("FSDP::cast_forward_inputs"):
+                cast_fn = functools.partial(
+                    _cast_fp_tensor, self._mp_policy.param_dtype
+                )
+                args, kwargs = tree_map(cast_fn, args), tree_map(cast_fn, kwargs)
+        if self._fsdp_param_group:
+            args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
+        return args, kwargs
+
+    @staticmethod
+    def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
+        # When composing with module-hook-based activation checkpointing, the
+        # post-backward hook is responsible for the reshard
+        if self._training_state == TrainingState.PRE_BACKWARD:
+            return output
+        if self._fsdp_param_group:
+            output = self._fsdp_param_group.post_forward(module, input, output)
+        output = self._register_pre_backward_hook(output)
+        self._training_state = TrainingState.IDLE
+        if self._state_ctx.iter_forward_root is self:
+            if all_gather_state := self._comm_ctx.all_gather_state:
+                if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
+                    # Free the last all-gather result if needed; refer to
+                    # [Note: Overlapping all-gather copy-in and all-gather]
+                    self._comm_ctx.all_gather_copy_in_stream.wait_event(
+                        all_gather_state.event
+                    )
+                    self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
+                self._comm_ctx.all_gather_state = None  # free the all-gather result
+            self._state_ctx.iter_forward_root = None
+        if self._mp_policy.output_dtype is not None:
+            with torch.profiler.record_function("FSDP::cast_forward_outputs"):
+                output = tree_map(
+                    functools.partial(_cast_fp_tensor, self._mp_policy.output_dtype),
+                    output,
+                )
+        return output
+
     def _pre_backward(self, forward_grad_fns: Tuple[Node, ...], *unused: Any) -> None:
         self._training_state = TrainingState.PRE_BACKWARD
         self._register_root_post_backward_final_callback()
         if self._fsdp_param_group:
             self._fsdp_param_group.pre_backward(forward_grad_fns, *unused)
+
+    @staticmethod
+    def _pre_backward_compile_only(self, forward_grad_fns: Tuple[Node, ...], grad) -> None:
+        """
+        NOTE(yf225): since under compile we use `register_hook` to call pre_backward, to mimic `multi_grad_hook` "any" mode behavior
+        we only want to call pre_backward once, so doing this check here to early return if already called.
+
+        Comment from Andrew:
+        one more thing to note is that the hook should run once per call to register_multi_grad_hook, where there is one call per forward
+        so if we run multiple forward before backward, we should run the pre-backward hook multiple times (one per forward)
+        as such, the bool to guard whether the pre-backward hook is a no-op or not needs to be per call to register_multi_grad_hook, not something global to the entire backward
+        """
+        if self._training_state == TrainingState.PRE_BACKWARD:
+            return grad
+        self._pre_backward(forward_grad_fns)
+        # NOTE(yf225): this is only needed because we are using `register_hook` for pre-backward hooks under compile.
+        # Not needed for eager mode where we use `register_multi_grad_hook`.
+        return grad
+
+    @staticmethod
+    def _root_post_backward_final_callback(self, *unused) -> None:
+        with torch.profiler.record_function("FSDP::root_post_backward_callback"):
+            for state in self._state_ctx.all_states:
+                if state._fsdp_param_group and state._fsdp_param_group.is_unsharded:
+                    # Run post-backward in case forward inputs did not require
+                    # gradient so the autograd backward did not run
+                    state._fsdp_param_group.post_backward()
+                if self._state_ctx.is_last_backward:
+                    state._finalize_backward()
+            if self._state_ctx.is_last_backward:
+                self._comm_ctx.post_forward_order.clear()
+            self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:
         self._training_state = TrainingState.IDLE
@@ -247,18 +248,16 @@ class FSDPState(_State):
         flat_outputs, _ = tree_flatten(output)
         tensors = tuple(t for t in flat_outputs if t.requires_grad)
         if tensors:
-            # NOTE(yf225): unfortunately `t.grad_fn` is not supported by Dynamo yet, so we set grad_fns = [] here
-            # and unconditionally do unshard in `_prefetch_unshard()`
             if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                 grad_fns = tuple(t.grad_fn for t in tensors if t.grad_fn is not None)
-            else:
-                grad_fns = []
-            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                 pre_backward = functools.partial(self._pre_backward, grad_fns)
                 handle = register_multi_grad_hook(tensors, pre_backward, mode="any")
                 self._pre_backward_hook_handles.append(handle)
             else:
-                pre_backward = functools.partial(_fsdp_state_pre_backward_compile_only, self, grad_fns)
+                # NOTE(yf225): unfortunately `t.grad_fn` is not supported by Dynamo yet, so we set grad_fns = [] here
+                # and unconditionally do unshard in `_prefetch_unshard()`
+                grad_fns = []
+                pre_backward = functools.partial(FSDPState._pre_backward_compile_only, self, grad_fns)
                 for tensor in tensors:
                     handle = tensor.register_hook(pre_backward)
                     self._pre_backward_hook_handles.append(handle)
@@ -273,11 +272,11 @@ class FSDPState(_State):
         self._state_ctx.post_backward_final_callback_queued = True
         if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
             Variable._execution_engine.queue_callback(
-                functools.partial(_fsdp_state_root_post_backward_final_callback, self)
+                functools.partial(FSDPState._root_post_backward_final_callback, self)
             )
         else:
             queue_callback(
-                functools.partial(_fsdp_state_root_post_backward_final_callback, self)
+                functools.partial(FSDPState._root_post_backward_final_callback, self)
             )
 
 
