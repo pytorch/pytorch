@@ -24,8 +24,8 @@ namespace {
 
 template <typename scalar_t>
 inline scalar_t multilabel_margin_loss_forward_inner_sum_cpu(
-    scalar_t* input_data,
-    int64_t* target_data,
+    const scalar_t* input_data,
+    const int64_t* target_data,
     scalar_t* is_target_data,
     int64_t dim) {
   using accscalar_t = at::acc_type<scalar_t, false>;
@@ -67,8 +67,8 @@ static void multilabel_margin_loss_forward_out_frame(
     int64_t nframe,
     int64_t dim) {
   using accscalar_t = at::acc_type<scalar_t, false>;
-  scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
-  int64_t* target_data = target_contiguous.data_ptr<int64_t>();
+  const scalar_t* input_data = input_contiguous.const_data_ptr<scalar_t>();
+  const int64_t* target_data = target_contiguous.const_data_ptr<int64_t>();
   scalar_t* is_target_data = is_target.data_ptr<scalar_t>();
 
   if (reduction != Reduction::None || output.dim() == 0) {

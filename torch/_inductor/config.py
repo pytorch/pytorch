@@ -98,7 +98,7 @@ post_grad_custom_post_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = N
 # use post-grad passes.
 pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 
-# Optimize away split cat patterns (Experimental)
+# Deprecated
 split_cat_fx_passes = True
 
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
@@ -113,8 +113,24 @@ group_fusion = False
 # Deprecated
 batch_fusion = True
 
-# Pre grad group/batch fusion and options in order, set to empty dict to disable fusion.
+# Pre grad fusion and options in order, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions()` to see available fusions.
+# batch fusion options:
+# batch_linear
+# batch_linear_lhs
+# batch_layernorm
+# batch_tanh
+# batch_relu
+# batch_sigmoid
+
+# split cat fusion options:
+# normalization_pass
+# remove_split_with_size_one_pass
+# merge_getitem_cat_pass
+# merge_stack_tahn_unbind
+# merge_splits_pass
+# mutate_cat_pass
+# split_cat_pass
 pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
     "batch_linear": {},
     "batch_linear_lhs": {},
@@ -124,7 +140,7 @@ pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
     "batch_sigmoid": {},
 }
 
-# Post grad group/batch fusion and options, set to empty dict to disable fusion.
+# Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
 post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 
@@ -463,6 +479,11 @@ use_minimal_arrayref_interface: bool = False
 # decompose some memory bound matmul/bmm to mul
 decompose_mem_bound_mm: bool = False
 
+# assume_aligned_inputs means that we assume that inputs will be aligned; we generate
+# code using this assumption, and clone tensors before use if they aren't aligned.
+# In the common case, most inputs will be aligned.
+assume_aligned_inputs: bool = True
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -531,11 +552,22 @@ class triton:
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = True
 
+    # Should we skip cudagraphing graphs with dynamic shape inputs
+    # If False, we will re-record a graph for each unique set of shape inputs
+    cudagraph_skip_dynamic_graphs = False
+
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
 
     # TODO - need to debug why this prevents cleanup
     cudagraph_trees_history_recording = False
+
+    # synchronize after cudagraph invocation
+    force_cudagraph_sync = False
+
+    # always run cudagraphs in the eager warmup stage
+    # instead of recording and executing cudagraphs
+    force_cudagraphs_warmup = False
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
