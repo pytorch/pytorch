@@ -507,6 +507,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if name == "__setattr__":
+            return super().call_method(tx, name, args, kwargs)
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
         if self.saved_tensors is None:

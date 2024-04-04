@@ -147,11 +147,11 @@ class UserDefineSetAttr:
     setup = False
 
     def __setattr__(self, key, value):
-        assert torch._dynamo.is_compiling() or UserDefineSetAttr.setup
+        assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
         super().__setattr__(f"pfx_{key}", value)
 
     def __getattr__(self, key):
-        assert torch._dynamo.is_compiling() or UserDefineSetAttr.setup
+        assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
         return self.__dict__[f"pfx_{key}"]
 
 
