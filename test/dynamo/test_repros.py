@@ -4499,7 +4499,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
             @staticmethod
             def cat(instance_lists: List["Instances"]) -> "Instances":
-                # TODO(jansel): support all isinstance
+                # TODO(jansel): support all isinstance generator
                 # assert all(isinstance(i, Instances) for i in instance_lists)
                 assert len(instance_lists) > 0
                 if len(instance_lists) == 1:
@@ -4537,7 +4537,10 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         def fn(instances):
             return instances[0].cat(instances)
 
-        fn(instances)
+        actual = fn(instances)
+        expected = instances[0].cat(instances)
+        self.assertEqual(type(actual), type(expected))
+        self.assertEqual(actual.__dict__, expected.__dict__)
 
     def test_super_in_staticmethod(self):
         class A:
