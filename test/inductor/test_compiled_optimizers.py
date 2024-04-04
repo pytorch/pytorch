@@ -23,7 +23,6 @@ from torch.optim import (
     Adamax,
     AdamW,
     ASGD,
-    LBFGS,
     NAdam,
     RAdam,
     RMSprop,
@@ -343,66 +342,75 @@ class CompiledOptimizerParityTests(TestCase):
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable",)
         )
-        for optim_input in all_optim_inputs:
-            kwargs = optim_input.kwargs
+        closure_options = (True,) if optim_info.step_requires_closure else (False, True)
+        for use_closure in closure_options:
+            for optim_input in all_optim_inputs:
+                kwargs = optim_input.kwargs
 
-            torch._dynamo.reset()
-            torch._inductor.metrics.reset()
-            input = torch.ones([10, 10], device=device)
-            model_eager = torch.nn.Sequential(
-                *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
-            )
-            model_eager(input).sum().backward()
-            model_compiled = deepcopy(model_eager)
-            model_compiled(input).sum().backward()
+                torch._dynamo.reset()
+                torch._inductor.metrics.reset()
+                input = torch.ones([10, 10], device=device)
+                model_eager = torch.nn.Sequential(
+                    *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
+                )
+                model_eager(input).sum().backward()
+                model_compiled = deepcopy(model_eager)
+                model_compiled(input).sum().backward()
 
-            if optim_cls is SparseAdam:
-                for param in model_eager.parameters():
-                    param.grad = param.grad.to_sparse()
-                for param in model_compiled.parameters():
-                    param.grad = param.grad.to_sparse()
+                if optim_cls is SparseAdam:
+                    for param in model_eager.parameters():
+                        param.grad = param.grad.to_sparse()
+                    for param in model_compiled.parameters():
+                        param.grad = param.grad.to_sparse()
 
-            opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
-            opt_eager = optim_cls(model_eager.parameters(), **kwargs)
+                opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
+                opt_eager = optim_cls(model_eager.parameters(), **kwargs)
 
-            if optim_cls is LBFGS:
+                if use_closure:
 
-                @torch.compile()
-                def fn():
-                    def closure():
-                        loss = model_compiled(input).sum()
+                    @torch.compile()
+                    def fn():
+                        def closure():
+                            loss = model_compiled(input).sum()
+                            loss.backward()
+                            if optim_cls is SparseAdam:
+                                for param in model_compiled.parameters():
+                                    param.grad = param.grad.to_sparse()
+                            return loss
+
+                        opt_compiled.step(closure)
+
+                    def closure_eager():
+                        loss = model_eager(input).sum()
                         loss.backward()
+                        if optim_cls is SparseAdam:
+                            for param in model_eager.parameters():
+                                param.grad = param.grad.to_sparse()
+
                         return loss
 
-                    opt_compiled.step(closure)
+                    opt_eager.step(closure_eager)
+                    opt_eager.step(closure_eager)
+                else:
 
-                def closure_eager():
-                    loss = model_eager(input).sum()
-                    loss.backward()
-                    return loss
+                    @torch.compile()
+                    def fn():
+                        opt_compiled.step()
 
-                opt_eager.step(closure_eager)
-                opt_eager.step(closure_eager)
-            else:
+                    opt_eager.step()
+                    opt_eager.step()
 
-                @torch.compile()
-                def fn():
-                    opt_compiled.step()
+                fn()
+                fn()
 
-                opt_eager.step()
-                opt_eager.step()
-
-            fn()
-            fn()
-
-            check_optim(
-                self,
-                optim_cls,
-                model_eager.parameters(),
-                model_compiled.parameters(),
-                opt_eager.state,
-                opt_compiled.state,
-            )
+                check_optim(
+                    self,
+                    optim_cls,
+                    model_eager.parameters(),
+                    model_compiled.parameters(),
+                    opt_eager.state,
+                    opt_compiled.state,
+                )
 
 
 class CompiledOptimizerTests(TestCase):
