@@ -844,6 +844,10 @@ class CppOverrides(OpOverrides):
         return f"std::log10({x})"
 
     @staticmethod
+    def log2(x):
+        return f"std::log2({x})"
+
+    @staticmethod
     def nextafter(x, y):
         return f"std::nextafter({x}, {y})"
 
@@ -1264,6 +1268,10 @@ class CppVecOverrides(CppOverrides):
     @staticmethod
     def log10(x):
         return f"{x}.log10()"
+
+    @staticmethod
+    def log2(x):
+        return f"{x}.log2()"
 
     @staticmethod
     def nextafter(x):

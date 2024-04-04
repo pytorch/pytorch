@@ -682,6 +682,13 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
+def output_node(gm: torch.fx.GraphModule):
+    """Get the output node from an FX graph"""
+    last_node = next(iter(reversed(gm.graph.nodes)))
+    assert last_node.op == "output"
+    return last_node
+
+
 # Attempt to import AttrsDescriptor from Triton
 try:
     from triton.compiler.compiler import AttrsDescriptor
@@ -946,10 +953,14 @@ class DeferredLineBase:
 
 
 @functools.lru_cache(None)
-def is_big_gpu(index):
-    sms = torch.cuda.get_device_properties(index).multi_processor_count
-    if sms < 80:  # V100
-        log.warning("not enough SMs to use max_autotune_gemm mode")
+def is_big_gpu(index) -> bool:
+    min_sms = 68  # 3080
+    avail_sms = torch.cuda.get_device_properties(index).multi_processor_count
+    if avail_sms < min_sms:
+        log.warning(
+            "Not enough SMs to use max_autotune_gemm mode",
+            extra={"min_sms": min_sms, "avail_sms": avail_sms},
+        )
         return False
     return True
 
@@ -984,7 +995,12 @@ def use_triton_template(layout, *, enable_int32=False):
     )
 
 
-def use_cutlass_template(layout):
+def use_cutlass_template(layout, m, n, k):
+    from .virtualized import V
+
+    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
+    if gemm_size <= 0 or gemm_size < config.cuda.cutlass_backend_min_gemm_size:
+        return False
     from .codegen.cuda.cutlass_utils import try_import_cutlass
 
     # Do not use cutlass template on ROCm
@@ -1480,3 +1496,7 @@ def collect_defined_kernels(kernel_list):
 
     with unittest.mock.patch.object(WrapperCodeGen, "define_kernel", new_define_kernel):
         yield
+
+
+def get_cloned_parameter_buffer_name(name: str):
+    return name + "__original__"
