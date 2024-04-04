@@ -239,6 +239,93 @@ _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
 ]
 
 
+def _mannually_invoke_dispatch_mode_in_python(curr_mode, op_overload, *args, **kwargs):
+    assert isinstance(curr_mode, TorchDispatchMode)
+    overload_types = []
+    args_flattened, _ = torch.utils._pytree.tree_flatten((args, kwargs.values()))
+    for a in args_flattened:
+        # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
+        # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
+        # where in one case we only include tensors with the python key, and in another
+        # we include **all** tensors.
+        if isinstance(a, torch.Tensor) and torch._C._dispatch_keys(a).has(
+            torch._C.DispatchKey.Python
+        ):
+            overload_types.append(type(a))
+    # TODO: check that I got these args correct (in C++, we pass in "0000"??)
+
+    return curr_mode.__torch_dispatch__(op_overload, overload_types, args, kwargs)
+
+
+def dispatch_in_python(dispatch_key, op_overload, *args, **kwargs):
+    from torch.utils._python_dispatch import _get_current_dispatch_mode
+
+    if dispatch_key in op_overload._dispatch_cache:
+        kernel = op_overload._dispatch_cache[dispatch_key]
+        assert not isinstance(kernel, torch._C.DispatchKey)
+        return kernel(*args, **kwargs)
+
+    if dispatch_key == torch._C.DispatchKey.FuncTorchDynamicLayerFrontMode:
+        return dispatch_functorch(op_overload, args, kwargs)
+
+    if dispatch_key == torch._C.DispatchKey.Python:
+        # The place to handle ProxyTorchDispatchMode, FakeTensorMode, etc
+        from torch.utils._python_dispatch import _pop_mode_temporarily
+
+        curr_mode = _get_current_dispatch_mode()
+        assert (
+            curr_mode is not None
+        ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
+        assert (
+            type(curr_mode) in op_overload.python_key_mode_table
+        ), f"Current active mode {curr_mode} not registered"
+        handler = op_overload.python_key_mode_table[type(curr_mode)]
+        with _pop_mode_temporarily() as mode:
+            return handler(mode, *args, **kwargs)
+
+    functionality_key = torch._C._to_functionality_key(dispatch_key)  # type: ignore[attr-defined]
+    if functionality_key == torch._C.DispatchKey.PreDispatch:
+        from torch.utils._python_dispatch import _pop_mode_temporarily
+
+        # The check for Python in the exclude set is so we properly respect `with no_dispatch()`
+        # calls inside of a mode.
+        if (
+            _len_torch_dispatch_stack_pre_dispatch() > 0
+        ) and not torch._C._dispatch_tls_is_dispatch_key_excluded(DispatchKey.Python):
+            curr_mode = _get_current_dispatch_mode_pre_dispatch()
+            assert (
+                curr_mode is not None
+            ), "Illegal invocation of dispatch on torch._C.DispatchKey.PreDispatch without a mode."
+            assert (
+                type(curr_mode) in op_overload.python_key_mode_table
+            ), f"Current active mode {curr_mode} not registered"
+            handler = op_overload.python_key_mode_table[type(curr_mode)]
+            with _pop_mode_temporarily(functionality_key) as mode:
+                return handler(mode, *args, **kwargs)
+
+    final_key = resolve_key(op_overload, dispatch_key)
+
+    # This can current fail due to backend fallbacks.  You just have to
+    # register them by hand for HigherOrderOperator.
+    if final_key not in op_overload.py_kernels:
+        raise NotImplementedError(
+            f"could not find kernel for op {op_overload._name} "
+            f"at dispatch key {final_key} (resolved from {dispatch_key})"
+        )
+
+    # [NOTE] We shouldn't cache PreDispatch kernel here because depending
+    # on what modes are active, predispatch behaviour is different.
+    # Also we do same thing for normal ops:
+    # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
+    if dispatch_key != torch._C.DispatchKey.PreDispatch:
+        op_overload._dispatch_cache[dispatch_key] = op_overload.py_kernels[final_key]
+    kernel = op_overload.py_kernels[final_key]
+    # It's illegal to register DispatchKey to py_kernels, since there's no
+    # C++ kernel to call into
+    assert not isinstance(kernel, torch._C.DispatchKey)
+    return kernel(*args, **kwargs)
+
+
 class HigherOrderOperator(OperatorBase):
     # The HigherOrderOperator will appear as torch.ops.higher_order.{name}
     #
@@ -371,8 +458,8 @@ class HigherOrderOperator(OperatorBase):
                 )
 
             dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
-            return self.dispatch(
-                dispatch_key_set.highestPriorityTypeId(), *args, **kwargs
+            return dispatch_in_python(
+                dispatch_key_set.highestPriorityTypeId(), self, *args, **kwargs
             )
 
         return wrapper()
@@ -712,24 +799,8 @@ class OpOverload(OperatorBase):
                             _set_mode_pre_dispatch(top_mode)
 
                     with _temporarily_pop_modes_from_pre_dispatch() as curr_mode:
-                        assert isinstance(curr_mode, TorchDispatchMode)
-                        overload_types = []
-                        args_flattened, _ = torch.utils._pytree.tree_flatten(
-                            (args, kwargs.values())
-                        )
-                        for a in args_flattened:
-                            # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
-                            # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
-                            # where in one case we only include tensors with the python key, and in another
-                            # we include **all** tensors.
-                            if isinstance(a, torch.Tensor) and torch._C._dispatch_keys(
-                                a
-                            ).has(torch._C.DispatchKey.Python):
-                                overload_types.append(type(a))
-                        # TODO: check that I got these args correct (in C++, we pass in "0000"??)
-
-                        return curr_mode.__torch_dispatch__(
-                            self, overload_types, args, kwargs
+                        return _mannually_invoke_dispatch_mode_in_python(
+                            curr_mode, self, *args, **kwargs
                         )
 
                 # Note [Not Caching Per-Dispatch-Key Mode Handlers]
