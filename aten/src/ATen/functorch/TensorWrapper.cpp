@@ -11,8 +11,9 @@
 #include <torch/library.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
-namespace at {
-namespace functorch {
+#include <iostream>
+
+namespace at::functorch {
 
 void dumpTensor(std::ostream& ss, const Tensor& tensor) {
   auto* wrapped = maybeGetTensorWrapper(tensor);
@@ -49,7 +50,7 @@ void TensorWrapper::refreshMetadata() {
 void dumpTensorCout(const Tensor& tensor) {
   dumpTensor(std::cout, tensor);
 
-  std::cout << std::endl;
+  std::cout << '\n';
 }
 
 static c10::intrusive_ptr<TensorWrapper> makeTensorWrapperPtr(const Tensor& tensor, int64_t level, const std::shared_ptr<bool>& life_handle) {
@@ -202,5 +203,4 @@ TORCH_LIBRARY_IMPL(_, FuncTorchGradWrapper, m) {
   m.fallback(torch::CppFunction::makeFromBoxedFunction<&dead_tensor_wrapper_fallback>());
 }
 
-}
-} // namespace at
+} // namespace at::functorch

@@ -5,7 +5,10 @@
 
 #include <c10/macros/Macros.h>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
+
+#include <iosfwd>
 
 #if defined(__CUDACC__) && !defined(USE_ROCM)
 #include <cuda_bf16.h>
@@ -67,6 +70,7 @@ inline C10_HOST_DEVICE uint16_t round_to_nearest_even(float src) {
 #endif
     return UINT16_C(0x7FC0);
   } else {
+    // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
     union {
       uint32_t U32;
       float F32;
@@ -109,6 +113,8 @@ struct alignas(2) BFloat16 {
   explicit inline C10_HOST_DEVICE operator sycl::ext::oneapi::bfloat16() const;
 #endif
 };
+
+C10_API std::ostream& operator<<(std::ostream& out, const BFloat16& value);
 
 } // namespace c10
 

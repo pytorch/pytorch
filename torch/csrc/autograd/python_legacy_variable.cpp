@@ -32,6 +32,7 @@ static PyObject* THPVariable_pynew(
           args,
           kwds,
           "|ObbOz",
+          // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(accepted_args),
           &data,
           &requires_grad,
@@ -53,10 +54,9 @@ static PyObject* THPVariable_pynew(
       throw python_error();
   }
 
-  if (is_volatile && requires_grad) {
-    throw ValueError(
-        "Variable can't be volatile and require_grad at the same time!");
-  }
+  TORCH_CHECK_VALUE(
+      !is_volatile || !requires_grad,
+      "Variable can't be volatile and require_grad at the same time!");
   if (grad_fn && !THPFunction_Check(grad_fn)) {
     throw TypeError(
         "_grad_fn has to be a Function object or None, but got %s",
@@ -130,6 +130,7 @@ PyTypeObject THPLegacyVariableType = {
     nullptr, /* tp_getattro */
     nullptr, /* tp_setattro */
     nullptr, /* tp_as_buffer */
+    // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
     nullptr, /* tp_doc */
     nullptr, /* tp_traverse */

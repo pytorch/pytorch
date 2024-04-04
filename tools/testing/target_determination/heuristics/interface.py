@@ -1,27 +1,8 @@
-import sys
 from abc import abstractmethod
-from enum import Enum
-from itertools import chain
-from typing import Any, Dict, FrozenSet, Iterable, List, Optional, Tuple
+from copy import copy
+from typing import Any, Dict, FrozenSet, Iterable, Iterator, List, Tuple
 
-StringTuple = Tuple[str, ...]
-
-
-# Note: Keep the implementation of Relevance private to this file so
-# that it's easy to change in the future as we discover what's needed
-class Relevance(Enum):
-    HIGH = 0
-    PROBABLE = 1
-    UNRANKED = 2
-    UNLIKELY = 3  # Not yet supported. Needs more infra to be usable
-    NONE = 4  # Not yet supported. Needs more infra to be usable
-
-
-METRIC_RELEVANCE_GROUP = "relevance_group"
-METRIC_ORDER_WITHIN_RELEVANCE_GROUP = "order_within_relevance_group"
-METRIC_NUM_TESTS_IN_RELEVANCE_GROUP = "num_tests_in_relevance_group"
-METRIC_ORDER_OVERALL = "order_overall"
-METRIC_HEURISTIC_NAME = "heuristic_name"
+from tools.testing.test_run import TestRun
 
 
 class TestPrioritizations:
@@ -29,7 +10,7 @@ class TestPrioritizations:
     Describes the results of whether heuristics consider a test relevant or not.
 
     All the different ranks of tests are disjoint, meaning a test can only be in one category, and they are only
-    declared at initization time.
+    declared at initialization time.
 
     A list can be empty if a heuristic doesn't consider any tests to be in that category.
 
@@ -37,171 +18,188 @@ class TestPrioritizations:
                otherwise it breaks the test sharding logic
     """
 
-    _test_priorities: List[StringTuple]  # This list MUST be ordered by Relevance
     _original_tests: FrozenSet[str]
+    _test_scores: Dict[TestRun, float]
 
     def __init__(
         self,
         tests_being_ranked: Iterable[str],  # The tests that are being prioritized.
-        high_relevance: Optional[List[str]] = None,
-        probable_relevance: Optional[List[str]] = None,
-        unranked_relevance: Optional[List[str]] = None,
-        unlikely_relevance: Optional[List[str]] = None,
-        no_relevance: Optional[List[str]] = None,
+        scores: Dict[TestRun, float],
     ) -> None:
         self._original_tests = frozenset(tests_being_ranked)
+        self._test_scores = {TestRun(test): 0.0 for test in self._original_tests}
 
-        self._test_priorities = [tuple() for _ in range(5)]
+        for test, score in scores.items():
+            self.set_test_score(test, score)
 
-        self._test_priorities[Relevance.HIGH.value] = self.filter_out_extra_tests(
-            high_relevance
-        )
-        self._test_priorities[Relevance.PROBABLE.value] = self.filter_out_extra_tests(
-            probable_relevance
-        )
-        self._test_priorities[Relevance.UNRANKED.value] = self.filter_out_extra_tests(
-            unranked_relevance
-        )
-        self._test_priorities[Relevance.UNLIKELY.value] = self.filter_out_extra_tests(
-            unlikely_relevance
-        )
-        self._test_priorities[Relevance.NONE.value] = self.filter_out_extra_tests(
-            no_relevance
-        )
+        self.validate()
 
-        # If any of the original tests were missed from the other lists, add them to the unranked_relevance list
-        missing_tests = sorted(self._original_tests - set(self.get_all_tests()))
-        self._test_priorities[Relevance.UNRANKED.value] = self._test_priorities[
-            Relevance.UNRANKED.value
-        ] + tuple(missing_tests)
+    def validate(self) -> None:
+        # Union all TestRuns that contain include/exclude pairs
+        all_tests = self._test_scores.keys()
+        files = {}
+        for test in all_tests:
+            if test.test_file not in files:
+                files[test.test_file] = copy(test)
+            else:
+                assert (
+                    files[test.test_file] & test
+                ).is_empty(), (
+                    f"Test run `{test}` overlaps with `{files[test.test_file]}`"
+                )
+                files[test.test_file] |= test
 
-        self.validate_test_priorities()
+        for test in files.values():
+            assert (
+                test.is_full_file()
+            ), f"All includes should have been excluded elsewhere, and vice versa. Test run `{test}` violates that"
 
-    def filter_out_extra_tests(
-        self, relevance_group: Optional[List[str]]
-    ) -> StringTuple:
-        if not relevance_group:
-            return tuple()
-        return tuple(filter(lambda test: test in self._original_tests, relevance_group))
-
-    def validate_test_priorities(self) -> None:
         # Ensure that the set of tests in the TestPrioritizations is identical to the set of tests passed in
         assert self._original_tests == set(
-            self.get_all_tests()
+            files.keys()
         ), "The set of tests in the TestPrioritizations must be identical to the set of tests passed in"
 
-    @staticmethod
-    def _merge_tests(
-        current_tests: Iterable[str],
-        new_tests: Iterable[str],
-        higher_pri_tests: Iterable[str],
-    ) -> StringTuple:
-        """
-        We append all new tests to the current tests, while preserving the sorting on the new_tests
-        However, exclude any specified tests which have now moved to a higher priority list or tests
-        that weren't originally in the self's TestPrioritizations
-        """
-        merged_tests = [
-            test
-            for test in chain(current_tests, new_tests)
-            if test not in higher_pri_tests
-        ]  # skip the excluded tests
-        return tuple(dict.fromkeys(merged_tests))  # remove dupes while preseving order
+    def _traverse_scores(self) -> Iterator[Tuple[float, TestRun]]:
+        # Sort by score, then alphabetically by test name
+        for test, score in sorted(
+            self._test_scores.items(), key=lambda x: (-x[1], str(x[0]))
+        ):
+            yield score, test
 
-    def integrate_priorities(self, other: "TestPrioritizations") -> None:
-        """
-        Integrates priorities from another TestPrioritizations object.
+    def set_test_score(self, test_run: TestRun, new_score: float) -> None:
+        if test_run.test_file not in self._original_tests:
+            return  # We don't need this test
 
-        The final result takes all tests from the `self` and rearranges them based on priorities from `other`.
-        If there are tests mentioned in `other` which are not in `self`, those tests are ignored.
-        (For example, that can happen if a heuristic reports tests that are not run in the current job)
-        """
-        assert (
-            self._original_tests == other._original_tests
-        ), "Both tests should stem from the same original test list"
+        relevant_test_runs: List[TestRun] = [
+            tr for tr in self._test_scores.keys() if tr & test_run and tr != test_run
+        ]
 
-        higher_pri_tests: List[str] = []
-        for relevance, _ in enumerate(self._test_priorities):
-            self._test_priorities[relevance] = TestPrioritizations._merge_tests(
-                current_tests=self._test_priorities[relevance],
-                new_tests=other._test_priorities[relevance],
-                higher_pri_tests=higher_pri_tests,
-            )
+        # Set the score of all the tests that are covered by test_run to the same score
+        self._test_scores[test_run] = new_score
+        # Set the score of all the tests that are not covered by test_run to original score
+        for relevant_test_run in relevant_test_runs:
+            old_score = self._test_scores[relevant_test_run]
+            del self._test_scores[relevant_test_run]
 
-            # Don't let the tests we just added to the current relevance group be added to a lower relevance group
-            higher_pri_tests.extend(self._test_priorities[relevance])
+            not_to_be_updated = relevant_test_run - test_run
+            if not not_to_be_updated.is_empty():
+                self._test_scores[not_to_be_updated] = old_score
+        self.validate()
 
-        self.validate_test_priorities()
+    def add_test_score(self, test_run: TestRun, score_to_add: float) -> None:
+        if test_run.test_file not in self._original_tests:
+            return
 
-    def get_all_tests(self) -> StringTuple:
+        relevant_test_runs: List[TestRun] = [
+            tr for tr in self._test_scores.keys() if tr & test_run
+        ]
+
+        for relevant_test_run in relevant_test_runs:
+            old_score = self._test_scores[relevant_test_run]
+            del self._test_scores[relevant_test_run]
+
+            intersection = relevant_test_run & test_run
+            if not intersection.is_empty():
+                self._test_scores[intersection] = old_score + score_to_add
+
+            not_to_be_updated = relevant_test_run - test_run
+            if not not_to_be_updated.is_empty():
+                self._test_scores[not_to_be_updated] = old_score
+
+        self.validate()
+
+    def get_all_tests(self) -> List[TestRun]:
         """Returns all tests in the TestPrioritizations"""
-        return tuple(test for test in chain(*self._test_priorities))
+        return [x[1] for x in self._traverse_scores()]
 
-    def get_prioritized_tests(self) -> StringTuple:
-        return self.get_high_relevance_tests() + self.get_probable_relevance_tests()
+    def get_top_per_tests(self, n: int) -> Tuple[List[TestRun], List[TestRun]]:
+        """Divides list of tests into two based on the top n% of scores.  The
+        first list is the top, and the second is the rest."""
+        tests = [x[1] for x in self._traverse_scores()]
+        return tests[: n * len(tests) // 100], tests[n * len(tests) // 100 :]
 
-    def get_high_relevance_tests(self) -> StringTuple:
-        return tuple(test for test in self._test_priorities[Relevance.HIGH.value])
+    def get_info_str(self, verbose: bool = True) -> str:
+        info = ""
 
-    def get_probable_relevance_tests(self) -> StringTuple:
-        return tuple(test for test in self._test_priorities[Relevance.PROBABLE.value])
+        for score, test in self._traverse_scores():
+            if not verbose and score == 0:
+                continue
+            info += f"  {test} ({score})\n"
 
-    def get_unranked_relevance_tests(self) -> StringTuple:
-        return tuple(test for test in self._test_priorities[Relevance.UNRANKED.value])
+        return info.rstrip()
 
     def print_info(self) -> None:
-        def _print_tests(label: str, tests: StringTuple) -> None:
-            if not tests:
-                return
+        print(self.get_info_str())
 
-            print(f"{label} tests ({len(tests)}):")
-            for test in tests:
-                if test in tests:
-                    print(f"  {test}")
-
-        for relevance_group, tests in enumerate(self._test_priorities):
-            _print_tests(f"{Relevance(relevance_group).name.title()} Relevance", tests)
-
-    def _get_test_relevance_group(self, test_name: str) -> Relevance:
-        """Returns the priority of a test."""
-        for relevance_group, tests in enumerate(self._test_priorities):
-            if test_name in tests:
-                return Relevance(relevance_group)
-
-        raise ValueError(f"Test {test_name} not found in any relevance group")
-
-    def _get_test_order(self, test_name: str) -> int:
-        """Returns the rank of the test specified by this heuristic."""
-        base_rank = 0
-
-        for relevance_group_tests in self._test_priorities:
-            if test_name in relevance_group_tests:
-                return base_rank + relevance_group_tests.index(test_name)
-            base_rank += len(relevance_group_tests)
-
-        raise ValueError(f"Test {test_name} not found in any relevance group")
-
-    def _get_test_order_within_relevance_group(self, test_name: str) -> int:
-        for relevance_group_tests in self._test_priorities:
-            if test_name not in relevance_group_tests:
-                continue
-
-            return relevance_group_tests.index(test_name)
-
-        raise ValueError(f"Test {test_name} not found in any relevance group")
-
-    def get_priority_info_for_test(self, test_name: str) -> Dict[str, Any]:
+    def get_priority_info_for_test(self, test_run: TestRun) -> Dict[str, Any]:
         """Given a failing test, returns information about it's prioritization that we want to emit in our metrics."""
+        for idx, (score, test) in enumerate(self._traverse_scores()):
+            #  Different heuristics may result in a given test file being split
+            #  into different test runs, so look for the overlapping tests to
+            #  find the match
+            if test & test_run:
+                return {"position": idx, "score": score}
+        raise AssertionError(f"Test run {test_run} not found")
+
+    def get_test_stats(self, test: TestRun) -> Dict[str, Any]:
         return {
-            METRIC_RELEVANCE_GROUP: self._get_test_relevance_group(test_name).name,
-            METRIC_ORDER_WITHIN_RELEVANCE_GROUP: self._get_test_order_within_relevance_group(
-                test_name
-            ),
-            METRIC_NUM_TESTS_IN_RELEVANCE_GROUP: len(
-                self._test_priorities[self._get_test_relevance_group(test_name).value]
-            ),
-            METRIC_ORDER_OVERALL: self._get_test_order(test_name),
+            "test_name": test.test_file,
+            "test_filters": test.get_pytest_filter(),
+            **self.get_priority_info_for_test(test),
+            "max_score": max(score for score, _ in self._traverse_scores()),
+            "min_score": min(score for score, _ in self._traverse_scores()),
+            "all_scores": {
+                str(test): score for test, score in self._test_scores.items()
+            },
         }
+
+    def to_json(self) -> Dict[str, Any]:
+        """
+        Returns a JSON dict that describes this TestPrioritizations object.
+        """
+        json_dict = {
+            "_test_scores": [
+                (test.to_json(), score)
+                for test, score in self._test_scores.items()
+                if score != 0
+            ],
+            "_original_tests": list(self._original_tests),
+        }
+        return json_dict
+
+    @staticmethod
+    def from_json(json_dict: Dict[str, Any]) -> "TestPrioritizations":
+        """
+        Returns a TestPrioritizations object from a JSON dict.
+        """
+        test_prioritizations = TestPrioritizations(
+            tests_being_ranked=json_dict["_original_tests"],
+            scores={
+                TestRun.from_json(testrun_json): score
+                for testrun_json, score in json_dict["_test_scores"]
+            },
+        )
+        return test_prioritizations
+
+    def amend_tests(self, tests: List[str]) -> None:
+        """
+        Removes tests that are not in the given list from the
+        TestPrioritizations.  Adds tests that are in the list but not in the
+        TestPrioritizations.
+        """
+        valid_scores = {
+            test: score
+            for test, score in self._test_scores.items()
+            if test.test_file in tests
+        }
+        self._test_scores = valid_scores
+
+        for test in tests:
+            if test not in self._original_tests:
+                self._test_scores[TestRun(test)] = 0
+        self._original_tests = frozenset(tests)
+
+        self.validate()
 
 
 class AggregatedHeuristics:
@@ -212,82 +210,91 @@ class AggregatedHeuristics:
     """
 
     _heuristic_results: Dict[
-        str, TestPrioritizations
+        "HeuristicInterface", TestPrioritizations
     ]  # Key is the Heuristic's name. Dicts will preserve the order of insertion, which is important for sharding
 
-    unranked_tests: Tuple[str, ...]
+    _all_tests: FrozenSet[str]
 
-    def __init__(self, unranked_tests: List[str]) -> None:
-        self.unranked_tests = tuple(unranked_tests)
+    def __init__(self, all_tests: List[str]) -> None:
+        self._all_tests = frozenset(all_tests)
         self._heuristic_results = {}
+        self.validate()
+
+    def validate(self) -> None:
+        for heuristic, heuristic_results in self._heuristic_results.items():
+            heuristic_results.validate()
+            assert (
+                heuristic_results._original_tests == self._all_tests
+            ), f"Tests in {heuristic.name} are not the same as the tests in the AggregatedHeuristics"
 
     def add_heuristic_results(
-        self, heuristic_name: str, heuristic_results: TestPrioritizations
+        self, heuristic: "HeuristicInterface", heuristic_results: TestPrioritizations
     ) -> None:
-        if heuristic_name in self._heuristic_results:
-            raise ValueError(f"We already have heuristics for {heuristic_name}")
+        if heuristic in self._heuristic_results:
+            raise ValueError(f"We already have heuristics for {heuristic.name}")
 
-        self._heuristic_results[heuristic_name] = heuristic_results
+        self._heuristic_results[heuristic] = heuristic_results
+        self.validate()
 
-    def get_aggregated_priorities(self) -> TestPrioritizations:
+    def get_aggregated_priorities(
+        self, include_trial: bool = False
+    ) -> TestPrioritizations:
         """
         Returns the aggregated priorities across all heuristics.
         """
-        aggregated_priorities = TestPrioritizations(
-            tests_being_ranked=self.unranked_tests
-        )
+        valid_heuristics = {
+            heuristic: heuristic_results
+            for heuristic, heuristic_results in self._heuristic_results.items()
+            if not heuristic.trial_mode or include_trial
+        }
 
-        for heuristic_results in self._heuristic_results.values():
-            aggregated_priorities.integrate_priorities(heuristic_results)
+        new_tp = TestPrioritizations(self._all_tests, {})
 
-        aggregated_priorities.print_info()
+        for heuristic_results in valid_heuristics.values():
+            for score, testrun in heuristic_results._traverse_scores():
+                new_tp.add_test_score(testrun, score)
+        new_tp.validate()
+        return new_tp
 
-        return aggregated_priorities
-
-    def get_test_stats(self, test: str) -> Dict[str, Any]:
+    def get_test_stats(self, test: TestRun) -> Dict[str, Any]:
         """
         Returns the aggregated statistics for a given test.
         """
         stats: Dict[str, Any] = {
-            "test_name": test,
+            "test_name": test.test_file,
+            "test_filters": test.get_pytest_filter(),
         }
+
+        # Get metrics about the heuristics used
         heuristics = []
 
-        # Figure out which heuristic gave this test the highest priority
-        highest_ranking_heuristic = None
-        highest_ranking_heuristic_order: int = sys.maxsize
-
-        # And figure out how many heuristics suggested prioritizing this test
-        num_heuristics_prioritized_by = 0
-
-        for heuristic_name, heuristic_results in self._heuristic_results.items():
+        for heuristic, heuristic_results in self._heuristic_results.items():
             metrics = heuristic_results.get_priority_info_for_test(test)
-            metrics["heuristic_name"] = heuristic_name
+            metrics["heuristic_name"] = heuristic.name
+            metrics["trial_mode"] = heuristic.trial_mode
             heuristics.append(metrics)
 
-            if metrics[METRIC_ORDER_OVERALL] < highest_ranking_heuristic_order:
-                highest_ranking_heuristic = heuristic_name
-                highest_ranking_heuristic_order = metrics[METRIC_ORDER_OVERALL]
-
-            if heuristic_results._get_test_relevance_group(test) in [
-                Relevance.HIGH,
-                Relevance.PROBABLE,
-            ]:
-                num_heuristics_prioritized_by += 1
-
         stats["heuristics"] = heuristics
-
-        # Easier to compute here than in rockset
-        stats["num_heuristics_prioritized_by"] = num_heuristics_prioritized_by
 
         stats[
             "aggregated"
         ] = self.get_aggregated_priorities().get_priority_info_for_test(test)
 
-        if highest_ranking_heuristic:
-            stats["highest_ranking_heuristic"] = highest_ranking_heuristic
+        stats["aggregated_trial"] = self.get_aggregated_priorities(
+            include_trial=True
+        ).get_priority_info_for_test(test)
 
         return stats
+
+    def to_json(self) -> Dict[str, Any]:
+        """
+        Returns a JSON dict that describes this AggregatedHeuristics object.
+        """
+        json_dict: Dict[str, Any] = {}
+        for heuristic, heuristic_results in self._heuristic_results.items():
+            json_dict[heuristic.name] = heuristic_results.to_json()
+
+        return json_dict
 
 
 class HeuristicInterface:
@@ -295,21 +302,28 @@ class HeuristicInterface:
     Interface for all heuristics.
     """
 
-    name: str
     description: str
 
-    @abstractmethod
-    def __init__(self, **kwargs: Dict[str, Any]) -> None:
-        pass
+    # When trial mode is set to True, this heuristic's predictions will not be used
+    # to reorder tests. It's results will however be emitted in the metrics.
+    trial_mode: bool
 
     @abstractmethod
-    def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
-        """
-        Returns the prioritizations for the given tests.
+    def __init__(self, **kwargs: Any) -> None:
+        self.trial_mode = kwargs.get("trial_mode", False)  # type: ignore[assignment]
 
-        The set of test in TestPrioritizations _must_ be identical to the set of tests passed in.
-        """
-        pass
+    @property
+    def name(self) -> str:
+        return self.__class__.__name__
 
     def __str__(self) -> str:
-        return self.__class__.__name__
+        return self.name
+
+    @abstractmethod
+    def get_prediction_confidence(self, tests: List[str]) -> TestPrioritizations:
+        """
+        Returns a float ranking ranging from -1 to 1, where negative means skip,
+        positive means run, 0 means no idea, and magnitude = how confident the
+        heuristic is. Used by AggregatedHeuristicsRankings.
+        """
+        pass

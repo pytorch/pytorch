@@ -13,9 +13,9 @@ struct NoOpPythonTracer : public PythonTracerBase {
 
   void stop() override {}
   std::vector<std::shared_ptr<Result>> getEvents(
-      std::function<time_t(approx_time_t)>,
+      std::function<c10::time_t(c10::approx_time_t)>,
       std::vector<CompressedEvent>&,
-      time_t) override {
+      c10::time_t) override {
     return {};
   }
 };

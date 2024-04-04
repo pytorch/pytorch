@@ -14,6 +14,7 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine DNNL_EXPERIMENTAL": "#undef DNNL_EXPERIMENTAL",
     "#cmakedefine DNNL_EXPERIMENTAL_SPARSE": "#undef DNNL_EXPERIMENTAL_SPARSE",
     "#cmakedefine ONEDNN_BUILD_GRAPH": "#undef ONEDNN_BUILD_GRAPH",
+    "#cmakedefine DNNL_EXPERIMENTAL_PROFILING": "#undef DNNL_EXPERIMENTAL_PROFILING",
     "#cmakedefine01 BUILD_TRAINING": "#define BUILD_TRAINING 1",
     "#cmakedefine01 BUILD_INFERENCE": "#define BUILD_INFERENCE 0",
     "#cmakedefine01 BUILD_PRIMITIVE_ALL": "#define BUILD_PRIMITIVE_ALL 1",
@@ -23,6 +24,7 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine01 BUILD_CONVOLUTION": "#define BUILD_CONVOLUTION 0",
     "#cmakedefine01 BUILD_DECONVOLUTION": "#define BUILD_DECONVOLUTION 0",
     "#cmakedefine01 BUILD_ELTWISE": "#define BUILD_ELTWISE 0",
+    "#cmakedefine01 BUILD_GROUP_NORMALIZATION": "#define BUILD_GROUP_NORMALIZATION 0",
     "#cmakedefine01 BUILD_INNER_PRODUCT": "#define BUILD_INNER_PRODUCT 0",
     "#cmakedefine01 BUILD_LAYER_NORMALIZATION": "#define BUILD_LAYER_NORMALIZATION 0",
     "#cmakedefine01 BUILD_LRN": "#define BUILD_LRN 0",
@@ -48,6 +50,11 @@ _DNNL_RUNTIME_OMP = {
     "#cmakedefine01 BUILD_XEHPG": "#define BUILD_XEHPG 0",
     "#cmakedefine01 BUILD_XEHPC": "#define BUILD_XEHPC 0",
     "#cmakedefine01 BUILD_XEHP": "#define BUILD_XEHP 0",
+    "#cmakedefine01 BUILD_GEMM_KERNELS_ALL": "#define BUILD_GEMM_KERNELS_ALL 0",
+    "#cmakedefine01 BUILD_GEMM_KERNELS_NONE": "#define BUILD_GEMM_KERNELS_NONE 0",
+    "#cmakedefine01 BUILD_GEMM_SSE41": "#define BUILD_GEMM_SSE41 0",
+    "#cmakedefine01 BUILD_GEMM_AVX2": "#define BUILD_GEMM_AVX2 0",
+    "#cmakedefine01 BUILD_GEMM_AVX512": "#define BUILD_GEMM_AVX512 0",
 }
 
 template_rule(
@@ -56,9 +63,9 @@ template_rule(
     out = "include/oneapi/dnnl/dnnl_version.h",
     substitutions = {
         "@DNNL_VERSION_MAJOR@": "3",
-        "@DNNL_VERSION_MINOR@": "1",
-        "@DNNL_VERSION_PATCH@": "1",
-        "@DNNL_VERSION_HASH@": "64f6bcbcbab628e96f33a62c3e975f8535a7bde4",
+        "@DNNL_VERSION_MINOR@": "3",
+        "@DNNL_VERSION_PATCH@": "6",
+        "@DNNL_VERSION_HASH@": "86e6af5974177e513fd3fee58425e1063e7f1361",
     },
 )
 

@@ -62,7 +62,6 @@ def define_targets(rules):
             exclude = [
                 "CPUAllocator.cpp",
                 "impl/alloc_cpu.cpp",
-                "impl/cow/*.cpp",
             ],
         ),
         hdrs = rules.glob(
@@ -73,7 +72,6 @@ def define_targets(rules):
             exclude = [
                 "CPUAllocator.h",
                 "impl/alloc_cpu.h",
-                "impl/cow/*.h",
             ],
         ),
         linkstatic = True,
@@ -81,7 +79,7 @@ def define_targets(rules):
         visibility = ["//visibility:public"],
         deps = [
             ":ScalarType",
-            ":impl_cow_context",
+            "//third_party/cpuinfo",
             "//c10/macros",
             "//c10/util:TypeCast",
             "//c10/util:base",
@@ -90,23 +88,6 @@ def define_targets(rules):
         # This library uses flags and registration. Do not let the
         # linker remove them.
         alwayslink = True,
-    )
-
-    rules.cc_library(
-        name = "impl_cow_context",
-        srcs = [
-            "impl/cow/context.cpp",
-            "impl/cow/deleter.cpp",
-        ],
-        hdrs = [
-            "impl/cow/context.h",
-            "impl/cow/deleter.h",
-        ],
-        deps = [
-            "//c10/macros",
-            "//c10/util:base",
-        ],
-        visibility = ["//c10/test:__pkg__"],
     )
 
     rules.filegroup(

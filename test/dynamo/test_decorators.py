@@ -39,7 +39,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         import torch.library
         from torch.library import Library
 
-        foo = Library("foo", "DEF")
+        foo = Library("foo", "DEF")  # noqa: TOR901
         foo.define("custom(Tensor self) -> Tensor")
 
         # Dynamic shape data dependent operator. For static shape compilation, Dynamo
@@ -233,7 +233,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
             @torch._dynamo.disable
             def helper_disabled(self, x, y):
-                return x * y
+                return x.sin() * y.cos()
 
             def helper(self, x, y):
                 return x * y
@@ -244,27 +244,12 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
         e = encoder(y)
 
-        seen_frames = []
-        import contextlib
+        cnt = torch._dynamo.testing.CompileCounter()
+        torch.compile(e, backend=cnt)(x)
 
-        @contextlib.contextmanager
-        def global_context_capture_fn(frame_summary):
-            if frame_summary is not None:
-                seen_frames.append(frame_summary)
-            yield
-
-        with mock.patch(
-            "torch._guards.TracingContext.current_frame",
-            side_effect=global_context_capture_fn,
-        ):
-            torch._dynamo.optimize("eager")(e)(x)
-
-        self.assertEqual(len(seen_frames), 1)
-        self.assertEqual(seen_frames[0].name, "forward")
-        self.assertEqual(
-            seen_frames[0].line,
-            "return self.helper(x, self.param) + self.helper_disabled(x, self.param)",
-        )
+        # first frame is before disable, second frame is after disable
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 3)
 
     def _test_mark_static_address(self, guarded):
         compiles_with_buffers = 0
@@ -302,6 +287,66 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
 
     def test_mark_static_address_unguarded(self):
         self._test_mark_static_address(guarded=False)
+
+    def test_class_methods(self):
+        class A:
+            @classmethod
+            def my_class_method(cls, arg1):
+                return cls, arg1
+
+            @staticmethod
+            def my_static_method(arg1):
+                return None, arg1
+
+            def my_regular_method(self, arg1):
+                return self, arg1
+
+        class B(A):
+            def my_class_method(self, arg1):
+                return super().my_class_method(arg1)
+
+            def my_static_method(self, arg1):
+                return super().my_static_method(arg1)
+
+        class C(A):
+            @classmethod
+            def my_class_method(cls, arg1):
+                return super().my_class_method(arg1)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        @torch.compile(backend=cnt)
+        def fn(a, b, c):
+            # We want a function that does not graph break but
+            # does generate custom bytecode
+            v1 = a.my_class_method(1)
+            v2 = A.my_class_method(2)
+            v3 = a.my_static_method(3)
+            v4 = A.my_static_method(4)
+            v5 = a.my_regular_method(5)
+            v6 = b.my_class_method(6)
+            v7 = b.my_static_method(7)
+            v8 = c.my_class_method(8)
+            v9 = C.my_class_method(9)
+            torch.rand(2)
+            return v1, v2, v3, v4, v5, v6, v7, v8, v9
+
+        a, b, c = A(), B(), C()
+        v1, v2, v3, v4, v5, v6, v7, v8, v9 = fn(a, b, c)
+
+        self.assertEqual(v1, (A, 1))
+        self.assertEqual(v2, (A, 2))
+        self.assertEqual(v3, (None, 3))
+        self.assertEqual(v4, (None, 4))
+        self.assertEqual(v5, (a, 5))
+        # TODO fix me: we do not resolve classmethods properly
+        # from a regular method
+        # self.assertEqual(v6, (B, 6))
+        self.assertEqual(v7, (None, 7))
+        self.assertEqual(v8, (C, 8))
+        self.assertEqual(v9, (C, 9))
+
+        self.assertEqual(cnt.frame_count, 1)
 
 
 if __name__ == "__main__":

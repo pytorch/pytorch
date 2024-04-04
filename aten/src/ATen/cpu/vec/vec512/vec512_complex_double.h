@@ -7,7 +7,8 @@
 #include <c10/util/irange.h>
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
+#define SLEEF_STATIC_LIBS
 #include <sleef.h>
 #endif
 
@@ -16,7 +17,7 @@ namespace vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
 
 template <> class Vectorized<c10::complex<double>> {
 private:
@@ -203,7 +204,7 @@ public:
     auto abs = abs_();
     auto zero = _mm512_setzero_pd();
     auto mask = _mm512_cmp_pd_mask(abs, zero, _CMP_EQ_OQ);
-    auto div = values / abs;
+    auto div = _mm512_div_pd(values, abs);
     return _mm512_mask_blend_pd(mask, div, zero);
   }
   __m512d real_() const {
@@ -275,14 +276,8 @@ public:
     return _mm512_sub_pd(pi_2, asin());
   }
   Vectorized<c10::complex<double>> atan() const;
-  Vectorized<c10::complex<double>> atan2(const Vectorized<c10::complex<double>> &b) const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> erf() const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> erfc() const {
-    AT_ERROR("not supported for complex numbers");
+  Vectorized<c10::complex<double>> atanh() const {
+    return map(std::atanh);
   }
   Vectorized<c10::complex<double>> exp() const {
     //exp(a + bi)
@@ -322,21 +317,9 @@ public:
   Vectorized<c10::complex<double>> floor() const {
     return _mm512_floor_pd(values);
   }
-  Vectorized<c10::complex<double>> hypot(const Vectorized<c10::complex<double>> &b) const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> igamma(const Vectorized<c10::complex<double>> &x) const {
-    AT_ERROR("not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> igammac(const Vectorized<c10::complex<double>> &x) const {
-    AT_ERROR("not supported for complex numbers");
-  }
   Vectorized<c10::complex<double>> neg() const {
     auto zero = _mm512_setzero_pd();
     return _mm512_sub_pd(zero, values);
-  }
-  Vectorized<c10::complex<double>> nextafter(const Vectorized<c10::complex<double>> &b) const {
-    AT_ERROR("not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> round() const {
     return _mm512_roundscale_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
@@ -395,18 +378,6 @@ public:
 
   Vectorized<c10::complex<double>> eq(const Vectorized<c10::complex<double>>& other) const;
   Vectorized<c10::complex<double>> ne(const Vectorized<c10::complex<double>>& other) const;
-  Vectorized<c10::complex<double>> lt(const Vectorized<c10::complex<double>>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> le(const Vectorized<c10::complex<double>>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> gt(const Vectorized<c10::complex<double>>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
-  Vectorized<c10::complex<double>> ge(const Vectorized<c10::complex<double>>& other) const {
-    TORCH_CHECK(false, "not supported for complex numbers");
-  }
 };
 
 template <> Vectorized<c10::complex<double>> inline operator+(const Vectorized<c10::complex<double>> &a,

@@ -1,11 +1,13 @@
 #pragma once
 
-#include <c10/util/C++17.h>
 #include <c10/util/TypeTraits.h>
 #include <algorithm>
+#include <cstddef>
+#include <tuple>
+#include <type_traits>
+#include <utility>
 
-namespace c10 {
-namespace guts {
+namespace c10::guts {
 
 template <class... T>
 struct false_t : std::false_type {};
@@ -172,12 +174,12 @@ template <class Type, class Head, class... Tail>
 struct contains<
     typelist<Head, Tail...>,
     Type,
-    std::enable_if_t<std::is_same<Head, Type>::value>> : std::true_type {};
+    std::enable_if_t<std::is_same_v<Head, Type>>> : std::true_type {};
 template <class Type, class Head, class... Tail>
 struct contains<
     typelist<Head, Tail...>,
     Type,
-    std::enable_if_t<!std::is_same<Head, Type>::value>>
+    std::enable_if_t<!std::is_same_v<Head, Type>>>
     : contains<typelist<Tail...>, Type> {};
 } // namespace detail
 template <class TypeList, class Type>
@@ -198,7 +200,7 @@ struct all {
 };
 template <template <class> class Condition, class... Types>
 struct all<Condition, typelist<Types...>>
-    : guts::conjunction<Condition<Types>...> {
+    : std::conjunction<Condition<Types>...> {
   static_assert(
       is_type_condition<Condition>::value,
       "In typelist::all<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
@@ -220,7 +222,7 @@ struct true_for_any_type final {
 };
 template <template <class> class Condition, class... Types>
 struct true_for_any_type<Condition, typelist<Types...>> final
-    : guts::disjunction<Condition<Types>...> {
+    : std::disjunction<Condition<Types>...> {
   static_assert(
       is_type_condition<Condition>::value,
       "In typelist::true_for_any_type<Condition, TypeList>, the Condition argument must be a condition type trait, i.e. have a static constexpr bool ::value member.");
@@ -339,7 +341,7 @@ struct last<typelist<Head>> final {
 };
 template <class TypeList>
 using last_t = typename last<TypeList>::type;
-static_assert(std::is_same<int, last_t<typelist<double, float, int>>>::value);
+static_assert(std::is_same_v<int, last_t<typelist<double, float, int>>>);
 
 /**
  * Take/drop a number of arguments from a typelist.
@@ -498,10 +500,8 @@ struct map_types_to_values final {
 template <class... Types>
 struct map_types_to_values<typelist<Types...>> final {
   template <class Func>
-  static std::tuple<c10::invoke_result_t<Func, type_<Types>>...> call(
-      Func&& func) {
-    return std::tuple<c10::invoke_result_t<Func, type_<Types>>...>{
-        std::forward<Func>(func)(type_<Types>())...};
+  static auto call(Func&& func) {
+    return std::tuple{std::forward<Func>(func)(type_<Types>())...};
   }
 };
 } // namespace detail
@@ -512,5 +512,4 @@ decltype(auto) map_types_to_values(Func&& func) {
 }
 
 } // namespace typelist
-} // namespace guts
-} // namespace c10
+} // namespace c10::guts

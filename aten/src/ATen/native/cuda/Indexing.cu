@@ -7,6 +7,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/ceil_div.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/MemoryOverlap.h>
 #include <ATen/TensorOperators.h>
@@ -367,7 +368,7 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
   // this point. We also compute the number of dimensions before and after that
   // are not being index.
   Tensor linearIndex;
-  int64_t emptyBefore = 0, emptyAfter = 0, nElemBefore = 1, nElemAfter = 1, strideBefore =0;
+  int64_t nElemBefore = 1, nElemAfter = 1, strideBefore =0;
   for (const auto i: c10::irange(src.dim())) {
     if (indices[i].defined()) {
       // Cast index to the longType matching src's device
@@ -382,10 +383,8 @@ computeLinearIndex(const Tensor & src, TensorList indices, bool check_range) {
         }
       }
     } else if (linearIndex.defined()) {
-      emptyAfter++;
       nElemAfter *= src.size(i);
     } else {
-      emptyBefore++;
       nElemBefore *= src.size(i);
     }
   }
@@ -415,9 +414,7 @@ static std::tuple<Tensor, Tensor, int64_t, int64_t, int64_t, std::vector<int64_t
   if (!hasContiguousSubspace(indices)) {
     std::tie(self, indices, inversePerm) = transposeToFrontAndInvPerm(self, indices);
   }
-  int64_t nElemBefore, strideBefore, nElemAfter;
-  Tensor linearIndex;
-  std::tie(linearIndex, nElemBefore, strideBefore, nElemAfter) = computeLinearIndex(self, indices, check_range);
+  auto [linearIndex, nElemBefore, strideBefore, nElemAfter] = computeLinearIndex(self, indices, check_range);
   return std::make_tuple(linearIndex, self, nElemBefore, strideBefore, nElemAfter, inversePerm);
 }
 
@@ -728,8 +725,8 @@ static ptrdiff_t getSliceSize(const Tensor & dst,
 template <typename T, typename IndicesType, typename IndexType, int DstDim, int SrcDim, int IdxDim,
           typename func_t>
 __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
-                                    cuda::detail::TensorInfo<T, IndexType> src,
-                                    cuda::detail::TensorInfo<IndicesType, IndexType> indices,
+                                    cuda::detail::TensorInfo<const T, IndexType> src,
+                                    cuda::detail::TensorInfo<const IndicesType, IndexType> indices,
                                     int dstAddDim,
                                     int srcAddDim,
                                     IndexType innerSize,
@@ -745,7 +742,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
   for (IndexType srcIndex = 0; srcIndex < indices.sizes[0]; ++srcIndex) {
     // Lua indices begin at 1
     IndexType dstIndex =
-        indices.data[cuda::detail::IndexToOffset<IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
+        indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
     CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
 
     // We stride over the output ignoring the indexed dimension
@@ -758,7 +755,7 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
       dstOffset += dstIndex * dst.strides[dstAddDim];
 
       IndexType srcOffset =
-          cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
+          cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(linearIndex, src);
       srcOffset += srcIndex * src.strides[srcAddDim];
 
       T val = src.data[srcOffset] * alpha;
@@ -777,8 +774,8 @@ __global__ void indexFuncSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
 template <typename T, typename IndicesType, typename IndexType, int DstDim, int SrcDim, int IdxDim,
           bool IndexIsMajor, typename func_t>
 __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
-                                    cuda::detail::TensorInfo<T, IndexType> src,
-                                    cuda::detail::TensorInfo<IndicesType, IndexType> indices,
+                                    cuda::detail::TensorInfo<const T, IndexType> src,
+                                    cuda::detail::TensorInfo<const IndicesType, IndexType> indices,
                                     int dstAddDim,
                                     int srcAddDim,
                                     IndexType totalSize,
@@ -804,7 +801,7 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
 
     // Lua indices begin at 1
     IndexType dstIndex =
-        indices.data[cuda::detail::IndexToOffset<IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
+        indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(srcIndex, indices)];
     CUDA_KERNEL_ASSERT(dstIndex < dstAddDimSize);
 
     IndexType dstOffset =
@@ -812,7 +809,7 @@ __global__ void indexFuncLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
     dstOffset += dstIndex * dst.strides[dstAddDim];
 
     IndexType srcOffset =
-      cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
+      cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice, src);
     srcOffset += srcIndex * src.strides[srcAddDim];
 
     T val = src.data[srcOffset] * alpha;
@@ -934,12 +931,12 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
       const auto alpha_value = alpha.to<scalar_t>();
       AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cuda_", [&] () {
         auto sourceInfo =
-          cuda::detail::getTensorInfo<scalar_t, unsigned int>(source_);
+          cuda::detail::getTensorInfo<const scalar_t, unsigned int>(source_);
         const int sourceAddDim = sourceInfo.collapseDims(dim);
         sourceInfo.reduceDim(sourceAddDim);
 
         auto indexInfo =
-        cuda::detail::getTensorInfo<index_t, unsigned int>(index);
+        cuda::detail::getTensorInfo<const index_t, unsigned int>(index);
         indexInfo.collapseDims();
 
         // A reasonable choice for when to have each thread iterate over
@@ -985,14 +982,14 @@ void index_add_cuda_impl(const Tensor& self, int64_t dim, const Tensor& index, c
       selfInfo.reduceDim(selfAddDim);
       const auto alpha_value = alpha.to<scalar_t>();
 
-      cuda::detail::TensorInfo<scalar_t, uint64_t> sourceInfo =
-        cuda::detail::getTensorInfo<scalar_t, uint64_t>(source_);
+      cuda::detail::TensorInfo<const scalar_t, uint64_t> sourceInfo =
+        cuda::detail::getTensorInfo<const scalar_t, uint64_t>(source_);
       const int sourceAddDim = sourceInfo.collapseDims(dim);
       sourceInfo.reduceDim(sourceAddDim);
 
       AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_add_cuda_", [&] () {
-        cuda::detail::TensorInfo<index_t, uint64_t> indexInfo =
-          cuda::detail::getTensorInfo<index_t, uint64_t>(index);
+        cuda::detail::TensorInfo<const index_t, uint64_t> indexInfo =
+          cuda::detail::getTensorInfo<const index_t, uint64_t>(index);
         indexInfo.collapseDims();
 
         LARGE_INDEX(scalar_t, index_t, uint64_t, -1, -1, -1, true);
@@ -1107,12 +1104,12 @@ void index_reduce_func_cuda_impl(
       auto alpha_value = (scalar_t) 1;
       AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_reduce_cuda", [&] () {
         auto sourceInfo =
-          cuda::detail::getTensorInfo<scalar_t, unsigned int>(source_);
+          cuda::detail::getTensorInfo<const scalar_t, unsigned int>(source_);
         int sourceReduceDim = sourceInfo.collapseDims(dim);
         sourceInfo.reduceDim(sourceReduceDim);
 
         auto indexInfo =
-        cuda::detail::getTensorInfo<index_t, unsigned int>(index);
+        cuda::detail::getTensorInfo<const index_t, unsigned int>(index);
         indexInfo.collapseDims();
 
         // A reasonable choice for when to have each thread iterate over
@@ -1158,14 +1155,14 @@ void index_reduce_func_cuda_impl(
       selfInfo.reduceDim(selfReduceDim);
       auto alpha_value = (scalar_t) 1;
 
-      cuda::detail::TensorInfo<scalar_t, uint64_t> sourceInfo =
-        cuda::detail::getTensorInfo<scalar_t, uint64_t>(source_);
+      cuda::detail::TensorInfo<const scalar_t, uint64_t> sourceInfo =
+        cuda::detail::getTensorInfo<const scalar_t, uint64_t>(source_);
       int sourceReduceDim = sourceInfo.collapseDims(dim);
       sourceInfo.reduceDim(sourceReduceDim);
 
       AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_reduce_cuda", [&] () {
-        cuda::detail::TensorInfo<index_t, uint64_t> indexInfo =
-          cuda::detail::getTensorInfo<index_t, uint64_t>(index);
+        cuda::detail::TensorInfo<const index_t, uint64_t> indexInfo =
+          cuda::detail::getTensorInfo<const index_t, uint64_t>(index);
         indexInfo.collapseDims();
 
         LARGE_INDEX(scalar_t, index_t, uint64_t, -1, -1, -1, true);
@@ -1222,8 +1219,8 @@ namespace {
 // parallelism.
 template <typename T, typename IndicesType, typename IndexType, int DstDim, int SrcDim, int IdxDim>
 __global__ void indexSelectSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst,
-                                      cuda::detail::TensorInfo<T, IndexType> src,
-                                      cuda::detail::TensorInfo<IndicesType, IndexType> indices,
+                                      cuda::detail::TensorInfo<const T, IndexType> src,
+                                      cuda::detail::TensorInfo<const IndicesType, IndexType> indices,
                                       int dstSelectDim,
                                       int srcSelectDim,
                                       IndexType innerSize,
@@ -1235,7 +1232,7 @@ __global__ void indexSelectSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst
   // re-accessing indices in addition to src elements can be slow.
   for (IndexType dstIndex = 0; dstIndex < indices.sizes[0]; ++dstIndex) {
     IndexType srcIndex =
-      indices.data[cuda::detail::IndexToOffset<IndicesType, IndexType, IdxDim>::get(dstIndex, indices)];
+      indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(dstIndex, indices)];
     CUDA_KERNEL_ASSERT(srcIndex < srcSelectDimSize);
 
     // We stride over the output ignoring the indexed dimension
@@ -1248,7 +1245,7 @@ __global__ void indexSelectSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst
       dstOffset += dstIndex * dst.strides[dstSelectDim];
 
       IndexType srcOffset =
-        cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(linearIndex, src);
+        cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(linearIndex, src);
       srcOffset += srcIndex * src.strides[srcSelectDim];
 
       dst.data[dstOffset] = src.data[srcOffset];
@@ -1265,8 +1262,8 @@ __global__ void indexSelectSmallIndex(cuda::detail::TensorInfo<T, IndexType> dst
 template <typename T, typename IndicesType, typename IndexType, int DstDim, int SrcDim, int IdxDim,
           bool IndexIsMajor>
 __global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst,
-                                      cuda::detail::TensorInfo<T, IndexType> src,
-                                      cuda::detail::TensorInfo<IndicesType, IndexType> indices,
+                                      cuda::detail::TensorInfo<const T, IndexType> src,
+                                      cuda::detail::TensorInfo<const IndicesType, IndexType> indices,
                                       int dstSelectDim,
                                       int srcSelectDim,
                                       IndexType totalSize,
@@ -1288,7 +1285,7 @@ __global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst
     }
 
     IndexType srcIndex =
-      indices.data[cuda::detail::IndexToOffset<IndicesType, IndexType, IdxDim>::get(dstIndex, indices)];
+      indices.data[cuda::detail::IndexToOffset<const IndicesType, IndexType, IdxDim>::get(dstIndex, indices)];
     CUDA_KERNEL_ASSERT(srcIndex < srcSelectDimSize);
 
     IndexType dstOffset =
@@ -1296,7 +1293,7 @@ __global__ void indexSelectLargeIndex(cuda::detail::TensorInfo<T, IndexType> dst
     dstOffset += dstIndex * dst.strides[dstSelectDim];
 
     IndexType srcOffset =
-      cuda::detail::IndexToOffset<T, IndexType, SrcDim>::get(elementInSlice, src);
+      cuda::detail::IndexToOffset<const T, IndexType, SrcDim>::get(elementInSlice, src);
     srcOffset += srcIndex * src.strides[srcSelectDim];
 
     dst.data[dstOffset] = src.data[srcOffset];
@@ -1396,12 +1393,12 @@ void index_select_out_cuda_impl(
     int outSelectDim = outInfo.collapseDims(dim);
     outInfo.reduceDim(outSelectDim);
 
-    auto  selfInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<scalar_t, unsigned int>(self));
+    auto  selfInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<const scalar_t, unsigned int>(self));
     int selfSelectDim = selfInfo.collapseDims(dim);
     selfInfo.reduceDim(selfSelectDim);
 
     AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_select_out_cuda_impl", [&] () {
-      auto indicesInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<index_t, unsigned int>(index));
+      auto indicesInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<const index_t, unsigned int>(index));
       indicesInfo.collapseDims();
 
       // A reasonable choice for when to have each thread iterate over
@@ -1443,11 +1440,11 @@ void index_select_out_cuda_impl(
     int outSelectDim = outInfo.collapseDims(dim);
     outInfo.reduceDim(outSelectDim);
 
-    auto selfInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<scalar_t, uint64_t>(self));
+    auto selfInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<const scalar_t, uint64_t>(self));
     int selfSelectDim = selfInfo.collapseDims(dim);
     selfInfo.reduceDim(selfSelectDim);
     AT_DISPATCH_INDEX_TYPES(index.scalar_type(), "index_select_out_cuda_impl", [&] () {
-      auto indicesInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<index_t, uint64_t>(index));
+      auto indicesInfo = tensorInfoLegacyIfScalar(cuda::detail::getTensorInfo<const index_t, uint64_t>(index));
       indicesInfo.collapseDims();
 
       LARGE_INDEX(scalar_t, index_t, uint64_t, -1, -1, -1, true);
@@ -1483,14 +1480,16 @@ Tensor& index_select_out_cuda(
       index_select_out_cuda_impl<scalar_t>(out, self, dim, index);
     });
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-        at::ScalarType::ComplexHalf,
-        at::ScalarType::Half,
-        at::ScalarType::Bool,
-        at::ScalarType::BFloat16,
+    AT_DISPATCH_V2(
         out.scalar_type(),
         "index_select_cuda",
-        [&] { index_select_out_cuda_impl<scalar_t>(out, self, dim, index); });
+        AT_WRAP([&] { index_select_out_cuda_impl<scalar_t>(out, self, dim, index); }),
+        AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES),
+        kComplexHalf,
+        kHalf,
+        kBool,
+        kBFloat16
+        );
   }
 
   return out;
@@ -1575,8 +1574,8 @@ Tensor & masked_fill__cuda(Tensor& self, const Tensor & mask, const Scalar& valu
       .check_all_same_dtype(false)
       .resize_outputs(false)
       .add_output(self)
-      .add_input(self)
-      .add_input(*b_mask)
+      .add_const_input(self)
+      .add_const_input(*b_mask)
       .build();
 
   masked_fill_kernel(iter, value);

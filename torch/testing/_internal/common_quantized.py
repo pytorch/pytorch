@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 r"""Importing this file includes common utility methods for checking quantized
 tensors and modules.
 """
@@ -125,7 +127,7 @@ def _snr(x, x_hat):
         signal, noise, SNR(in dB): Either floats or a nested list of floats
     """
     if isinstance(x, (list, tuple)):
-        assert(len(x) == len(x_hat))
+        assert len(x) == len(x_hat)
         res = []
         for idx in range(len(x)):
             res.append(_snr(x[idx], x_hat[idx]))

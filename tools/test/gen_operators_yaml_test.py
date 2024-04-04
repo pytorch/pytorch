@@ -1,9 +1,45 @@
 #!/usr/bin/env python3
 # Copyright 2004-present Facebook. All Rights Reserved.
 
+import argparse
+import json
 import unittest
+from collections import defaultdict
 
-from gen_operators_yaml import make_filter_from_options, verify_all_specified_present
+from unittest.mock import Mock, patch
+
+from gen_operators_yaml import (
+    fill_output,
+    get_parser_options,
+    make_filter_from_options,
+    verify_all_specified_present,
+)
+
+
+def _mock_options():
+    options = argparse.Namespace()
+    options.root_ops = "aten::add,aten::cat"
+    options.training_root_ops = []
+    options.output_path = "/tmp"
+    options.dep_graph_yaml_path = "dummy_pytorch_op_deps.yaml"
+    options.model_name = "test_model"
+    options.model_versions = None
+    options.model_assets = None
+    options.model_backends = None
+    options.models_yaml_path = None
+    options.include_all_operators = False
+    options.rule_name = "test_rule"
+    options.not_include_all_overloads_static_root_ops = True
+    options.not_include_all_overloads_closure_ops = True
+
+    return options
+
+
+def _mock_load_op_dep_graph():
+    result = defaultdict(set)
+    result["aten::add"] = {"aten::add", "aten::as_strided_"}
+    result["aten::cat"] = {"aten::cat", "aten::as_strided_"}
+    return dict(result)
 
 
 class GenOperatorsYAMLTest(unittest.TestCase):
@@ -186,3 +222,25 @@ class GenOperatorsYAMLTest(unittest.TestCase):
                 model_name="abcd",
                 new_style_rule=True,
             )
+
+    @patch("gen_operators_yaml.parse_options", return_value=_mock_options())
+    @patch(
+        "gen_operators_yaml.load_op_dep_graph", return_value=_mock_load_op_dep_graph()
+    )
+    def test_fill_output_with_arguments_not_include_all_overloads(
+        self, mock_parse_options: Mock, mock_load_op_dep_graph: Mock
+    ):
+        parser = argparse.ArgumentParser(description="Generate used operators YAML")
+        options = get_parser_options(parser)
+
+        model_dict = {
+            "model_name": options.model_name,
+            "asset_info": {},
+            "is_new_style_rule": False,
+        }
+        output = {"debug_info": [json.dumps(model_dict)]}
+
+        fill_output(output, options)
+
+        for op_val in output["operators"].values():
+            self.assertFalse(op_val["include_all_overloads"])

@@ -132,7 +132,7 @@ TEST(Expr, IsChannelsLastContiguous) {
     }
   };
 
-  // channels-last contigous
+  // channels-last contiguous
   for (size_t i = 0; i < dims.size(); i++) {
     auto shape_info = shape_gen_fn(dims[i], channels_last_cont_shape_conf);
     for (size_t j = 0; j < shape_info.second.size(); j++) {
@@ -141,7 +141,7 @@ TEST(Expr, IsChannelsLastContiguous) {
     }
   }
 
-  // channels-last non-contigous
+  // channels-last non-contiguous
   for (size_t i = 0; i < dims.size(); i++) {
     auto shape_info = shape_gen_fn(dims[i], channels_last_non_cont_shape_conf);
     for (size_t j = 0; j < shape_info.second.size(); j++) {

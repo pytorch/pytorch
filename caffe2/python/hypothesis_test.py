@@ -61,7 +61,7 @@ def _tensor_and_indices(min_dim=1, max_dim=4, dtype=np.float32,
 _NUMPY_TYPE_TO_ENUM = {
     np.float32: core.DataType.FLOAT,
     np.int32: core.DataType.INT32,
-    np.bool: core.DataType.BOOL,
+    bool: core.DataType.BOOL,
     np.uint8: core.DataType.UINT8,
     np.int8: core.DataType.INT8,
     np.uint16: core.DataType.UINT16,
@@ -514,7 +514,7 @@ class TestOperators(hu.HypothesisTestCase):
         import numpy.testing as npt
         npt.assert_almost_equal(output, new_output, decimal=5)
 
-    @given(dtype=st.sampled_from([np.float32, np.float64, np.int32, np.bool]))
+    @given(dtype=st.sampled_from([np.float32, np.float64, np.int32, bool]))
     @settings(deadline=1000)
     def test_print(self, dtype):
         data = np.random.permutation(6).astype(dtype)
@@ -590,7 +590,7 @@ class TestOperators(hu.HypothesisTestCase):
     @staticmethod
     def _dense_ftrl(alpha, beta, lambda1, lambda2, w, nz, g):
         if isinstance(alpha, np.ndarray):
-            alpha = np.asscalar(alpha)
+            alpha = alpha.item()
         n = np.take(nz, 0, axis=-1)
         z = np.take(nz, 1, axis=-1)
         # python port of Sigrid's implementation
@@ -636,7 +636,7 @@ class TestOperators(hu.HypothesisTestCase):
     @staticmethod
     def _dense_gftrl(alpha, beta, lambda1, lambda2, w, nz, g):
         if isinstance(alpha, np.ndarray):
-            alpha = np.asscalar(alpha)
+            alpha = alpha.item()
 
         old_shape = g.shape
 
@@ -2134,7 +2134,7 @@ class TestOperators(hu.HypothesisTestCase):
         # Casting from a float type outside the range of the integral
         # type is UB.
         ftypes = [np.float32, np.float64]
-        if src in ftypes and dst not in ftypes and dst is not np.bool:
+        if src in ftypes and dst not in ftypes and dst is not bool:
             info = np.iinfo(dst)
             a = np.clip(a, info.min, info.max)
 
@@ -2189,7 +2189,7 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [a], [0])
         self.assertReferenceChecks(gc, op, [a], ref)
 
-    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, np.bool]).
+    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, bool]).
            flatmap(lambda dtype: hu.tensor(
                min_dim=1, dtype=dtype, elements=hu.elements_of_type(dtype))),
            has_input=st.booleans(),
@@ -2201,9 +2201,9 @@ class TestOperators(hu.HypothesisTestCase):
     def test_constant_fill(self, data, has_input, has_extra_shape, extra_shape,
                            gc, dc):
         dtype = data.dtype.type
-        # in opt mode, np.bool is converted into np.bool_
-        if data.dtype == np.dtype(np.bool):
-            dtype = np.bool
+        # in opt mode, bool is converted into np.bool_
+        if data.dtype == np.dtype(bool):
+            dtype = bool
 
         value = data.item(0)
         gt_shape = data.shape
@@ -2236,15 +2236,15 @@ class TestOperators(hu.HypothesisTestCase):
         out, = self.assertReferenceChecks(gc, op, inputs, ref)
         self.assertEqual(dtype, out.dtype)
 
-    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, np.bool]).
+    @given(data=_dtypes(dtypes=[np.int32, np.int64, np.float32, bool]).
         flatmap(lambda dtype: hu.tensor(
             min_dim=1, dtype=dtype, elements=hu.elements_of_type(dtype))),
         **hu.gcs)
     @settings(deadline=1000)
     def test_constant_fill_from_tensor(self, data, gc, dc):
         dtype = data.dtype.type
-        if data.dtype == np.dtype(np.bool):
-            dtype = np.bool
+        if data.dtype == np.dtype(bool):
+            dtype = bool
 
         value = np.array([data.item(0)], dtype=dtype)
         inputs = [data, value]

@@ -14,7 +14,8 @@ __all__ = []  # type: ignore[var-annotated]
 
 def _pack_kwargs(*args: Any, **kwargs: Any) -> Tuple[Tuple[Any, ...], Tuple[str, ...]]:
     """
-    Turn argument list into separate key list and value list (unpack_kwargs does the opposite)
+    Turn argument list into separate key list and value list (unpack_kwargs does the opposite).
+
     Inspiration: https://github.com/facebookresearch/fairscale/blob/eeb6684/fairscale/internal/containers.py#L70
     Usage::
 
@@ -45,7 +46,8 @@ def _cast_forward_inputs(
     **kwargs: Any,
 ) -> Tuple[Any, Any]:
     """
-    Casts floating point tensors in ``args`` and ``kwargs`` to ``input_dtype``.
+    Cast floating point tensors in ``args`` and ``kwargs`` to ``input_dtype``.
+
     This respects the existing ``requires_grad`` on the tensors.
     """
     if dtype is None:
@@ -85,9 +87,7 @@ def _recursive_to(inputs: T, target_device: torch.device, use_side_stream_for_te
 
 
 def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
-    r"""
-    Recursively moves input to the target_device.
-    """
+    r"""Recursively moves input to the target_device."""
 
     def to_map(obj):
         if isinstance(obj, (torch.Tensor, PackedSequence)):
@@ -138,8 +138,7 @@ def _recursive_to(inputs, target_device, use_side_stream_for_tensor_copies):
 
 
 def _p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
-    """This is used as an alternate to ``assert`` when in the backward context
-    to print the error message ``s`` since otherwise, it is swallowed."""
+    """Alternate to ``assert`` when in the backward context to print the error message ``s`` since otherwise, it is swallowed."""
     if not cond:
         print(s)
         traceback.print_stack()
@@ -147,7 +146,7 @@ def _p_assert(cond: Any, s: str, raise_assertion_error: bool = True) -> None:
             raise AssertionError(s)
 
 
-def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
+def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
     """
     Allocate storage for ``tensor`` with the given size.
 
@@ -156,18 +155,20 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> bool:
         storage was already allocated.
     """
     with torch.no_grad():
-        already_allocated = tensor._typed_storage()._size() == size.numel()
-        if not already_allocated:
-            tensor_storage_size = tensor._typed_storage()._size()
-            _p_assert(
-                tensor_storage_size == 0,
-                f"Tensor storage should have been resized to be 0 but got {tensor_storage_size}",
-            )
-            tensor._typed_storage()._resize_(size.numel())
-        return not already_allocated
+        if (
+            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+        ):
+            already_allocated = tensor._typed_storage()._size() == size.numel()
+            if not already_allocated:
+                tensor_storage_size = tensor._typed_storage()._size()
+                _p_assert(
+                    tensor_storage_size == 0,
+                    "Tensor storage should have been resized to be 0 but got PLACEHOLDEr",
+                )
+                tensor._typed_storage()._resize_(size.numel())
 
 
-def _free_storage(tensor: torch.Tensor) -> bool:
+def _free_storage(tensor: torch.Tensor):
     """
     Frees the underlying storage of ``tensor``.
 
@@ -176,17 +177,20 @@ def _free_storage(tensor: torch.Tensor) -> bool:
         storage was already freed.
     """
     with torch.no_grad():
-        already_freed = tensor._typed_storage()._size() == 0
-        if not already_freed:
-            _p_assert(
-                tensor.storage_offset() == 0,
-                "Freeing a tensor's storage is unsafe when it is not the sole occupant\n"
-                f"storage offset: {tensor.storage_offset()}\n"
-                f"storage size: {tensor._typed_storage()._size()}\n"
-                f"tensor shape: {tensor.shape}",
-            )
-            tensor._typed_storage()._resize_(0)
-        return not already_freed
+        if (
+            not torch.distributed._functional_collectives.is_torchdynamo_compiling()
+        ):
+            already_freed = tensor._typed_storage()._size() == 0
+            if not already_freed:
+                _p_assert(
+                    tensor.storage_offset() == 0,
+                    "Freeing a tensor's storage is unsafe when it is not the sole occupant\n"
+                    f"storage offset: {tensor.storage_offset()}\n"
+                    f"storage size: {tensor._typed_storage()._size()}\n"
+                    f"tensor shape: {tensor.shape}",
+                )
+                tensor._typed_storage()._resize_(0)
+
 
 
 Q = TypeVar("Q")
@@ -274,6 +278,8 @@ def _sync_module_states(
     broadcast_buffers: bool = True,
 ) -> None:
     """
+    Sync ``module``'s parameters and buffers state.
+
     Syncs ``module``'s parameters and buffers state so that all ranks contain
     the same module state across all ranks. Note that this API assumes that all
     parameter shapes are consistent before running the synchronization. This can
@@ -298,10 +304,7 @@ def _sync_params_and_buffers(
     broadcast_bucket_size: int,
     src: int,
 ) -> None:
-    """
-    Synchronizes ``module_states`` (list of tensors) across all processes by
-    broadcasting them from rank 0.
-    """
+    """Synchronize ``module_states`` (list of tensors) across all processes by broadcasting them from rank 0."""
     if len(module_states) > 0:
         dist._broadcast_coalesced(
             process_group, module_states, broadcast_bucket_size, src
@@ -330,3 +333,7 @@ def _replace_by_prefix(
         new_key = new_prefix + key[len(old_prefix) :]
         state_dict[new_key] = state_dict[key]
         del state_dict[key]
+
+
+def _data_ptr_allocated(tensor: torch.Tensor) -> bool:
+    return tensor.untyped_storage().data_ptr() > 0

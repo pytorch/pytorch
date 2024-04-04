@@ -11,7 +11,7 @@
 
 #include <utility>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 template <typename F, F Func, typename... ExtraArgs>
 std::tuple<Tensor,optional<int64_t>> _binary_pointwise_batch_rule(
@@ -60,13 +60,9 @@ struct BinaryRandomPointwiseBatchRuleHelper<F, Func, typelist<T1, T2, T...>> {
     auto cur_level = maybe_layer->layerId();
     RandomnessType randomness = maybe_layer->randomness();
 
-    Tensor tensor_value;
-    optional<int64_t> tensor_bdim;
-    std::tie(tensor_value, tensor_bdim) = unwrapTensorAtLevel(tensor, cur_level);
+    auto [tensor_value, tensor_bdim] = unwrapTensorAtLevel(tensor, cur_level);
 
-    Tensor other_value;
-    optional<int64_t> other_bdim;
-    std::tie(other_value, other_bdim) = unwrapTensorAtLevel(other, cur_level);
+    auto [other_value, other_bdim] = unwrapTensorAtLevel(other, cur_level);
 
     check_randomness(randomness, (tensor_bdim || other_bdim));
     if (randomness == RandomnessType::Different && !tensor_bdim && !other_bdim) {
@@ -362,12 +358,15 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(atan2);
   BINARY_SCALAR_2(bitwise_and, Tensor, Scalar);
   BINARY_POINTWISE2(bitwise_and_, Tensor);
+  POINTWISE_BOXED(bitwise_and_.Scalar);
   POINTWISE_BOXED(bitwise_and.Scalar_Tensor);
-  BINARY_POINTWISE2(bitwise_or, Tensor);
+  BINARY_SCALAR_2(bitwise_or, Tensor, Scalar);
   BINARY_POINTWISE2(bitwise_or_, Tensor);
+  POINTWISE_BOXED(bitwise_or_.Scalar);
   POINTWISE_BOXED(bitwise_or.Scalar_Tensor);
-  BINARY_POINTWISE2(bitwise_xor, Tensor);
+  BINARY_SCALAR_2(bitwise_xor, Tensor, Scalar);
   BINARY_POINTWISE2(bitwise_xor_, Tensor);
+  POINTWISE_BOXED(bitwise_xor_.Scalar);
   POINTWISE_BOXED(bitwise_xor.Scalar_Tensor);
   BINARY_SCALAR_3(bitwise_left_shift, Tensor, Tensor_Scalar, Scalar_Tensor);
   POINTWISE_BOXED(bitwise_left_shift_.Tensor_Scalar);
@@ -399,6 +398,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_SCALAR_2(div, Tensor_mode, Scalar_mode);
 
   BINARY_POINTWISE(floor_divide);
+  UNARY_POINTWISE2(floor_divide, Scalar);
 
   BINARY_POINTWISE(fmax);
   BINARY_POINTWISE(fmin);
@@ -430,7 +430,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_SCALAR_2(rsub, Tensor, Scalar);
 
   BINARY_SCALAR_3_Tensor(special_xlog1py, other_scalar, self_scalar);
-  BINARY_SCALAR_3_Tensor(special_xlogy, other_scalar, self_scalar);
   BINARY_SCALAR_3_Tensor(special_zeta, other_scalar, self_scalar);
 
   VMAP_SUPPORT2(where, self, where_self_batch_rule);
@@ -458,16 +457,21 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   using TensorScalarInplaceT = Tensor& (Tensor::*)(const Tensor&, const Scalar&) const;
   using ScalarScalarInplaceT = Tensor& (Tensor::*)(const Scalar&, const Scalar&) const;
   using TensorInplaceT = Tensor& (Tensor::*)(const Tensor&) const;
+  using TensorInplaceModeT = Tensor& (Tensor::*)(const Tensor&, c10::optional<c10::string_view>) const;
   using ScalarInplaceT = Tensor& (Tensor::*)(const Scalar&) const;
   using CopyT = Tensor& (Tensor::*)(const Tensor&, bool) const;
 
   POINTWISE_BOXED(add_.Tensor); // just testing
+  POINTWISE_BOXED(atan2_);
+  POINTWISE_BOXED(gcd_);
+  POINTWISE_BOXED(lcm_);
   VMAP_SUPPORT2(add_, Scalar, SINGLE_ARG(unary_inplace_batch_rule<ScalarScalarInplaceT, &Tensor::add_, const Scalar&, const Scalar&>));
   VMAP_SUPPORT2(sub_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorScalarInplaceT, &Tensor::sub_, const Scalar&>));
   VMAP_SUPPORT2(sub_, Scalar, SINGLE_ARG(unary_inplace_batch_rule<ScalarScalarInplaceT, &Tensor::sub_, const Scalar&, const Scalar&>));
   VMAP_SUPPORT2(mul_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::mul_>));
   VMAP_SUPPORT2(mul_, Scalar, SINGLE_ARG(unary_inplace_batch_rule<ScalarInplaceT, &Tensor::mul_, const Scalar&>));
   VMAP_SUPPORT2(div_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::div_>));
+  VMAP_SUPPORT2(div_, Tensor_mode, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceModeT, &Tensor::div_, c10::optional<c10::string_view>>));
   VMAP_SUPPORT2(div_, Scalar, SINGLE_ARG(unary_inplace_batch_rule<ScalarInplaceT, &Tensor::div_, const Scalar&>));
   VMAP_SUPPORT2(clamp_min_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_min_>));
   VMAP_SUPPORT2(clamp_max_, Tensor, SINGLE_ARG(binary_pointwise_inplace_batch_rule<TensorInplaceT, &Tensor::clamp_max_>));
@@ -512,4 +516,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(fill_, Tensor, fill__Tensor_batch_rule);
 }
 
-}}
+} // namespace at::functorch

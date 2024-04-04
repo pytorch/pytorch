@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 """Export torch work functions for unary ufuncs, rename/tweak to match numpy.
 This listing is further exported to public symbols in the `_numpy/_ufuncs.py` module.
 """

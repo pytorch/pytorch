@@ -1,12 +1,34 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+from typing import List, Sequence, Tuple
 
 import torch
 
-from torch.distributed._tensor.ops.common_rules import (
-    linear_pointwise_rule,
-    pointwise_rule,
+from torch.distributed._tensor.op_schema import (
+    _is_inplace_op,
+    _is_out_variant_op,
+    OpSchema,
+    OpStrategy,
+    PlacementStrategy,
+    RuntimeSchemaInfo,
+    StrategyType,
+    TupleStrategy,
 )
-from torch.distributed._tensor.ops.utils import register_prop_rule
+
+from torch.distributed._tensor.ops.utils import (
+    generate_redistribute_costs,
+    infer_broadcast_dims_map,
+    map_placements_after_broadcast,
+    normalize_dim,
+    register_op_strategy,
+)
+from torch.distributed._tensor.placement_types import (
+    _Partial,
+    DTensorSpec,
+    Placement,
+    Replicate,
+    Shard,
+)
+from torch.distributed.device_mesh import DeviceMesh
 
 
 aten = torch.ops.aten
@@ -29,14 +51,19 @@ aten = torch.ops.aten
 
 linear_pointwise_ops = [
     aten.div.Scalar,  # this op is linear on the first argument, and the second argument is scalar, so it fits as a linear op.
+    aten.div_.Scalar,  # this op is linear on the first argument, and the second argument is scalar, so it fits as a linear op.
     aten.to.dtype,
     aten.add.Tensor,
+    aten.add_.Tensor,
 ]
 
 
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
+    aten._conj.default,
     aten.abs.default,
+    aten.abs.out,
+    aten.abs_.default,
     aten.acos.default,
     aten.acos.out,
     aten.acos_.default,
@@ -46,7 +73,6 @@ pointwise_ops = [
     aten.add.Scalar,
     aten.add.out,
     aten.add_.Scalar,
-    aten.add_.Tensor,
     aten.addcdiv.default,
     aten.addcdiv.out,
     aten.addcdiv_.default,
@@ -189,6 +215,10 @@ pointwise_ops = [
     aten.ge.Scalar,
     aten.ge.Tensor,
     aten.gelu.default,
+    aten.gt.Tensor,
+    aten.gt.Tensor_out,
+    aten.gt.Scalar,
+    aten.gt.Scalar_out,
     aten.gt.Scalar,
     aten.gt.Tensor,
     aten.hypot.default,
@@ -207,6 +237,10 @@ pointwise_ops = [
     aten.ldexp.default,
     aten.ldexp.out,
     aten.ldexp_.default,
+    aten.lt.Tensor,
+    aten.lt.Tensor_out,
+    aten.lt.Scalar,
+    aten.lt.Scalar_out,
     aten.le.Scalar,
     aten.le.Tensor,
     aten.lerp.Scalar,
@@ -250,6 +284,7 @@ pointwise_ops = [
     aten.logit.out,
     aten.logit_.default,
     aten.masked_fill.Scalar,
+    aten.maximum.out,
     aten.mul.Scalar,
     aten.mul.Tensor,
     aten.mul.out,
@@ -318,6 +353,8 @@ pointwise_ops = [
     aten.sign_.default,
     aten.signbit.default,
     aten.signbit.out,
+    aten.silu.default,
+    aten.silu.out,
     aten.sin.default,
     aten.sin.out,
     aten.sin_.default,
@@ -349,6 +386,7 @@ pointwise_ops = [
     aten.trunc.out,
     aten.trunc_.default,
     aten.where.self,
+    aten.where.self_out,
     aten.xlogy.OutScalar_Self,
     aten.xlogy.OutScalar_Other,
     aten.xlogy.OutTensor,
@@ -361,14 +399,233 @@ pointwise_ops = [
     # please keep the entries below alphabetically sorted
     aten.gelu_backward.default,
     aten.sigmoid_backward.default,
+    aten.silu_backward.default,
     aten.tanh_backward.default,
     aten.threshold_backward.default,
 ]
 
 
-for op in linear_pointwise_ops:
-    register_prop_rule(op)(linear_pointwise_rule)
+def pointwise_strategy(
+    mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
+) -> OpStrategy:
+    max_shards_strategy_index = -1
+    max_shards = -1
 
+    if _is_inplace_op(op_schema.op):
+        # inplace op should follow the first arg strategy
+        followed_strategy = op_schema.args_schema[0]
+    elif _is_out_variant_op(op_schema.op):
+        # out variant op should follow the out kwarg strategy
+        followed_strategy = op_schema.kwargs_schema["out"]
+    else:
+        # normal pointwise op, we choose to follow the arg with
+        # the max shards in case operands needs reshard
+        for idx, arg_strategy in enumerate(op_schema.args_schema):
+            if not isinstance(arg_strategy, OpStrategy):
+                continue
+
+            arg_max_shards = arg_strategy.max_num_shards()
+            if arg_max_shards > max_shards:
+                max_shards_strategy_index = idx
+                max_shards = arg_max_shards
+
+        followed_strategy = op_schema.args_schema[max_shards_strategy_index]
+
+    assert isinstance(
+        followed_strategy, OpStrategy
+    ), f"no strategy to follow for {op_schema}!"
+    return common_pointwise_strategy(
+        mesh, op_schema.args_schema, followed_strategy, linearity
+    )
+
+
+def common_pointwise_strategy(
+    mesh: DeviceMesh,
+    args_schema: Sequence[object],
+    followed_strategy: OpStrategy,
+    linearity: bool,
+) -> OpStrategy:
+    # handle broadcasting
+    common_shape = torch.broadcast_shapes(
+        *[arg.output_shape for arg in args_schema if isinstance(arg, OpStrategy)]
+    )
+    pointwise_strategy = OpStrategy([])
+
+    for placement_strategy in followed_strategy.strategies:
+        spec_to_follow = placement_strategy.output_spec
+        out_placements: List[Placement] = []
+        for placement in spec_to_follow.placements:
+            if isinstance(placement, Shard):
+                shard_dim = normalize_dim(placement.dim, len(spec_to_follow.shape))
+                common_ndim = len(common_shape)
+                new_shard_dim = common_ndim - len(spec_to_follow.shape) + shard_dim
+                out_placements.append(Shard(new_shard_dim))
+            elif isinstance(placement, _Partial) and not linearity:
+                # clear the partial placemnet if op does not support linearity
+                # by default we just replicate the partial, need to see if this
+                # is optimal for all cases
+                out_placements.append(Replicate())
+            else:
+                out_placements.append(placement)
+
+        input_specs: List[DTensorSpec] = []
+        redistribute_costs: List[List[float]] = []
+        for idx, input_arg in enumerate(args_schema):
+            if isinstance(input_arg, OpStrategy):
+                # every arg follow the out_placements, but need to handle broadcasting
+                input_arg_spec = input_arg.strategies[0].output_spec
+                input_arg_dims_map = infer_broadcast_dims_map(
+                    common_shape, input_arg_spec.shape
+                )
+                input_target_placements = map_placements_after_broadcast(
+                    tuple(out_placements),
+                    common_shape,
+                    input_arg_dims_map,
+                )
+                input_arg_target_spec = DTensorSpec(
+                    mesh=mesh,
+                    placements=input_target_placements,
+                    tensor_meta=input_arg_spec.tensor_meta,
+                )
+                input_specs.append(input_arg_target_spec)
+                redistribute_costs.append(
+                    generate_redistribute_costs(input_arg, input_arg_target_spec)
+                )
+
+        pointwise_strategy.strategies.append(
+            PlacementStrategy(
+                output_specs=DTensorSpec(
+                    mesh=mesh,
+                    placements=tuple(out_placements),
+                ),
+                input_specs=input_specs,
+                redistribute_cost=redistribute_costs,
+            )
+        )
+    return pointwise_strategy
+
+
+def linear_pointwise_strategy(mesh: DeviceMesh, op_schema: OpSchema) -> StrategyType:
+    """
+    Linear pointwise operators can propagate pending reductions.
+    For example, c = add(a, b); if a is pending sum, then c will be
+    pending sum as well without any communication overhead.
+    """
+    return pointwise_strategy(mesh, op_schema, linearity=True)
+
+
+for op in linear_pointwise_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        linear_pointwise_strategy
+    )
 
 for op in pointwise_ops:
-    register_prop_rule(op)(pointwise_rule)
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+        pointwise_strategy
+    )
+
+
+# TODO: add all for_each ops
+for_each_ops = [
+    aten._foreach_abs_.default,
+    aten._foreach_addcdiv_.Scalar,
+    aten._foreach_addcdiv_.ScalarList,
+    aten._foreach_addcdiv_.Tensor,
+    aten._foreach_addcmul.Scalar,
+    aten._foreach_addcmul_.Scalar,
+    aten._foreach_addcmul_.ScalarList,
+    aten._foreach_addcmul_.Tensor,
+    aten._foreach_div_.List,
+    aten._foreach_div_.ScalarList,
+    aten._foreach_lerp_.Scalar,
+    aten._foreach_maximum_.List,
+    aten._foreach_mul.Scalar,
+    aten._foreach_mul.List,
+    aten._foreach_mul_.Scalar,
+    aten._foreach_mul_.ScalarList,
+    aten._foreach_mul_.Tensor,
+    aten._foreach_mul_.List,
+    aten._foreach_neg.default,
+    aten._foreach_neg_.default,
+    aten._foreach_reciprocal_.default,
+    aten._foreach_sub.List,
+    aten._foreach_sub_.Scalar,
+    aten._foreach_sqrt.default,
+    aten._foreach_sqrt_.default,
+    aten._foreach_zero_.default,
+]
+
+for_each_linearity_ops = [
+    aten._foreach_add.Scalar,
+    aten._foreach_add_.Scalar,
+    aten._foreach_add_.ScalarList,
+    aten._foreach_add.List,
+    aten._foreach_add_.List,
+]
+
+
+def foreach_list_pointwise_strategy(
+    mesh: DeviceMesh, op_schema: OpSchema, linearity: bool = False
+) -> StrategyType:
+    """
+    Apply the pointwise strategy to the zipped arguments. For example, if we
+    run a foreach add of two lists l1 and l2, then we apply the pointwise
+    strategy on each pair (l1[i], l2[i]). If the first argument is a list but
+    the second (or later) one is a tensor, then we broadcast the tensor by
+    replicating it into a list with the length of the first argument.
+    """
+
+    def args_tuple_strategies(args_schema: Tuple[object, ...]) -> List[TupleStrategy]:
+        first_arg = args_schema[0]
+        assert isinstance(first_arg, TupleStrategy)
+        strategy_len = len(first_arg.childs)
+        tuple_strategies: List[TupleStrategy] = []
+        for arg_idx, arg in enumerate(args_schema):
+            if isinstance(arg, TupleStrategy):
+                # every tuple strategy should have the same length
+                assert len(arg.childs) == strategy_len
+                tuple_strategies.append(arg)
+            elif isinstance(arg, OpStrategy):
+                if arg_idx > 0:  # implicitly broadcast
+                    tuple_strategies.append(
+                        TupleStrategy([arg for _ in range(strategy_len)])
+                    )
+                else:
+                    raise RuntimeError(
+                        f"foreach list op only supports tuple strategy! {op_schema}"
+                    )
+        return tuple_strategies
+
+    args_strategies = args_tuple_strategies(op_schema.args_schema)
+    follow_strategy: TupleStrategy = args_strategies[0]
+    foreach_strategy_list: List[OpStrategy] = []
+    for child_idx, child_strtgy in enumerate(follow_strategy.childs):
+        assert isinstance(child_strtgy, OpStrategy)
+        args_schema: List[StrategyType] = [
+            arg_strategy.childs[child_idx] for arg_strategy in args_strategies
+        ]
+        pointwise_strategy: OpStrategy = common_pointwise_strategy(
+            mesh, args_schema, child_strtgy, linearity
+        )
+        foreach_strategy_list.append(pointwise_strategy)
+    return TupleStrategy(foreach_strategy_list)
+
+
+def foreach_list_linear_pointwise_strategy(
+    mesh: DeviceMesh, op_schema: OpSchema
+) -> StrategyType:
+    """
+    for each list op stratgy that supports linearity
+    """
+    return foreach_list_pointwise_strategy(mesh, op_schema, linearity=True)
+
+
+for op in for_each_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
+        foreach_list_pointwise_strategy
+    )
+
+for op in for_each_linearity_ops:
+    register_op_strategy(op, schema_info=RuntimeSchemaInfo(needs_pytree=True))(
+        foreach_list_linear_pointwise_strategy
+    )

@@ -60,11 +60,10 @@ find_package(CUDAToolkit REQUIRED)
 
 cmake_policy(POP)
 
-if(NOT CMAKE_CUDA_COMPILER_VERSION STREQUAL CUDAToolkit_VERSION OR
-    NOT CUDA_INCLUDE_DIRS STREQUAL CUDAToolkit_INCLUDE_DIR)
-  message(FATAL_ERROR "Found two conflicting CUDA installs:\n"
+if(NOT CMAKE_CUDA_COMPILER_VERSION VERSION_EQUAL CUDAToolkit_VERSION)
+  message(FATAL_ERROR "Found two conflicting CUDA versions:\n"
                       "V${CMAKE_CUDA_COMPILER_VERSION} in '${CUDA_INCLUDE_DIRS}' and\n"
-                      "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIR}'")
+                      "V${CUDAToolkit_VERSION} in '${CUDAToolkit_INCLUDE_DIRS}'")
 endif()
 
 if(NOT TARGET CUDA::nvToolsExt)
@@ -252,8 +251,8 @@ if(CAFFE2_USE_CUDNN)
       "Cannot find cuDNN library. Turning the option off")
     set(CAFFE2_USE_CUDNN OFF)
   else()
-    if(CUDNN_VERSION VERSION_LESS "8.0.0")
-      message(FATAL_ERROR "PyTorch requires cuDNN 8 and above.")
+    if(CUDNN_VERSION VERSION_LESS "8.1.0")
+      message(FATAL_ERROR "PyTorch requires cuDNN 8.1 and above.")
     endif()
   endif()
 
@@ -348,7 +347,7 @@ message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA}")
 
 # disable some nvcc diagnostic that appears in boost, glog, glags, opencv, etc.
 foreach(diag cc_clobber_ignored
-             set_but_not_used field_without_dll_interface
+             field_without_dll_interface
              base_class_has_different_dll_interface
              dll_interface_conflict_none_assumed
              dll_interface_conflict_dllexport_assumed

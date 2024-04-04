@@ -4,7 +4,7 @@ import json
 import os
 import pathlib
 from collections import defaultdict, namedtuple, OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import (
     Any,
     Callable,
@@ -43,6 +43,11 @@ from torchgen.context import (
     native_function_manager,
     with_native_function,
     with_native_function_and_indices,
+)
+from torchgen.gen_aoti_c_shim import (
+    gen_aoti_c_shim,
+    gen_static_dispatch_backend_call_signature,
+    get_backend_index_for_aoti,
 )
 from torchgen.gen_functionalization_type import (
     gen_functionalization_definition,
@@ -138,11 +143,12 @@ class LineLoader(YamlLoader):
         return mapping
 
 
-_GLOBAL_PARSE_NATIVE_YAML_CACHE = {}
-_GLOBAL_PARSE_TAGS_YAML_CACHE = {}
-
 # Parse native_functions.yaml into a sequence of NativeFunctions and Backend Indices.
 ParsedYaml = namedtuple("ParsedYaml", ["native_functions", "backend_indices"])
+
+
+_GLOBAL_PARSE_NATIVE_YAML_CACHE: Dict[str, ParsedYaml] = {}
+_GLOBAL_PARSE_TAGS_YAML_CACHE: Dict[str, Set[str]] = {}
 
 
 def parse_native_yaml_struct(
@@ -274,9 +280,9 @@ def error_check_native_functions(funcs: Sequence[NativeFunction]) -> None:
             "inplace_view" in f.tags
             and str(f.func.name) != "resize_"
             and str(f.func.name) != "resize_as_"
+            and str(f.func.name.name) != "set_"
         ):
             base_name = f.func.name.name
-            overload_name = f.func.name.overload_name
             assert base_name.inplace, (
                 f"{f.func.name} is marked with tag: inplace_view, but it doesn't follow the naming "
                 "convention for inplace ops - the codegen expects the base name to have a trailing underscore. "
@@ -414,14 +420,7 @@ def generate_static_dispatch_backend_call(
     f: NativeFunction,
     backend_index: BackendIndex,
 ) -> str:
-    cpp_sigs = CppSignatureGroup.from_native_function(
-        f, method=False, fallback_binding=False
-    )
-    if sig.symint and f.func.has_symint():
-        cpp_sig = cpp_sigs.symint_signature
-    else:
-        cpp_sig = cpp_sigs.signature
-    assert cpp_sig is not None
+    cpp_sig = gen_static_dispatch_backend_call_signature(sig, f)
     name = cpp_sig.name()
     exprs = translate_args(sig, cpp_sig)
     backend_metadata = backend_index.get_kernel(f)
@@ -542,13 +541,21 @@ def static_dispatch(
 @dataclass(frozen=True)
 class RegisterSchema:
     selector: SelectiveBuilder
+    known_tags: Dict[str, int] = field(default_factory=dict)
 
     @method_with_native_function
     def __call__(self, f: NativeFunction) -> Optional[str]:
         if not self.selector.is_native_function_selected(f):
             return None
         tags = "{" + ", ".join(f"at::Tag::{tag}" for tag in sorted(f.tags)) + "}"
-        return f"m.def({cpp_string(str(f.func))}, {tags});\n"
+        if tags == "{}":
+            return f"m.def({cpp_string(str(f.func))}, {{}});\n"
+        maybe_tags = ""
+        if tags not in self.known_tags:
+            idx = len(self.known_tags)
+            self.known_tags[tags] = idx
+            maybe_tags = f"const std::vector<at::Tag> tags_{idx} = {tags};\n"
+        return f"{maybe_tags}m.def({cpp_string(str(f.func))}, tags_{self.known_tags[tags]});\n"
 
 
 # Generates Operators.h and Operators.cpp.
@@ -850,7 +857,7 @@ def compute_meta_function_declaration(g: NativeFunctionsGroup) -> Optional[str]:
                 # element that is set by this method is false on the
                 # class corresponding to the object that `this` points to.
                 # This ensures that each element can be set only once.
-                assert_msg = f'"{precomputed_elements[i].name} already set"'
+                assert_msg = f'"{elem.name} already set"'
                 assert_stmt = f"static_assert({precomputed_template_parameters[i]} == false, {assert_msg});"
 
                 # Generate the new object construction block. All state
@@ -1374,8 +1381,7 @@ def get_grouped_by_view_native_functions(
             )
         # Take the remaining functions that weren't part of the view group
         # and emit them separately
-        for func in d.values():
-            funcs.append(func)
+        funcs.extend(d.values())
         return funcs
 
     grouped_by_views: Dict[
@@ -2172,6 +2178,7 @@ def gen_source_files(
     selector: SelectiveBuilder,
     static_dispatch_idx: List[BackendIndex],
     backend_indices: Dict[DispatchKey, BackendIndex],
+    aoti_fm: FileManager,
     core_fm: FileManager,
     cpu_fm: FileManager,
     cpu_vec_fm: FileManager,
@@ -2341,6 +2348,60 @@ def gen_source_files(
             else:
                 raise AssertionError(f"unrecognized {dispatch_key} for ufunc")
 
+        if dispatch_key in (DispatchKey.CPU, DispatchKey.CUDA):
+
+            def get_header(
+                f: NativeFunction,
+            ) -> Optional[str]:
+                backend_index = get_backend_index_for_aoti(
+                    f, dispatch_key, backend_indices
+                )
+                return (
+                    None
+                    if backend_index is None
+                    else f"#include <ATen/ops/{f.root_name}_{backend_index.dispatch_key.lower()}_dispatch.h>"
+                )
+
+            def headers_for_aoti() -> str:
+                headers = []
+                for g in grouped_native_functions:
+                    if isinstance(g, NativeFunctionsGroup):
+                        for f in g.functions():
+                            # some variants are registered in the backend, but some are registered as CompositeExplicitAutograd
+                            header = get_header(f)
+                            if header is not None:
+                                headers.append(header)
+                    else:
+                        header = get_header(g)
+                        if header is not None:
+                            headers.append(header)
+                return "\n".join(sorted(set(headers)))
+
+            extra_headers = (
+                extra_cuda_headers if is_cuda_dispatch_key(dispatch_key) else ""
+            )
+
+            aoti_fm.write(
+                f"c_shim_{dispatch_key.lower()}.h",
+                lambda: gen_aoti_c_shim(
+                    native_functions,
+                    dispatch_key,
+                    backend_indices,
+                    header=True,
+                    includes="",
+                ),
+            )
+            aoti_fm.write(
+                f"c_shim_{dispatch_key.lower()}.cpp",
+                lambda: gen_aoti_c_shim(
+                    native_functions,
+                    dispatch_key,
+                    backend_indices,
+                    header=False,
+                    includes=headers_for_aoti() + "\n" + extra_headers,
+                ),
+            )
+
         del fm
 
     # BackendSelect is generated specially
@@ -2419,9 +2480,9 @@ def gen_source_files(
         },
     )
 
-    cpu_fm.write("Functions.cpp", lambda: {})
+    cpu_fm.write("Functions.cpp", dict)
 
-    core_fm.write("TensorMethods.cpp", lambda: {})
+    core_fm.write("TensorMethods.cpp", dict)
 
     core_fm.write(
         "ATenOpList.cpp",
@@ -2774,6 +2835,9 @@ def main() -> None:
     cpu_vec_fm = make_file_manager(options=options)
     cuda_fm = make_file_manager(options=options)
     ops_fm = make_file_manager(options=options, install_dir=ops_install_dir)
+    aoti_fm = make_file_manager(
+        options=options, install_dir="torch/csrc/inductor/aoti_torch/generated"
+    )
 
     # Only a limited set of dispatch keys get CPUFunctions.h headers generated
     # for them; this is the set
@@ -2816,6 +2880,7 @@ def main() -> None:
             selector=selector,
             static_dispatch_idx=static_dispatch_idx,
             backend_indices=backend_indices,
+            aoti_fm=aoti_fm,
             core_fm=core_fm,
             cpu_fm=cpu_fm,
             cpu_vec_fm=cpu_vec_fm,

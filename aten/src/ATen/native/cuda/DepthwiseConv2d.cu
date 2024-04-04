@@ -32,10 +32,10 @@ PackedTensorAccessor32<scalar_t, ndim, PtrTraits> dummy_packed_accessor32() {
 
 template <int kSize, typename scalar_t, typename index_t>
 __global__ void conv_depthwise2d_forward_kernel(
-    const PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> input,
+    const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> input,
     PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> output,
-    const PackedTensorAccessor32<scalar_t, 4, DefaultPtrTraits> weight,
-    const PackedTensorAccessor32<scalar_t, 1, DefaultPtrTraits> bias,
+    const PackedTensorAccessor32<const scalar_t, 4, DefaultPtrTraits> weight,
+    const PackedTensorAccessor32<const scalar_t, 1, DefaultPtrTraits> bias,
     bool biasEnabled,
     index_t totalElements,
     const int outputChannels,
@@ -309,12 +309,12 @@ void conv_depthwise2d_forward_out(
     // Create PackedTensorAccessor
     // Kernel currently relies upon all the Tensors to be contiguous, but we made
     // them contiguous above
-    const auto input_a = input.packed_accessor32<scalar_t, 4>();
-    const auto weight_a = weight.packed_accessor32<scalar_t, 4>();
+    const auto input_a = input.packed_accessor32<const scalar_t, 4>();
+    const auto weight_a = weight.packed_accessor32<const scalar_t, 4>();
     const auto output_a = output.packed_accessor32<scalar_t, 4>();
     const auto bias_a = has_bias ?
-      bias.packed_accessor32<scalar_t, 1>() :
-      dummy_packed_accessor32<scalar_t, 1>();
+      bias.packed_accessor32<const scalar_t, 1>() :
+      dummy_packed_accessor32<const scalar_t, 1>();
     if (kW == 3 && kH == 3) {
       conv_depthwise2d_forward_kernel<3> <<<grid, block, 0, stream>>>(
         input_a, output_a, weight_a, bias_a, has_bias, n, outputChannels, depthwiseMultiplier,
@@ -537,7 +537,7 @@ const Tensor& conv_depthwise2d_cuda_out(
     if (bias_opt.has_value() && bias_opt->defined()) {
       return bias_opt->expect_contiguous();
     }
-    return c10::MaybeOwned<Tensor>::owned(c10::in_place);
+    return c10::MaybeOwned<Tensor>::owned(std::in_place);
   }();
 
   conv_depthwise2d_forward_out(

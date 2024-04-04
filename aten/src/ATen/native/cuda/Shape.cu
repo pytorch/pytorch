@@ -9,6 +9,7 @@
 #include <ATen/native/TypeProperties.h>
 #include <ATen/native/TensorShape.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <c10/core/MemoryFormat.h>
 #include <c10/util/Optional.h>
 
@@ -48,6 +49,28 @@ inline bool getCatGrid(ptrdiff_t nTensors, dim3& grid) {
   grid = dim3( 2LL * numSM, (long long) nTensors );
 
   return true;
+}
+
+template<typename T>
+inline std::tuple<dim3, dim3> getCatGridRocm(unsigned int max_elements_per_tensor,
+  ptrdiff_t nTensors) {
+  constexpr unsigned int threads_per_block = 256;
+  constexpr unsigned int elements_per_thread = 8;
+  constexpr unsigned int max_tb_per_sm = 32;
+
+  unsigned int max_threads = ceil_div(max_elements_per_tensor, elements_per_thread);
+  unsigned int thread_blocks = ceil_div(max_threads, threads_per_block);
+
+  // Limit the number of thread blocks to prevent too many threads to load the metadata
+  // if they operate on very small tensors.
+
+  const unsigned int num_sm = at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
+  thread_blocks = std::min(num_sm * max_tb_per_sm, thread_blocks);
+
+  dim3 block = dim3(threads_per_block);
+  dim3 grid = dim3(thread_blocks, (long long)nTensors);
+
+  return std::make_tuple(grid, block);
 }
 
 template<typename T>
@@ -175,6 +198,34 @@ __global__ void CatArrayBatchedCopy(
     }
 }
 
+template <typename T, typename IndexType, int Dims, int batch_size, int stride_size>
+__global__ void CatArrayBatchedCopy_contig(
+    T* output,
+    CatArrInputTensorMetadata<T, IndexType, batch_size, stride_size> inputs,
+    TensorSizeStride<IndexType, CAT_ARRAY_MAX_INPUT_DIMS> os,
+    const int concatDim,
+    IndexType dimStride) {
+
+    IndexType tid = blockIdx.x * blockDim.x + threadIdx.x;
+    IndexType nElements = inputs.nElements[blockIdx.y];
+
+    if(tid >= nElements) return;
+
+    const T* data = inputs.input[blockIdx.y];
+    IndexType offset = inputs.offset[blockIdx.y];
+    IndexType dimSize = inputs.dimSize[blockIdx.y];
+    IndexType dataOffset = offset * dimStride;
+
+    IndexType stride = gridDim.x * blockDim.x;
+
+    while( tid < nElements){
+      IndexType elementOffset = CatArrIndexToOffset<IndexType, Dims>::compute(
+                    os.tensorSize, os.tensorStride, dimSize, concatDim, tid);
+      output[dataOffset + elementOffset] = data[tid];
+      tid += stride;
+    }
+}
+
 /*
   Specialized implementation of the CatArrayBatchedCopy written to generate wide memory loads
   to improve memory bandwidth throughput.
@@ -239,7 +290,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
                   int nDims, c10::MemoryFormat memory_format) {
   // First, let's set up our kernel parameters. We start with a raw pointer to
   // the storage for the output Tensor.
-  scalar_t *data = out.mutable_data_ptr<scalar_t>();
+  scalar_t *data = (scalar_t *)(out.mutable_data_ptr());
   CatArrInputTensorMetadata<scalar_t, unsigned int, batch_size, stride_size> catMetaData;
   TensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> outputParam;
 
@@ -289,14 +340,19 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
         dimSize = inputs[i+batchCounter].get().size(dimension);
       }
 
-      catMetaData.input[batchCounter] = inputs[i+batchCounter].get().const_data_ptr<scalar_t>();
+      catMetaData.input[batchCounter] = (scalar_t*)(inputs[i+batchCounter].get().const_data_ptr());
       catMetaData.offset[batchCounter] = offset;
       catMetaData.dimSize[batchCounter] = dimSize;
       catMetaData.nElements[batchCounter] = inputs[i+batchCounter].get().numel();
 
+#ifdef USE_ROCM
+      // On ROCm, CatArrayBatchedCopy_contig is faster
+      isAligned = false;
+#else
       // If at least one of the inputs is not aligned, we can't call the
       // CatArrayBatchedCopy_aligned16_contig
       isAligned &= is_aligned_vec4(catMetaData.input[batchCounter]);
+#endif
 
       if (stride_size > 1) {
         auto strides = inputs[i+batchCounter].get().strides();
@@ -319,9 +375,21 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
         catMetaData.nElements[batchCounter]);
     }
 
+    // Skip if the tensor is empty. Otherwise, the grid dim is invalid
+    if (max_elements_per_tensor == 0)
+      continue;
 
     dim3 applyBlock, catGrid;
 
+#ifdef USE_ROCM
+    // always base grid size on max_elements_per_tensor
+    {
+      std::tuple<dim3, dim3> launchParams = getCatGridRocm<scalar_t>(
+          max_elements_per_tensor, batchCounter);
+      catGrid = std::get<0>(launchParams);
+      applyBlock = std::get<1>(launchParams);
+    }
+#else
     if (isContig && sizeof(scalar_t) > 2) {
       std::tuple<dim3, dim3> launchParams = getCatGridContig<scalar_t>(
           max_elements_per_tensor, batchCounter);
@@ -331,6 +399,7 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
       applyBlock = dim3(32 * 16);
       getCatGrid(batchCounter, catGrid);
     }
+#endif
 
     if (memory_format != c10::MemoryFormat::Contiguous) {
       switch (dimension) {
@@ -347,6 +416,10 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
 #define HANDLE_CASE(DIMS) \
     if (isContig && isAligned && sizeof(scalar_t) >= 4 && sizeof(scalar_t) <= 8) {\
       CatArrayBatchedCopy_aligned16_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
+          catGrid, applyBlock, 0, stream.stream()>>>(\
+              data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
+    } else if (isContig) {\
+      CatArrayBatchedCopy_contig<scalar_t, unsigned int, DIMS, batch_size, stride_size><<<\
           catGrid, applyBlock, 0, stream.stream()>>>(\
               data, catMetaData, outputParam, dimension, outputParam.tensorStride[dimension]);\
     } else {\
@@ -372,6 +445,10 @@ void parallel_cat(const Tensor &out, const MaterializedITensorListRef& inputs, i
 #undef HANDLE_CASE
   }
 }
+// The kernels are templated on an opaque, self-aligned type of the correct
+// size to avoid redundant kernels for different types of the same size.
+template <unsigned N> struct alignas(N) OpaqueType { char data[N]; };
+
 } // namespace
 
 TORCH_IMPL_FUNC(cat_out_cuda)
@@ -409,17 +486,26 @@ TORCH_IMPL_FUNC(cat_out_cuda)
   // memory. Therefore, we could pass more inputs to cuda threads.
   // For non-contiguous, we reduce the number of inputs passed to cuda kernel due to the limitation
   // of constant memory.
+
+
+
   if (materialized.size() > 1 &&
       result.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
       at::cuda::detail::canUse32BitIndexMath(result) &&
       all_contiguous &&
       all32BitIndexable &&
       all_same_dtype) {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-          kComplexHalf, kHalf, kBool, kBFloat16,
-          result.scalar_type(), "cat_cuda", [&]() {
-        parallel_cat<scalar_t, CAT_ARRAY_BATCH_SIZE, 1>(result, materialized, dim, nDims, memory_format);
-      });
+      if (isBitsType(result.scalar_type())) {
+        AT_DISPATCH_BIT_TYPES(result.scalar_type(), "cat_cuda", [&]() {
+          using dtype = OpaqueType<sizeof(scalar_t)>;
+          parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE, 1>(result, materialized, dim, nDims, memory_format);
+        });
+      } else {
+        AT_DISPATCH_V2(result.scalar_type(), "cat_cuda", AT_WRAP([&]() {
+          using dtype = OpaqueType<sizeof(scalar_t)>;
+          parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE, 1>(result, materialized, dim, nDims, memory_format);
+        }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+      }
   } else if (materialized.size() > 1 &&
       result.dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
       at::cuda::detail::canUse32BitIndexMath(result) &&
@@ -427,11 +513,17 @@ TORCH_IMPL_FUNC(cat_out_cuda)
       all32BitIndexable &&
       all_same_dtype &&
       memory_format == c10::MemoryFormat::Contiguous) {
-      AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-          kComplexHalf, kHalf, kBool, kBFloat16,
-          result.scalar_type(), "cat_cuda", [&]() {
-        parallel_cat<scalar_t, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(result, materialized, dim, nDims, memory_format);
-      });
+      if (isBitsType(result.scalar_type())) {
+        AT_DISPATCH_BIT_TYPES(result.scalar_type(), "cat_cuda", [&]() {
+          using dtype = OpaqueType<sizeof(scalar_t)>;
+          parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(result, materialized, dim, nDims, memory_format);
+        });
+      } else {
+        AT_DISPATCH_V2(result.scalar_type(), "cat_cuda", AT_WRAP([&]() {
+            using dtype = OpaqueType<sizeof(scalar_t)>;
+            parallel_cat<dtype, CAT_ARRAY_BATCH_SIZE/2, CAT_ARRAY_BATCH_SIZE/2>(result, materialized, dim, nDims, memory_format);
+        }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+      }
   } else {
     int64_t offset = 0;
     for (const Tensor& t : materialized) {

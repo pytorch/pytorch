@@ -2,8 +2,11 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/Float8_e4m3fn.h>
+#include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/Half.h>
+#include <c10/util/complex.h>
 
 #include <type_traits>
 
@@ -37,6 +40,21 @@ struct maybe_real<true, src_t> {
   }
 };
 
+template <bool, typename src_t>
+struct maybe_bool {
+  C10_HOST_DEVICE static inline src_t apply(src_t src) {
+    return src;
+  }
+};
+
+template <typename src_t>
+struct maybe_bool<true, src_t> {
+  C10_HOST_DEVICE static inline decltype(auto) apply(src_t src) {
+    // Don't use bool operator so as to to also compile for ComplexHalf.
+    return src.real() || src.imag();
+  }
+};
+
 // Note: deliberately ignores undefined behavior, consistent with NumPy.
 // PyTorch's type conversions can cause a variety of undefined behavior,
 // including float to integral overflow and signed to unsigned integer overflow.
@@ -48,6 +66,17 @@ struct static_cast_with_inter_type {
     constexpr bool real = needs_real<dest_t, src_t>::value;
     auto r = maybe_real<real, src_t>::apply(src);
     return static_cast<dest_t>(r);
+  }
+};
+
+// Partial template specialization for casting to bool.
+// Need to handle complex types separately, as we don't
+// simply want to cast the real part to bool.
+template <typename src_t>
+struct static_cast_with_inter_type<bool, src_t> {
+  C10_HOST_DEVICE static inline bool apply(src_t src) {
+    constexpr bool complex = needs_real<bool, src_t>::value;
+    return static_cast<bool>(maybe_bool<complex, src_t>::apply(src));
   }
 };
 
@@ -91,10 +120,32 @@ struct static_cast_with_inter_type<c10::complex<c10::Half>, c10::Float8_e5m2> {
 template <>
 struct static_cast_with_inter_type<
     c10::complex<c10::Half>,
+    c10::Float8_e5m2fnuz> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::Half>
+  apply(c10::Float8_e5m2fnuz src) {
+    return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
     c10::Float8_e4m3fn> {
   C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
       c10::Half>
   apply(c10::Float8_e4m3fn src) {
+    return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
+  }
+};
+
+template <>
+struct static_cast_with_inter_type<
+    c10::complex<c10::Half>,
+    c10::Float8_e4m3fnuz> {
+  C10_HOST_DEVICE __ubsan_ignore_undefined__ static inline c10::complex<
+      c10::Half>
+  apply(c10::Float8_e4m3fnuz src) {
     return static_cast<c10::complex<c10::Half>>(c10::complex<float>{src});
   }
 };
@@ -131,7 +182,7 @@ C10_API void report_overflow(const char* name);
 template <typename To, typename From>
 To checked_convert(From f, const char* name) {
   // Converting to bool can't overflow so we exclude this case from checking.
-  if (!std::is_same<To, bool>::value && overflows<To, From>(f)) {
+  if (!std::is_same_v<To, bool> && overflows<To, From>(f)) {
     report_overflow(name);
   }
   return convert<To, From>(f);

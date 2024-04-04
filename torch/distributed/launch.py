@@ -1,4 +1,6 @@
 r"""
+Module ``torch.distributed.launch``.
+
 ``torch.distributed.launch`` is a module that spawns up multiple distributed
 training processes on each of the training nodes.
 
@@ -144,13 +146,9 @@ will not pass ``--local-rank`` when you specify this flag.
 
 """
 
-import logging
 import warnings
 
 from torch.distributed.run import get_args_parser, run
-
-
-logger = logging.getLogger(__name__)
 
 
 def parse_args(args):

@@ -1500,14 +1500,11 @@ TEST(TestAutogradNotImplementedFallback, RetTupleNonTensor) {
   auto opHandle = c10::Dispatcher::singleton().findSchemaOrThrow(
       "_test::ret_tuple_non_tensor", "");
   auto op = [&](const torch::Tensor& _1, const torch::Tensor& _2) {
-    torch::Tensor out0;
-    torch::Tensor out1;
-    int64_t out2;
     auto out = callOpUnboxed<
         std::tuple<torch::Tensor, torch::Tensor, int64_t>,
         const torch::Tensor&,
         const torch::Tensor&>(opHandle, _1, _2);
-    std::tie(out0, out1, out2) = std::move(out);
+    auto [out0, out1, out2] = std::move(out);
     return out0;
   };
 

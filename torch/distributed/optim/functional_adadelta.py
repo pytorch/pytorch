@@ -53,6 +53,7 @@ class _FunctionalAdadelta:
         grads = []
         square_avgs = []
         acc_deltas = []
+        state_steps = []
         lr = self.defaults["lr"]
         rho = self.defaults["rho"]
         eps = self.defaults["eps"]
@@ -64,9 +65,10 @@ class _FunctionalAdadelta:
                 + f"Params length: {len(params)}. "
                 + f"Gradients length: {len(gradients)}"
             )
-
+        has_complex = False
         for param, gradient in zip(params, gradients):
             if gradient is not None:
+                has_complex |= torch.is_complex(param)
                 params_with_grad.append(param)
                 grads.append(gradient)
                 # Lazy state initialization
@@ -84,6 +86,7 @@ class _FunctionalAdadelta:
                 state = self.state[param]
                 square_avgs.append(state["square_avg"])
                 acc_deltas.append(state["acc_delta"])
+                state_steps.append(state["step"])
 
         with torch.no_grad():
             F.adadelta(
@@ -91,10 +94,12 @@ class _FunctionalAdadelta:
                 grads,
                 square_avgs,
                 acc_deltas,
+                state_steps,
                 lr=lr,
                 rho=rho,
                 eps=eps,
                 weight_decay=weight_decay,
                 foreach=self.foreach,
                 maximize=self.maximize,
+                has_complex=has_complex
             )

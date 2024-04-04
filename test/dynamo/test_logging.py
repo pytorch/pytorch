@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import atexit
 import contextlib
 import functools
 import logging
@@ -15,7 +14,11 @@ from torch._dynamo.testing import skipIfNotPy311
 
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-from torch.testing._internal.common_utils import find_free_port, munge_exc
+from torch.testing._internal.common_utils import (
+    find_free_port,
+    munge_exc,
+    skipIfTorchDynamo,
+)
 from torch.testing._internal.inductor_utils import HAS_CUDA
 from torch.testing._internal.logging_utils import (
     LoggingTestCase,
@@ -23,7 +26,7 @@ from torch.testing._internal.logging_utils import (
     make_settings_test,
 )
 
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_distributed = functools.partial(
     unittest.skipIf, not dist.is_available(), "requires distributed"
 )
@@ -84,13 +87,29 @@ class LoggingTests(LoggingTestCase):
     test_output_code = multi_record_test(2, output_code=True)
     test_aot_graphs = multi_record_test(2, aot_graphs=True)
 
-    @requires_cuda()
+    @requires_cuda
     @make_logging_test(schedule=True)
     def test_schedule(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
         fn_opt(torch.ones(1000, 1000, device="cuda"))
         self.assertGreater(len(records), 0)
         self.assertLess(len(records), 5)
+
+    @requires_cuda
+    @make_logging_test(fusion=True)
+    def test_fusion(self, records):
+        fn_opt = torch._dynamo.optimize("inductor")(inductor_schedule_fn)
+        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 8)
+
+    @requires_cuda
+    @make_logging_test(cudagraphs=True)
+    def test_cudagraphs(self, records):
+        fn_opt = torch.compile(mode="reduce-overhead")(inductor_schedule_fn)
+        fn_opt(torch.ones(1000, 1000, device="cuda"))
+        self.assertGreater(len(records), 0)
+        self.assertLess(len(records), 8)
 
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
@@ -102,9 +121,10 @@ class LoggingTests(LoggingTestCase):
         fn_opt(torch.ones(1000, 1000), 1)
         self.assertGreater(len(records), 0)
 
-    test_dynamo_debug = within_range_record_test(30, 50, dynamo=logging.DEBUG)
+    test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
 
+    @skipIfTorchDynamo("too slow")
     @make_logging_test(dynamo=logging.DEBUG)
     def test_dynamo_debug_default_off_artifacts(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
@@ -135,7 +155,7 @@ from user code:
         )
 
     test_aot = within_range_record_test(2, 6, aot=logging.INFO)
-    test_inductor_debug = within_range_record_test(3, 15, inductor=logging.DEBUG)
+    test_inductor_debug = within_range_record_test(3, 17, inductor=logging.DEBUG)
     test_inductor_info = within_range_record_test(2, 4, inductor=logging.INFO)
 
     @make_logging_test()
@@ -181,7 +201,7 @@ LoweringException: AssertionError:
         exitstack.close()
 
     @requires_distributed()
-    @requires_cuda()
+    @requires_cuda
     @make_logging_test(ddp_graphs=True)
     def test_ddp_graphs(self, records):
         class ToyModel(torch.nn.Module):
@@ -236,14 +256,23 @@ LoweringException: AssertionError:
     def test_all(self, _):
         registry = torch._logging._internal.log_registry
 
-        dynamo_qname = registry.log_alias_to_log_qname["dynamo"]
+        dynamo_qnames = registry.log_alias_to_log_qnames["dynamo"]
         for logger_qname in torch._logging._internal.log_registry.get_log_qnames():
             logger = logging.getLogger(logger_qname)
 
-            if logger_qname == dynamo_qname:
-                self.assertEqual(logger.level, logging.INFO)
+            # if logger_qname is a.b.c and dynamo_qnames contains a.b, it still matches dynamo's INFO setting
+            if any(logger_qname.find(d) == 0 for d in dynamo_qnames):
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.INFO,
+                    msg=f"expected {logger_qname} is INFO, got {logging.getLevelName(logger.getEffectiveLevel())}",
+                )
             else:
-                self.assertEqual(logger.level, logging.DEBUG)
+                self.assertEqual(
+                    logger.getEffectiveLevel(),
+                    logging.DEBUG,
+                    msg=f"expected {logger_qname} is DEBUG, got {logging.getLevelName(logger.getEffectiveLevel())}",
+                )
 
     @make_logging_test(graph_breaks=True)
     def test_graph_breaks(self, records):
@@ -260,14 +289,36 @@ LoweringException: AssertionError:
     def test_dump_compile_times(self, records):
         fn_opt = torch._dynamo.optimize("inductor")(example_fn)
         fn_opt(torch.ones(1000, 1000))
-        # explicitly invoke the atexit registered functions
-        atexit._run_exitfuncs()
+        # This function runs during exit via atexit.register.
+        # We're not actually going to run atexit._run_exit_funcs() here,
+        # because it'll destroy state necessary for other tests.
+        torch._dynamo.utils.dump_compile_times()
         self.assertEqual(
             len(
                 [r for r in records if "TorchDynamo compilation metrics" in str(r.msg)]
             ),
             1,
         )
+
+    @make_logging_test(dynamo=logging.INFO)
+    def test_custom_format_exc(self, records):
+        dynamo_log = logging.getLogger(torch._dynamo.__name__)
+        try:
+            raise RuntimeError("foo")
+        except RuntimeError:
+            dynamo_log.exception("test dynamo")
+            dynamo_log.info("with exc", exc_info=True)
+        dynamo_log.info("with stack", stack_info=True)
+        self.assertEqual(len(records), 3)
+        # unfortunately there's no easy way to test the final formatted log other than
+        # to ask the dynamo logger's handler to format it.
+        for handler in dynamo_log.handlers:
+            if torch._logging._internal._is_torch_handler(handler):
+                break
+        self.assertIsNotNone(handler)
+        self.assertIn("Traceback", handler.format(records[0]))
+        self.assertIn("Traceback", handler.format(records[1]))
+        self.assertIn("Stack", handler.format(records[2]))
 
     @make_logging_test(dynamo=logging.INFO)
     def test_custom_format(self, records):
@@ -284,7 +335,7 @@ LoweringException: AssertionError:
             if torch._logging._internal._is_torch_handler(handler):
                 break
         self.assertIsNotNone(handler)
-        self.assertIn("[INFO]", handler.format(records[0]))
+        self.assertIn("I", handler.format(records[0]))
         self.assertEqual("custom format", handler.format(records[1]))
 
     @make_logging_test(dynamo=logging.INFO)
@@ -303,7 +354,7 @@ LoweringException: AssertionError:
         for record in records:
             r = handler.format(record)
             for l in r.splitlines():
-                self.assertIn("[INFO]", l)
+                self.assertIn("I", l)
 
     test_trace_source_simple = within_range_record_test(1, 100, trace_source=True)
 
@@ -395,6 +446,28 @@ LoweringException: AssertionError:
 
         self.assertTrue(found_x2)
         self.assertTrue(found_x3)
+
+    @make_logging_test(trace_source=True)
+    def test_trace_source_funcname(self, records):
+        # NOTE: list comprehensions are inlined in 3.12, so test with tuples
+        def fn1():
+            def fn2():
+                if True:
+                    return tuple(torch.ones(3, 3) for _ in range(5))
+                return None
+
+            return fn2()
+
+        fn_opt = torch._dynamo.optimize("eager")(fn1)
+        fn_opt()
+
+        found_funcname = False
+        for record in records:
+            msg = record.getMessage()
+            if "<genexpr>" in msg and "fn1.fn2" in msg:
+                found_funcname = True
+
+        self.assertTrue(found_funcname)
 
     @make_logging_test(graph_sizes=True)
     def test_graph_sizes_dynamic(self, records):
@@ -522,7 +595,7 @@ print("arf")
         fn_opt = torch._dynamo.optimize("eager")(fn)
         fn_opt(torch.randn(3, 3))
 
-        self.assertEqual(len(records), 2)
+        self.assertEqual(len(records), 3)
         messages = [
             "\n".join(record.getMessage().split("\n")[-2:]) for record in records
         ]
@@ -533,12 +606,45 @@ print("arf")
                 ~~^~~""",
         )
         self.assertExpectedInline(
-            messages[1],
+            messages[-1],
             """\
             return x * 3
                    ~~^~~""",
         )
 
+    @make_logging_test(guards=True, recompiles=True)
+    def test_guards_recompiles(self, records):
+        def fn(x, ys, zs):
+            return inner(x, ys, zs)
+
+        def inner(x, ys, zs):
+            for y, z in zip(ys, zs):
+                x += y * z
+            return x
+
+        ys = [1.0, 2.0]
+        zs = [3.0]
+        x = torch.tensor([1.0])
+
+        fn_opt = torch._dynamo.optimize("eager")(fn)
+        fn_opt(x, ys, zs)
+        fn_opt(x, ys[:1], zs)
+
+        record_str = "\n".join(r.getMessage() for r in records)
+
+        self.assertIn(
+            """\
+L['zs'][0] == 3.0                                             # for y, z in zip(ys, zs):""",
+            record_str,
+        )
+        self.assertIn(
+            """\
+    triggered by the following guard failure(s):\n\
+    - len(L['ys']) == 2                                             # for y, z in zip(ys, zs):""",
+            record_str,
+        )
+
+    @skipIfTorchDynamo("too slow")
     @make_logging_test(**torch._logging.DEFAULT_LOGGING)
     def test_default_logging(self, records):
         def fn(a):
@@ -561,14 +667,42 @@ print("arf")
             len([r for r in records if "return a + 1" in r.getMessage()]), 0
         )
 
+    def test_logs_out(self):
+        import tempfile
+
+        with tempfile.NamedTemporaryFile() as tmp:
+            env = dict(os.environ)
+            env["TORCH_LOGS"] = "dynamo"
+            env["TORCH_LOGS_OUT"] = tmp.name
+            stdout, stderr = self.run_process_no_exception(
+                """\
+import torch
+@torch.compile(backend="eager")
+def fn(a):
+    return a.sum()
+
+fn(torch.randn(5))
+                """,
+                env=env,
+            )
+            with open(tmp.name) as fd:
+                lines = fd.read()
+                self.assertEqual(lines, stderr.decode("utf-8"))
+
 
 # single record tests
 exclusions = {
     "bytecode",
+    "cudagraphs",
     "output_code",
     "schedule",
+    "fusion",
+    "overlap",
     "aot_graphs",
+    "post_grad_graphs",
+    "compiled_autograd",
     "recompiles",
+    "recompiles_verbose",
     "graph_breaks",
     "ddp_graphs",
     "perf_hints",
@@ -580,6 +714,8 @@ exclusions = {
     "onnx_diagnostics",
     "guards",
     "verbose_guards",
+    "sym_node",
+    "export",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

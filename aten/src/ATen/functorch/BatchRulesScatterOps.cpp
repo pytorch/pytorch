@@ -11,11 +11,10 @@
 #include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
-#include <iostream>
 #include <torch/library.h>
 
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 namespace {
 static bool any_has_value(ArrayRef<optional<int64_t>> bdims) {
@@ -326,9 +325,7 @@ Tensor index_plumbing(const Tensor & self, const List<optional<Tensor>> & indice
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level)) {
     return at::index(self, indices);
   }
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   std::vector<optional<Tensor>> indices_value;
   std::vector<optional<int64_t>> indices_bdims;
   for (const auto&& indRef : indices) {
@@ -458,9 +455,7 @@ namespace {
                                                    const List<optional<Tensor>> &indices,
                                                    const Tensor &values, int64_t cur_level)
   {
-    Tensor self_value;
-    optional<int64_t> self_bdim;
-    std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+    auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
     std::vector<optional<Tensor>> indices_value;
     std::vector<optional<int64_t>> indices_bdims;
     for (const auto &&indRef : indices)
@@ -468,16 +463,13 @@ namespace {
       optional<Tensor> ind = indRef;
       optional<Tensor> index;
       optional<int64_t> index_bdim;
-      if (ind.has_value())
-      {
+      if (ind.has_value()) {
         std::tie(index, index_bdim) = unwrapTensorAtLevel(ind.value(), cur_level);
       }
       indices_value.push_back(index);
       indices_bdims.push_back(index_bdim);
     }
-    Tensor values_value;
-    optional<int64_t> values_bdim;
-    std::tie(values_value, values_bdim) = unwrapTensorAtLevel(values, cur_level);
+    auto [values_value, values_bdim] = unwrapTensorAtLevel(values, cur_level);
     return std::make_tuple(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim);
   }
 
@@ -494,9 +486,7 @@ void index_put__batch_rule(
   if (!self_bdim.has_value()) {
     vmapIncompatibleInplaceError("index_put_");
   }
-  Tensor self_, values_;
-  std::vector<optional<Tensor>> indices_;
-  std::tie(self_, indices_, values_) = index_put_batch_rule_helper(
+  auto [self_, indices_, values_] = index_put_batch_rule_helper(
       self, self_bdim, indices, indices_bdims, values, values_bdim);
   at::index_put_(self_, List<optional<Tensor>>(indices_), values_, accumulate);
 }
@@ -511,11 +501,7 @@ Tensor& index_put__plumbing(Tensor & self, const List<optional<Tensor>> & indice
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
     return self.index_put_(indices, values, accumulate);
   }
-  Tensor self_value, values_value;
-  optional<int64_t> self_bdim, values_bdim;
-  std::vector<optional<Tensor>> indices_value;
-  std::vector<optional<int64_t>> indices_bdims;
-  std::tie(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim) =
+  auto [self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim] =
       unpackSelfAndIndicesAndValuesAtCurrentLevel(self, indices, values, cur_level);
   index_put__batch_rule(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim, accumulate);
   return self;
@@ -533,9 +519,7 @@ void _index_put_impl__batch_rule(
   if (!self_bdim.has_value()) {
     vmapIncompatibleInplaceError("_index_put_impl_");
   }
-  Tensor self_, values_;
-  std::vector<optional<Tensor>> indices_;
-  std::tie(self_, indices_, values_) = index_put_batch_rule_helper(
+  auto [self_, indices_, values_] = index_put_batch_rule_helper(
       self, self_bdim, indices, indices_bdims, values, values_bdim);
   at::_index_put_impl_(self_, List<optional<Tensor>>(indices_), values_, accumulate, unsafe);
 }
@@ -550,11 +534,7 @@ Tensor &_index_put_impl__plumbing(Tensor &self, const List<optional<Tensor>> &in
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
     return at::_index_put_impl_(self, indices, values, accumulate, unsafe);
   }
-  Tensor self_value, values_value;
-  optional<int64_t> self_bdim, values_bdim;
-  std::vector<optional<Tensor>> indices_value;
-  std::vector<optional<int64_t>> indices_bdims;
-  std::tie(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim) =
+  auto [self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim] =
       unpackSelfAndIndicesAndValuesAtCurrentLevel(self, indices, values, cur_level);
   _index_put_impl__batch_rule(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim, accumulate, unsafe);
   return self;
@@ -639,9 +619,7 @@ std::tuple<Tensor,optional<int64_t>> index_put_batch_rule(
     }
   }
 
-  Tensor self_, values_;
-  std::vector<optional<Tensor>> indices_;
-  std::tie(self_, indices_, values_) = index_put_batch_rule_helper(
+  auto [self_, indices_, values_] = index_put_batch_rule_helper(
       self, self_bdim, indices, indices_bdims, values, values_bdim, batch_size);
 
   // Why do we need to permute values?
@@ -670,11 +648,7 @@ Tensor index_put_plumbing(const Tensor & self, const List<optional<Tensor>> & in
   if (!isBatchedAtLevel(self, cur_level) && !isBatchedAtLevel(indices, cur_level) && !isBatchedAtLevel(values, cur_level)) {
     return self.index_put(indices, values, accumulate);
   }
-  Tensor self_value, values_value;
-  optional<int64_t> self_bdim, values_bdim;
-  std::vector<optional<Tensor>> indices_value;
-  std::vector<optional<int64_t>> indices_bdims;
-  std::tie(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim) =
+  auto [self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim] =
       unpackSelfAndIndicesAndValuesAtCurrentLevel(self, indices, values, cur_level);
   auto results = index_put_batch_rule(self_value, self_bdim, indices_value, indices_bdims, values_value, values_bdim, accumulate);
   return makeBatched(std::get<0>(results), std::get<1>(results), cur_level);
@@ -835,7 +809,7 @@ Tensor get_expanded_index(const Tensor& index, IntArrayRef self_size, int64_t di
   if (index.dim() == 0) {
     return index.expand(self_size);
   }
-  dim = maybe_wrap_dim(dim, self_size.size());
+  dim = maybe_wrap_dim(dim, static_cast<int64_t>(self_size.size()));
 
   // setup new_index_shape as [BS, 1, ..., idx_size, ..., 1]
   // to reshape index_
@@ -934,12 +908,18 @@ std::tuple<Tensor, optional<int64_t>> diagonal_scatter_batch_rule(
   return std::make_tuple(at::diagonal_scatter(self_, src_, offset, dim1, dim2), 0);
 }
 
-std::tuple<Tensor,optional<int64_t>> index_add_batch_rule(
-    const Tensor& self, optional<int64_t> self_bdim,
+std::tuple<Tensor,optional<int64_t>> index_add_batch_rule_impl(
+    Tensor& self, optional<int64_t> self_bdim,
     int64_t dim,
     const Tensor& index, optional<int64_t> index_bdim,
     const Tensor& other, optional<int64_t> other_bdim,
-    const Scalar& alpha) {
+    const Scalar& alpha,
+    const bool inplace) {
+
+  if (inplace && !self_bdim.has_value()){
+    vmapIncompatibleInplaceError("index_add_");
+  }
+
   if (!index_bdim) {
     // Handle scalar tensors... self, other can be scalar tensors
     const auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -958,6 +938,14 @@ std::tuple<Tensor,optional<int64_t>> index_add_batch_rule(
     self_ = ensure_has_bdim(self_, self_bdim.has_value(), batch_size);
     other_ = ensure_has_bdim(other_, other_bdim.has_value(), batch_size);
 
+    if (inplace) {
+      self_.index_add_(dim + 1, index, other_, alpha);
+      if (self_logical_rank == 0) {
+        self_ = self_.squeeze(-1);
+      }
+      return std::make_tuple(self, 0);
+    }
+
     auto result = self_.index_add(dim + 1, index, other_, alpha);
     if (self_logical_rank == 0) {
       result = result.squeeze(-1);
@@ -969,7 +957,9 @@ std::tuple<Tensor,optional<int64_t>> index_add_batch_rule(
   // right now. We really want generalized index_add kernel in PyTorch
   auto batch_size = get_bdim_size3(self, self_bdim, other, other_bdim, index, index_bdim);
   std::vector<Tensor> results;
-  results.reserve(batch_size);
+  if (!inplace) {
+    results.reserve(batch_size);
+  }
   for (const auto i : c10::irange(0, batch_size)) {
     const auto& self_slice = self_bdim.has_value() ?
       self.select(*self_bdim, i) : self;
@@ -977,9 +967,38 @@ std::tuple<Tensor,optional<int64_t>> index_add_batch_rule(
       other.select(*other_bdim, i) : other;
     const auto& index_slice = index_bdim.has_value() ?
       index.select(*index_bdim, i) : index;
-    results.push_back(at::index_add(self_slice, dim, index_slice, other_slice, alpha));
+
+    if (inplace) {
+      self_slice.index_add_(dim, index_slice, other_slice, alpha);
+    } else {
+      results.push_back(at::index_add(self_slice, dim, index_slice, other_slice, alpha));
+    }
+  }
+  if (inplace) {
+    return std::make_tuple(at::stack(self), 0);
   }
   return std::make_tuple(at::stack(results), 0);
+}
+
+void index_add__batch_rule(
+    Tensor& self, optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, optional<int64_t> index_bdim,
+    const Tensor& other, optional<int64_t> other_bdim,
+    const Scalar& alpha) {
+  index_add_batch_rule_impl(self, self_bdim, dim, index, index_bdim, other,
+                            other_bdim, alpha, true);
+}
+
+std::tuple<Tensor,optional<int64_t>> index_add_batch_rule(
+    Tensor& self, optional<int64_t> self_bdim,
+    int64_t dim,
+    const Tensor& index, optional<int64_t> index_bdim,
+    const Tensor& other, optional<int64_t> other_bdim,
+    const Scalar& alpha) {
+  auto self_ = self.clone(at::MemoryFormat::Preserve);
+  return index_add_batch_rule_impl(self_, self_bdim, dim, index, index_bdim,
+                                   other, other_bdim, alpha, false);
 }
 
 static std::tuple<Tensor,Tensor> binary_pointwise_align(
@@ -1208,6 +1227,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(index_fill_, int_Scalar, index_fill__int_scalar_batch_rule);
   VMAP_SUPPORT2(index_fill, int_Tensor, index_fill_int_tensor_batch_rule);
   VMAP_SUPPORT2(index_fill, int_Scalar, index_fill_int_scalar_batch_rule);
+  VMAP_SUPPORT(index_add_, index_add__batch_rule);
   VMAP_SUPPORT(index_add, index_add_batch_rule);
   VMAP_SUPPORT(diagonal_scatter, diagonal_scatter_batch_rule);
   VMAP_SUPPORT(gather, gather_batch_rule);
@@ -1224,4 +1244,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("as_strided_scatter", torch::CppFunction::makeFromBoxedFunction<&vmapErrorFallback>());
 }
 
-}}
+} // namespace at::functorch

@@ -55,7 +55,7 @@ variable_list CopyBackwards::apply_with_saved(
 CopySlices::CopySlices(
     const Variable& base_var,
     at::TensorGeometry view_,
-    std::function<at::Tensor(const at::Tensor&)> view_fn_,
+    std::unique_ptr<ViewFunc> view_fn_,
     std::shared_ptr<Node> fn_)
     : Node(),
       base(base_var),
@@ -98,7 +98,7 @@ inline variable_list CopySlices::apply_impl(
 
   at::Tensor grad_slice;
   if (view_fn) {
-    grad_slice = view_fn(result);
+    grad_slice = (*view_fn)(result);
   } else {
     auto offset = view.sym_storage_offset() - base.sym_storage_offset();
     grad_slice =
@@ -156,7 +156,11 @@ inline variable_list CopySlices::apply_impl(
   variable_list grad_inputs(num_outputs());
   for (const auto i : c10::irange(res.size())) {
     if (task_should_compute_output(i)) {
-      AT_ASSERT(res[i].defined());
+      if (!res[i].defined()) {
+        // If the output is not defined, treat it as if it was a zero tensor.
+        // This can happen if users define a custom Function.
+        continue;
+      }
       if (i == 0) {
         grad_slice.copy_(res[i]);
         // NOLINTNEXTLINE(clang-analyzer-cplusplus.Move)

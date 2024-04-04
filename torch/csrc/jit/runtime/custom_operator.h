@@ -4,8 +4,7 @@
 #include <ATen/core/stack.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 /// Registration class for new operators. Effectively calls
 /// `torch::jit::registerOperator` for every supplied operator, but allows doing
@@ -28,5 +27,4 @@ struct TORCH_API RegisterOperators {
   }
 };
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

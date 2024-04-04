@@ -7,8 +7,14 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
 
 import torch
 import torch.nn.functional as F
+from torch.ao.quantization.fake_quantize import (
+    FakeQuantize,
+    FusedMovingAvgObsFakeQuantize,
+)
 from torch.ao.quantization.observer import (
     HistogramObserver,
+    MovingAverageMinMaxObserver,
+    MovingAveragePerChannelMinMaxObserver,
     PerChannelMinMaxObserver,
     PlaceholderObserver,
 )
@@ -51,25 +57,31 @@ class _X86InductorQuantizationAnnotation(QuantizationAnnotation):
     _is_output_of_quantized_pattern: bool = False
 
 
-# Ops support int8 data type and excludes ops like conv, linear.
-quantizable_ops_pt2e: Set = {
-    torch.ops.aten.max_pool2d.default,
-    torch.ops.aten.cat.default,
-    torch.ops.aten.avg_pool2d.default,
-}
-
-
-# Ops that:
-# 1. Ops prefer to run with int8 when int8 input is given.
-# 2. Ops don't support int8 in and fp32 out.
+# Operations that:
+# 1. Operations are optimized to run with int8 when int8 input provided.
+# 2. Operations do not support int8 input and produce fp32 output.
 int8_in_int8_out_ops_pt2e: Set = {
     torch.ops.aten.max_pool2d.default,
     torch.ops.aten.cat.default,
     torch.ops.aten.avg_pool2d.default,
+    torch.ops.aten.adaptive_avg_pool2d.default,
+    torch.ops.aten.flatten.using_ints,
 }
 
 
+# Operations support the int8 data type and exclude operations such as conv and linear.
+# A superset of int8_in_int8_out_ops_pt2e incorporating additional operators.
+quantizable_ops_pt2e = copy.deepcopy(int8_in_int8_out_ops_pt2e)
+
 QUANT_ANNOTATION_KEY = "quantization_annotation"
+
+
+def _mark_nodes_as_annotated(nodes: List[Node]):
+    for node in nodes:
+        if node is not None:
+            if QUANT_ANNOTATION_KEY not in node.meta:
+                node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation()
+            node.meta[QUANT_ANNOTATION_KEY]._annotated = True
 
 
 def _is_node_annotated(_node):
@@ -156,10 +168,25 @@ def _get_supported_x86_inductor_config_and_operators() -> List[OperatorConfig]:
 
 
 @functools.lru_cache
-def get_default_x86_inductor_quantization_config():
-    act_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
-        HistogramObserver
-    )
+def get_default_x86_inductor_quantization_config(
+    is_qat: bool = False,
+    is_dynamic: bool = False,
+):
+    extra_args: Dict[str, Any] = {"eps": 2**-12}
+    if is_qat:
+        if is_dynamic:
+            act_observer_or_fake_quant_ctr = FakeQuantize
+            dynamic_quant_observer = MovingAverageMinMaxObserver.with_args(
+                averaging_constant=1
+            )
+            extra_args["observer"] = dynamic_quant_observer
+        else:
+            act_observer_or_fake_quant_ctr = FusedMovingAvgObsFakeQuantize  # type: ignore[assignment]
+    else:
+        if is_dynamic:
+            act_observer_or_fake_quant_ctr = PlaceholderObserver  # type: ignore[assignment]
+        else:
+            act_observer_or_fake_quant_ctr = HistogramObserver  # type: ignore[assignment]
 
     # Copy from x86 default qconfig from torch/ao/quantization/qconfig.py
     act_quantization_spec = QuantizationSpec(
@@ -167,16 +194,19 @@ def get_default_x86_inductor_quantization_config():
         quant_min=0,
         quant_max=255,  # reduce_range=False
         qscheme=torch.per_tensor_affine,
-        is_dynamic=False,
+        is_dynamic=is_dynamic,
         observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(
-            eps=2**-12
+            **extra_args
         ),
     )
 
     weight_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
-        PerChannelMinMaxObserver
+        FusedMovingAvgObsFakeQuantize if is_qat else PerChannelMinMaxObserver
     )
-    extra_args: Dict[str, Any] = {"eps": 2**-12}
+
+    if is_qat:
+        # Only support per channel quant for now
+        extra_args["observer"] = MovingAveragePerChannelMinMaxObserver  # type: ignore[dict-item]
     weight_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
         quant_min=-128,
@@ -188,17 +218,13 @@ def get_default_x86_inductor_quantization_config():
             **extra_args
         ),
     )
-    bias_observer_or_fake_quant_ctr: _ObserverOrFakeQuantizeConstructor = (
-        PlaceholderObserver
-    )
-    bias_quantization_spec = QuantizationSpec(
-        dtype=torch.float, observer_or_fake_quant_ctr=bias_observer_or_fake_quant_ctr
-    )
+    bias_quantization_spec = None  # will use placeholder observer by default
     quantization_config = QuantizationConfig(
         act_quantization_spec,
         act_quantization_spec,
         weight_quantization_spec,
         bias_quantization_spec,
+        is_qat,
     )
     return quantization_config
 
@@ -267,8 +293,6 @@ class X86InductorQuantizer(Quantizer):
         if annotate_output:
             conv_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
-                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
-                output_qspec=get_output_act_qspec(quantization_config),
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
             )
@@ -305,14 +329,13 @@ class X86InductorQuantizer(Quantizer):
             input_qspec_map[bias_node] = get_bias_qspec(quantization_config)
 
         if annotate_output:
-            linear_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            linear_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map,
-                # TODO<leslie> Remove the annotate of output
-                output_qspec=get_output_act_qspec(quantization_config),
                 _annotated=True,
+                _is_output_of_quantized_pattern=True,
             )
         else:
-            linear_node.meta["quantization_annotation"] = QuantizationAnnotation(
+            linear_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=input_qspec_map, _annotated=True
             )
 
@@ -360,7 +383,10 @@ class X86InductorQuantizer(Quantizer):
 
     def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
         """just handling global spec for now"""
-        model = self._annotate_for_static_quantization_config(model)
+        if self.global_config and self.global_config.input_activation.is_dynamic:  # type: ignore[union-attr]
+            model = self._annotate_for_dynamic_quantization_config(model)
+        else:
+            model = self._annotate_for_static_quantization_config(model)
         return model
 
     def _annotate_for_static_quantization_config(
@@ -380,6 +406,10 @@ class X86InductorQuantizer(Quantizer):
         config = self.global_config
 
         # Step1: Recipe of fusion patterns like conv/linear.
+        if config.is_qat:
+            # Annotate QAT specific pattern: mainly due to BN not folded in prepare_qat
+            self._annotate_qat_conv2d_fusion_pattern(model, config)
+
         self._annotate_conv2d_fusion_pattern(model, config)
 
         # Step2: Recipe to propagate annotation for patterns beside conv/linear.
@@ -397,6 +427,226 @@ class X86InductorQuantizer(Quantizer):
             self._annotate_output_for_int8_in_int8_out_pattern(node, config)
 
         return model
+
+    def _annotate_for_dynamic_quantization_config(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        config = self.global_config
+        self._annotate_linear(model, config)
+        return model
+
+    def _annotate_qat_conv2d_fusion_pattern(
+        self, model: torch.fx.GraphModule, config: QuantizationConfig
+    ):
+        # Annotate QAT Specific patterns
+        self._annotate_qat_conv2d_bn_binary_unary(model, config)
+        self._annotate_qat_conv2d_bn_binary(model, config)
+        self._annotate_qat_conv2d_bn_unary(model, config)
+        self._annotate_qat_conv2d_bn(model, config)
+
+    def _annotate_qat_conv2d_bn_binary_unary(
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+    ) -> None:
+        fused_partitions = find_sequential_partitions(
+            gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d, operator.add, torch.nn.ReLU]
+        )
+        for fused_partition in fused_partitions:
+            (
+                conv_partition,
+                bn_partition,
+                binary_partition,
+                unary_partition,
+            ) = fused_partition
+
+            (
+                conv_node,
+                bn_output_node,
+                binary_node,
+                unary_node,
+            ) = self._get_output_nodes_of_partitions(
+                [conv_partition, bn_partition, binary_partition, unary_partition]
+            )
+            if len(bn_output_node.users) != 1:
+                # Conv BN pattern should only has 1 user.
+                continue
+            (
+                bn_output_node_idx,
+                extra_input_node_idx,
+            ) = self._get_input_idx_for_binary_node(bn_output_node, binary_node)
+            if (bn_output_node_idx is None) or (extra_input_node_idx is None):
+                continue
+            if bn_output_node != binary_node.args[bn_output_node_idx]:
+                raise ValueError(f"{bn_output_node} doesn't match input of binary node")
+            extra_input_node = binary_node.args[extra_input_node_idx]
+
+            if (
+                conv_node.op != "call_function"
+                or conv_node.target != torch.ops.aten.conv2d.default
+            ):
+                continue
+
+            if _is_annotated([unary_node, binary_node, bn_output_node, conv_node]):
+                continue
+
+            self._annotate_conv_node_helper(conv_node, False, quantization_config)
+
+            binary_node_input_qspec_map = {}
+            binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(
+                quantization_config
+            )
+            binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                input_qspec_map=binary_node_input_qspec_map,
+                _annotated=True,
+            )
+            unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                _annotated=True,
+                _is_output_of_quantized_pattern=True,
+            )
+            nodes_to_mark_annotated = list(conv_partition.nodes)
+            nodes_to_mark_annotated.extend(list(bn_partition.nodes))
+            nodes_to_mark_annotated.extend(list(binary_partition.nodes))
+            nodes_to_mark_annotated.extend(list(unary_partition.nodes))
+            _mark_nodes_as_annotated(nodes_to_mark_annotated)
+
+    def _annotate_qat_conv2d_bn_binary(
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+    ) -> None:
+        fused_partitions = find_sequential_partitions(
+            gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d, operator.add]
+        )
+        for fused_partition in fused_partitions:
+            conv_partition, bn_partition, binary_partition = fused_partition
+            (
+                conv_node,
+                bn_output_node,
+                binary_node,
+            ) = self._get_output_nodes_of_partitions(
+                [conv_partition, bn_partition, binary_partition]
+            )
+            if len(bn_output_node.users) != 1:
+                # Conv BN pattern should only has 1 user.
+                continue
+            (
+                bn_output_node_idx,
+                extra_input_node_idx,
+            ) = self._get_input_idx_for_binary_node(bn_output_node, binary_node)
+            if (bn_output_node_idx is None) or (extra_input_node_idx is None):
+                continue
+            if bn_output_node != binary_node.args[bn_output_node_idx]:
+                raise ValueError(f"{bn_output_node} doesn't match input of binary node")
+
+            extra_input_node = binary_node.args[extra_input_node_idx]
+
+            if (
+                conv_node.op != "call_function"
+                or conv_node.target != torch.ops.aten.conv2d.default
+            ):
+                continue
+
+            if _is_annotated([binary_node, bn_output_node, conv_node]):
+                continue
+
+            self._annotate_conv_node_helper(conv_node, False, quantization_config)
+
+            binary_node_input_qspec_map = {}
+            binary_node_input_qspec_map[extra_input_node] = get_input_act_qspec(
+                quantization_config
+            )
+            binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                input_qspec_map=binary_node_input_qspec_map,
+                # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                _annotated=True,
+                _is_output_of_quantized_pattern=True,
+            )
+            nodes_to_mark_annotated = list(conv_partition.nodes)
+            nodes_to_mark_annotated.extend(list(bn_partition.nodes))
+            nodes_to_mark_annotated.extend(list(binary_partition.nodes))
+            _mark_nodes_as_annotated(nodes_to_mark_annotated)
+
+    def _annotate_qat_conv2d_bn_unary(
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+    ) -> None:
+        fused_partitions = []
+        unary_patterns = [
+            [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU],
+            [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.Hardtanh],
+            [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.Hardswish],
+            [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.ReLU6],
+            [torch.nn.Conv2d, torch.nn.BatchNorm2d, torch.nn.SiLU],
+        ]
+        for unary_pattern in unary_patterns:
+            partitions = find_sequential_partitions(gm, unary_pattern)
+            if partitions:
+                # Extend the fused_partitions if partitions is not empty
+                fused_partitions.extend(partitions)
+
+        for fused_partition in fused_partitions:
+            conv_partition, bn_partition, unary_partition = fused_partition
+            (
+                conv_node,
+                bn_output_node,
+                unary_node,
+            ) = self._get_output_nodes_of_partitions(
+                [conv_partition, bn_partition, unary_partition]
+            )
+
+            if (
+                conv_node.op != "call_function"
+                or conv_node.target != torch.ops.aten.conv2d.default
+            ):
+                continue
+
+            if _is_annotated([unary_node, bn_output_node, conv_node]):
+                continue
+
+            self._annotate_conv_node_helper(conv_node, False, quantization_config)
+            unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
+                # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                _annotated=True,
+                _is_output_of_quantized_pattern=True,
+            )
+            nodes_to_mark_annotated = list(conv_partition.nodes)
+            nodes_to_mark_annotated.extend(list(bn_partition.nodes))
+            nodes_to_mark_annotated.extend(list(unary_partition.nodes))
+            _mark_nodes_as_annotated(nodes_to_mark_annotated)
+
+    def _annotate_qat_conv2d_bn(
+        self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
+    ) -> None:
+        fused_partitions = find_sequential_partitions(
+            gm, [torch.nn.Conv2d, torch.nn.BatchNorm2d]
+        )
+        for fused_partition in fused_partitions:
+            conv_partition, bn_partition = fused_partition
+            conv_node, bn_output_node = self._get_output_nodes_of_partitions(
+                [conv_partition, bn_partition]
+            )
+
+            if (
+                conv_node.op != "call_function"
+                or conv_node.target != torch.ops.aten.conv2d.default
+            ):
+                continue
+
+            if _is_annotated([bn_output_node, conv_node]):
+                continue
+
+            self._annotate_conv_node_helper(conv_node, False, quantization_config)
+            bn_output_node.meta[
+                QUANT_ANNOTATION_KEY
+            ] = _X86InductorQuantizationAnnotation(
+                # TODO<leslie> Remove the annotate of output in QAT when qat util support pattern matcher.
+                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+                _annotated=True,
+                _is_output_of_quantized_pattern=True,
+            )
+            nodes_to_mark_annotated = list(conv_partition.nodes)
+            nodes_to_mark_annotated.extend(list(bn_partition.nodes))
+            _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
     def _annotate_conv2d_fusion_pattern(
         self, model: torch.fx.GraphModule, config: QuantizationConfig
@@ -420,6 +670,9 @@ class X86InductorQuantizer(Quantizer):
             conv_node, binary_node, unary_node = self._get_output_nodes_of_partitions(
                 [conv_partition, binary_partition, unary_partition]
             )
+            if len(conv_node.users) != 1:
+                # Conv Node should only has 1 user node
+                continue
             conv_node_idx, extra_input_node_idx = self._get_input_idx_for_binary_node(
                 conv_node, binary_node
             )
@@ -446,8 +699,6 @@ class X86InductorQuantizer(Quantizer):
                 _annotated=True,
             )
             unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
-                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
             )
@@ -464,6 +715,9 @@ class X86InductorQuantizer(Quantizer):
             conv_node, binary_node = self._get_output_nodes_of_partitions(
                 [conv_partition, binary_partition]
             )
+            if len(conv_node.users) != 1:
+                # Conv Node should only has 1 user node
+                continue
             conv_node_idx, extra_input_node_idx = self._get_input_idx_for_binary_node(
                 conv_node, binary_node
             )
@@ -488,8 +742,6 @@ class X86InductorQuantizer(Quantizer):
             )
             binary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 input_qspec_map=binary_node_input_qspec_map,
-                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
-                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
             )
@@ -497,9 +749,20 @@ class X86InductorQuantizer(Quantizer):
     def _annotate_conv2d_unary(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
     ) -> None:
-        fused_partitions = find_sequential_partitions(
-            gm, [torch.nn.Conv2d, torch.nn.ReLU]
-        )
+        fused_partitions = []
+        unary_patterns = [
+            [torch.nn.Conv2d, torch.nn.ReLU],
+            [torch.nn.Conv2d, torch.nn.Hardtanh],
+            [torch.nn.Conv2d, torch.nn.Hardswish],
+            [torch.nn.Conv2d, torch.nn.ReLU6],
+            [torch.nn.Conv2d, torch.nn.SiLU],
+        ]
+        for unary_pattern in unary_patterns:
+            partitions = find_sequential_partitions(gm, unary_pattern)
+            if partitions:
+                # Extend the fused_partitions if partitions is not empty
+                fused_partitions.extend(partitions)
+
         for fused_partition in fused_partitions:
             conv_partition, unary_partition = fused_partition
             conv_node, unary_node = self._get_output_nodes_of_partitions(
@@ -514,8 +777,6 @@ class X86InductorQuantizer(Quantizer):
                 continue
             self._annotate_conv_node_helper(conv_node, False, quantization_config)
             unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
-                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
-                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
                 _annotated=True,
                 _is_output_of_quantized_pattern=True,
             )
@@ -526,7 +787,7 @@ class X86InductorQuantizer(Quantizer):
         conv_partitions = get_source_partitions(
             gm.graph, [torch.nn.Conv2d, torch.nn.functional.conv2d]
         )
-        conv_partitions = list(itertools.chain(*conv_partitions.values()))
+        conv_partitions = list(itertools.chain.from_iterable(conv_partitions.values()))
         for conv_partition in conv_partitions:
             if len(conv_partition.output_nodes) > 1:
                 raise ValueError("conv partition has more than one output node")
@@ -701,7 +962,9 @@ class X86InductorQuantizer(Quantizer):
         linear_partitions = get_source_partitions(
             gm.graph, [torch.nn.Linear, torch.nn.functional.linear]
         )
-        linear_partitions = list(itertools.chain(*linear_partitions.values()))
+        linear_partitions = list(
+            itertools.chain.from_iterable(linear_partitions.values())
+        )
         for partition in linear_partitions:
             if len(partition.output_nodes) > 1:
                 raise ValueError(
@@ -724,6 +987,7 @@ class X86InductorQuantizer(Quantizer):
             torch.nn.ReLU,
             torch.nn.LeakyReLU,
             torch.nn.Tanh,
+            torch.nn.GELU,
         ]
         fused_partitions: List[tuple] = []
         for postop in postop_list:
@@ -742,10 +1006,9 @@ class X86InductorQuantizer(Quantizer):
             if _is_annotated([unary_node, linear_node]):
                 continue
             self._annotate_linear_node_helper(linear_node, False, quantization_config)
-            unary_node.meta["quantization_annotation"] = QuantizationAnnotation(
-                # TODO<leslie> Remove the annotate of output when oneDNN qconv support fp32 out.
-                output_qspec=get_output_act_qspec(quantization_config),  # type: ignore[arg-type]
+            unary_node.meta[QUANT_ANNOTATION_KEY] = _X86InductorQuantizationAnnotation(
                 _annotated=True,
+                _is_output_of_quantized_pattern=True,
             )
 
     def validate(self, model: torch.fx.GraphModule) -> None:

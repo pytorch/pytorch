@@ -1,10 +1,19 @@
 #pragma once
 #include <c10/core/DispatchKey.h>
+#include <c10/macros/Export.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Metaprogramming.h>
+#include <c10/util/TypeList.h>
 #include <c10/util/llvmMathExtras.h>
 #include <array>
+#include <cstddef>
+#include <cstdint>
+#include <initializer_list>
+#include <iterator>
 #include <ostream>
+#include <string>
+#include <type_traits>
 
 namespace c10 {
 
@@ -70,6 +79,7 @@ C10_ALWAYS_INLINE static const std::
 // we have:
 // - "Dense":     CPU, CUDA, XLA, ... (~12 keys)
 // - "Sparse":    SparseCPU, SparseCUDA, ...
+// - "SparseCsr": SparseCsrCPU, SparseCsrCUDA, ...
 // - "Quantized": QuantizedCPU, QuantizedCUDA, QuantizedXLA, ...
 // - "Autograd":  AutogradCPU, AutogradCUDA, Autograd XLA, ...
 // The problem is that total number of keys grows quadratically with [#
@@ -81,9 +91,9 @@ C10_ALWAYS_INLINE static const std::
 // 5 categories.
 //
 // (1) "Building block" keys
-//    (a) backends: jEverything in the BackendComponent enum (e.g. CPUBit,
-//    CUDABIt) (b) functionalities: (per-backend) functionality-bit DispatchKeys
-//    (e.g. AutogradFunctionality, Sparse, Dense)
+//    (a) backends: Everything in the BackendComponent enum (e.g. CPUBit,
+//    CUDABit) (b) functionalities: (per-backend) functionality-bit DispatchKeys
+//    (e.g. AutogradFunctionality, SparseCsr, Sparse, Dense)
 // (2) "Runtime" keys
 //    (a) "non-customizable backends" (e.g. FPGA)
 //    (b) "non-customizable functionalities" (e.g. Functionalize)
@@ -107,14 +117,16 @@ C10_ALWAYS_INLINE static const std::
 // Backend keys and functionality keys that count as "building blocks" will
 // contribute to a full cross product of functionality that can be overriden.
 //
-// For example, right now we have at least 12 "backend" building blocks (CPU,
-// CUDA, XLA, ...) and at least 4 "functionality" building blocks (Dense,
-// Sparse, Quantized, AutogradFunctionality, ...). These keys together allow
-// every dispatcher operator to be customized in up to 12*4 different ways. Each
-// of those requires a slot in the operator table of every dispatcher operator.
-// Not every piece of functionality necessarily needs to be customizeable
-// per-backend, and not every backend necessarily needs to be able to customize
-// every type of functionality.
+// For example, right now we have at least 12 "backend" building
+// blocks (CPU, CUDA, XLA, ...) and at least 5 "functionality"
+// building blocks (Dense, Sparse, SparseCsr, Quantized,
+// AutogradFunctionality, ...). These keys together allow every
+// dispatcher operator to be customized in up to 12*4 different
+// ways. Each of those requires a slot in the operator table of every
+// dispatcher operator.  Not every piece of functionality necessarily
+// needs to be customizable per-backend, and not every backend
+// necessarily needs to be able to customize every type of
+// functionality.
 //
 //
 // (2) Every runtime key corresponds directly to a slot in an operator's runtime
@@ -128,10 +140,10 @@ C10_ALWAYS_INLINE static const std::
 
 // (2a) and (2b) are represented identically in the DispatchKeySet logic:
 // - backend-agnostic functionalities (e.g. FuncTorchBatched) are NOT
-// customizeable per backend.
+// customizable per backend.
 //   In order to do so, we'd need to promote it to a per-backend functionality
 //   "building block" key.
-// - non-customizeable backends (e.g. FPGA) can NOT customize existing
+// - non-customizable backends (e.g. FPGA) can NOT customize existing
 // functionality like Sparse, Autograd, etc.
 //   In order to do so, we'd need to promote it to a backend "building block"
 //   key.
@@ -190,6 +202,7 @@ class DispatchKeySet final {
   }
 
   constexpr explicit DispatchKeySet(DispatchKey k) {
+    // NOLINTNEXTLINE(bugprone-branch-clone)
     if (k == DispatchKey::Undefined) {
       // Case 1: handle Undefined specifically
       repr_ = 0;
@@ -297,6 +310,7 @@ class DispatchKeySet final {
                              DispatchKey::Dense,
                              DispatchKey::Quantized,
                              DispatchKey::Sparse,
+                             DispatchKey::SparseCsr,
                              DispatchKey::AutogradFunctionality,
                          })
               .repr_) == 0));
@@ -675,8 +689,7 @@ constexpr DispatchKeySet python_ks = DispatchKeySet({
 
 constexpr DispatchKeySet sparse_ks = DispatchKeySet(DispatchKey::Sparse);
 
-constexpr DispatchKeySet sparse_csr_ks =
-    DispatchKeySet({DispatchKey::SparseCsrCPU, DispatchKey::SparseCsrCUDA});
+constexpr DispatchKeySet sparse_csr_ks = DispatchKeySet(DispatchKey::SparseCsr);
 
 constexpr DispatchKeySet mkldnn_ks = DispatchKeySet(DispatchKey::MkldnnCPU);
 
@@ -692,12 +705,11 @@ constexpr DispatchKeySet autogradother_backends =
          DispatchKey::ORT,
          DispatchKey::Vulkan,
          DispatchKey::Metal,
-         DispatchKey::SparseCsrCPU,
-         DispatchKey::SparseCsrCUDA,
          DispatchKey::CustomRNGKeyId,
          DispatchKey::MkldnnCPU,
          // Sparse and Quantized backends also live here.
          DispatchKey::Sparse,
+         DispatchKey::SparseCsr,
          DispatchKey::Quantized})
     // Including the backend bits because this keyset is used during op
     // registration, which requires looping over all runtime autogradother
@@ -775,6 +787,7 @@ constexpr DispatchKeySet backend_functionality_keys =
         DispatchKey::Dense,
         DispatchKey::Quantized,
         DispatchKey::Sparse,
+        DispatchKey::SparseCsr,
     }) |
     DispatchKeySet(DispatchKeySet::RAW, full_backend_mask);
 
@@ -795,7 +808,7 @@ C10_API bool isBackendDispatchKey(DispatchKey t);
 C10_API DispatchKeySet getRuntimeDispatchKeySet(DispatchKey t);
 
 // Resolve alias dispatch key to DispatchKeySet if applicable,
-// and chek if k is a part of that set
+// and check if k is a part of that set
 C10_API bool runtimeDispatchKeySetHas(DispatchKey t, DispatchKey k);
 
 // Returns a DispatchKeySet of all backend keys mapped to Autograd dispatch key
@@ -903,7 +916,7 @@ static inline DispatchKey legacyExtractDispatchKey(DispatchKeySet s) {
 }
 
 template <class T>
-using is_not_DispatchKeySet = guts::negation<std::is_same<DispatchKeySet, T>>;
+using is_not_DispatchKeySet = std::negation<std::is_same<DispatchKeySet, T>>;
 
 // Given a function type, constructs a function_traits type that drops the first
 // parameter type if the first parameter is of type DispatchKeySet. NB:
@@ -915,12 +928,12 @@ template <class FuncType>
 using remove_DispatchKeySet_arg_from_func = guts::make_function_traits_t<
     typename guts::infer_function_traits_t<FuncType>::return_type,
     typename std::conditional_t<
-        std::is_same<
+        std::is_same_v<
             DispatchKeySet,
             typename guts::typelist::head_with_default_t<
                 void,
                 typename guts::infer_function_traits_t<
-                    FuncType>::parameter_types>>::value,
+                    FuncType>::parameter_types>>,
         guts::typelist::drop_if_nonempty_t<
             typename guts::infer_function_traits_t<FuncType>::parameter_types,
             1>,

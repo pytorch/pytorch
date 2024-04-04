@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import numpy as np
 import unittest
 import caffe2.python.fakelowp.init_shared_libs  # noqa

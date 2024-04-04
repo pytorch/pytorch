@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import sys
 import threading
 from dataclasses import dataclass
@@ -21,7 +23,7 @@ from torch._C._distributed_c10d import (
 )
 from torch.distributed.distributed_c10d import _CollOp, _store_based_barrier, P2POp
 from torch.futures import Future
-from torch.utils._pytree import tree_flatten
+from torch.utils import _pytree as pytree
 
 """
 TODO:
@@ -35,7 +37,7 @@ We need some synchronization around cleanup to ensure that timedout ranks don't 
 
 
 def flatten_list(lst):
-    return tree_flatten(lst)[0]
+    return pytree.tree_leaves(lst)
 
 
 def ret_work(ret):
@@ -152,8 +154,8 @@ class Gather:
 
 class ReduceScatter:
     def __init__(self, op):
-        if op != dist.ReduceOp.SUM:
-            raise NotImplementedError("ReduceScatter only supports SUM on threaded pg for now.")
+        if op != dist.ReduceOp.SUM and op != dist.ReduceOp.AVG:
+            raise NotImplementedError(f"ReduceScatter does not support {op}")
         self.op = op
 
     @torch.no_grad()
@@ -173,6 +175,11 @@ class ReduceScatter:
                     start_reduction[i] = True
                 else:
                     dest_tensor_on_rank_i[0].add_(to_scatter[i].to(dst_tensor_device))
+        if self.op == dist.ReduceOp.AVG:
+            num_ranks = len(data)
+            for each_rank_data in data:
+                each_rank_data[0][0] /= num_ranks
+
 
 class Broadcast:
     def __init__(self, src):
@@ -326,11 +333,21 @@ class ProcessLocalGroup(dist.ProcessGroup):
         ProcessLocalGroup._end_coll(coll, self)
         return res
 
-    def _reduce_scatter_base(self, output_tensor, input_tensor, opts=AllgatherOptions()):
+    def _reduce_scatter_base(self, output_tensor, input_tensor, opts=ReduceScatterOptions()):
         tensor_list = list(torch.chunk(input_tensor, self._world_size))
         return self.reduce_scatter([output_tensor], [tensor_list], opts)
 
-    def allgather_into_tensor_coalesced(self, output_tensor_list, input_tensor_list):
+    def reduce_scatter_tensor_coalesced(self, output_tensors, input_tensors, opts=ReduceScatterOptions()):
+        works = [
+            self._reduce_scatter_base(output_tensor, input_tensor, opts)
+            for output_tensor, input_tensor
+            in zip(output_tensors, input_tensors)
+        ]
+        for work in works[:-1]:
+            work.wait()
+        return works[-1]
+
+    def allgather_into_tensor_coalesced(self, output_tensor_list, input_tensor_list, opts=AllgatherOptions()):
         res = None
         for o_t, i_t in zip(output_tensor_list, input_tensor_list):
             res = self._allgather_base(o_t, i_t)
@@ -355,6 +372,10 @@ class ProcessLocalGroup(dist.ProcessGroup):
         return the global registered name of the current pg in the world
         """
         return self._world().pg_names[self]
+
+    @property
+    def group_name(self):
+        return self.pg_name
 
     def getBackendName(self):
         return "threaded"
@@ -381,7 +402,7 @@ def _create_threaded_pg(prefix_store, rank, world_size, timeout):
     return pg
 
 
-dist.Backend.register_backend("threaded", _create_threaded_pg)
+dist.Backend.register_backend("threaded", _create_threaded_pg, devices=["cpu", "cuda"])
 
 
 @dataclass

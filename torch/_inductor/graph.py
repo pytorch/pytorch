@@ -1,4 +1,4 @@
-import hashlib
+import itertools
 import logging
 import operator
 import os
@@ -7,7 +7,7 @@ import sys
 import time
 from collections import defaultdict
 from contextlib import contextmanager
-from typing import DefaultDict, Dict, List, Optional, Set, Tuple
+from typing import Any, Callable, DefaultDict, Dict, List, Optional, Set, Tuple, Union
 
 import sympy
 
@@ -15,30 +15,47 @@ import torch
 import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
-from torch._dynamo.utils import dynamo_timed
+from torch._dynamo.utils import defake, dynamo_timed
+from torch._logging import LazyString, trace_structured
+from torch._subclasses.fake_tensor import FakeTensor
+from torch.fx.experimental._backward_state import BackwardState
+from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
-    free_symbols,
-    magic_methods,
-    method_to_operator,
+    free_unbacked_symbols,
+    has_free_symbols,
     ShapeEnv,
     SymTypes,
 )
 from torch.utils._mode_utils import no_dispatch
 
-from . import config, ir, metrics
+from . import config, ir
 from .codegen.common import (
+    DeviceOpOverrides,
+    get_device_op_overrides,
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
-from .codegen.wrapper import CppWrapperCodeGen, CudaWrapperCodeGen, WrapperCodeGen
+from .codegen.cpp_wrapper_cpu import CppWrapperCpu
+from .codegen.cpp_wrapper_cuda import CppWrapperCuda
+from .codegen.wrapper import WrapperCodeGen
 from .exc import (
+    CppWrapperCodeGenError,
     LoweringException,
     MissingOperatorWithDecomp,
     MissingOperatorWithoutDecomp,
 )
-from .ir import Constant, FixedLayout, InputBuffer, Pointwise, Reduction, TensorBox
+from .ir import (
+    Constant,
+    FixedLayout,
+    InputBuffer,
+    Pointwise,
+    Reduction,
+    StorageBox,
+    TensorBox,
+)
 from .lowering import (
+    constrain_to_fx_strides,
     FALLBACK_ALLOW_LIST,
     fallback_handler,
     fallback_node_due_to_unsupported_type,
@@ -57,6 +74,14 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
 
+if config.is_fbcode():
+    from torch._inductor.fb.utils import log_module_code
+else:
+
+    def log_module_code(*args, **kwargs):
+        pass
+
+
 def supported_dtype_of_cpp_wrapper(dtype, cuda):
     supported_dtype = {
         torch.float32,
@@ -68,11 +93,16 @@ def supported_dtype_of_cpp_wrapper(dtype, cuda):
         torch.uint8,
         torch.bool,
         torch.bfloat16,
+        torch.complex32,
         torch.complex64,
-        # torch.float16, # TODO: implement this
+        torch.complex128,
+        torch.float16,
     }
     if cuda:
-        supported_dtype.add(torch.float16)
+        supported_dtype.add(torch.float8_e4m3fn)
+        supported_dtype.add(torch.float8_e5m2)
+        supported_dtype.add(torch.float8_e4m3fnuz)
+        supported_dtype.add(torch.float8_e5m2fnuz)
 
     return dtype in supported_dtype
 
@@ -100,7 +130,21 @@ def is_magic_method(op):
     return op in magic_ops
 
 
+def getattr_recursive(obj, target):
+    target_atoms = target.split(".")
+    attr_itr = obj
+    for i, atom in enumerate(target_atoms):
+        if not hasattr(attr_itr, atom):
+            raise RuntimeError(
+                f"Node referenced nonexistent target {'.'.join(target_atoms[:i])}"
+            )
+        attr_itr = getattr(attr_itr, atom)
+    return attr_itr
+
+
 class GraphLowering(torch.fx.Interpreter):
+    graph_outputs: List[ir.IRNode]
+
     def symbolic_sizes_strides(self, ex: torch.Tensor):
         """
         Support dynamic shapes and dynamic strides by assigning variables
@@ -148,16 +192,22 @@ class GraphLowering(torch.fx.Interpreter):
         if get_scheduling_for_device("cpu") is None:
             from .codegen.cpp import CppScheduling
 
-            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
+            register_backend_for_device(
+                "cpu", CppScheduling, WrapperCodeGen, CppWrapperCpu
+            )
 
         if get_scheduling_for_device("cuda") is None:
-            from .codegen.triton import TritonScheduling
+            from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
 
-            register_backend_for_device("cuda", TritonScheduling, WrapperCodeGen)
+            # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
+            register_backend_for_device(
+                "cuda", CUDACombinedScheduling, WrapperCodeGen, CppWrapperCuda
+            )
 
     def __init__(
         self,
         gm: torch.fx.GraphModule,
+        example_inputs: Optional[List[torch.Tensor]] = None,
         shape_env=None,
         num_static_inputs=None,
         graph_id=None,
@@ -165,13 +215,27 @@ class GraphLowering(torch.fx.Interpreter):
         aot_mode=False,
         user_visible_outputs=frozenset(),
         layout_opt=None,
+        extern_node_serializer=None,
+        is_inference=False,
+        is_const_graph=False,
+        const_output_index=None,
+        const_code=None,
+        const_module=None,
+        name=None,
     ):
         super().__init__(gm)
 
+        self.example_inputs = example_inputs
         self.layout_opt = (
-            layout_opt if layout_opt is not None else self.decide_layout_opt(gm)
+            layout_opt
+            if layout_opt is not None
+            else self.decide_layout_opt(gm, is_inference=is_inference)
         )
         self.num_channels_last_conv = 0
+        self.is_inference = is_inference
+        self.is_const_graph = is_const_graph
+        self.const_code = const_code
+        self.const_module = const_module
 
         self.extra_traceback = False  # we do our own error wrapping
         if shape_env is None:
@@ -182,33 +246,57 @@ class GraphLowering(torch.fx.Interpreter):
             self.reuse_shape_env = True
         self._shape_env = shape_env
         self.sizevars = SizeVarAllocator(shape_env)
+        self.graph_input_names: List[str] = []
         self.graph_inputs: Dict[str, TensorBox] = {}
         self.graph_inputs_original: Dict[str, InputBuffer] = {}
-        self.graph_outputs: Optional[List[ir.IRNode]] = None
-        self.device_types: Set[str] = set()
-        self.device_idxs: Set[int] = set()
+        self.device_types: Set[str] = (
+            const_module.device_types if const_module else set()
+        )
+        self.device_idxs: Set[int] = const_module.device_idxs if const_module else set()
         self.cuda = False
-        self.buffers: List[ir.ComputedBuffer] = []
-        self.constants: Dict[str, torch.Tensor] = {}
+        self.buffers: List[ir.Buffer] = []
+        self.const_output_index: Dict[str, int] = (
+            const_output_index if const_output_index else {}
+        )
+        self.folded_constants: Set[str] = (
+            set(const_output_index.keys()) if const_output_index else set()
+        )
+        self.constants: Dict[str, torch.Tensor] = (
+            const_module.constants if const_module else {}
+        )
         self.constant_reprs: Dict[str, str] = {}
         self.removed_buffers: Set[str] = set()
         self.removed_inplace_buffers: Set[str] = set()
         self.mutated_buffers: Set[str] = set()
+        self.never_reuse_buffers: Set[str] = set()
         self.inplaced_to_remove: Set[str] = set()
-        self.wrapper_code: Optional[WrapperCodeGen] = None
-        self.current_node: Optional[torch.fx.Node] = None
+        self.device_ops: DeviceOpOverrides = None  # type: ignore[assignment]
+        self.wrapper_code: WrapperCodeGen = None  # type: ignore[assignment]
+        # See `ProxyExecutor Design Note` in ir.py for more details
+        self.extern_kernel_nodes: List[ir.ExternKernelNode] = []
+        self.extern_node_serializer: Optional[
+            Callable[[List[ir.ExternKernelNode]], Any]
+        ] = extern_node_serializer
+        self.current_node: torch.fx.Node = None  # type: ignore[assignment]
         self.num_static_inputs = num_static_inputs
         self.lists: Dict[str, List[str]] = {}
         self.mutated_inputs: Set[str] = set()
         self.mutated_input_idxs: List[int] = []
-        self.name_to_buffer: Dict[str, ir.ComputedBuffer] = {}
+        self.name_to_buffer: Dict[str, ir.Buffer] = {}
         self.name_to_users: DefaultDict[str, List[ir.IRNode]] = defaultdict(list)
         self.creation_time = time.time()
-        self.name = "GraphLowering"
+        self.name = name
         self.cpp_wrapper = cpp_wrapper
+
+        # record multi_kernel choice for cpp_wrapper so the second pass knows
+        # which sub-kernel is picked. Copy cpp_wrapper to another variable
+        # since cpp_wrapper flag is set to false for the first pass of codegen.
+        self.record_multi_kernel_choice = cpp_wrapper
+        self.multi_kernel_to_choice: Dict[str, int] = {}
+
         self.aot_mode = aot_mode
         self.graph_id = graph_id
-        self.scheduler = None
+        self.scheduler: "torch._inductor.scheduler.Scheduler" = None  # type: ignore[assignment]
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
@@ -222,17 +310,30 @@ class GraphLowering(torch.fx.Interpreter):
             []
         )  # This is the linemap used by the profiler to mark custom compiled kernels getting run
         # Used if lowering encounters cases where cudagraphs are not supported
-        self.disable_cudagraphs = False
+        self.disable_cudagraphs_reason: Optional[str] = None
+
+        # only keeping one node per device for stack trace purposes
+        self.device_node_mapping: Dict[torch.device, torch.fx.Node] = {}
+        self.orig_gm: torch.fx.GraphModule = gm.__copy__()
+        self.dynamo_flat_name_to_original_fqn = self.module.meta.get(
+            "dynamo_flat_name_to_original_fqn", {}
+        )
+        self.allocated_constant_name = (
+            const_module.allocated_constant_name if const_module is not None else {}
+        )
         self.init_backend_registration()
 
     @staticmethod
-    def decide_layout_opt(gm) -> bool:
+    def decide_layout_opt(gm, *, is_inference) -> bool:
         """
         Decide if we should enable layout optimization for this graph based on
         heuristics.
         """
         if not config.layout_optimization:
             return False
+
+        if config.force_layout_optimization:
+            return True
 
         conv_nodes = [
             n for n in gm.graph.nodes if n.target == torch.ops.aten.convolution.default
@@ -242,41 +343,103 @@ class GraphLowering(torch.fx.Interpreter):
         if nconv == 0:
             return False
 
-        # Currently on ROCm we are seeing some slow downs in gcnArch that do not
-        # have optimal NHWC implementations. On ROCm MI200 series we will
-        # default to the enforced last channels behavior, but on non-MI200 series
-        # we will disable the forced layout.
-        if torch.version.hip and torch.cuda.is_available():
-            gpu_name = torch.cuda.get_device_name(0)
-            if not re.search(r"MI2\d\d", gpu_name):
-                return False
-
-        # For cpu backend and mkldnn enabled, we always using channels_last for a better performance.
+        # For cpu backend and mkldnn enabled, we always use channels_last for better performance.
         if (
-            all(
+            torch.backends.mkldnn.enabled
+            and torch.backends.mkldnn.is_available()
+            and all(
                 n.args[idx].meta["val"].device == torch.device("cpu")
                 for n in conv_nodes
                 for idx in [0, 1]
             )
-            and torch.backends.mkldnn.enabled
-            and torch.backends.mkldnn.is_available()
         ):
             return True
 
-        # Followering models are skipped due to this:
+        # Following models are skipped due to this:
         # jx_nest_base
         # volo_d1_224
         if len(list(gm.graph.nodes)) >= 300 * nconv:
-            log.debug("Only a few conv, skip layout optimization")
+            log.debug("Skipped layout opt because only a few conv")
             return False
 
         if any(
-            free_symbols(n.args[idx].meta["val"]) for n in conv_nodes for idx in [0, 1]
+            has_free_symbols(n.args[idx].meta["val"])
+            for n in conv_nodes
+            for idx in [0, 1]
         ):
             log.debug(
                 "See perf regression with dynamic shape. Follow up in https://github.com/pytorch/pytorch/issues/102670"
             )
             return False
+
+        def is_grouped(n):
+            return n.args[-1] > 1 and n.args[1].meta["val"].size(1) > 1
+
+        def is_in_out_channel(n):
+            return (
+                n.args[1].meta["val"].size(0) * 2 <= n.args[1].meta["val"].size(1)
+                and n.args[1].meta["val"].size(2) > 1
+            )
+
+        def is_small_channel(n):
+            return (
+                n.args[1].meta["val"].size(0) <= 64
+                and n.args[1].meta["val"].size(1) <= 64
+            )
+
+        # only grouped convolutions benchmarked as slower in conv samples for inference only
+        if is_inference:
+            from torch.utils.flop_counter import FlopCounterMode
+
+            flop_counts: Dict[str, float] = defaultdict(float)
+            for node in conv_nodes:
+                success, args, kwargs = torch._inductor.fx_utils.get_fake_args_kwargs(
+                    node
+                )
+
+                if success:
+                    with FlopCounterMode(display=False) as flop_counter_mode:
+                        with V.fake_mode:
+                            node.target(*args, **kwargs)
+
+                    counted_flops = flop_counter_mode.get_total_flops()
+                    if is_grouped(node):
+                        node_type = "grouped"
+                    elif is_small_channel(node):
+                        node_type = "small"
+                    elif is_in_out_channel(node):
+                        node_type = "in_out"
+                    else:
+                        node_type = "default"
+
+                    flop_counts[node_type] += counted_flops
+                else:
+                    log.debug("Conv inputs meta not found")
+
+            # average benchmarked channels last speedup / slowdown, < 1 is speedup.
+            # taken from the set of convolution inputs in benchmarks/dynamo/microbenchmarks/operator_inp_logs/torchbench_train/
+            # To regenerate these numbers follow https://gist.github.com/eellison/55d7a6ed6f39829d68ac56f95f4df5bb
+            GROUPED_MULTIPLIER = 1.358
+            DEFAULT_MULTIPLIER = 0.823
+            IN_OUT_MULTIPLIER = 0.725
+            SMALL_MULTIPLIER = 0.783
+
+            total_flops = sum(flop_counts.values())
+            # TODO - get different values per hardware
+            weighted_flops = (
+                flop_counts["grouped"] * GROUPED_MULTIPLIER
+                + flop_counts["small"] * SMALL_MULTIPLIER
+                + flop_counts["in_out"] * IN_OUT_MULTIPLIER
+                + flop_counts["default"] * DEFAULT_MULTIPLIER
+            )
+            do_layout_opt = weighted_flops <= total_flops
+            if not do_layout_opt:
+                log.debug(
+                    "Skipped layout opt in inference because weighted flops indicate slowdown, default: %d, channels last: %d",
+                    total_flops,
+                    weighted_flops,
+                )
+            return do_layout_opt
 
         # Channels last layout can dramatically hurt grouped conv perf. E.g.
         # Conv with arguments like
@@ -295,10 +458,10 @@ class GraphLowering(torch.fx.Interpreter):
         #
         # The following heuristics skip using channels-last if the model contains
         # grouped convolution with in-channels > 1.
-        if any(
-            n.args[-1] > 1 and n.args[1].meta["val"].size(1) > 1 for n in conv_nodes
-        ):
-            log.debug("Found grouped convolution with >1 in_channels!")
+        if any(map(is_grouped, conv_nodes)):
+            log.debug(
+                "Skip layout opt because found grouped convolution with >1 in_channels!"
+            )
             return False
 
         # For some models that contain convolution with larger in-channel than out-channel, applying
@@ -308,50 +471,50 @@ class GraphLowering(torch.fx.Interpreter):
         # - phlippe_densenet (slightly worse)
         # - Background_Matting (1.22x -> 0.821x)
         # - pytorch_CycleGAN_and_pix2pix (1.597x -> 1.294x)
-        if any(
-            n.args[1].meta["val"].size(0) * 2 <= n.args[1].meta["val"].size(1)
-            and n.args[1].meta["val"].size(2) > 1
-            for n in conv_nodes
-        ):
+        if any(map(is_in_out_channel, conv_nodes)):
             log.debug(
-                "Skip layout optimization because some convolutions have smaller out_channel"
+                "Skip layout opt because some convolutions have smaller out_channel"
             )
             return False
 
         # Following models are skipped due to this:
         # - functorch_maml_omniglot
-        if all(
-            n.args[1].meta["val"].size(0) <= 64 and n.args[1].meta["val"].size(1) <= 64
-            for n in conv_nodes
-        ):
+        if all(map(is_small_channel, conv_nodes)):
             log.debug("Skip layout opt because all convolution channels are too small")
             return False
 
-        # aten._scaled_dot_product_flash_attention requires the last stride of query/key/value
-        # to be 1. Check https://gist.github.com/shunting314/fa6eeab2aad8d1265c4d5e50b560d94f
-        # for more details.
-        #
-        # When a model contains aten._scaled_dot_product_flash_attention and we enable layout optimization,
-        # the op may get channels last input and fail. Example include: twins_pcpvt_base, xcit_large_24_p8_224
-        # for _scaled_dot_product_flash_attention and xcit_large_24_p8_224 for _scaled_dot_product_efficient_attention.
-        #
-        # We disable layout optimization if a model contains aten._scaled_dot_product_flash_attention.
-        #
-        # An alternative is to do necessary layout convertion to make sure aten._scaled_dot_product_flash_attention's
-        # inputs have the layout needed. But that seems to have worse perf than disabing the layout opt.
-        # TODO(shunting) revisit if we can still apply layout optimization to models containing sdpa while
-        # bringing perf gains.
-        for n in gm.graph.nodes:
-            if n.target in (
-                torch.ops.aten._scaled_dot_product_flash_attention.default,
-                torch.ops.aten._scaled_dot_product_efficient_attention.default,
-            ):
-                log.debug(
-                    "Skip layout optimization because sdpa (scaled dot product attention) is found"
-                )
-                return False
-
         return True
+
+    def qualify_name(self, name: str) -> str:
+        """Prepend the given name with the graph name if any."""
+        if self.name is not None:
+            return f"{self.name}_{name}"
+        return name
+
+    def make_subgraph(
+        self,
+        gm: torch.fx.GraphModule,
+        example_inputs: List[torch.Tensor],
+        subgraph_name: str,
+    ) -> "GraphLowering":
+        """
+        Make a subgraph of the current graph with all inherited
+        parts, except the graph module (`gm`) and `example_inputs`.
+        The subgraphs are lowered separately, but intended to be
+        inlined in the parent graph's codegening. Hence the need
+        for maintaining the same `shape_env` and other properties.
+        The subgraph name is qualified by the parent graph's name.
+        """
+        return GraphLowering(
+            gm=gm,
+            example_inputs=example_inputs,
+            shape_env=self._shape_env,
+            cpp_wrapper=self.cpp_wrapper,
+            aot_mode=self.aot_mode,
+            extern_node_serializer=self.extern_node_serializer,
+            is_inference=self.is_inference,
+            name=self.qualify_name(subgraph_name),
+        )
 
     def find_nodes_prefer_channels_last(self):
         """
@@ -409,9 +572,12 @@ class GraphLowering(torch.fx.Interpreter):
             self._warned_fallback.add(name)
             perf_hint_log.info("Using FallbackKernel: %s", name)
 
-    def add_device_idx(self, idx: Optional[int]):
-        if idx is not None:
-            self.device_idxs.add(idx)
+    def add_device_info(self, device: torch.device):
+        self.device_types.add(device.type)
+        if device.index is not None:
+            self.device_idxs.add(device.index)
+        if V.graph.current_node and device not in self.device_node_mapping:
+            self.device_node_mapping[device] = V.graph.current_node
 
     @property
     def fake_mode(self):
@@ -454,19 +620,17 @@ class GraphLowering(torch.fx.Interpreter):
     def run(self, *args):
         return super().run(*args)
 
-    def disable_cpp_wrapper(self, cond):
-        metrics.disable_cpp_wrapper += 1
-        self.cpp_wrapper = False
-        log.debug("Set cpp_wrapper to False due to %s", cond)
-
-    def register_buffer(self, buffer: ir.ComputedBuffer):
-        name = f"buf{len(self.buffers)}"
+    def register_buffer(self, buffer: ir.Buffer):
+        name = self.qualify_name(f"buf{len(self.buffers)}")
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
+        # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
+        if not isinstance(buffer, ir.ComputedBuffer) or not buffer.is_zero_elements():
+            self.add_device_info(buffer.get_device())
         return name
 
     def register_list(self, buffer_names: List[str]):
-        name = "list_" + "_".join(buffer_names)
+        name = self.qualify_name("list_" + "_".join(buffer_names))
         self.lists[name] = buffer_names
         return name
 
@@ -479,7 +643,10 @@ class GraphLowering(torch.fx.Interpreter):
                 if (
                     not hasattr(value, "data")
                     or not isinstance(value.data, ir.IRNode)
-                    or not isinstance(value.data.data, ir.IRNode)
+                    or not (
+                        hasattr(value.data, "data")
+                        and isinstance(value.data.data, ir.IRNode)
+                    )
                 ):
                     return
 
@@ -502,33 +669,52 @@ class GraphLowering(torch.fx.Interpreter):
         for user in self.name_to_users[name]:
             user.realize()
 
-    def add_tensor_constant(self, data):
-        def allocate():
-            for name, value in self.constants.items():
-                if (
-                    not data.is_mkldnn
-                    and data.size() == value.size()
-                    and data.stride() == value.stride()
-                    and data.dtype == value.dtype
-                    and data.device == value.device
-                    and torch.eq(data, value).all()
-                ):
-                    return name
-            name = f"constant{len(self.constants)}"
+    def add_tensor_constant(self, data, name=None):
+        def allocate(name):
+            if not config.aot_inductor.use_runtime_constant_folding:
+                for constant_name, value in self.constants.items():
+                    if (
+                        not data.is_mkldnn
+                        and data.size() == value.size()
+                        and data.stride() == value.stride()
+                        and data.dtype == value.dtype
+                        and data.device == value.device
+                        and torch.eq(data, value).all()
+                    ):
+                        return constant_name
+
+            if name is None:
+                name = f"constant{len(self.constants)}"
+            if name[0].isdigit():
+                name = f"constant_{name}"
+            name = self.qualify_name(name)
+            # We may generate a var name for each constant in the codegen.
+            # Let's only keep sane characters.
+            prefix = re.sub(r"[^a-zA-Z0-9_]", "_", name)
+            name = prefix
+            cnt = 0
+            while name in self.constants:
+                name = f"{prefix}_{cnt}"
+                cnt += 1
             self.constants[name] = data
-            self.constant_reprs[name] = hashlib.sha256(
-                repr(data).encode("utf-8")
-            ).hexdigest()
+            self.constant_reprs[name] = (
+                f"{data.device!r} {data.dtype!r} "
+                f"{tuple(data.size())!r} {tuple(data.stride())!r} "
+                f"{hash(data):x}"
+            )
             return name
+
+        new_name = allocate(name)
+        self.allocated_constant_name[new_name] = name
 
         return TensorBox.create(
             ir.ConstantBuffer(
-                allocate(),
+                new_name,
                 FixedLayout(data.device, data.dtype, *self.static_sizes_strides(data)),
             )
         )
 
-    def constant_name(self, name: str, device_override: torch.device):
+    def constant_name(self, name: str, device_override: Optional[torch.device]):
         """
         We AOT copy constants to the devices they are needed on.
         If device_override doesn't match the constant's device, then
@@ -543,6 +729,7 @@ class GraphLowering(torch.fx.Interpreter):
 
     def placeholder(self, target: str, args, kwargs):
         example = super().placeholder(target, args, kwargs)
+        self.graph_input_names.append(target)
         if isinstance(example, SymTypes):
             expr = example.node.expr
             self.graph_inputs[target] = expr
@@ -551,6 +738,10 @@ class GraphLowering(torch.fx.Interpreter):
             expr = sympy.sympify(example)
             self.graph_inputs[target] = expr
             return expr
+        if isinstance(example, BackwardState):
+            # Ignored arg, must be unused
+            # Alternately we could filter this out in AotAutograd
+            return None
         assert isinstance(example, torch.Tensor), example
         # todo(chilli): We can remove the last check once we turn buffers into
         # static shape tensors. That's a hack to workaround Inductor believing
@@ -562,6 +753,7 @@ class GraphLowering(torch.fx.Interpreter):
         else:
             sizes, strides = self.symbolic_sizes_strides(example)
         # TODO(jansel): handle input aliasing
+        target = self.qualify_name(target)
         tensor = TensorBox.create(
             InputBuffer(
                 target,
@@ -570,23 +762,45 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.graph_inputs[target] = tensor
         self.graph_inputs_original[target] = tensor.data.data
-        self.device_types.add(example.device.type)
-        self.add_device_idx(example.device.index)
+        self.add_device_info(example.device)
         return tensor
 
     def call_function(self, target, args, kwargs):
-        if target is operator.getitem and isinstance(args[0], (list, tuple)):
+        if target is operator.getitem and isinstance(args[0], (list, tuple, dict)):
             return super().call_function(target, args, kwargs)
 
         if hasattr(target, "_inductor_lowering_function"):
             # passthrough lowerings from .pattern_matcher
             return target(*args, **kwargs)
 
+        def get_custom_op_layout_constraints(target, args, kwargs):
+            # Custom operations that require preserving stride order
+            # which run through implicit fallback must constrain their
+            # arguments' fx strides
+            layout_constraint = None
+            if torch._C.Tag.needs_fixed_stride_order in target.tags:
+                # We have to set the current args because call_function will immediately
+                # evaluate this lowering after creating the fallback, without evaluating
+                # the layout constraint
+                args, kwargs = constrain_to_fx_strides(
+                    self.current_node, *args, **kwargs
+                )
+                # Also register the layout constraint so when the fallback
+                # is used again, we can constrain the args to the same layout
+                layout_constraint = constrain_to_fx_strides
+            return layout_constraint, args, kwargs
+
         if target not in lowerings:
+            assert isinstance(
+                target, torch._ops.OpOverload
+            ), f"{target} is not an OpOverload"
             base_name = target.name().split(".")[0]
             if base_name in FALLBACK_ALLOW_LIST:
                 make_fallback(target)
             elif config.implicit_fallbacks:
+                layout_constraint, args, kwargs = get_custom_op_layout_constraints(
+                    target, args, kwargs
+                )
                 error = (
                     MissingOperatorWithDecomp
                     if get_decompositions([target])
@@ -596,7 +810,8 @@ class GraphLowering(torch.fx.Interpreter):
                     "Creating implicit fallback for:\n%s",
                     error.operator_str(target, args, kwargs),
                 )
-                make_fallback(target)
+                make_fallback(target, layout_constraint)
+
             elif get_decompositions([target]):
                 # There isn't a good way to dynamically patch this in
                 # since AOT Autograd already ran.  The error message tells
@@ -606,6 +821,7 @@ class GraphLowering(torch.fx.Interpreter):
                 raise MissingOperatorWithoutDecomp(target, args, kwargs)
 
         try:
+            log.debug("  via %s", lowerings[target])
             out = lowerings[target](*args, **kwargs)
             return out
         except Exception as e:
@@ -613,23 +829,37 @@ class GraphLowering(torch.fx.Interpreter):
                 e.__traceback__
             ) from None
 
+    @staticmethod
+    def can_inline_constant(t: torch.Tensor) -> bool:
+        """
+        True if this is a small constant attr that will be inlined.
+        """
+        return len(t.shape) == 1 and t.shape[0] <= 8
+
     def get_attr(self, target, args, kwargs):
         # this is a constant
-        value = getattr(self.module, target)
+        value = getattr_recursive(self.module, target)
 
-        if unsupported_output_tensor(value):
-            return self.add_tensor_constant(value)
+        if isinstance(value, torch.fx.GraphModule):
+            return ir.Subgraph(name=target, graph_module=value)
+
+        if (
+            config.aot_inductor.use_runtime_constant_folding
+            or config.always_keep_tensor_constants
+            or unsupported_output_tensor(value)
+        ):
+            return self.add_tensor_constant(value, target)
 
         with no_dispatch():
             if value.shape == ():
                 return Constant(value.item(), value.dtype, value.device)
-            if len(value.shape) == 1 and value.shape[0] <= 8:
+            if self.can_inline_constant(value):
                 # tensor lowering has constant inlining logic
                 from .lowering import tensor
 
                 return tensor(value.tolist(), dtype=value.dtype, device=value.device)
 
-        return self.add_tensor_constant(value)
+        return self.add_tensor_constant(value, target)
 
     def call_module(self, target, args, kwargs):
         raise AssertionError()
@@ -639,6 +869,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def output(self, target, args, kwargs):
         result = super().output(target, args, kwargs)
+        if not isinstance(result, (tuple, list)):
+            # nested subgraphs can have singleton outputs
+            result = (result,)
         assert isinstance(result, (tuple, list)), type(result)
         assert all(
             isinstance(
@@ -655,10 +888,31 @@ class GraphLowering(torch.fx.Interpreter):
             )
             for x in result
         ), result
-        self.graph_outputs = [ir.ExternKernel.realize_input(x) for x in result]
+
+        fx_node_args = V.graph.current_node.args[0]  # type: ignore[arg-type]
+        if not isinstance(fx_node_args, (tuple, list)):
+            # nested subgraphs can have singleton outputs
+            fx_node_args = (fx_node_args,)
+        result = [ir.ExternKernel.realize_input(x) for x in result]
+        result_correct_strides = []
+
+        assert len(fx_node_args) == len(result)
+        for r, fx_node in zip(result, fx_node_args):
+            if not isinstance(r, (ir.TensorBox, ir.BaseView)):
+                result_correct_strides.append(r)
+            else:
+                # AOT Autograd tries to detect stride divergence of inductor from output metadata.
+                # Here, we try to avoid spurious divergence by matching insignificant strides such as
+                result_correct_strides.append(
+                    self.match_insignificant_strides(r, fx_node.meta["val"].stride())
+                )
+
+        self.graph_outputs = result_correct_strides
         value: ir.IRNode
         for name, value in self.graph_inputs.items():
-            assert isinstance(value, (TensorBox, sympy.Expr))
+            assert isinstance(
+                value, (TensorBox, sympy.Expr)
+            ), f"Unsupported inductor graph input type: {type(value)}"
             if not isinstance(value, TensorBox):
                 continue
             value.realize()
@@ -669,7 +923,9 @@ class GraphLowering(torch.fx.Interpreter):
             value = value.data
             if not isinstance(value, InputBuffer) or value.get_name() != name:
                 # one of our inputs was mutated, need to turn that into a copy
-                ir.MutationLayout.realize_into(value, self.graph_inputs_original[name])
+                ir.MutationLayoutSHOULDREMOVE.realize_into(
+                    value, self.graph_inputs_original[name]
+                )
                 # replace output with mutated input
                 try:
                     ind = self.graph_outputs.index(value_storage_box)
@@ -681,43 +937,104 @@ class GraphLowering(torch.fx.Interpreter):
         log.debug(
             "Force channels last inputs for %d conv for the current graph with id %d",
             self.num_channels_last_conv,
-            self.graph_id,
+            self.graph_id if self.graph_id is not None else -1,
         )
 
     def finalize(self):
         for buf in self.buffers:
             buf.decide_layout()
 
+    @contextmanager
+    def set_current_node(self, node: torch.fx.Node):
+        old = self.current_node
+        try:
+            self.current_node = node
+            yield
+        finally:
+            self.current_node = old
+
+    def match_insignificant_strides(
+        self,
+        tensor,
+        meta_strides_inp: Tuple[Union[int, torch.SymInt], ...],
+    ) -> ir.TensorBox:
+        # should have already been realized
+        assert torch._inductor.ir.is_storage_and_layout(tensor)
+
+        meta_strides = [
+            s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_strides_inp
+        ]
+
+        if all(
+            self.sizevars.statically_known_equals(s1, s2)
+            for s1, s2 in zip(meta_strides, tensor.get_stride())
+        ):
+            return tensor
+
+        def significant_strides_equal(shape, meta_strides, tensor_strides):
+            for dim, s1, s2 in zip(shape, meta_strides, tensor_strides):
+                if self.sizevars.statically_known_leq(dim, 1):  # type: ignore[arg-type]
+                    continue
+
+                if not self.sizevars.statically_known_equals(s1, s2):
+                    return False
+
+            return True
+
+        if not significant_strides_equal(
+            tensor.get_size(), meta_strides, tensor.get_stride()
+        ):
+            return tensor
+
+        storage, old_layout = torch._inductor.ir.as_storage_and_layout(tensor)
+        new_stride = list(old_layout.stride)
+        for i, s in enumerate(tensor.get_size()):
+            if self.sizevars.statically_known_leq(s, 1):  # type: ignore[arg-type]
+                new_stride[i] = meta_strides[i]
+
+        new_layout = torch._inductor.ir.FixedLayout(
+            old_layout.device,
+            old_layout.dtype,
+            old_layout.size,
+            new_stride,
+            old_layout.offset,
+        )
+        return ir.TensorBox(torch._inductor.ir.ReinterpretView(storage, new_layout))
+
     def run_node(self, n: torch.fx.Node):
+        def debug(msg):
+            log.debug("lowering %s %s", LazyString(n.format_node), msg)
+
         origins = {n}
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
             origins |= gather_origins(args, kwargs)
-        with ir.IRNode.current_origins(origins), self.set_current_node(n):
+        with ir.IRNode.current_origins(origins), self.set_current_node(
+            n
+        ), V.set_current_node(n):
             if (
                 n.op == "call_function"
                 and n.target is not operator.getitem
                 and fallback_node_due_to_unsupported_type(n)
             ):
+                debug("fallback_handler")
                 result = fallback_handler(n.target, add_to_fallback_set=False)(
-                    *args, **kwargs
+                    *args, **kwargs  # type: ignore[possibly-undefined]
                 )
             elif n.op == "call_function" and n.target in layout_constraints:
-                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)
+                debug("layout_constraints")
+                args, kwargs = layout_constraints[n.target](n, *args, **kwargs)  # type: ignore[index]
                 result = self.call_function(n.target, args, kwargs)
-            elif n.target == torch.ops.aten.sym_stride:
-                # inductor graphs can occasionally return sizes/strides,
-                # e.g. if we need to save symints for the backward graph.
-                if isinstance(n.meta["val"], torch.SymInt):
-                    result = n.meta["val"].node.expr
-                else:
-                    result = super().run_node(n)
             elif is_magic_method(n.target):
+                # TODO: this is sus, it probably should be handled in the
+                # lowerings themselves similarly to sym_size/sym-stride
+                debug("is_magic_method")
                 if isinstance(n.meta["val"], torch.SymInt):
                     result = n.meta["val"].node.expr
                 else:
                     result = super().run_node(n)
             else:
+                debug("")
                 result = super().run_node(n)
 
             # require the same stride order for dense outputs,
@@ -736,14 +1053,23 @@ class GraphLowering(torch.fx.Interpreter):
             is_input_for_as_strided = any(
                 user.target in as_strided_ops for user in n.users
             )
+            if (
+                is_output
+                and isinstance(result, TensorBox)
+                and isinstance(result.data, ir.BaseView)
+            ):
+                # Realize so that outputs are correctly aliased
+                result.realize()
+
             if (is_output or is_input_for_as_strided) and isinstance(
                 n.meta["val"], torch.Tensor
             ):
                 strides = n.meta["val"].stride()
                 dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
+                unbacked_symbols_in_strides = len(free_unbacked_symbols(strides)) > 0
                 # requiring a stride order for a non-dense output wouldn't
                 # recreate the same strides, and would fail with view, defer for now.
-                if dense and len(strides):
+                if not unbacked_symbols_in_strides and dense and len(strides):
                     stride_order = ir.get_stride_order(strides)
                     if (
                         len(result.get_size()) == 4
@@ -790,6 +1116,7 @@ class GraphLowering(torch.fx.Interpreter):
                                 torch.ops.onednn.qconv2d_pointwise.default,
                                 torch.ops.onednn.qconv2d_pointwise.binary,
                                 torch.ops.onednn.qlinear_pointwise.default,
+                                torch.ops.onednn.qlinear_pointwise.tensor,
                             ]
                             if torch._C.has_mkl:
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
@@ -810,6 +1137,15 @@ class GraphLowering(torch.fx.Interpreter):
                 # there are multiple branches each with small number of memory
                 # reads, but they converge to a user.
                 result.realize_hint()
+
+            # Realize if a Pointwise has too much stuff to be inlined.
+            # As this may cause RecursionError during Inductor's evaluation.
+            if isinstance(result, TensorBox) and isinstance(result.data, StorageBox):
+                curr = result.data.data
+                if isinstance(curr, Pointwise):
+                    # Use inner fn as a rough proxy. Good enough.
+                    if curr.has_large_inner_fn():
+                        result.realize()
 
         # This is not complete, but it doesn't have to be: origin_node
         # tracking is best effort.  The logic here critically relies on direct
@@ -840,15 +1176,13 @@ class GraphLowering(torch.fx.Interpreter):
 
         return result
 
-    def check_cpp_codegen_disabled(self):
+    def validate_can_generate_cpp_wrapper(self):
         if config.disable_cpp_codegen:
-            self.disable_cpp_wrapper("cpp codegen disabled")
+            raise CppWrapperCodeGenError("C++ codegen is disabled")
 
-    def check_platform(self):
-        if sys.platform != "linux":
-            self.disable_cpp_wrapper("platform not linux")
+        if sys.platform not in ["linux", "darwin"]:
+            raise CppWrapperCodeGenError(f"Unsupported platform {sys.platform}")
 
-    def check_input_for_cpp_buffer(self):
         for value in self.graph_inputs.values():
             dtype = None
             if isinstance(value, TensorBox):
@@ -859,41 +1193,14 @@ class GraphLowering(torch.fx.Interpreter):
                 dtype = may_get_constant_buffer_dtype(value)
 
             if not supported_dtype_of_cpp_wrapper(dtype, self.cuda):
-                self.disable_cpp_wrapper("unsupported inputs dtype")
-
-    @contextmanager
-    def set_current_node(self, node: torch.fx.Node):
-        old = self.current_node
-        try:
-            self.current_node = node
-            yield
-        finally:
-            self.current_node = old
-
-    def check_cpp_wrapper(self):
-        self.check_cpp_codegen_disabled()
-        self.check_platform()
-        self.check_input_for_cpp_buffer()
+                raise CppWrapperCodeGenError(f"Unsupported input dtype {dtype}")
 
     def init_wrapper_code(self):
         self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
-            self.check_cpp_wrapper()
-            # Re-check self.cpp_wrapper because it might be disabled due to failed checking
-            if self.cuda:
-                assert self.cpp_wrapper, "CudaWrapperCodeGen hit unsupported case"
-
-            if self.cpp_wrapper:
-                self.wrapper_code = (
-                    CudaWrapperCodeGen() if self.cuda else CppWrapperCodeGen()
-                )
-                return
+            self.validate_can_generate_cpp_wrapper()
 
         device_types = self.device_types.copy()
-        # In terms of some operations that don't have input tensors, we need to
-        # check the deivce of the buffers.
-        for buffer in self.buffers:
-            device_types.add(buffer.get_device().type)
         device_types.discard("cpu")
         # TODO(Eikan): Only support mixing cpu and other device now.
         assert len(device_types) <= 1, "Does not support mixing {}".format(
@@ -901,8 +1208,75 @@ class GraphLowering(torch.fx.Interpreter):
         )
         only_cpu = len(device_types) == 0
         device_type = "cpu" if only_cpu else device_types.pop()
-        wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
+
+        self.device_ops = get_device_op_overrides(device_type)
+        wrapper_code_gen_cls = get_wrapper_codegen_for_device(
+            device_type, self.cpp_wrapper
+        )
+        assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
         self.wrapper_code = wrapper_code_gen_cls()
+
+        if self.const_module:
+            # If we have const module, we could reuse the kernels
+            # This could avoid duplication and save time on doing recompilation (if Triton.)
+            self.wrapper_code._names_iter = self.const_module.wrapper_code._names_iter
+            self.wrapper_code.src_to_kernel = (
+                self.const_module.wrapper_code.src_to_kernel
+            )
+
+    def codegen_with_cpp_wrapper(self):
+        """
+        For CPU, the cpp wrapper codegen is done in one pass.
+        For GPU, the cpp wrapper codegen is done in two steps: JIT-compile the model with python
+        wrapper code and run it to generate autotuned kernel binaries in the first pass; and then
+        generate cpp wrapper code and compile it to a dynamic library in the second pass.
+        """
+        if "cuda" in self.device_types:
+            # first pass
+            self.cpp_wrapper = False
+            compiled = self.compile_to_module().call
+
+            def materialize(x):
+                if isinstance(x, (torch.SymInt, torch.SymFloat)):
+                    # Need concrete value to run dynamic shapes and tune the result
+                    return x.node.hint
+                elif isinstance(x, FakeTensor):
+                    return defake(x)
+                else:
+                    assert isinstance(
+                        x, torch.Tensor
+                    ), "Unknown type when creating real inputs" + str(type(x))
+                    return x
+
+            if tracing_context := torch._guards.TracingContext.try_get():
+                if tracing_context.output_strides:
+                    tracing_context.output_strides.clear()
+
+                params_flat = [
+                    param
+                    for param in tracing_context.params_flat  # type: ignore[union-attr]
+                    if param is not None
+                ]
+                real_inputs = [
+                    materialize(x) for x in itertools.chain(params_flat, V.real_inputs)
+                ]
+            else:
+                real_inputs = [materialize(x) for x in V.real_inputs]
+
+            with torch.utils._python_dispatch._disable_current_modes():
+                assert self.example_inputs is not None
+                compiled(real_inputs)
+            del real_inputs
+
+            # second pass
+            # TODO: reuse self.scheduler from the first pass to speed up the second pass
+            self.cpp_wrapper = True
+            self.removed_buffers.clear()
+            self.inplaced_to_remove.clear()
+            return self.codegen()
+        else:
+            # cpu
+            return self.codegen()
 
     def codegen(self):
         from .scheduler import Scheduler
@@ -910,10 +1284,32 @@ class GraphLowering(torch.fx.Interpreter):
         self.init_wrapper_code()
 
         self.scheduler = Scheduler(self.buffers)
-        assert self.scheduler is not None  # mypy can't figure this out
+        V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
+
+        self.wrapper_code.push_codegened_graph(self)
         self.scheduler.codegen()
-        assert self.wrapper_code is not None
-        return self.wrapper_code.generate()
+        result = self.wrapper_code.generate(self.is_inference)
+        self.wrapper_code.pop_codegened_graph()
+        return result
+
+    def codegen_subgraph(self, parent_graph):
+        """
+        This is a more compact version of the `codegen()` above
+        where we codegen this graph as a subgraph of some parent
+        graph. The parent graph is passed as an argument: the
+        intention is to inline codegening of the subgraph in
+        the parent graph's wrapper code (including the generated
+        kerenls). The wrapper code is not finalized (via `.generate()`
+        call), as this will be done in the parent graph's `codegen()`.
+        """
+        from .scheduler import Scheduler
+
+        self.wrapper_code = parent_graph.wrapper_code
+        self.device_ops = parent_graph.device_ops
+        self.cpp_wrapper = parent_graph.cpp_wrapper
+
+        self.scheduler = Scheduler(self.buffers)
+        self.scheduler.codegen()
 
     def count_bytes(self):
         from .scheduler import Scheduler
@@ -930,25 +1326,34 @@ class GraphLowering(torch.fx.Interpreter):
             node_runtimes.append((node, node.get_estimated_runtime()))
         return total_bytes, node_counts, node_runtimes
 
-    @dynamo_timed
+    @dynamo_timed(phase_name="code_gen")
     def compile_to_module(self):
         from .codecache import PyCodeCache
 
-        code, linemap = self.codegen()
+        code, linemap = (
+            self.codegen_with_cpp_wrapper() if self.cpp_wrapper else self.codegen()
+        )
         linemap = [(line_no, node.stack_trace) for line_no, node in linemap]
         key, path = PyCodeCache.write(code)
-        mod = PyCodeCache.load_by_key_path(key, path, linemap=linemap)
+        mod = PyCodeCache.load_by_key_path(
+            key, path, linemap=linemap, attrs=self.constants
+        )
         self.cache_key = key
         self.cache_path = path
         self.cache_linemap = linemap
 
-        for name, value in self.constants.items():
-            setattr(mod, name, value)
-
         # Logged twice as per https://github.com/pytorch/pytorch/pull/99038#discussion_r1167826029
         # TODO. Revisit this once the logging API is more mature
+        assert mod.__file__ is not None
+
+        log_module_code(mod.__file__)
         log.debug("Output code written to: %s", mod.__file__)
         output_code_log.debug("Output code: \n%s", code)
+        trace_structured(
+            "inductor_output_code",
+            lambda: {"filename": mod.__file__},
+            payload_fn=lambda: code,
+        )
         output_code_log.info("Output code written to: %s", mod.__file__)
         if config.benchmark_kernel:
             print(f"Compiled module path: {mod.__file__}", file=sys.stderr)
@@ -957,19 +1362,35 @@ class GraphLowering(torch.fx.Interpreter):
         return mod
 
     def compile_to_fn(self):
-        if self.aot_mode and self.cpp_wrapper:
-            from .codecache import AotCodeCache
+        if self.aot_mode:
+            from .codecache import AotCodeCompiler
 
-            code, linemap = self.codegen()
+            assert self.cpp_wrapper, "AOT mode only supports C++ wrapper"
+            code, linemap = self.codegen_with_cpp_wrapper()
             output_code_log.debug("Output code: \n%s", code)
 
+            serialized_extern_kernel_nodes = None
+            if (
+                config.is_fbcode()
+                and self.extern_kernel_nodes
+                and self.extern_node_serializer
+            ):
+                serialized_extern_kernel_nodes = self.extern_node_serializer(
+                    self.extern_kernel_nodes
+                )
+                output_code_log.debug(
+                    "Serialized Extern Kernel Nodes: \n%s",
+                    serialized_extern_kernel_nodes,
+                )
+
             # Directly return the file path with the compiled code
-            return AotCodeCache.compile(self, code, cuda=self.cuda)
+            return AotCodeCompiler.compile(
+                self, code, serialized_extern_kernel_nodes, cuda=self.cuda
+            )
         else:
             return self.compile_to_module().call
 
     def get_output_names(self):
-        assert self.graph_outputs is not None
         return [
             node.get_name()
             for node in self.graph_outputs

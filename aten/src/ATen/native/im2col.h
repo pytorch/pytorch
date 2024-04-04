@@ -55,7 +55,7 @@ static void im2col(
           }
         }
 
-        // move the the next index
+        // move the next index
         data_index_step(h_col, height_col, w_col, width_col);
       }
     });

@@ -11,7 +11,7 @@
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/xnnpack/Engine.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // NOTE: [functorch's PyTorch Operator Hacks]
 //
@@ -77,7 +77,7 @@ Tensor linear_hack(const Tensor& input, const Tensor& weight, const c10::optiona
   // See [Note: hacky wrapper removal for optional tensor]
   auto bias = bias_opt.has_value()
     ? c10::MaybeOwned<Tensor>::borrowed(*bias_opt)
-    : c10::MaybeOwned<Tensor>::owned(c10::in_place);
+    : c10::MaybeOwned<Tensor>::owned(std::in_place);
 
   if (input.is_mkldnn()) {
     return at::mkldnn_linear(input, weight, *bias);
@@ -167,7 +167,7 @@ namespace dropout_hack {
 namespace {
 
 template<bool inplace>
-using Ctype = typename std::conditional<inplace, Tensor&, Tensor>::type;
+using Ctype = std::conditional_t<inplace, Tensor&, Tensor>;
 
 static Tensor make_feature_noise(const Tensor& input) {
   auto input_sizes = input.sizes();
@@ -176,8 +176,7 @@ static Tensor make_feature_noise(const Tensor& input) {
   sizes.reserve(input.dim());
   sizes.push_back(input_sizes[0]);
   sizes.push_back(input_sizes[1]);
-  for (const auto i : c10::irange(2, input.dim())) {
-    (void)i; //Suppress unused variable warning
+  for (C10_UNUSED const auto i : c10::irange(2, input.dim())) {
     sizes.push_back(1);
   }
   // NB: THIS WAS CHANGED FROM THE ORIGINAL
@@ -313,4 +312,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchDynamicLayerFrontMode, m) {
   m.impl("feature_alpha_dropout_", dropout_hack::feature_alpha_dropout_);
 }
 
-}}
+} // namespace at::functorch

@@ -14,9 +14,11 @@ import torch.nn as nn
 from torch._inductor import config
 from torch._inductor.compile_fx import compile_fx_inner
 from torch._inductor.cudagraph_trees import cudagraphify_impl as tree_cudagraphify_impl
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 
+from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_LINUX,
@@ -24,7 +26,6 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
-    TestCase as TorchTestCase,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -41,19 +42,36 @@ importlib.import_module("filelock")
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
-HAS_MULTIGPU = HAS_CUDA and torch.cuda.device_count() >= 2
 aten = torch.ops.aten
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 requires_multigpu = functools.partial(
-    unittest.skipIf, not HAS_MULTIGPU, "requires multiple cuda devices"
+    unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
+from io import StringIO
+
+
+class capture_stderr(list):
+    """
+    Replace sys.stderr with a temporary StringIO
+    """
+
+    def __enter__(self):
+        self.sys_stderr = sys.stderr
+        self.stringio = StringIO()
+        sys.stderr = self.stringio
+        return self
+
+    def __exit__(self, *args):
+        self.append(str(self.stringio.getvalue()))
+        del self.stringio
+        sys.stderr = self.sys_stderr
 
 
 def cdata(t):
     return t.untyped_storage()._cdata
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
@@ -172,7 +190,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo(x):
                 return x * x * x
 
-            foo_opt = torch._dynamo.optimize()(foo)
+            foo_opt = torch.compile(foo)
             ones = torch.ones([4, 4], device="cuda")
             zeros = torch.zeros([5, 5], device="cuda")
             self.run_twc(foo_opt, ones)
@@ -205,6 +223,65 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_rng_non_trees(self):
             self.check_rng()
 
+        def test_mutation_reinplaced(self):
+            import torch.nn as nn
+
+            class Model(nn.Module):
+                def __init__(self):
+                    super().__init__()
+
+                def forward(self, input, other, out):
+                    input = torch.logical_xor(input=input, other=other, out=out)
+                    return input
+
+            x = torch.rand([1, 2, 1, 4, 9, 7], dtype=torch.float32).cuda()
+            y = torch.rand([1, 2, 1, 4, 9, 7], dtype=torch.float32).cuda()
+            z = torch.rand([1, 2, 1, 4, 9, 7], dtype=torch.float16).cuda()
+
+            model = Model().cuda()
+            eag = model(x, y, z)
+            with capture_stderr() as captured_output:
+                opt = torch.compile(model.forward, mode="reduce-overhead")(x, y, z)
+
+            FileCheck().check(
+                "skipping cudagraphs due to mutaton on input. Found from"
+            ).check("torch.logical_xor").run(captured_output[0])
+
+        @requires_multigpu()
+        def test_multiple_devices_msg(self):
+            @torch.compile()
+            def foo(x, y):
+                return (x + 1, y + 2)
+
+            with capture_stderr() as captured_output:
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+
+            FileCheck().check("skipping cudagraphs due to cpu device.").check(
+                "y + 2"
+            ).run(captured_output[0])
+
+            with capture_stderr() as captured_output:
+                foo(
+                    torch.ones([10], device="cuda:0"), torch.ones([10], device="cuda:1")
+                )
+
+            FileCheck().check("skipping cudagraphs due to multiple devices").run(
+                captured_output[0]
+            )
+
+        @torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True)
+        def test_skip_symbolic(self):
+            @torch.compile(dynamic=True)
+            def foo(x, y):
+                return x + y
+
+            with capture_stderr() as captured_output:
+                foo(torch.rand([10], device="cuda"), torch.rand([10], device="cuda"))
+
+            FileCheck().check(
+                "skipping cudagraphs due to graph with symbolic shapes inputs"
+            ).check("x + y").run(captured_output[0])
+
         def test_mutation(self):
             @torch.compile()
             def foo(x):
@@ -214,7 +291,12 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def inp():
                 return torch.ones([10], device="cuda")
 
-            foo(inp())
+            with capture_stderr() as captured_output:
+                foo(inp())
+
+            FileCheck().check("skipping cudagraphs due to mutaton on input.").check(
+                ".add_(2)"
+            ).run(captured_output[0])
 
             # mutation on inp doesnt hit cudagraphs
             self.assertIsNone(self.get_manager())
@@ -251,7 +333,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 torch._dynamo.graph_break()
                 return x * x * x
 
-            foo_opt = torch._dynamo.optimize()(foo)
+            foo_opt = torch.compile(foo)
             ones = torch.ones([4, 4], device="cuda")
             foo(ones)
             foo_opt(ones)
@@ -269,11 +351,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 z = x + y
                 return z
 
-            @torch._dynamo.optimize()
+            @torch.compile
             def foo2(x):
                 return x + 4
 
-            foo_opt = torch._dynamo.optimize()(foo)
+            foo_opt = torch.compile(foo)
 
             for _ in range(3):
                 out = foo_opt(torch.ones([4, 4], device="cuda"))
@@ -303,7 +385,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 else:
                     return y - 10
 
-            foo_opt = torch._dynamo.optimize()(foo)
+            foo_opt = torch.compile(foo)
             inp = torch.zeros([4, 4], dtype=torch.float, device="cuda")
             self.assertEqual(foo_opt(inp), foo(inp))
             self.assertEqual(foo_opt(inp), foo(inp))
@@ -431,6 +513,28 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_unaligned_static_input_no_cudagraphs(self):
             self._test_unaligned_static_input_impl()
 
+        def test_sparsity(self):
+            def foo(view_6, buf31):
+                return aten._sparse_coo_tensor_with_dims_and_tensors(
+                    1,
+                    1,
+                    [1000000, 64],
+                    view_6,
+                    buf31,
+                    dtype=torch.float32,
+                    layout=torch.sparse_coo,
+                    device="cuda",
+                    pin_memory=None,
+                )
+
+            foo_opt = torch.compile(foo)
+
+            view_6 = torch.zeros([1, 102397], dtype=torch.int64, device="cuda")
+            buf31 = torch.rand([102397, 64], device="cuda")
+
+            for _ in range(3):
+                self.assertEqual(foo_opt(view_6, buf31), foo(view_6, buf31))
+
         def test_accumulate_multiple_recordings(self):
             def foo(x):
                 y = x + x + x
@@ -440,7 +544,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 else:
                     return y * 10
 
-            foo_opt = torch._dynamo.optimize()(foo)
+            foo_opt = torch.compile(foo)
 
             # two separate compilations & recordings
             out1 = self.run_twc(foo_opt, torch.zeros([5], device="cuda"))
@@ -462,6 +566,27 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             gc.collect()
             self.assertEqual(all_live_block_count(), 0)
 
+        @torch._inductor.config.patch("freezing", True)
+        def test_constant_output(self):
+            class Mod(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.param = torch.nn.Parameter(
+                        torch.tensor([float(i) for i in range(10)], device="cuda")
+                    )
+
+                def forward(self, inp):
+                    return self.param, self.param[0:2], inp + 2
+
+            inp = torch.tensor([2], device="cuda")
+            m = Mod()
+            with torch.no_grad():
+                out_eager = m(inp)
+
+                m_comp = torch.compile(m)
+                for _ in range(3):
+                    self.assertEqual(out_eager, m_comp(inp))
+
         def test_live_outputs_multiple_graphs(self):
             def foo(x):
                 x = x + x + x
@@ -473,7 +598,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 else:
                     return y
 
-            foo_opt = torch._dynamo.optimize()(foo)
+            foo_opt = torch.compile(foo)
 
             self.run_twc(foo_opt, torch.zeros([5], device="cuda"))
             self.assertEqual(self.num_checkpoints(), 0)
@@ -665,6 +790,26 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             self.assertEqual(node.cached_tensor_outputs, [None])
             self.assertEqual(node.unaliased_in_all_paths, [False])
 
+        def test_warmup_stream_sync(self):
+            def foo(args):
+                x = args[0]
+                args.clear()
+                x_orig = x
+                for _ in range(100):
+                    x = x @ x
+                return (x,)
+
+            inp = torch.rand([4096, 4096], device="cuda")
+            ref = foo([inp])[0]
+            torch.cuda.synchronize()
+
+            user_stream = torch.cuda.Stream()
+            with torch.cuda.stream(user_stream):
+                foo_cg = self.cudagraphify_impl(foo, [inp], (0,))
+                out = foo_cg([inp])[0]
+                y = out + 1
+                self.assertEqual(y, ref + 1)
+
         def test_unaligned_static_parameter(self):
             def gen_inp():
                 inp = torch.ones([20], device="cuda")
@@ -765,6 +910,19 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             # didnt do additional recordings
             self.assertTrue(self.get_manager().new_graph_id().id == 2)
 
+        def test_empty_cpu_tensor(self):
+            def foo(x):
+                return x @ x, torch.tensor([])
+
+            foo_opt = torch.compile(foo)
+            x = torch.rand([4], device="cuda")
+
+            for _ in range(3):
+                out_opt = foo_opt(x)
+                self.assertEqual(foo(x), out_opt)
+
+            self.assertTrue(self.get_manager().new_graph_id().id == 1)
+
         def test_output_alias(self):
             inp = torch.rand([20, 20], device="cuda")
 
@@ -787,13 +945,17 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         def test_empty_storage(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
-                return (x + x + x), torch.zeros([0], device="cuda")
+                return (
+                    (x + x + x),
+                    torch.zeros([0], device="cuda"),
+                    torch.zeros([100], device="cuda")[0:0],
+                )
 
             inp = torch.rand([4], device="cuda")
             for _ in range(3):
                 out = foo(inp)
                 node = self.curr_node()
-                self.assertEqual(len(list(node.path_live_weakrefs())), 1)
+                self.assertEqual(len(list(node.path_live_weakrefs())), 2)
 
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -974,7 +1136,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_cleanup(self):
             def test_closure():
-                @torch._dynamo.optimize()
+                @torch.compile
                 def foo(x):
                     return x + 1 + 2, x * 10
 
@@ -993,7 +1155,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @torch._inductor.config.patch("triton.skip_cudagraph_warmup", True)
         def test_forward_backward(self):
-            @torch._dynamo.optimize()
+            @torch.compile
             def foo(x):
                 y = x * 2
                 return torch.sin(y) * torch.nn.functional.dropout(x, p=0.4)
@@ -1017,7 +1179,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo_unopt(x, y):
                 return (x + 1) @ y
 
-            foo = torch._dynamo.optimize()(foo_unopt)
+            foo = torch.compile(foo_unopt)
 
             foo_unopt(
                 torch.ones([20, 20], device="cuda"), torch.ones([20, 20], device="cuda")
@@ -1080,6 +1242,23 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             node = self.get_manager().current_node
             self.assertEqual(len(list(node.path_live_weakrefs())), 1)
+
+        def test_unstable_ptr(self):
+            import torch
+
+            @torch.compile(mode="reduce-overhead")
+            def foo(m, inp):
+                return m(inp)
+
+            def f():
+                l = []
+                m = torch.nn.Linear(20, 20).cuda()
+                for _ in range(4):
+                    inp = torch.rand([20, 20], device="cuda")
+                    foo(m, inp)
+                    m.weight.data = torch.rand([20, 20], device="cuda")
+
+            self.assertRaises(RuntimeError, f)
 
         @requires_multigpu()
         def test_manager_per_device(self):
@@ -1224,8 +1403,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo2(x):
                 return x * 12
 
-            foo_opt = torch._dynamo.optimize()(foo)
-            foo2_opt = torch._dynamo.optimize()(foo2)
+            foo_opt = torch.compile(foo)
+            foo2_opt = torch.compile(foo2)
             ones = torch.ones([4, 4], device="cuda", requires_grad=True)
 
             out = foo_opt(ones)
@@ -1269,16 +1448,45 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             def foo(x):
                 return x * x * x
 
-            torch._inductor.cudagraph_mark_step_begin()
+            torch.compiler.cudagraph_mark_step_begin()
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
 
-            torch._inductor.cudagraph_mark_step_begin()
+            torch.compiler.cudagraph_mark_step_begin()
             out = foo(torch.rand([4, 4], device="cuda", requires_grad=True))
             self.assertFalse(self.get_manager().new_graph_id().id == 0)
 
+        @torch._dynamo.config.patch("capture_scalar_outputs", True)
+        def test_incompatible_cudagraph_ops_item(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x.item()
+
+            self.assertEqual(foo(torch.tensor(3.0, device="cuda")), 3.0)
+            self.assertEqual(foo(torch.tensor(6.0, device="cuda")), 6.0)
+
+        @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+        def test_incompatible_cudagraph_ops_nonzero(self):
+            @torch.compile(mode="reduce-overhead")
+            def foo(x):
+                return x.nonzero()
+
+            self.assertEqual(
+                foo(torch.tensor([1, 0, 2], device="cuda")), torch.tensor([[0], [2]])
+            )
+            self.assertEqual(
+                foo(torch.tensor([1, 0, 0], device="cuda")), torch.tensor([[0]])
+            )
+
+        def test_storage_access_error(self):
+            x = torch.rand([4], device="cuda")
+            torch._C._set_storage_access_error_msg(x, "custom error msg")
+
+            with self.assertRaisesRegex(Exception, "custom error msg"):
+                device = x.untyped_storage()
+
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if not TEST_CUDA_GRAPH:
         if __name__ == "__main__":

@@ -170,7 +170,7 @@ c10::IValue IValueUnpickler::readArchive(
 std::map<std::string, at::Tensor> load_parameters_from_zip(
     std::unique_ptr<ReadAdapterInterface> rai,
     c10::optional<c10::Device> device) {
-  auto reader = torch::make_unique<PyTorchStreamReader>(std::move(rai));
+  auto reader = std::make_unique<PyTorchStreamReader>(std::move(rai));
   IValueUnpickler unpickler(std::move(reader));
   auto result = unpickler.deserialize(device).toGenericDict();
   std::map<std::string, at::Tensor> map;
@@ -269,18 +269,14 @@ static std::map<std::string, at::Tensor> _load_parameters_bytes(
 std::map<std::string, at::Tensor> _load_parameters(
     std::istream& in,
     c10::optional<at::Device> device) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_stream_content(in);
+  auto [data, size] = get_stream_content(in);
   return _load_parameters_bytes(std::move(data), size, device);
 }
 
 std::map<std::string, at::Tensor> _load_parameters(
     const std::string& filename,
     c10::optional<at::Device> device) {
-  std::shared_ptr<char> data;
-  size_t size = 0;
-  std::tie(data, size) = get_file_content(filename.c_str());
+  auto [data, size] = get_file_content(filename.c_str());
   return _load_parameters_bytes(std::move(data), size, device);
 }
 

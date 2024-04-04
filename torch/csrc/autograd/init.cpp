@@ -106,6 +106,14 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   if (!THPFunctionClass)
     return nullptr;
 
+  // NOTE: "leaks" GradientEdge
+  auto autograd_graph_mod =
+      THPObjectPtr(PyImport_ImportModule("torch.autograd.graph"));
+  THPGradientEdgeClass =
+      PyObject_GetAttrString(autograd_graph_mod, "GradientEdge");
+  if (!THPGradientEdgeClass)
+    return nullptr;
+
   auto torch_C_module = THPObjectPtr(PyImport_ImportModule("torch._C"));
   if (!torch_C_module)
     return nullptr;
@@ -262,7 +270,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       py::arg("activities"),
       py::arg("scopes") = std::unordered_set<at::RecordScope>());
   m.def("_disable_profiler", disableProfiler);
-  m.def("_prepare_profiler", prepareProfiler);
+  m.def(
+      "_prepare_profiler",
+      prepareProfiler,
+      py::call_guard<py::gil_scoped_release>());
   m.def("_add_metadata_json", addMetadataJson); // Only if `USE_KINETO` is set
   m.def("_kineto_step", profilerStep); // Only if `USE_KINETO` is set
   m.def("kineto_available", []() { return torch::profiler::kKinetoAvailable; });
@@ -274,7 +285,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   // callbacks.
   m.def(
       "_record_function_with_args_enter",
-      [](const std::string& name, py::args args) {
+      [](const std::string& name, const py::args& args) {
         using torch::autograd::profiler::PythonRecordFunction;
         auto python_rec = c10::make_intrusive<PythonRecordFunction>(
             at::RecordScope::USER_SCOPE);
@@ -307,24 +318,25 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   });
 
   m.def("_supported_activities", []() {
-    std::set<ActivityType> activities{ActivityType::CPU};
+    std::set<torch::profiler::impl::ActivityType> activities{
+        torch::profiler::impl::ActivityType::CPU};
 #if defined(USE_KINETO) && \
     (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
     if (at::getNumGPUs() > 0) {
-      activities.insert(ActivityType::CUDA);
+      activities.insert(torch::profiler::impl::ActivityType::CUDA);
     }
 #elif defined(USE_KINETO)
     if (at::hasXPU()) {
-      activities.insert(ActivityType::XPU);
+      activities.insert(torch::profiler::impl::ActivityType::XPU);
     }
     if (at::hasMTIA()) {
-      activities.insert(ActivityType::MTIA);
+      activities.insert(torch::profiler::impl::ActivityType::MTIA);
     }
 #endif
     return activities;
   });
 
-  m.def("_unsafe_set_version_counter", [](at::Tensor t, int64_t i) {
+  m.def("_unsafe_set_version_counter", [](const at::Tensor& t, int64_t i) {
     auto vc = torch::autograd::impl::version_counter(t);
     vc.set_version(i);
   });
@@ -467,9 +479,11 @@ namespace autograd {
 
 static PyObject* set_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyBool_Check(arg),
+      "enabled must be a bool (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
   at::autocast::set_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -499,9 +513,11 @@ static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyBool_Check(arg),
+      "enabled must be a bool (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
   at::autocast::set_cpu_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -519,9 +535,11 @@ static PyObject* is_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyBool_Check(arg),
+      "enabled must be a bool (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
   at::autocast::set_ipu_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -539,9 +557,11 @@ static PyObject* is_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyBool_Check(arg),
+      "enabled must be a bool (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
   at::autocast::set_xla_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -559,10 +579,11 @@ static PyObject* is_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (!THPDtype_Check(arg)) {
-    throw TypeError(
-        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      THPDtype_Check(arg),
+      "dtype must be a torch.dtype (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
   at::autocast::set_autocast_gpu_dtype(targetType);
   Py_RETURN_NONE;
@@ -571,10 +592,11 @@ static PyObject* set_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (!THPDtype_Check(arg)) {
-    throw TypeError(
-        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      THPDtype_Check(arg),
+      "dtype must be a torch.dtype (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
   at::autocast::set_autocast_cpu_dtype(targetType);
   Py_RETURN_NONE;
@@ -583,10 +605,11 @@ static PyObject* set_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (!THPDtype_Check(arg)) {
-    throw TypeError(
-        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      THPDtype_Check(arg),
+      "dtype must be a torch.dtype (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
   at::autocast::set_autocast_ipu_dtype(targetType);
   Py_RETURN_NONE;
@@ -595,10 +618,11 @@ static PyObject* set_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (!THPDtype_Check(arg)) {
-    throw TypeError(
-        "dtype must be a torch.dtype (got %s)", Py_TYPE(arg)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      THPDtype_Check(arg),
+      "dtype must be a torch.dtype (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
   at::autocast::set_autocast_xla_dtype(targetType);
   Py_RETURN_NONE;
@@ -642,8 +666,10 @@ static PyObject* get_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
 }
 
 static PyObject* clear_autocast_cache(PyObject* _unused, PyObject* arg) {
-  HANDLE_TH_ERRORS
-  at::autocast::clear_cache();
+  HANDLE_TH_ERRORS {
+    pybind11::gil_scoped_release no_gil;
+    at::autocast::clear_cache();
+  }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -672,9 +698,11 @@ static PyObject* is_autocast_cache_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_autocast_cache_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyBool_Check(arg),
+      "enabled must be a bool (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
   at::autocast::set_autocast_cache_enabled(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -714,9 +742,11 @@ static PyObject* is_grad_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* set_fwd_grad_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (!PyBool_Check(arg)) {
-    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
-  }
+  TORCH_CHECK_TYPE(
+      PyBool_Check(arg),
+      "enabled must be a bool (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
   c10::AutogradState::get_tls_state().set_fw_grad_mode(arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -975,7 +1005,7 @@ static PyObject* pop_torch_dispatch_stack(
     PyObject* maybe_mode_key) {
   HANDLE_TH_ERRORS
   c10::optional<c10::impl::TorchDispatchModeKey> mode_key = c10::nullopt;
-  PyObject* r;
+  PyObject* r = nullptr;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
     auto maybe_mode =
@@ -1041,6 +1071,7 @@ static PyObject* get_dispatch_mode(PyObject* _unused, PyObject* arg) {
   if (maybe_mode == c10::nullopt) {
     Py_RETURN_NONE;
   }
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;
@@ -1056,6 +1087,7 @@ static PyObject* unset_dispatch_mode(PyObject* _unused, PyObject* arg) {
   if (maybe_mode == c10::nullopt) {
     Py_RETURN_NONE;
   }
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   auto* r = maybe_mode.value()->ptr(getPyInterpreter());
   Py_INCREF(r);
   return r;
@@ -1071,7 +1103,7 @@ static PyObject* len_torch_dispatch_stack(PyObject* _unused, PyObject* args) {
 
 PyObject* THPModule_increment_version(PyObject* _unused, PyObject* tensor) {
   HANDLE_TH_ERRORS
-  THPUtils_assert(
+  TORCH_CHECK(
       THPVariable_Check(tensor), "increment_version expect a Tensor as input");
   torch::autograd::increment_version((THPVariable_Unpack(tensor)));
   Py_RETURN_NONE;

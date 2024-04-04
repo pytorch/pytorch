@@ -18,6 +18,10 @@
 #include <ATen/ops/empty.h>
 #endif
 
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8907
+#define USE_CUDNN_RNN_V8_API
+#endif
+
 namespace at { namespace native {
 
 std::string cudnnTypeToString(cudnnDataType_t dtype);
@@ -118,6 +122,18 @@ private:
   std::unique_ptr<T, DescriptorDeleter<T, dtor>> desc_;
 };
 
+class TORCH_CUDA_CPP_API RNNDataDescriptor : public Descriptor<
+                                       cudnnRNNDataStruct,
+                                       &cudnnCreateRNNDataDescriptor,
+                                       &cudnnDestroyRNNDataDescriptor> {
+public:
+  void set(const at::Tensor &t, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray);
+private:
+  void set(cudnnDataType_t dataType, cudnnRNNDataLayout_t layout, int maxSeqLength, int batchSize, int vectorSize, const int* seqLengthArray) {
+    AT_CUDNN_CHECK(cudnnSetRNNDataDescriptor(mut_desc(), dataType, layout, maxSeqLength, batchSize, vectorSize, seqLengthArray, NULL));
+  }
+};
+
 class TORCH_CUDA_CPP_API TensorDescriptor : public Descriptor<
                                                cudnnTensorStruct,
                                                &cudnnCreateTensorDescriptor,
@@ -194,9 +210,7 @@ struct TORCH_CUDA_CPP_API ConvolutionDescriptor
     if(dataType == CUDNN_DATA_HALF) {
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_TENSOR_OP_MATH));
     } else if (dataType == CUDNN_DATA_FLOAT && !allow_tf32) {
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
       AT_CUDNN_CHECK(cudnnSetConvolutionMathType(mut_desc(), CUDNN_FMA_MATH));
-#endif
     }
   }
 };
@@ -255,11 +269,16 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
                                              &cudnnCreateRNNDescriptor,
                                              &cudnnDestroyRNNDescriptor> {
   DropoutDescriptor dropout_desc_;
-  void set(cudnnHandle_t handle, int hidden_size, int proj_size, int num_layers, DropoutDescriptor&& dropout_desc,
+  void set(cudnnHandle_t handle,
+#ifdef USE_CUDNN_RNN_V8_API
+       int input_size,
+       bool packed,
+#endif
+       int hidden_size, int proj_size, int num_layers, DropoutDescriptor&& dropout_desc,
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
            cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnDataType_t input_type, cudnnRNNAlgo_t algo, bool allow_tf32) {
     dropout_desc_ = std::move(dropout_desc);
-
+#ifndef USE_CUDNN_RNN_V8_API
     AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
           handle,
           mut_desc(),
@@ -283,17 +302,42 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
       if (input_type == CUDNN_DATA_HALF) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);
       }
-#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8000
       else if (input_type == CUDNN_DATA_FLOAT && !allow_tf32) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_FMA_MATH);
       }
-#endif
       else {
         // Technically, as the default it's not necessary to explicitly
         // set this.
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_DEFAULT_MATH);
       }
     }
+#else
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    auto math_type = CUDNN_DEFAULT_MATH;
+    if (prop->major >= 7) {
+      if (input_type == CUDNN_DATA_HALF) {
+        math_type = CUDNN_TENSOR_OP_MATH;
+      } else if (!allow_tf32) {
+        math_type = CUDNN_FMA_MATH;
+      }
+    }
+    AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v8(
+          mut_desc(),
+          algo,
+          mode,
+          CUDNN_RNN_DOUBLE_BIAS,
+          bidirectional,
+          input_mode,
+          input_type,
+          datatype,
+          math_type,
+          input_size,
+          hidden_size,
+          proj_size ? proj_size : hidden_size,
+          num_layers,
+          dropout_desc_.desc(),
+          packed ? CUDNN_RNN_PADDED_IO_DISABLED : CUDNN_RNN_PADDED_IO_ENABLED));
+#endif
   }
 };
 
@@ -305,7 +349,6 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
   void set(cudnnDataType_t datatype) {
     AT_CUDNN_CHECK(cudnnSetCTCLossDescriptor(mut_desc(), datatype));
   }
-#if CUDNN_VERSION >= 7600
   void setEx(
       cudnnDataType_t datatype,
       cudnnLossNormalizationMode_t normMode,
@@ -313,7 +356,6 @@ struct TORCH_CUDA_CPP_API CTCLossDescriptor
     AT_CUDNN_CHECK(
         cudnnSetCTCLossDescriptorEx(mut_desc(), datatype, normMode, gradMode));
   }
-#endif
 };
 
 struct TORCH_CUDA_CPP_API ActivationDescriptor

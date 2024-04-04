@@ -13,6 +13,11 @@ graph {
       type: INT
     }
     attribute {
+      name: "dilations"
+      ints: 1
+      type: INTS
+    }
+    attribute {
       name: "kernel_shape"
       ints: 3
       type: INTS

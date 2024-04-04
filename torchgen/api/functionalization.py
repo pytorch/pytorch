@@ -2,6 +2,7 @@ from typing import List, Optional
 
 from torchgen.api import dispatcher
 from torchgen.api.types import (
+    BaseCppType,
     BaseCType,
     Binding,
     boolT,
@@ -16,6 +17,7 @@ from torchgen.model import (
     BaseTy,
     BaseType,
     FunctionSchema,
+    NativeFunction,
     NativeFunctionsViewGroup,
 )
 
@@ -69,6 +71,20 @@ reapply_views_binding = Binding(
     default=None,
 )
 
+InverseReturnModeT = BaseCppType("at::functionalization", "InverseReturnMode")
+inverse_return_mode_binding = Binding(
+    name="inverse_return_mode",
+    nctype=NamedCType(name="inverse_return_mode", type=BaseCType(InverseReturnModeT)),
+    argument=Argument(
+        name="inverse_return_mode",
+        # NB: not actually a bool but it doesn't matter because this isn't used
+        type=BaseType(BaseTy.bool),
+        default=None,
+        annotation=None,
+    ),
+    default=None,
+)
+
 
 # The lambda capture itself doesn't have a name.
 # The name returned here corresponds to the name of the inner function called by the lambda.
@@ -84,16 +100,7 @@ def name(
         # since we always plumb the runtime "reapply_views" argument into the reverse function.
         assert is_reverse
     if is_reverse:
-        # for the reverse: the name of the inverse function always involves "view_copy",
-        # and we plumb the "reapply_views" flag into that function.
-        # (We could avoid doing that, but that would require writing out twice as many view inverse functions).
-        assert g.view_copy is not None
-        api_name = g.view_copy.func.name.unambiguous_name()
-        # in the reverse case, we codegen both the call-sites (which need the full namespace) and the declarations (which don't)
-        if include_namespace:
-            return f"at::functionalization::FunctionalInverses::{api_name}_inverse"
-        else:
-            return f"{api_name}_inverse"
+        return reverse_name(g.view, include_namespace)
     # in the forward case, we just directly call into the at::_ops API (so we always need the namespace)
     assert include_namespace
     assert g.view_copy is not None
@@ -103,6 +110,18 @@ def name(
         else g.view_copy.func.name.unambiguous_name()
     )
     return f"at::_ops::{api_name}::call"
+
+
+def reverse_name(f: NativeFunction, include_namespace: bool) -> str:
+    # for the reverse: we plumb the "reapply_views" flag into that function and support
+    # both copy and non-copy variants. (We could avoid doing that, but that would require
+    # writing out twice as many view inverse functions).
+    api_name = f.func.name.unambiguous_name()
+    # in the reverse case, we codegen both the call-sites (which need the full namespace) and the declarations (which don't)
+    if include_namespace:
+        return f"at::functionalization::FunctionalInverses::{api_name}_inverse"
+    else:
+        return f"{api_name}_inverse"
 
 
 def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding]:
@@ -115,7 +134,11 @@ def capture_arguments(func: FunctionSchema, *, is_reverse: bool) -> List[Binding
     non_self_value_bindings = [
         dispatcher.argument(a, remove_non_owning_ref_types=True) for a in non_self_args
     ]
-    all_bindings = [reapply_views_binding] + non_self_value_bindings
+
+    all_bindings = [
+        inverse_return_mode_binding if is_reverse else reapply_views_binding
+    ]
+    all_bindings.extend(non_self_value_bindings)
     return all_bindings
 
 
@@ -165,12 +188,12 @@ def inner_arguments(func: FunctionSchema, is_reverse: bool) -> List[Binding]:
             return [
                 base_binding,
                 mutated_view_binding,
-                reapply_views_binding,
+                inverse_return_mode_binding,
                 index_binding,
             ] + non_self_bindings
         else:
             return [
                 base_binding,
                 mutated_view_binding,
-                reapply_views_binding,
+                inverse_return_mode_binding,
             ] + non_self_bindings

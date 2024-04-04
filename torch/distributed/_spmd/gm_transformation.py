@@ -45,7 +45,7 @@ class GraphModuleTransformation:
                     "iter_graph_main_gm": iter_gm.main_gm.print_readable(False),
                     "iter_graph_cleanup_gm": iter_gm.cleanup_gm.print_readable(False),
                 },
-                graph_folder,
+                graph_folder,  # type: ignore[possibly-undefined]
             )
 
         return iter_gm

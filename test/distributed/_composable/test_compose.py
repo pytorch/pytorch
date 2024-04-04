@@ -187,7 +187,7 @@ class TestFSDPCheckpoint(FSDPTest):
         # Ensure replicate param names are as expected, i.e.
         # immediate parameters of model and parameters of model's non-UnitModule
         # submodules are replicated
-        param_names = replicate.state(model)._replicate_param_names
+        param_names = replicate.state(model)._param_names
         replicated_modules = [
             (name, mod)
             for (name, mod) in model.named_children()
@@ -253,9 +253,9 @@ class TestFSDPCheckpoint(FSDPTest):
     def test_composable_fsdp_replicate(self):
         # Verify how the APIs can be composed, e.g. if both `fully_shard` and
         # `replicate` are applied on the same module, it should raise exception.
-        model = CompositeModel(device=torch.device("cpu"))
+        model = CompositeModel(device=torch.device("cuda"))
         fully_shard(model.l1)
-        with self.assertRaisesRegex(AssertionError, "Cannot apply .*replicate"):
+        with self.assertRaisesRegex(RuntimeError, "Cannot apply .*replicate"):
             replicate(model.l1)
         replicate(model.l2)  # should not raise
 

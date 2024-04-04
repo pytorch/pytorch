@@ -13,6 +13,7 @@
 #include <ATen/native/TensorCompare.h>
 #include <ATen/native/TypeProperties.h>
 #include <ATen/TensorSubclassLikeUtils.h>
+#include <iostream>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -22,6 +23,9 @@
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/_assert_async_native.h>
 #include <ATen/ops/_functional_assert_async_native.h>
+#include <ATen/ops/_print_native.h>
+#include <ATen/ops/_assert_scalar_native.h>
+#include <ATen/ops/_functional_assert_scalar_native.h>
 #include <ATen/ops/_make_per_tensor_quantized_tensor.h>
 #include <ATen/ops/_unique.h>
 #include <ATen/ops/allclose_native.h>
@@ -69,11 +73,11 @@
 #include <ATen/ops/where_native.h>
 #include <ATen/ops/zeros_like.h>
 
+#include <iostream>
 #include <utility>
 #endif
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
 static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
   // Bail out for dtypes unsupported by the sorting algorithm to keep the interface consistent.
@@ -127,17 +131,17 @@ const OptionalTensorRef max) {
     TensorIteratorConfig()                  \
       .set_check_mem_overlap(true)          \
       .add_output(maybe_get_output())       \
-      .add_input(self)                      \
+      .add_const_input(self)                \
       .promote_inputs_to_common_dtype(true) \
       .cast_common_dtype_to_outputs(true)   \
       .enforce_safe_casting_to_output(true)
 
   if (min && max) {
-    build(CLAMP_CONFIG().add_input(*min).add_input(*max));
+    build(CLAMP_CONFIG().add_const_input(*min).add_const_input(*max));
   } else if (min) {
-    build(CLAMP_CONFIG().add_input(*min));
+    build(CLAMP_CONFIG().add_const_input(*min));
   } else if (max) {
-    build(CLAMP_CONFIG().add_input(*max));
+    build(CLAMP_CONFIG().add_const_input(*max));
   }
 }
 
@@ -261,9 +265,9 @@ TORCH_PRECOMPUTE_META_FUNC2(min, dim)(const Tensor& self, int64_t dim, bool keep
       .set_dim(maybe_wrap_dim(dim, self.dim()));
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(where_kernel); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
 DEFINE_DISPATCH(max_stub); // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
@@ -422,6 +426,15 @@ void _assert_async_msg_cpu(const Tensor& self, c10::string_view assert_msg) {
   TORCH_CHECK(native::is_nonzero(self), assert_msg != "" ? assert_msg : "Assertion is failed");
 }
 
+void _assert_scalar(const Scalar& scalar, c10::string_view assert_msg) {
+  TORCH_SYM_CHECK(scalar.toSymBool(), assert_msg != "" ? assert_msg : "Assertion is failed");
+}
+
+Tensor _functional_assert_scalar(const Scalar& scalar, c10::string_view assert_msg, const Tensor& dep_token) {
+  _assert_scalar(scalar, assert_msg);
+  return dep_token.clone();
+}
+
 Tensor _functional_assert_async_msg_cpu(
   const Tensor& self,
   c10::string_view assert_msg,
@@ -430,6 +443,9 @@ Tensor _functional_assert_async_msg_cpu(
   return dep_token.clone();
 }
 
+void _print(c10::string_view s) {
+  std::cout << s << "\n";
+}
 
 // Sorting-based algorithm for isin(); used when the number of test elements is large.
 static void isin_sorting(
@@ -445,17 +461,16 @@ static void isin_sorting(
     elements_flat = elements.ravel();
     test_elements_flat = test_elements.ravel();
   } else {
-    std::tie (elements_flat, unique_order) = at::_unique(
+    std::tie(elements_flat, unique_order) = at::_unique(
         elements, /*sorted=*/ false, /*return_inverse=*/ true);
-    std::tie (test_elements_flat, std::ignore) = at::_unique(test_elements, /*sorted=*/ false);
+    std::tie(test_elements_flat, std::ignore) = at::_unique(test_elements, /*sorted=*/ false);
   }
 
   // 2. Stable sort all elements, maintaining order indices to reverse the
   //    operation. Stable sort is necessary to keep elements before test
   //    elements within the sorted list.
   Tensor all_elements = at::cat({std::move(elements_flat), std::move(test_elements_flat)});
-  Tensor sorted_elements, sorted_order;
-  std::tie (sorted_elements, sorted_order) = all_elements.sort(
+  auto [sorted_elements, sorted_order] = all_elements.sort(
       /*stable=*/ true, /*dim=*/ 0, /*descending=*/ false);
 
   // 3. Create a mask for locations of adjacent duplicate values within the
@@ -493,17 +508,13 @@ Device out_device(Args&... inps){
 
 
 Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor& other, Tensor& out) {
-  Tensor self_, other_, condition_;
-  if (self.dtype() != other.dtype()) {
-    auto result_type = at::native::result_type(self, other);
-    self_ = self.to(result_type);
-    other_ = other.to(result_type);
-  } else {
-    self_ = self;
-    other_ = other;
-  }
+  const auto result_type = at::native::result_type(self, other);
+  TORCH_CHECK(out.scalar_type() == result_type, "Expected out type to be ", result_type, " but got ", out.scalar_type());
+
+  auto self_ = self.scalar_type() != result_type ? self.to(result_type): self;
+  auto other_ = other.scalar_type() != result_type ? other.to(result_type): other;
+  auto condition_ = condition;
   auto device = out_device(condition, self_, other_);
-  condition_ = condition;
   if (device != at::kCPU) { // allow CPU scalars on non-cpu device
     if (condition.device() != device && condition.ndimension() == 0) {
       condition_ = condition.to(device);
@@ -515,19 +526,18 @@ Tensor& where_self_out(const Tensor& condition, const Tensor& self, const Tensor
         other_ = other_.to(device);
     }
   }
-  if (condition.scalar_type() == ScalarType::Byte) {
-  TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
-  } else {
-  TORCH_CHECK(condition.scalar_type() == ScalarType::Bool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition.scalar_type());
+  if (condition_.scalar_type() == ScalarType::Byte) {
+    TORCH_WARN_ONCE("where received a uint8 condition tensor. This behavior is deprecated and will be removed in a future version of PyTorch. Use a boolean condition instead.");
+    condition_ = condition_.to(kBool);
   }
-  condition_ = condition_.scalar_type() == ScalarType::Byte ? condition_.to(ScalarType::Bool) : condition_;
+  TORCH_CHECK(condition_.scalar_type() == kBool, "where expected condition to be a boolean tensor, but got a tensor with dtype ", condition_.scalar_type());
   // if there's still a device mismatch, let tensoriterator error out with it
   auto iter = at::TensorIteratorConfig()
     .check_all_same_dtype(false)
     .add_output(out)
-    .add_input(condition_)
-    .add_input(self_)
-    .add_input(other_)
+    .add_const_input(condition_)
+    .add_const_input(self_)
+    .add_const_input(other_)
     .build();
   where_kernel(iter.device_type(), iter);
   return out;
@@ -851,5 +861,4 @@ TORCH_IMPL_FUNC(isneginf_out) (const Tensor& self, const Tensor& result) {
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

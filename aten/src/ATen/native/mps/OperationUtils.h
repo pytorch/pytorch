@@ -25,9 +25,15 @@
 
 #include <MetalPerformanceShaders/MetalPerformanceShaders.h>
 
+// Fwd declarations
+namespace at {
+  struct TensorIteratorBase;
+}
 using namespace at::mps;
 
 namespace at::native::mps {
+
+void dispatch_sync_with_rethrow(dispatch_queue_t queue, void (^block)());
 
 struct MPSScalar {
   id<MTLBuffer> getMTLBuffer() const { return __builtin_bit_cast(id<MTLBuffer>, buffer.get()); }
@@ -40,11 +46,13 @@ struct MPSScalar {
     at::Half h;
     int64_t i;
     bool b;
+    c10::complex<float> cf;
+    c10::complex<at::Half> ch;
+    at::BFloat16 bf16;
   } value {};
 };
 
-void runMPSGraph(
-    MPSStream* mpsStream,
+void runMPSGraph(MPSStream* mpsStream,
     MPSGraph* mpsGraph,
     NSDictionary* feeds,
     NSDictionary* results);
@@ -220,31 +228,22 @@ struct MPSGraphCache
   MPSCachedGraph* CreateCachedGraph(const std::string& key, CreateCachedGraphBlock createCacheBlock) {
 
     __block MPSCachedGraph* cachedGraph = nil;
-    __block std::optional<std::exception_ptr> block_exception;
 
     MPSCacheKey hash = std::hash<std::string>{}(key);
 
-    dispatch_sync(serialQueue_, ^() {
-
-      try {
-        // verify the cached entry doesn't already exist
-        if (cache_.count(hash) != 0) {
-          auto& entry = cache_.at(hash);
-          TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
-          cachedGraph = entry.cachedGraph_;
-        } else {
-          cachedGraph = createCacheBlock();
-          CacheEntry entry(key, cachedGraph);
-          cache_.emplace(hash, entry);
-          profileCachedGraph(entry);
-        }
-      } catch (...) {
-        block_exception = std::current_exception();
+    dispatch_sync_with_rethrow(serialQueue_, ^() {
+      // verify the cached entry doesn't already exist
+      if (cache_.count(hash) != 0) {
+        auto& entry = cache_.at(hash);
+        TORCH_INTERNAL_ASSERT_DEBUG_ONLY(key == entry.key_, "Key collision in the MPS cached graph!\n");
+        cachedGraph = entry.cachedGraph_;
+      } else {
+        cachedGraph = createCacheBlock();
+        CacheEntry entry(key, cachedGraph);
+        cache_.emplace(hash, entry);
+        profileCachedGraph(entry);
       }
     });
-    if (block_exception) {
-            std::rethrow_exception(*block_exception);
-    }
     return cachedGraph;
   }
 
@@ -328,6 +327,68 @@ size_t compute_storage_numel_distance(const at::Tensor& t);
  */
 inline bool is_dense_in_storage(const at::Tensor& t) {
   return compute_storage_numel_distance(t) == static_cast<size_t>(t.numel());
+}
+
+static inline void mtl_setBuffer(id<MTLComputeCommandEncoder> encoder, const Tensor& t, unsigned idx) {
+  [encoder setBuffer:getMTLBufferStorage(t)
+              offset:t.storage_offset() * t.element_size()
+             atIndex:idx];
+}
+
+static inline void mtl_dispatch1DJob(id<MTLComputeCommandEncoder> encoder,
+                                     id<MTLComputePipelineState> cplState,
+                                     uint32_t length) {
+  const uint32_t maxThreadsPerGroup = [cplState maxTotalThreadsPerThreadgroup];
+  auto size = MTLSizeMake(length, 1, 1);
+  auto threadGroupSize = MTLSizeMake(std::min(maxThreadsPerGroup, length), 1, 1);
+  [encoder dispatchThreads:size threadsPerThreadgroup:threadGroupSize];
+}
+
+id<MTLBuffer> generateKernelDataOffsets(id<MTLComputeCommandEncoder> commandEncoder, const TensorIteratorBase& iter, bool use_64bit_index = false);
+
+inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1) {
+        return @{ p1.getMPSGraphTensor(): p1.getMPSGraphTensorData() };
+}
+
+inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1, Placeholder& p2) {
+        return @{
+                p1.getMPSGraphTensor(): p1.getMPSGraphTensorData(),
+                p2.getMPSGraphTensor(): p2.getMPSGraphTensorData(),
+         };
+}
+
+inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1, Placeholder& p2, Placeholder& p3) {
+        return @{
+                p1.getMPSGraphTensor(): p1.getMPSGraphTensorData(),
+                p2.getMPSGraphTensor(): p2.getMPSGraphTensorData(),
+                p3.getMPSGraphTensor(): p3.getMPSGraphTensorData(),
+         };
+}
+
+inline NSDictionary* dictionaryFromPlaceholders(Placeholder& p1, Placeholder& p2, Placeholder& p3, Placeholder& p4) {
+        return @{
+                p1.getMPSGraphTensor(): p1.getMPSGraphTensorData(),
+                p2.getMPSGraphTensor(): p2.getMPSGraphTensorData(),
+                p3.getMPSGraphTensor(): p3.getMPSGraphTensorData(),
+                p4.getMPSGraphTensor(): p4.getMPSGraphTensorData(),
+         };
+}
+
+inline void runMPSGraph(MPSStream* stream, MPSGraph* graph, NSDictionary* feeds, Placeholder& result) {
+        runMPSGraph(stream, graph, feeds, dictionaryFromPlaceholders(result));
+}
+
+inline bool supportsComplex() {
+  return is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_0_PLUS);
+}
+
+// MPS yet to support double types, but starting from MacOS 14, supports bfloat16
+inline bool supportedFloatingType(ScalarType dtype) {
+  return dtype == kFloat || dtype == kHalf || dtype == kBFloat16;
+}
+
+inline bool supportedFloatingType(const Tensor& t) {
+  return supportedFloatingType(t.scalar_type());
 }
 
 } // namespace at::native::mps

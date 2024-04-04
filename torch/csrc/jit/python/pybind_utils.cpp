@@ -111,6 +111,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
     case TypeKind::StorageType:
       return py::cast<at::Storage>(obj);
     case TypeKind::FloatType:
+      if (torch::is_symfloat(py::handle(obj))) {
+        return py::cast<c10::SymFloat>(obj).guard_float(__FILE__, __LINE__);
+      }
       return py::cast<double>(obj);
     case TypeKind::ComplexType: {
       auto c_obj = py::cast<std::complex<double>>(obj.ptr());
@@ -138,6 +141,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       if (THPMemoryFormat_Check(obj.ptr())) {
         auto memory_format = reinterpret_cast<THPMemoryFormat*>(obj.ptr());
         return static_cast<int8_t>(memory_format->memory_format);
+      }
+      if (torch::is_symint(py::handle(obj))) {
+        return py::cast<c10::SymInt>(obj).guard_int(__FILE__, __LINE__);
       }
       return py::cast<int64_t>(obj);
     case TypeKind::LayoutType: {
@@ -186,6 +192,9 @@ IValue toIValue(py::handle obj, const TypePtr& type, c10::optional<int32_t> N) {
       }
       return {};
     case TypeKind::BoolType:
+      if (torch::is_symbool(obj.ptr())) {
+        return py::cast<c10::SymBool>(obj).guard_bool(__FILE__, __LINE__);
+      }
       return py::cast<bool>(obj);
     case TypeKind::TupleType: {
       py::tuple tuple = py::cast<py::tuple>(obj);
@@ -632,7 +641,7 @@ py::object toPyObject(IValue ivalue) {
       return std::move(t);
     }
   } else if (ivalue.isDevice()) {
-    return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
+    return py::cast(std::move(ivalue).toDevice());
   } else if (ivalue.isStream()) {
     return py::cast(std::move(ivalue).toStream());
   } else if (ivalue.isGenericDict()) {
@@ -737,7 +746,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     }
     if (!found_op) {
       std::stringstream ss;
-      ss << "Overloaded torch operator invoked from Python failed to many any schema:\n";
+      ss << "Overloaded torch operator invoked from Python failed to match any schema:\n";
       for (const auto& err : errors) {
         ss << err.what() << "\n\n";
       }
@@ -753,9 +762,7 @@ py::object invokeOperatorFromPython(
     py::args args,
     const py::kwargs& kwargs,
     c10::optional<c10::DispatchKey> dk) {
-  auto opWithStack = getOpWithStack(operations, args, kwargs);
-  std::shared_ptr<Operator> found_op = std::get<0>(opWithStack);
-  Stack stack = std::get<1>(opWithStack);
+  auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
     if (dk) {

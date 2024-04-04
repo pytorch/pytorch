@@ -18,7 +18,6 @@
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/OpMathType.h>
 
-#include <c10/util/math_compat.h>
 #include <c10/util/MathConstants.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/TypeSafeSignMath.h>
@@ -45,8 +44,7 @@ static void sigmoid_kernel(TensorIteratorBase& iter) {
             return static_cast<float>(1) / (static_cast<float>(1) + std::exp((-a0)));
           },
           [=](Vectorized<scalar_t> a) {
-            Vectorized<float> a0, a1;
-            std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+            auto [a0, a1] = convert_to_float<scalar_t>(a);
             a0 = (Vectorized<float>(static_cast<float>(1)) + a0.neg().exp()).reciprocal();
             a1 = (Vectorized<float>(static_cast<float>(1)) + a1.neg().exp()).reciprocal();
             return convert_from_float<scalar_t>(a0, a1);
@@ -140,11 +138,12 @@ void LogitMKLKernel(T eps, TensorIteratorBase* it) {
 #endif // AT_MKL_ENABLED
 
 static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
-  AT_DISPATCH_FLOATING_TYPES_AND(
-      kBFloat16, iter.common_dtype(), "logit_cpu", [&]() {
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kBFloat16, kHalf, iter.common_dtype(), "logit_cpu", [&]() {
         const scalar_t eps = eps_scalar.to<scalar_t>();
         if (at::hasMKL() && iter.is_contiguous()) {
           LogitMKLKernel<scalar_t>(eps, &iter);
+          iter.cast_outputs();
         } else if (eps < scalar_t(0)) {
           const Vectorized<scalar_t> kOneVec(scalar_t(1));
           cpu_kernel_vec(
@@ -180,9 +179,9 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
 }
 
 #if !defined(C10_MOBILE)
-#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)                   \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                   \
-            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn,       \
+#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)                                                 \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                                 \
+            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, \
             TYPE, NAME, __VA_ARGS__)
 #else
 #define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)          \
@@ -356,8 +355,9 @@ static void sinc_kernel(TensorIteratorBase& iter) {
           if (a == scalar_t(0)) {
             return scalar_t(1);
           } else {
-            scalar_t product = c10::pi<scalar_t> * a;
-            return std::sin(product) / product;
+            using opmath_t = at::opmath_type<scalar_t>;
+            opmath_t product = c10::pi<opmath_t> * opmath_t{a};
+            return static_cast<scalar_t>(std::sin(product) / product);
           }
         });
   });
@@ -399,17 +399,19 @@ static void asinh_kernel(TensorIteratorBase& iter) {
 
 static void atanh_kernel(TensorIteratorBase& iter) {
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "atanh_cpu", [&]() {
-      cpu_kernel(
+      cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return std::atanh(a); });
+        [=](scalar_t a) -> scalar_t { return std::atanh(a); },
+        [=](Vectorized<scalar_t> self_vec){return self_vec.atanh();});
     });
 }
 
 static void digamma_kernel(TensorIteratorBase& iter) {
   AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.common_dtype(), "digamma", [&]() {
-    cpu_kernel(
+    cpu_kernel_vec(
         iter,
-        [=](scalar_t a) -> scalar_t { return calc_digamma(a); });
+        [=](scalar_t a) -> scalar_t { return calc_digamma(a); },
+        [=](Vectorized<scalar_t> x) { return x.digamma(); });
   });
 }
 
@@ -444,15 +446,52 @@ static void polygamma_kernel(TensorIteratorBase& iter, int64_t n) {
   }
 }
 
-template<typename scalar_t>
-inline scalar_t _nan_to_num_replace(scalar_t a, scalar_t nan_replacement, scalar_t pos_inf_replacement, scalar_t neg_inf_replacement) {
-  return at::_isnan(a)
-    ? nan_replacement
-    : (a == std::numeric_limits<scalar_t>::infinity()
-      ? pos_inf_replacement
-      : (a == -std::numeric_limits<scalar_t>::infinity()
-        ? neg_inf_replacement
-        : a));
+template <typename scalar_t>
+inline scalar_t _nan_to_num_replace(
+    scalar_t a, scalar_t nan_replacement, scalar_t pos_inf_replacement, scalar_t neg_inf_replacement) {
+  if (at::_isnan(a)) {
+    return nan_replacement;
+  } else if (a == std::numeric_limits<scalar_t>::infinity()) {
+    return pos_inf_replacement;
+  } else if (a == -std::numeric_limits<scalar_t>::infinity()) {
+    return neg_inf_replacement;
+  } else {
+    return a;
+  }
+}
+
+template <typename scalar_t>
+inline c10::complex<scalar_t> _nan_to_num_replace(
+    c10::complex<scalar_t> a, scalar_t nan, scalar_t posinf, scalar_t neginf) {
+  return c10::complex<scalar_t>(
+      _nan_to_num_replace(a.real(), nan, posinf, neginf),
+      _nan_to_num_replace(a.imag(), nan, posinf, neginf)
+  );
+}
+
+template <typename scalar_t>
+inline Vectorized<scalar_t> _nan_to_num_replace(
+    Vectorized<scalar_t> a, scalar_t nan, scalar_t posinf, scalar_t neginf) {
+  using vec_t = Vectorized<scalar_t>;
+  vec_t inf(std::numeric_limits<scalar_t>::infinity());
+  vec_t result;
+  result = vec_t::blendv(a, vec_t(nan), a.isnan());
+  result = vec_t::blendv(result, vec_t(posinf), a == inf);
+  return vec_t::blendv(result, vec_t(neginf), a == inf.neg());
+}
+
+template <typename scalar_t>
+inline Vectorized<c10::complex<scalar_t>> _nan_to_num_replace(
+    Vectorized<c10::complex<scalar_t>> a, scalar_t nan, scalar_t posinf, scalar_t neginf) {
+#if !defined(_MSC_VER) && (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512))
+  return {_nan_to_num_replace(Vectorized<scalar_t>(a), nan, posinf, neginf)};
+#else
+  __at_align__ c10::complex<scalar_t> buffer[a.size()];
+  a.store(buffer);
+  auto asreal = Vectorized<scalar_t>::loadu(buffer);
+  _nan_to_num_replace(asreal, nan, posinf, neginf).store(buffer);
+  return Vectorized<c10::complex<scalar_t>>::loadu(buffer);
+#endif
 }
 
 static void nan_to_num_kernel(
@@ -460,41 +499,23 @@ static void nan_to_num_kernel(
     c10::optional<double> nan,
     c10::optional<double> pos_inf,
     c10::optional<double> neg_inf) {
-  if (isComplexType(iter.dtype())) {
-    AT_DISPATCH_COMPLEX_TYPES(iter.dtype(), "nan_to_num", [&]() {
-      using value_t = scalar_t::value_type;
-      value_t nan_replacement = static_cast<value_t>(nan.value_or(0.));
-      value_t pos_inf_replacement = pos_inf.has_value()
-          ? static_cast<value_t>(pos_inf.value())
-          : std::numeric_limits<value_t>::max();
-      value_t neg_inf_replacement = neg_inf.has_value()
-          ? static_cast<value_t>(neg_inf.value())
-          : std::numeric_limits<value_t>::lowest();
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "nan_to_num", [&]() {
+    using value_t = c10::scalar_value_type<scalar_t>::type;
+    value_t nan_replacement = static_cast<value_t>(nan.value_or(0.));
+    value_t pos_inf_replacement = pos_inf.has_value()
+        ? static_cast<value_t>(pos_inf.value())
+        : std::numeric_limits<value_t>::max();
+    value_t neg_inf_replacement = neg_inf.has_value()
+        ? static_cast<value_t>(neg_inf.value())
+        : std::numeric_limits<value_t>::lowest();
+    using vec_t = Vectorized<scalar_t>;
 
-      cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
-        value_t res_real = _nan_to_num_replace(
-          a.real(), nan_replacement, pos_inf_replacement, neg_inf_replacement);
-        value_t res_imag = _nan_to_num_replace(
-          a.imag(), nan_replacement, pos_inf_replacement, neg_inf_replacement);
-        return scalar_t(res_real, res_imag);
-      });
+    cpu_kernel_vec(iter, [=](scalar_t a) -> scalar_t {
+      return _nan_to_num_replace(a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
+    }, [=](vec_t a) -> vec_t {
+      return _nan_to_num_replace(a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
     });
-  } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, iter.dtype(), "nan_to_num", [&]() {
-      scalar_t nan_replacement = static_cast<scalar_t>(nan.value_or(0.));
-      scalar_t pos_inf_replacement = pos_inf.has_value()
-          ? static_cast<scalar_t>(pos_inf.value())
-          : std::numeric_limits<scalar_t>::max();
-      scalar_t neg_inf_replacement = neg_inf.has_value()
-          ? static_cast<scalar_t>(neg_inf.value())
-          : std::numeric_limits<scalar_t>::lowest();
-
-      cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
-        return _nan_to_num_replace(
-          a, nan_replacement, pos_inf_replacement, neg_inf_replacement);
-      });
-    });
-  }
+  });
 }
 
 static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length, double beta){
@@ -502,8 +523,8 @@ static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length
     using opmath_t = at::opmath_type<scalar_t>;
     const opmath_t alpha = static_cast<opmath_t>((window_length - 1) / 2.0);
     const opmath_t beta_ = static_cast<opmath_t>(beta);
-    cpu_kernel(iter, [=](scalar_t a){
-        return calc_i0(beta_ * std::sqrt(1 - std::pow((static_cast<opmath_t>(a) - alpha) / alpha, static_cast<opmath_t>(2.0)))) / calc_i0(beta_);
+    cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
+        return calc_i0(beta_ * std::sqrt(std::abs(1 - std::pow((static_cast<opmath_t>(a) - alpha) / alpha, static_cast<opmath_t>(2.0))))) / calc_i0(beta_);
     });
   });
 }
@@ -827,11 +848,11 @@ ALSO_REGISTER_AVX512_DISPATCH(sigmoid_stub, &CPU_CAPABILITY::sigmoid_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(logit_stub, &CPU_CAPABILITY::logit_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(sinh_stub, &CPU_CAPABILITY::sinh_kernel);
 ALSO_REGISTER_AVX512_DISPATCH(cosh_stub, &CPU_CAPABILITY::cosh_kernel);
+ALSO_REGISTER_AVX512_DISPATCH(atanh_stub, &CPU_CAPABILITY::atanh_kernel);
 
 // Might enable AVX512 dispatch after enabling explicit vectorization for them
 REGISTER_DISPATCH(acosh_stub, &CPU_CAPABILITY::acosh_kernel);
 REGISTER_DISPATCH(asinh_stub, &CPU_CAPABILITY::asinh_kernel);
-REGISTER_DISPATCH(atanh_stub, &CPU_CAPABILITY::atanh_kernel);
 REGISTER_DISPATCH(digamma_stub, &CPU_CAPABILITY::digamma_kernel);
 REGISTER_DISPATCH(trigamma_stub, &CPU_CAPABILITY::trigamma_kernel);
 REGISTER_DISPATCH(polygamma_stub, &CPU_CAPABILITY::polygamma_kernel);

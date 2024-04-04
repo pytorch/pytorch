@@ -92,7 +92,7 @@ class OutputProp:
             elif node.op == 'call_module':
                 result = self.modules[node.target](*load_arg(node.args), **load_arg(node.kwargs))
 
-            if isinstance(result, torch.Tensor):
+            if isinstance(result, torch.Tensor):  # type: ignore[possibly-undefined]
                 node.traced_result = result
 
             env[node.name] = result
@@ -173,7 +173,7 @@ def _get_dedup_subgraphs(
                 last_node = None
                 for n in nodes:
                     prev_n = n.args[0]
-                    next_n = list(n.users)[0]
+                    next_n = next(iter(n.users))
                     if prev_n not in nodes:
                         first_node = n
                     elif next_n not in nodes:
@@ -375,7 +375,7 @@ def create_submodule_from_subgraph(
             # TODO(future PR): this is ignoring kwargs, will need to support kwargs
             # for any fusion pattern which has them for a node that is not the
             # first node.
-            cur_args_copy = [cur_node_copy]  # type: ignore[has-type]
+            cur_args_copy = [cur_node_copy]  # type: ignore[has-type, possibly-undefined]  # noqa: F821
 
             if len(cur_node_orig.args) > 1:
                 for arg in cur_node_orig.args[1:]:
@@ -399,15 +399,15 @@ def create_submodule_from_subgraph(
             mod_name = f"mod_{cur_name_idx}"
             setattr(gm, mod_name, orig_mod_copy)
             cur_name_idx += 1
-            cur_node_copy = g.call_module(mod_name, cur_args_copy, cur_kwargs_copy)
+            cur_node_copy = g.call_module(mod_name, cur_args_copy, cur_kwargs_copy)  # type: ignore[possibly-undefined]
 
         elif cur_node_orig.op == 'call_function':
             cur_node_copy = g.call_function(
-                cur_node_orig.target, cur_args_copy, cur_kwargs_copy)
+                cur_node_orig.target, cur_args_copy, cur_kwargs_copy)  # type: ignore[possibly-undefined]
 
         elif cur_node_orig.op == 'call_method':
             cur_node_copy = g.call_method(
-                cur_node_orig.target, cur_args_copy, cur_kwargs_copy)
+                cur_node_orig.target, cur_args_copy, cur_kwargs_copy)  # type: ignore[possibly-undefined]
 
         else:
             raise AssertionError(f'{cur_node_orig.op} not supported yet')
@@ -418,7 +418,7 @@ def create_submodule_from_subgraph(
         # go to next node
         assert len(cur_node_orig.users.keys()) == 1, \
             f'{cur_node_orig} has more than 1 users, not supported yet'
-        cur_node_orig = list(cur_node_orig.users.keys())[0]
+        cur_node_orig = next(iter(cur_node_orig.users.keys()))
         cur_args_orig = cur_node_orig.args
         cur_kwargs_orig = cur_node_orig.kwargs
 
@@ -544,9 +544,8 @@ def create_one_transformed_and_logged_copy_of_subgraph(
                 if isinstance(old_kwarg, Node):
                     new_kwargs[name] = old_kwarg
                 elif isinstance(old_kwarg, (list, tuple)) and len(old_kwarg):
-                    for inner_old_kwarg in old_kwarg:
-                        # TODO(future PR): clarify why we are adding kwargs to args
-                        new_args.append(inner_old_kwarg)
+                    # TODO(future PR): clarify why we are adding kwargs to args
+                    new_args.extend(old_kwarg)
 
             new_args = tuple(new_args)  # type: ignore[assignment]
 
@@ -821,7 +820,7 @@ def create_add_loggers_graph(
                 # except the last one must have only one user
                 if cur_node_orig != last_node:
                     assert len(cur_node_orig.users.keys()) == 1
-                cur_node_orig = list(cur_node_orig.users.keys())[0]
+                cur_node_orig = next(iter(cur_node_orig.users.keys()))
                 assert not cur_node_orig.name.startswith(SHADOW_NODE_NAME_PREFIX)
                 insertion_point = cur_node_copy
 
@@ -947,7 +946,7 @@ def _get_weight_info_from_shadow_wrapper(shadow_wrapper: torch.nn.Module):
         #  to get `_input_scale_1` and `_input_zero_point_1`
 
         assert len(shadow_n.users) == 1
-        quant_node = list(shadow_n.users.keys())[0]
+        quant_node = next(iter(shadow_n.users.keys()))
         new_args: Any = None
         if quant_node.target == torch.quantize_per_channel:
             _weight, scale_node, zp_node, axis, dtype = quant_node.args
@@ -1145,7 +1144,7 @@ def group_results_by_subgraph(results: NSResultsType) -> Any:
     subgraph_name_to_subgraph_results: Any = collections.defaultdict(dict)
 
     # node_output or weight
-    key_to_use = list(results['model'].keys())[0]
+    key_to_use = next(iter(results['model'].keys()))
 
     for subgraph_name_with_idx, subgraph_candidate_results in \
             results['model'][key_to_use].items():

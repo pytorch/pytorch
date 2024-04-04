@@ -30,6 +30,7 @@
 #include <ATen/ops/kl_div_native.h>
 #include <ATen/ops/l1_loss_native.h>
 #include <ATen/ops/log.h>
+#include <ATen/ops/log_sigmoid.h>
 #include <ATen/ops/margin_ranking_loss_native.h>
 #include <ATen/ops/mean.h>
 #include <ATen/ops/min.h>
@@ -70,8 +71,7 @@ namespace {
   }
 }
 
-namespace at {
-namespace meta {
+namespace at::meta {
 
 TORCH_META_FUNC(smooth_l1_loss)
 (const Tensor& input, const Tensor& target, const int64_t reduction, double beta) {
@@ -98,9 +98,9 @@ TORCH_META_FUNC(mse_loss)
   maybe_get_output().resize_({});
 }
 
-} // namespace meta
+} // namespace at::meta
 
-namespace native {
+namespace at::native {
 
 DEFINE_DISPATCH(smooth_l1_stub);
 DEFINE_DISPATCH(smooth_l1_backward_stub);
@@ -146,10 +146,9 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
   TORCH_CHECK(
       targ_dim == 1 || targ_dim == 0,
       "0D or 1D target tensor expected, multi-target not supported");
-
   if (targ_dim == 1) {
     TORCH_CHECK(
-        input1.dim() == 2,
+        input1.dim() == 2 && input2.dim() == 2,
         "1D target tensor expects 2D input tensors, but found inputs with sizes ",
         input1.sizes(),
         " and ",
@@ -157,7 +156,7 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
         ".");
   } else {
     TORCH_CHECK(
-        input1.dim() == 1,
+        input1.dim() == 1 && input2.dim() == 1,
         "0D target tensor expects 1D input tensors, but found inputs with sizes ",
         input1.sizes(),
         " and ",
@@ -270,8 +269,8 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
 
     auto iter = TensorIteratorConfig()
       .add_output(loss_squeezed)
-      .add_owned_input(at::squeeze(input))
-      .add_owned_input(at::squeeze(target))
+      .add_owned_const_input(at::squeeze(input))
+      .add_owned_const_input(at::squeeze(target))
       .build();
 
     AT_DISPATCH_FLOATING_TYPES(loss.scalar_type(), "binary_cross_entropy", [&] {
@@ -360,21 +359,20 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
   c10::MaybeOwned<Tensor> pos_weight_maybe_owned = at::borrow_from_optional_tensor(pos_weight_opt);
   const Tensor& pos_weight = *pos_weight_maybe_owned;
 
-    Tensor loss;
-    auto max_val = (-input).clamp_min_(0);
-    if (pos_weight.defined()) {
-        // pos_weight need to be broadcasted, thus mul(target) is not inplace.
-        auto log_weight = (pos_weight - 1).mul(target).add_(1);
-        loss = (1 - target).mul_(input).add_(log_weight.mul_(((-max_val).exp_().add_((-input - max_val).exp_())).log_().add_(max_val)));
-    } else {
-        loss = (1 - target).mul_(input).add_(max_val).add_((-max_val).exp_().add_((-input -max_val).exp_()).log_());
-    }
+  Tensor loss;
+  if (pos_weight.defined()) {
+      // pos_weight need to be broadcasted, thus mul(target) is not inplace.
+      auto log_weight = (pos_weight - 1).mul(target).add_(1);
+      loss = (1 - target).mul_(input).sub_(log_weight.mul_(at::log_sigmoid(input)));
+  } else {
+      loss = (1 - target).mul_(input).sub_(at::log_sigmoid(input));
+  }
 
-    if (weight.defined()) {
-        loss.mul_(weight);
-    }
+  if (weight.defined()) {
+      loss.mul_(weight);
+  }
 
-    return apply_loss_reduction(loss, reduction);
+  return apply_loss_reduction(loss, reduction);
 }
 
 Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool log_input, const bool full, const double eps, const int64_t reduction)
@@ -511,4 +509,4 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
 Tensor l1_loss(const Tensor& input, const Tensor& target, int64_t reduction) {
   return apply_loss_reduction((input - target).abs(), reduction);
 }
-}}  // namespace at::native
+}  // namespace at::native

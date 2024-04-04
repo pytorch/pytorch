@@ -13,7 +13,7 @@ def val_expressable_in_32_bits(val):
         return True
 
     if isinstance(val, sympy.Expr):
-        assert val.is_constant()
+        assert val.is_number
         if val.is_Integer or val.is_Boolean:
             val = int(val)
         else:
@@ -71,7 +71,7 @@ def try_to_reduce_precision(node, bounds, indirect_vars, indices, replacement_va
                     # TODO - not sure if we should be doing int/float casts while tracing,
                     # might interfere with sympy.
 
-                    index_val_int = ValueRanges(
+                    index_val_int = ValueRanges[sympy.Expr](
                         int(index_val.lower), int(index_val.upper)
                     )
                     if not range_expressable_in_32_bits(index_val_int):

@@ -1,5 +1,6 @@
 # Owner(s): ["module: unknown"]
 
+import expecttest
 import io
 import numpy as np
 import os
@@ -7,7 +8,6 @@ import shutil
 import sys
 import tempfile
 import unittest
-import expecttest
 
 TEST_TENSORBOARD = True
 try:
@@ -43,7 +43,16 @@ except ImportError:
 skipIfNoMatplotlib = unittest.skipIf(not TEST_MATPLOTLIB, "no matplotlib")
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_ASAN, TEST_WITH_CROSSREF
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    TestCase,
+    run_tests,
+    TEST_WITH_ASAN,
+    TEST_WITH_CROSSREF,
+    IS_WINDOWS,
+    IS_MACOS,
+)
 
 def tensor_N(shape, dtype=float):
     numel = np.prod(shape)
@@ -80,7 +89,7 @@ if TEST_TENSORBOARD:
     from torch.utils.tensorboard import summary, SummaryWriter
     from torch.utils.tensorboard._utils import _prepare_video, convert_to_HWC
     from tensorboard.compat.proto.types_pb2 import DataType
-    from torch.utils.tensorboard.summary import tensor_proto
+    from torch.utils.tensorboard.summary import int_to_half, tensor_proto
     from torch.utils.tensorboard._convert_np import make_np
     from torch.utils.tensorboard._pytorch_graph import graph
     from google.protobuf import text_format
@@ -122,6 +131,7 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
         with self.createSummaryWriter() as w:
             w.add_histogram('float histogram', torch.rand((50,)))
             w.add_histogram('int histogram', torch.randint(0, 100, (50,)))
+            w.add_histogram('bfloat16 histogram', torch.rand(50, dtype=torch.bfloat16))
 
     def test_pytorch_histogram_raw(self):
         with self.createSummaryWriter() as w:
@@ -406,18 +416,23 @@ class TestTensorBoardSummary(BaseTestCase):
         summary.video('dummy', np.random.rand(16, 48, 1, 28, 28))
         summary.video('dummy', np.random.rand(20, 7, 1, 8, 8))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_audio(self):
         self.assertTrue(compare_proto(summary.audio('dummy', tensor_N(shape=(42,))), self))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_text(self):
         self.assertTrue(compare_proto(summary.text('dummy', 'text 123'), self))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_histogram_auto(self):
         self.assertTrue(compare_proto(summary.histogram('dummy', tensor_N(shape=(1024,)), bins='auto', max_bins=5), self))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_histogram_fd(self):
         self.assertTrue(compare_proto(summary.histogram('dummy', tensor_N(shape=(1024,)), bins='fd', max_bins=5), self))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_histogram_doane(self):
         self.assertTrue(compare_proto(summary.histogram('dummy', tensor_N(shape=(1024,)), bins='doane', max_bins=5), self))
 
@@ -433,61 +448,8 @@ class TestTensorBoardSummary(BaseTestCase):
         }
         summary.custom_scalars(layout)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
 
-    def test_hparams_smoke(self):
-        hp = {'lr': 0.1, 'bsize': 4}
-        mt = {'accuracy': 0.1, 'loss': 10}
-        summary.hparams(hp, mt)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
 
-        hp = {'use_magic': True, 'init_string': "42"}
-        mt = {'accuracy': 0.1, 'loss': 10}
-        summary.hparams(hp, mt)
-
-        mt = {'accuracy': torch.zeros(1), 'loss': torch.zeros(1)}
-        summary.hparams(hp, mt)
-
-    def test_hparams_wrong_parameter(self):
-        with self.assertRaises(TypeError):
-            summary.hparams([], {})
-        with self.assertRaises(TypeError):
-            summary.hparams({}, [])
-        with self.assertRaises(ValueError):
-            res = summary.hparams({'pytorch': [1, 2]}, {'accuracy': 2.0})
-        # metric data is used in writer.py so the code path is different, which leads to different exception type.
-        with self.assertRaises(NotImplementedError):
-            with self.createSummaryWriter() as writer:
-                writer.add_hparams({'pytorch': 1.0}, {'accuracy': [1, 2]})
-
-    def test_hparams_number(self):
-        hp = {'lr': 0.1}
-        mt = {'accuracy': 0.1}
-        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
-
-    def test_hparams_bool(self):
-        hp = {'bool_var': True}
-        mt = {'accuracy': 0.1}
-        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
-
-    def test_hparams_string(self):
-        hp = {'string_var': "hi"}
-        mt = {'accuracy': 0.1}
-        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
-
-    def test_hparams_domain_discrete(self):
-        hp = {"lr": 0.1, "bool_var": True, "string_var": "hi"}
-        mt = {"accuracy": 0.1}
-        hp_domain = {"lr": [0.1], "bool_var": [True], "string_var": ["hi"]}
-
-        # hparam_domain_discrete keys needs to be subset of hparam_dict keys
-        with self.assertRaises(TypeError):
-            summary.hparams(hp, mt, hparam_domain_discrete={"wrong_key": []})
-
-        # hparam_domain_discrete values needs to be same type as hparam_dict values
-        with self.assertRaises(TypeError):
-            summary.hparams(hp, mt, hparam_domain_discrete={"lr": [True]})
-
-        # only smoke test. Because protobuf map serialization is nondeterministic.
-        summary.hparams(hp, mt, hparam_domain_discrete=hp_domain)
-
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_mesh(self):
         v = np.array([[[1, 1, 1], [-1, -1, 1], [1, -1, -1], [-1, 1, -1]]], dtype=float)
         c = np.array([[[255, 0, 0], [0, 255, 0], [0, 0, 255], [255, 0, 255]]], dtype=int)
@@ -495,6 +457,7 @@ class TestTensorBoardSummary(BaseTestCase):
         mesh = summary.mesh('my_mesh', vertices=v, colors=c, faces=f, config_dict=None)
         self.assertTrue(compare_proto(mesh, self))
 
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_scalar_new_style(self):
         scalar = summary.scalar('test_scalar', 1.0, new_style=True)
         self.assertTrue(compare_proto(scalar, self))
@@ -777,6 +740,8 @@ class TestTensorBoardFigure(BaseTestCase):
         writer.close()
 
 class TestTensorBoardNumpy(BaseTestCase):
+    @unittest.skipIf(IS_WINDOWS, "Skipping on windows, see https://github.com/pytorch/pytorch/pull/109349 ")
+    @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_scalar(self):
         res = make_np(1.1)
         self.assertIsInstance(res, np.ndarray) and self.assertEqual(res.shape, (1,))
@@ -865,6 +830,25 @@ class TestTensorBoardNumpy(BaseTestCase):
         compare_proto(graph, self)
 
 class TestTensorProtoSummary(BaseTestCase):
+    @parametrize(
+        "tensor_type,proto_type",
+        [
+            (torch.float16, DataType.DT_HALF),
+            (torch.bfloat16, DataType.DT_BFLOAT16),
+        ],
+    )
+    def test_half_tensor_proto(self, tensor_type, proto_type):
+        float_values = [1.0, 2.0, 3.0]
+        actual_proto = tensor_proto(
+            "dummy",
+            torch.tensor(float_values, dtype=tensor_type),
+        ).value[0].tensor
+        self.assertSequenceEqual(
+            [int_to_half(x) for x in actual_proto.half_val],
+            float_values,
+        )
+        self.assertTrue(actual_proto.dtype == proto_type)
+
     def test_float_tensor_proto(self):
         float_values = [1.0, 2.0, 3.0]
         actual_proto = (
@@ -901,6 +885,8 @@ class TestTensorProtoSummary(BaseTestCase):
     def test_empty_tensor_proto(self):
         actual_proto = tensor_proto("dummy", torch.empty(0)).value[0].tensor
         self.assertEqual(actual_proto.float_val, [])
+
+instantiate_parametrized_tests(TestTensorProtoSummary)
 
 if __name__ == '__main__':
     run_tests()

@@ -28,6 +28,7 @@
 # users.
 
 import ctypes
+import functools
 import hashlib
 import os.path
 import struct
@@ -41,6 +42,52 @@ import torch.nn.functional as F
 from torch._C import default_generator
 
 from torch.multiprocessing.reductions import StorageWeakRef
+
+
+def lazy_compile(**compile_kwargs):
+    """Lazily wrap a function with torch.compile on the first call
+
+    This avoids eagerly importing dynamo.
+    """
+
+    def decorate_fn(fn):
+        @functools.wraps(fn)
+        def compile_hook(*args, **kwargs):
+            compiled_fn = torch.compile(fn, **compile_kwargs)
+            globals()[fn.__name__] = functools.wraps(fn)(compiled_fn)
+            return compiled_fn(*args, **kwargs)
+
+        return compile_hook
+
+    return decorate_fn
+
+
+# Use of torch.compile is mandatory for (1) good memory usage
+# and (2) xor_sum implementation.  This is our first instance of
+# using PT2 to implement a kernel in PyTorch; if we get AOT capabilities
+# it would be good to apply it here.
+@lazy_compile(dynamic=True)
+def hash_storage_kernel(x):
+    # The randint calls are carefully written to hit things we
+    # have lowerings for in inductor.  Lack of unsigned 32-bit integer
+    # is a pain.
+    a = torch.randint(
+        -(2**31), 2**31, x.shape, device=x.device, dtype=torch.int32
+    ).abs()
+    a = ((a % (2**31 - 1)) + 1).long()
+    b = (
+        torch.randint(-(2**31), 2**31, x.shape, device=x.device, dtype=torch.int32)
+        .abs()
+        .long()
+    )
+    # This is a standard shift-multiply universal hash family
+    # plus xor sum hash, using Philox to generate random numbers.
+    # Our Philox RNG is not deterministic across devices so
+    # don't use this for stable hashing.
+    #
+    # This assumes fixed length so you're also obligated to bucket
+    # by the length of tensor as well
+    return prims.xor_sum((a * x + b).int(), [0])
 
 
 # Returns a hex digest of the data in the storage.  Guaranteed to be
@@ -61,35 +108,6 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
         sha1 = hashlib.sha1()
         sha1.update(buf)
         return sha1.hexdigest()
-
-    # Use of torch.compile is mandatory for (1) good memory usage
-    # and (2) xor_sum implementation.  This is our first instance of
-    # using PT2 to implement a kernel in PyTorch; if we get AOT capabilities
-    # it would be good to apply it here.
-    @torch.compile(dynamic=True)
-    def kernel(x):
-        # The randint calls are carefully written to hit things we
-        # have lowerings for in inductor.  Lack of unsigned 32-bit integer
-        # is a pain.
-        a = torch.randint(
-            -(2**31), 2**31, x.shape, device=x.device, dtype=torch.int32
-        ).abs()
-        a = ((a % (2**31 - 1)) + 1).long()
-        b = (
-            torch.randint(
-                -(2**31), 2**31, x.shape, device=x.device, dtype=torch.int32
-            )
-            .abs()
-            .long()
-        )
-        # This is a standard shift-multiply universal hash family
-        # plus xor sum hash, using Philox to generate random numbers.
-        # Our Philox RNG is not deterministic across devices so
-        # don't use this for stable hashing.
-        #
-        # This assumes fixed length so you're also obligated to bucket
-        # by the length of tensor as well
-        return prims.xor_sum((a * x + b).int(), [0])
 
     # TODO: factor this into a random utility
     if device_type == "cpu":
@@ -114,7 +132,7 @@ def hash_storage(storage: torch.UntypedStorage, *, stable_hash: bool = False) ->
         # We run the 32-bit hash five times with differing parameters to
         # reduce chance of collision
         ITER = 5
-        cs = [kernel(x).item() for _ in range(ITER)]
+        cs = [hash_storage_kernel(x).item() for _ in range(ITER)]
         return struct.pack(">" + "i" * ITER, *cs).hex()
     finally:
         generator.set_state(state)

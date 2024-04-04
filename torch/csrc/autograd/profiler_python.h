@@ -1,13 +1,7 @@
 #pragma once
 
-namespace torch {
-namespace autograd {
-namespace profiler {
-namespace python_tracer {
+namespace torch::autograd::profiler::python_tracer {
 
 void init();
 
 }
-} // namespace profiler
-} // namespace autograd
-} // namespace torch

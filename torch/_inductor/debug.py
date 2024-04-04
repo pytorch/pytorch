@@ -11,7 +11,7 @@ import pickle
 import pstats
 import shutil
 import subprocess
-from typing import Any, List
+from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
 from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
@@ -38,9 +38,13 @@ from .virtualized import V
 
 log = logging.getLogger(__name__)
 
+SchedulerNodeList = List[Any]
+BufMeta = collections.namedtuple("BufMeta", ["name", "n_origin"])
+GRAPHVIZ_COMMAND_SCALABLE = ["dot", "-Gnslimit=2", "-Gnslimit1=2", "-Gmaxiter=5000"]
+
 
 @functools.lru_cache(None)
-def has_dot():
+def has_dot() -> bool:
     try:
         subprocess.check_output(["which", "dot"], stderr=subprocess.PIPE)
         return True
@@ -48,10 +52,9 @@ def has_dot():
         return False
 
 
-def draw_buffers(nodes, print_graph=False, fname=None):
+def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
     """
     Draw a graph in fname.svg.
-    nodes is a list of SchedulerNode objects.
     """
     if not has_dot():
         log.warning("draw_buffers() requires `graphviz` package")
@@ -67,14 +70,17 @@ def draw_buffers(nodes, print_graph=False, fname=None):
             continue
         group = node.meta["fusion_meta"].group
         if isinstance(group, tuple):
-            group = group[1]
+            if isinstance(group[1], int):
+                group = (group[1],)
+            else:
+                group = group[1]
 
         # gather meta data
         dtype = None
         if isinstance(node, ir.ComputedBuffer):
             dtype = node.data.dtype
 
-        metadata = TensorMetadata(group, dtype, None, None, None, None, None)
+        metadata = TensorMetadata(group, dtype, None, None, None, None, None)  # type: ignore[arg-type]
         node.meta["tensor_meta"] = metadata
 
     if print_graph:
@@ -83,7 +89,9 @@ def draw_buffers(nodes, print_graph=False, fname=None):
     gm = GraphModule({}, graph)
     legalize_graph(gm)
     gm.graph.lint()
-    draw_graph(gm, fname, clear_meta=False)
+    draw_graph(
+        gm, fname, clear_meta=False, dot_graph_shape=config.trace.dot_graph_shape
+    )
 
 
 def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
@@ -131,7 +139,10 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
         )
         func_name = f"{node_type}: {fused_name}"
         node_func = get_fake_func(func_name)
-        fx_node = graph.call_function(node_func, args=(), kwargs=None)
+        kwargs = {}
+        if hasattr(snode, "get_device"):
+            kwargs = {"device": snode.get_device()}
+        fx_node = graph.call_function(node_func, args=(), kwargs=kwargs)
 
         def in_output(snode):
             if isinstance(snode, FusedSchedulerNode):
@@ -175,6 +186,72 @@ def create_fx_from_snodes(snodes: List[BaseSchedulerNode]) -> fx.Graph:
     return graph
 
 
+def update_orig_fx_node_name_to_buf_name(
+    nodes: SchedulerNodeList,
+    node_name_to_buf_name: Dict[str, str],
+    parent_buf_name: Optional[str] = None,
+    n_origins: int = 0,
+):
+    if nodes is None:
+        return
+    for node in nodes:
+        # for FusedSchedulerNode, traverse recursively into get_nodes()
+        buf_name = node.get_name()
+        children_nodes = node.get_nodes()
+        if children_nodes is not None and len(children_nodes) > 1:
+            update_orig_fx_node_name_to_buf_name(
+                children_nodes,
+                node_name_to_buf_name,
+                buf_name if parent_buf_name is None else parent_buf_name,
+            )
+            continue
+        else:
+            assert len(children_nodes) == 1 and children_nodes[0] == node
+
+        ir_node = node.node
+        if ir_node is None or ir_node.origins is None:
+            continue
+        for origin in ir_node.origins:
+            node_name = origin.name
+            # when buf1 and buf2 both have origin=node1
+            # we draw node1 according to buf1
+            if node_name not in node_name_to_buf_name:
+                node_name_to_buf_name[node_name] = (
+                    buf_name if parent_buf_name is None else parent_buf_name
+                )
+
+
+def get_node_name_to_buf_meta(node_name_to_buf_name: Dict[str, str]):
+    buf_name_to_n_node = {}
+    for node_name, buf_name in node_name_to_buf_name.items():
+        if buf_name not in buf_name_to_n_node:
+            buf_name_to_n_node[buf_name] = {node_name}
+        else:
+            buf_name_to_n_node[buf_name].add(node_name)
+
+    node_name_to_buf_meta = {}
+    for node_name, buf_name in node_name_to_buf_name.items():
+        n_node = len(buf_name_to_n_node[buf_name])
+        node_name_to_buf_meta[node_name] = BufMeta(buf_name, n_node)
+    return node_name_to_buf_meta
+
+
+def annotate_orig_fx_with_snodes(
+    gm: torch.fx.GraphModule, snodes: SchedulerNodeList
+) -> None:
+    """
+    Creates a FX Graph from a list of SchedulerNode objects.
+    """
+    node_name_to_buf_name: Dict[str, str] = {}
+    update_orig_fx_node_name_to_buf_name(snodes, node_name_to_buf_name)
+    if node_name_to_buf_name is None:
+        return
+    node_name_to_buf_meta = get_node_name_to_buf_meta(node_name_to_buf_name)
+    for node in gm.graph.nodes:
+        if node.name in node_name_to_buf_meta:
+            node.meta["buf_meta"] = node_name_to_buf_meta.get(node.name)
+
+
 @contextlib.contextmanager
 def enable_aot_logging():
     compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
@@ -196,8 +273,7 @@ def enable_aot_logging():
     stack.enter_context(patch("functorch.compile.config.debug_partitioner", True))
 
     path = os.path.join(get_debug_dir(), "torchinductor")
-    if not os.path.exists(path):
-        os.makedirs(path)
+    os.makedirs(path, exist_ok=True)
 
     fh = logging.FileHandler(
         os.path.join(
@@ -230,16 +306,18 @@ class DebugContext:
         return wrap_compiler_debug(inner, compiler_name="inductor")
 
     @staticmethod
-    def create_debug_dir(folder_name):
+    def create_debug_dir(folder_name: str) -> Optional[str]:
+        debug_dir = config.trace.debug_dir or get_debug_dir()
         for n in DebugContext._counter:
             dirname = os.path.join(
-                get_debug_dir(),
+                debug_dir,
                 "torchinductor",
                 f"{folder_name}.{n}",
             )
             if not os.path.exists(dirname):
                 os.makedirs(dirname)
                 return dirname
+        return None
 
     def __init__(self):
         self._prof = None
@@ -250,22 +328,30 @@ class DebugContext:
         if not self._path:
             return
         assert new_path.endswith(".debug"), new_path
-        if os.path.exists(new_path):
-            shutil.rmtree(new_path)
+        from filelock import FileLock
+
         try:
-            shutil.copytree(self._path, new_path)
-            self._path = new_path
+            with FileLock(f"{new_path}.lock"):
+                if os.path.exists(new_path):
+                    shutil.rmtree(new_path)
+                shutil.copytree(self._path, new_path)
         except OSError:
             log.warning(
                 "Failed to copy debug files from %s to %s", self._path, new_path
             )
-            pass
 
-    def fopen(self, filename):
+    def fopen(self, filename: str, write_mode: str = "w", *args, **kwargs):
         assert self._path
-        return open(os.path.join(self._path, filename), "w")
+        return open(os.path.join(self._path, filename), write_mode, *args, **kwargs)
 
-    def filename(self, suffix):
+    @contextlib.contextmanager
+    def fopen_context(self, filename: str, write_mode: str = "w", *args, **kwargs):
+        assert self._path
+        with open(os.path.join(self._path, filename), write_mode, *args, **kwargs) as f:
+            yield f
+
+    def filename(self, suffix: str):
+        assert self._path
         return os.path.join(self._path, suffix)
 
     def upload_tar(self):
@@ -306,7 +392,7 @@ class DebugContext:
             self._prof = cProfile.Profile()
             self._prof.enable()
 
-    def _setup_log_capture(self, filename, level):
+    def _setup_log_capture(self, filename: str, level: int):
         log = logging.getLogger("torch._inductor")
         fd = self._stack.enter_context(self.fopen(filename))
         ch = logging.StreamHandler(fd)
@@ -329,6 +415,7 @@ class DebugContext:
         self._stack.close()
 
     def _save_profile_data(self):
+        assert self._prof
         self._prof.dump_stats(self.filename("compile.prof"))
         with self.fopen("compile.stats") as fd:
             stats = pstats.Stats(self._prof, stream=fd)
@@ -352,12 +439,10 @@ class DebugContext:
             return ignored
 
 
-SchedulerNodeList = List[Any]
-
-
 class DebugFormatter:
     def __init__(self, handler):
         self.fopen = handler.fopen
+        self.fopen_context = handler.fopen_context
         self.filename = handler.filename
         self.handler = handler
 
@@ -382,6 +467,7 @@ class DebugFormatter:
 
     def _write_ir(self, filename: str, nodes: SchedulerNodeList):
         with self.fopen(filename) as fd:
+            log.info("Writing debug ir to  %s", fd.name)
             for node in nodes:
                 fd.write(node.debug_str())
                 fd.write("\n\n\n")
@@ -389,8 +475,109 @@ class DebugFormatter:
     def graph_diagram(self, nodes: SchedulerNodeList):
         draw_buffers(nodes, fname=self.filename("graph_diagram.svg"))
 
+    def draw_orig_fx_graph(self, gm: torch.fx.GraphModule, nodes: SchedulerNodeList):
+        annotate_orig_fx_with_snodes(gm, nodes)
+        draw_graph(
+            gm,
+            fname=self.filename("orig_fx_graph_diagram.svg"),
+            clear_meta=False,
+            prog=GRAPHVIZ_COMMAND_SCALABLE,
+            parse_stack_trace=True,
+            dot_graph_shape=config.trace.dot_graph_shape,
+        )
+
     def output_code(self, filename):
         shutil.copy(filename, self.filename("output_code.py"))
+
+    def log_autotuning_results(
+        self,
+        name: str,
+        input_nodes: List[ir.IRNode],
+        timings: Dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
+        elapse: float,
+        precompile_elapse: float,
+    ):
+        import json
+
+        from .ir import FixedLayout
+
+        def build_node_info(node: ir.IRNode):
+            if hasattr(node, "name"):
+                node_name = node.name
+            else:
+                node_name = ""
+            node_info = {
+                "name": node_name,
+                "type": type(node).__name__,
+            }
+            try:
+                layout = node.get_layout()
+                if isinstance(layout, FixedLayout):
+                    offset = 0
+                    try:
+                        offset = int(layout.offset)
+                    except Exception:
+                        try:
+                            offset = V.graph.sizevars.size_hint(
+                                layout.offset, fallback=0
+                            )
+                        except Exception:
+                            pass
+                    static_layout = FixedLayout(
+                        layout.device,
+                        dtype=layout.dtype,
+                        size=list(V.graph.sizevars.size_hints(layout.size)),
+                        stride=list(V.graph.sizevars.size_hints(layout.stride)),
+                        offset=offset,
+                    )
+                    node_info["layout"] = str(static_layout)
+                else:
+                    node_info["layout"] = str(node.get_layout())
+            except Exception as e:
+                pass
+            try:
+                node_info["dtype"] = str(node.get_dtype())
+            except Exception as e:
+                pass
+            try:
+                node_info["device"] = str(node.get_device())
+            except Exception as e:
+                pass
+            try:
+                node_info["stride"] = str(
+                    V.graph.sizevars.size_hints(node.get_stride())
+                )
+            except Exception as e:
+                pass
+            try:
+                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))
+            except Exception as e:
+                pass
+            try:
+                node_info["numel"] = str(V.graph.sizevars.size_hint(node.get_numel()))
+            except Exception as e:
+                pass
+            if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
+                node_info["data"] = build_node_info(node.data)
+            return node_info
+
+        general_properties = {
+            "op_name": name,
+            "cuda_device_name": torch.cuda.get_device_name(),
+            "cuda_device_count": torch.cuda.device_count(),
+            "input_nodes": [build_node_info(node) for node in input_nodes],
+            "autotuning_time": elapse,
+            "precompile_time": precompile_elapse,
+        }
+        with self.fopen_context(
+            "autotuning_result_json_list.txt", "at", encoding="utf-8"
+        ) as fd:
+            for caller, time in timings.items():
+                info_dict = dict(caller.info_dict())
+                info_dict.update(general_properties)
+                info_dict["benchmark_result"] = time
+                json.dump(info_dict, fd)
+                fd.write("\n")
 
 
 @dataclasses.dataclass
@@ -448,7 +635,7 @@ load_args_and_run_compile_fx_inner({path!r})
         print(message)
 
 
-def load_args_and_run_compile_fx_inner(path):
+def load_args_and_run_compile_fx_inner(path: str):
     from torch._inductor.compile_fx import compile_fx_inner
 
     with open(path, "rb") as f:

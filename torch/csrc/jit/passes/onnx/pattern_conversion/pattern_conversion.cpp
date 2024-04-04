@@ -7,6 +7,8 @@
 
 #include <ATen/ScalarOps.h>
 
+#include <iostream>
+
 // EDITING THIS FILE? READ THIS FIRST!
 // see Note [Edit Pattern Conversion] in pattern_conversion.h
 

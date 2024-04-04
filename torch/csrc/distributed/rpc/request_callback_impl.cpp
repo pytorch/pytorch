@@ -1,6 +1,5 @@
 #include <torch/csrc/distributed/rpc/request_callback_impl.h>
 
-#include <c10/util/C++17.h>
 #include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/distributed/autograd/context/container.h>
 #include <torch/csrc/distributed/autograd/context/context.h>

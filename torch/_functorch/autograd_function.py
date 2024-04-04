@@ -162,8 +162,8 @@ NO_OUT_DIMS = "not specified"
 # Mode-only functorch will greatly simplify this logic.
 def wrap_outputs_maintaining_identity(
         outputs, unwrapped_inputs, orig_inputs, wrap_fn, out_dims=NO_OUT_DIMS):
-    flat_unwrapped_inputs, _ = pytree.tree_flatten(unwrapped_inputs)
-    flat_orig_inputs, _ = pytree.tree_flatten(orig_inputs)
+    flat_unwrapped_inputs = pytree.arg_tree_leaves(*unwrapped_inputs)
+    flat_orig_inputs = pytree.arg_tree_leaves(*orig_inputs)
 
     unwrapped_input_to_orig_input = {
         id(unwrapped): orig
@@ -188,7 +188,7 @@ def wrap_outputs_maintaining_identity(
                 f"out_dims has structure {pytree.tree_flatten(out_dims)[1]} "
                 f"but output has structure {spec}. "
                 f"For more details, please see "
-                f"https://pytorch.org/docs/master/notes/extending.func.html"
+                f"https://pytorch.org/docs/main/notes/extending.func.html"
             )
 
     for i, output in enumerate(flat_outputs):
@@ -199,7 +199,7 @@ def wrap_outputs_maintaining_identity(
             result.append(unwrapped_input_to_orig_input[id(output)])
             continue
         if out_dims_specified:
-            result.append(wrap_fn(output, flat_out_dims[i]))  # type: ignore[index]
+            result.append(wrap_fn(output, flat_out_dims[i]))  # type: ignore[possibly-undefined, index]
         else:
             result.append(wrap_fn(output))
 
@@ -211,7 +211,7 @@ def wrap_outputs_maintaining_identity(
 # that will eventually be fixed by mode-only functorch.
 # The TL;DR is that there's no way to unwrap a dead GradTensorWrapper,
 # so we (the framework) need to do it manually. Regular PyTorch operators
-# automatically do so this is consisent.
+# automatically do so this is consistent.
 #
 # class MyExp(torch.autograd.Function):
 #     @staticmethod
@@ -279,7 +279,7 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
                 f"staticmethod. Please set generate_vmap_rule=False or delete "
                 f"the overriden vmap staticmethod to avoid ambiguity. "
                 f"For more details, please see "
-                f"https://pytorch.org/docs/master/notes/extending.func.html")
+                f"https://pytorch.org/docs/main/notes/extending.func.html")
         return custom_function_call_vmap_generate_rule(interpreter, autograd_function, *operands)
 
     if not has_overriden_vmap_rule(autograd_function):
@@ -290,7 +290,7 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands):
             f"it does not have vmap support. Please override and implement the "
             f"vmap staticmethod or set generate_vmap_rule=True. "
             f"For more details, please see "
-            f"https://pytorch.org/docs/master/notes/extending.func.html")
+            f"https://pytorch.org/docs/main/notes/extending.func.html")
 
     current_level = interpreter.level()
     info = VmapInfo(
@@ -349,9 +349,10 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
     #   vmap(vmap( but not completely sure if it is a problem. If we
     #   assigned those fields to the ctx object, the worry is that they
     #   get overwritten.
-    out_dims = "not populated"
-    input_shapes: Any = "not populated"
-    saved_tensors_bdims: Any = "not populated"
+    init_val = "not populated"
+    out_dims = init_val
+    input_shapes: Any = init_val
+    saved_tensors_bdims: Any = init_val
 
     def forward(*operands):
         nonlocal out_dims
@@ -395,8 +396,8 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
         saved_tensors_bdims = saved_tensors_bdims_
 
     def jvp(ctx, *tangents):
-        assert out_dims != "not populated"
-        assert saved_tensors_bdims != "not populated"
+        assert out_dims != init_val
+        assert saved_tensors_bdims != init_val
 
         def jvp_no_context(saved_tensors, tangents):
             wrapped_ctx = CtxWithSavedTensors(ctx, saved_tensors)
@@ -411,9 +412,9 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
         return result
 
     def backward(ctx, *grad_outputs):
-        assert out_dims != "not populated"
-        assert input_shapes != "not populated"
-        assert saved_tensors_bdims != "not populated"
+        assert out_dims != init_val
+        assert input_shapes != init_val
+        assert saved_tensors_bdims != init_val
 
         def backward_no_context(inputs):
             saved_tensors, grad_outputs = inputs
@@ -440,7 +441,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
     )
 
     def get_out_dims():
-        assert out_dims != "not populated"
+        assert out_dims != init_val
         return out_dims
 
     return Generated, get_out_dims
@@ -450,7 +451,7 @@ def vmapify_autograd_function(autograd_function, in_dims, batch_size, randomness
 # the corresponding in_dims with None.
 def get_tangents_in_dims(input_dims, tangents):
     flat_in_dims, spec = pytree.tree_flatten(input_dims)
-    flat_tangents, _ = pytree.tree_flatten(tangents)
+    flat_tangents = pytree.arg_tree_leaves(*tangents)
     result = [None if tangent is None else in_dim
               for in_dim, tangent in zip(flat_in_dims, flat_tangents)]
     return pytree.tree_unflatten(result, spec)
@@ -632,3 +633,27 @@ def reductify_leaf(grad_input, grad_input_bdim, input_bdim, batch_size,
     if input_bdim != grad_input_bdim:
         grad_input = grad_input.movedim(grad_input_bdim, input_bdim)
     return grad_input
+
+
+class AutogradFunctionApply(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("autograd_function_apply")
+
+    def __call__(self, fwd, bwd, *fwd_args):
+        saved_values = None
+
+        class ApplyTemplate(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, *args):
+                nonlocal saved_values
+                output, saved_values = fwd(None, *args)
+                return output
+
+            @staticmethod
+            def backward(ctx, *grad):
+                return bwd(None, *grad, *saved_values)
+
+        return ApplyTemplate.apply(*fwd_args)
+
+
+autograd_function_apply = AutogradFunctionApply()

@@ -6,19 +6,19 @@ import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
 from torch.distributed._tensor import (
     DeviceMesh,
+    distribute_tensor,
     DTensor,
     Replicate,
     Shard,
-    distribute_tensor,
     zeros,
 )
-from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_if_lt_x_gpu,
     with_comms,
 )
-from torch.testing._internal.common_utils import run_tests
+from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
 
 
 SUBMESH_TENSOR_SIZE = 6
@@ -81,9 +81,7 @@ class DTensorPlanner(DTensorTestBase):
             device_type=self.device_type,
             mesh=range(dist.get_world_size()),
         )
-        sharded_dt = distribute_tensor(
-            tensor_to_shard, mesh, placements=[Shard(0)]
-        )
+        sharded_dt = distribute_tensor(tensor_to_shard, mesh, placements=[Shard(0)])
         replicated_dt = distribute_tensor(
             tensor_to_replicate, mesh, placements=[Replicate()]
         )
@@ -179,9 +177,7 @@ class DTensorPlanner(DTensorTestBase):
             storage_writer=dist_cp.FileSystemWriter(path=CHECKPOINT_DIR),
             planner=dist_cp.DefaultSavePlanner(),
         )
-        model, _, _ = self.create_dtensor_model(
-            local_tensor * 10, local_tensor_2 * 10
-        )
+        model, _, _ = self.create_dtensor_model(local_tensor * 10, local_tensor_2 * 10)
         state_dict = model.state_dict()
 
         """
@@ -247,9 +243,7 @@ class DTensorPlanner(DTensorTestBase):
             if k == "submesh_sdt":
                 if self.rank % 2 == 0:
                     shard_size = int(SUBMESH_TENSOR_SIZE / v.device_mesh.size())
-                    self.assertEqual(
-                        v.to_local().size(), torch.Size([shard_size])
-                    )
+                    self.assertEqual(v.to_local().size(), torch.Size([shard_size]))
                     self.assertEqual(v.to_local(), torch.zeros([shard_size]))
                 else:
                     self.assertEqual(v.to_local().size(), torch.Size([0]))
@@ -258,9 +252,7 @@ class DTensorPlanner(DTensorTestBase):
             if k == "submesh_rdt":
                 if self.rank % 2 == 0:
                     shard_size = SUBMESH_TENSOR_SIZE
-                    self.assertEqual(
-                        v.to_local().size(), torch.Size([shard_size])
-                    )
+                    self.assertEqual(v.to_local().size(), torch.Size([shard_size]))
                     self.assertEqual(v.to_local(), torch.zeros([shard_size]))
                 else:
                     self.assertEqual(v.to_local().size(), torch.Size([0]))

@@ -7,7 +7,8 @@ from typing import Callable, Dict, List, Sequence, Union
 import torch
 import torch.library
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
-from torch.utils._pytree import tree_map
+from torch._prims_common import CustomOutParamAnnotation
+from torch.utils import _pytree as pytree
 
 __all__ = [
     "decomposition_table",
@@ -60,11 +61,15 @@ def _add_op_to_registry(registry, op, fn):
 
 
 def _convert_out_params(f):
-    sig = inspect.signature(f)
     out_annotation = f.__annotations__.get("out")
+
+    # If there are no out params, do not wrap the function.
+    if not out_annotation:
+        return f
+
     # Hack to detect when out is a Tuple. There seems to be no pretty way of doing this
-    fn = f
-    if out_annotation and getattr(out_annotation, "__origin__", None) is tuple:
+    if getattr(out_annotation, "__origin__", None) is tuple:
+        sig = inspect.signature(f)
         out_names = sig.return_annotation._fields
         # If out is a tuple, we need to register a function that unpacks all the out
         # elements as this is what native_functions.yaml expects
@@ -96,9 +101,45 @@ def _convert_out_params(f):
         for o in out_params:
             _fn.__annotations__[o.name] = o.annotation
 
-        fn = _fn
+        # Propagate that this function is wrapped by `out_wrapper`
+        _fn._torch_decompositions_out_wrapper = f._torch_decompositions_out_wrapper  # type: ignore[attr-defined]
 
-    return fn
+        return _fn
+
+    # Alternatively, there may be a single tensor out parameter with a name
+    # other than "out". This will need special treatment and is indicated by an
+    # annotation, which we will remove here so it is not exposed after wrapping.
+    custom_out_param_name = f.__annotations__.pop(CustomOutParamAnnotation, None)
+    if custom_out_param_name:
+
+        @wraps(f)
+        def _fn(*args, **kwargs):
+            out_kwarg = kwargs.pop(custom_out_param_name, None)
+            return f(*args, **kwargs, out=out_kwarg)
+
+        out_param = inspect.Parameter(
+            custom_out_param_name,
+            kind=inspect.Parameter.KEYWORD_ONLY,
+            default=None,
+            annotation=out_annotation,
+        )
+
+        # Drop the out parameter and concatenate the new kwarg in the signature
+        sig = inspect.signature(f)
+        params = chain(
+            (v for k, v in sig.parameters.items() if k != "out"), (out_param,)
+        )
+        _fn.__signature__ = inspect.Signature(  # type: ignore[attr-defined]
+            parameters=params, return_annotation=sig.return_annotation  # type: ignore[arg-type]
+        )
+
+        # Drop the out parameter and concatenate the new kwargs in the annotations
+        _fn.__annotations__ = {k: v for k, v in f.__annotations__.items() if k != "out"}
+        _fn.__annotations__[out_param.name] = out_param.annotation
+
+        return _fn
+
+    return f
 
 
 def register_decomposition(
@@ -130,6 +171,7 @@ def register_decomposition(
     assert type in {"post_autograd", "pre_autograd", "meta"}
 
     def decomposition_decorator(fn: Callable) -> Callable:
+        orig_fn = fn
         if not unsafe:
             fn = _convert_out_params(fn)
 
@@ -141,8 +183,8 @@ def register_decomposition(
             _add_op_to_registry(registry, op, fn)
 
         # To handle allowing multiple aten_ops at once
-        tree_map(register, aten_op)
-        return fn
+        pytree.tree_map_(register, aten_op)
+        return orig_fn
 
     return decomposition_decorator
 
@@ -180,7 +222,7 @@ def get_decompositions(
 
 
 def remove_decompositions(
-    decompositions: Dict[OpOverload, Callable],
+    decompositions: Dict[torch._ops.OperatorBase, Callable],
     aten_ops: Sequence[Union[OpOverload, OpOverloadPacket]],
 ) -> None:
     """
@@ -218,17 +260,23 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.addcmul_,
             aten.addr,
             aten.affine_grid_generator,
+            aten.all,
             aten.aminmax,
             aten.arange.default,
             aten.arange.start,
             aten.avg_pool2d_backward,
+            aten.baddbmm,
             aten.binary_cross_entropy,
             aten.binary_cross_entropy_backward,
             aten.binary_cross_entropy_with_logits,
+            aten.block_diag,
             aten.celu,
             aten.celu_,
+            aten.clamp_max,
+            aten.clamp_min,
             aten.col2im,
             aten.count_nonzero,
+            aten.linalg_cross,
             aten.cudnn_batch_norm,
             aten.cudnn_batch_norm_backward,
             aten.deg2rad,
@@ -249,11 +297,13 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.eye,
             aten.fill,
             aten.fill_,
+            aten.floor_divide,
             aten.frac,
             aten.frac_,
             aten._fused_moving_avg_obs_fq_helper,
             aten.gelu_,
             aten.gelu_backward,
+            aten.glu,
             aten.glu_backward,
             aten.hardshrink,
             aten.hardsigmoid,
@@ -275,9 +325,12 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.index_copy_,
             aten.index_fill,
             aten.index_fill_,
+            aten.isin,
             aten.isneginf,
             aten.isposinf,
             aten.l1_loss,
+            aten._lazy_clone,
+            aten._test_parallel_materialize,
             aten.leaky_relu_,
             aten.leaky_relu_backward,
             aten.lerp,
@@ -321,19 +374,28 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.norm,
             aten.ones,
             aten.ones_like,
+            aten.pixel_shuffle,
+            aten.pixel_unshuffle,
             aten._prelu_kernel,
             aten._prelu_kernel_backward,
             aten._reshape_alias,
             aten.rad2deg,
             aten.rad2deg_,
+            aten.reflection_pad1d,
+            aten.reflection_pad2d,
+            aten.reflection_pad3d,
+            aten.replication_pad1d,
+            aten.replication_pad2d,
+            aten.replication_pad3d,
             aten.renorm,
             aten.renorm_,
+            aten.replication_pad2d,
+            aten.roll,
             aten.rot90,
             aten.rrelu_with_noise,
             aten.rrelu_with_noise_,
-            aten.rsub.Scalar,
-            aten.rsub.Tensor,
-            aten._scaled_dot_product_flash_attention.default,
+            aten.rsub,
+            aten._scaled_dot_product_flash_attention_for_cpu.default,
             aten.select_backward,
             aten.select_scatter,
             aten.sgn,
@@ -356,8 +418,17 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.special_entr,
             aten.special_log_ndtr,
             aten.special_xlog1py,
+            aten.split.Tensor,
+            aten.split_with_sizes_copy,
+            aten.squeeze.default,
+            aten.squeeze.dim,
+            aten.std,
+            aten.std_mean,
             aten.stack,
+            aten.sum.default,
+            aten.sum.out,
             aten.t,
+            aten.take,
             aten.tanh_backward,
             aten.threshold,
             aten.threshold_,
@@ -368,16 +439,25 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.tril_,
             aten.triu,
             aten.triu_,
+            aten.unbind,
             aten.unfold_backward,
             aten.unfold_copy,
             aten._unsafe_index,
+            aten.unsafe_split.Tensor,
+            aten.unsafe_split_with_sizes,
+            aten._unsafe_view,
+            aten.upsample_linear1d,
             aten.upsample_bilinear2d,
+            aten.upsample_trilinear3d,
             aten.upsample_nearest2d_backward,
+            aten.view_as_complex,
             aten.xlogy,
             aten.xlogy_,
             aten.zero,
             aten.zero_,
             aten.zeros,
             aten.zeros_like,
+            aten._chunk_cat,
+            aten._weight_norm_interface,
         ]
     )

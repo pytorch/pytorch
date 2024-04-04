@@ -15,8 +15,7 @@
 
 #define INTRA_OP_PARALLEL
 
-namespace at {
-namespace internal {
+namespace at::internal {
 
 template <typename F>
 inline void invoke_parallel(
@@ -50,5 +49,4 @@ inline void invoke_parallel(
   }
 }
 
-} // namespace internal
-} // namespace at
+} // namespace at::internal

@@ -11,7 +11,7 @@ namespace nn {
 
 namespace detail {
 
-typedef c10::variant<
+typedef std::variant<
     enumtype::kZeros,
     enumtype::kReflect,
     enumtype::kReplicate,
@@ -20,7 +20,7 @@ typedef c10::variant<
 
 template <size_t D>
 using conv_padding_t =
-    c10::variant<ExpandingArray<D>, enumtype::kValid, enumtype::kSame>;
+    std::variant<ExpandingArray<D>, enumtype::kValid, enumtype::kSame>;
 
 /// Options for a `D`-dimensional convolution or convolution transpose module.
 template <size_t D>

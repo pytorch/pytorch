@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from typing import List
 
 import torch
@@ -44,6 +46,7 @@ _double_types = _dispatch_dtypes((torch.float64, torch.complex128))
 def double_types():
     return _double_types
 
+# NB: Does not contain uint16/uint32/uint64 for BC reasons
 _integral_types = _dispatch_dtypes((torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64))
 def integral_types():
     return _integral_types
@@ -75,6 +78,10 @@ def all_types_and_complex_and(*dtypes):
 _all_types_and_half = _all_types + (torch.half,)
 def all_types_and_half():
     return _all_types_and_half
+
+def custom_types(*dtypes):
+    """Create a list of arbitrary dtypes"""
+    return _empty_types + _validate_dtypes(*dtypes)
 
 # The functions below are used for convenience in our test suite and thus have no corresponding C++ dispatch macro
 

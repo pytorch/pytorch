@@ -33,7 +33,7 @@ void TSLoweringContext::Lower(const Node* node) {
     // First, we call the node lowering function, which exists for newly
     // codegenned or refactored nodes
     TSOpVector ops = tsnode->Lower(function_, this);
-    CHECK(!ops.empty()) << "Failed to lower: " << *node;
+    TORCH_CHECK(!ops.empty(), "Failed to lower: ", *node);
     TORCH_CHECK_EQ(node->num_outputs(), ops.size());
     for (size_t i = 0; i < ops.size(); ++i) {
       AssignOutputOp(torch::lazy::Output(node, i), ops[i]);

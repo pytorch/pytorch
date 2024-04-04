@@ -13,8 +13,10 @@ from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_
 from torch.overrides import (
     handle_torch_function,
     has_torch_function,
+    get_ignored_functions,
     get_overridable_functions,
     get_testing_overrides,
+    resolve_name,
     is_tensor_method_or_property,
     TorchFunctionMode,
     _get_current_function_mode,
@@ -215,7 +217,7 @@ class SubTensor(torch.Tensor):
     """
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if(kwargs is None):
+        if kwargs is None:
             kwargs = {}
 
         if func not in HANDLED_FUNCTIONS_SUB:
@@ -332,7 +334,7 @@ def generate_tensor_like_torch_implementations():
     # the problem.  A more proper fix is to make the "not tested" check
     # a test on its own, and to make sure the monkeypatch is only installed
     # for the span of the relevant test (and deleted afterwards)
-    testing_ignore = {"sample_functional"}
+    testing_ignore = {"sample_functional", "autocast"}
     for namespace, funcs in get_overridable_functions().items():
         for func in funcs:
             if func not in testing_overrides and func.__name__ not in testing_ignore:
@@ -366,7 +368,7 @@ class TensorLike:
     """
     @classmethod
     def __torch_function__(cls, func, types, args=(), kwargs=None):
-        if(kwargs is None):
+        if kwargs is None:
             kwargs = {}
 
         if func not in HANDLED_FUNCTIONS_TENSOR_LIKE:
@@ -636,7 +638,7 @@ def generate_tensor_like_override_tests(cls):
                 return instance_gen()
             elif arg_type == "TensorList" or arg_type == "ITensorListRef":
                 return [instance_gen(), instance_gen()]
-            elif arg_type == "c10::List<c10::optional<Tensor>>":
+            elif arg_type == "c10::List<::std::optional<Tensor>>":
                 return [instance_gen(), instance_gen()]
             elif arg_type == "IntArrayRef" or arg_type == "SymIntArrayRef":
                 size = arg.get("size", 2)
@@ -1136,6 +1138,14 @@ class TestTorchFunctionWarning(TestCase):
             with self.assertWarnsRegex(UserWarning, "as a plain method is deprecated"):
                 # Function that handles torch_function in C++
                 torch.abs(a)
+
+class TestDisabledUserWarnings(TestCase):
+    def test_no_implicit_user_warning_for_deprecated_functions(self):
+        self.assertNotWarn(get_ignored_functions)
+        self.assertNotWarn(get_testing_overrides)
+        self.assertNotWarn(get_overridable_functions)
+        self.assertNotWarn(lambda: resolve_name(torch.Tensor.add))
+        self.assertNotWarn(lambda: is_tensor_method_or_property(torch.Tensor.add))
 
 @unittest.skipIf(TEST_WITH_CROSSREF, "not run with crossref")
 class TestTorchFunctionMode(TestCase):

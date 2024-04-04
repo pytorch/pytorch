@@ -1,4 +1,5 @@
-from typing import List
+import sys
+from typing import Any, List
 
 from tools.testing.target_determination.heuristics import (
     AggregatedHeuristics as AggregatedHeuristics,
@@ -7,23 +8,19 @@ from tools.testing.target_determination.heuristics import (
 )
 
 
-def get_test_prioritizations(tests: List[str]) -> AggregatedHeuristics:
-    aggregated_results = AggregatedHeuristics(unranked_tests=tests)
-    print(f"Received {len(tests)} tests to prioritize")
+def get_test_prioritizations(
+    tests: List[str], file: Any = sys.stdout
+) -> AggregatedHeuristics:
+    aggregated_results = AggregatedHeuristics(tests)
+    print(f"Received {len(tests)} tests to prioritize", file=file)
     for test in tests:
-        print(f"  {test}")
+        print(f"  {test}", file=file)
 
     for heuristic in HEURISTICS:
-        new_rankings: TestPrioritizations = heuristic.get_test_priorities(tests)
-        aggregated_results.add_heuristic_results(str(heuristic), new_rankings)
+        new_rankings: TestPrioritizations = heuristic.get_prediction_confidence(tests)
+        aggregated_results.add_heuristic_results(heuristic, new_rankings)
 
-        num_tests_found = len(new_rankings.get_prioritized_tests())
-        print(
-            f"Heuristic {heuristic} identified {num_tests_found} tests "
-            + f"to prioritize ({(num_tests_found / len(tests)):.2%}%)"
-        )
-
-        if num_tests_found:
-            new_rankings.print_info()
+        print(f"Results from {heuristic.__class__.__name__}")
+        print(new_rankings.get_info_str(verbose=False), file=file)
 
     return aggregated_results

@@ -6,8 +6,11 @@ from ._compatibility import compatibility
 
 import copy
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Union
+from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Union, TYPE_CHECKING
 import torch
+
+if TYPE_CHECKING:
+    from .passes.utils.matcher_with_name_node_map_utils import InternalMatch
 
 __all__ = ['Match', 'replace_pattern', 'replace_pattern_with_filters', "ReplacedPatterns"]
 
@@ -36,7 +39,10 @@ def _replace_attributes(gm: GraphModule, replacement: torch.nn.Module) -> None:
 
     def try_get_attr(gm: torch.nn.Module, target: str) -> Optional[Any]:
         module_path, _, attr_name = target.rpartition(".")
-        mod: torch.nn.Module = gm.get_submodule(module_path)
+        try:
+            mod: torch.nn.Module = gm.get_submodule(module_path)
+        except AttributeError:
+            return None
         attr = getattr(mod, attr_name, None)
         return attr
 
@@ -200,9 +206,9 @@ def replace_pattern(
 @compatibility(is_backward_compatible=False)
 def replace_pattern_with_filters(
     gm: GraphModule,
-    pattern: Union[Callable, GraphModule],
-    replacement: Union[Callable, GraphModule],
-    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,  # type: ignore[name-defined]
+    pattern: Union[Callable, Graph, GraphModule],
+    replacement: Union[Callable, Graph, GraphModule],
+    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,
     ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
     """
@@ -220,9 +226,9 @@ def replace_pattern_with_filters(
 
 def _replace_pattern(
     gm: GraphModule,
-    pattern: Union[Callable, GraphModule],
-    replacement: Union[Callable, GraphModule],
-    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,  # type: ignore[name-defined]
+    pattern: Union[Callable, Graph, GraphModule],
+    replacement: Union[Callable, Graph, GraphModule],
+    match_filters: Optional[List[Callable[["InternalMatch", Graph, Graph], bool]]] = None,
     ignore_literals: bool = False,
 ) -> List[ReplacedPatterns]:
 
@@ -236,11 +242,15 @@ def _replace_pattern(
 
     if isinstance(pattern, GraphModule):
         pattern_graph = pattern.graph
+    elif isinstance(pattern, Graph):
+        pattern_graph = pattern
     else:
         pattern_graph = symbolic_trace(pattern).graph
 
     if isinstance(replacement, GraphModule):
         replacement_graph = replacement.graph
+    elif isinstance(replacement, Graph):
+        replacement_graph = replacement
     else:
         replacement_graph = symbolic_trace(replacement).graph
 
@@ -289,7 +299,7 @@ def _replace_pattern(
         assert user_nodes, "The returning_nodes should have at least one user node"
 
         if len(user_nodes) == 1:
-            first_user_node = list(user_nodes)[0]
+            first_user_node = next(iter(user_nodes))
         else:
             # If there are multiple user nodes, we need to find the first user node
             # in the current execution order of the `original_graph`
@@ -298,7 +308,7 @@ def _replace_pattern(
                     first_user_node = n
                     break
 
-        with original_graph.inserting_before(first_user_node):
+        with original_graph.inserting_before(first_user_node):  # type: ignore[possibly-undefined]
             copied_returning_nodes = original_graph.graph_copy(replacement_graph, val_map)
 
         if isinstance(copied_returning_nodes, Node):

@@ -6,7 +6,7 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 typedef std::tuple<Tensor, optional<int64_t>> oneOutput;
 typedef std::tuple<Tensor, optional<int64_t>, Tensor, optional<int64_t>> twoOutputs;
@@ -146,21 +146,6 @@ Tensor baddbmm_decomp(
   return out;
 }
 
-Tensor linear_decomp(
-    const Tensor& input, const Tensor& weight,
-    const c10::optional<Tensor>& bias_opt) {
-  auto result = input.matmul(weight.t());
-  if (bias_opt) {
-    // NB: It's too much work to figure out how to actually fuse the bias so
-    // we're not going to.
-    // TODO: if the result isn't batched but bias is, then we need to do the following.
-    // Otherwise, it can just be in-place. We should write a more nuanced
-    // decomposition rule
-    return result.add(*bias_opt);
-  }
-  return result;
-}
-
 Tensor addmm_decomp(const Tensor& self, const Tensor& mat1, const Tensor& mat2, const Scalar& beta, const Scalar& alpha) {
   // Decomposition that is probably not very fast...
   return at::add(self * beta, at::mm(mat1, mat2), alpha);
@@ -280,6 +265,28 @@ static void expect_at_least_rank(
       rank, " dimensions instead.");
 }
 
+threeOutputs linalg_lu_unpack_batch_rule(
+    const Tensor& LU, optional<int64_t> LU_bdim,
+    const Tensor& pivots, optional<int64_t> pivots_bdim,
+    bool unpack_data, bool unpack_pivots) {
+  auto LU_ = moveBatchDimToFront(LU, LU_bdim);
+  auto pivots_ = moveBatchDimToFront(pivots, pivots_bdim);
+
+  // LU and pivots's first {N-2} (for LU), {N-1} (for pivots) dimensions must
+  // match So if only one of them is being vmapped over, we must expand out that
+  // dimension.
+  if (LU_bdim.has_value() != pivots_bdim.has_value()) {
+    auto bdim_size = get_bdim_size2(LU, LU_bdim, pivots, pivots_bdim);
+    LU_ = ensure_has_bdim(LU_, LU_bdim.has_value(), bdim_size);
+    pivots_ = ensure_has_bdim(pivots_, pivots_bdim.has_value(), bdim_size);
+    pivots_bdim = 0;
+    LU_bdim = 0;
+  }
+
+  const auto res = at::lu_unpack(LU_, pivots_, unpack_data, unpack_pivots);
+  return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0);
+}
+
 oneOutput linalg_lu_solve_batch_rule(
     const Tensor& LU, optional<int64_t> LU_bdim,
     const Tensor& pivots, optional<int64_t> pivots_bdim,
@@ -345,14 +352,6 @@ threeOutputs linalg_lu_factor_ex_batch_rule(
   return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0, std::get<2>(res), 0);
 }
 
-twoOutputs linalg_lu_factor_batch_rule(
-    const Tensor& A, c10::optional<int64_t> A_bdim, bool pivot) {
-  TORCH_CHECK(rankWithoutBatchDim(A, A_bdim) >= 2, "torch.lu_factor: Expected tensor with 2 or more dimensions. Got size: ", A.sizes(), " instead");
-  const auto A_ = moveBatchDimToFront(A, A_bdim);
-  const auto res = at::linalg_lu_factor(A_, pivot);
-  return std::make_tuple(std::get<0>(res), 0, std::get<1>(res), 0);
-}
-
 oneOutput matrix_exp_batch_rule(const Tensor& self, c10::optional<int64_t> self_bdim) {
   TORCH_CHECK(rankWithoutBatchDim(self, self_bdim) >= 2, "torch.matrix_exp: The input tensor A must have at least 2 dimensions.");
   const auto self_ = moveBatchDimToFront(self, self_bdim).contiguous();  // seems to be a bug
@@ -371,7 +370,7 @@ fourOutputs solve_ex_batch_rule(
   TORCH_CHECK(A_logical_rank >= 2,
             "linalg.solve: The input tensor A must have at least 2 dimensions.");
 
-  int b_logical_rank = max_logical_rank;
+  auto b_logical_rank = max_logical_rank;
   if (A_logical_rank > B_logical_rank) {  // vector case: B was a vector or batched vector
     // not accurate but matches linalg error message
     TORCH_CHECK(B_logical_rank >= 1, "linalg.solve: The input tensor B must have at least 2 dimensions.");
@@ -440,8 +439,7 @@ fourOutputs linalg_lstsq_batch_rule(
   const auto self_ = ensure_has_bdim(std::get<0>(tensor_other), self_bdim.has_value(), batch_size);
   const auto b_ = ensure_has_bdim(std::get<1>(tensor_other), b_bdim.has_value(), batch_size);
 
-  Tensor res, res_1, res_2, res_3;
-  std::tie(res, res_1, res_2, res_3) = at::linalg_lstsq(self_, b_, rcond, driver);
+  auto [res, res_1, res_2, res_3] = at::linalg_lstsq(self_, b_, rcond, driver);
 
   // everything but the 0th output are only sometimes computed. When they aren't, they're empty tensors without a bdim
   const auto res_1_bdim = batch_dim_if_not_empty(res_1);
@@ -576,25 +574,24 @@ pinv_batch_rule(
   }
 
 // These need to be outside. String constant must be declared outside of a macro to be used as template param
+// NOLINTBEGIN(*array*)
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky, cholesky);
 LINALG_CHECK_MATRIX_UNARY_ONE_OUT(cholesky_inverse, cholesky_inverse);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_cholesky_ex, linalg.cholesky);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_eig, linalg.eig);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_inv_ex, linalg.inv_ex);
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(linalg_ldl_factor_ex, torch.linalg.ldl_factor_ex);
-LINALG_CHECK_MATRIX_UNARY_ONE_OUT(linalg_pinv, linalg.pinv);
-LINALG_CHECK_MATRIX_UNARY_ONE_OUT2(linalg_pinv, atol_rtol_float, linalg.pinv);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_qr, linalg.qr);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(linalg_slogdet, linalg.slogdet);
 LINALG_CHECK_MATRIX_BINARY_ONE_OUT(linalg_solve_triangular, linalg.solve_triangular);
 
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(geqrf, geqrf);
-LINALG_CHECK_MATRIX_UNARY_ONE_OUT(logdet, logdet);
 LINALG_CHECK_MATRIX_BINARY_TWO_OUT(triangular_solve, triangular_solve);
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_det, linalg.det);
 LINALG_CHECK_MATRIX_UNARY_TWO_OUT(_linalg_eigh, linalg.eigh);
 LINALG_CHECK_MATRIX_UNARY_FOUR_OUT(_linalg_slogdet, linalg.slogdet);
 LINALG_CHECK_MATRIX_UNARY_THREE_OUT(_linalg_svd, linalg.svd);
+// NOLINTEND(*array*)
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(bmm, bmm_batch_rule);
@@ -605,13 +602,12 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(dot, dot_batch_rule);
   VMAP_SUPPORT(mv, mv_batch_rule);
   VMAP_SUPPORT(mm, mm_batch_rule);
-  m.impl("linear", linear_decomp);
+  VMAP_SUPPORT(lu_unpack, linalg_lu_unpack_batch_rule);
   VMAP_SUPPORT(linalg_lu_solve, linalg_lu_solve_batch_rule);
   VMAP_SUPPORT(linalg_householder_product, householder_product_batch_rule);
   VMAP_SUPPORT(cholesky_solve, cholesky_solve_batch_rule);  // custom dim error
   VMAP_SUPPORT(linalg_lstsq, linalg_lstsq_batch_rule);  // custom errors and sometimes empty return
   VMAP_SUPPORT(linalg_lu_factor_ex, linalg_lu_factor_ex_batch_rule);
-  VMAP_SUPPORT(linalg_lu_factor, linalg_lu_factor_batch_rule);
   VMAP_SUPPORT(linalg_matrix_exp, matrix_exp_batch_rule);
   VMAP_SUPPORT(_linalg_solve_ex, solve_ex_batch_rule);
   VMAP_SUPPORT(linalg_cross, cross_batch_rule);
@@ -621,4 +617,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   m.impl("vdot", vdot_decomp);
 }
-}}
+} // namespace at::functorch

@@ -5,21 +5,21 @@ from functorch.experimental.control_flow import cond
 
 
 @export_case(
-    example_inputs=(torch.ones(6),),
+    example_inputs=(torch.randn(6),),
     tags={
         "torch.cond",
         "torch.dynamic-shape",
     },
 )
-def cond_branch_nonlocal_variables(x):
+class CondBranchNonlocalVariables(torch.nn.Module):
     """
     The branch functions (`true_fn` and `false_fn`) passed to cond() must follow these rules:
-      - both branches must take the same args, which must also match the branch args passed to cond.
-      - both branches must return a single tensor
-      - returned tensor must have the same tensor metadata, e.g. shape and dtype
-      - branch function can be free function, nested function, lambda, class methods
-      - branch function can not have closure variables
-      - no inplace mutations on inputs or global variables
+    - both branches must take the same args, which must also match the branch args passed to cond.
+    - both branches must return a single tensor
+    - returned tensor must have the same tensor metadata, e.g. shape and dtype
+    - branch function can be free function, nested function, lambda, class methods
+    - branch function can not have closure variables
+    - no inplace mutations on inputs or global variables
 
     This example demonstrates how to rewrite code to avoid capturing closure variables in branch functions.
 
@@ -42,18 +42,22 @@ def cond_branch_nonlocal_variables(x):
     NOTE: If the `pred` is test on a dim with batch size < 2, it will be specialized.
     """
 
-    my_tensor_var = x + 100
-    my_primitive_var = 3.14
+    def __init__(self):
+        super().__init__()
 
-    def true_fn(x, y, z):
-        return x + y + z
+    def forward(self, x):
+        my_tensor_var = x + 100
+        my_primitive_var = 3.14
 
-    def false_fn(x, y, z):
-        return x - y - z
+        def true_fn(x, y, z):
+            return x + y + z
 
-    return cond(
-        x.shape[0] > 5,
-        true_fn,
-        false_fn,
-        [x, my_tensor_var, torch.tensor(my_primitive_var)],
-    )
+        def false_fn(x, y, z):
+            return x - y - z
+
+        return cond(
+            x.shape[0] > 5,
+            true_fn,
+            false_fn,
+            [x, my_tensor_var, torch.tensor(my_primitive_var)],
+        )

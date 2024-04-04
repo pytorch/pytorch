@@ -518,7 +518,7 @@ class TestQuantizationUtils(TestCase):
         This unit test checks that
         1. Embeddings and EmbeddingBags are sparsified to the right sparsity levels
         2. Embeddings and EmbeddingBags are quantized
-        3. Linear modules are not quanitzed
+        3. Linear modules are not quantized
         """
         model = Model()
 
@@ -557,7 +557,7 @@ class TestQuantizationUtils(TestCase):
         This unit test checks that
         1. Embeddings and EmbeddingBags are sparsified to the right sparsity levels
         2. Embeddings and EmbeddingBags are quantized
-        3. Linear modules are not quanitzed
+        3. Linear modules are not quantized
         """
         model = Model()
 

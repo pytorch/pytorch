@@ -1,12 +1,12 @@
-"""
-This module converts objects into numpy array.
-"""
+"""This module converts objects into numpy array."""
 import numpy as np
 import torch
 
 
 def make_np(x):
     """
+    Convert an object into numpy array.
+
     Args:
       x: An instance of torch tensor or caffe blob name
 
@@ -27,6 +27,8 @@ def make_np(x):
 
 
 def _prepare_pytorch(x):
+    if x.dtype == torch.bfloat16:
+        x = x.to(torch.float16)
     x = x.detach().cpu().numpy()
     return x
 

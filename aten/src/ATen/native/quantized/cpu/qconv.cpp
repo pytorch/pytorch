@@ -35,6 +35,7 @@
 #endif
 
 #include <c10/util/irange.h>
+#include <c10/util/string_utils.h>
 
 namespace {
 // To have a sanity check for maximum matrix size.
@@ -769,19 +770,32 @@ at::Tensor PackedConvWeightsQnnp<kSpatialDim>::apply_impl_xnnp(
       output_zero_point,
       c10::MemoryFormat::ChannelsLast);
 
-  // Setup the operator
-  status = at::native::xnnp_utils::xnnp_setup_convolution2d_nhwc(
+  // Reshape the operator
+  status = at::native::xnnp_utils::xnnp_reshape_convolution2d_nhwc(
       xnnp_convolution_op.get(),
       N,
       H,
       W,
-      reinterpret_cast<const underlying_t*>(act_nhwc.template data_ptr<scalar_t>()),
-      reinterpret_cast<underlying_t*>(output.template data_ptr<scalar_t>()),
       caffe2::pthreadpool_(),
       per_channel(),
       transpose(),
       output_padding()[0],
       output_padding()[1]);
+
+  TORCH_CHECK(
+      status == xnn_status_success,
+      func_name,
+      ": xnn setup operator failed(",
+      status,
+      ")");
+
+  // Setup the operator
+  status = at::native::xnnp_utils::xnnp_setup_convolution2d_nhwc(
+      xnnp_convolution_op.get(),
+      reinterpret_cast<const underlying_t*>(act_nhwc.template data_ptr<scalar_t>()),
+      reinterpret_cast<underlying_t*>(output.template data_ptr<scalar_t>()),
+      per_channel(),
+      transpose());
 
   TORCH_CHECK(
       status == xnn_status_success,
@@ -1388,7 +1402,7 @@ static at::Tensor _quantized_convolution_onednn(
     c10::optional<at::Tensor> accum, // accum to fused with conv add
     double accum_scale,
     int64_t accum_zero_point,
-    bool fp32_output,
+    c10::optional<c10::ScalarType> output_dtype,
     c10::optional<c10::string_view> binary_attr,
     c10::optional<at::Scalar> binary_alpha,
     c10::optional<c10::string_view> unary_attr,
@@ -1402,13 +1416,15 @@ static at::Tensor _quantized_convolution_onednn(
   // inv_scale = 1.0 / scale will be folded.
   // So, we can only get inv_scale from quant node which is used as
   // output_scale of this op.
-  if (fp32_output) {
-    // When fp32_output, oneDNN expects op_attr doesn't set_scales and set_zero_points.
+  bool fp32_output = output_dtype.has_value() && (output_dtype.value() == c10::kFloat);
+  bool bfloat16_output = output_dtype.has_value() && (output_dtype.value() == c10::kBFloat16);
+  if (fp32_output || bfloat16_output) {
+    // When fp32 or bf16 output, oneDNN expects op_attr doesn't set_scales and set_zero_points.
     // So, we will use default inv_output_scale as 1.0 and output_zero_point as 0, since
     // when inv_output_scale is 1.0, we will skip invoking of op_attr.set_scales in ideep;
     // when output_zero_point is 0, we will skip invoking of op_attr.set_zero_points in ideep.
-    TORCH_CHECK(inv_output_scale == 1.0,  " (ONEDNN): fp32 output, inv_output_scale must be 1.0.");
-    TORCH_CHECK(output_zero_point == 0,  " (ONEDNN): fp32 output, output_zero_point must be 0");
+    TORCH_CHECK(inv_output_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, inv_output_scale must be 1.0.");
+    TORCH_CHECK(output_zero_point == 0,  " (ONEDNN): fp32 or bf16 output, output_zero_point must be 0");
   }
 
   int kSpatialDim = act.dim() - 2;
@@ -1416,8 +1432,26 @@ static at::Tensor _quantized_convolution_onednn(
 
   bool has_binary_post_op = binary_attr.has_value() && binary_attr.value() != "none";
   bool has_unary_post_op = unary_attr.has_value() && unary_attr.value() != "none";
-  // has_accum_postop_sum: extra input besides the conv to do conv add fusion with post op sum.
-  bool has_accum_postop_sum = has_binary_post_op && binary_attr.value() == "add" && !fp32_output;
+  // has_accum_postop_sum: extra input besides the conv to do conv post op sum fusion.
+  bool has_accum_postop_sum = has_binary_post_op && binary_attr.value() == "sum";
+
+  if (has_accum_postop_sum) {
+    TORCH_CHECK(accum.has_value(), "For post op sum, accum tensor should not be empty.");
+    TORCH_CHECK(
+      accum.value().is_contiguous(
+        kSpatialDim == 2
+        ? c10::MemoryFormat::ChannelsLast
+        : c10::MemoryFormat::ChannelsLast3d
+      ),
+      "For post op sum, accum tensor must be contiguous."
+    );
+    if (fp32_output || bfloat16_output) {
+      TORCH_CHECK(accum_scale == 1.0,  " (ONEDNN): fp32 or bf16 output, accum_scale must be 1.0.");
+      TORCH_CHECK(accum_zero_point == 0,  " (ONEDNN): fp32 or bf16 output, accum_zero_point must be 0");
+      TORCH_CHECK((accum.value().scalar_type() == c10::kFloat) || (accum.value().scalar_type() == c10::kBFloat16), "The accum tensor should be KFloat or KBFloat.");
+    }
+  }
+
   std::string func_name = "quantized::packed_weights_conv";
   func_name += std::to_string(kSpatialDim) + "d";
   if (has_binary_post_op) {
@@ -1473,7 +1507,24 @@ static at::Tensor _quantized_convolution_onednn(
   // Scales of ONEDNN and PyTorch are reciprocal
   const ideep::scale_t& src_scales = ideep::scale_t(1, 1.0 / act_scale);
 
-#if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION == 0
+#if IDEEP_PREREQ(3, 1, 0, 1)
+  // 1. If the weight scale generated by observer should with dtype float32
+  // https://github.com/pytorch/pytorch/blob/d2c24eca8a60c56b31ca967a44d5cc4522802aa6/torch/ao/quantization/observer.py#L323
+  // 2. If the weight scale got from the quantized tensor, like did in the UT. It's with dtype of double.
+  // https://github.com/pytorch/pytorch/blob/d2fa3f608b5e4f582a8aaf752f10efe4ca72a7d0/aten/src/ATen/quantized/Quantizer.cpp#L69
+  TORCH_CHECK(
+    weight_scales.scalar_type() == c10::ScalarType::Double || weight_scales.scalar_type() == c10::ScalarType::Float,
+    "weight_scales should be with data type Double or float");
+  if (weight_scales.scalar_type() == c10::ScalarType::Double) {
+    // For case 2, we will convert it from double to float, since ideep::scale_t is alias of std::vector<float>
+    weight_scales = weight_scales.to(c10::ScalarType::Float);
+  }
+  TORCH_CHECK(
+    weight_scales.ndimension() == 0 ||
+    (weight_scales.strides().size() == 1 || weight_scales.stride(0) == 1),
+    "weight_scales should be scalar tensor or contiguous 1D tensor.");
+  ideep::scale_t weights_scales(weight_scales.data_ptr<float>(), weight_scales.data_ptr<float>()+weight_scales.numel());
+#elif IDEEP_PREREQ(3, 1, 0, 0)
   // TODO (leslie): optimize the performance here:
   // 1. Remove the reciprocal of weight scale, we have done the reciprocal of weight scale back in Ideep:
   // https://github.com/intel/ideep/blob/3c90e365526e19c110371d23831678a7e9d4353d/include/ideep/operators/conv.hpp#L163-L168
@@ -1492,23 +1543,6 @@ static at::Tensor _quantized_convolution_onednn(
       weights_scales[i] = 1.0 / weight_scales[i].item().toDouble();
     }
   }
-#elif defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION > 0
-  // 1. If the weight scale generated by observer should with dtype float32
-  // https://github.com/pytorch/pytorch/blob/d2c24eca8a60c56b31ca967a44d5cc4522802aa6/torch/ao/quantization/observer.py#L323
-  // 2. If the weight scale got from the quantized tensor, like did in the UT. It's with dtype of double.
-  // https://github.com/pytorch/pytorch/blob/d2fa3f608b5e4f582a8aaf752f10efe4ca72a7d0/aten/src/ATen/quantized/Quantizer.cpp#L69
-  TORCH_CHECK(
-    weight_scales.scalar_type() == c10::ScalarType::Double || weight_scales.scalar_type() == c10::ScalarType::Float,
-    "weight_scales should be with data type Double or float");
-  if (weight_scales.scalar_type() == c10::ScalarType::Double) {
-    // For case 2, we will convert it from double to float, since ideep::scale_t is alias of std::vector<float>
-    weight_scales = weight_scales.to(c10::ScalarType::Float);
-  }
-  TORCH_CHECK(
-    weight_scales.ndimension() == 0 ||
-    (weight_scales.strides().size() == 1 || weight_scales.stride(0) == 1),
-    "weight_scales should be scalar tensor or contiguous 1D tensor.");
-  ideep::scale_t weights_scales(weight_scales.data_ptr<float>(), weight_scales.data_ptr<float>()+weight_scales.numel());
 #else
   TORCH_CHECK(false, "Unexpected IDeep version to do qconv calculation.");
 #endif
@@ -1523,14 +1557,17 @@ static at::Tensor _quantized_convolution_onednn(
   ideep::tensor onednn_bias;
   const int output_channels = weight.size(0);
   bool with_bias = bias.has_value();
+
+  at::Tensor bias_val_float;
   if (with_bias) {
-    at::Tensor bias_val = bias.value();
-    TORCH_CHECK(bias_val.dim() == 1, "bias should be a vector (1D Tensor)");
+    // For int8-mixed-bf16, we will also use float32 bias
+    bias_val_float = bias.value().to(at::kFloat);
+    TORCH_CHECK(bias_val_float.dim() == 1, "bias should be a vector (1D Tensor)");
     TORCH_CHECK(
-        bias_val.size(0) == output_channels,
+        bias_val_float.size(0) == output_channels,
         "bias should have K elements: " + std::to_string(output_channels));
-    auto bias_desc = ideep::tensor::desc(bias.value().sizes().vec(), dnnl::memory::data_type::f32);
-    onednn_bias.init(bias_desc, bias.value().data_ptr());
+    auto bias_desc = ideep::tensor::desc(bias_val_float.sizes().vec(), dnnl::memory::data_type::f32);
+    onednn_bias.init(bias_desc, bias_val_float.data_ptr());
   }
 
   const auto& expected_bias = with_bias ? onednn_bias : ideep::tensor();
@@ -1556,11 +1593,11 @@ static at::Tensor _quantized_convolution_onednn(
   ideep::dims dst_dims = ideep::dims({output_sizes.cbegin(), output_sizes.cend()});
   // Output is not a quantized tensor but data type is uint8
   at::Tensor output;
-  if (fp32_output) {
+  if (fp32_output || bfloat16_output) {
     output = at::empty(
       dst_dims,
       device(c10::kCPU)
-        .dtype(c10::kFloat)
+        .dtype(fp32_output ? c10::kFloat : c10::kBFloat16)
         .memory_format(kSpatialDim == 2 ?
             c10::MemoryFormat::ChannelsLast :
             c10::MemoryFormat::ChannelsLast3d),
@@ -1579,18 +1616,17 @@ static at::Tensor _quantized_convolution_onednn(
     return output;
   }
   ideep::tensor dst;
-  at::Tensor accum_contig;
   if (has_accum_postop_sum) {
-    auto dst_desc = ideep::tensor::desc(dst_dims, src_data_type,
+    auto dst_desc = ideep::tensor::desc(dst_dims, fp32_output ? ideep::tensor::data_type::f32 : (
+      bfloat16_output ? ideep::tensor::data_type::bf16 : src_data_type),
         kSpatialDim == 2 ? ideep::format_tag::nhwc : ideep::format_tag::ndhwc);
-    accum_contig = accum.value().contiguous(kSpatialDim == 2 ? c10::MemoryFormat::ChannelsLast : c10::MemoryFormat::ChannelsLast3d);
-    TORCH_CHECK(accum_contig.dtype() == output.dtype(), "The output tensor should have same dtype as the accum tensor.");
+    TORCH_CHECK(accum.value().dtype() == output.dtype(), "The output tensor should have same dtype as the accum tensor.");
     // When fused with sum, the dst tensor will share the data ptr as the accum tensor.
-    dst.init(dst_desc, accum_contig.data_ptr());
+    dst.init(dst_desc, accum.value().data_ptr());
   } else {
-    if (fp32_output) {
+    if (fp32_output || bfloat16_output) {
       // Conv without add: int8-in, fp32-output
-      dst = ideep::tensor({dst_dims, ideep::tensor::data_type::f32, {output.strides().cbegin(), output.strides().cend()}},
+      dst = ideep::tensor({dst_dims, fp32_output ? ideep::tensor::data_type::f32 : ideep::tensor::data_type::bf16, {output.strides().cbegin(), output.strides().cend()}},
                         output.data_ptr());
     } else {
       dst = ideep::tensor({dst_dims, ideep::tensor::data_type::u8, {output.strides().cbegin(), output.strides().cend()}},
@@ -1608,7 +1644,27 @@ static at::Tensor _quantized_convolution_onednn(
     dst.set_scale(accum_ideep_scale);
     dst.set_zero_point(accum_ideep_zero_points);
   } else {
-    op_attr = (has_unary_post_op && unary_attr.value()=="relu") ? ideep::attr_t::fuse_relu() : ideep::attr_t();
+    if (has_unary_post_op && unary_attr.value()=="relu") {
+      op_attr = ideep::attr_t::fuse_relu();
+    } else if (has_unary_post_op && unary_attr.value()=="hardtanh") {
+      TORCH_CHECK(
+          unary_scalars.size() == 2 &&
+              unary_scalars[0].get().toOptional<at::Scalar>().has_value() &&
+              unary_scalars[1].get().toOptional<at::Scalar>().has_value(),
+          "hardtanh is expected to have two scalar input: min_val and max_val");
+
+      auto lower_bound_value =
+          unary_scalars[0].get().toOptional<at::Scalar>().value().to<float>();
+      auto upper_bound_value =
+          unary_scalars[1].get().toOptional<at::Scalar>().value().to<float>();
+      op_attr = ideep::attr_t::fuse_clamp(lower_bound_value, upper_bound_value);
+    } else if (has_unary_post_op && unary_attr.value()=="hardswish") {
+      op_attr = ideep::attr_t::fuse_hardswish();
+    } else if (has_unary_post_op && unary_attr.value()=="swish") {
+      op_attr = ideep::attr_t::fuse_swish();
+    } else {
+      op_attr = ideep::attr_t();
+    }
   }
 
   // Weight Reorder
@@ -1632,7 +1688,7 @@ static at::Tensor _quantized_convolution_onednn(
     return output;
   }
   if (has_accum_postop_sum) {
-    return accum_contig;
+    return accum.value();
   } else {
     return output;
   }
@@ -1782,7 +1838,7 @@ class QConvoneDNN final {
       int64_t groups,
       double inv_output_scale,  // inv_output_scale is the reciprocal of scale in fake quant
       int64_t output_zero_point,
-      bool fp32_output,
+      c10::optional<c10::ScalarType> output_dtype,
       c10::string_view attr,
       torch::List<c10::optional<at::Scalar>> scalars,
       c10::optional<c10::string_view> algorithm) {
@@ -1799,8 +1855,8 @@ class QConvoneDNN final {
     } else {
       // Conv2D post op check
       TORCH_CHECK(
-        attr == "none" || attr == "relu",
-        "none post_op or post_op relu is supported for quantized pointwise conv2d. Got unary_post_op: ",
+        attr == "none" || attr == "relu" || attr == "hardtanh" || attr == "hardswish" || attr == "swish",
+        "none post_op or post_op relu/hardtanh/hardswish is supported for quantized pointwise conv2d. Got unary_post_op: ",
         attr,
         ".")
     }
@@ -1810,7 +1866,7 @@ class QConvoneDNN final {
         bias, stride, padding, dilation, /*transposed*/false,
         groups, inv_output_scale, output_zero_point,
         /*accum*/c10::nullopt, /*accum_scale*/0.0, /*accum_zero_point*/0,
-        /*fp32_output*/fp32_output, /*binary_attr*/c10::nullopt, /*binary_alpha*/c10::nullopt,
+        /*output_dtype*/output_dtype, /*binary_attr*/c10::nullopt, /*binary_alpha*/c10::nullopt,
         /*unary_attr*/attr, /*unary_scalars*/scalars, /*unary_algorithm*/algorithm
     );
 #else
@@ -1834,7 +1890,7 @@ class QConvoneDNN final {
       int64_t groups,
       double inv_output_scale,  // inv_output_scale is the reciprocal of scale in fake quant
       int64_t output_zero_point,
-      bool fp32_output,
+      c10::optional<c10::ScalarType> output_dtype,
       c10::string_view binary_attr,
       c10::optional<at::Scalar> alpha,
       c10::optional<c10::string_view> unary_attr,
@@ -1843,7 +1899,7 @@ class QConvoneDNN final {
 #if AT_MKLDNN_ENABLED()
     // Conv2D post op check
     TORCH_CHECK(
-      act.dim() == 4 && binary_attr == "add" && (
+      act.dim() == 4 && binary_attr == "sum" && (
         !unary_attr.has_value() ||
         (unary_attr.has_value() &&
           (
@@ -1851,7 +1907,7 @@ class QConvoneDNN final {
           )
         )
       ),
-      "post_op add or post_op add_relu is supported for quantized pointwise conv2d. Got binary_post_op: ",
+      "post_op sum or post_op sum_relu is supported for quantized pointwise conv2d. Got binary_post_op: ",
       binary_attr,
       " unary_post_op: ",
       unary_attr.has_value() ? unary_attr.value() : "none",
@@ -1862,7 +1918,7 @@ class QConvoneDNN final {
         bias, stride, padding, dilation, /*transposed*/false,
         groups, inv_output_scale, output_zero_point,
         accum, accum_scale, accum_zero_point,
-        /*fp32_output*/false, binary_attr, alpha,
+        /*output_dtype*/output_dtype, binary_attr, alpha,
         unary_attr, unary_scalars, unary_algorithm
     );
 #else

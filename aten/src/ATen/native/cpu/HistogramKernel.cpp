@@ -98,14 +98,14 @@ void histogramdd_cpu_contiguous(Tensor& hist, const TensorList& bin_edges,
         return;
     }
 
-    TensorAccessor<input_t, 2> accessor_in = input.accessor<input_t, 2>();
+    TensorAccessor<const input_t, 2> accessor_in = input.accessor<const input_t, 2>();
 
     /* Constructs a c10::optional<TensorAccessor> containing an accessor iff
      * the optional weight tensor has a value.
      */
     const auto accessor_wt = weight.has_value()
-            ? c10::optional<TensorAccessor<input_t, 1>>(weight.value().accessor<input_t, 1>())
-            : c10::optional<TensorAccessor<input_t, 1>>();
+            ? c10::optional<TensorAccessor<const input_t, 1>>(weight.value().accessor<const input_t, 1>())
+            : c10::optional<TensorAccessor<const input_t, 1>>();
 
     std::vector<input_t*> bin_seq(D);
     std::vector<int64_t> num_bin_edges(D);
@@ -227,7 +227,7 @@ void histogramdd_out_cpu_template(const Tensor& self, const c10::optional<Tensor
         bin_edges_contig[dim] = bin_edges[dim].contiguous();
     }
 
-    AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, self.scalar_type(), "histogram_cpu", [&]() {
+    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "histogram_cpu", [&]() {
         histogramdd_cpu_contiguous<scalar_t, bin_algorithm>(
                 hist, bin_edges_contig, reshaped_input, reshaped_weight);
     });

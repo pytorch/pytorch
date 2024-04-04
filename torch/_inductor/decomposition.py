@@ -1,11 +1,13 @@
 import functools
 import logging
 import math
-import numbers
+import sys
 import typing
+from typing import Optional
 
 import torch
 import torch._decomp as decomp
+import torch._prims_common as utils
 import torch.ao.quantization.fx._decomposed
 from torch._decomp import (
     core_aten_decompositions,
@@ -18,8 +20,13 @@ from torch._decomp.decompositions import (
 )
 from torch._decomp.decompositions_for_rng import extra_random_decomps
 from torch._higher_order_ops.out_dtype import out_dtype
+from torch._prims_common import (
+    elementwise_dtypes,
+    ELEMENTWISE_TYPE_PROMOTION_KIND,
+    type_to_dtype,
+)
 
-from . import config
+from . import config, inductor_prims
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -47,19 +54,21 @@ inductor_decompositions = get_decompositions(
         aten._native_batch_norm_legit,
         aten._native_batch_norm_legit_functional,
         aten._native_batch_norm_legit_no_training,
+        aten._batch_norm_with_update,
+        aten._batch_norm_with_update_functional,
+        aten._batch_norm_no_update,
+        aten.batch_norm_backward,
         aten.native_batch_norm,
         aten.native_group_norm,
         aten.native_layer_norm,
+        aten.nll_loss2d_backward,
         aten._softmax,
         aten.sin_,
         aten.sqrt_,
-        aten.std,
-        aten.std_mean,
         out_dtype,
         aten._to_copy,
         aten.tril_indices,
         aten.triu_indices,
-        aten.unsafe_split,
         aten.upsample_bilinear2d.vec,
     ]
 )
@@ -69,7 +78,14 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 # the Inductor decomp table.
 decomps_to_exclude = [
     aten._unsafe_index,
-    aten._scaled_dot_product_flash_attention.default,  # See comments in torch/_decomp/decompositions.py
+    aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
+    aten.clamp_max,
+    aten.clamp_min,
+    aten.glu,  # inductor lowers this directly
+    aten.split.Tensor,  # inductor lowers this directly
+    aten.squeeze,  # inductor lowers this directly
+    aten.sum,  # inductor lowers this directly
+    aten.unbind,  # inductor lowers this directly
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)
@@ -80,12 +96,6 @@ def register_decomposition(ops):
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
-
-
-@register_decomposition(aten._unsafe_view.default)
-def _unsafe_view(self, size):
-    # this makes pattern matching easier
-    return self.view(size)
 
 
 # TODO: for now, inductor doesn't handle asserts
@@ -116,11 +126,13 @@ def clamp(x, min=None, max=None):
     return x
 
 
-# TorchInductor-only decomposition. It should not be taken to core.
-# See https://github.com/pytorch/torchdynamo/pull/1120
-@register_decomposition([aten.floor_divide.default])
-def floordiv(a, b):
-    return aten.div.Tensor_mode(a, b, rounding_mode="floor")
+@register_decomposition([aten.full])
+def full(size, fill_value, **kwargs):
+    dtype = kwargs.get("dtype")
+    if dtype is None:
+        kwargs["dtype"] = type_to_dtype(type(fill_value))
+        return aten.full(size, fill_value, **kwargs)
+    return NotImplemented
 
 
 # Not really sure how to put this into the main library.  PrimTorch wants
@@ -179,31 +191,14 @@ def round_dec(x, decimals=0):
     return aten.round(x * ten_pow_decimals) * (1.0 / ten_pow_decimals)
 
 
-@register_decomposition([aten.all.default])
-def all(input):
-    return torch.logical_not(torch.any(torch.logical_not(input)))
-
-
-@register_decomposition([aten.all.dim])
-def all_dim(input, dim, keepdim=False):
-    return torch.logical_not(torch.any(torch.logical_not(input), dim, keepdim))
-
-
-@register_decomposition([aten.baddbmm])
-def baddbmm(self, batch1, batch2, beta=1, alpha=1):
-    result = torch.bmm(batch1, batch2)
-    if not isinstance(alpha, numbers.Number) or alpha != 1:
-        result = result * alpha
-    if beta == 0:
-        return result
-    if not isinstance(beta, numbers.Number) or beta != 1:
-        self = self * beta
-    return self + result
-
-
 @register_decomposition([aten.bmm])
+@pw_cast_for_opmath
 def bmm(self, batch2):
-    if self.device == "cpu":
+    if config.coordinate_descent_tuning:
+        if self.shape[1] == 1 or batch2.shape[2] == 1:
+            out = (self.unsqueeze(-1) * batch2.unsqueeze(1)).sum(dim=2)
+            return out
+    if self.device.type == "cpu":
         if self.size(1) == 1 and batch2.size(-1) == 1:
             return torch.sum(
                 self.squeeze(1) * batch2.squeeze(-1), dim=1, keepdim=True
@@ -211,43 +206,87 @@ def bmm(self, batch2):
     return NotImplemented
 
 
+@register_decomposition([aten.addmm])
+@pw_cast_for_opmath
+def addmm(self, mat1, mat2, beta=1, alpha=1):
+    if self.device.type == "cpu":
+        if mat1.size(0) == 1 and mat2.size(-1) == 1:
+            out = torch.sum(
+                mat1.squeeze(0) * mat2.squeeze(-1), dim=0, keepdim=True
+            ).unsqueeze(0)
+            return alpha * out + beta * self
+        if mat1.size(0) == 1 and mat2.size(0) <= 16 and mat2.size(1) <= 16:
+            out = (mat1.T * mat2).sum(dim=0, keepdim=True)
+            return alpha * out + beta * self
+    return NotImplemented
+
+
 @register_decomposition([aten.mm])
+@pw_cast_for_opmath
 def mm(self, input2):
+    from torch.fx.experimental.symbolic_shapes import (
+        definitely_true,
+        guard_size_oblivious,
+    )
+
     # Our matrix vector multiplies only achieve peak bandwidth with coordinate descent tuning.
     # todo: Look into why and fix it (hopefully)
     if config.coordinate_descent_tuning:
         if self.shape[0] == 1 or input2.shape[1] == 1:
             return (self.unsqueeze(2) * input2.unsqueeze(0)).sum(dim=1)
-    if self.device == "cpu":
+    if self.device.type == "cpu":
         if (
-            self.size(-1) == 1
-            and input2.size(0) == 1
+            guard_size_oblivious(self.size(-1) == 1)
+            and guard_size_oblivious(self.size(0) > 0)
+            and guard_size_oblivious(input2.size(0) == 1)
             and (self.dtype == input2.dtype)
-            and ((torch.numel(self) + torch.numel(input2)) <= 32)
+            and definitely_true((torch.numel(self) + torch.numel(input2)) <= 32)
         ):
             return torch.cat([self[i, :] * input2 for i in range(self.size(0))])
-        if self.size(0) == 1 and input2.size(-1) == 1:
+        if guard_size_oblivious(self.size(0) == 1) and guard_size_oblivious(
+            input2.size(-1) == 1
+        ):
             return torch.sum(
                 self.squeeze(0) * input2.squeeze(-1), dim=0, keepdim=True
             ).unsqueeze(0)
     return NotImplemented
 
 
+# This pass does two things:
+# - Eliminate cat when there is only one tensor input
+# - Normalize cat calls, so that legacy empty 1-D tensors are removed (NB: we
+#   don't remove ALL empty tensors, only the naughty ones)
 @register_decomposition([aten.cat.default])
 def cat(tensors, dim=0):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     def non_empty_tensor(x):
-        # special case for cat'ing with an empty tensor -
-        # just drop the 'empty' inputs so they don't confuse the logic below.
-        return len(x.shape) > 1 or x.shape[0] > 0
+        # For better or worse, this is a valid cat:
+        #
+        #   torch.cat([torch.randn(2, 2, 4), torch.randn(0), torch.randn(3, 2, 4)])
+        #
+        # We'd like to eliminate naughtiness like this for downstream passes
+        # like split_cat.  The easiest way is to just drop such inputs
+        # (guarding that they are non-zero).
+        #
+        # Is it permissible for this filtering to be size-oblivious?  A case
+        # where this could matter is cat([(2, 2), (u0,)], dim=0); if u0
+        # happened to be zero, we would have liked to have filtered it out.
+        # But actually, the ONLY way this could have passed is if u0 == 0,
+        # so by the time we get here we have already installed a deferred
+        # runtime assert forcing u0 to be zero.  So if this hasn't happened,
+        # we know that the unbacked SymInt has appropriate size and there are
+        # no problems.
+        return len(x.shape) != 1 or guard_size_oblivious(x.shape[0] > 0)
 
     filtered_tensors = list(filter(non_empty_tensor, tensors))
 
     if len(filtered_tensors) == 1:
-        return tensors[0].clone()
+        return filtered_tensors[0].clone()
     elif 1 < len(filtered_tensors) < len(tensors):
         # on the first call, when we remove empty tensors, we redispatch recursively
         return aten.cat.default(filtered_tensors, dim)
-    # when no 'filtering' has occured, we raise to prevent infinite recursion (no more decomposition needed)
+    # when no 'filtering' has occurred, we raise to prevent infinite recursion (no more decomposition needed)
     return NotImplemented
 
 
@@ -257,14 +296,31 @@ def angle(x):
         return torch.where(
             torch.isnan(x.real), float("nan"), torch.atan2(x.imag, x.real)
         )
-    else:
-        # when x is real number
-        #   if x >= 0, return 0
-        #   if x < 0, return pi
-        #   if x is nan, return nan
-        ret = torch.where(x < 0, math.pi, 0.0)
-        nan = torch.where(torch.isnan(x), float("nan"), 0.0)
-        return ret + nan
+
+    # when x is real number
+    #   if x >= 0, return 0
+    #   if x < 0, return pi
+    #   if x is nan, return nan
+    _, dtype = elementwise_dtypes(
+        x,
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    )
+    pi = torch.scalar_tensor(math.pi, dtype=dtype, device=x.device)
+    ret = torch.where(x < 0, pi, 0.0)
+    return torch.where(torch.isnan(x), float("nan"), ret)
+
+
+@register_decomposition([aten.add])
+def add(x, y, *, alpha=None):
+    x_is_complex_tensor = torch.is_tensor(x) and x.is_complex()
+    y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
+    if not x_is_complex_tensor or not y_is_complex_tensor:
+        return NotImplemented
+    z = y
+    if alpha is not None:
+        z = alpha * y
+    complex_type = torch.promote_types(x.dtype, y.dtype)
+    return (x.view(x.real.dtype) + z.view(y.real.dtype)).view(complex_type)
 
 
 @register_decomposition([aten.conj_physical])
@@ -281,7 +337,7 @@ def lift(self):
 @register_decomposition([aten.bernoulli.default])
 def bernoulli(self, *, generator=None):
     assert generator is None
-    return torch.rand_like(self, dtype=torch.float32) < self
+    return (torch.rand_like(self, dtype=torch.float32) < self).to(self.dtype)
 
 
 @register_decomposition([aten.fmin, prims.fmin])
@@ -292,6 +348,20 @@ def fmin(self, other):
 @register_decomposition([aten.fmax, prims.fmax])
 def fmax(self, other):
     return torch.where(torch.isnan(other) | (other < self), self, other)
+
+
+@register_decomposition(aten.amax)
+def amax(self, dim=None, keepdim=False):
+    if self.dtype == torch.bool:
+        return torch.any(self, dim=dim, keepdim=keepdim)
+    return NotImplemented
+
+
+@register_decomposition(aten.amin)
+def amin(self, dim=None, keepdim=False):
+    if self.dtype == torch.bool:
+        return torch.all(self, dim=dim, keepdim=keepdim)
+    return NotImplemented
 
 
 @register_decomposition([aten.narrow_copy])
@@ -314,24 +384,34 @@ def view_copy_dtype(self, dtype):
     return self.to(dtype).clone()
 
 
+def get_like_layout(
+    tensor: torch.Tensor, memory_format: Optional[torch.memory_format]
+) -> torch.memory_format:
+    # TODO: _to_copy tensor to stride permutation
+    if memory_format is torch.preserve_format or memory_format is None:
+        return utils.suggest_memory_format(tensor)
+    else:
+        return memory_format
+
+
 @register_decomposition(aten.rand_like)
-def rand_like(self, *, dtype=None, device=None, **kwargs):
+def rand_like(self, *, dtype=None, device=None, memory_format=None, **kwargs):
     return torch.rand(
         [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    )
+    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.randn_like)
-def randn_like(self, *, dtype=None, device=None, **kwargs):
+def randn_like(self, *, dtype=None, device=None, memory_format=None, **kwargs):
     return torch.randn(
         [*self.size()],
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    )
+    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.full_like)
@@ -353,11 +433,11 @@ def full_like(
         layout=layout or self.layout,
         device=device or self.device,
         requires_grad=requires_grad,
-    )
+    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.randint_like.default)
-def randint_like(self, high, *, dtype=None, device=None, **kwargs):
+def randint_like(self, high, *, dtype=None, device=None, memory_format=None, **kwargs):
     return aten.randint.low(
         0,
         high,
@@ -365,11 +445,13 @@ def randint_like(self, high, *, dtype=None, device=None, **kwargs):
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    )
+    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.randint_like.low_dtype)
-def randint_like_low(self, low, high, *, dtype=None, device=None, **kwargs):
+def randint_like_low(
+    self, low, high, *, dtype=None, device=None, memory_format=None, **kwargs
+):
     return aten.randint.low(
         low,
         high,
@@ -377,7 +459,7 @@ def randint_like_low(self, low, high, *, dtype=None, device=None, **kwargs):
         dtype=dtype or self.dtype,
         device=device or self.device,
         **kwargs,
-    )
+    ).to(memory_format=get_like_layout(self, memory_format))
 
 
 @register_decomposition(aten.randint.default)
@@ -396,6 +478,8 @@ def quantize_per_tensor_default_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
     inv_scale = 1.0 / scale
     return torch.clamp(
         torch.round(input * inv_scale) + zero_point, quant_min, quant_max
@@ -425,6 +509,8 @@ def quantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
+    if input.dtype == torch.bfloat16:
+        input = input.to(torch.float32)
     inv_scale = 1.0 / scale
     return torch.clamp(
         torch.round(input * inv_scale) + zero_point, quant_min, quant_max
@@ -440,7 +526,23 @@ def dequantize_per_tensor_tensor_decomp_impl(
     quant_max: int,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    return (input.to(torch.float32) - zero_point) * scale
+    return (input.to(torch.float32) - zero_point.to(torch.int32)) * scale.to(
+        torch.float32
+    )
+
+
+@register_decomposition(torch.ops.quantized.embedding_bag_byte_unpack)
+def q_embedding_bag_byte_unpack_decomp(packed):
+    def bitcast_u8_to_f32(u8):
+        x, y, z, w = (u8[..., n].to(torch.int32) for n in (0, 1, 2, 3))
+        if sys.byteorder == "little":
+            return (x + (y << 8) + (z << 16) + (w << 24)).view(torch.float32)[..., None]
+        else:
+            return ((x << 24) + (y << 16) + (z << 8) + w).view(torch.float32)[..., None]
+
+    scales = bitcast_u8_to_f32(packed[..., -8:-4])
+    offsets = bitcast_u8_to_f32(packed[..., -4:])
+    return packed[..., :-8].to(torch.float32) * scales + offsets
 
 
 @register_decomposition([aten.grid_sampler_2d])
@@ -540,3 +642,41 @@ def select_decomp_table():
     if config.fallback_random:
         return decompositions
     return fast_random_decomps()
+
+
+@register_decomposition(aten.masked_scatter)
+def masked_scatter(self, mask, source):
+    if self.device.type == "cuda":
+        # This two-step algorithm is the same as eager CUDA, for eager CPU we
+        # use a 1-shot serial iteration.
+        self, mask = aten.broadcast_tensors([self, mask])
+        source_idx = mask.reshape(-1).cumsum(0) - 1
+        return inductor_prims.masked_scatter_with_index(self, mask, source_idx, source)
+    return NotImplemented
+
+
+@register_decomposition(quantized_decomposed.choose_qparams.tensor)
+def choose_qparams_tensor(
+    input: torch.Tensor, quant_min: int, quant_max: int, eps: float, dtype: torch.dtype
+):
+    min_val, max_val = torch.aminmax(input)
+    scale = (max_val - min_val) / float(quant_max - quant_min)
+    scale = torch.max(scale, torch.Tensor([eps]))
+    zero_point = quant_min - torch.round(min_val / scale).to(torch.int)
+    zero_point = torch.clamp(zero_point, quant_min, quant_max)
+    return scale.to(torch.float64), zero_point.to(torch.int64)
+
+
+@register_decomposition(aten.put)
+def put(self, index, source, accumulate=False):
+    flattened = self.flatten()
+    flattened = torch.index_put(
+        flattened, [index], source.reshape(index.shape), accumulate
+    )
+    return flattened.reshape(self.shape)
+
+
+@register_decomposition(aten.put_)
+def put_(self, index, source, accumulate=False):
+    out = aten.put(self, index, source, accumulate=accumulate)
+    return self.copy_(out)

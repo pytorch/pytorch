@@ -1,18 +1,18 @@
 import abc
-from dataclasses import dataclass
 import io
-from typing import List, Tuple, Any, Union, Optional
+from dataclasses import dataclass
+from enum import auto, Enum
+from functools import reduce
+from typing import Any, List, Optional, Tuple, Union
 
-from enum import Enum, auto
 import torch
-
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 
 from .metadata import (
     ChunkStorageMetadata,
-    MetadataIndex,
     Metadata,
+    MetadataIndex,
     STATE_DICT_TYPE,
+    TensorProperties,
 )
 
 
@@ -49,11 +49,27 @@ class TensorWriteData:
 
 @dataclass(frozen=True)
 class WriteItem:
+    """Dataclass which holds information about what needs to be written to storage."""
+
     index: MetadataIndex
     type: WriteItemType
 
     # Value present if it's a tensor write
     tensor_data: Optional[TensorWriteData] = None
+
+    def tensor_storage_size(self) -> Optional[int]:
+        """
+        Calculates the storage size of the underlying tensor, or None if this is not a tensor write.
+
+        Returns:
+            Optional[int] storage size, in bytes of underlying tensor if any.
+        """
+        if self.tensor_data is None:
+            return None
+
+        numels = reduce(lambda x, y: x * y, self.tensor_data.size, 1)
+        dtype_size = torch._utils._element_size(self.tensor_data.properties.dtype)
+        return numels * dtype_size
 
 
 @dataclass(frozen=True)
@@ -194,6 +210,7 @@ class SavePlanner(abc.ABC):
     def create_local_plan(self) -> SavePlan:
         """
         Compute the save plan for the current rank.
+
         This will be aggregated and passed to create_global_plan.
         Planner specific data can be passed through SavePlan::planner_data.
 
@@ -222,10 +239,10 @@ class SavePlanner(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def resolve_data(
-        self, write_item: WriteItem
-    ) -> Union[torch.Tensor, io.BytesIO]:
+    def resolve_data(self, write_item: WriteItem) -> Union[torch.Tensor, io.BytesIO]:
         """
+        Transform and prepare ``write_item`` from ``state_dict`` for storage, ensuring idempotency and thread-safety.
+
         Lookup the object associated with ``write_item`` in ``state_dict`` and apply any
         transformation (such as serialization) prior to the storage layer consuming it.
 
@@ -283,7 +300,17 @@ class LoadPlanner:
     >>> class RenamePlanner(DefaultLoadPlanner):
     >>>     def set_up_planner(self, state_dict, metadata, is_coordinator):
     >>>         self.original_state_dict = state_dict
-    >>>         super().set_up_planner(self, {"foo_" + k: v for k, v in state_dict.items()}, is_coordinator)
+    >>>         state_dict = {"foo_" + k: v for k, v in state_dict.items()}
+    >>>
+    >>>         if self.flatten_sharded_tensors:
+    >>>             state_dict = _flatten_sharded_tensors(state_dict)
+    >>>
+    >>>         if self.flatten_state_dict:
+    >>>             state_dict, self.mappings = flatten_state_dict(state_dict)
+    >>>
+    >>>         self.state_dict = state_dict
+    >>>         self.metadata = metadata
+    >>>         self.is_coordinator = is_coordinator
     >>>
     >>>     def load_bytes(self, read_item, value):
     >>>         # Remove the "foo_" prefix
@@ -310,7 +337,7 @@ class LoadPlanner:
         is_coordinator: bool,
     ) -> None:
         """
-        Initialize this instance to load data into ``state_dict``
+        Initialize this instance to load data into ``state_dict``.
 
         . N.B. This is called on every rank.
         """
@@ -336,9 +363,7 @@ class LoadPlanner:
 
     @abc.abstractmethod
     def finish_plan(self, central_plan: LoadPlan) -> LoadPlan:
-        """
-        Accept the plan from coordinator and return final LoadPlan.
-        """
+        """Accept the plan from coordinator and return final LoadPlan."""
         pass
 
     @abc.abstractmethod
@@ -352,6 +377,14 @@ class LoadPlanner:
         the checkpoint being loaded.
         """
         pass
+
+    def resolve_bytes(self, read_item: ReadItem) -> io.BytesIO:
+        """
+        Return the BytesIO to be used by the StorageReader to load `read_item`.
+
+        The BytesIO should alias with one on the underlying state_dict as StorageReader will replace its contents.
+        """
+        raise NotImplementedError("LoadPlanner.resolve_bytes is not implemented")
 
     @abc.abstractmethod
     def resolve_tensor(self, read_item: ReadItem) -> torch.Tensor:
@@ -367,7 +400,7 @@ class LoadPlanner:
     @abc.abstractmethod
     def commit_tensor(self, read_item: ReadItem, tensor: torch.Tensor) -> None:
         """
-        This method is called once the StorageReader finished loading data into ``tensor``.
+        Call once the StorageReader finished loading data into ``tensor``.
 
         The provided tensor is the same one returned by the call to ``resolve_tensor``.
         This method is only needed if this LoadPlanner needs to post process ``tensor`` prior to

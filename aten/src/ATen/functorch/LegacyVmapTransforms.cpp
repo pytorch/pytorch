@@ -10,8 +10,7 @@
 #include <ATen/ATen.h>
 #include <c10/util/irange.h>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 // Takes a BatchedTensorImpl, permutes all of the batch dims to the front,
 // and then returns a physical version of the Tensor.
@@ -136,7 +135,7 @@ MultiBatchVmapTransform::logicalToPhysical(ITensorListRef logical_tensors) {
   TORCH_INTERNAL_ASSERT(bdim_size != -1);
 
   std::bitset<kVmapNumLevels> levels;
-  levels[cur_level] = 1;
+  levels[cur_level] = true;
 
   VmapPhysicalViewVec result;
   for (const auto& logical_tensor : logical_tensors) {
@@ -185,7 +184,7 @@ VmapPhysicalViewVec BroadcastingVmapTransform::logicalToPhysical(TensorList logi
   TORCH_INTERNAL_ASSERT(bdim_size != -1);
 
   std::bitset<kVmapNumLevels> levels;
-  levels[cur_level] = 1;
+  levels[cur_level] = true;
 
   // figure out the example ndim
   int64_t max_example_dim = -1;
@@ -227,5 +226,4 @@ void VmapPhysicalToLogicalMap::applyInplace(std::vector<Tensor>& physical_tensor
   }
 }
 
-}
-} // namespace at
+} // namespace at::functorch

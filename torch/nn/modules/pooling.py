@@ -10,8 +10,8 @@ from ..common_types import (_size_any_t, _size_1_t, _size_2_t, _size_3_t,
 
 __all__ = ['MaxPool1d', 'MaxPool2d', 'MaxPool3d', 'MaxUnpool1d', 'MaxUnpool2d', 'MaxUnpool3d',
            'AvgPool1d', 'AvgPool2d', 'AvgPool3d', 'FractionalMaxPool2d', 'FractionalMaxPool3d', 'LPPool1d',
-           'LPPool2d', 'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d', 'AdaptiveAvgPool1d',
-           'AdaptiveAvgPool2d', 'AdaptiveAvgPool3d']
+           'LPPool2d', 'LPPool3d', 'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d',
+           'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d', 'AdaptiveAvgPool3d']
 
 class _MaxPoolNd(Module):
     __constants__ = ['kernel_size', 'stride', 'padding', 'dilation',
@@ -36,8 +36,7 @@ class _MaxPoolNd(Module):
 
 
 class MaxPool1d(_MaxPoolNd):
-    r"""Applies a 1D max pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 1D max pooling over an input signal composed of several input planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, L)`
     and output :math:`(N, C, L_{out})` can be precisely described as:
@@ -95,8 +94,7 @@ class MaxPool1d(_MaxPoolNd):
 
 
 class MaxPool2d(_MaxPoolNd):
-    r"""Applies a 2D max pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 2D max pooling over an input signal composed of several input planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, H, W)`,
     output :math:`(N, C, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kH, kW)`
@@ -169,8 +167,7 @@ class MaxPool2d(_MaxPoolNd):
 
 
 class MaxPool3d(_MaxPoolNd):
-    r"""Applies a 3D max pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 3D max pooling over an input signal composed of several input planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, D, H, W)`,
     output :math:`(N, C, D_{out}, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kD, kH, kW)`
@@ -491,8 +488,7 @@ class _AvgPoolNd(Module):
 
 
 class AvgPool1d(_AvgPoolNd):
-    r"""Applies a 1D average pooling over an input signal composed of several
-    input planes.
+    r"""Applies a 1D average pooling over an input signal composed of several input planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, L)`,
     output :math:`(N, C, L_{out})` and :attr:`kernel_size` :math:`k`
@@ -528,6 +524,10 @@ class AvgPool1d(_AvgPoolNd):
               L_{out} = \left\lfloor \frac{L_{in} +
               2 \times \text{padding} - \text{kernel\_size}}{\text{stride}} + 1\right\rfloor
 
+          Per the note above, if ``ceil_mode`` is True and :math:`(L_{out} - 1) \times \text{stride} \geq L_{in}
+          + \text{padding}`, we skip the last window as it would start in the right padded region, resulting in
+          :math:`L_{out}` being reduced by one.
+
     Examples::
 
         >>> # pool with window of size=3, stride=2
@@ -558,8 +558,7 @@ class AvgPool1d(_AvgPoolNd):
 
 
 class AvgPool2d(_AvgPoolNd):
-    r"""Applies a 2D average pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 2D average pooling over an input signal composed of several input planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, H, W)`,
     output :math:`(N, C, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kH, kW)`
@@ -604,6 +603,12 @@ class AvgPool2d(_AvgPoolNd):
               W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] -
                 \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
 
+          Per the note above, if ``ceil_mode`` is True and :math:`(H_{out} - 1)\times \text{stride}[0]\geq H_{in}
+          + \text{padding}[0]`, we skip the last window as it would start in the bottom padded region,
+          resulting in :math:`H_{out}` being reduced by one.
+
+          The same applies for :math:`W_{out}`.
+
     Examples::
 
         >>> # pool of square window of size=3, stride=2
@@ -613,6 +618,7 @@ class AvgPool2d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50, 32)
         >>> output = m(input)
     """
+
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
 
     kernel_size: _size_2_t
@@ -637,8 +643,7 @@ class AvgPool2d(_AvgPoolNd):
 
 
 class AvgPool3d(_AvgPoolNd):
-    r"""Applies a 3D average pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 3D average pooling over an input signal composed of several input planes.
 
     In the simplest case, the output value of the layer with input size :math:`(N, C, D, H, W)`,
     output :math:`(N, C, D_{out}, H_{out}, W_{out})` and :attr:`kernel_size` :math:`(kD, kH, kW)`
@@ -690,6 +695,12 @@ class AvgPool3d(_AvgPoolNd):
               W_{out} = \left\lfloor\frac{W_{in} + 2 \times \text{padding}[2] -
                     \text{kernel\_size}[2]}{\text{stride}[2]} + 1\right\rfloor
 
+          Per the note above, if ``ceil_mode`` is True and :math:`(D_{out} - 1)\times \text{stride}[0]\geq D_{in}
+          + \text{padding}[0]`, we skip the last window as it would start in the padded region,
+          resulting in :math:`D_{out}` being reduced by one.
+
+          The same applies for :math:`W_{out}` and :math:`H_{out}`.
+
     Examples::
 
         >>> # pool of square window of size=3, stride=2
@@ -699,6 +710,7 @@ class AvgPool3d(_AvgPoolNd):
         >>> input = torch.randn(20, 16, 50, 44, 31)
         >>> output = m(input)
     """
+
     __constants__ = ['kernel_size', 'stride', 'padding', 'ceil_mode', 'count_include_pad', 'divisor_override']
 
     kernel_size: _size_3_t
@@ -743,9 +755,12 @@ class FractionalMaxPool2d(Module):
         kernel_size: the size of the window to take a max over.
                      Can be a single number k (for a square kernel of k x k) or a tuple `(kh, kw)`
         output_size: the target output size of the image of the form `oH x oW`.
-                     Can be a tuple `(oH, oW)` or a single number oH for a square image `oH x oH`
+                     Can be a tuple `(oH, oW)` or a single number oH for a square image `oH x oH`.
+                     Note that we must have :math:`kH + oH - 1 <= H_{in}` and :math:`kW + oW - 1 <= W_{in}`
         output_ratio: If one wants to have an output size as a ratio of the input size, this option can be given.
-                      This has to be a number or tuple in the range (0, 1)
+                      This has to be a number or tuple in the range (0, 1).
+                      Note that we must have :math:`kH + (output\_ratio\_H * H_{in}) - 1 <= H_{in}`
+                      and :math:`kW + (output\_ratio\_W * W_{in}) - 1 <= W_{in}`
         return_indices: if ``True``, will return the indices along with the outputs.
                         Useful to pass to :meth:`nn.MaxUnpool2d`. Default: ``False``
 
@@ -766,6 +781,7 @@ class FractionalMaxPool2d(Module):
     .. _Fractional MaxPooling:
         https://arxiv.org/abs/1412.6071
     """
+
     __constants__ = ['kernel_size', 'return_indices', 'output_size',
                      'output_ratio']
 
@@ -837,6 +853,7 @@ class FractionalMaxPool3d(Module):
     .. _Fractional MaxPooling:
         https://arxiv.org/abs/1412.6071
     """
+
     __constants__ = ['kernel_size', 'return_indices', 'output_size',
                      'output_ratio']
     kernel_size: _size_3_t
@@ -889,8 +906,7 @@ class _LPPoolNd(Module):
 
 
 class LPPool1d(_LPPoolNd):
-    r"""Applies a 1D power-average pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 1D power-average pooling over an input signal composed of several input planes.
 
     On each window, the function computed is:
 
@@ -931,8 +947,7 @@ class LPPool1d(_LPPoolNd):
 
 
 class LPPool2d(_LPPoolNd):
-    r"""Applies a 2D power-average pooling over an input signal composed of several input
-    planes.
+    r"""Applies a 2D power-average pooling over an input signal composed of several input planes.
 
     On each window, the function computed is:
 
@@ -957,8 +972,8 @@ class LPPool2d(_LPPoolNd):
         ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
 
     Shape:
-        - Input: :math:`(N, C, H_{in}, W_{in})`
-        - Output: :math:`(N, C, H_{out}, W_{out})`, where
+        - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, H_{out}, W_{out})` or :math:`(C, H_{out}, W_{out})`, where
 
           .. math::
               H_{out} = \left\lfloor\frac{H_{in} - \text{kernel\_size}[0]}{\text{stride}[0]} + 1\right\rfloor
@@ -982,6 +997,64 @@ class LPPool2d(_LPPoolNd):
 
     def forward(self, input: Tensor) -> Tensor:
         return F.lp_pool2d(input, float(self.norm_type), self.kernel_size,
+                           self.stride, self.ceil_mode)
+
+
+class LPPool3d(_LPPoolNd):
+    r"""Applies a 3D power-average pooling over an input signal composed of several input planes.
+
+    On each window, the function computed is:
+
+    .. math::
+        f(X) = \sqrt[p]{\sum_{x \in X} x^{p}}
+
+    - At p = :math:`\infty`, one gets Max Pooling
+    - At p = 1, one gets Sum Pooling (which is proportional to average pooling)
+
+    The parameters :attr:`kernel_size`, :attr:`stride` can either be:
+
+        - a single ``int`` -- in which case the same value is used for the height, width and depth dimension
+        - a ``tuple`` of three ints -- in which case, the first `int` is used for the depth dimension,
+          the second `int` for the height dimension and the third `int` for the width dimension
+
+    .. note:: If the sum to the power of `p` is zero, the gradient of this function is
+              not defined. This implementation will set the gradient to zero in this case.
+
+    Args:
+        kernel_size: the size of the window
+        stride: the stride of the window. Default value is :attr:`kernel_size`
+        ceil_mode: when True, will use `ceil` instead of `floor` to compute the output shape
+
+    Shape:
+        - Input: :math:`(N, C, D_{in}, H_{in}, W_{in})` or :math:`(C, D_{in}, H_{in}, W_{in})`.
+        - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` or
+          :math:`(C, D_{out}, H_{out}, W_{out})`, where
+
+          .. math::
+              D_{out} = \left\lfloor\frac{D_{in} - \text{kernel\_size}[0]}{\text{stride}[0]} + 1\right\rfloor
+
+          .. math::
+              H_{out} = \left\lfloor\frac{H_{in} - \text{kernel\_size}[1]}{\text{stride}[1]} + 1\right\rfloor
+
+          .. math::
+              W_{out} = \left\lfloor\frac{W_{in} - \text{kernel\_size}[2]}{\text{stride}[2]} + 1\right\rfloor
+
+    Examples::
+
+        >>> # power-2 pool of square window of size=3, stride=2
+        >>> m = nn.LPPool3d(2, 3, stride=2)
+        >>> # pool of non-square window of power 1.2
+        >>> m = nn.LPPool3d(1.2, (3, 2, 2), stride=(2, 1, 2))
+        >>> input = torch.randn(20, 16, 50, 44, 31)
+        >>> output = m(input)
+
+    """
+
+    kernel_size: _size_3_t
+    stride: _size_3_t
+
+    def forward(self, input: Tensor) -> Tensor:
+        return F.lp_pool3d(input, float(self.norm_type), self.kernel_size,
                            self.stride, self.ceil_mode)
 
 
@@ -1027,7 +1100,7 @@ class AdaptiveMaxPool1d(_AdaptiveMaxPoolNd):
 
     output_size: _size_1_t
 
-    def forward(self, input: Tensor) -> Tensor:
+    def forward(self, input: Tensor):
         return F.adaptive_max_pool1d(input, self.output_size, self.return_indices)
 
 

@@ -44,10 +44,10 @@ def export_as_test_case(
     """
     try:
         import onnx
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "Export test case to ONNX format failed: Please install ONNX."
-        )
+        ) from exc
 
     test_case_dir = os.path.join(dir, "test_" + name)
     os.makedirs(test_case_dir, exist_ok=True)
@@ -99,10 +99,10 @@ def load_test_case(dir: str) -> Tuple[bytes, Any, Any]:
     try:
         import onnx
         from onnx import numpy_helper
-    except ImportError:
+    except ImportError as exc:
         raise ImportError(
             "Load test case from ONNX format failed: Please install ONNX."
-        )
+        ) from exc
 
     with open(os.path.join(dir, "model.onnx"), "rb") as f:
         model_bytes = f.read()
@@ -135,8 +135,10 @@ def export_data(data, value_info_proto, f: str) -> None:
     """
     try:
         from onnx import numpy_helper
-    except ImportError:
-        raise ImportError("Export data to ONNX format failed: Please install ONNX.")
+    except ImportError as exc:
+        raise ImportError(
+            "Export data to ONNX format failed: Please install ONNX."
+        ) from exc
 
     with open(f, "wb") as opened_file:
         if value_info_proto.type.HasField("map_type"):
@@ -168,9 +170,6 @@ def _export_file(
     export_map: Mapping[str, bytes],
 ) -> None:
     """export/write model bytes into directory/protobuf/zip"""
-    # TODO(titaiwang) MYPY asks for os.PathLike[str] type for parameter: f,
-    # but beartype raises beartype.roar.BeartypeDecorHintNonpepException,
-    # as os.PathLike[str] uncheckable at runtime
     if export_type == _exporter_states.ExportTypes.PROTOBUF_FILE:
         assert len(export_map) == 0
         with torch.serialization._open_file_like(f, "wb") as opened_file:
@@ -216,7 +215,6 @@ def _add_onnxscript_fn(
     custom_opsets: Mapping[str, int],
 ) -> bytes:
     """Insert model-included custom onnx-script function into ModelProto"""
-    # TODO(titaiwang): remove this when onnx becomes dependency
     try:
         import onnx
     except ImportError as e:
@@ -231,8 +229,6 @@ def _add_onnxscript_fn(
 
     # Iterate graph nodes to insert only the included custom
     # function_proto into model_proto
-    # TODO(titaiwang): Currently, onnxscript doesn't support ONNXFunction
-    # calling other ONNXFunction scenario, neither does it here
     onnx_function_list = list()  # type: ignore[var-annotated]
     included_node_func = set()  # type: Set[str]
     # onnx_function_list and included_node_func are expanded in-place
@@ -276,8 +272,6 @@ def _find_onnxscript_op(
             specified_version = custom_opsets.get(node.domain, 1)
             onnx_fn = onnx_function_group.get(specified_version)
             if onnx_fn is not None:
-                # TODO(titaiwang): to_function_proto is onnx-script API and can be annotated
-                # after onnx-script is dependency
                 if hasattr(onnx_fn, "to_function_proto"):
                     onnx_function_proto = onnx_fn.to_function_proto()  # type: ignore[attr-defined]
                     onnx_function_list.append(onnx_function_proto)

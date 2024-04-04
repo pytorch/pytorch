@@ -20,11 +20,11 @@ from torch.distributed.fsdp import (
     StateDictType,
 )
 from torch.distributed.fsdp._common_utils import clean_tensor_name
-from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
-from torch.distributed.fsdp.flat_param import (
+from torch.distributed.fsdp._flat_param import (
     _FSDP_SKIP_WRITEBACK_CHECK,
     _FSDP_USE_FULL_PREC_IN_EVAL,
 )
+from torch.distributed.fsdp._init_utils import NO_RESHARD_AFTER_FORWARD_STRATEGIES
 from torch.distributed.fsdp.wrap import always_wrap_policy, ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_DEV_DBG_ASAN,
     TestCase,
 )
+from torch.utils._triton import has_triton
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -216,6 +217,7 @@ class TestFSDPUseOrigParamsMultipleParamGroups(FSDPTest):
             raise ValueError(f"Invalid string: {sharding_strategy_str}")
         return sharding_strategy
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_fsdp_compile(self):
         self.run_subtests(

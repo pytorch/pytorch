@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import copy
 import gc
 import inspect
@@ -13,9 +15,11 @@ import os
 import torch
 from torch.testing._internal.common_utils import TestCase, TEST_WITH_ROCM, TEST_MKL, \
     skipCUDANonDefaultStreamIf, TEST_WITH_ASAN, TEST_WITH_UBSAN, TEST_WITH_TSAN, \
-    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, TEST_MPS, \
+    IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, IS_WINDOWS, TEST_MPS, TEST_XPU, \
     _TestParametrizer, compose_parametrize_fns, dtype_name, \
-    NATIVE_DEVICES, skipIfTorchDynamo
+    TEST_WITH_MIOPEN_SUGGEST_NHWC, NATIVE_DEVICES, skipIfTorchDynamo, \
+    get_tracked_input, clear_tracked_input, PRINT_REPRO_ON_FAILURE, \
+    TEST_WITH_TORCHINDUCTOR
 from torch.testing._internal.common_cuda import _get_torch_cuda_version, \
     TEST_CUSPARSE_GENERIC, TEST_HIPSPARSE_GENERIC, _get_torch_rocm_version
 from torch.testing._internal.common_dtype import get_all_dtypes
@@ -458,7 +462,7 @@ class DeviceTypeTestBase(TestCase):
             parametrize_fn = compose_parametrize_fns(dtype_parametrize_fn, parametrize_fn)
 
         # Instantiate the parametrized tests.
-        for (test, test_suffix, param_kwargs, decorator_fn) in parametrize_fn(test, generic_cls, cls):
+        for (test, test_suffix, param_kwargs, decorator_fn) in parametrize_fn(test, generic_cls, cls):  # noqa: B020
             test_suffix = '' if test_suffix == '' else '_' + test_suffix
             device_suffix = '_' + cls.device_type
 
@@ -565,6 +569,27 @@ class MPSTestBase(DeviceTypeTestBase):
     def _should_stop_test_suite(self):
         return False
 
+class XPUTestBase(DeviceTypeTestBase):
+    device_type = 'xpu'
+    primary_device: ClassVar[str]
+
+    @classmethod
+    def get_primary_device(cls):
+        return cls.primary_device
+
+    @classmethod
+    def get_all_devices(cls):
+        # currently only one device is supported on MPS backend
+        prim_device = cls.get_primary_device()
+        return [prim_device]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.primary_device = 'xpu:0'
+
+    def _should_stop_test_suite(self):
+        return False
+
 class PrivateUse1TestBase(DeviceTypeTestBase):
     primary_device: ClassVar[str]
     device_mod = None
@@ -665,6 +690,50 @@ PYTORCH_CUDA_MEMCHECK = os.getenv('PYTORCH_CUDA_MEMCHECK', '0') == '1'
 
 PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY = 'PYTORCH_TESTING_DEVICE_ONLY_FOR'
 PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
+PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY = 'PYTORCH_TESTING_DEVICE_FOR_CUSTOM'
+
+
+def get_desired_device_type_test_bases(except_for=None, only_for=None, include_lazy=False, allow_mps=False):
+    # allow callers to specifically opt tests into being tested on MPS, similar to `include_lazy`
+    test_bases = device_type_test_bases.copy()
+    if allow_mps and TEST_MPS and MPSTestBase not in test_bases:
+        test_bases.append(MPSTestBase)
+    if only_for == 'xpu' and TEST_XPU and XPUTestBase not in test_bases:
+        test_bases.append(XPUTestBase)
+    # Filter out the device types based on user inputs
+    desired_device_type_test_bases = filter_desired_device_types(test_bases, except_for, only_for)
+    if include_lazy:
+        # Note [Lazy Tensor tests in device agnostic testing]
+        # Right now, test_view_ops.py runs with LazyTensor.
+        # We don't want to opt every device-agnostic test into using the lazy device,
+        # because many of them will fail.
+        # So instead, the only way to opt a specific device-agnostic test file into
+        # lazy tensor testing is with include_lazy=True
+        if IS_FBCODE:
+            print("TorchScript backend not yet supported in FBCODE/OVRSOURCE builds", file=sys.stderr)
+        else:
+            desired_device_type_test_bases.append(LazyTestBase)
+
+    def split_if_not_empty(x: str):
+        return x.split(",") if x else []
+
+    # run some cuda testcases on other devices if available
+    # Usage:
+    # export PYTORCH_TESTING_DEVICE_FOR_CUSTOM=privateuse1
+    env_custom_only_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY, ''))
+    if env_custom_only_for:
+        desired_device_type_test_bases += filter(lambda x: x.device_type in env_custom_only_for, test_bases)
+        desired_device_type_test_bases = list(set(desired_device_type_test_bases))
+
+    # Filter out the device types based on environment variables if available
+    # Usage:
+    # export PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda,cpu
+    # export PYTORCH_TESTING_DEVICE_EXCEPT_FOR=xla
+    env_only_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, ''))
+    env_except_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, ''))
+
+    return filter_desired_device_types(desired_device_type_test_bases, env_except_for, env_only_for)
+
 
 
 # Adds 'instantiated' device-specific test cases to the given scope.
@@ -693,40 +762,8 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     generic_members = set(generic_test_class.__dict__.keys()) - set(empty_class.__dict__.keys())
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
-    # allow callers to specifically opt tests into being tested on MPS, similar to `include_lazy`
-    test_bases = device_type_test_bases.copy()
-    if allow_mps and TEST_MPS and MPSTestBase not in test_bases:
-        test_bases.append(MPSTestBase)
-    # Filter out the device types based on user inputs
-    desired_device_type_test_bases = filter_desired_device_types(test_bases, except_for, only_for)
-    if include_lazy:
-        # Note [Lazy Tensor tests in device agnostic testing]
-        # Right now, test_view_ops.py runs with LazyTensor.
-        # We don't want to opt every device-agnostic test into using the lazy device,
-        # because many of them will fail.
-        # So instead, the only way to opt a specific device-agnostic test file into
-        # lazy tensor testing is with include_lazy=True
-        if IS_FBCODE:
-            print("TorchScript backend not yet supported in FBCODE/OVRSOURCE builds", file=sys.stderr)
-        else:
-            desired_device_type_test_bases.append(LazyTestBase)
-
-    def split_if_not_empty(x: str):
-        return x.split(",") if len(x) != 0 else []
-
-    # Filter out the device types based on environment variables if available
-    # Usage:
-    # export PYTORCH_TESTING_DEVICE_ONLY_FOR=cuda,cpu
-    # export PYTORCH_TESTING_DEVICE_EXCEPT_FOR=xla
-    env_only_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, ''))
-    env_except_for = split_if_not_empty(os.getenv(PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, ''))
-
-    desired_device_type_test_bases = filter_desired_device_types(desired_device_type_test_bases,
-                                                                 env_except_for, env_only_for)
-
-
     # Creates device-specific test cases
-    for base in desired_device_type_test_bases:
+    for base in get_desired_device_type_test_bases(except_for, only_for, include_lazy, allow_mps):
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
         # type set to Any and suppressed due to unsupport runtime class:
@@ -747,6 +784,23 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
                 assert name not in device_type_test_class.__dict__, f"Redefinition of directly defined member {name}"
                 nontest = getattr(generic_test_class, name)
                 setattr(device_type_test_class, name, nontest)
+
+        # The dynamically-created test class derives from the test template class
+        # and the empty class. Arrange for both setUpClass and tearDownClass methods
+        # to be called. This allows the parameterized test classes to support setup
+        # and teardown.
+        @classmethod
+        def _setUpClass(cls):
+            base.setUpClass()
+            empty_class.setUpClass()
+
+        @classmethod
+        def _tearDownClass(cls):
+            empty_class.tearDownClass()
+            base.tearDownClass()
+
+        device_type_test_class.setUpClass = _setUpClass
+        device_type_test_class.tearDownClass = _tearDownClass
 
         # Mimics defining the instantiated class in the caller's file
         # by setting its module to the given class's and adding
@@ -796,6 +850,12 @@ ANY_DTYPE_ORDER = (
     torch.bool
 )
 
+def _serialize_sample(sample_input):
+    # NB: For OpInfos, SampleInput.summary() prints in a cleaner way.
+    if getattr(sample_input, "summary", None) is not None:
+        return sample_input.summary()
+    return str(sample_input)
+
 # Decorator that defines the OpInfos a test template should be instantiated for.
 #
 # Example usage:
@@ -835,10 +895,11 @@ ANY_DTYPE_ORDER = (
 
 class ops(_TestParametrizer):
     def __init__(self, op_list, *, dtypes: Union[OpDTypes, Sequence[torch.dtype]] = OpDTypes.supported,
-                 allowed_dtypes: Optional[Sequence[torch.dtype]] = None):
+                 allowed_dtypes: Optional[Sequence[torch.dtype]] = None, skip_if_dynamo=True):
         self.op_list = list(op_list)
         self.opinfo_dtypes = dtypes
         self.allowed_dtypes = set(allowed_dtypes) if allowed_dtypes is not None else None
+        self.skip_if_dynamo = skip_if_dynamo
 
     def _parametrize_test(self, test, generic_cls, device_cls):
         """ Parameterizes the given test function across each op and its associated dtypes. """
@@ -905,7 +966,28 @@ class ops(_TestParametrizer):
                 try:
                     @wraps(test)
                     def test_wrapper(*args, **kwargs):
-                        return test(*args, **kwargs)
+                        try:
+                            return test(*args, **kwargs)
+                        except unittest.SkipTest as e:
+                            raise e
+                        except Exception as e:
+                            tracked_input = get_tracked_input()
+                            if PRINT_REPRO_ON_FAILURE and tracked_input is not None:
+                                raise Exception(
+                                    f"Caused by {tracked_input.type_desc} "
+                                    f"at index {tracked_input.index}: "
+                                    f"{_serialize_sample(tracked_input.val)}") from e
+                            raise e
+                        finally:
+                            clear_tracked_input()
+
+                    if self.skip_if_dynamo and not TEST_WITH_TORCHINDUCTOR:
+                        test_wrapper = skipIfTorchDynamo("Policy: we don't run OpInfo tests w/ Dynamo")(test_wrapper)
+
+                    # Initialize info for the last input seen. This is useful for tracking
+                    # down which inputs caused a test failure. Note that TrackedInputIter is
+                    # responsible for managing this.
+                    test.tracked_input = None
 
                     decorator_fn = partial(op.get_decorators, generic_cls.__name__,
                                            test.__name__, device_cls.device_type, dtype)
@@ -1251,6 +1333,10 @@ def onlyCUDA(fn):
 def onlyMPS(fn):
     return onlyOn('mps')(fn)
 
+
+def onlyXPU(fn):
+    return onlyOn('xpu')(fn)
+
 def onlyPRIVATEUSE1(fn):
     device_type = torch._C._get_privateuse1_backend_name()
     device_mod = getattr(torch, device_type, None)
@@ -1291,6 +1377,10 @@ def disableMkldnn(fn):
         return fn(self, *args, **kwargs)
 
     return disable_mkldnn
+
+
+def expectedFailureCPU(fn):
+    return expectedFailure('cpu')(fn)
 
 
 def expectedFailureCUDA(fn):
@@ -1392,6 +1482,10 @@ def skipCUDAIfRocmVersionLessThan(version=None):
 
         return wrap_fn
     return dec_fn
+
+# Skips a test on CUDA when using ROCm.
+def skipCUDAIfNotMiopenSuggestNHWC(fn):
+    return skipCUDAIf(not TEST_WITH_MIOPEN_SUGGEST_NHWC, "test doesn't currently work without MIOpen NHWC activation")(fn)
 
 # Skips a test for specified CUDA versions, given in the form of a list of [major, minor]s.
 def skipCUDAVersionIn(versions : List[Tuple[int, int]] = None):

@@ -4,15 +4,19 @@
   - .ci/onnx/*
   - .ci/docker/common/install_onnx.sh
   - aten/src/ATen/core/interned_strings.h
+  - benchmarks/dynamo/**
   - docs/source/onnx.rst
   - docs/source/onnx*
   - docs/source/scripts/onnx/**
+  - docs/source/_static/img/onnx/**
   - scripts/onnx/**
   - test/onnx/**
+  - test/onnx_caffe2/**
   - tools/onnx/**
   - torch/_dynamo/backends/onnxrt.py
   - torch/_C/__init__.pyi.in
   - torch/_C/_onnx.pyi
+  - torch/_logging/**
   - torch/csrc/jit/passes/onnx.*
   - torch/csrc/jit/passes/onnx/**
   - torch/csrc/jit/serialization/export.*
@@ -22,8 +26,6 @@
   - torch/testing/_internal/common_methods_invocations.py
   - third_party/onnx
   - caffe2/python/onnx/**
-  - benchmarks/dynamo/_onnx/**
-  - torch/_logging/**
   approved_by:
   - BowenBao
   - abock
@@ -72,6 +74,7 @@
 
 - name: OSS CI / pytorchbot
   patterns:
+  - .github/ci_commit_pins/audio.txt
   - .github/ci_commit_pins/vision.txt
   - .github/ci_commit_pins/torchdynamo.txt
   - .ci/docker/ci_commit_pins/triton.txt
@@ -82,6 +85,19 @@
   - EasyCLA
   - Lint
   - pull
+  - inductor
+
+- name: OSS CI /pytorchbot / Executorch
+  patterns:
+  - .ci/docker/ci_commit_pins/executorch.txt
+  approved_by:
+  - pytorchbot
+  ignore_flaky_failures: false
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull / linux-jammy-py3-clang12-executorch / build
+  - pull / linux-jammy-py3-clang12-executorch / test (executorch, 1, 1, linux.2xlarge)
 
 - name: OSS CI / pytorchbot / XLA
   patterns:
@@ -92,8 +108,8 @@
   mandatory_checks_name:
   - EasyCLA
   - Lint
-  - pull / linux-bionic-py3_8-clang9-xla / build
-  - pull / linux-bionic-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)
+  - pull / linux-focal-py3_8-clang9-xla / build
+  - pull / linux-focal-py3_8-clang9-xla / test (xla, 1, 1, linux.12xlarge)
 
 - name: Documentation
   patterns:
@@ -123,9 +139,6 @@
 
 - name: PrimTorch
   patterns:
-  - aten/src/ATen/native_functions.yaml
-  - aten/src/ATen/native/**
-  - test/**
   - torch/_meta_registrations.py
   - torch/_decomp/**
   - torch/_refs/**
@@ -223,6 +236,20 @@
   - Lint
   - pull
 
+- name: XPU ATen
+  patterns:
+  - aten/src/ATen/xpu/**
+  - c10/xpu/**
+  - third_party/xpu.txt
+  approved_by:
+  - EikanWang
+  - jgong5
+  - gujinghui
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Distributions
   patterns:
   - torch/distributions/**
@@ -262,16 +289,20 @@
   - wanchaol
   - fduwjj
   - H-Huang
-  - aazzolini
   - kwen2501
   - XilunWu
   - wz337
   - awgu
   - fegin
-  - kumpera
-  - yhcharles
+  - kurman
+  - LucasLLC
+  - sanketpurandare
+  - shuqiangzhang
+  - tianyu-l
   - kiukchung
   - d4l3k
+  - shuqiangzhang
+  - weifengpy
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -319,6 +350,7 @@
   - XiaobingSuper
   - jgong5
   - vfdev-5
+  - leslie-fang-intel
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -332,6 +364,27 @@
   approved_by:
   - leslie-fang-intel
   - jgong5
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: CPU inductor
+  patterns:
+  - torch/_inductor/fx_passes/mkldnn_fusion.py
+  - torch/_inductor/fx_passes/quantization.py
+  - torch/_inductor/codegen/cpp.py
+  - test/inductor/test_mkldnn_pattern_matcher.py
+  - test/inductor/test_cpu_repo.py
+  - test/inductor/test_cpu_cpp_wrapper.py
+  - aten/src/ATen/native/quantized/cpu/**
+  - test/quantization/core/test_quantized_op.py
+  - torch/ao/quantization/quantizer/x86_inductor_quantizer.py
+  - test/quantization/pt2e/test_x86inductor_quantizer.py
+  approved_by:
+  - leslie-fang-intel
+  - jgong5
+  - EikanWang
   mandatory_checks_name:
   - EasyCLA
   - Lint

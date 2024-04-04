@@ -5,7 +5,6 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
-#include <iostream>
 #include <utility>
 
 #include <ATen/Operators.h>
@@ -17,7 +16,7 @@
 #include <c10/util/SmallBuffer.h>
 #include <ATen/InferSize.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 // Note [Adding vmap support for an operator]
 // Hey there! So you have an operator and you want to get it to work with vmap.
@@ -163,9 +162,7 @@ const Tensor& resize__plumbing(
     return self.resize_(size, optional_memory_format);
   }
 
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
   TORCH_INTERNAL_ASSERT(self_bdim.has_value());
 
   // TODO: The following algorithm only works for batch dim == 0.
@@ -204,7 +201,7 @@ std::tuple<Tensor, optional<int64_t>> squeeze_batch_rule(const Tensor& self, opt
   int64_t new_batch_idx = 0;
   int64_t original_idx = 0;
 
-  for (auto it : shape) {
+  for (const auto& it : shape) {
     // Keep only dimensions != 1 and the batch dimension (irrespective of size).
     if (it != 1 || original_idx == bdim) {
       squeezed_sizes.push_back(it);
@@ -454,7 +451,7 @@ std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto self_sizes = self_.sym_sizes();
-  auto batch_size = self_sizes[0];
+  const auto& batch_size = self_sizes[0];
 
   c10::SmallVector<c10::SymInt> size_(size.size() + 1);
   size_[0] = batch_size;
@@ -520,13 +517,6 @@ std::tuple<std::vector<Tensor>, optional<int64_t>> unsafe_split_batch_rule(
   return std::make_tuple(std::move(result), 0);
 }
 
-std::tuple<Tensor, optional<int64_t>> movedim_batch_rule(const Tensor& self, optional<int64_t> self_bdim, IntArrayRef source, IntArrayRef destination) {
-  auto self_ = moveBatchDimToFront(self, self_bdim);
-  auto source_ = getPhysicalDims(self_, self_bdim.has_value(), source);
-  auto destination_ = getPhysicalDims(self_, self_bdim.has_value(), destination);
-  return std::make_tuple(self_.movedim(source_, destination_), 0);
-}
-
 std::tuple<Tensor, optional<int64_t>> diag_embed_batch_rule(const Tensor& self, optional<int64_t> self_bdim, int64_t offset, int64_t dim1, int64_t dim2) {
   auto logical_rank = rankWithoutBatchDim(self, self_bdim);
   auto self_ = moveBatchDimToFront(self, self_bdim);
@@ -563,7 +553,6 @@ std::tuple<Tensor,optional<int64_t>> triu_batch_rule(
 }
 
 TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
-  m.impl("flatten.using_ints", static_cast<decltype(&ATEN_FN2(flatten, using_ints))>(native::flatten));
   VMAP_SUPPORT(flip, flip_batch_rule);
   m.impl("trace", trace_decomp);
   VMAP_SUPPORT(tril, tril_batch_rule);
@@ -588,7 +577,6 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(expand, SINGLE_ARG(expand_batch_rule<decltype(&ATEN_FN(expand)), &ATEN_FN(expand)>));
   VMAP_SUPPORT(expand_copy, SINGLE_ARG(expand_batch_rule<decltype(&ATEN_FN(expand_copy)), &ATEN_FN(expand_copy)>));
   VMAP_SUPPORT(unfold, unfold_batch_rule);
-  VMAP_SUPPORT2(movedim, intlist, movedim_batch_rule);
   VMAP_SUPPORT2(slice, Tensor, slice_batch_rule);
   VMAP_SUPPORT2(transpose, int, transpose_int_batch_rule);
   m.impl("t", native::t);  // CompositeExplicitAutograd, should not go in BatchRulesDecompositions.cpp
@@ -598,4 +586,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT2(unsafe_split, Tensor, unsafe_split_batch_rule);
 }
 
-}}
+} // namespace at::functorch

@@ -8,6 +8,7 @@ import os
 import random
 import sys
 import tempfile
+from datetime import timedelta
 from functools import reduce
 from itertools import groupby
 
@@ -458,56 +459,6 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_allreduce_basics_cuda(self):
         self._test_allreduce_basics(lambda t: t.clone().cuda())
 
-    # _using_work_api tests are to make sure we still properly support work API.
-    # This should go away as we deprecate it.
-    def _test_allreduce_basics_using_work_api(self, fn):
-        store = c10d.FileStore(self.file_name, self.world_size)
-        pg = self._create_process_group_gloo(
-            store, self.rank, self.world_size, self.opts()
-        )
-
-        # Single input tests
-        tests = simple_reduce_tests(self.rank, self.world_size)
-        for (op, input, expected) in tests:
-            opts = c10d.AllreduceOptions()
-            opts.reduceOp = op
-            tensor = fn(input)
-            work = pg.allreduce([tensor], opts)
-            work.wait()
-            result = work.result()
-            self.assertEqual(expected, result[0])
-
-        # Multi input tests
-        tests = simple_multi_input_reduce_tests(self.rank, self.world_size)
-        for (op, inputs, output) in tests:
-            opts = c10d.AllreduceOptions()
-            opts.reduceOp = op
-            tensors = [fn(input) for input in inputs]
-            work = pg.allreduce(tensors, opts)
-            work.wait()
-            result = work.result()
-            for tensor in result:
-                self.assertEqual(output, tensor)
-
-        # Test overloaded convenience function (defaults to using sum)
-        x = fn(torch.tensor([self.rank + 1.0]))
-        work = pg.allreduce(x)
-        work.wait()
-        result = work.result()
-        self.assertEqual(
-            torch.tensor([float(self.world_size * (self.world_size + 1) / 2)]),
-            result[0],
-        )
-
-    @requires_gloo()
-    def test_allreduce_basics_using_work_api(self):
-        self._test_allreduce_basics_using_work_api(lambda t: t.clone())
-
-    @skip_if_lt_x_gpu(2)
-    @requires_gloo()
-    def test_allreduce_basics_cuda_using_work_api(self):
-        self._test_allreduce_basics_using_work_api(lambda t: t.clone().cuda())
-
     def _test_allreduce_stress(self, inputs):
         store = c10d.FileStore(self.file_name, self.world_size)
         pg = self._create_process_group_gloo(
@@ -702,6 +653,87 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     def test_sparse_allreduce_basics_cuda(self):
         self._test_sparse_allreduce_basics(lambda t: t.clone().cuda())
 
+    @skip_if_lt_x_gpu(2)
+    @requires_gloo()
+    def test_sparse_allreduce_cuda_dispatched(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(backend="gloo", store=store, rank=self.rank, world_size=self.world_size)
+        tests = simple_sparse_reduce_tests(
+            self.rank, self.world_size, num_inputs=1
+        )
+        for (inputs, outputs) in tests:
+            tensors = inputs[-1].clone().cuda()
+            work = dist.all_reduce(tensors, async_op=True)
+            work.wait()
+            self.assertEqual([tensors], outputs)
+
+    @requires_gloo()
+    def test_allgather_into_tensor_coalesced(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        torch.manual_seed(42)
+        in_shapes = [(5, 5), (10, 10), (15, 15)]
+        out_shapes = [(s[0] * self.world_size,) + s[1:] for s in in_shapes]
+
+        outputs = [torch.empty(s) for s in out_shapes]
+        inputs = [torch.rand(s) for s in in_shapes]
+        work = dist.group.WORLD.allgather_into_tensor_coalesced(outputs, inputs)
+        work.wait()
+
+        for output, input in zip(outputs, inputs):
+            expect = torch.cat([input] * self.world_size)
+            self.assertTrue(torch.allclose(output, expect))
+
+    @requires_gloo()
+    def test_reduce_scatter_tensor(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        torch.manual_seed(42)
+        out_shape = (20, 20)
+        in_shape = (out_shape[0] * self.world_size,) + out_shape[1:]
+
+        output = torch.empty(out_shape)
+        input = torch.rand(in_shape)
+        work = dist.reduce_scatter_tensor(output, input, async_op=True)
+        work.wait()
+
+        expect = input.view(self.world_size, *out_shape) \
+            .chunk(self.world_size)[self.rank] * self.world_size
+        self.assertTrue(torch.allclose(output, expect))
+
+    @requires_gloo()
+    def test_reduce_scatter_tensor_coalesced(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+        )
+        torch.manual_seed(42)
+        out_shapes = [(5, 5), (10, 10), (15, 15)]
+        in_shapes = [(s[0] * self.world_size,) + s[1:] for s in out_shapes]
+
+        outputs = [torch.empty(s) for s in out_shapes]
+        inputs = [torch.rand(s) for s in in_shapes]
+        work = dist.group.WORLD.reduce_scatter_tensor_coalesced(outputs, inputs)
+        work.wait()
+
+        for output, input in zip(outputs, inputs):
+            expect = input.view(self.world_size, *output.shape) \
+                .chunk(self.world_size)[self.rank] * self.world_size
+            self.assertTrue(torch.allclose(output, expect))
+
     @requires_gloo()
     def test_scatter_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -848,6 +880,17 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 result[0],
                 msg=("Mismatch in iteration %d for rank %d" % (iter, root)),
             )
+
+    @requires_gloo()
+    def test_set_gloo_pg_timeout(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+        pg.allreduce(torch.rand(10))
+        self.assertEqual(pg.options._timeout, timedelta(seconds=50))
+        pg._set_default_timeout(timedelta(seconds=23))
+        self.assertEqual(pg.options._timeout, timedelta(seconds=23))
 
     @requires_gloo()
     def test_scatter_stress(self):

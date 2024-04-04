@@ -170,6 +170,17 @@ Tensor run_qconv2d_context(
     int64_t zero_point,
     const c10::intrusive_ptr<Conv2dPackedContext>& conv_context);
 
+c10::intrusive_ptr<Conv2dPackedContext> create_qtconv2d_context(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
+    const c10::optional<Scalar>& output_min = c10::nullopt,
+    const c10::optional<Scalar>& output_max = c10::nullopt);
+
 // Backwards compatibility
 class Conv2dOpContext final : public torch::jit::CustomClassHolder {
  public:
@@ -216,6 +227,75 @@ c10::intrusive_ptr<Conv2dOpContext> conv2d_clamp_prepack(
     const int64_t groups,
     const c10::optional<Scalar>& output_min,
     const c10::optional<Scalar>& output_max);
+
+class Conv1dPackedContext final : virtual public VulkanPackedContext,
+                                  public torch::jit::CustomClassHolder {
+ private:
+  c10::impl::GenericList unpacked_;
+  api::ShaderInfo compute_shader_{};
+
+ public:
+  Conv1dPackedContext(
+      const Tensor& weight,
+      const c10::optional<Tensor>& bias,
+      const IntArrayRef stride_arg,
+      const IntArrayRef padding_arg,
+      const IntArrayRef dilation_arg,
+      const int64_t groups);
+
+  /*
+   * Assigns a name to each index in the unpacked list.
+   */
+  struct Unpacked final {
+    static constexpr uint32_t Weight = 0u;
+    static constexpr uint32_t Bias = 1u;
+    static constexpr uint32_t Stride = 2u;
+    static constexpr uint32_t Padding = 3u;
+    static constexpr uint32_t Dilation = 4u;
+    static constexpr uint32_t Groups = 5u;
+
+    static constexpr uint32_t NumArgs = 6u;
+  };
+
+  /*
+   * Assigns a name to each index in the packed list.
+   */
+  struct Packed final {
+    static constexpr uint32_t Weight = 0u;
+    static constexpr uint32_t Bias = 1u;
+    static constexpr uint32_t Stride = 2u;
+    static constexpr uint32_t Padding = 3u;
+    static constexpr uint32_t Dilation = 4u;
+    static constexpr uint32_t Groups = 5u;
+    static constexpr uint32_t WeightSizes = 6u;
+
+    static constexpr uint32_t NumArgs = 7u;
+  };
+
+  static Conv1dPackedContext pack(c10::impl::GenericList);
+
+  const c10::impl::GenericList unpack() const override {
+    TORCH_CHECK(unpacked_.size() > 0u, "unpacked_ does not have any elements!");
+
+    return unpacked_;
+  }
+
+  inline api::ShaderInfo& compute_shader() {
+    return compute_shader_;
+  }
+};
+
+c10::intrusive_ptr<Conv1dPackedContext> create_conv1d_context(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups);
+
+Tensor run_conv1d_context(
+    const Tensor& input,
+    const c10::intrusive_ptr<Conv1dPackedContext>& context);
 
 } // namespace ops
 } // namespace vulkan

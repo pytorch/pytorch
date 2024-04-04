@@ -1,12 +1,12 @@
 # Owner(s): ["module: inductor"]
 
-import functools
+import collections
 import unittest
 
 import torch
 import torch._inductor
-from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.utils import counters
+from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
 try:
@@ -18,7 +18,7 @@ except Exception:
     has_fbgemm = False
     pass
 
-requires_cuda = functools.partial(unittest.skipIf, not HAS_CUDA, "requires cuda")
+requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 class MyModule(torch.nn.Module):
@@ -198,22 +198,46 @@ class MyModule5(torch.nn.Module):
         return torch.sin(l1_out)
 
 
-class MyModule6(torch.nn.Module):
+class TestPoitwiseOps(torch.nn.Module):
     def __init__(self, device, has_bias=True):
         super().__init__()
         self.device = device
 
     def forward(self, x):
         inputs = torch.split(x.to(self.device), 500, dim=1)
-        x_split = torch.split(inputs[0].to(self.device), 100, dim=1)
-        y_split = torch.split(inputs[1].to(self.device), 100, dim=1)
+        x_split = torch.split(inputs[0].to(self.device), 50, dim=1)
+        y_split = torch.split(inputs[1].to(self.device), 50, dim=1)
         tanh_1 = [torch.tanh(x_split[i]) for i in range(len(x_split))]
         tanh_2 = [torch.tanh(y_split[i]) for i in range(len(y_split))]
-        return torch.cat(tanh_1, dim=1) + torch.cat(tanh_2, dim=1)
+        sigmoid_1 = [torch.sigmoid(tanh_1[i]) for i in range(len(tanh_1))]
+        sigmoid_2 = [torch.sigmoid(tanh_2[i]) for i in range(len(tanh_2))]
+        relu_1 = [torch.nn.functional.relu(sigmoid_1[i]) for i in range(len(sigmoid_1))]
+        relu_2 = [torch.nn.functional.relu(sigmoid_2[i]) for i in range(len(sigmoid_2))]
+        add = [torch.add(relu_1[i], relu_2[i]) for i in range(len(relu_1))]
+        mul = [torch.mul(add[i], add[i]) for i in range(len(add))]
+        sub = [torch.sub(mul[i], mul[i]) for i in range(len(mul))]
+        div = [torch.div(sub[i], sub[i]) for i in range(len(sub))]
+        return torch.cat(div, dim=1)
 
 
-@requires_cuda()
-@torch._inductor.config.patch(group_fusion=True, batch_fusion=True)
+@requires_cuda
+@torch._inductor.config.patch(
+    pre_grad_fusion_options={
+        "batch_linear": {},
+        "batch_linear_lhs": {},
+        "batch_layernorm": {},
+        "batch_tanh": {},
+        "batch_relu": {},
+        "batch_sigmoid": {},
+    },
+    post_grad_fusion_options={
+        "batch_aten_add": {},
+        "batch_aten_mul": {},
+        "batch_aten_sub": {},
+        "batch_aten_div": {},
+        "group_linear": {"require_fbgemm": True},
+    },
+)
 class TestGroupBatchFusion(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
@@ -254,25 +278,23 @@ class TestGroupBatchFusion(TestCase):
             res = traced(*input)
             self.compare_pred(module, traced, input)
             self.assertEqual(
-                counters["inductor"]["group_fusion"],
+                counters["inductor"]["group_linear"],
                 2,
             )
-            self.assertEqual(
-                counters["inductor"]["batch_fusion"],
-                0,
-            )
+            self.assertNotIn("group_batch_fusion_pre_grad", optimus_scuba_log)
             ref.sum().backward()
             res.sum().backward()
             self.compare_parameters(module, traced)
             self.compare_gradients(module, traced)
             self.assertEqual(
-                counters["inductor"]["group_fusion"],
+                counters["inductor"]["group_linear"],
                 4,
             )
             self.assertEqual(
-                counters["inductor"]["batch_fusion"],
-                0,
+                counters["inductor"]["batch_aten_add"],
+                3,
             )
+            self.assertIn("GroupLinearFusion", optimus_scuba_log)
             counters.clear()
 
     @unittest.skipIf(not has_fbgemm, "requires fbgemm")
@@ -285,7 +307,7 @@ class TestGroupBatchFusion(TestCase):
         res = traced(*input)
         self.compare_pred(module, traced, input)
         self.assertEqual(
-            counters["inductor"]["group_fusion"],
+            counters["inductor"]["group_linear"],
             1,
         )
         self.assertEqual(
@@ -297,12 +319,12 @@ class TestGroupBatchFusion(TestCase):
         self.compare_parameters(module, traced)
         self.compare_gradients(module, traced)
         self.assertEqual(
-            counters["inductor"]["group_fusion"],
+            counters["inductor"]["group_linear"],
             2,
         )
         self.assertEqual(
-            counters["inductor"]["batch_fusion"],
-            0,
+            counters["inductor"]["batch_aten_mul"],
+            1,
         )
         counters.clear()
 
@@ -316,19 +338,7 @@ class TestGroupBatchFusion(TestCase):
                 ref = module(*input)
                 res = traced(*input)
                 self.compare_pred(module, traced, input)
-                self.assertEqual(
-                    counters["inductor"]["group_fusion"],
-                    0,
-                )
-                self.assertEqual(counters["inductor"]["batch_fusion"], 2)
-                self.assertEqual(
-                    counters["inductor"]["scmerge_split_removed"],
-                    3,
-                )
-                self.assertEqual(
-                    counters["inductor"]["scmerge_cat_removed"],
-                    3,
-                )
+                self.assertEqual(counters["inductor"]["batch_layernorm"], 2)
                 ref.sum().backward()
                 res.sum().backward()
                 self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
@@ -345,15 +355,7 @@ class TestGroupBatchFusion(TestCase):
             ref = module(*input)
             res = traced(*input)
             self.compare_pred(module, traced, input)
-            self.assertEqual(counters["inductor"]["batch_fusion"], 2)
-            self.assertEqual(
-                counters["inductor"]["scmerge_split_removed"],
-                1,
-            )
-            self.assertEqual(
-                counters["inductor"]["scmerge_cat_removed"],
-                1,
-            )
+            self.assertEqual(counters["inductor"]["batch_linear_lhs"], 2)
             ref.sum().backward()
             res.sum().backward()
             self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
@@ -369,44 +371,695 @@ class TestGroupBatchFusion(TestCase):
             ref = module(*input)
             res = traced(*input)
             self.compare_pred(module, traced, input)
-            self.assertEqual(counters["inductor"]["batch_fusion"], 1)
-            self.assertEqual(counters["inductor"]["group_fusion"], 0)
-            self.assertEqual(
-                counters["inductor"]["scmerge_split_removed"],
-                2,
-            )
-            self.assertEqual(
-                counters["inductor"]["scmerge_cat_removed"],
-                2,
-            )
+            self.assertEqual(counters["inductor"]["batch_linear"], 1)
             ref.sum().backward()
             res.sum().backward()
             self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
             self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
             counters.clear()
 
-    def test_batch_tanh_pre_grad_fusion(self):
+    def test_pointwise_op_fusion(self):
         counters.clear()
-        module = MyModule6("cuda")
+        module = TestPoitwiseOps("cuda")
         input = [torch.randn(50, 1000, requires_grad=True, device="cuda")]
         traced = torch.compile(module)
         ref = module(*input)
         res = traced(*input)
         self.compare_pred(module, traced, input)
-        self.assertEqual(counters["inductor"]["batch_fusion"], 2)
-        self.assertEqual(
-            counters["inductor"]["scmerge_split_removed"],
-            2,
-        )
-        self.assertEqual(
-            counters["inductor"]["scmerge_cat_removed"],
-            2,
-        )
+        self.assertEqual(counters["inductor"]["batch_tanh"], 1)
+        self.assertEqual(counters["inductor"]["batch_relu"], 1)
+        self.assertEqual(counters["inductor"]["batch_sigmoid"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_add"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_mul"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_sub"], 1)
+        self.assertEqual(counters["inductor"]["batch_aten_div"], 1)
         ref.sum().backward()
         res.sum().backward()
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         self.compare_gradients(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
+
+
+class TestBMMFusionModule(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.my_modules = torch.nn.ModuleList()
+        for _ in range(10):
+            self.my_modules.append(torch.nn.Linear(10, 10))
+
+    def forward(self, inputs):
+        output = None
+        for linear, input in zip(self.my_modules, inputs):
+            if output is None:
+                output = linear(input)
+            else:
+                output += linear(input)
+        return output
+
+
+@requires_cuda
+@torch._inductor.config.patch(
+    post_grad_fusion_options={"batch_linear_post_grad": {"require_fbgemm": False}}
+)
+class TestPostGradBatchLinearFusion(TestCase):
+    def test_batch_linear_post_grad_fusion(self):
+        pt1_module = TestBMMFusionModule().cuda()
+        inputs = []
+        for _ in range(10):
+            inputs.append(torch.randn(10, 10).cuda())
+        eager_output = pt1_module(inputs)
+        pt2_module = torch.compile(pt1_module)
+        pt2_output = pt2_module(inputs)
+        self.assertTrue(torch.allclose(eager_output, pt2_output))
+        self.assertEqual(
+            counters["inductor"]["batch_linear_post_grad"],
+            2,
+        )
+        self.assertIn("PostGradBatchLinearFusion", optimus_scuba_log)
+
+
+class TestFindIndependentSubsetGreedy(TestCase):
+    # Helper function to build a Graph from a data description.
+    def build_graph(self, desc):
+        # desc: {
+        #   "n1": ["n2", "n3"],
+        #   "n2": ["n3"],
+        #   "n3": [],
+        # }
+        #
+        g = torch.fx.Graph()
+        lookup = {}
+        desc = collections.deque((k, v) for k, v in desc.items())
+        unsatisfied = 0
+        while desc:
+            unsatisfied += 1
+            assert unsatisfied <= len(desc)  # cycle or bad input?
+            name, v = desc.popleft()
+            args = tuple(lookup.get(n, None) for n in v)
+            if None in args:
+                desc.append((name, v))
+                continue
+            node = g.create_node("placeholder", "target", name=name, args=args)
+            lookup[name] = node
+            unsatisfied = 0
+        return g, lookup
+
+    def verify(self, tree, subnodes, min_fuse, max_fuse, expected):
+        g, lookup = self.build_graph(tree)
+        subnodes = [lookup[n] for n in subnodes]
+        expected = [[lookup[n] for n in sub] for sub in expected]
+        opts = {
+            "min_fuse_set_size": min_fuse,
+            "max_fuse_set_size": max_fuse,
+        }
+        result = list(
+            torch._inductor.fx_passes.group_batch_fusion.find_independent_subset_greedy(
+                subnodes, opts
+            )
+        )
+        self.assertEqual(expected, result)
+
+    def test_find_independent_subset_greedy(self):
+        # First some randomly generated tests.
+        self.verify({"n0": (), "n1": ()}, ["n0"], 0, 100, [["n0"]])
+        self.verify(
+            {"n0": (), "n1": (), "n2": ("n0",)}, ["n1", "n2"], 0, 100, [["n1", "n2"]]
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": ("n0",),
+                "n3": (),
+                "n4": ("n0", "n1", "n2"),
+                "n5": ("n0", "n2", "n4"),
+                "n6": ("n3",),
+                "n7": ("n4", "n5", "n6", "n1", "n3"),
+                "n8": ("n7", "n1", "n3", "n5", "n0"),
+                "n9": ("n3", "n4", "n8", "n6", "n5", "n2", "n0", "n7"),
+                "n10": ("n0",),
+                "n11": ("n4", "n0", "n2", "n3", "n1", "n9"),
+                "n12": ("n2", "n3", "n10", "n6", "n9"),
+            },
+            ["n10", "n5", "n3", "n4", "n9"],
+            0,
+            100,
+            [["n10", "n5", "n3"], ["n4"], ["n9"]],
+        )
+        self.verify({"n0": (), "n1": (), "n2": ("n0",)}, ["n2"], 0, 100, [["n2"]])
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": (),
+                "n4": ("n3", "n1", "n0"),
+                "n5": ("n1", "n2", "n4", "n0"),
+                "n6": ("n0", "n3", "n2"),
+                "n7": ("n6", "n1", "n5", "n4", "n3", "n0"),
+                "n8": ("n2", "n7", "n3"),
+                "n9": ("n3", "n5", "n6", "n7", "n2", "n1"),
+                "n10": ("n8", "n0", "n2", "n4", "n6", "n3"),
+                "n11": ("n6", "n5", "n8", "n1", "n3", "n10", "n2"),
+                "n12": ("n7", "n4"),
+            },
+            ["n7"],
+            0,
+            100,
+            [["n7"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n1", "n2"),
+                "n4": ("n1",),
+                "n5": (),
+                "n6": ("n5",),
+                "n7": ("n1", "n6", "n5", "n2", "n3", "n0"),
+                "n8": ("n5", "n7", "n2", "n6"),
+                "n9": ("n1",),
+                "n10": ("n9",),
+                "n11": ("n3", "n4", "n0", "n2"),
+                "n12": ("n8", "n9", "n5", "n1"),
+                "n13": ("n11", "n4", "n12", "n1", "n9", "n3", "n0"),
+            },
+            ["n9", "n2", "n8", "n10", "n5", "n6", "n13", "n7", "n3", "n0", "n4"],
+            0,
+            100,
+            [
+                ["n9", "n2", "n5", "n0", "n4"],
+                ["n8", "n10"],
+                ["n6", "n3"],
+                ["n13"],
+                ["n7"],
+            ],
+        )
+        self.verify({"n0": ()}, ["n0"], 0, 100, [["n0"]])
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": (),
+                "n4": ("n1", "n2"),
+                "n5": ("n0", "n4", "n1"),
+                "n6": ("n1", "n5"),
+                "n7": (),
+                "n8": ("n7", "n1", "n3", "n5", "n6"),
+                "n9": ("n2", "n1", "n8", "n0", "n4", "n7", "n6", "n5"),
+                "n10": ("n4", "n7", "n2", "n3", "n8"),
+                "n11": (),
+                "n12": ("n9", "n7", "n5", "n11", "n8"),
+                "n13": (
+                    "n5",
+                    "n6",
+                    "n12",
+                    "n3",
+                    "n9",
+                    "n8",
+                    "n4",
+                    "n11",
+                    "n2",
+                    "n10",
+                    "n1",
+                ),
+                "n14": ("n7", "n3", "n12", "n10", "n2", "n0", "n4", "n5"),
+                "n15": ("n9", "n5", "n1", "n13", "n8", "n10", "n12", "n7", "n11", "n3"),
+                "n16": (
+                    "n2",
+                    "n4",
+                    "n15",
+                    "n5",
+                    "n0",
+                    "n6",
+                    "n3",
+                    "n8",
+                    "n14",
+                    "n12",
+                    "n9",
+                    "n10",
+                    "n7",
+                    "n13",
+                ),
+            },
+            ["n0", "n3", "n2", "n11", "n1", "n6", "n12", "n5", "n4", "n15", "n8"],
+            0,
+            100,
+            [
+                ["n0", "n3", "n2", "n11", "n1"],
+                ["n6"],
+                ["n12"],
+                ["n5"],
+                ["n4"],
+                ["n15"],
+                ["n8"],
+            ],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n2", "n1"),
+                "n4": ("n2", "n3", "n1"),
+                "n5": ("n3", "n1"),
+                "n6": ("n1",),
+                "n7": ("n5", "n4"),
+                "n8": ("n6", "n2"),
+            },
+            ["n4", "n3", "n1", "n8", "n5", "n6", "n2"],
+            0,
+            100,
+            [["n4", "n8", "n5"], ["n3", "n6"], ["n1", "n2"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n1", "n0"),
+                "n4": ("n0",),
+                "n5": ("n1", "n4"),
+                "n6": ("n2", "n1", "n4"),
+                "n7": ("n0", "n3"),
+                "n8": ("n5", "n0", "n6", "n1", "n4", "n2", "n3"),
+                "n9": ("n1", "n4", "n8", "n7", "n5"),
+                "n10": ("n9", "n8", "n0", "n2", "n7", "n1", "n3", "n5"),
+                "n11": ("n9", "n2", "n6", "n0", "n3"),
+                "n12": ("n1", "n4", "n7", "n10", "n5", "n2", "n11", "n6"),
+                "n13": ("n9", "n2", "n3", "n0", "n7", "n5", "n10", "n11"),
+                "n14": (
+                    "n8",
+                    "n0",
+                    "n3",
+                    "n6",
+                    "n10",
+                    "n1",
+                    "n5",
+                    "n9",
+                    "n12",
+                    "n11",
+                    "n4",
+                ),
+                "n15": (
+                    "n3",
+                    "n10",
+                    "n0",
+                    "n4",
+                    "n9",
+                    "n11",
+                    "n2",
+                    "n13",
+                    "n12",
+                    "n8",
+                    "n5",
+                    "n14",
+                ),
+                "n16": ("n6",),
+                "n17": (
+                    "n4",
+                    "n3",
+                    "n14",
+                    "n8",
+                    "n15",
+                    "n16",
+                    "n2",
+                    "n5",
+                    "n7",
+                    "n12",
+                    "n1",
+                    "n0",
+                    "n11",
+                ),
+            },
+            ["n17", "n16", "n10", "n4", "n8", "n12", "n6", "n1"],
+            0,
+            100,
+            [["n17"], ["n16", "n10"], ["n4", "n1"], ["n8"], ["n12"], ["n6"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": ("n0",),
+                "n3": ("n0", "n1"),
+                "n4": ("n0",),
+                "n5": ("n0",),
+                "n6": ("n5", "n3", "n0", "n2"),
+                "n7": (),
+                "n8": ("n2", "n5", "n3", "n1", "n7", "n6", "n0"),
+                "n9": ("n4",),
+                "n10": ("n4", "n5", "n1", "n2", "n0", "n6", "n8", "n9", "n7"),
+                "n11": ("n3", "n0", "n9", "n10", "n5", "n1", "n2", "n7", "n4", "n6"),
+                "n12": ("n9", "n5"),
+            },
+            ["n8", "n3", "n1", "n12", "n2", "n5", "n11", "n4", "n10", "n6", "n0"],
+            0,
+            100,
+            [
+                ["n8", "n12"],
+                ["n3", "n2", "n5", "n4"],
+                ["n1", "n0"],
+                ["n11"],
+                ["n10"],
+                ["n6"],
+            ],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": (),
+                "n4": ("n2", "n3"),
+                "n5": ("n1", "n3", "n2", "n4"),
+                "n6": ("n5", "n4", "n1", "n3"),
+                "n7": ("n5",),
+                "n8": ("n5", "n4", "n1"),
+                "n9": ("n2", "n3", "n1", "n5", "n7", "n0", "n8"),
+                "n10": ("n5", "n3", "n1", "n7", "n8", "n9"),
+                "n11": ("n1", "n4", "n2", "n0", "n8", "n9"),
+                "n12": ("n4", "n3", "n9"),
+                "n13": (
+                    "n6",
+                    "n10",
+                    "n4",
+                    "n8",
+                    "n0",
+                    "n11",
+                    "n12",
+                    "n7",
+                    "n3",
+                    "n2",
+                    "n1",
+                ),
+                "n14": ("n4", "n13", "n2"),
+                "n15": ("n11", "n7", "n6", "n10", "n14"),
+                "n16": ("n15", "n3"),
+                "n17": ("n10", "n2", "n7", "n0", "n5", "n6", "n9"),
+                "n18": (
+                    "n16",
+                    "n8",
+                    "n6",
+                    "n9",
+                    "n11",
+                    "n12",
+                    "n14",
+                    "n5",
+                    "n13",
+                    "n4",
+                    "n1",
+                ),
+            },
+            [
+                "n1",
+                "n0",
+                "n16",
+                "n6",
+                "n15",
+                "n9",
+                "n7",
+                "n4",
+                "n3",
+                "n11",
+                "n13",
+                "n17",
+                "n12",
+                "n18",
+            ],
+            0,
+            100,
+            [
+                ["n1", "n0", "n4"],
+                ["n16", "n17"],
+                ["n6", "n9"],
+                ["n15"],
+                ["n7"],
+                ["n3"],
+                ["n11", "n12"],
+                ["n13"],
+                ["n18"],
+            ],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n2",),
+                "n4": ("n1",),
+                "n5": (),
+                "n6": ("n1", "n4"),
+                "n7": ("n5", "n1"),
+                "n8": ("n6",),
+                "n9": ("n6", "n1", "n2", "n0"),
+                "n10": ("n0", "n7"),
+                "n11": ("n0", "n4", "n3", "n5"),
+                "n12": ("n9", "n8", "n7", "n4", "n0"),
+            },
+            ["n8", "n9", "n11", "n2", "n4", "n0", "n7", "n5", "n1"],
+            0,
+            100,
+            [["n8", "n9", "n11", "n7"], ["n2", "n4", "n0", "n5"], ["n1"]],
+        )
+        self.verify(
+            {"n0": (), "n1": (), "n2": (), "n3": ("n0",), "n4": ("n3",)},
+            ["n1", "n2", "n4"],
+            0,
+            100,
+            [["n1", "n2", "n4"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": ("n1",),
+                "n3": ("n2", "n1"),
+                "n4": ("n3",),
+                "n5": (),
+                "n6": ("n1", "n5"),
+                "n7": (),
+                "n8": ("n4", "n5"),
+                "n9": ("n0", "n3", "n6", "n4", "n5", "n8", "n7", "n1"),
+                "n10": ("n3", "n0", "n6", "n9", "n7"),
+                "n11": (),
+                "n12": ("n1", "n8", "n3", "n6", "n7", "n0", "n10", "n5", "n9", "n11"),
+                "n13": ("n9", "n11", "n4"),
+                "n14": (),
+                "n15": ("n6", "n12"),
+                "n16": (
+                    "n1",
+                    "n7",
+                    "n10",
+                    "n3",
+                    "n9",
+                    "n0",
+                    "n2",
+                    "n5",
+                    "n8",
+                    "n13",
+                    "n14",
+                    "n15",
+                    "n4",
+                    "n6",
+                ),
+            },
+            [
+                "n11",
+                "n16",
+                "n5",
+                "n12",
+                "n7",
+                "n2",
+                "n0",
+                "n6",
+                "n3",
+                "n9",
+                "n8",
+                "n15",
+                "n14",
+                "n4",
+                "n13",
+                "n1",
+            ],
+            0,
+            100,
+            [
+                ["n11", "n5", "n7", "n2", "n0", "n14"],
+                ["n16"],
+                ["n12", "n13"],
+                ["n6", "n3"],
+                ["n9"],
+                ["n8"],
+                ["n15"],
+                ["n4"],
+                ["n1"],
+            ],
+        )
+        self.verify({"n0": (), "n1": ()}, ["n1"], 0, 100, [["n1"]])
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": ("n1",),
+                "n3": (),
+                "n4": ("n0", "n2", "n3"),
+                "n5": ("n2", "n3"),
+                "n6": ("n3",),
+            },
+            ["n6", "n2", "n3", "n1"],
+            0,
+            100,
+            [["n6", "n2"], ["n3", "n1"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n2",),
+                "n4": ("n0",),
+                "n5": ("n1", "n2"),
+                "n6": ("n2", "n3", "n1", "n0", "n5"),
+                "n7": ("n6", "n2", "n0", "n4", "n5", "n1"),
+                "n8": ("n4",),
+                "n9": ("n4", "n6", "n7", "n1", "n2"),
+            },
+            ["n8", "n6", "n2", "n4", "n7", "n5", "n3", "n9"],
+            0,
+            100,
+            [["n8", "n6"], ["n2", "n4"], ["n7"], ["n5", "n3"], ["n9"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n1", "n2"),
+                "n4": ("n0",),
+                "n5": ("n2", "n3", "n0", "n1"),
+                "n6": ("n4", "n1"),
+                "n7": ("n5",),
+                "n8": ("n7", "n1", "n5", "n6", "n3", "n4", "n0"),
+                "n9": ("n2", "n8"),
+            },
+            ["n1", "n7", "n4", "n2", "n0", "n8", "n3", "n5"],
+            0,
+            100,
+            [["n1", "n4", "n2"], ["n7"], ["n0", "n3"], ["n8"], ["n5"]],
+        )
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": ("n0",),
+                "n3": ("n1",),
+                "n4": ("n2", "n1"),
+                "n5": (),
+                "n6": ("n0",),
+                "n7": ("n6", "n3", "n2", "n1", "n0"),
+                "n8": ("n0", "n2"),
+                "n9": ("n6", "n5", "n8", "n4", "n0"),
+                "n10": ("n1", "n7", "n5", "n8", "n6", "n2", "n4", "n9"),
+            },
+            ["n0"],
+            0,
+            100,
+            [["n0"]],
+        )
+
+        # trivial test of min_fuse
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n1", "n2"),
+                "n4": ("n1",),
+                "n5": (),
+                "n6": ("n5",),
+                "n7": ("n1", "n6", "n5", "n2", "n3", "n0"),
+                "n8": ("n5", "n7", "n2", "n6"),
+                "n9": ("n1",),
+                "n10": ("n9",),
+                "n11": ("n3", "n4", "n0", "n2"),
+                "n12": ("n8", "n9", "n5", "n1"),
+                "n13": ("n11", "n4", "n12", "n1", "n9", "n3", "n0"),
+            },
+            ["n9", "n2", "n8", "n10", "n5", "n6", "n13", "n7", "n3", "n0", "n4"],
+            2,
+            10,
+            [["n9", "n2", "n5", "n0", "n4"], ["n8", "n10"], ["n6", "n3"]],
+        )
+
+        # trivial test of max_fuse
+        self.verify(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": (),
+                "n3": ("n1", "n2"),
+                "n4": ("n1",),
+                "n5": (),
+                "n6": ("n5",),
+                "n7": ("n1", "n6", "n5", "n2", "n3", "n0"),
+                "n8": ("n5", "n7", "n2", "n6"),
+                "n9": ("n1",),
+                "n10": ("n9",),
+                "n11": ("n3", "n4", "n0", "n2"),
+                "n12": ("n8", "n9", "n5", "n1"),
+                "n13": ("n11", "n4", "n12", "n1", "n9", "n3", "n0"),
+            },
+            ["n9", "n2", "n8", "n10", "n5", "n6", "n13", "n7", "n3", "n0", "n4"],
+            0,
+            3,
+            [
+                ["n9", "n2", "n5"],
+                ["n8", "n10", "n4"],
+                ["n6", "n3", "n0"],
+                ["n13"],
+                ["n7"],
+            ],
+        )
+
+    def test_find_independent_subset_greedy_fuse(self):
+        # ensure that fusing the sets during iteration results in the correct
+        # iteration results. In the example graph after we merge n2 and n3,
+        # n4 is no longer independent from n1.
+        g, lookup = self.build_graph(
+            {
+                "n0": (),
+                "n1": (),
+                "n2": ("n0",),
+                "n3": ("n1",),
+                "n4": ("n2",),
+                "n5": (),
+            }
+        )
+        opts = {
+            "min_fuse_set_size": 0,
+            "max_fuse_set_size": 100,
+        }
+        subnodes = ["n2", "n3", "n4", "n0", "n1", "n5"]
+        subnodes = [lookup[n] for n in subnodes]
+        i = torch._inductor.fx_passes.group_batch_fusion.find_independent_subset_greedy(
+            subnodes, opts
+        )
+        self.assertEqual(next(i), [lookup[n] for n in ["n2", "n3", "n5"]])
+
+        # fuse n2 and n3 which makes n4 now dependant on n1.
+        args = tuple(lookup[n] for n in ["n0", "n1"])
+        fused = g.create_node("placeholder", "target", name="n2+n3", args=args)
+        lookup["n2"].replace_all_uses_with(fused)
+        g.erase_node(lookup["n2"])
+        lookup["n3"].replace_all_uses_with(fused)
+        g.erase_node(lookup["n3"])
+
+        self.assertEqual(next(i), [lookup[n] for n in ["n4"]])
+        self.assertEqual(next(i), [lookup[n] for n in ["n0", "n1"]])
+        self.assertRaises(StopIteration, lambda: next(i))
 
 
 if __name__ == "__main__":

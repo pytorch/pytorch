@@ -61,8 +61,7 @@
 
 #include <c10/cuda/CUDAMathCompat.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 namespace {
 
 // Number of threads in a block given an input size up to MAX_BLOCK_SIZE
@@ -669,5 +668,4 @@ Tensor log_softmax_backward_sparse_cuda(
   return grad_input;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

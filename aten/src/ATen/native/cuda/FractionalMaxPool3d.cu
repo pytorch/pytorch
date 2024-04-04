@@ -12,6 +12,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/native/FractionalMaxPooling.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -52,10 +53,10 @@ __device__ inline int64_t get_intervals(
 
 template <typename scalar_t>
 __global__ void fractional_max_pool3d_out_frame(
-  PackedTensorAccessor64<scalar_t, 5> input,
+  PackedTensorAccessor64<const scalar_t, 5> input,
   PackedTensorAccessor64<scalar_t, 5> output,
   PackedTensorAccessor64<int64_t, 5> indices,
-  PackedTensorAccessor64<scalar_t, 3> samples,
+  PackedTensorAccessor64<const scalar_t, 3> samples,
   int64_t poolSizeT, int64_t poolSizeH, int64_t poolSizeW) {
     using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
     // Output (t, h, w) point that this thread is responsible for
@@ -136,13 +137,13 @@ __global__ void fractional_max_pool3d_backward_out_frame(
                       gradOutput.size(4));
 
     int64_t index = indices[batch][plane][outputT][outputH][outputW];
-    assert(index >= 0);
+    CUDA_KERNEL_ASSERT(index >= 0);
     int64_t inputW = index % gradInput.size(4);
     int64_t inputH = (index / gradInput.size(4)) %
       gradInput.size(3);
     int64_t inputT = index / (gradInput.size(3) *
       gradInput.size(4));
-    assert(inputT < gradInput.size(2));
+    CUDA_KERNEL_ASSERT(inputT < gradInput.size(2));
 
     gpuAtomicAddNoReturn(
       &gradInput[batch][plane][inputT][inputH][inputW],
@@ -225,7 +226,9 @@ void fractional_max_pool3d_backward_out_cuda_template(
       gradInput_.size(0));
     dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
       gradOutput.scalar_type(),
       "fractional_max_pool3d_backward_out_frame",
       [&] {
@@ -284,16 +287,18 @@ TORCH_IMPL_FUNC(fractional_max_pool3d_out_cuda) (
     input_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    at::ScalarType::Half,
+    at::ScalarType::BFloat16,
     input.scalar_type(),
     "fractional_max_pool3d_out_frame",
     [&]{
       fractional_max_pool3d_out_frame<scalar_t>
       <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
-        input_.packed_accessor64<scalar_t, 5>(),
+        input_.packed_accessor64<const scalar_t, 5>(),
         output_.packed_accessor64<scalar_t, 5>(),
         indices_.packed_accessor64<int64_t, 5>(),
-        randomSamples.packed_accessor64<scalar_t, 3>(),
+        randomSamples.packed_accessor64<const scalar_t, 3>(),
         poolSizeT, poolSizeH, poolSizeW
       );
       C10_CUDA_KERNEL_LAUNCH_CHECK();

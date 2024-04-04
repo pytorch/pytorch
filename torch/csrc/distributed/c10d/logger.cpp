@@ -13,6 +13,13 @@
 
 namespace c10d {
 
+static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
+    "TORCH_NCCL_BLOCKING_WAIT",
+    "NCCL_BLOCKING_WAIT"};
+static std::vector<std::string> TORCH_NCCL_ASYNC_ERROR_HANDLING = {
+    "TORCH_NCCL_ASYNC_ERROR_HANDLING",
+    "NCCL_ASYNC_ERROR_HANDLING"};
+
 // Logs runtime stats to configured destination. Note that since data collection
 // only runs every ddp_runtime_logging_sample_rate iterations, the actual
 // training iterations recorded will be like 10,
@@ -67,29 +74,33 @@ void Logger::log_if_graph_static(bool is_static) {
 
 // Environment variables
 void Logger::set_env_variables() {
-  ddp_logging_data_->strs_map["master_port"] = parse_env("MASTER_PORT");
-  ddp_logging_data_->strs_map["master_addr"] = parse_env("MASTER_ADDR");
+  ddp_logging_data_->strs_map["master_port"] =
+      getCvarString({"MASTER_PORT"}, "N/A");
+  ddp_logging_data_->strs_map["master_addr"] =
+      getCvarString({"MASTER_ADDR"}, "N/A");
   ddp_logging_data_->strs_map["torch_distributed_debug"] =
-      parse_env("TORCH_DISTRIBUTED_DEBUG");
+      getCvarString({"TORCH_DISTRIBUTED_DEBUG"}, "N/A");
   ddp_logging_data_->strs_map["cuda_visible_devices"] =
-      parse_env("CUDA_VISIBLE_DEVICES");
+      getCvarString({"CUDA_VISIBLE_DEVICES"}, "N/A");
   if (reducer_->process_group_->getBackendName() == "nccl") {
     ddp_logging_data_->strs_map["nccl_socket_ifname"] =
-        parse_env("NCCL_SOCKET_IFNAME");
+        getCvarString({"NCCL_SOCKET_IFNAME"}, "N/A");
     ddp_logging_data_->strs_map["nccl_blocking_wait"] =
-        parse_env("NCCL_BLOCKING_WAIT");
+        getCvarString(TORCH_NCCL_BLOCKING_WAIT, "N/A");
     ddp_logging_data_->strs_map["nccl_async_error_handling"] =
-        parse_env("NCCL_ASYNC_ERROR_HANDLING");
-    ddp_logging_data_->strs_map["nccl_debug"] = parse_env("NCCL_DEBUG");
-    ddp_logging_data_->strs_map["nccl_nthreads"] = parse_env("NCCL_NTHREADS");
+        getCvarString(TORCH_NCCL_ASYNC_ERROR_HANDLING, "N/A");
+    ddp_logging_data_->strs_map["nccl_debug"] =
+        getCvarString({"NCCL_DEBUG"}, "N/A");
+    ddp_logging_data_->strs_map["nccl_nthreads"] =
+        getCvarString({"NCCL_NTHREADS"}, "N/A");
     ddp_logging_data_->strs_map["nccl_ib_timeout"] =
-        parse_env("NCCL_IB_TIMEOUT");
+        getCvarString({"NCCL_IB_TIMEOUT"}, "N/A");
   }
   if (reducer_->process_group_->getBackendName() == "gloo") {
     ddp_logging_data_->strs_map["gloo_socket_ifname"] =
-        parse_env("GLOO_SOCKET_IFNAME");
+        getCvarString({"GLOO_SOCKET_IFNAME"}, "N/A");
     ddp_logging_data_->strs_map["gloo_device_transport"] =
-        parse_env("GLOO_DEVICE_TRANSPORT");
+        getCvarString({"GLOO_DEVICE_TRANSPORT"}, "N/A");
 
 #ifdef USE_C10D_GLOO
     auto gloo_pg = static_cast<c10d::ProcessGroupGloo*>(
@@ -399,4 +410,33 @@ at::DDPLoggingData Logger::get_ddp_logging_data() {
   return *ddp_logging_data_;
 }
 
+// initialization of static variables in C10dLogger
+std::unique_ptr<C10dLogger> C10dLogger::logger_ = nullptr;
+std::atomic<bool> C10dLogger::registered_(false);
+
+C10dLogger* C10dLogger::getLogger() {
+  if (!registered_.load()) {
+    return nullptr;
+  }
+  return logger_.get();
+}
+
+void C10dLogger::registerLogger(std::unique_ptr<C10dLogger> logger) {
+  if (registered_.load()) {
+    LOG(WARNING) << "C10dLogger has already been registered.";
+    return;
+  }
+  registered_.store(true);
+  logger_ = std::move(logger);
+}
+
+void C10dLogger::log(const C10dLoggingData& data) {
+  for (const auto& [key, value] : data.integers) {
+    LOG(INFO) << key << ": " << value;
+  }
+  for (const auto& [key, value] : data.strings) {
+    LOG(INFO) << key << ": " << value;
+  }
+  return;
+}
 } // namespace c10d

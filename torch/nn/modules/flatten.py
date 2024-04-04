@@ -8,8 +8,9 @@ __all__ = ['Flatten', 'Unflatten']
 
 class Flatten(Module):
     r"""
-    Flattens a contiguous range of dims into a tensor. For use with :class:`~nn.Sequential`.
-    See :meth:`torch.flatten` for details.
+    Flattens a contiguous range of dims into a tensor.
+
+    For use with :class:`~nn.Sequential`, see :meth:`torch.flatten` for details.
 
     Shape:
         - Input: :math:`(*, S_{\text{start}},..., S_{i}, ..., S_{\text{end}}, *)`,'
@@ -34,6 +35,7 @@ class Flatten(Module):
         >>> output.size()
         torch.Size([160, 5])
     """
+
     __constants__ = ['start_dim', 'end_dim']
     start_dim: int
     end_dim: int
@@ -96,6 +98,7 @@ class Unflatten(Module):
         >>> output.size()
         torch.Size([2, 2, 5, 5])
     """
+
     NamedShape = Tuple[Tuple[str, int]]
 
     __constants__ = ['dim', 'unflattened_size']

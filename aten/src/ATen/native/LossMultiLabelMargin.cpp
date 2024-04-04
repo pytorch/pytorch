@@ -18,15 +18,14 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
 template <typename scalar_t>
 inline scalar_t multilabel_margin_loss_forward_inner_sum_cpu(
-    scalar_t* input_data,
-    int64_t* target_data,
+    const scalar_t* input_data,
+    const int64_t* target_data,
     scalar_t* is_target_data,
     int64_t dim) {
   using accscalar_t = at::acc_type<scalar_t, false>;
@@ -68,8 +67,8 @@ static void multilabel_margin_loss_forward_out_frame(
     int64_t nframe,
     int64_t dim) {
   using accscalar_t = at::acc_type<scalar_t, false>;
-  scalar_t* input_data = input_contiguous.data_ptr<scalar_t>();
-  int64_t* target_data = target_contiguous.data_ptr<int64_t>();
+  const scalar_t* input_data = input_contiguous.const_data_ptr<scalar_t>();
+  const int64_t* target_data = target_contiguous.const_data_ptr<int64_t>();
   scalar_t* is_target_data = is_target.data_ptr<scalar_t>();
 
   if (reduction != Reduction::None || output.dim() == 0) {
@@ -77,8 +76,7 @@ static void multilabel_margin_loss_forward_out_frame(
 
     accscalar_t sum = 0;
 
-    for (const auto t : c10::irange(nframe)) {
-      (void)t; //Suppress unused variable warning
+    for (C10_UNUSED const auto t : c10::irange(nframe)) {
       sum += multilabel_margin_loss_forward_inner_sum_cpu(
           input_data, target_data, is_target_data, dim);
 
@@ -178,8 +176,7 @@ static void multilabel_margin_loss_backward_out_frame(
       reduction == Reduction::Mean ? 1. / (nframe * dim) : 1. / dim);
 
   scalar_t* grad_input_row_data = grad_input.mutable_data_ptr<scalar_t>();
-  for (const auto t : c10::irange(nframe)) {
-    (void)t; //Suppress unused variable warning
+  for (C10_UNUSED const auto t : c10::irange(nframe)) {
     for (const auto dt : c10::irange(dim)) {
       int64_t target_idx = target_data[dt];
       if (target_idx < 0) {
@@ -325,5 +322,4 @@ Tensor multilabel_margin_loss(const Tensor & self, const Tensor & target, int64_
   return std::get<0>(at::multilabel_margin_loss_forward(self, target, reduction));
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

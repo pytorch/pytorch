@@ -348,7 +348,7 @@ def fill_output(output: Dict[str, object], options: object):
             {
                 "is_root_operator": True,
                 "is_used_for_training": False,
-                "include_all_overloads": True,
+                "include_all_overloads": not options.not_include_all_overloads_static_root_ops,
                 "debug_info": [options.model_name],
             },
         )
@@ -362,7 +362,7 @@ def fill_output(output: Dict[str, object], options: object):
             {
                 "is_root_operator": False,
                 "is_used_for_training": False,
-                "include_all_overloads": True,
+                "include_all_overloads": not options.not_include_all_overloads_closure_ops,
                 "debug_info": [options.model_name],
             },
         )
@@ -489,7 +489,7 @@ def fill_output(output: Dict[str, object], options: object):
         output["kernel_metadata"] = kernel_metadata
 
 
-def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
+def add_arguments_parser(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
     parser.add_argument(
         "--root-ops",
         "--root_ops",
@@ -567,8 +567,32 @@ def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
         help="The name of pt_operator_library rule resulting in this generation",
         required=True,
     )
-    options = parser.parse_args()
-    return options
+    parser.add_argument(
+        "--not-include-all-overloads-static-root-ops",
+        "--not_include_all_overloads_static_root_ops",
+        action="store_true",
+        default=False,
+        help="Set this flag to not include all overloaded operators for static root ops bucket in fill_output() subroutine",
+        required=False,
+    )
+    parser.add_argument(
+        "--not-include-all-overloads-closure-ops",
+        "--not_include_all_overloads_closure_ops",
+        action="store_true",
+        default=False,
+        help="Set this flag to not include all overloaded operators for closure ops bucket in fill_output() subroutine",
+        required=False,
+    )
+    return parser
+
+
+def parse_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
+    return parser.parse_args()
+
+
+def get_parser_options(parser: argparse.ArgumentParser) -> argparse.Namespace:
+    parser = add_arguments_parser(parser)
+    return parse_options(parser)
 
 
 def main(argv) -> None:

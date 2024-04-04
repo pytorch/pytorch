@@ -7,26 +7,30 @@ import unittest
 import torch
 import torch._dynamo
 import torch.utils.cpp_extension
+from torch._C import FileCheck
 
 try:
-    from extension_backends.extension_codegen_backend import (
+    from extension_backends.cpp.extension_codegen_backend import (
+        ExtensionCppWrapperCodegen,
         ExtensionScheduling,
         ExtensionWrapperCodegen,
     )
 except ImportError:
-    from .extension_backends.extension_codegen_backend import (
+    from .extension_backends.cpp.extension_codegen_backend import (
+        ExtensionCppWrapperCodegen,
         ExtensionScheduling,
         ExtensionWrapperCodegen,
     )
 
-from torch._C import FileCheck
+import torch._inductor.config as config
 from torch._inductor import metrics
+from torch._inductor.codegen import cpp
 from torch._inductor.codegen.common import (
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
     register_backend_for_device,
 )
-from torch.testing._internal.common_utils import IS_MACOS
+from torch.testing._internal.common_utils import IS_FBCODE, IS_MACOS
 
 try:
     try:
@@ -52,6 +56,7 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
+@unittest.skipIf(IS_FBCODE, "cpp_extension doesn't work in fbcode right now")
 class ExtensionBackendTests(TestCase):
     module = None
 
@@ -63,7 +68,7 @@ class ExtensionBackendTests(TestCase):
         remove_build_path()
         source_file_path = os.path.dirname(os.path.abspath(__file__))
         source_file = os.path.join(
-            source_file_path, "extension_backends/extension_device.cpp"
+            source_file_path, "extension_backends/cpp/extension_device.cpp"
         )
         cls.module = torch.utils.cpp_extension.load(
             name="extension_device",
@@ -102,7 +107,10 @@ class ExtensionBackendTests(TestCase):
         torch.utils.rename_privateuse1_backend("extension_device")
 
         register_backend_for_device(
-            "extension_device", ExtensionScheduling, ExtensionWrapperCodegen
+            "extension_device",
+            ExtensionScheduling,
+            ExtensionWrapperCodegen,
+            ExtensionCppWrapperCodegen,
         )
         self.assertTrue(
             get_scheduling_for_device("extension_device") == ExtensionScheduling
@@ -110,6 +118,10 @@ class ExtensionBackendTests(TestCase):
         self.assertTrue(
             get_wrapper_codegen_for_device("extension_device")
             == ExtensionWrapperCodegen
+        )
+        self.assertTrue(
+            get_wrapper_codegen_for_device("extension_device", True)
+            == ExtensionCppWrapperCodegen
         )
 
         self.assertFalse(self.module.custom_op_called())
@@ -127,20 +139,24 @@ class ExtensionBackendTests(TestCase):
         def fn(a, b, c):
             return a * b + c
 
-        metrics.reset()
-        opt_fn = torch.compile()(fn)
-        code = run_and_get_cpp_code(opt_fn, x, y, z)
-        FileCheck().check("void kernel").check("loadu").check("extension_device").run(
-            code
-        )
-        opt_fn(x, y, z)
-        res = opt_fn(x, y, z)
-        self.assertEqual(ref, res.to(device="cpu"))
+        cpp.DEVICE_TO_ATEN["extension_device"] = "at::kPrivateUse1"
+        for cpp_wrapper_flag in [True, False]:
+            with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
+                metrics.reset()
+                opt_fn = torch.compile()(fn)
+                _, code = run_and_get_cpp_code(opt_fn, x, y, z)
+                FileCheck().check("void").check("loadu").check("extension_device").run(
+                    code
+                )
+                opt_fn(x, y, z)
+                res = opt_fn(x, y, z)
+                self.assertEqual(ref, res.to(device="cpu"))
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
     from torch.testing._internal.inductor_utils import HAS_CPU
 
-    if HAS_CPU and not IS_MACOS:
+    # cpp_extension doesn't work in fbcode right now
+    if HAS_CPU and not IS_MACOS and not IS_FBCODE:
         run_tests(needs="filelock")

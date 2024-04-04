@@ -59,17 +59,15 @@ on:
       github-token:
         required: true
         description: Github Token
-      aws-pytorch-uploader-access-key-id:
-        required: true
-        description: AWS access key id
-      aws-pytorch-uploader-secret-access-key:
-        required: true
-        description: AWS secret access key
       conda-pytorchbot-token:
         required: true
         description: Conda PyTorchBot token
+      conda-pytorchbot-token-test:
+        required: true
+        description: Conda PyTorchBot token
+
 jobs:
-  build:
+  upload:
     runs-on: ubuntu-22.04
     environment: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v'))) && 'conda-aws-upload' || '' }}
     container:
@@ -101,6 +99,20 @@ jobs:
         with:
           no-sudo: true
 
+      - name: Configure AWS credentials(PyTorch account) for nightly
+        if: ${{ github.event_name == 'push' && github.event.ref == 'refs/heads/nightly' }}
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
+          aws-region: us-east-1
+
+      - name: Configure AWS credentials(PyTorch account) for RC builds
+        if: ${{ github.event_name == 'push' &&  (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')) }}
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_test_build_wheels
+          aws-region: us-east-1
+
       - name: Download Build Artifacts
         id: download-artifacts
         # NB: When the previous build job is skipped, there won't be any artifacts and
@@ -127,14 +139,19 @@ jobs:
 
       - name: Upload binaries
         if: steps.download-artifacts.outcome && steps.download-artifacts.outcome == 'success'
+        shell: bash
         env:
           PKG_DIR: "${{ runner.temp }}/artifacts"
           UPLOAD_SUBFOLDER: "${{ env.DESIRED_CUDA }}"
           # When running these on pull_request events these should be blank
-          AWS_ACCESS_KEY_ID: ${{ secrets.aws-pytorch-uploader-access-key-id }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.aws-pytorch-uploader-secret-access-key }}
-          ANACONDA_API_TOKEN: ${{ secrets.conda-pytorchbot-token }}
+          CONDA_PYTORCHBOT_TOKEN: ${{ secrets.conda-pytorchbot-token }}
+          CONDA_PYTORCHBOT_TOKEN_TEST: ${{ secrets.conda-pytorchbot-token-test }}
           BUILD_NAME: ${{ inputs.build_name }}
         run: |
             set -ex
+            if [[ "${GITHUB_REF_NAME}" = *-rc[0-9]* ]]; then
+              export ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN_TEST}"
+            else
+              export ANACONDA_API_TOKEN="${CONDA_PYTORCHBOT_TOKEN}"
+            fi
             bash .circleci/scripts/binary_upload.sh

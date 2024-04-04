@@ -3,7 +3,9 @@ from torch.testing._internal.common_utils import (
     TestCase,
     run_tests,
     skipIfTorchDynamo,
-    IS_WINDOWS
+    IS_WINDOWS,
+    parametrize as parametrize_test,
+    instantiate_parametrized_tests
 )
 from torch.testing._internal.common_nn import NNTestCase, _create_basic_net
 
@@ -18,7 +20,7 @@ from copy import deepcopy
 from tempfile import NamedTemporaryFile
 import weakref
 import pickle
-from collections import OrderedDict
+from collections import OrderedDict, namedtuple
 import math
 import warnings
 
@@ -32,16 +34,21 @@ class Net(nn.Module):
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.seq2(self.seq1(x))
 
+ToyNamedTuple = namedtuple("ToyNamedTuple", "content")
 
 class ToyModel(nn.Module):
-    def __init__(self) -> None:
+    def __init__(self, with_named_tuple=False) -> None:
         super().__init__()
         self.net1 = Net()
         self.net2 = Net()
+        self.with_named_tuple = with_named_tuple
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net2(self.net1(x))
-
+        res = self.net2(self.net1(x))
+        if self.with_named_tuple:
+            return ToyNamedTuple(res)
+        else:
+            return (res,)
 
 def forward_hook(
     self: TestCase,
@@ -177,10 +184,10 @@ class DummyContextManager:
 
 
 class TestModuleHooks(TestCase):
-    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
-    def test_forward_hooks(self):
+    @parametrize_test("named_tuple", (True, False))
+    def test_forward_hooks(self, named_tuple):
         fired_hooks: List[int] = []
-        model = ToyModel()
+        model = ToyModel(named_tuple)
         x = torch.randn(10, 10)
         hook = partial(forward_hook, self, fired_hooks, model.net1.seq2)
         model.net1.seq2.register_forward_hook(partial(hook, 0))
@@ -193,15 +200,16 @@ class TestModuleHooks(TestCase):
         self.assertEqual(fired_hooks, [])
         out = model(x)
         self.assertEqual(fired_hooks, expected)
-        out.sum().backward()
+        self.assertIsInstance(out, ToyNamedTuple if named_tuple else tuple)
+        out[0].sum().backward()
         self.assertEqual(fired_hooks, expected)
-        model(x).sum().backward()
+        model(x)[0].sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
-    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
-    def test_forward_pre_hooks(self):
+    @parametrize_test("named_tuple", (True, False))
+    def test_forward_pre_hooks(self, named_tuple):
         fired_hooks: List[int] = []
-        model = ToyModel()
+        model = ToyModel(named_tuple)
         x = torch.randn(10, 10)
         hook = partial(forward_pre_hook, self, fired_hooks, model.net2.seq1)
         model.net2.seq1.register_forward_pre_hook(
@@ -218,15 +226,16 @@ class TestModuleHooks(TestCase):
         self.assertEqual(fired_hooks, [])
         out = model(x)
         self.assertEqual(fired_hooks, expected)
-        out.sum().backward()
+        self.assertIsInstance(out, ToyNamedTuple if named_tuple else tuple)
+        out[0].sum().backward()
         self.assertEqual(fired_hooks, expected)
-        model(x).sum().backward()
+        model(x)[0].sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
-    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
-    def test_full_backward_hooks(self):
+    @parametrize_test("named_tuple", (True, False))
+    def test_full_backward_hooks(self, named_tuple):
         fired_hooks: List[int] = []
-        model = ToyModel()
+        model = ToyModel(named_tuple)
         x = torch.randn(10, 10)
         hook = partial(full_backward_hook, self, fired_hooks, model.net1)
         model.net1.register_full_backward_hook(partial(hook, 0))
@@ -239,15 +248,16 @@ class TestModuleHooks(TestCase):
         self.assertEqual(fired_hooks, [])
         out = model(x)
         self.assertEqual(fired_hooks, [])
-        out.sum().backward()
+        self.assertIsInstance(out, ToyNamedTuple if named_tuple else tuple)
+        out[0].sum().backward()
         self.assertEqual(fired_hooks, expected)
-        model(x).sum().backward()
+        model(x)[0].sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
-    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
-    def test_full_backward_pre_hooks(self):
+    @parametrize_test("named_tuple", (True, False))
+    def test_full_backward_pre_hooks(self, named_tuple):
         fired_hooks: List[int] = []
-        model = ToyModel()
+        model = ToyModel(named_tuple)
         x = torch.randn(10, 10)
         hook = partial(full_backward_pre_hook, self, fired_hooks, model.net1)
         model.net1.register_full_backward_pre_hook(
@@ -264,28 +274,35 @@ class TestModuleHooks(TestCase):
         self.assertEqual(fired_hooks, [])
         out = model(x)
         self.assertEqual(fired_hooks, [])
-        out.sum().backward()
+        self.assertIsInstance(out, ToyNamedTuple if named_tuple else tuple)
+        out[0].sum().backward()
         self.assertEqual(fired_hooks, expected)
-        model(x).sum().backward()
+        model(x)[0].sum().backward()
         self.assertEqual(fired_hooks, expected + expected)
 
         # Backward pre hook can affect subsequent gradient computation
-        a = torch.ones(2, requires_grad=True)
-        model = nn.Linear(2, 2)
+        for rg in [True, False]:
+            a = torch.ones(2, requires_grad=rg)
+            model = nn.Linear(2, 2)
 
-        def fn(_unused_module, grad_output):
-            return (grad_output[0] * 0,)
+            def fn(_unused_module, grad_output):
+                return (grad_output[0] * 0,)
 
-        model.register_full_backward_pre_hook(fn)
+            model.register_full_backward_pre_hook(fn)
 
-        out = model(a)
-        out.sum().backward()
-        self.assertEqual(a.grad, torch.zeros_like(a))
+            out = model(a)
+            out.sum().backward()
+            self.assertEqual(model.weight.grad, torch.zeros(2, 2))
+            if rg:
+                self.assertEqual(a.grad, torch.zeros_like(a))
+            else:
+                self.assertIsNone(a.grad)
 
-    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
-    def test_mixed_hooks(self):
+
+    @parametrize_test("named_tuple", (True, False))
+    def test_mixed_hooks(self, named_tuple):
         fired_hooks: List[int] = []
-        model = ToyModel()
+        model = ToyModel(named_tuple)
         x = torch.randn(10, 10)
         model.register_forward_pre_hook(
             partial(forward_pre_hook, self, fired_hooks, model, 0)
@@ -303,12 +320,12 @@ class TestModuleHooks(TestCase):
         self.assertEqual(fired_hooks, [])
         out = model(x)
         self.assertEqual(fired_hooks, [0, 1])
-        out.sum().backward()
+        self.assertIsInstance(out, ToyNamedTuple if named_tuple else tuple)
+        out[0].sum().backward()
         self.assertEqual(fired_hooks, [0, 1, 2, 3])
-        model(x).sum().backward()
+        model(x)[0].sum().backward()
         self.assertEqual(fired_hooks, [0, 1, 2, 3, 0, 1, 2, 3])
 
-    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_kwarg_hooks(self):
         # 1. test forward pre hook
         fired_hooks: List[int] = []
@@ -365,7 +382,6 @@ class TestModuleHooks(TestCase):
         self.assertEqual(out, x + 2 * bias, rtol=0, atol=1e-5)
 
 
-    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_remove_kwarg_hooks(self):
         # test forward pre and forward hooks
         fired_hooks: List[int] = []
@@ -411,7 +427,6 @@ class TestModuleHooks(TestCase):
             forward_pre_hook_handle.id in model._forward_pre_hooks_with_kwargs
         )
 
-    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_always_called_forward_hooks(self):
         x: torch.Tensor = torch.ones(10, 10)
         model = FailsInForwardModel()
@@ -499,7 +514,6 @@ class TestModuleHooks(TestCase):
             model(x)
         self.assertEqual(stack, [2, -1, 2, -1, 2, -1, 2, -1, 2, -1, 2, -1, 2])
 
-    @skipIfTorchDynamo("Dynamo does not yet capture hooks")
     def test_bw_hook_warning_for_non_tensor_or_tuple(self):
         # Test to verify that backward hook raises warning
         # if result is not a Tensor or tuple of Tensors.
@@ -854,7 +868,6 @@ class TestModuleGlobalHooks(TestCase):
             with self.assertRaisesRegex(RuntimeError, 'got 2, but expected 1'):
                 module(input).sum().backward()
 
-    @skipIfTorchDynamo("https://github.com/pytorch/torchdynamo/issues/847")
     def test_module_backward_global_hook_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -894,7 +907,6 @@ class TestModuleGlobalHooks(TestCase):
         expected_grad = -sig_x * (1 - sig_x) * 2 * mask
         self.assertEqual(input.grad, expected_grad)
 
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_forward_preforward_hook_removable(self):
         """
         This test is to test when multiple pre-forward hook functions can be
@@ -930,7 +942,6 @@ class TestModuleGlobalHooks(TestCase):
         self.assertEqual(len(handle.hooks_dict_ref()), 0)
         self.assertEqual(len(handle_2.hooks_dict_ref()), 0)
 
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_module_forward_forward_hook_removable(self):
         """
         This test is to test when multiple forward hook functions can be registered
@@ -1114,7 +1125,6 @@ class TestModuleHookNN(NNTestCase):
         test_fwd.remove()
         test_bwd.remove()
 
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hooks(self):
         self._test_hooks("register_backward_hook")
         self._test_hooks("register_full_backward_hook")
@@ -1132,7 +1142,6 @@ class TestModuleHookNN(NNTestCase):
         output = bn(torch.randn(5, 5, requires_grad=True))
         output.sum().backward()
 
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_backward_hooks_interaction(self):
         # Test to make sure that the grad_outputs
         # updated by full_backward_pre_hook are received by
@@ -1207,7 +1216,6 @@ class TestModuleHookNN(NNTestCase):
         mod.register_full_backward_hook(lambda mod, gI, gO: None)
         mod(inp, inp.detach(), inp)
 
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hook_no_requires_grad(self):
         mod = nn.Linear(2, 3)
 
@@ -1401,7 +1409,6 @@ class TestModuleHookNN(NNTestCase):
         with module.register_full_backward_hook(bw_hook):
             module(inp1, inp2).sum().backward()
 
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hook_backward_writeable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -1419,7 +1426,6 @@ class TestModuleHookNN(NNTestCase):
         expected_grad = sig_x * (1 - sig_x) * 2
         self.assertEqual(input.grad, expected_grad)
 
-    @skipIfTorchDynamo("TorchDynamo does not work well with hooks")
     def test_hook_forward_preforward_writable(self):
         module = nn.Sigmoid()
         input = torch.randn(5, 5, requires_grad=True)
@@ -1490,6 +1496,7 @@ class TestModuleHookNN(NNTestCase):
             finally:
                 handle.remove()
 
+instantiate_parametrized_tests(TestModuleHooks)
 
 if __name__ == "__main__":
     run_tests()

@@ -22,7 +22,7 @@ Tensor unary_op(
   vTensor v_output{
       context,
       v_self.sizes(),
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
 
   const struct Block final {
@@ -106,7 +106,7 @@ Tensor exp(const Tensor& self_arg) {
 }
 
 Tensor& exp_(Tensor& self_arg) {
-  return unary_op_(self_arg, VK_KERNEL(exp_));
+  return unary_op_(self_arg, VK_KERNEL(exp_inplace));
 }
 
 Tensor sqrt(const Tensor& self_arg) {
@@ -114,7 +114,15 @@ Tensor sqrt(const Tensor& self_arg) {
 }
 
 Tensor& sqrt_(Tensor& self_arg) {
-  return unary_op_(self_arg, VK_KERNEL(sqrt_));
+  return unary_op_(self_arg, VK_KERNEL(sqrt_inplace));
+}
+
+Tensor log(const Tensor& self_arg) {
+  return unary_op(self_arg, VK_KERNEL(log));
+}
+
+Tensor& log_(Tensor& self_arg) {
+  return unary_op_(self_arg, VK_KERNEL(log_inplace));
 }
 
 #ifdef USE_VULKAN_API
@@ -124,6 +132,8 @@ TORCH_LIBRARY_IMPL(aten, Vulkan, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::exp_"), TORCH_FN(exp_));
   m.impl(TORCH_SELECTIVE_NAME("aten::sqrt"), TORCH_FN(sqrt));
   m.impl(TORCH_SELECTIVE_NAME("aten::sqrt_"), TORCH_FN(sqrt_));
+  m.impl(TORCH_SELECTIVE_NAME("aten::log"), TORCH_FN(log));
+  m.impl(TORCH_SELECTIVE_NAME("aten::log_"), TORCH_FN(log_));
 }
 
 #endif /* USE_VULKAN_API */

@@ -1,16 +1,19 @@
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
-from . import allowed_functions
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from . import trace_rules, variables
+from .comptime import comptime
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
+from .external_utils import is_compiling
 
 if TYPE_CHECKING:
     from torch._C._dynamo.eval_frame import (  # noqa: F401
         reset_code,
         set_eval_frame,
         set_guard_error_hook,
-        set_guard_fail_hook,
         skip_code,
         unsupported,
     )
@@ -91,9 +94,9 @@ def allow_in_graph(fn):
     if isinstance(fn, (list, tuple)):
         return [allow_in_graph(x) for x in fn]
     assert callable(fn), "allow_in_graph expects a callable"
-    allowed_functions._allowed_function_ids.add(id(fn))
-    allowed_functions._disallowed_function_ids.remove(id(fn))
-    allowed_functions._allowed_user_defined_function_ids.add(id(fn))
+    if trace_rules.lookup_callable(fn) != variables.TorchInGraphFunctionVariable:
+        trace_rules._disallowed_callable_ids.remove(id(fn))
+        trace_rules._allowed_callable_ids.add(id(fn))
     return fn
 
 
@@ -102,14 +105,18 @@ def _disallow_in_graph_helper(throw_if_not_allowed):
         if isinstance(fn, (list, tuple)):
             return [disallow_in_graph(x) for x in fn]
         assert callable(fn), "disallow_in_graph expects a callable"
-        if throw_if_not_allowed and not allowed_functions.is_allowed(fn):
+        if (
+            throw_if_not_allowed
+            and trace_rules.lookup_callable(fn)
+            != variables.TorchInGraphFunctionVariable
+            and trace_rules.lookup(fn) != variables.TorchInGraphFunctionVariable
+        ):
             raise IncorrectUsage(
                 "disallow_in_graph is expected to be used on an already allowed callable (like torch.* ops). "
                 "Allowed callables means callables that TorchDynamo puts as-is in the extracted graph."
             )
-        allowed_functions._allowed_function_ids.remove(id(fn))
-        allowed_functions._disallowed_function_ids.add(id(fn))
-        allowed_functions._allowed_user_defined_function_ids.remove(id(fn))
+        trace_rules._allowed_callable_ids.remove(id(fn))
+        trace_rules._disallowed_callable_ids.add(id(fn))
         return fn
 
     return inner
@@ -159,10 +166,36 @@ def forbid_in_graph(fn):
     return fn
 
 
-@forbid_in_graph
-def mark_dynamic(t, index):
+# Helper function to flatten a tensor subclass and apply a function to
+# all inner tensors that match the outer dim. Used to reduce duplication
+# across the various marking APIs.
+def _apply_func_to_inner_tensors_of_same_dim(func, t, *args, **kwargs):
+    assert is_traceable_wrapper_subclass(t)
+
+    attrs, ctx = t.__tensor_flatten__()
+    for attr in attrs:
+        inner = getattr(t, attr)
+        if inner.dim() == t.dim():
+            func(inner, *args, **kwargs)
+
+
+@dataclass(frozen=True)
+class _DimRange:
     """
-    Mark a tensor as having a dynamic dim.
+    This represents an dimension of a tensor and the corresponding
+    min and max values it can take.  Don't create this
+    class directly; instead, use :func:`mark_dynamic`.
+    """
+
+    dim: int
+    min: int
+    max: int
+
+
+@forbid_in_graph
+def mark_dynamic(t, index, *, min=None, max=None):
+    """
+    Mark a tensor as having a dynamic dim and set corresponding min and max range for the dim.
 
     [Note - on the state of mark_dynamic]
 
@@ -171,7 +204,7 @@ def mark_dynamic(t, index):
     1) torch._dynamo.config dynamic_shapes True or False.
         a) dynamic_shapes=True - dynamic_shapes must be True for mark_dynamic to work.
         a) dynamic_shapes=False - This config will raise an exception when used in conjunction with
-        mark_dyamic. We will eventually support this.
+        mark_dynamic. We will eventually support this.
 
     2) If the dimension is fully constrained - as in, it does not allow more than a single value
     in both eager (torch.compile, torch._dynamo.optimize) mode and export mode (torch._dynamo.export),
@@ -184,16 +217,25 @@ def mark_dynamic(t, index):
     before torch.compile.
 
     """
+    if is_traceable_wrapper_subclass(t):
+        # default behavior: mirror mark_dynamic() on all inner tensors with same dim as t
+        # TODO: Make this configurable via a supported public API
+        _apply_func_to_inner_tensors_of_same_dim(
+            mark_dynamic, t, index, min=min, max=max
+        )
+
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_dynamic_indices"):
             t._dynamo_dynamic_indices = set()
+            t._dynamo_dynamic_range = set()
         # TODO(voz): Should we bounds check?
         t._dynamo_dynamic_indices.add(index)
+        t._dynamo_dynamic_range.add(_DimRange(index, min, max))
         return
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_dynamic(t, i)
+        mark_dynamic(t, i, min=min, max=max)
 
 
 @forbid_in_graph
@@ -202,6 +244,11 @@ def maybe_mark_dynamic(t, index):
     Mark a tensor as having a dynamic dim, but don't enforce it (i.e., if this
     dimension ends up getting specialized, don't error).
     """
+    if is_traceable_wrapper_subclass(t):
+        # default behavior: mirror maybe_mark_dynamic() on all inner tensors with same dim as t
+        # TODO: Make this configurable via a supported public API
+        _apply_func_to_inner_tensors_of_same_dim(maybe_mark_dynamic, t, index)
+
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_weak_dynamic_indices"):
             t._dynamo_weak_dynamic_indices = set()
@@ -214,7 +261,6 @@ def maybe_mark_dynamic(t, index):
         maybe_mark_dynamic(t, i)
 
 
-@forbid_in_graph
 def mark_static(t, index=None):
     """
     Mark a tensor as having a static dim.
@@ -223,7 +269,23 @@ def mark_static(t, index=None):
     when dynamic=True; this can improve trace-time performance.
 
     This has lower precedence than mark_dynamic.
+
+    Unlike mark_dynamic, this can be done inside a graph, in which case it
+    induces specialization on the tensor.
     """
+    if is_compiling():
+        if index is None:
+            for s in t.size():
+                comptime.force_static(s)
+        else:
+            comptime.force_static(t.size(index))
+        return
+
+    if is_traceable_wrapper_subclass(t):
+        # default behavior: mirror mark_static() on all inner tensors with same dim as t
+        # TODO: Make this configurable via a supported public API
+        _apply_func_to_inner_tensors_of_same_dim(mark_static, t, index)
+
     if isinstance(index, int):
         if not hasattr(t, "_dynamo_static_indices"):
             t._dynamo_static_indices = set()
@@ -250,41 +312,36 @@ def mark_static_address(t, guard=True):
         raise TypeError(f"mark_static_address expects a tensor but recieved {type(t)}")
 
     if guard:
-        t._dynamo_static_input_type = "guarded"
+        t._dynamo_static_input_type = "guarded"  # type: ignore[attr-defined]
     else:
-        t._dynamo_static_input_type = "unguarded"
+        t._dynamo_static_input_type = "unguarded"  # type: ignore[attr-defined]
 
 
-# Note: it's preferable to not make `import torch` eagerly import other libs.
-# However, we want to provide a grace period to make borderline versions of einops
-# compatible with torch.compile.
+# Note: this carefully avoids eagerly import einops.
 # TODO: we should delete this whole _allow_in_graph_einops logic by approximately 2024 Q2
 def _allow_in_graph_einops():
+    import einops
+
     try:
-        import einops
+        # requires einops > 0.6.1, torch >= 2.0
+        from einops._torch_specific import (  # type: ignore[attr-defined]  # noqa: F401
+            _ops_were_registered_in_torchdynamo,
+        )
 
-        try:
-            # requires einops > 0.6.1, torch >= 2.0
-            from einops._torch_specific import (  # noqa: F401
-                _ops_were_registered_in_torchdynamo,
-            )
-
-            # einops > 0.6.1 will call the op registration logic as it is imported.
-            pass
-        except ImportError:
-            # einops <= 0.6.1
-            allow_in_graph(einops.rearrange)
-            allow_in_graph(einops.reduce)
-            if hasattr(einops, "repeat"):
-                allow_in_graph(einops.repeat)  # available since einops 0.2.0
-            if hasattr(einops, "einsum"):
-                allow_in_graph(einops.einsum)  # available since einops 0.5.0
-            if hasattr(einops, "pack"):
-                allow_in_graph(einops.pack)  # available since einops 0.6.0
-            if hasattr(einops, "unpack"):
-                allow_in_graph(einops.unpack)  # available since einops 0.6.0
-    except ImportError:
+        # einops > 0.6.1 will call the op registration logic as it is imported.
         pass
+    except ImportError:
+        # einops <= 0.6.1
+        allow_in_graph(einops.rearrange)
+        allow_in_graph(einops.reduce)
+        if hasattr(einops, "repeat"):
+            allow_in_graph(einops.repeat)  # available since einops 0.2.0
+        if hasattr(einops, "einsum"):
+            allow_in_graph(einops.einsum)  # available since einops 0.5.0
+        if hasattr(einops, "pack"):
+            allow_in_graph(einops.pack)  # available since einops 0.6.0
+        if hasattr(einops, "unpack"):
+            allow_in_graph(einops.unpack)  # available since einops 0.6.0
 
 
-_allow_in_graph_einops()
+trace_rules.add_module_init_func("einops", _allow_in_graph_einops)

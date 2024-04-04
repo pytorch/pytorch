@@ -1,12 +1,17 @@
 import argparse
 import collections
+import importlib
+import sys
+
 from pprint import pformat
 from typing import Dict, List, Sequence
+from unittest.mock import Mock, patch
+from warnings import warn
 
 from torchgen.api.python import (
     PythonSignatureGroup,
     PythonSignatureNativeFunctionPair,
-    returns_named_tuple_pyi,
+    returns_structseq_pyi,
 )
 from torchgen.gen import parse_native_yaml, parse_tags_yaml
 
@@ -74,13 +79,51 @@ def get_py_torch_functions(
 # TODO: Consider defining some aliases for our Union[...] types, to make
 # the stubs to read on the human eye.
 
-DEVICE_PARAM = "device: Device = None"
-FACTORY_PARAMS = (
-    f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False"
-)
+DEVICE_PARAM = "device: Optional[DeviceLikeType] = None"
+FACTORY_PARAMS = f"dtype: Optional[_dtype] = None, {DEVICE_PARAM}, requires_grad: _bool = False, pin_memory: _bool = False"
 
-# this could be more precise w.r.t list contents etc. How to do Ellipsis?
-INDICES = "indices: Union[None, _int, slice, Tensor, List, Tuple]"
+# NOTE: specifying indices for Tensor.__getitem__
+# We can imitate numpy's definition of ndarray.__getitem__ found in numpy/__init__.pyi:
+#
+# key: (
+#     None
+#     | slice
+#     | ellipsis
+#     | SupportsIndex
+#     | _ArrayLikeInt_co
+#     | tuple[None | slice | ellipsis | _ArrayLikeInt_co | SupportsIndex, ...]
+# )
+#
+# where:
+#
+# _ArrayLikeInt_co = _DualArrayLike[
+#     dtype[Union[bool_, integer[Any]]],
+#     Union[bool, int],
+# ]
+#
+# and
+#
+# _DualArrayLike = Union[
+#     _SupportsArray[_DType],
+#     _NestedSequence[_SupportsArray[_DType]],
+#     _T,
+#     _NestedSequence[_T],
+# ]
+#
+# Moreover, _NestedSequence is a Protocol that matches arbitrary nesting of list/tuple.
+# We can substitute and simplify:
+# _SupportsArray -> Tensor
+# _ArrayLikeInt_co -> [bool | int | | Tensor | NestedSequence[bool | int] | NestedSequence[Tensor]]
+# which leaves us with key: T | tuple[T, ...], where T is:
+# T = (
+#     None | bool | int | slice | ellipsis | SupportsIndex
+#     | Tensor | _NestedSequence[Tensor] | _NestedSequence[bool | int]
+# )
+
+# NOTE: ellipsis is equal to type[Ellipsis] in stub files.
+_leaf_types = "Union[None, _bool, _int, slice, ellipsis, Tensor]"  # not SupportsIndex!
+_index = f"Union[SupportsIndex, {_leaf_types}, _NestedSequence[{_leaf_types}]]"
+INDICES = f"indices: Union[{_index}, tuple[{_index}, ...]]"
 
 blocklist = [
     "__init_subclass__",
@@ -375,7 +418,7 @@ def gen_nn_functional(fm: FileManager) -> None:
             "softplus": [
                 "def softplus({}) -> Tensor: ...".format(
                     ", ".join(
-                        ["input: Tensor", "beta: int = ...", "threshold: int = ..."]
+                        ["input: Tensor", "beta: float = ...", "threshold: float = ..."]
                     )
                 )
             ],
@@ -542,6 +585,49 @@ def gen_nn_functional(fm: FileManager) -> None:
     )
 
 
+"""
+We gather the docstrings for torch with the following steps:
+1. Mock torch and torch._C, which are the only dependencies of the docs files
+2. Mock the _add_docstr function to save the docstrings
+3. Import the docs files to trigger mocked _add_docstr and collect docstrings
+"""
+
+
+def gather_docstrs() -> Dict[str, str]:
+    docstrs = {}
+
+    def mock_add_docstr(func: Mock, docstr: str) -> None:
+        docstrs[func._extract_mock_name()] = docstr.strip()
+
+    # sys.modules and sys.path are restored after the context manager exits
+    with patch.dict(sys.modules), patch.object(sys, "path", sys.path + ["torch"]):
+        # mock the torch module and torch._C._add_docstr
+        sys.modules["torch"] = Mock(name="torch")
+        sys.modules["torch._C"] = Mock(_add_docstr=mock_add_docstr)
+
+        try:
+            # manually import torch._torch_docs and torch._tensor_docs to trigger
+            # the mocked _add_docstr and collect docstrings
+            sys.modules["torch._torch_docs"] = importlib.import_module("_torch_docs")
+            sys.modules["torch._tensor_docs"] = importlib.import_module("_tensor_docs")
+        except ModuleNotFoundError:
+            # Gracefully fail if these modules are not importable
+            warn(
+                "Failed to import _torch_docs/_tensor_docs, skipping docstring in pyi files."
+            )
+
+    return docstrs
+
+
+def add_docstr_to_hint(docstr: str, hint: str) -> str:
+    if "..." in hint:  # function or method
+        assert hint.endswith("..."), f"Hint `{hint}` does not end with '...'"
+        hint = hint[:-3]  # remove "..."
+        return "\n    ".join([hint, 'r"""'] + docstr.split("\n") + ['"""', "..."])
+    else:  # attribute or property
+        return f'{hint}\nr"""{docstr}"""\n'
+
+
 def gen_pyi(
     native_yaml_path: str,
     tags_yaml_path: str,
@@ -561,7 +647,7 @@ def gen_pyi(
     # also needs to update the other file.
 
     # Dictionary for NamedTuple definitions
-    namedtuples: Dict[str, str] = {}
+    structseqs: Dict[str, str] = {}
 
     # Generate type signatures for top-level functions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -586,7 +672,7 @@ def gen_pyi(
                                 "size: Optional[_size] = None",
                                 "*",
                                 "dtype: Optional[_dtype] = None",
-                                "device: Union[_device, str, None] = None",
+                                "device: Optional[DeviceLikeType] = None",
                                 "requires_grad: _bool = False",
                                 "check_invariants: Optional[_bool] = None",
                             ]
@@ -607,7 +693,7 @@ def gen_pyi(
                             "obj: Any",
                             "*",
                             "dtype: Optional[_dtype] = None",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "copy: Optional[_bool] = None",
                             "requires_grad: _bool = False",
                         ]
@@ -624,7 +710,6 @@ def gen_pyi(
                             "dtype: _dtype",
                             "count: int = -1",
                             "offset: int = 0",
-                            "device: Union[_device, str, None] = None",
                             "requires_grad: _bool = False",
                         ]
                     )
@@ -662,7 +747,7 @@ def gen_pyi(
                             "size: Optional[_size] = None",
                             "*",
                             "dtype: Optional[_dtype] = None",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                             "check_invariants: Optional[_bool] = None",
                             "is_coalesced: Optional[_bool] = None",
@@ -681,7 +766,7 @@ def gen_pyi(
                             "*",
                             "dtype: Optional[_dtype] = None",
                             "layout: Optional[_layout] = None",
-                            "device: Union[_device, str, None] = None",
+                            "device: Optional[DeviceLikeType] = None",
                             "requires_grad: _bool = False",
                             "check_invariants: Optional[_bool] = None",
                         ]
@@ -698,6 +783,22 @@ def gen_pyi(
             "_to_functional_tensor": [
                 "def _to_functional_tensor(t: Tensor) -> Tensor: ..."
             ],
+            "_functionalize_replace": [
+                "def _functionalize_replace(self_: Tensor, other: Tensor) -> None: ..."
+            ],
+            "_functionalize_commit_update": [
+                "def _functionalize_commit_update(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_mark_mutation_hidden_from_autograd": [
+                "def _functionalize_mark_mutation_hidden_from_autograd(t: Tensor) -> None: ..."
+            ],
+            "_functionalize_are_all_mutations_hidden_from_autograd": [
+                "def _functionalize_are_all_mutations_hidden_from_autograd(t: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_are_all_mutations_under_no_grad_or_inference_mode": [
+                "def _functionalize_are_all_mutations_under_no_grad_or_inference_mode(t: Tensor) -> _bool: ..."
+            ],
+            "_functionalize_sync": ["def _functionalize_sync(t: Tensor) -> None: ..."],
             "_enable_functionalization": [
                 "def _enable_functionalization(*, reapply_views: _bool = False): ..."
             ],
@@ -872,15 +973,20 @@ def gen_pyi(
             ],
         }
     )
-    for binop in ["mul", "true_divide", "floor_divide"]:
+    for binop in ["true_divide", "floor_divide"]:
         unsorted_function_hints[binop].append(
             f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
             "*, out: Optional[Tensor] = None) -> Tensor: ..."
         )
+    for binop in ["mul"]:
+        unsorted_function_hints[binop].append(
+            f"def {binop}(input: Union[Tensor, Number, _complex], other: Union[Tensor, Number, _complex], "
+            "*, out: Optional[Tensor] = None) -> Tensor: ..."
+        )
     for binop in ["add", "sub"]:
         unsorted_function_hints[binop].append(
-            f"def {binop}(input: Union[Tensor, Number], other: Union[Tensor, Number], "
-            "*, alpha: Optional[Number] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
+            f"def {binop}(input: Union[Tensor, Number, _complex], other: Union[Tensor, Number, _complex], "
+            "*, alpha: Optional[Union[Number, _complex]] = 1, out: Optional[Tensor] = None) -> Tensor: ..."
         )
 
     native_functions = parse_native_yaml(
@@ -896,14 +1002,14 @@ def gen_pyi(
         name = group.signature.name
         unsorted_function_hints[name] += generate_type_hints(group)
 
-        named_tuple = returns_named_tuple_pyi(group.signature)
-        if named_tuple is not None and not group.signature.deprecated:
-            # deprecated namedtuples are currently not included for torch functions
-            tuple_name, tuple_def = named_tuple
-            if tuple_name in namedtuples:
-                assert namedtuples[tuple_name] == tuple_def
+        structseq = returns_structseq_pyi(group.signature)
+        if structseq is not None and not group.signature.deprecated:
+            # deprecated structseqs are currently not included for torch functions
+            tuple_name, tuple_def = structseq
+            if tuple_name in structseqs:
+                assert structseqs[tuple_name] == tuple_def
             else:
-                namedtuples[tuple_name] = tuple_def
+                structseqs[tuple_name] = tuple_def
 
     def replace_special_case(hint: str) -> str:
         # NB: Keep this in sync with enum in aten/src/ATen/core/Reduction.h
@@ -918,11 +1024,15 @@ def gen_pyi(
         )
         return hint
 
+    docstrs = gather_docstrs()
     function_hints = []
     for name, hints in sorted(unsorted_function_hints.items()):
         hints = [replace_special_case(h) for h in hints]
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
+        docstr = docstrs.get(f"torch.{name}")
+        if docstr is not None:
+            hints = [add_docstr_to_hint(docstr, h) for h in hints]
         function_hints += hints
 
     # Generate type signatures for Tensor methods
@@ -932,12 +1042,12 @@ def gen_pyi(
     unsorted_tensor_method_hints.update(
         {
             "size": [
-                "def size(self) -> Size: ...",
+                "def size(self, dim: None = None) -> Size: ...",
                 "def size(self, dim: _int) -> _int: ...",
             ],
             "stride": [
-                "def stride(self) -> Tuple[_int, ...]: ...",
-                "def stride(self, _int) -> _int: ...",
+                "def stride(self, dim: None = None) -> Tuple[_int, ...]: ...",
+                "def stride(self, dim: _int) -> _int: ...",
             ],
             "new_ones": [
                 f"def new_ones(self, size: _size, {FACTORY_PARAMS}) -> Tensor: ..."
@@ -945,10 +1055,11 @@ def gen_pyi(
             "new_tensor": [
                 f"def new_tensor(self, data: Any, {FACTORY_PARAMS}) -> Tensor: ..."
             ],
+            "__new__": ["def __new__(self, *args, **kwargs) -> Tensor: ..."],
             # new and __init__ have the same signatures differ only in return type
             # Adapted from legacy_tensor_ctor and legacy_tensor_new
             "new": [
-                f"def new(self, *args: Any, {DEVICE_PARAM}) ->Tensor: ...",
+                f"def new(self, *args: Any, {DEVICE_PARAM}) -> Tensor: ...",
                 "def new(self, storage: Storage) -> Tensor: ...",
                 "def new(self, other: Tensor) -> Tensor: ...",
                 f"def new(self, size: _size, *, {DEVICE_PARAM}) -> Tensor: ...",
@@ -999,9 +1110,13 @@ def gen_pyi(
                             "self",
                             "device: Optional[Union[_device, _int, str]] = None",
                             "non_blocking: _bool = False",
+                            "memory_format: torch.memory_format = torch.preserve_format",
                         ]
                     )
                 )
+            ],
+            "cpu": [
+                "def cpu(self, memory_format: torch.memory_format = torch.preserve_format) -> Tensor: ..."
             ],
             "numpy": ["def numpy(self, *, force: _bool = False) -> Any: ..."],
             "apply_": ["def apply_(self, callable: Callable) -> Tensor: ..."],
@@ -1042,19 +1157,15 @@ def gen_pyi(
             "is_ipu": ["is_ipu: _bool"],
             "storage_offset": ["def storage_offset(self) -> _int: ..."],
             "to": [
-                "def to(self, dtype: _dtype, non_blocking: _bool = False, copy: _bool = False) -> Tensor: ...",
-                "def to({}) -> Tensor: ...".format(
-                    ", ".join(
-                        [
-                            "self",
-                            "device: Optional[Union[_device, str]] = None",
-                            "dtype: Optional[_dtype] = None",
-                            "non_blocking: _bool = False",
-                            "copy: _bool = False",
-                        ]
-                    )
-                ),
-                "def to(self, other: Tensor, non_blocking: _bool = False, copy: _bool = False) -> Tensor: ...",
+                (
+                    f"def to(self, {args}, non_blocking: _bool = False, copy: _bool = False, *, "
+                    "memory_format: Optional[torch.memory_format] = None) -> Tensor: ..."
+                )
+                for args in [
+                    "dtype: _dtype",
+                    "device: Optional[DeviceLikeType] = None, dtype: Optional[_dtype] = None",
+                    "other: Tensor",
+                ]
             ],
             "item": ["def item(self) -> Number: ..."],
             "copy_": [
@@ -1077,7 +1188,7 @@ def gen_pyi(
             ],
         }
     )
-    for binop in ["mul", "true_divide", "floor_divide"]:
+    for binop in ["true_divide", "floor_divide"]:
         for inplace in [False, True]:
             out_suffix = ", *, out: Optional[Tensor] = None"
             if inplace:
@@ -1087,6 +1198,16 @@ def gen_pyi(
                 f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat]{out_suffix})"
                 " -> Tensor: ..."
             )
+    for binop in ["mul"]:
+        for inplace in [False, True]:
+            out_suffix = ", *, out: Optional[Tensor] = None"
+            if inplace:
+                binop += "_"
+                out_suffix = ""
+            unsorted_tensor_method_hints[binop].append(
+                f"def {binop}(self, other: Union[Tensor, Number, _complex, torch.SymInt, torch.SymFloat]{out_suffix})"
+                " -> Tensor: ..."
+            )
     for binop in ["add", "sub"]:
         for inplace in [False, True]:
             out_suffix = ", out: Optional[Tensor] = None"
@@ -1094,14 +1215,13 @@ def gen_pyi(
                 binop += "_"
                 out_suffix = ""
             unsorted_tensor_method_hints[binop].append(
-                f"def {binop}(self, other: Union[Tensor, Number, torch.SymInt, torch.SymFloat], "
-                f"*, alpha: Optional[Number] = 1{out_suffix})"
+                f"def {binop}(self, other: Union[Tensor, Number, _complex, torch.SymInt, torch.SymFloat], "
+                f"*, alpha: Optional[Union[Number, _complex]] = 1{out_suffix})"
                 " -> Tensor: ..."
             )
     simple_conversions = [
         "byte",
         "char",
-        "cpu",
         "double",
         "float",
         "half",
@@ -1131,14 +1251,14 @@ def gen_pyi(
         name = group.signature.name
         unsorted_tensor_method_hints[name] += generate_type_hints(group)
 
-        named_tuple = returns_named_tuple_pyi(group.signature)
-        if named_tuple is not None and not group.signature.deprecated:
-            # deprecated namedtuples are currently not included for torch functions
-            tuple_name, tuple_def = named_tuple
-            if tuple_name in namedtuples:
-                assert namedtuples[tuple_name] == tuple_def
+        structseq = returns_structseq_pyi(group.signature)
+        if structseq is not None and not group.signature.deprecated:
+            # deprecated structseqs are currently not included for torch functions
+            tuple_name, tuple_def = structseq
+            if tuple_name in structseqs:
+                assert structseqs[tuple_name] == tuple_def
             else:
-                namedtuples[tuple_name] = tuple_def
+                structseqs[tuple_name] = tuple_def
 
     for op in all_ops:
         name = f"__{op}__"
@@ -1148,14 +1268,17 @@ def gen_pyi(
     for name, hints in sorted(unsorted_tensor_method_hints.items()):
         if len(hints) > 1:
             hints = ["@overload\n" + h for h in hints]
+        docstr = docstrs.get(f"torch._C.TensorBase.{name}")
+        if docstr is not None:
+            hints = [add_docstr_to_hint(docstr, h) for h in hints]
         tensor_method_hints += hints
 
     # TODO: Missing type hints for nn
 
-    # Generate namedtuple definitions
+    # Generate structseq definitions
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-    namedtuple_defs = [f"{defn}\n" for defn in namedtuples.values()]
+    structseq_defs = [f"{defn}\n" for defn in structseqs.values()]
 
     # Generate type signatures for legacy classes
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -1166,6 +1289,7 @@ def gen_pyi(
     for c in (
         "DoubleTensor",
         "FloatTensor",
+        "BFloat16Tensor",
         "LongTensor",
         "IntTensor",
         "ShortTensor",
@@ -1190,8 +1314,15 @@ def gen_pyi(
             "double",
             "float16",
             "bfloat16",
+            "float8_e4m3fn",
+            "float8_e4m3fnuz",
+            "float8_e5m2",
+            "float8_e5m2fnuz",
             "half",
             "uint8",
+            "uint16",
+            "uint32",
+            "uint64",
             "int8",
             "int16",
             "short",
@@ -1201,6 +1332,7 @@ def gen_pyi(
             "long",
             "complex32",
             "complex64",
+            "chalf",
             "cfloat",
             "complex128",
             "cdouble",
@@ -1210,6 +1342,11 @@ def gen_pyi(
             "bool",
             "quint4x2",
             "quint2x4",
+            "bits1x8",
+            "bits2x4",
+            "bits4x2",
+            "bits8",
+            "bits16",
         ]
     ]
 
@@ -1221,7 +1358,7 @@ def gen_pyi(
     hinted_function_names = [
         name for name, hint in unsorted_function_hints.items() if hint
     ]
-    all_symbols = sorted(list(namedtuples.keys()) + hinted_function_names)
+    all_symbols = sorted(list(structseqs.keys()) + hinted_function_names)
     all_directive = pformat(all_symbols, width=100, compact=True).split("\n")
     all_directive[0] = f"__all__ = {all_directive[0]}"
 
@@ -1244,7 +1381,7 @@ def gen_pyi(
     # ~~~~~~~~~~~~~~~~~~
 
     env = {
-        "namedtuple_defs": namedtuple_defs,
+        "structseq_defs": structseq_defs,
         "function_hints": function_hints,
         "tensor_method_hints": tensor_method_hints,
         "legacy_class_hints": legacy_class_hints,

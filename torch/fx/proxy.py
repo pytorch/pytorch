@@ -1,17 +1,20 @@
+# mypy: ignore-errors
+
+import enum
 import dis
 import copy
 import sys
 import torch
 import inspect
 import operator
-import traceback
 import collections
 
 from dataclasses import is_dataclass, fields
 
 
 from .graph import magic_methods, reflectable_magic_methods, Graph
-from typing import Tuple, Dict, OrderedDict, Optional, Iterable, Any, Iterator, Callable
+from torch.utils._traceback import CapturedTraceback
+from typing import Tuple, Dict, OrderedDict, Optional, Any, Iterator, Callable
 from .node import Target, Node, Argument, base_types, map_aggregate
 from ._compatibility import compatibility
 from .operator_schemas import check_for_mutable_operation
@@ -83,7 +86,15 @@ class ScopeContextManager:
         return
 
 
-_COPY_META_FIELDS = ["nn_module_stack", "source_fn", "original_aten", "recompute", "from_node"]
+_COPY_META_FIELDS = [
+    "nn_module_stack",
+    "torch_fn",
+    "source_fn_stack",
+    "original_aten",
+    "recompute",
+    "from_node",
+    "quantization_tag",
+]
 
 
 @compatibility(is_backward_compatible=True)
@@ -106,7 +117,7 @@ class TracerBase:
     scope : Scope
 
     # Records the module call stack
-    module_stack: OrderedDict[str, str]
+    module_stack: OrderedDict[str, Tuple[str, Any]]
 
     # Mapping of node name to module scope
     node_name_to_scope: Dict[str, Tuple[str, type]]
@@ -155,8 +166,8 @@ class TracerBase:
             # nodes as is the case with in-place foreach ops. During the
             # BWD pass we retrieve the sequence_nr stored on the current
             # executing autograd Node. See NOTE [ Sequence Number ].
-            if current_meta.get("in_grad_fn", False):
-                new_seq_nr = current_meta["grad_fn_seq_nr"]
+            if current_meta.get("in_grad_fn", 0) > 0:
+                new_seq_nr = current_meta["grad_fn_seq_nr"][-1]
             node.meta["seq_nr"] = new_seq_nr
 
         elif self.module_stack:
@@ -194,12 +205,8 @@ class TracerBase:
             proxy = proxy_factory_fn(node)
 
         if self.record_stack_traces and not proxy.node.stack_trace:
-            user_frame = self._find_user_frame()
-            if user_frame:
-                summary = traceback.extract_stack(user_frame)
-                tb_lines = summary.format()
-                # stack_trace would have innermost frame at the bottom
-                proxy.node.stack_trace = ''.join(tb_lines)
+            proxy.node.stack_trace = ''.join(CapturedTraceback.extract().format())
+
 
         return proxy
 
@@ -286,7 +293,7 @@ class TracerBase:
             kwargs = {field.name: self.create_arg(getattr(a, field.name)) for field in fields(a)}
             return self.create_node("call_function", a.__class__, (), kwargs)
 
-        elif isinstance(a, base_types) or a is None or a is ...:
+        elif isinstance(a, (*base_types, enum.Enum)) or a is None or a is ...:
             return a
         raise NotImplementedError(f"argument of type: {type(a)}")
 
@@ -369,7 +376,7 @@ class Proxy:
             indexed_item = proxied_value[i]
 
     For a more detailed description into the Proxy internals, check out
-    the "Proxy" section in `torch/fx/OVERVIEW.md`
+    the "Proxy" section in `torch/fx/README.md`
     """
 
     @compatibility(is_backward_compatible=True)
@@ -391,7 +398,7 @@ class Proxy:
     def __call__(self, *args, **kwargs) -> 'Proxy':
         return self.tracer.create_proxy('call_method', '__call__', (self,) + args, kwargs)
 
-    def __iter__(self) -> Iterable['Proxy']:
+    def __iter__(self) -> Iterator['Proxy']:
         frame = inspect.currentframe()
         assert frame is not None
         calling_frame = frame.f_back
@@ -407,6 +414,9 @@ class Proxy:
             return (self[i] for i in range(inst.argval))  # type: ignore[index]
 
         return self.tracer.iter(self)
+
+    def __abs__(self):
+        return self.tracer.create_proxy('call_function', operator.abs, (self,), {})
 
     def __bool__(self) -> bool:
         if self.tracer.trace_asserts:
@@ -506,7 +516,7 @@ class ParameterProxy(Proxy):
     """
     def __init__(self, tracer: TracerBase, node: Node, name, param):
         super().__init__(node, tracer)
-        assert(isinstance(param, torch.nn.Parameter))
+        assert isinstance(param, torch.nn.Parameter)
         self.param = param
         self.name = name
 

@@ -14,7 +14,18 @@ import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
 
 import torch
-from .functions import CleanDiv, FloorDiv, Mod, ModularIndexing, Where
+from .functions import (
+    CleanDiv,
+    FloorDiv,
+    IsNonOverlappingAndDenseIndicator,
+    Mod,
+    ModularIndexing,
+    Pow,
+    Round,
+    RoundDecimal,
+    TrueDiv,
+    Where,
+)
 
 
 # TODO: Dedupe this with SYMPY_INTERP
@@ -22,8 +33,6 @@ from .functions import CleanDiv, FloorDiv, Mod, ModularIndexing, Where
 
 @functools.lru_cache(None)
 def handlers():
-    from torch.fx.experimental.symbolic_shapes import Pow, TrueDiv
-
     # TODO add CeilDiv (it doesn't appear in the index_expr)
 
     # TODO default to some decompositions if the interpreter doesn't have them
@@ -57,7 +66,15 @@ def handlers():
         sympy.Min: "minimum",
         sympy.Max: "maximum",
         ModularIndexing: "modular_indexing",
+        sympy.functions.elementary.piecewise.ExprCondPair: "expr_cond_pair",
+        sympy.Piecewise: "piecewise",
+        IsNonOverlappingAndDenseIndicator: "is_non_overlapping_and_dense_indicator",
+        Round: "round",
+        RoundDecimal: "round",
     }
+    for name in ["cos", "sin", "tan", "sinh", "cosh", "tanh", "asin", "acos", "atan"]:
+        HANDLERS[getattr(sympy, name)] = name
+
     return HANDLERS
 
 
@@ -89,7 +106,10 @@ def sympy_interp(
 
     # Recursive case
     args = [sympy_interp(analysis, env, arg) for arg in expr.args]  # type: ignore[arg-type]
-    handler_name = handlers()[expr.func]
+    if hasattr(expr.func, "_torch_handler_name"):
+        handler_name = expr.func._torch_handler_name
+    else:
+        handler_name = handlers()[expr.func]
     handler = getattr(analysis, handler_name)
     if handler_name in ASSOCIATIVE_OPS:
         assert len(args) > 1

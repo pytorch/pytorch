@@ -63,7 +63,7 @@
 
 #include <algorithm>
 
-namespace at { namespace native {
+namespace at::native {
 
 namespace {
 
@@ -83,8 +83,7 @@ ScalarType promote_type_fft(ScalarType type, bool require_complex, Device device
   const bool maybe_support_half = (
     // Only CUDA supports half precision, but since meta tensors don't have a
     // device we err on the side of accepting it
-    (device.is_cuda() || device.is_meta()) &&
-    !at::detail::getCUDAHooks().hasROCM()
+    device.is_cuda() || device.is_meta()
   );
   if (maybe_support_half) {
     TORCH_CHECK(type == kHalf || type == kFloat || type == kDouble, "Unsupported dtype ", type);
@@ -832,6 +831,17 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const optional<int64_t> hop
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
 
+  // Warn if window is not provided
+  if (!window.defined()) {
+    TORCH_WARN_ONCE(
+        "A window was not provided. A rectangular window will be applied,"
+        "which is known to cause spectral leakage. "
+        "Other windows such as torch.hann_window or torch.hamming_window "
+        "can are recommended to reduce spectral leakage."
+        "To suppress this warning and use a rectangular window, explicitly set "
+        "`window=torch.ones(n_fft, device=<device>)`.");
+  }
+
   #define REPR(SS) \
     SS << "stft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
        << ", hop_length=" << hop_length << ", win_length=" << win_length \
@@ -1007,6 +1017,16 @@ Tensor istft(const Tensor& self, const int64_t n_fft, const optional<int64_t> ho
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> window_maybe_owned = at::borrow_from_optional_tensor(window_opt);
   const Tensor& window = *window_maybe_owned;
+
+  // Warn if window is not provided
+  if (!window.defined()) {
+    TORCH_WARN_ONCE(
+        "A window was not provided. A rectangular window will be applied."
+        "Please provide the same window used by stft to make the inversion "
+        "lossless."
+        "To suppress this warning and use a rectangular window, explicitly set "
+        "`window=torch.ones(n_fft, device=<device>)`.");
+  }
 
   #define REPR(SS) \
     SS << "istft(" << self.toString() << self.sizes() << ", n_fft=" << n_fft \
@@ -1277,4 +1297,4 @@ void _fft_fill_with_conjugate_symmetry_(const Tensor& input, IntArrayRef dim_) {
 
 DEFINE_DISPATCH(fft_fill_with_conjugate_symmetry_stub);
 
-}} // at::native
+} // namespace at::native

@@ -1,7 +1,6 @@
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/ir/subgraph_matcher.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/fold_conv_bn.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
@@ -58,6 +57,24 @@ void insertPrePackedLinearOp(std::shared_ptr<Graph>& graph) {
   linear_rewriter.runOnGraph(graph);
 }
 
+void insertPrePackedLayernormOp(std::shared_ptr<Graph>& graph) {
+  std::string layernorm_pattern = R"(
+    graph(%input, %normalized_shape, %weight, %bias, %eps, %cudnn_enable):
+        %r = aten::layer_norm(%input, %normalized_shape, %weight, %bias, %eps, %cudnn_enable)
+        return (%r))";
+  std::string prepacked_ops_pattern = R"(
+    graph(%input, %normalized_shape, %weight, %bias, %eps, %cudnn_enable):
+        %op_context : __torch__.torch.classes.vulkan.LayernormPackedContext = vulkan_prepack::create_layernorm_context(
+            %weight, %bias, %eps)
+        %res = vulkan_prepack::run_layernorm_context(%input, %normalized_shape, %op_context)
+        return (%res))";
+
+  SubgraphRewriter layernorm_rewriter;
+  layernorm_rewriter.RegisterRewritePattern(
+      layernorm_pattern, prepacked_ops_pattern);
+  layernorm_rewriter.runOnGraph(graph);
+}
+
 void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
 
@@ -99,6 +116,27 @@ void insertPrePackedConv2dOp(std::shared_ptr<Graph>& graph) {
   transpose_rewriter.RegisterRewritePattern(
       conv_2d_transpose_pattern, prepacked_ops_conv2d_transpose_pattern);
   transpose_rewriter.runOnGraph(graph);
+}
+
+void insertPrePackedConv1dOp(std::shared_ptr<Graph>& graph) {
+  graph_rewrite_helper::replaceConvolutionWithAtenConv(graph);
+
+  std::string conv_1d_pattern = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
+        %r = aten::conv1d(%input, %weight, %bias, %stride, %padding, %dilation, %groups)
+        return (%r) )";
+
+  std::string prepacked_ops_conv1d_pattern = R"(
+    graph(%input, %weight, %bias, %stride:int[], %padding:int[], %dilation:int[], %groups:int):
+        %packed_weight_bias = vulkan_prepack::create_conv1d_context(
+            %weight, %bias, %stride, %padding, %dilation, %groups)
+        %r = vulkan_prepack::run_conv1d_context(%input, %packed_weight_bias)
+        return (%r) )";
+
+  SubgraphRewriter rewriter;
+  rewriter.RegisterRewritePattern(
+      conv_1d_pattern, prepacked_ops_conv1d_pattern);
+  rewriter.runOnGraph(graph);
 }
 
 void transferInputOutputBackends(std::shared_ptr<Graph>& graph) {
@@ -197,6 +235,26 @@ void rewriteQuantizedOps(std::shared_ptr<Graph>& graph) {
       quantized_conv2d_pattern, vk_quantized_conv2d_pattern);
   quantized_conv2d_rewriter.runOnGraph(graph);
 
+  // quantized::conv_transpose2d
+  std::string quantized_conv_transpose2d_pattern = R"(
+    graph(%a_quant, %packed_params, %r_scale, %r_zero_point) :
+      %res = quantized::conv_transpose2d(%a_quant, %packed_params, %r_scale, %r_zero_point)
+      return (%res) )";
+  std::string vk_quantized_conv_transpose2d_pattern = R"(
+    graph(%a_quant, %packed_params, %r_scale, %r_zero_point):
+      %output_min_max : None = prim::Constant()
+      %vk_packed_params : __torch__.torch.classes.vulkan.Conv2dPackedContext = vulkan_quantized_prepack::convert_qtconv2d_context(
+        %packed_params, %output_min_max, %output_min_max)
+      %res = vulkan_prepack::run_qconv2d_context(
+        %a_quant, %r_scale, %r_zero_point, %vk_packed_params)
+      return (%res) )";
+
+  torch::jit::SubgraphRewriter quantized_conv_transpose2d_rewriter;
+  quantized_conv_transpose2d_rewriter.RegisterRewritePattern(
+      quantized_conv_transpose2d_pattern,
+      vk_quantized_conv_transpose2d_pattern);
+  quantized_conv_transpose2d_rewriter.runOnGraph(graph);
+
   // quantized::conv2d_relu
   std::string quantized_conv2d_relu_pattern = R"(
     graph(%a_quant, %packed_params, %r_scale, %r_zero_point) :
@@ -216,6 +274,24 @@ void rewriteQuantizedOps(std::shared_ptr<Graph>& graph) {
   quantized_conv2d_relu_rewriter.RegisterRewritePattern(
       quantized_conv2d_relu_pattern, vk_quantized_conv2d_relu_pattern);
   quantized_conv2d_relu_rewriter.runOnGraph(graph);
+
+  // quantized::linear
+  std::string quantized_linear_pattern = R"(
+    graph(%a_quant, %packed_params, %r_scale, %r_zero_point) :
+      %res = quantized::linear(%a_quant, %packed_params, %r_scale, %r_zero_point)
+      return (%res) )";
+  std::string vk_quantized_linear_pattern = R"(
+    graph(%a_quant, %packed_params, %r_scale, %r_zero_point):
+      %vk_packed_params : __torch__.torch.classes.vulkan.LinearPackedContext = vulkan_quantized_prepack::convert_linear_context(
+        %packed_params)
+      %res = vulkan_prepack::run_qlinear_context(
+        %a_quant, %r_scale, %r_zero_point, %vk_packed_params)
+      return (%res) )";
+
+  torch::jit::SubgraphRewriter quantized_linear_rewriter;
+  quantized_linear_rewriter.RegisterRewritePattern(
+      quantized_linear_pattern, vk_quantized_linear_pattern);
+  quantized_linear_rewriter.runOnGraph(graph);
 }
 
 void insertPrePackedGruOp(std::shared_ptr<Graph>& graph) {
@@ -352,7 +428,9 @@ void fuseReluWithPackedOps(std::shared_ptr<Graph>& graph) {
 
 void vulkanInsertPrePackedOps(std::shared_ptr<Graph>& graph) {
   insertPrePackedLinearOp(graph);
+  insertPrePackedLayernormOp(graph);
   insertPrePackedConv2dOp(graph);
+  insertPrePackedConv1dOp(graph);
   rewriteQuantizedOps(graph);
   insertPrePackedGruOp(graph);
   insertPrePackedLstmOp(graph);
@@ -385,10 +463,22 @@ void vulkanFoldPrePackingOps(script::Module& m) {
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_qconv2d_context")) ||
         (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::create_qtconv2d_context")) ||
+        (n->kind() ==
          Symbol::fromQualString(
              "vulkan_quantized_prepack::convert_qconv2d_context")) ||
         (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::create_conv1d_context")) ||
+        (n->kind() ==
+         Symbol::fromQualString(
+             "vulkan_quantized_prepack::convert_qtconv2d_context")) ||
+        (n->kind() ==
+         Symbol::fromQualString(
+             "vulkan_quantized_prepack::convert_linear_context")) ||
+        (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_linear_context")) ||
+        (n->kind() ==
+         Symbol::fromQualString("vulkan_prepack::create_layernorm_context")) ||
         (n->kind() ==
          Symbol::fromQualString("vulkan_prepack::create_gru_context")) ||
         (n->kind() ==

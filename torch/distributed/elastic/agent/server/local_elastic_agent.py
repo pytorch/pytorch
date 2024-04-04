@@ -9,10 +9,9 @@
 
 import json
 import os
-import shutil
 import signal
 import socket
-import tempfile
+from string import Template
 import uuid
 from typing import Any, Dict, Optional, Tuple
 
@@ -28,11 +27,11 @@ from torch.distributed.elastic.agent.server.api import (
 )
 from torch.distributed.elastic.events.api import EventMetadataValue
 from torch.distributed.elastic.metrics.api import prof
-from torch.distributed.elastic.multiprocessing import PContext, start_processes
+from torch.distributed.elastic.multiprocessing import PContext, start_processes, LogsSpecs
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 
-log = get_logger(__name__)
+logger = get_logger(__name__)
 
 __all__ = [
     "LocalElasticAgent",
@@ -44,9 +43,8 @@ TORCHELASTIC_ENABLE_FILE_TIMER = "TORCHELASTIC_ENABLE_FILE_TIMER"
 TORCHELASTIC_TIMER_FILE = "TORCHELASTIC_TIMER_FILE"
 
 class LocalElasticAgent(SimpleElasticAgent):
-    """
-    An implementation of :py:class:`torchelastic.agent.server.ElasticAgent`
-    that handles host-local workers.
+    """An implementation of :py:class:`torchelastic.agent.server.ElasticAgent` that handles host-local workers.
+
     This agent is deployed per host and is configured to spawn ``n`` workers.
     When using GPUs, ``n`` maps to the number of GPUs available on the host.
 
@@ -78,6 +76,16 @@ class LocalElasticAgent(SimpleElasticAgent):
     variable ```TORCHELASTIC_TIMER_FILE```, and this environment variable will
     be propagated to the worker processes to allow them to connect to the same
     named pipe that ```LocalElasticAgent``` uses.
+
+    Logs are written to the specified log directory. Each log line will be by default
+    prefixed by ``[${role_name}${local_rank}]:`` (e.g. ``[trainer0]: foobar``).
+    Log prefixes can be customized by passing a `template string
+    <https://docs.python.org/3/library/string.html#template-strings>`_ as the
+    ``log_line_prefix_template`` argument.
+    The following macros (identifiers) are substituted at runtime:
+    ``${role_name}, ${local_rank}, ${rank}``. For example, to prefix each log line with
+    global rank instead of the local rank, set ``log_line_prefix_template = "[${rank}]:``.
+
 
     Example launching function
 
@@ -126,23 +134,19 @@ class LocalElasticAgent(SimpleElasticAgent):
     def __init__(
         self,
         spec: WorkerSpec,
+        logs_specs: LogsSpecs,
         start_method="spawn",
         exit_barrier_timeout: float = 300,
-        log_dir: Optional[str] = None,
+        log_line_prefix_template: Optional[str] = None,
     ):
         super().__init__(spec, exit_barrier_timeout)
         self._start_method = start_method
         self._pcontext: Optional[PContext] = None
-        rdzv_run_id = spec.rdzv_handler.get_run_id()
-        self._log_dir = self._make_log_dir(log_dir, rdzv_run_id)
+        self._rdzv_handler = spec.rdzv_handler
+        self._log_line_prefix_template = log_line_prefix_template
         self._worker_watchdog: Optional[timer.FileTimerServer] = None
+        self._logs_specs = logs_specs
 
-    def _make_log_dir(self, log_dir: Optional[str], rdzv_run_id: str):
-        base_log_dir = log_dir or tempfile.mkdtemp(prefix="torchelastic_")
-        os.makedirs(base_log_dir, exist_ok=True)
-        dir = tempfile.mkdtemp(prefix=f"{rdzv_run_id}_", dir=base_log_dir)
-        log.info("log directory set to: %s", dir)
-        return dir
 
     def _setup_local_watchdog(self, envs: Dict[int, Dict[str, str]]) -> None:
         enable_watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
@@ -152,16 +156,16 @@ class LocalElasticAgent(SimpleElasticAgent):
         if watchdog_enabled is not None and str(watchdog_enabled) == "1":
             if watchdog_file_path is None:
                 watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
-            log.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
+            logger.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
             self._worker_watchdog = timer.FileTimerServer(
                 file_path=watchdog_file_path,
                 max_interval=0.1,
                 daemon=True,
                 log_event=self._log_watchdog_event)
             self._worker_watchdog.start()
-            log.info("FileTimerServer started")
+            logger.info("FileTimerServer started")
         else:
-            log.info("Environment variable '%s' not found. Do not start FileTimerServer.", enable_watchdog_env_name)
+            logger.info("Environment variable '%s' not found. Do not start FileTimerServer.", enable_watchdog_env_name)
         # Propagate the watchdog file env to worker processes
         if watchdog_file_path is not None:
             for worker_env in envs.values():
@@ -229,6 +233,7 @@ class LocalElasticAgent(SimpleElasticAgent):
 
         args: Dict[int, Tuple] = {}
         envs: Dict[int, Dict[str, str]] = {}
+        log_line_prefixes: Optional[Dict[int, str]] = {} if self._log_line_prefix_template else None
         for worker in worker_group.workers:
             local_rank = worker.local_rank
             worker_env = {
@@ -247,36 +252,38 @@ class LocalElasticAgent(SimpleElasticAgent):
                 "TORCHELASTIC_MAX_RESTARTS": str(spec.max_restarts),
                 "TORCHELASTIC_RUN_ID": spec.rdzv_handler.get_run_id(),
                 "TORCHELASTIC_USE_AGENT_STORE": str(use_agent_store),
-                "NCCL_ASYNC_ERROR_HANDLING": os.getenv(
-                    "NCCL_ASYNC_ERROR_HANDLING", str(1)
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING": os.getenv(
+                    "TORCH_NCCL_ASYNC_ERROR_HANDLING", str(1)
                 ),
             }
             if "OMP_NUM_THREADS" in os.environ:
                 worker_env["OMP_NUM_THREADS"] = os.environ["OMP_NUM_THREADS"]
+
+
+            if self._log_line_prefix_template:
+                log_line_prefix = Template(self._log_line_prefix_template).safe_substitute(
+                    role_name=spec.role,
+                    rank=worker.global_rank,
+                    local_rank=local_rank,)
+                log_line_prefixes[local_rank] = log_line_prefix
 
             envs[local_rank] = worker_env
             worker_args = list(spec.args)
             worker_args = macros.substitute(worker_args, str(local_rank))
             args[local_rank] = tuple(worker_args)
 
-        # scaling events do not count towards restarts (gets same attempt #)
-        # remove existing log dir if this restart is due to a scaling event
-        attempt_log_dir = os.path.join(self._log_dir, f"attempt_{restart_count}")
-        shutil.rmtree(attempt_log_dir, ignore_errors=True)
-        os.makedirs(attempt_log_dir)
-
         self._setup_local_watchdog(envs=envs)
 
         assert spec.entrypoint is not None
+        assert self._logs_specs is not None
         self._pcontext = start_processes(
             name=spec.role,
             entrypoint=spec.entrypoint,
             args=args,
             envs=envs,
-            log_dir=attempt_log_dir,
+            logs_specs=self._logs_specs,
+            log_line_prefixes=log_line_prefixes,
             start_method=self._start_method,
-            redirects=spec.redirects,
-            tee=spec.tee,
         )
 
         return self._pcontext.pids()
@@ -287,6 +294,8 @@ class LocalElasticAgent(SimpleElasticAgent):
             self._worker_watchdog = None
         if self._pcontext:
             self._pcontext.close(death_sig)
+        if self._rdzv_handler:
+            self._rdzv_handler.shutdown()
 
     # pyre-fixme[56]: Pyre was not able to infer the type of the decorator
     #  `torch.distributed.elastic.metrics.prof`.
@@ -297,7 +306,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         assert self._pcontext is not None
         pc_pids = set(self._pcontext.pids().values())
         if worker_pids != pc_pids:
-            log.error(
+            logger.error(
                 "[%s] worker pids do not match process_context pids."
                 " Expected: %s, actual: %s",
                 role, worker_pids, pc_pids

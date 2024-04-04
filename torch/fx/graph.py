@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optiona
 from dataclasses import dataclass
 from contextlib import contextmanager
 import copy
+import enum
 import torch
 import keyword
 import re
@@ -195,6 +196,11 @@ class _Namespace:
 
         return False
 
+    def _rename_object(self, obj: Any, name: str):
+        assert obj in self._obj_to_name
+        self._obj_to_name[obj] = name
+        self._used_names.add(name)
+
 dtype_abbrs = {
     torch.bfloat16: 'bf16',
     torch.float64: 'f64',
@@ -202,6 +208,8 @@ dtype_abbrs = {
     torch.float16: 'f16',
     torch.float8_e4m3fn: 'f8e4m3fn',
     torch.float8_e5m2: 'f8e5m2',
+    torch.float8_e4m3fnuz: 'f8e4m3fnuz',
+    torch.float8_e5m2fnuz: 'f8e5m2fnuz',
     torch.complex32: 'c32',
     torch.complex64: 'c64',
     torch.complex128: 'c128',
@@ -211,6 +219,8 @@ dtype_abbrs = {
     torch.int64: 'i64',
     torch.bool: 'b8',
     torch.uint8: 'u8',
+    torch.uint32: 'u32',
+    torch.uint64: 'u64',
 }
 
 @compatibility(is_backward_compatible=True)
@@ -223,6 +233,9 @@ class PythonCode:
     src: str
     # Values in global scope during execution of `src_def`.
     globals: Dict[str, Any]
+    # Optional mapping from the forward function's line number to
+    # node index.
+    _lineno_map: Optional[Dict[int, Optional[int]]]
 
 
 def _format_target(base: str, target: str) -> str:
@@ -256,12 +269,20 @@ class _node_list:
         return self.graph._len
 
     def __iter__(self):
-        root, direction = self.graph._root, self.direction
-        cur = getattr(root, direction)
-        while cur is not root:
-            if not cur._erased:
-                yield cur
-            cur = getattr(cur, direction)
+        root = self.graph._root
+        if self.direction == "_next":
+            cur = root._next
+            while cur is not root:
+                if not cur._erased:
+                    yield cur
+                cur = cur._next
+        else:
+            assert self.direction == "_prev"
+            cur = root._prev
+            while cur is not root:
+                if not cur._erased:
+                    yield cur
+                cur = cur._prev
 
     def __reversed__(self):
         return _node_list(self.graph, '_next' if self.direction == '_prev' else '_prev')
@@ -274,21 +295,54 @@ class _PyTreeInfo(NamedTuple):
     in_spec: pytree.TreeSpec
     out_spec: Optional[pytree.TreeSpec]
 
+@dataclass(frozen=True)
+class _ParsedStackTrace:
+    """
+    Represents the top-most frame of a parsed stack trace
+    """
+    file: str
+    lineno: str
+    name: str
+    code: str
+
+# get File:lineno code from stack_trace
+def _parse_stack_trace(stack_trace: str):
+    if stack_trace is None:
+        return None
+    pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
+    lines = stack_trace.strip().split('\n')
+    # stacktrace should have innermost frame last, so we
+    # iterate backwards to find the first line that starts
+    # with 'File '
+    summary_str = ""
+    for idx in range(len(lines) - 2, -1, -1):
+        line = lines[idx].strip()
+        matches = pattern.match(line)
+        if matches:
+            file = matches.group(1)
+            lineno = matches.group(2)
+            name = matches.group(3)
+            # next line should be the code
+            code = lines[idx + 1].strip()
+            return _ParsedStackTrace(file, lineno, name, code)
+    return None
+
 @compatibility(is_backward_compatible=False)
 class CodeGen:
     def __init__(self):
         self._body_transformer: Optional[TransformCodeFunc] = None
+        self._func_name: str = "forward"
 
     def gen_fn_def(self, free_vars: List[str], maybe_return_annotation: str) -> str:
         """
         Given the free variables and a return annotation, generates the beginning of the FX function.
-        By default, `gen_fn_def(['a', 'b'], '') == 'def forward(a, b):'`
+        By default, `gen_fn_def(['a', 'b'], '') == 'def {self._func_name}(a, b):'`
         """
         # If the original function didn't have self as its first argument, we
         # would have added it.
         if len(free_vars) == 0 or free_vars[0] != 'self':
             free_vars.insert(0, 'self')
-        return f"def forward({', '.join(free_vars)}){maybe_return_annotation}:"
+        return f"def {self._func_name}({', '.join(free_vars)}){maybe_return_annotation}:"
 
     def generate_output(self, output_args: Argument) -> str:
         """
@@ -323,7 +377,9 @@ class CodeGen:
         """
         return []
 
-    def _gen_python_code(self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
+    def _gen_python_code(
+        self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False,
+    ) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
         globals_: Dict[str, Any] = {}
@@ -389,18 +445,23 @@ class CodeGen:
             # Common case: this is a regular module name like 'foo.bar.baz'
             return add_global(typename, o)
 
+        def _get_repr(arg: Any) -> str:
+            # Handle NamedTuples (if it has `_fields`) via add_global.
+            if isinstance(arg, tuple) and hasattr(arg, '_fields'):
+                qualified_name = _get_qualified_name(type(arg))
+                global_name = add_global(qualified_name, type(arg))
+                return f"{global_name}{repr(tuple(arg))}"
+            elif isinstance(arg, torch._ops.OpOverload):
+                qualified_name = _get_qualified_name(arg)
+                global_name = add_global(qualified_name, arg)
+                return f"{global_name}"
+            elif isinstance(arg, enum.Enum):
+                cls = arg.__class__
+                clsname = add_global(cls.__name__, cls)
+                return f"{clsname}.{arg.name}"
+            return repr(arg)
+
         def _format_args(args: Tuple[Argument, ...], kwargs: Dict[str, Argument]) -> str:
-            def _get_repr(arg):
-                # Handle NamedTuples (if it has `_fields`) via add_global.
-                if isinstance(arg, tuple) and hasattr(arg, '_fields'):
-                    qualified_name = _get_qualified_name(type(arg))
-                    global_name = add_global(qualified_name, type(arg))
-                    return f"{global_name}{repr(tuple(arg))}"
-                elif isinstance(arg, torch._ops.OpOverload):
-                    qualified_name = _get_qualified_name(arg)
-                    global_name = add_global(qualified_name, arg)
-                    return f"{global_name}"
-                return repr(arg)
             args_s = ', '.join(_get_repr(a) for a in args)
             kwargs_s = ', '.join(f'{k} = {_get_repr(v)}' for k, v in kwargs.items())
             if args_s and kwargs_s:
@@ -449,28 +510,21 @@ class CodeGen:
             useful for debugging.
             """
             nonlocal prev_stacktrace
-            pattern = re.compile(r"^File \"(.+)\", line (\d+), in (.+)$")
 
             if node.op not in {'placeholder', 'output'}:
                 if node.stack_trace:
                     if node.stack_trace != prev_stacktrace:
                         prev_stacktrace = node.stack_trace
-
-                        lines = node.stack_trace.strip().split('\n')
-                        # stacktrace should have innermost frame last, so we
-                        # iterate backwards to find the first line that starts
-                        # with 'File '
                         summary_str = ""
-                        for idx in range(len(lines) - 2, -1, -1):
-                            line = lines[idx].strip()
-                            matches = pattern.match(line)
-                            if matches:
-                                file = matches.group(1)
-                                lineno = matches.group(2)
-                                # next line should be the code
-                                code = lines[idx + 1].strip()
-                                summary_str = f'File: {file}:{lineno}, code: {code}'
-                                break
+
+                        parsed_stack_trace = _parse_stack_trace(node.stack_trace)
+
+                        if parsed_stack_trace is not None:
+                            lineno = parsed_stack_trace.lineno
+                            code = parsed_stack_trace.code
+                            name = parsed_stack_trace.name
+                            summary_str = f'File: {parsed_stack_trace.file}:{lineno} in {name}, code: {code}'
+
                         body.append(f'\n# {summary_str}\n')
                 elif prev_stacktrace != "":
                     prev_stacktrace = ""
@@ -490,16 +544,17 @@ class CodeGen:
 
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
 
+                # use string as annotation, to make it valid python code
                 if isinstance(meta_val, FakeTensor):
-                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
+                    maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
                 elif isinstance(meta_val, py_sym_types):
-                    maybe_type_annotation = f': Sym({meta_val})'
+                    maybe_type_annotation = f': "Sym({meta_val})"'
                 elif isinstance(meta_val, TensorMetadata):
-                    maybe_type_annotation = f': {dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}'
+                    maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
 
             if node.op == 'placeholder':
                 assert isinstance(node.target, str)
-                maybe_default_arg = '' if not node.args else f' = {repr(node.args[0])}'
+                maybe_default_arg = '' if not node.args else f' = {_get_repr(node.args[0])}'
                 free_vars.append(f'{node.target}{maybe_type_annotation}{maybe_default_arg}')
                 raw_name = node.target.replace('*', '')
                 if raw_name != repr(node):
@@ -508,7 +563,7 @@ class CodeGen:
             elif node.op == 'call_method':
                 assert isinstance(node.target, str)
                 body.append(
-                    f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.target)}'
+                    f'{repr(node)}{maybe_type_annotation} = {_format_target(_get_repr(node.args[0]), node.target)}'
                     f'({_format_args(node.args[1:], node.kwargs)})')
                 return
             elif node.op == 'call_function':
@@ -517,14 +572,14 @@ class CodeGen:
                 if getattr(node.target, "__module__", "") == '_operator' and node.target.__name__ in magic_methods:
                     assert isinstance(node.args, tuple)
                     body.append(f'{repr(node)}{maybe_type_annotation} = '
-                                f'{magic_methods[node.target.__name__].format(*(repr(a) for a in node.args))}')
+                                f'{magic_methods[node.target.__name__].format(*(_get_repr(a) for a in node.args))}')
                     return
 
                 # pretty print inplace operators; required for jit.script to work properly
                 # not currently supported in normal FX graphs, but generated by torchdynamo
                 if getattr(node.target, "__module__", "") == '_operator' and node.target.__name__ in inplace_methods:
-                    body.append(f'{inplace_methods[node.target.__name__].format(*(repr(a) for a in node.args))};  '
-                                f'{repr(node)}{maybe_type_annotation} = {repr(node.args[0])}')
+                    body.append(f'{inplace_methods[node.target.__name__].format(*(_get_repr(a) for a in node.args))};  '
+                                f'{repr(node)}{maybe_type_annotation} = {_get_repr(node.args[0])}')
                     return
 
                 qualified_name = _get_qualified_name(node.target)
@@ -536,7 +591,7 @@ class CodeGen:
                    isinstance(node.args[1], str) and \
                    node.args[1].isidentifier() and \
                    len(node.args) == 2:
-                    body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(repr(node.args[0]), node.args[1])}')
+                    body.append(f'{repr(node)}{maybe_type_annotation} = {_format_target(_get_repr(node.args[0]), node.args[1])}')
                     return
                 body.append(f'{repr(node)}{maybe_type_annotation} = {global_name}({_format_args(node.args, node.kwargs)})')
                 if node.meta.get('is_wrapped', False):
@@ -558,11 +613,15 @@ class CodeGen:
                 return
             raise NotImplementedError(f'node: {node.op} {node.target}')
 
-        for node in nodes:
+        for i, node in enumerate(nodes):
             # NOTE: emit_node does not emit a string with newline. It depends
             # on delete_unused_values to append one
             if verbose:
                 append_stacktrace_summary(node)
+            # emit a counter comment to keep track of
+            # node index, which will be deleted later
+            # after going through _body_transformer
+            body.append(f"# COUNTER: {i}\n")
             emit_node(node)
             delete_unused_values(node)
 
@@ -588,14 +647,28 @@ class CodeGen:
 
         prologue = self.gen_fn_def(free_vars, maybe_return_annotation[0])
 
-        code = ''.join(body).lstrip('\n')
+        # remove counter and generate lineno to node index mapping
+        lineno_map: Dict[int, Optional[int]] = {}
+        prologue_len = prologue.count('\n') + 1
+        new_lines: List[str] = []
+        cur_idx = None
+        for line in ''.join(body).split('\n'):
+            counter = re.search(r"# COUNTER: (\d+)", line)
+            if counter and counter.group(1) is not None:
+                cur_idx = int(counter.group(1))
+            else:
+                lineno_map[len(new_lines) + prologue_len] = cur_idx
+                new_lines.append(line)
+
+        code = "\n".join(new_lines).lstrip('\n')
         code = '\n'.join('    ' + line for line in code.split('\n'))
+
         fn_code = f"""
 {wrap_stmts}
 
 {prologue}
 {code}"""
-        return PythonCode(fn_code, globals_)
+        return PythonCode(fn_code, globals_, _lineno_map=lineno_map)
 
 
 # Ideally, we'd like to refactor all of the pytree logic into this codegen
@@ -610,7 +683,7 @@ class _PyTreeCodeGen(CodeGen):
         self.pytree_info: _PyTreeInfo = pytree_info
 
     def process_inputs(self, *inputs: Any) -> Any:
-        flat_args, _ = pytree.tree_flatten(inputs)
+        flat_args = pytree.arg_tree_leaves(*inputs)
         return flat_args
 
     def process_outputs(self, out: Any) -> Any:
@@ -618,7 +691,7 @@ class _PyTreeCodeGen(CodeGen):
             return out
         if not isinstance(out, (list, tuple)):
             out = [out]
-        assert(self.pytree_info.out_spec is not None)
+        assert self.pytree_info.out_spec is not None
         return pytree.tree_unflatten(out, self.pytree_info.out_spec)
 
     def gen_fn_def(self, free_vars, maybe_return_annotation):
@@ -649,21 +722,29 @@ class _PyTreeCodeGen(CodeGen):
         if len(free_vars) > 0:  # pytree has placeholders in it
             # when kwargs is present, in_spec is tuple(args, kwargs)
             has_args_kwargs_tuple = self.pytree_info.in_spec.type == tuple and \
-                len(self.pytree_info.in_spec.children_specs) == 2 and \
+                self.pytree_info.in_spec.num_children == 2 and \
                 self.pytree_info.in_spec.children_specs[0].type == tuple and \
                 self.pytree_info.in_spec.children_specs[1].type == dict
             fn_kwargs = '{}'
             fn_signature = f"[{', '.join(fn_args)}], self._in_spec"
             if has_args_kwargs_tuple:
-                count_args = len(self.pytree_info.in_spec.children_specs[0].children_specs)
+                count_args = self.pytree_info.in_spec.children_specs[0].num_children
                 fn_args = self.pytree_info.orig_args[:count_args]
                 fn_kwargs = '{' + ', '.join(f"'{k}':{v}" for k, v in zip(
                                   self.pytree_info.in_spec.children_specs[1].context,
                                   self.pytree_info.orig_args[count_args:])) + '}'
                 fn_signature = f"([{', '.join(fn_args)}], {fn_kwargs}), self._in_spec"
 
+            # in Python, `var1: annotation1, var2: annotation2 = function_call()` is invalid.
+            # we need to split it to two lines:
+            # one for annotation: `var1: annotation1; var2: annotation2;` (note the semicolon)
+            # one for code: `var1, var2, = function_call()`
+            without_annotation = [x.split(":")[0] for x in free_vars]
+            has_annotation = [x + "; " for x in free_vars if ":" in x]
+            if len(has_annotation) > 0:
+                fn_definition += "\n    " + "".join(has_annotation) + "\n"
             fn_definition += f"""
-    {', '.join(free_vars)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
+    {', '.join(without_annotation)}, = fx_pytree.tree_flatten_spec({fn_signature})"""
         return fn_definition
 
     def generate_output(self, output_args):
@@ -874,6 +955,8 @@ class Graph:
         if len(to_erase.users) > 0:
             raise RuntimeError(f'Tried to erase Node {to_erase} but it still had {len(to_erase.users)} '
                                f'users in the graph: {to_erase.users}!')
+        if to_erase.graph != self:
+            raise RuntimeError(f"Attempting to remove {to_erase} from wrong graph!")
         if to_erase._erased:
             warnings.warn(f"erase_node({to_erase}) on an already erased node")
             return

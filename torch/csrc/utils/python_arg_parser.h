@@ -74,6 +74,7 @@
 #include <c10/core/SymFloat.h>
 #include <c10/core/SymNodeImpl.h>
 
+#include <c10/core/DispatchKeySet.h>
 #include <array>
 #include <cstddef>
 #include <memory>
@@ -120,7 +121,8 @@ enum class ParameterType {
   QSCHEME,
   FLOAT_LIST,
   SCALAR_LIST,
-  SYM_INT_LIST
+  SYM_INT_LIST,
+  DISPATCH_KEY_SET
 };
 
 struct FunctionParameter;
@@ -298,6 +300,7 @@ struct PythonArgs {
   inline bool toBool(int i);
   inline bool toBoolWithDefault(int i, bool default_bool);
   inline bool isNone(int i);
+  inline c10::optional<c10::DispatchKeySet> toDispatchKeySetOptional(int i);
 
  private:
   at::Tensor tensor_slow(int i);
@@ -352,12 +355,13 @@ inline PythonArgs PythonArgParser::parse(
     PyObject* args,
     PyObject* kwargs,
     ParsedArgs<N>& dst) {
-  if (N < max_args) {
-    throw ValueError(
-        "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected %d (got %d)",
-        (int)max_args,
-        N);
-  }
+  TORCH_CHECK_VALUE(
+      N >= max_args,
+      "PythonArgParser: dst ParsedArgs buffer does not have enough capacity, expected ",
+      max_args,
+      " (got ",
+      N,
+      ")");
   return raw_parse(self, args, kwargs, dst.args);
 }
 
@@ -546,16 +550,6 @@ inline std::vector<c10::SymInt> PythonArgs::symintlist(int i) {
     return std::vector<c10::SymInt>(size1, si);
   }
 
-  if (is_dynamo_compiling && size1 > 0 && THPVariable_Check(args[i])) {
-    auto& var = THPVariable_Unpack(args[i]);
-    if (size1 == 1 && var.numel() == 1 && var.sizes().empty() &&
-        at::isIntegralType(var.dtype().toScalarType(), /*include_bool*/ true)) {
-      auto scalar = var.item();
-      TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
-      return std::vector<c10::SymInt>(size1, scalar.toSymInt());
-    }
-  }
-
   PyObject* arg = args[i];
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
@@ -626,6 +620,11 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
   if (size1 > 0 && THPUtils_checkLong(arg)) {
     return std::vector<int64_t>(size1, THPUtils_unpackLong(arg));
   }
+  if (size1 > 0 && torch::is_symint(py::handle(arg))) {
+    return std::vector<int64_t>(
+        size1,
+        py::handle(arg).cast<c10::SymInt>().guard_int(__FILE__, __LINE__));
+  }
   auto tuple = PyTuple_Check(arg);
   // NOLINTNEXTLINE(bugprone-branch-clone)
   const auto size2 = tuple ? PyTuple_GET_SIZE(arg) : PyList_GET_SIZE(arg);
@@ -655,6 +654,9 @@ inline std::vector<int64_t> PythonArgs::intlistWithDefault(
         } catch (std::exception& e) {
           throw_intlist_exception(this, i, obj, idx, e);
         }
+      } else if (torch::is_symint(py::handle(obj))) {
+        res[idx] = py::cast<c10::SymInt>(py::handle(obj))
+                       .guard_int(__FILE__, __LINE__);
       } else if (THPVariable_Check(obj)) {
         auto& var = THPVariable_Unpack(obj);
         if (var.numel() != 1 ||
@@ -725,6 +727,14 @@ inline std::vector<double> PythonArgs::doublelist(int i) {
     return {};
   }
   return this->getDoublelist(i);
+}
+
+inline c10::optional<c10::DispatchKeySet> PythonArgs::toDispatchKeySetOptional(
+    int i) {
+  if (!args[i]) {
+    return {};
+  }
+  return py::cast<c10::DispatchKeySet>(py::handle(args[i]));
 }
 
 inline at::ScalarType PythonArgs::scalartypeWithDefault(
@@ -798,6 +808,11 @@ inline at::Device toDevice(PyObject* obj) {
   if (THPUtils_checkLong(obj)) {
     const auto device_index = THPUtils_unpackLong(obj);
     TORCH_CHECK(device_index >= 0, "Device index must not be negative");
+    if (c10::is_privateuse1_backend_registered()) {
+      return at::Device(
+          c10::DeviceType::PrivateUse1,
+          static_cast<c10::DeviceIndex>(device_index));
+    }
     return at::Device(
         c10::DeviceType::CUDA, static_cast<c10::DeviceIndex>(device_index));
   }
@@ -941,7 +956,6 @@ inline int64_t PythonArgs::toInt64(int i) {
 }
 
 inline c10::SymInt PythonArgs::toSymInt(int i) {
-  PyObject* obj = args[i];
   if (!args[i]) {
     return c10::SymInt(signature.params[i].default_int);
   }
@@ -950,28 +964,6 @@ inline c10::SymInt PythonArgs::toSymInt(int i) {
     auto& var = THPVariable_Unpack(args[i]);
     jit::tracer::ArgumentStash::stashValue(
         signature.params[i].name, idx, var, c10::IntType::get());
-  }
-
-  // convert FakeTensor to SymInt
-  // expect empty sizes, numel = 1
-  // and ScalarType::Int
-  if (is_dynamo_compiling && THPVariable_Check(obj)) {
-    auto& var = THPVariable_Unpack(obj);
-
-    if (var.numel() != 1 || !var.sizes().empty() ||
-        !at::isIntegralType(
-            var.dtype().toScalarType(), /*include_bool*/ true)) {
-      throw TypeError(
-          "%s(): argument '%s' must be %s, failed to convert %s with sizes.empty()=%d",
-          signature.name.c_str(),
-          signature.params[i].name.c_str(),
-          signature.params[i].type_name().c_str(),
-          Py_TYPE(obj)->tp_name,
-          var.sizes().empty());
-    }
-    auto scalar = var.item();
-    TORCH_CHECK(scalar.isIntegral(/*include bool*/ false));
-    return scalar.toSymInt();
   }
 
   return py::cast<c10::SymInt>(py::handle(args[i]));
@@ -1028,6 +1020,10 @@ inline double PythonArgs::toDouble(int i) {
   if (torch::is_symfloat(py::handle(args[i]))) {
     return py::cast<c10::SymFloat>(py::handle(args[i]))
         .guard_float(__FILE__, __LINE__);
+  }
+  if (torch::is_symint(py::handle(args[i]))) {
+    return static_cast<double>(py::cast<c10::SymInt>(py::handle(args[i]))
+                                   .guard_int(__FILE__, __LINE__));
   }
   return THPUtils_unpackDouble(args[i]);
 }
@@ -1095,8 +1091,8 @@ inline at::Storage PythonArgs::storage(
     is_typed_storage = false;
     storage_scalar_type = at::ScalarType::Undefined;
   } else {
-    storage =
-        createStorageGetType(args[i], storage_scalar_type, is_typed_storage);
+    std::tie(storage, storage_scalar_type, is_typed_storage) =
+        createStorageGetType(args[i]);
   }
   return storage;
 }

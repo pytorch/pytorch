@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/ir/ir.h>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 TORCH_API void FuseInferenceOpsForSparseNN(
     std::shared_ptr<torch::jit::Graph>& graph);
@@ -87,5 +86,4 @@ TORCH_API void UseInPlaceGetRealInputsFromOptionalInputsV2(
 
 TORCH_API void PrepackWeights(std::shared_ptr<Graph>& graph);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

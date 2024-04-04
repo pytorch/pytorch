@@ -8,9 +8,13 @@ from torch.utils import _pytree as pytree
     example_inputs=({1: torch.randn(3, 2), 2: torch.randn(3, 2)},),
     support_level=SupportLevel.SUPPORTED,
 )
-def pytree_flatten(x):
+class PytreeFlatten(torch.nn.Module):
     """
-    Pytree from PyTorch cannot be captured by TorchDynamo.
+    Pytree from PyTorch can be captured by TorchDynamo.
     """
-    y, spec = pytree.tree_flatten(x)
-    return y[0] + 1
+    def __init__(self):
+        super().__init__()
+
+    def forward(self, x):
+        y, spec = pytree.tree_flatten(x)
+        return y[0] + 1

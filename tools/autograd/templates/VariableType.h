@@ -48,11 +48,12 @@ namespace VariableType {
   TORCH_API std::vector<at::DeprecatedTypeProperties*> allCUDATypes();
   TORCH_API std::vector<at::DeprecatedTypeProperties*> allXPUTypes();
   TORCH_API std::vector<at::DeprecatedTypeProperties*> allCPUTypes();
+  TORCH_API std::vector<at::DeprecatedTypeProperties*> allPrivateUser1Types();
 
   at::Tensor & unpack(Tensor & t, const char * name, int pos);
   const at::Tensor & unpack(const Tensor & t, const char * name, int pos);
   at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
-  std::vector<at::Tensor> unpack(at::ITensorListRef tl, const char *name, int pos);
+  std::vector<at::Tensor> unpack(const at::ITensorListRef& tl, const char *name, int pos);
 };
 
 }} // namespace torch::autograd

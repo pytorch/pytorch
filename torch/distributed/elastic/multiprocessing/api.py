@@ -10,9 +10,11 @@ import abc
 import logging
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -20,6 +22,7 @@ from enum import IntFlag
 from multiprocessing import synchronize
 from types import FrameType
 from typing import Any, Callable, Dict, Optional, Set, Tuple, Union
+from abc import ABC, abstractmethod
 
 import torch.multiprocessing as mp
 from torch.distributed.elastic.multiprocessing.errors import ProcessFailure, record
@@ -27,16 +30,27 @@ from torch.distributed.elastic.multiprocessing.redirects import (
     redirect_stderr,
     redirect_stdout,
 )
+
+from torch.distributed.elastic.multiprocessing.subprocess_handler import SubprocessHandler, get_subprocess_handler
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
 
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
 
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
-__all__ = ["SignalException", "Std", "to_map", "RunProcsResult", "PContext", "get_std_cm", "MultiprocessContext",
-           "SubprocessHandler", "SubprocessContext"]
+__all__ = [
+    "DefaultLogsSpecs",
+    "SignalException",
+    "Std",
+    "to_map",
+    "RunProcsResult",
+    "PContext",
+    "get_std_cm",
+    "MultiprocessContext",
+    "SubprocessContext",
+]
 
 class SignalException(Exception):
     """
@@ -63,9 +77,7 @@ def _terminate_process_handler(signum: int, frame: Optional[FrameType]) -> None:
 
 
 def _get_kill_signal() -> signal.Signals:
-    """
-    Get the kill signal. SIGKILL for unix, CTRL_C_EVENT for windows.
-    """
+    """Get the kill signal. SIGKILL for unix, CTRL_C_EVENT for windows."""
     if IS_WINDOWS:
         return signal.CTRL_C_EVENT  # type: ignore[attr-defined] # noqa: F821
     else:
@@ -73,9 +85,7 @@ def _get_kill_signal() -> signal.Signals:
 
 
 def _get_default_signal() -> signal.Signals:
-    """
-    Get the default termination signal. SIGTERM for unix, CTRL_C_EVENT for windows.
-    """
+    """Get the default termination signal. SIGTERM for unix, CTRL_C_EVENT for windows."""
     if IS_WINDOWS:
         return signal.CTRL_C_EVENT  # type: ignore[attr-defined] # noqa: F821
     else:
@@ -107,7 +117,6 @@ class Std(IntFlag):
     def from_str(cls, vm: str) -> Union["Std", Dict[int, "Std"]]:
         """
         Example:
-
         ::
 
          from_str("0") -> Std.NONE
@@ -146,7 +155,6 @@ def to_map(
     method that converts a value or mapping into a mapping.
 
     Example:
-
     ::
 
      to_map(Std.OUT, local_world_size=2) # returns: {0: Std.OUT, 1: Std.OUT}
@@ -154,7 +162,7 @@ def to_map(
      to_map({0: Std.OUT, 1: Std.OUT}, local_world_size=2) # returns: {0: Std.OUT, 1: Std.OUT}
     """
     if isinstance(val_or_map, Std):
-        return {i: val_or_map for i in range(local_world_size)}
+        return dict.fromkeys(range(local_world_size), val_or_map)
     else:
         map = {}
         for i in range(local_world_size):
@@ -163,10 +171,217 @@ def to_map(
 
 
 @dataclass
+class LogsDest:
+    """
+    For each log type, holds mapping of local rank ids to file paths.
+    """
+    stdouts: Dict[int, str] = field(default_factory=dict)
+    stderrs: Dict[int, str] = field(default_factory=dict)
+    tee_stdouts: Dict[int, str] = field(default_factory=dict)
+    tee_stderrs: Dict[int, str] = field(default_factory=dict)
+    error_files: Dict[int, str] = field(default_factory=dict)
+
+
+class LogsSpecs(ABC):
+    """
+    Defines logs processing and redirection for each worker process.
+
+    Args:
+        log_dir:
+            Base directory where logs will be written.
+        redirects:
+            Streams to redirect to files. Pass a single ``Std``
+            enum to redirect for all workers, or a mapping keyed
+            by local_rank to selectively redirect.
+        tee:
+            Streams to duplicate to stdout/stderr.
+            Pass a single ``Std`` enum to duplicate streams for all workers,
+            or a mapping keyed by local_rank to selectively duplicate.
+    """
+
+    def __init__(
+        self,
+        log_dir: Optional[str] = None,
+        redirects: Union[Std, Dict[int, Std]] = Std.NONE,
+        tee: Union[Std, Dict[int, Std]] = Std.NONE,
+        local_ranks_filter: Optional[Set[int]] = None,
+    ) -> None:
+        self._root_log_dir = log_dir
+        self._redirects = redirects
+        self._tee = tee
+        self._local_ranks_filter = local_ranks_filter
+
+    @abstractmethod
+    def reify(self, envs: Dict[int, Dict[str, str]],) -> LogsDest:
+        """
+        Given the environment variables, builds destination of log files for each of the local ranks.
+
+        Envs parameter contains env variables dict for each of the local ranks, where entries are defined in:
+        :func:`~torchelastic.distributed.elastic.agent.server.local_elastic_agent.LocalElasticAgent._start_workers`.
+        """
+        pass
+
+    @property
+    @abstractmethod
+    def root_log_dir(self) -> str:
+        pass
+
+class DefaultLogsSpecs(LogsSpecs):
+    """
+    Default LogsSpecs implementation:
+
+    - `log_dir` will be created if it doesn't exist
+    - Generates nested folders for each attempt and rank.
+    """
+    def __init__(
+        self,
+        log_dir: Optional[str] = None,
+        redirects: Union[Std, Dict[int, Std]] = Std.NONE,
+        tee: Union[Std, Dict[int, Std]] = Std.NONE,
+        local_ranks_filter: Optional[Set[int]] = None,
+    ) -> None:
+        if log_dir != os.devnull:
+            if not log_dir:
+                log_dir = tempfile.mkdtemp(prefix="torchelastic_")
+            elif not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+            else:
+                if os.path.isfile(log_dir):
+                    raise NotADirectoryError(f"log_dir: {log_dir} is a file")
+        super().__init__(log_dir, redirects, tee, local_ranks_filter)
+        # initialized only once
+        self._run_log_dir = None
+
+    @property
+    def root_log_dir(self) -> str:
+        return str(self._root_log_dir)
+
+    def _make_log_dir(self, log_dir: Optional[str], rdzv_run_id: str):
+        base_log_dir = log_dir or tempfile.mkdtemp(prefix="torchelastic_")
+        os.makedirs(base_log_dir, exist_ok=True)
+        dir = tempfile.mkdtemp(prefix=f"{rdzv_run_id}_", dir=base_log_dir)
+        logger.info("log directory set to: %s", dir)
+        return dir
+
+    def reify(self, envs: Dict[int, Dict[str, str]],) -> LogsDest:
+        """
+        Uses following scheme to build log destination paths:
+
+        - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/stdout.log`
+        - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/stderr.log`
+        - `<log_dir>/<rdzv_run_id>/attempt_<attempt>/<rank>/error.json`
+        """
+        nprocs = len(envs)
+        global_env = {}  # use only to query properies that are not dependent on a rank
+        if nprocs > 0:
+            global_env = envs[0]
+        else:
+            logger.warning("Empty envs map provided when defining logging destinations.")
+        # Keys are always defined, but values can be missing in unit tests
+        run_id = global_env.get("TORCHELASTIC_RUN_ID", "test_run_id")
+        restart_count = global_env.get("TORCHELASTIC_RESTART_COUNT", "0")
+
+        attempt_log_dir: str = ""
+        if self._root_log_dir != os.devnull:
+            if not self._run_log_dir:
+                self._run_log_dir = self._make_log_dir(self._root_log_dir, run_id)
+
+            attempt_log_dir = os.path.join(self._run_log_dir, f"attempt_{restart_count}")  # type: ignore[call-overload]
+            shutil.rmtree(attempt_log_dir, ignore_errors=True)
+            os.makedirs(attempt_log_dir)
+
+        if self._root_log_dir == os.devnull:
+            attempt_log_dir = os.devnull
+
+        # create subdirs for each local rank in the logs_dir
+        # logs_dir
+        #       |- 0
+        #          |- error.json
+        #          |- stdout.log
+        #          |- stderr.log
+        #       |- ...
+        #       |- (nprocs-1)
+        redirs = to_map(self._redirects, nprocs)
+        ts = to_map(self._tee, nprocs)
+
+        # to tee stdout/stderr we first redirect into a file
+        # then tail -f stdout.log/stderr.log so add tee settings to redirects
+        for local_rank, tee_std in ts.items():
+            redirect_std = redirs[local_rank]
+            redirs[local_rank] = redirect_std | tee_std
+
+        SYS_STREAM = ""  # special case to indicate to output to console
+        stdouts = dict.fromkeys(range(nprocs), SYS_STREAM)
+        stderrs = dict.fromkeys(range(nprocs), SYS_STREAM)
+        tee_stdouts: Dict[int, str] = {}
+        tee_stderrs: Dict[int, str] = {}
+        error_files = {}
+
+        for local_rank in range(nprocs):
+
+            if attempt_log_dir == os.devnull:
+                tee_stdouts[local_rank] = os.devnull
+                tee_stderrs[local_rank] = os.devnull
+                error_files[local_rank] = os.devnull
+                envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = ""
+            else:
+                clogdir = os.path.join(attempt_log_dir, str(local_rank))
+                os.mkdir(clogdir)
+
+                rd = redirs[local_rank]
+                if (rd & Std.OUT) == Std.OUT:
+                    stdouts[local_rank] = os.path.join(clogdir, "stdout.log")
+                if (rd & Std.ERR) == Std.ERR:
+                    stderrs[local_rank] = os.path.join(clogdir, "stderr.log")
+
+                t = ts[local_rank]
+                if t & Std.OUT == Std.OUT:
+                    tee_stdouts[local_rank] = stdouts[local_rank]
+                if t & Std.ERR == Std.ERR:
+                    tee_stderrs[local_rank] = stderrs[local_rank]
+
+                if self._local_ranks_filter and local_rank not in self._local_ranks_filter:
+                    # If stream is tee'd, only write to file, but don't tail
+                    if local_rank in tee_stdouts:
+                        tee_stdouts.pop(local_rank, None)
+                    if local_rank in tee_stderrs:
+                        tee_stderrs.pop(local_rank, None)
+
+                    # If stream is not redirected, don't print
+                    if stdouts[local_rank] == SYS_STREAM:
+                        stdouts[local_rank] = os.devnull
+                    if stderrs[local_rank] == SYS_STREAM:
+                        stderrs[local_rank] = os.devnull
+
+                error_file = os.path.join(clogdir, "error.json")
+                error_files[local_rank] = error_file
+                logger.info("Setting worker%s reply file to: %s", local_rank, error_file)
+                envs[local_rank]["TORCHELASTIC_ERROR_FILE"] = error_file
+
+        return LogsDest(stdouts, stderrs, tee_stdouts, tee_stderrs, error_files)
+
+    def __repr__(self) -> str:
+        return (
+            f"DefaultLogsSpecs(root_log_dir={self._root_log_dir}, redirects={self._redirects}, "
+            f"tee={self._tee}, local_ranks_filter={self._local_ranks_filter})"
+        )
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, DefaultLogsSpecs):
+            return False
+
+        return (
+            self._root_log_dir == other._root_log_dir
+            and self._redirects == other._redirects
+            and self._tee == other._tee
+            and self._local_ranks_filter == other._local_ranks_filter
+        )
+
+
+@dataclass
 class RunProcsResult:
     """
-    Results of a completed run of processes started with ``start_processes()``.
-    Returned by ``PContext``.
+    Results of a completed run of processes started with ``start_processes()``. Returned by ``PContext``.
 
     Note the following:
 
@@ -188,9 +403,9 @@ class RunProcsResult:
 
 class PContext(abc.ABC):
     """
-    The base class that standardizes operations over a set of processes
-    that are launched via different mechanisms. The name ``PContext``
-    is intentional to disambiguate with ``torch.multiprocessing.ProcessContext``.
+    The base class that standardizes operations over a set of processes that are launched via different mechanisms.
+
+    The name ``PContext`` is intentional to disambiguate with ``torch.multiprocessing.ProcessContext``.
 
     .. warning:: stdouts and stderrs should ALWAYS be a superset of
                  tee_stdouts and tee_stderrs (respectively) this is b/c
@@ -203,34 +418,34 @@ class PContext(abc.ABC):
         entrypoint: Union[Callable, str],
         args: Dict[int, Tuple],
         envs: Dict[int, Dict[str, str]],
-        stdouts: Dict[int, str],
-        stderrs: Dict[int, str],
-        tee_stdouts: Dict[int, str],
-        tee_stderrs: Dict[int, str],
-        error_files: Dict[int, str],
+        logs_specs: LogsSpecs,
+        log_line_prefixes: Optional[Dict[int, str]] = None,
+
     ):
         self.name = name
         # validate that all mappings have the same number of keys and
         # all local ranks are accounted for
         nprocs = len(args)
-        _validate_full_rank(stdouts, nprocs, "stdouts")
-        _validate_full_rank(stderrs, nprocs, "stderrs")
+
+        # TODO log_line_prefixes can be exanded too
+        logs_dest = logs_specs.reify(envs)
+
+        _validate_full_rank(logs_dest.stdouts, nprocs, "stdouts")
+        _validate_full_rank(logs_dest.stderrs, nprocs, "stderrs")
 
         self.entrypoint = entrypoint
         self.args = args
         self.envs = envs
-        self.stdouts = stdouts
-        self.stderrs = stderrs
-        self.error_files = error_files
+        self.stdouts = logs_dest.stdouts
+        self.stderrs = logs_dest.stderrs
+        self.error_files = logs_dest.error_files
         self.nprocs = nprocs
 
-        self._stdout_tail = TailLog(name, tee_stdouts, sys.stdout)
-        self._stderr_tail = TailLog(name, tee_stderrs, sys.stderr)
+        self._stdout_tail = TailLog(name, logs_dest.tee_stdouts, sys.stdout, log_line_prefixes)
+        self._stderr_tail = TailLog(name, logs_dest.tee_stderrs, sys.stderr, log_line_prefixes)
 
     def start(self) -> None:
-        """
-        Start processes using parameters defined in the constructor.
-        """
+        """Start processes using parameters defined in the constructor."""
         signal.signal(signal.SIGTERM, _terminate_process_handler)
         signal.signal(signal.SIGINT, _terminate_process_handler)
         if not IS_WINDOWS:
@@ -242,15 +457,13 @@ class PContext(abc.ABC):
 
     @abc.abstractmethod
     def _start(self) -> None:
-        """
-        Start processes using strategy defined in a particular context.
-        """
+        """Start processes using strategy defined in a particular context."""
         raise NotImplementedError()
 
     @abc.abstractmethod
     def _poll(self) -> Optional[RunProcsResult]:
         """
-        Polls the run status of the processes running under this context.
+        Poll the run status of the processes running under this context.
         This method follows an "all-or-nothing" policy and returns
         a ``RunProcessResults`` object if either all processes complete
         successfully or any process fails. Returns ``None`` if
@@ -260,7 +473,7 @@ class PContext(abc.ABC):
 
     def wait(self, timeout: float = -1, period: float = 1) -> Optional[RunProcsResult]:
         """
-        Waits for the specified ``timeout`` seconds, polling every ``period`` seconds
+        Wait for the specified ``timeout`` seconds, polling every ``period`` seconds
         for the processes to be done. Returns ``None`` if the processes are still running
         on timeout expiry. Negative timeout values are interpreted as "wait-forever".
         A timeout value of zero simply queries the status of the processes (e.g. equivalent
@@ -283,7 +496,6 @@ class PContext(abc.ABC):
         received signal. If child processes will not terminate in the timeout time, the process will send
         the SIGKILL.
         """
-
         if timeout == 0:
             return self._poll()
 
@@ -301,9 +513,7 @@ class PContext(abc.ABC):
 
     @abc.abstractmethod
     def pids(self) -> Dict[int, int]:
-        """
-        Returns pids of processes mapped by their respective local_ranks
-        """
+        """Return pids of processes mapped by their respective local_ranks."""
         raise NotImplementedError()
 
     @abc.abstractmethod
@@ -373,9 +583,7 @@ def _wrap(
 
 
 class MultiprocessContext(PContext):
-    """
-    ``PContext`` holding worker processes invoked as a function.
-    """
+    """``PContext`` holding worker processes invoked as a function."""
 
     def __init__(
         self,
@@ -383,23 +591,17 @@ class MultiprocessContext(PContext):
         entrypoint: Callable,
         args: Dict[int, Tuple],
         envs: Dict[int, Dict[str, str]],
-        stdouts: Dict[int, str],
-        stderrs: Dict[int, str],
-        tee_stdouts: Dict[int, str],
-        tee_stderrs: Dict[int, str],
-        error_files: Dict[int, str],
         start_method: str,
+        logs_specs: LogsSpecs,
+        log_line_prefixes: Optional[Dict[int, str]] = None,
     ):
         super().__init__(
             name,
             entrypoint,
             args,
             envs,
-            stdouts,
-            stderrs,
-            tee_stdouts,
-            tee_stderrs,
-            error_files,
+            logs_specs,
+            log_line_prefixes,
         )
 
         self.start_method = start_method
@@ -490,14 +692,13 @@ class MultiprocessContext(PContext):
             failed_proc = self._pc.processes[failed_local_rank]
             error_filepath = self.error_files[failed_local_rank]
 
-            log.error(
+            logger.exception(
                 "failed (exitcode: %s)"
                 " local_rank: %s (pid: %s)"
                 " of fn: %s (start_method: %s)",
                 failed_proc.exitcode,
                 failed_local_rank, e.pid,
                 fn_name, self.start_method,
-                exc_info=True,
             )
 
             self.close()
@@ -523,7 +724,7 @@ class MultiprocessContext(PContext):
             return
         for proc in self._pc.processes:
             if proc.is_alive():
-                log.warning("Closing process %s via signal %s", proc.pid, death_sig.name)
+                logger.warning("Closing process %s via signal %s", proc.pid, death_sig.name)
                 try:
                     os.kill(proc.pid, death_sig)
                 except ProcessLookupError:
@@ -538,7 +739,7 @@ class MultiprocessContext(PContext):
             proc.join(time_to_wait)
         for proc in self._pc.processes:
             if proc.is_alive():
-                log.warning(
+                logger.warning(
                     "Unable to shutdown process %s via %s, forcefully exiting via %s",
                     proc.pid, death_sig, _get_kill_signal()
                 )
@@ -550,55 +751,8 @@ class MultiprocessContext(PContext):
                     pass
             proc.join()
 
-
-class SubprocessHandler:
-    """
-    Convenience wrapper around python's ``subprocess.Popen``. Keeps track of
-    meta-objects associated to the process (e.g. stdout and stderr redirect fds).
-    """
-
-    def __init__(
-        self,
-        entrypoint: str,
-        args: Tuple,
-        env: Dict[str, str],
-        stdout: str,
-        stderr: str,
-    ):
-        self._stdout = open(stdout, "w") if stdout else None
-        self._stderr = open(stderr, "w") if stderr else None
-        # inherit parent environment vars
-        env_vars = os.environ.copy()
-        env_vars.update(env)
-
-        args_str = (entrypoint, *[str(e) for e in args])
-        self.proc: subprocess.Popen = self._popen(args_str, env_vars)
-
-    def _popen(self, args: Tuple, env: Dict[str, str]) -> subprocess.Popen:
-        return subprocess.Popen(
-            # pyre-fixme[6]: Expected `Union[typing.Sequence[Union[_PathLike[bytes],
-            #  _PathLike[str], bytes, str]], bytes, str]` for 1st param but got
-            #  `Tuple[str, *Tuple[Any, ...]]`.
-            args=args,
-            env=env,
-            stdout=self._stdout,
-            stderr=self._stderr,
-        )
-
-    def close(self, death_sig: Optional[signal.Signals] = None) -> None:
-        if not death_sig:
-            death_sig = _get_default_signal()
-        self.proc.send_signal(death_sig)
-        if self._stdout:
-            self._stdout.close()
-        if self._stderr:
-            self._stderr.close()
-
-
 class SubprocessContext(PContext):
-    """
-    ``PContext`` holding worker processes invoked as a binary.
-    """
+    """``PContext`` holding worker processes invoked as a binary."""
 
     def __init__(
         self,
@@ -606,22 +760,17 @@ class SubprocessContext(PContext):
         entrypoint: str,
         args: Dict[int, Tuple],
         envs: Dict[int, Dict[str, str]],
-        stdouts: Dict[int, str],
-        stderrs: Dict[int, str],
-        tee_stdouts: Dict[int, str],
-        tee_stderrs: Dict[int, str],
-        error_files: Dict[int, str],
+        logs_specs: LogsSpecs,
+        log_line_prefixes: Optional[Dict[int, str]] = None,
+
     ):
         super().__init__(
             name,
             entrypoint,
             args,
             envs,
-            stdouts,
-            stderrs,
-            tee_stdouts,
-            tee_stderrs,
-            error_files,
+            logs_specs,
+            log_line_prefixes,
         )
 
         # state vector; _vdone[local_rank] -> is local_rank finished or not
@@ -635,12 +784,13 @@ class SubprocessContext(PContext):
                 "The subprocess handlers already initialized. Most likely the start method got called twice."
             )
         self.subprocess_handlers = {
-            local_rank: SubprocessHandler(
+            local_rank: get_subprocess_handler(
                 entrypoint=self.entrypoint,  # type: ignore[arg-type] # entrypoint is always a str
                 args=self.args[local_rank],
                 env=self.envs[local_rank],
                 stdout=self.stdouts[local_rank],
                 stderr=self.stderrs[local_rank],
+                local_rank_id=local_rank,
             )
             for local_rank in range(self.nprocs)
         }
@@ -673,7 +823,7 @@ class SubprocessContext(PContext):
             )
             if result.is_failed():
                 first_failure = min(result.failures.values(), key=lambda f: f.timestamp)
-                log.error(
+                logger.error(
                     "failed (exitcode: %s)"
                     " local_rank: %s (pid: %s)"
                     " of binary: %s",
@@ -681,9 +831,7 @@ class SubprocessContext(PContext):
                 )
             else:
                 # Populate return with dummy values. This provides consistency with MultiprocessingHandler
-                result.return_values = {
-                    local_rank: None for local_rank in range(self.nprocs)
-                }
+                result.return_values = dict.fromkeys(range(self.nprocs))
 
             return result
         else:  # there are no failures and procs still running
@@ -700,7 +848,7 @@ class SubprocessContext(PContext):
             return
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
-                log.warning(
+                logger.warning(
                     "Sending process %s closing signal %s", handler.proc.pid, death_sig.name
                 )
                 handler.close(death_sig=death_sig)
@@ -717,7 +865,7 @@ class SubprocessContext(PContext):
                 pass
         for handler in self.subprocess_handlers.values():
             if handler.proc.poll() is None:
-                log.warning(
+                logger.warning(
                     "Unable to shutdown process %s via %s, forcefully exiting via %s",
                     handler.proc.pid, death_sig, _get_kill_signal()
                 )

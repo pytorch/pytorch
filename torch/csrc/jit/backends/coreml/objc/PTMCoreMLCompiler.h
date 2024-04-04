@@ -14,7 +14,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 + (nullable MLModel*)loadModel:(const std::string)modelID
                        backend:(const std::string)backend
-             allowLowPrecision:(BOOL)allowLowPrecision;
+             allowLowPrecision:(BOOL)allowLowPrecision
+                         error:(NSError**)error;
 
 @end
 

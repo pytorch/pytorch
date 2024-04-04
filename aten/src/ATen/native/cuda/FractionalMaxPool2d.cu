@@ -11,8 +11,8 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/Utils.h>
 #include <ATen/native/FractionalMaxPooling.h>
+#include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
-
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/NativeFunctions.h>
 #else
@@ -47,8 +47,8 @@ template <typename scalar_t>
 __global__ void fractional_max_pool2d_out_cuda_frame(
   PackedTensorAccessor<scalar_t, 4> output,
   PackedTensorAccessor<int64_t, 4> indices,
-  PackedTensorAccessor<scalar_t, 4> input,
-  PackedTensorAccessor<scalar_t, 3> samples,
+  PackedTensorAccessor<const scalar_t, 4> input,
+  PackedTensorAccessor<const scalar_t, 3> samples,
   int poolSizeH, int poolSizeW) {
 
   using accscalar_t = at::acc_type<scalar_t, /*is_cuda=*/true>;
@@ -117,10 +117,10 @@ __global__ void fractional_max_pool2d_backward_out_cuda_frame(
     int outputH = ourOutputPoint / gradOutput.size(3);
 
     int index = indices[batch][plane][outputH][outputW];
-    assert(index >= 0);
+    CUDA_KERNEL_ASSERT(index >= 0);
     int inputW = index % gradInput.size(3);
     int inputH = index / gradInput.size(3);
-    assert(inputH < gradInput.size(2));
+    CUDA_KERNEL_ASSERT(inputH < gradInput.size(2));
 
     gpuAtomicAddNoReturn(
       &gradInput[batch][plane][inputH][inputW],
@@ -142,15 +142,11 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
   fractional_max_pool_check_shape</*ndim*/ 2>(input, randomSamples);
 
   int planeDim = 0;
-  int dimh = 1;
-  int dimw = 2;
 
   int ndims = input.ndimension();
 
   if (ndims == 4) {
     planeDim++;
-    dimh++;
-    dimw++;
   }
 
   /* sizes */
@@ -184,13 +180,16 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_out_cuda) (
             input_.size(0));
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    at::ScalarType::Half,
+    at::ScalarType::BFloat16,
+    input.scalar_type(),
     "fractional_max_pool2d_out_cuda_frame",
     [&] {
-      auto devInput = input_.packed_accessor64<scalar_t, 4>();
+      auto devInput = input_.packed_accessor64<const scalar_t, 4>();
       auto devOutput = output_.packed_accessor64<scalar_t, 4>();
       auto devIndices = indices_.packed_accessor64<int64_t, 4>();
-      auto devSamples = randomSamples.packed_accessor64<scalar_t, 3>();
+      auto devSamples = randomSamples.packed_accessor64<const scalar_t, 3>();
       fractional_max_pool2d_out_cuda_frame<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           devOutput, devIndices, devInput, devSamples,
@@ -256,7 +255,10 @@ TORCH_IMPL_FUNC(fractional_max_pool2d_backward_cuda)(
   dim3 block(outputPlaneSize > 128 ? 128 : outputPlaneSize);
 
   auto devIndices = indices_.packed_accessor64<int64_t, 4>();
-  AT_DISPATCH_FLOATING_TYPES_AND_HALF(gradOutput.scalar_type(),
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+    at::ScalarType::Half,
+    at::ScalarType::BFloat16,
+    gradOutput.scalar_type(),
     "fractional_max_pool2d_backward_out_cuda_frame",
     [&] {
       auto devGradInput = gradInput_.packed_accessor64<scalar_t, 4>();

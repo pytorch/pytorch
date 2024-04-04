@@ -53,7 +53,7 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
     // NOLINTNEXTLINE(bugprone-argument-comment)
     .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
     .add_output(result)
-    .add_input(self)
+    .add_const_input(self)
     .build();
 
   auto result_dim_stride = ensure_nonempty_stride(result, dim);
@@ -81,7 +81,7 @@ static void cumsum_cpu_kernel(const Tensor& result, const Tensor& self, int64_t 
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, self.scalar_type(), "cumsum_out_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, self.scalar_type(), "cumsum_out_cpu", [&] {
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
@@ -100,7 +100,7 @@ static void cumprod_cpu_kernel(const Tensor& result, const Tensor& self, int64_t
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, self.scalar_type(), "cumprod_out_cpu", [&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, self.scalar_type(), "cumprod_out_cpu", [&] {
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
@@ -119,7 +119,7 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
   auto wrap_dim = maybe_wrap_dim(dim, self.dim());
   int64_t self_dim_size = ensure_nonempty_size(self, wrap_dim);
 
-  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND1(kBFloat16, self.scalar_type(), "logcumsumexp_out_cpu", [&] {
+  AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kBFloat16, kHalf, self.scalar_type(), "logcumsumexp_out_cpu", [&] {
     cpu_cum_base_kernel<scalar_t>(result, self, wrap_dim, [&] (
       scalar_t* result_data, auto result_dim_stride,
       const scalar_t* self_data, auto self_dim_stride, scalar_t init_val) {
@@ -132,19 +132,6 @@ static void logcumsumexp_cpu_kernel(Tensor& result, const Tensor& self, int64_t 
           result_data[i * result_dim_stride] = static_cast<scalar_t>(cum_number);
         }
       }, /*init_val=*/ -std::numeric_limits<scalar_t>::infinity()
-    );
-  });
-}
-
-static void mean_kernel_impl(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "mean_cpu", [&] {
-    using acc_t = at::opmath_type<scalar_t>;
-    using factor_t = typename c10::scalar_value_type<acc_t>::type;
-    factor_t factor = static_cast<factor_t>(iter.num_output_elements()) / iter.numel();
-    binary_kernel_reduce(
-      iter,
-      MeanOps<scalar_t, acc_t, factor_t, scalar_t> {factor},
-      acc_t(0)
     );
   });
 }
@@ -176,7 +163,7 @@ static void prod_kernel_impl(TensorIterator& iter) {
         // NOLINTNEXTLINE(bugprone-argument-comment)
         /*identity=*/1);
   } else {
-    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16, iter.dtype(), "prod_out_cpu", [&] {
+    AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kBFloat16, kHalf, iter.dtype(), "prod_out_cpu", [&] {
       binary_kernel_reduce_vec(
           iter,
           [=](scalar_t a, scalar_t b)
@@ -196,8 +183,7 @@ inline void norm_two_reduce_step(Vectorized<acc_t>& acc_vec, Vectorized<scalar_t
 
 template <>
 inline void norm_two_reduce_step(Vectorized<float>& acc_fvec, Vectorized<BFloat16>& data_bvec) {
-  Vectorized<float> data_fvec0, data_fvec1;
-  std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+  auto [data_fvec0, data_fvec1] = convert_bfloat16_float(data_bvec);
   acc_fvec += data_fvec0 * data_fvec0;
   acc_fvec += data_fvec1 * data_fvec1;
 }
@@ -209,7 +195,7 @@ template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>
 void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   if (val == 0.0) {
     binary_kernel_reduce(iter, NormZeroOps<scalar_t, acc_t, out_t>(), acc_t(0));
-  } else if (val == 0.0) {
+  } else if (val == 1.0) {
     binary_kernel_reduce(iter, NormOneOps<scalar_t, acc_t, out_t>(), acc_t(0));
   } else if (val == 2.0) {
     binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t>(), acc_t(0));
@@ -304,7 +290,9 @@ static void and_kernel_impl(TensorIterator& iter) {
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a && b) ? 1 : 0; },
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
-          return a & b;
+          // NB: != returns 0xFF rather than 0x01, so we must negate to get
+          // the desired result
+          return (a != Vectorized<uint8_t>(0)).neg() & (b != Vectorized<uint8_t>(0)).neg();
         },
         /*ident=*/true);
   } else {
@@ -340,7 +328,7 @@ static void or_kernel_impl(TensorIterator& iter) {
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a || b) ? 1 : 0; },
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
-          return a | b;
+          return (a != Vectorized<uint8_t>(0)).neg() | (b != Vectorized<uint8_t>(0)).neg();
         },
         /*ident=*/false);
   } else {
@@ -450,7 +438,9 @@ static void argmin_kernel_impl(TensorIterator &iter) {
 
 REGISTER_DISPATCH(std_var_stub, &std_var_kernel_impl);
 REGISTER_DISPATCH(prod_stub, &prod_kernel_impl);
-REGISTER_DISPATCH(mean_stub, &mean_kernel_impl);
+// mean implementation for CPU is in aten/src/ATen/native/ReduceOps.cpp
+// but mean_stub must be defined for CPU as well
+REGISTER_DISPATCH(mean_stub, nullptr);
 REGISTER_DISPATCH(norm_stub, &norm_kernel_tensor_iterator_impl);
 REGISTER_DISPATCH(and_stub, &and_kernel_impl);
 REGISTER_DISPATCH(or_stub, &or_kernel_impl);

@@ -25,8 +25,8 @@ namespace {
   C10_LAUNCH_BOUNDS_1(256)
   __global__ void grid_sampler_2d_kernel(
       const index_t nthreads,
-      TensorInfo<scalar_t, index_t> input,
-      TensorInfo<scalar_t, index_t> grid,
+      TensorInfo<const scalar_t, index_t> input,
+      TensorInfo<const scalar_t, index_t> grid,
       TensorInfo<scalar_t, index_t> output,
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
@@ -104,7 +104,7 @@ namespace {
         index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
         index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
 
-        // assign nearest neighor pixel value to output pixel
+        // assign nearest neighbour pixel value to output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
         auto out_ptr_NCHW = output.data + n * out_sN + h * out_sH + w * out_sW;
         for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCHW += out_sC) {
@@ -155,8 +155,8 @@ namespace {
   C10_LAUNCH_BOUNDS_1(512)
   __global__ void grid_sampler_3d_kernel(
       const index_t nthreads,
-      TensorInfo<scalar_t, index_t> input,
-      TensorInfo<scalar_t, index_t> grid,
+      TensorInfo<const scalar_t, index_t> input,
+      TensorInfo<const scalar_t, index_t> grid,
       TensorInfo<scalar_t, index_t> output,
       const GridSamplerInterpolation interpolation_mode,
       const GridSamplerPadding padding_mode,
@@ -287,7 +287,7 @@ namespace {
         index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
         index_t iz_nearest = static_cast<index_t>(std::nearbyint(iz));
 
-        // assign nearest neighor pixel value to output pixel
+        // assign nearest neighbour pixel value to output pixel
         auto inp_ptr_NC = input.data + n * inp_sN;
         auto out_ptr_NCDHW = output.data + n * out_sN + d * out_sD + h * out_sH + w * out_sW;
         for (index_t c = 0; c < C; ++c, inp_ptr_NC += inp_sC, out_ptr_NCDHW += out_sC) {
@@ -434,7 +434,7 @@ namespace {
           index_t ix_nearest = static_cast<index_t>(std::nearbyint(ix));
           index_t iy_nearest = static_cast<index_t>(std::nearbyint(iy));
 
-          // assign nearest neighor pixel value to output pixel
+          // assign nearest neighbour pixel value to output pixel
           scalar_t *gOut_ptr_NCHW = grad_output.data + n * gOut_sN + h * gOut_sH + w * gOut_sW;
           index_t NC_offset = n * gInp_sN;
           for (index_t c = 0; c < C; ++c, NC_offset += gInp_sC, gOut_ptr_NCHW += gOut_sC) {
@@ -724,7 +724,7 @@ namespace {
           auto iy_nearest = static_cast<index_t>(std::nearbyint(iy));
           auto iz_nearest = static_cast<index_t>(std::nearbyint(iz));
 
-          // assign nearest neighor pixel value to output pixel
+          // assign nearest neighbour pixel value to output pixel
           scalar_t *gOut_ptr_NCDHW = grad_output.data + n * gOut_sN + d * gOut_sD + h * gOut_sH + w * gOut_sW;
           index_t NC_offset = n * gInp_sN;
           for (index_t c = 0; c < C; ++c, gOut_ptr_NCDHW += gOut_sC, NC_offset += gInp_sC) {
@@ -760,14 +760,16 @@ void launch_grid_sampler_2d_forward_kernel(
   auto W = grid.size(2);
   int64_t count = N * H * W;
   if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      input.scalar_type(), "grid_sampler_2d_cuda", [&] {
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(output)) {
         grid_sampler_2d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
-            getTensorInfo<scalar_t, int>(input),
-            getTensorInfo<scalar_t, int>(grid),
+            getTensorInfo<const scalar_t, int>(input),
+            getTensorInfo<const scalar_t, int>(grid),
             getTensorInfo<scalar_t, int>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
@@ -777,8 +779,8 @@ void launch_grid_sampler_2d_forward_kernel(
         grid_sampler_2d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 256), 256, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
-            getTensorInfo<scalar_t, int64_t>(input),
-            getTensorInfo<scalar_t, int64_t>(grid),
+            getTensorInfo<const scalar_t, int64_t>(input),
+            getTensorInfo<const scalar_t, int64_t>(grid),
             getTensorInfo<scalar_t, int64_t>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
@@ -803,14 +805,16 @@ void launch_grid_sampler_3d_forward_kernel(
   auto W = grid.size(3);
   int64_t count = N * D * H * W;
   if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_3d_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      input.scalar_type(), "grid_sampler_3d_cuda", [&] {
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(output)) {
         grid_sampler_3d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 512), 512, 0, at::cuda::getCurrentCUDAStream()>>>(
             static_cast<int>(count),
-            getTensorInfo<scalar_t, int>(input),
-            getTensorInfo<scalar_t, int>(grid),
+            getTensorInfo<const scalar_t, int>(input),
+            getTensorInfo<const scalar_t, int>(grid),
             getTensorInfo<scalar_t, int>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
@@ -820,8 +824,8 @@ void launch_grid_sampler_3d_forward_kernel(
         grid_sampler_3d_kernel<scalar_t>
           <<<GET_BLOCKS(count, 512), 512, 0, at::cuda::getCurrentCUDAStream()>>>(
             count,
-            getTensorInfo<scalar_t, int64_t>(input),
-            getTensorInfo<scalar_t, int64_t>(grid),
+            getTensorInfo<const scalar_t, int64_t>(input),
+            getTensorInfo<const scalar_t, int64_t>(grid),
             getTensorInfo<scalar_t, int64_t>(output),
             static_cast<GridSamplerInterpolation>(interpolation_mode),
             static_cast<GridSamplerPadding>(padding_mode),
@@ -856,7 +860,9 @@ void launch_grid_sampler_2d_backward_kernel(
 
   int64_t count = N * H * W;
   if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      input.scalar_type(), "grid_sampler_2d_backward_cuda", [&] {
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(grad_output)) {
         grid_sampler_2d_backward_kernel<scalar_t>
@@ -913,7 +919,9 @@ void launch_grid_sampler_3d_backward_kernel(
   int64_t count = N * D * H * W;
   auto input_requires_grad = output_mask[0];
   if (count > 0) {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.scalar_type(), "grid_sampler_3d_backward_cuda", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      ScalarType::Half, ScalarType::BFloat16,
+      input.scalar_type(), "grid_sampler_3d_backward_cuda", [&] {
       if (canUse32BitIndexMath(input) && canUse32BitIndexMath(grid) &&
           canUse32BitIndexMath(grad_output)) {
         grid_sampler_3d_backward_kernel<scalar_t>

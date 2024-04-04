@@ -2,7 +2,7 @@ import bisect
 import dataclasses
 import dis
 import sys
-from numbers import Real
+from typing import Any, Set, Union
 
 TERMINAL_OPCODES = {
     dis.opmap["RETURN_VALUE"],
@@ -17,6 +17,8 @@ if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
 else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
+if sys.version_info >= (3, 12):
+    TERMINAL_OPCODES.add(dis.opmap["RETURN_CONST"])
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
 JUMP_OPNAMES = {dis.opname[opcode] for opcode in JUMP_OPCODES}
 HASLOCAL = set(dis.haslocal)
@@ -127,9 +129,9 @@ def remove_extra_line_nums(instructions):
 
 @dataclasses.dataclass
 class ReadsWrites:
-    reads: set
-    writes: set
-    visited: set
+    reads: Set[Any]
+    writes: Set[Any]
+    visited: Set[Any]
 
 
 def livevars_analysis(instructions, instruction):
@@ -173,8 +175,8 @@ class FixedPointBox:
 
 @dataclasses.dataclass
 class StackSize:
-    low: Real
-    high: Real
+    low: Union[int, float]
+    high: Union[int, float]
     fixed_point: FixedPointBox
 
     def zero(self):
@@ -197,7 +199,7 @@ class StackSize:
             self.fixed_point.value = False
 
 
-def stacksize_analysis(instructions):
+def stacksize_analysis(instructions) -> Union[int, float]:
     assert instructions
     fixed_point = FixedPointBox()
     stack_sizes = {

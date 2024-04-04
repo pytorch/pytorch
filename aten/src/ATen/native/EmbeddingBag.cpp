@@ -56,8 +56,7 @@ namespace {
   const int MODE_MAX = 2;
 }
 
-namespace at {
-namespace native {
+namespace at::native {
 
 template<typename scalar_t>
 scalar_t dot_impl(int64_t n, scalar_t *x, int64_t incx, scalar_t *y, int64_t incy);
@@ -71,16 +70,16 @@ static void make_offset2bag(const Tensor &offsets, Tensor& offset2bag) {
 
 namespace {
 
-std::pair<Tensor, Tensor> promoteIndicesAndOffsets(
+std::pair<c10::MaybeOwned<Tensor>, c10::MaybeOwned<Tensor>> promoteIndicesAndOffsets(
     const Tensor& indices,
     const Tensor& offsets) {
   const auto commonType =
       promoteTypes(offsets.scalar_type(), indices.scalar_type());
   return {
-      indices.scalar_type() == commonType ? indices
-                                          : indices.toType(commonType),
-      offsets.scalar_type() == commonType ? offsets
-                                          : offsets.toType(commonType)};
+      indices.scalar_type() == commonType ? c10::MaybeOwned<Tensor>::borrowed(indices)
+                                          : c10::MaybeOwned<Tensor>::owned(indices.toType(commonType)),
+      offsets.scalar_type() == commonType ? c10::MaybeOwned<Tensor>::borrowed(offsets)
+                                          : c10::MaybeOwned<Tensor>::owned(offsets.toType(commonType))};
 }
 
 // Determines if we can use a fast implementation for index_select_add, which
@@ -126,9 +125,9 @@ index_select_add(
     index_t padding_idx,
     _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
   TORCH_CHECK(select_indices.numel() == add_indices.numel());
-  auto* add_indices_data = add_indices.data_ptr<index_t>();
-  auto* select_indices_data = select_indices.data_ptr<index_t>();
-  auto* src_data = src.data_ptr<data_t>();
+  auto* add_indices_data = add_indices.const_data_ptr<index_t>();
+  auto* select_indices_data = select_indices.const_data_ptr<index_t>();
+  auto* src_data = src.const_data_ptr<data_t>();
   auto* output_data = output.data_ptr<data_t>();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   index_t* bag_size_data = nullptr;
@@ -209,14 +208,14 @@ index_select_add(
     index_t padding_idx,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
-  auto* select_indices_data = select_indices.data_ptr<index_t>();
+  auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* output_data = output.data_ptr<data_t>();
 
   if (is_fast_path_index_select(src, output, padding_idx)) {
     auto src_contig = src.contiguous();
-    auto* src_data = src_contig.data_ptr<data_t>();
+    auto* src_data = src_contig.const_data_ptr<data_t>();
     int64_t output_size = offsets.numel() - 1;
-    auto* offsets_data = offsets.data_ptr<index_t>();
+    auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
 
     if (include_last_offset) {
@@ -234,7 +233,7 @@ index_select_add(
       offsets_data = offsets_include_last.data();
     }
 #if defined(USE_FBGEMM)
-    constexpr bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
+    constexpr bool isbf16 = std::is_same_v<data_t, at::Half> ? false : true;
     auto kernel_16bit_index_t = fbgemm_kernel_cache
         ? fbgemm_kernel_cache
               ->getCallback</* has_weight */ false, index_t, uint16_t>(ddim)
@@ -245,7 +244,8 @@ index_select_add(
               /* prefetch */ 16,
               /* is_weight_positional */ false,
               /* use_offsets */ true,
-              /* isbf16*/ isbf16);
+              /* is_bf16_out */ isbf16,
+              /* is_bf16_in */ isbf16);
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           bool success = kernel_16bit_index_t(
@@ -316,8 +316,8 @@ index_select_add(
 #endif
   } else {
     TORCH_CHECK(select_indices.numel() == add_indices.numel());
-    auto* src_data = src.data_ptr<data_t>();
-    auto* add_indices_data = add_indices.data_ptr<index_t>();
+    auto* src_data = src.const_data_ptr<data_t>();
+    auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
@@ -388,14 +388,14 @@ index_select_add(const Tensor &select_indices,
                              index_t padding_idx,
                              _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
-  auto* select_indices_data = select_indices.data_ptr<index_t>();
+  auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* output_data = output.data_ptr<float>();
 
   if (is_fast_path_index_select(src, output, padding_idx)) {
     auto src_contig = src.contiguous();
-    auto* src_data = src_contig.data_ptr<float>();
+    auto* src_data = src_contig.const_data_ptr<float>();
     int64_t output_size = offsets.numel() - 1;
-    auto* offsets_data = offsets.data_ptr<index_t>();
+    auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
 
     if (include_last_offset) {
@@ -463,8 +463,8 @@ index_select_add(const Tensor &select_indices,
         });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
-    auto* src_data = src.data_ptr<float>();
-    auto* add_indices_data = add_indices.data_ptr<index_t>();
+    auto* src_data = src.const_data_ptr<float>();
+    auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
@@ -519,9 +519,9 @@ index_select_scale_add(
     index_t padding_idx,
     _EmbeddingBagKernelCache* /* fbgemm_kernel_cache */) {
   AT_ASSERT(select_indices.numel() == add_indices.numel());
-  auto* add_indices_data = add_indices.data_ptr<index_t>();
-  auto* select_indices_data = select_indices.data_ptr<index_t>();
-  auto* src_data = src.data_ptr<data_t>();
+  auto* add_indices_data = add_indices.const_data_ptr<index_t>();
+  auto* select_indices_data = select_indices.const_data_ptr<index_t>();
+  auto* src_data = src.const_data_ptr<data_t>();
   auto* output_data = output.data_ptr<data_t>();
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
   index_t* bag_size_data = nullptr;
@@ -536,7 +536,7 @@ index_select_scale_add(
   auto output_stride0 = output.strides()[0];
   auto output_stride1 = output.strides()[1];
 
-  auto* scale_data = scale.data_ptr<data_t>();
+  auto* scale_data = scale.const_data_ptr<data_t>();
   auto scale_stride = scale.strides()[0];
 
   for (const auto i : c10::irange(numel)) {
@@ -579,15 +579,15 @@ index_select_scale_add(
     index_t padding_idx,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
-  auto* scale_data = scale.data_ptr<data_t>();
-  auto* select_indices_data = select_indices.data_ptr<index_t>();
+  auto* scale_data = scale.const_data_ptr<data_t>();
+  auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* output_data = output.data_ptr<data_t>();
 
   if (is_fast_path_index_select_scale(src, scale, output, padding_idx)) {
     auto src_contig = src.contiguous();
-    auto* src_data = src_contig.data_ptr<data_t>();
+    auto* src_data = src_contig.const_data_ptr<data_t>();
     int64_t output_size = offsets.numel() - 1;
-    auto* offsets_data = offsets.data_ptr<index_t>();
+    auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
 
     if (include_last_offset) {
@@ -607,7 +607,7 @@ index_select_scale_add(
     auto* scale_data_fp32 = scale_fp32.mutable_data_ptr<float>();
 
 #if defined(USE_FBGEMM)
-    constexpr bool isbf16 = std::is_same<data_t, at::Half>::value ? false : true;
+    constexpr bool isbf16 = std::is_same_v<data_t, at::Half> ? false : true;
     if constexpr (isbf16) {
       fbgemm::Bfloat16ToFloat_simd(
           reinterpret_cast<const fbgemm::bfloat16*>(scale_data),
@@ -629,7 +629,8 @@ index_select_scale_add(
               /* prefetch */ 16,
               /* is_weight_positional */ false,
               /* use_offsets */ true,
-              /* isbf16*/ isbf16);
+              /* is_bf16_out */ isbf16,
+              /* is_bf16_in */ isbf16);
     at::parallel_for(
         0, output_size, 1, [&](index_t start_idx, index_t end_idx) {
           bool success = kernel_16bit_index_t(
@@ -704,8 +705,8 @@ index_select_scale_add(
 #endif
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
-    auto* src_data = src.data_ptr<data_t>();
-    auto* add_indices_data = add_indices.data_ptr<index_t>();
+    auto* src_data = src.const_data_ptr<data_t>();
+    auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
@@ -769,15 +770,15 @@ index_select_scale_add(const Tensor &select_indices,
                                           index_t padding_idx,
                                           _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
-  auto* scale_data = scale.data_ptr<float>();
-  auto* select_indices_data = select_indices.data_ptr<index_t>();
+  auto* scale_data = scale.const_data_ptr<float>();
+  auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* output_data = output.data_ptr<float>();
 
   if (is_fast_path_index_select_scale(src, scale, output, padding_idx)) {
     auto src_contig = src.contiguous();
-    auto* src_data = src_contig.data_ptr<float>();
+    auto* src_data = src_contig.const_data_ptr<float>();
     int64_t output_size = offsets.numel() - 1;
-    auto* offsets_data = offsets.data_ptr<index_t>();
+    auto* offsets_data = offsets.const_data_ptr<index_t>();
     std::vector<index_t> offsets_include_last;
 
     if (include_last_offset) {
@@ -843,8 +844,8 @@ index_select_scale_add(const Tensor &select_indices,
         });
   } else {
     AT_ASSERT(select_indices.numel() == add_indices.numel());
-    auto* src_data = src.data_ptr<float>();
-    auto* add_indices_data = add_indices.data_ptr<index_t>();
+    auto* src_data = src.const_data_ptr<float>();
+    auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
@@ -1088,7 +1089,7 @@ void embedding_bag_cpu_max_out(
   int64_t featureSize = weight.size(1);
   int64_t vocab_size = weight.size(0);
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_cpu_max_out", [&] {
-    auto* indices_data = indices.data_ptr<index_t>();
+    auto* indices_data = indices.const_data_ptr<index_t>();
     auto* offset2bag_data = offset2bag.data_ptr<index_t>();
 
     index_t* max_indices_data = nullptr;
@@ -1098,7 +1099,7 @@ void embedding_bag_cpu_max_out(
       max_indices_stride = max_indices->strides()[0];
     }
 
-    auto* weight_data = weight.data_ptr<scalar_t>();
+    auto* weight_data = weight.const_data_ptr<scalar_t>();
     auto* output_data = output.data_ptr<scalar_t>();
     auto* bag_size_data = bag_size.data_ptr<index_t>();
     auto weight_stride0 = weight.strides()[0];
@@ -1209,8 +1210,9 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_cpu_impl(
   TORCH_CHECK(weight.dim() == 2,
       "weight has to be a 2D Tensor, but got Tensor of dimension ",
       weight.dim());
-  Tensor indices, offsets;
-  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
+  auto [indicesMaybeOwned, offsetsMaybeOwned] = promoteIndicesAndOffsets(indices_, offsets_);
+  const auto& indices = *indicesMaybeOwned;
+  const auto& offsets = *offsetsMaybeOwned;
   check_arguments(weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
   Tensor output = at::empty(
@@ -1330,8 +1332,8 @@ void _embedding_bag_cpu_out(
     at::Tensor& bag_size,
     at::Tensor* p_max_indices,
     const at::Tensor& weight,
-    const at::Tensor& indices,
-    const at::Tensor& offsets,
+    const at::Tensor& indices_,
+    const at::Tensor& offsets_,
     const bool /* scale_grad_by_freq */,
     const int64_t mode,
     const bool /* sparse */,
@@ -1339,6 +1341,9 @@ void _embedding_bag_cpu_out(
     const bool include_last_offset,
     const c10::optional<int64_t>& padding_idx,
     _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
+  auto [indicesMaybeOwned, offsetsMaybeOwned] = promoteIndicesAndOffsets(indices_, offsets_);
+  const auto& indices = *indicesMaybeOwned;
+  const auto& offsets = *offsetsMaybeOwned;
   at::native::check_arguments(
       weight, indices, offsets, mode, per_sample_weights, include_last_offset);
 
@@ -1409,8 +1414,9 @@ Tensor _embedding_bag_backward_symint(const Tensor &grad, const Tensor &indices_
   c10::MaybeOwned<Tensor> per_sample_weights_maybe_owned = at::borrow_from_optional_tensor(per_sample_weights_opt);
   const Tensor& per_sample_weights = *per_sample_weights_maybe_owned;
 
-  Tensor indices, offsets;
-  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
+  auto [indicesMaybeOwned, offsetsMaybeOwned] = promoteIndicesAndOffsets(indices_, offsets_);
+  const auto& indices = *indicesMaybeOwned;
+  const auto& offsets = *offsetsMaybeOwned;
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarTypes("embedding_bag", indices_arg, {kLong, kInt});
   checkContiguous("embedding_bag", indices_arg);
@@ -1665,8 +1671,10 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
   AT_ASSERT(grad.dim() == 2);
   auto embedding_features = grad.sizes()[1];
 
-  Tensor indices, offsets;
-  std::tie(indices, offsets) = promoteIndicesAndOffsets(indices_, offsets_);
+  auto [indicesMaybeOwned, offsetsMaybeOwned] = promoteIndicesAndOffsets(indices_, offsets_);
+  const auto& indices = *indicesMaybeOwned;
+  const auto& offsets = *offsetsMaybeOwned;
+
   AT_ASSERT(indices.dim() == 1);
   auto num_samples = indices.size(0);
 
@@ -1780,6 +1788,5 @@ Tensor _embedding_bag_sparse_backward_symint(
   }
   return native::embedding_backward_symint(index_grad, indices, std::move(num_weights), padding_idx,
                                     scale_grad_by_freq, true);
-}
 }
 } // namespace at::native

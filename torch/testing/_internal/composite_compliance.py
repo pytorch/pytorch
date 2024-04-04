@@ -1,9 +1,12 @@
+# mypy: ignore-errors
+
 import torch
 from torch import Tensor
 import itertools
 
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
+from torch.utils import _pytree as pytree
 from functools import partial
 from torch.utils._mode_utils import no_dispatch, all_same_mode
 import torch.autograd.forward_ad as fwAD
@@ -114,7 +117,6 @@ def generate_cct_and_mode(autograd_view_consistency=True):
         elem: torch.Tensor
 
         __slots__ = ['elem']
-        __torch_function__ = torch._C._disabled_torch_function_impl
 
         @staticmethod
         def __new__(cls, elem, mode, *args, **kwargs):
@@ -158,7 +160,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
 
         @classmethod
         def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-            all_args = tree_flatten(args)[0] + tree_flatten(kwargs)[0]
+            all_args = pytree.arg_tree_leaves(*args, **(kwargs or {}))
             modes = tuple(e.mode for e in all_args if isinstance(e, CompositeCompliantTensor))
             if not all_same_mode(modes):
                 raise RuntimeError("Multiple CompositeCompliantTensorModes NYI")
@@ -237,9 +239,9 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             # have consistent metadata. If they don't have consistent metadata,
             # that means the operator did something fishy.
             check = partial(check_metadata_consistency, CCT=CompositeCompliantTensor)
-            tree_map(check, args)
-            tree_map(check, kwargs)
-            tree_map(check, rs)
+            pytree.tree_map_(check, args)
+            pytree.tree_map_(check, kwargs)
+            pytree.tree_map_(check, rs)
             return rs
 
     return CompositeCompliantTensor, CompositeCompliantTensorMode()
@@ -420,7 +422,8 @@ def compute_expected_grads(op, args, kwargs, output_process_fn_grad=None, gradch
     if output_process_fn_grad is not None:
         results = output_process_fn_grad(results)
 
-    flat_results, _ = tree_flatten(results)
+    flat_results = pytree.tree_leaves(results)
+    flat_results = [r for r in flat_results if isinstance(r, torch.Tensor)]
     flat_diff_results = [r for r in flat_results if r.requires_grad]
     assert len(flat_diff_results) > 0
 
@@ -465,7 +468,8 @@ def check_backward_formula(op: Callable, args, kwargs,
                 f"- wrapped_kwargs: {which_kwargs_are_wrapped}\n"
             )
 
-        flat_results, _ = tree_flatten(results)
+        flat_results = pytree.tree_leaves(results)
+        flat_results = [r for r in flat_results if isinstance(r, torch.Tensor)]
         flat_diff_results = [r for r in flat_results if r.requires_grad]
         assert len(flat_diff_results) > 0
 

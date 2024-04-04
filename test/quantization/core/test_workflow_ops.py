@@ -30,7 +30,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 
 # Reference method for fake quantize
 # Note: because scale/zero_point are left as float in the actual kernel, this mimics how fake_quant works for float16/64
@@ -364,8 +364,8 @@ class TestFakeQuantizeOps(TestCase):
     def _test_backward_per_tensor_cachemask_impl(self, device):
         float_types = (torch.float32, torch.float16, torch.float64)
         torch_types = (torch.qint8, torch.quint8)
-        tensor_qparam = (True, False)
-        for float_type, torch_type, tensor_qparam in itertools.product(float_types, torch_types, tensor_qparam):
+        tensor_qparams = (True, False)
+        for float_type, torch_type, tensor_qparam in itertools.product(float_types, torch_types, tensor_qparams):
             X = torch.randn(4, 8).to(device).to(float_type)
             X.requires_grad_()
             # pick the scale + zp so that some values get clipped
@@ -879,7 +879,7 @@ class TestFakeQuantizeOps(TestCase):
             Y_prime.backward(dout)
             np.testing.assert_allclose(
                 dX.cpu().detach().numpy(), X.grad.cpu().detach().numpy(), rtol=tolerance, atol=tolerance)
-            assert(X.grad.dtype == float_type)
+            assert X.grad.dtype == float_type
 
 
     def test_backward_per_channel_cachemask_cpu(self):
@@ -1012,6 +1012,30 @@ class TestFakeQuantizeOps(TestCase):
                     self.assertEqual(
                         Y, Y_prime, "Difference found between dequant+quant_per_channel and fake_quantize_per_channel")
                 self.assertTrue(test_was_run)
+
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_fake_quantize_per_channel_affine_scale_dtypes(self):
+        """
+        Ensure the error message is more helpful
+        """
+        dtype_list = [torch.float, torch.float64, torch.bfloat16, torch.half]
+        for scale_dtype in dtype_list:
+            input = torch.randn(3, 4, 5, 6)
+            scale = torch.Tensor([0.1, 0.2, 0.3, 0.4]).to(scale_dtype)
+            zero_point = torch.tensor([1, 2, 3, 4], dtype=torch.int32)
+            axis = 1
+            quant_min = 0
+            quant_max = 255
+            if scale_dtype != torch.float:
+                with self.assertRaises(RuntimeError):
+                    torch.fake_quantize_per_channel_affine(
+                        input, scale, zero_point, axis, quant_min, quant_max
+                    )
+            else:
+                torch.fake_quantize_per_channel_affine(
+                    input, scale, zero_point, axis, quant_min, quant_max
+                )
+
 
 class TestFusedObsFakeQuant(TestCase):
     @given(device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']),

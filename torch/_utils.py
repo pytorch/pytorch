@@ -150,7 +150,7 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 #     serialize the *state_dict* of a model, not the model itself
 #     (since this is more stable to code changes affecting the model
 #     serialization), and the state dict saves "data" only, thus
-#     stripping the the backward hooks.  In some cases, hooks are
+#     stripping the backward hooks.  In some cases, hooks are
 #     essential to the well-functioning of a model (e.g., DDP),
 #     but DDP already manages readding the hooks!
 #
@@ -177,7 +177,7 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
 # be a TypedStorage
 def _rebuild_tensor(storage, storage_offset, size, stride):
     # first construct a tensor with the correct dtype/device
-    t = torch.tensor([], dtype=storage.dtype, device=storage._untyped_storage.device)
+    t = torch.empty((0,), dtype=storage.dtype, device=storage._untyped_storage.device)
     return t.set_(storage._untyped_storage, storage_offset, size, stride)
 
 
@@ -209,6 +209,29 @@ def _rebuild_tensor_v2(
     # OrderedDict.  See Note [Don't serialize hooks]
     tensor._backward_hooks = backward_hooks
     return tensor
+
+
+def _rebuild_tensor_v3(
+    storage,
+    storage_offset,
+    size,
+    stride,
+    requires_grad,
+    backward_hooks,
+    dtype,
+    metadata=None,
+):
+    t = torch.empty(
+        (0,),
+        dtype=dtype,
+        device=storage._untyped_storage.device,
+        requires_grad=requires_grad,
+    )
+    t.set_(storage._untyped_storage, storage_offset, size, stride)
+    if metadata:
+        set_tensor_metadata(t, metadata)
+    t._backward_hooks = backward_hooks
+    return t
 
 
 _sparse_tensors_to_validate: List["torch.Tensor"] = []
@@ -301,6 +324,10 @@ def _rebuild_sparse_tensor(layout, data):
         return result
 
     raise NotImplementedError(f"rebuilding sparse tensor for layout {layout}")
+
+
+def _rebuild_nested_tensor(buffer, sizes, strides, storage_offsets):
+    return torch._nested_view_from_buffer(buffer, sizes, strides, storage_offsets)
 
 
 def _rebuild_device_tensor_from_numpy(data, dtype, device, requires_grad):
@@ -463,22 +490,6 @@ def _import_dotted_name(name):
     for component in components[1:]:
         obj = getattr(obj, component)
     return obj
-
-
-# Taken from python 3.5 docs
-def _accumulate(iterable, fn=lambda x, y: x + y):
-    "Return running totals"
-    # _accumulate([1,2,3,4,5]) --> 1 3 6 10 15
-    # _accumulate([1,2,3,4,5], operator.mul) --> 1 2 6 24 120
-    it = iter(iterable)
-    try:
-        total = next(it)
-    except StopIteration:
-        return
-    yield total
-    for element in it:
-        total = fn(total, element)
-        yield total
 
 
 def _flatten_dense_tensors(tensors):
@@ -837,9 +848,43 @@ def classproperty(func):
     return _ClassPropertyDescriptor(func)
 
 
-# Whether we are compiling with torch.compile or not
-def is_compiling():
-    return False
+def is_compiling() -> bool:
+    """
+    Indicates whether we are tracing/compiling with torch.compile() or torch.export().
+
+    TODO(khabinov): we should deprecate this function and use torch.compiler.is_compiling().
+    """
+    return torch.compiler.is_compiling()
+
+
+def _functionalize_sync(t):
+    # This code lives in python instead of C++ since conditioning on a certain python subclass
+    # is much more of a pain in C++.
+    from torch._subclasses.functional_tensor import FunctionalTensor
+
+    if isinstance(t, FunctionalTensor):
+        # If a FunctionalTensorMode is active while syncing, we don't want it to intercept any ops that get called
+        # when we sync our inner tensor.
+        # Why?
+        # (1) If there are input mutations in the graph, then they will be re-applied during
+        #     AOTAutograd when we call _sync() from inside of our functionalization kernels.
+        # (2) _sync() causes us to regenerate our updated the tensor from the updated base,
+        #     which dispatches to a bunch of view ops
+        # (3) The input to these view ops is our inner FunctionalTensorWrapper
+        #     (since the sync was called from C++), not the python FunctionalTensor
+        # (4) if a python FunctionalTensorMode is active, it will complain when it intercepts
+        #     the view op, since it will see an input that is a C++ FunctionalTensorWrapper
+        #     (aka a normal torch.Tensor) instead of a python `FunctionalTensor).
+        maybe_functional_mode = torch._C._unset_dispatch_mode(
+            torch._C._TorchDispatchModeKey.FUNCTIONAL
+        )
+        try:
+            torch._functionalize_sync(t.elem)  # type: ignore[attr-defined]
+        finally:
+            if maybe_functional_mode is not None:
+                torch._C._set_dispatch_mode(maybe_functional_mode)
+    else:
+        torch._functionalize_sync(t)  # type: ignore[attr-defined]
 
 
 @functools.lru_cache(2)
@@ -850,3 +895,43 @@ def _get_device_module(device_type: str):
             f"Device '{device_type}' does not have a corresponding module registered as 'torch.{device_type}'."
         )
     return device_module
+
+
+def _dummy_type(name: str) -> type:
+    def get_err_fn(is_init: bool):
+        def err_fn(obj, *args, **kwargs):
+            if is_init:
+                class_name = obj.__class__.__name__
+            else:
+                class_name = obj.__name__
+            raise RuntimeError(f"Tried to instantiate dummy base class {class_name}")
+
+        return err_fn
+
+    return type(
+        name, (object,), {"__init__": get_err_fn(True), "__new__": get_err_fn(False)}
+    )
+
+
+class _LazySeedTracker:
+    # Since seeding is memory-less, only track the latest seed.
+    # Note: `manual_seed_all` followed by `manual_seed` overwrites
+    # the seed on current device. We track the order of **latest**
+    # calls between these two API.
+    def __init__(self):
+        self.manual_seed_all_cb = None
+        self.manual_seed_cb = None
+        self.call_order = []
+
+    def queue_seed_all(self, cb, traceback):
+        self.manual_seed_all_cb = (cb, traceback)
+        # update seed_all to be latest
+        self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
+
+    def queue_seed(self, cb, traceback):
+        self.manual_seed_cb = (cb, traceback)
+        # update seed to be latest
+        self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
+
+    def get_calls(self) -> List:
+        return self.call_order

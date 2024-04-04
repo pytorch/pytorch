@@ -19,6 +19,8 @@
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
+#include <iostream>
+
 namespace torch::jit {
 
 namespace {
@@ -194,6 +196,9 @@ Method::Method(ModulePtr owner, Function* function)
 
 Module Method::owner() const {
   return Module(owner_);
+}
+ObjectPtr Method::raw_owner() const {
+  return owner_;
 }
 void Method::run(Stack& stack) {
   stack.insert(stack.begin(), owner()._ivalue()); // self
@@ -502,9 +507,9 @@ Module optimize_for_inference(
   } else {
     frozen_mod = module;
   }
-
-  optimize_for_inference(frozen_mod.get_method("forward").graph());
-
+  if (auto method = frozen_mod.find_method("forward")) {
+    optimize_for_inference(frozen_mod.get_method("forward").graph());
+  }
   for (const auto& method : other_methods) {
     optimize_for_inference(frozen_mod.get_method(method).graph());
   }

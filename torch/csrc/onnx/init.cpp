@@ -1,4 +1,5 @@
 #include <onnx/onnx_pb.h>
+#include <torch/csrc/onnx/back_compat.h>
 #include <torch/csrc/onnx/init.h>
 #include <torch/csrc/onnx/onnx.h>
 #include <torch/version.h>
@@ -28,8 +29,7 @@
 #include <torch/csrc/jit/passes/onnx/unpack_quantized_weights.h>
 #include <torch/csrc/jit/serialization/export.h>
 
-namespace torch {
-namespace onnx {
+namespace torch::onnx {
 
 using namespace torch::jit;
 
@@ -272,7 +272,13 @@ void initONNXBindings(PyObject* module) {
       .value("UINT64", ::ONNX_NAMESPACE::TensorProto_DataType_UINT64)
       .value("COMPLEX64", ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX64)
       .value("COMPLEX128", ::ONNX_NAMESPACE::TensorProto_DataType_COMPLEX128)
-      .value("BFLOAT16", ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16);
+      .value("BFLOAT16", ::ONNX_NAMESPACE::TensorProto_DataType_BFLOAT16)
+      .value("FLOAT8E4M3FN", ::torch::onnx::TensorProto_DataType_FLOAT8E4M3FN)
+      .value(
+          "FLOAT8E4M3FNUZ", ::torch::onnx::TensorProto_DataType_FLOAT8E4M3FNUZ)
+      .value("FLOAT8E5M2", ::torch::onnx::TensorProto_DataType_FLOAT8E5M2)
+      .value(
+          "FLOAT8E5M2FNUZ", ::torch::onnx::TensorProto_DataType_FLOAT8E5M2FNUZ);
 
   py::enum_<OperatorExportTypes>(onnx, "OperatorExportTypes")
       .value("ONNX", OperatorExportTypes::ONNX)
@@ -293,5 +299,4 @@ void initONNXBindings(PyObject* module) {
   onnx.attr("_CAFFE2_ATEN_FALLBACK") = false;
 #endif
 }
-} // namespace onnx
-} // namespace torch
+} // namespace torch::onnx

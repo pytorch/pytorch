@@ -171,9 +171,9 @@ As the message suggests you can set
 ``torch._dynamo.config.verbose=True`` to get a full stack trace to both
 the error in TorchDynamo and the user code. In addition to this flag,
 you can also set the ``log_level`` of TorchDynamo through
-``torch._dynamo.config.log_level``. These levels include:
+``torch._logging.set_logs(dynamo = logging.INFO)`` or ``TORCH_LOGS="dynamo"``. These levels include:
 
-- ``logging.DEBUG``: Print every instruction that is
+- ``logging.DEBUG`` or ``TORCH_LOGS="+dynamo"``: Print every instruction that is
   encountered in addition to all the log levels listed below.
 - ``logging.INFO``:
   Print each function that is compiled (original and modified bytecode)
@@ -274,7 +274,7 @@ Minifying TorchInductor Errors
 ------------------------------
 
 From here, let’s run the minifier to get a minimal repro. Setting the
-environment variable ``TORCHDYNAMO_REPRO_AFTER=“aot”`` (or setting
+environment variable ``TORCHDYNAMO_REPRO_AFTER="aot"`` (or setting
 ``torch._dynamo.config.repro_after="aot"`` directly) will generate a
 Python program which reduces the graph produced by AOTAutograd to the
 smallest subgraph which reproduces the error. (See below for an example
@@ -376,7 +376,7 @@ through an example.
 
 In order to run the code after TorchDynamo has traced the forward graph,
 you can use the ``TORCHDYNAMO_REPRO_AFTER`` environment variable. Running
-this program with ``TORCHDYNAMO_REPRO_AFTER=“dynamo”`` (or
+this program with ``TORCHDYNAMO_REPRO_AFTER="dynamo"`` (or
 ``torch._dynamo.config.repro_after="dynamo"``) should produce `this
 output <https://gist.github.com/mlazos/244e3d5b53667e44078e194762c0c92b>`__\ and
 the following code in ``{torch._dynamo.config.base_dir}/repro.py``.
@@ -612,21 +612,26 @@ that are encountered. Here is an example usage:
        if b.sum() < 0:
            b = b * -1
        return x * b
-   explanation, out_guards, graphs, ops_per_graph, break_reasons, explanation_verbose = (
-       dynamo.explain(toy_example, torch.randn(10), torch.randn(10))
-   )
+   explanation = dynamo.explain(toy_example)(torch.randn(10), torch.randn(10))
    print(explanation_verbose)
    """
-   Dynamo produced 3 graphs, with 2 graph breaks and 6 ops.
-    Break reasons:
-   1. call_function BuiltinVariable(print) [ConstantVariable(str)] {}
-      File "t2.py", line 16, in toy_example
-       print("woo")
-
-   2. generic_jump
-      File "t2.py", line 17, in toy_example
-       if b.sum() < 0:
-    """
+   Graph Count: 3
+   Graph Break Count: 2
+   Op Count: 5
+   Break Reasons:
+     Break Reason 1:
+       Reason: builtin: print [<class 'torch._dynamo.variables.constant.ConstantVariable'>] False
+       User Stack:
+         <FrameSummary file foo.py, line 5 in toy_example>
+     Break Reason 2:
+       Reason: generic_jump TensorVariable()
+       User Stack:
+         <FrameSummary file foo.py, line 6 in torch_dynamo_resume_in_toy_example_at_5>
+   Ops per Graph:
+     ...
+   Out Guards:
+     ...
+   """
 
 Outputs include:
 
@@ -634,7 +639,7 @@ Outputs include:
 - ``graphs`` - a list of graph modules which were successfully traced.
 - ``ops_per_graph`` - a list of lists where each sublist contains the ops that are run in the graph.
 
-To throw an error on the first graph break encountered, use the ``nopython``
+To throw an error on the first graph break encountered, use the ``fullgraph``
 mode. This mode disables TorchDynamo’s Python fallback, and only
 succeeds if the entire program is convertible into a single graph. Example
 usage:
@@ -644,7 +649,7 @@ usage:
    def toy_example(a, b):
       ...
 
-   compiled_toy = torch.compile(toy_example, fullgraph=True, backend=<compiler>)
+   compiled_toy = torch.compile(toy_example, fullgraph=True, backend=<compiler>)(a, b)
 
 Excessive Recompilation
 -----------------------
@@ -707,3 +712,18 @@ to detect bugs in our codegen or with a backend compiler.
 
 If you'd like to ensure that random number generation is the same across both torch
 and triton then you can enable ``torch._inductor.config.fallback_random = True``
+
+Extended Debugging
+~~~~~~~~~~~~~~~~~~
+
+Extended debugging can be enabled by using the following experimental flags.
+
+``TORCHDYNAMO_EXTENDED_DEBUG_GUARD_ADDED`` - provides extended debug information if the
+string representation of a guard matches this flag value. For example, set it to
+"Ne(s0, 10)" to generate full Python and C++ backtrace whenever guard was issued.
+``TORCHDYNAMO_EXTENDED_DEBUG_CREATE_SYMBOL`` - provides extended debug information when
+a particular symbol is allocated. For example, set this to "u2" to generate full Python
+and C++ backtrace whenever this symbol was created.
+``TORCHDYNAMO_EXTENDED_DEBUG_CPP`` - provides extended debug information (C++ backtrace)
+for all extended debug settings as well as errors. For example, set this to "1". The C++
+backtrace is slow and very spammy so it is not included by default with extended debugging.

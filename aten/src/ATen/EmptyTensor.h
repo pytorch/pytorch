@@ -1,8 +1,7 @@
 #pragma once
 #include <ATen/core/TensorBase.h>
 
-namespace at {
-namespace detail {
+namespace at::detail {
 
 inline void check_size_nonnegative(ArrayRef<int64_t> size) {
   for (const auto& x : size) {
@@ -17,8 +16,8 @@ inline void check_size_nonnegative(ArrayRef<int64_t> size) {
 
 inline void check_size_nonnegative(ArrayRef<c10::SymInt> size) {
   for (const auto& x : size) {
-    TORCH_SYM_CHECK(
-        x.sym_ge(0),
+    TORCH_CHECK(
+        x.expect_size(__FILE__, __LINE__),
         "Trying to create tensor with negative dimension ",
         x,
         ": ",
@@ -47,6 +46,13 @@ TORCH_API SymInt computeStorageNbytes(
 
 TORCH_API TensorBase empty_generic(
     IntArrayRef size,
+    c10::Allocator* allocator,
+    c10::DispatchKeySet ks,
+    ScalarType scalar_type,
+    c10::optional<c10::MemoryFormat> memory_format_opt);
+
+TORCH_API TensorBase empty_generic_symint(
+    SymIntArrayRef size,
     c10::Allocator* allocator,
     c10::DispatchKeySet ks,
     ScalarType scalar_type,
@@ -158,5 +164,4 @@ TORCH_API TensorBase empty_strided_symint_meta(
     SymIntArrayRef stride,
     const TensorOptions& options);
 
-} // namespace detail
-} // namespace at
+} // namespace at::detail

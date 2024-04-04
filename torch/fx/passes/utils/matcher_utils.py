@@ -2,8 +2,10 @@ from dataclasses import dataclass, field
 from collections import defaultdict
 import copy
 import torch
-from torch.fx.graph import Graph
-from torch.fx.node import Node
+from torch.fx import (
+    Node,
+    Graph,
+)
 from torch.fx._compatibility import compatibility
 from typing import Dict, List, Set, Any, Union, Tuple
 import logging
@@ -41,6 +43,10 @@ class InternalMatch:
 
     # nodes in matched subgraph returned by output
     returning_nodes: List[Node] = field(default_factory=list)
+
+    # map from a string name to a node in the target graph
+    # only available if the matcher is `SubgraphMatcherWithNameNodesMap`
+    name_node_map: Dict[str, Node] = field(default_factory=dict)
 
     def __copy__(self):
         return InternalMatch(anchors=self.anchors, nodes_map=self.nodes_map.copy(),
@@ -100,8 +106,20 @@ class SubgraphMatcher:
         # Attributes matching is complicated. Right now we only support matching constant tensor
         assert isinstance(pn.target, str), f"pn.target {pn.target} must be a string."
         assert isinstance(gn.target, str), f"gn.target {gn.target} must be a string."
-        pn_value = getattr(pn.graph.owning_module, pn.target)
-        gn_value = getattr(gn.graph.owning_module, gn.target)
+
+        # TODO(tmanlaibaatar) should probably make this actual API
+        def _getattr(model: torch.fx.GraphModule, attr_name: str):
+            *prefix, field = attr_name.split(".")
+            t = model
+            for item in prefix:
+                t = getattr(t, item, None)  # type: ignore[assignment]
+                assert t is not None
+
+            return getattr(t, field)
+
+        pn_value = _getattr(pn.graph.owning_module, pn.target)
+        gn_value = _getattr(gn.graph.owning_module, gn.target)
+
         if type(pn_value) != type(gn_value):
             return False
 

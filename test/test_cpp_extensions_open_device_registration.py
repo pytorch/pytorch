@@ -51,6 +51,7 @@ class DummyModule:
         return 0
 
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionOpenRgistration(common.TestCase):
     """Tests Open Device Registration with C++ extensions.
     """
@@ -178,11 +179,34 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         def test_open_device_dispatchstub():
             # test kernels could be reused by privateuse1 backend through dispatchstub
             torch.utils.rename_privateuse1_backend('foo')
-            input_data = torch.randn(3, 4, 5, dtype=torch.float32, device="cpu")
+            input_data = torch.randn(2, 2, 3, dtype=torch.float32, device="cpu")
             foo_input_data = input_data.to("foo")
-            self.assertFalse(self.module.custom_abs_called())
-            torch.abs(foo_input_data)
-            self.assertTrue(self.module.custom_abs_called())
+            output_data = torch.abs(input_data)
+            foo_output_data = torch.abs(foo_input_data)
+            self.assertEqual(output_data, foo_output_data.cpu())
+            output_data = torch.randn(2, 2, 6, dtype=torch.float32, device="cpu")
+            # output operand will resize flag is True in TensorIterator.
+            foo_input_data = input_data.to("foo")
+            foo_output_data = output_data.to("foo")
+            # output operand will resize flag is False in TensorIterator.
+            torch.abs(input_data, out=output_data[:, :, 0:6:2])
+            torch.abs(foo_input_data, out=foo_output_data[:, :, 0:6:2])
+            self.assertEqual(output_data, foo_output_data.cpu())
+            # output operand will resize flag is True in TensorIterator.
+            # and convert output to contiguous tensor in TensorIterator.
+            output_data = torch.randn(2, 2, 6, dtype=torch.float32, device="cpu")
+            foo_input_data = input_data.to("foo")
+            foo_output_data = output_data.to("foo")
+            torch.abs(input_data, out=output_data[:, :, 0:6:3])
+            torch.abs(foo_input_data, out=foo_output_data[:, :, 0:6:3])
+            self.assertEqual(output_data, foo_output_data.cpu())
+
+        def test_open_device_quantized():
+            torch.utils.rename_privateuse1_backend('foo')
+            input_data = torch.randn(3, 4, 5, dtype=torch.float32, device="cpu").to("foo")
+            quantized_tensor = torch.quantize_per_tensor(input_data, 0.1, 10, torch.qint8)
+            self.assertEqual(quantized_tensor.device, torch.device('foo:0'))
+            self.assertEqual(quantized_tensor.dtype, torch.qint8)
 
         def test_open_device_random():
             with torch.random.fork_rng(device_type="foo"):
@@ -254,6 +278,9 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             z3 = y.untyped_storage()
             self.assertFalse(self.module.custom_storageImpl_called())
             z3 = z3.foo()
+            self.assertTrue(self.module.custom_storageImpl_called())
+            self.assertFalse(self.module.custom_storageImpl_called())
+            z3 = z3[0:3]
             self.assertTrue(self.module.custom_storageImpl_called())
 
         def test_open_device_storage_pin_memory():
@@ -362,10 +389,11 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             foo_tensor = cpu_tensor.foo()
             foo_storage = foo_tensor.storage()
             self.assertTrue(foo_storage.size() == 8)
-            foo_storage.resize_(8)
+            # Only register tensor resize_ function.
+            foo_tensor.resize_(8)
             self.assertTrue(foo_storage.size() == 8)
-            with self.assertRaisesRegex(RuntimeError, 'Overflow'):
-                foo_storage.resize_(8**29)
+            with self.assertRaisesRegex(TypeError, 'Overflow'):
+                foo_tensor.resize_(8**29)
 
         def test_open_device_storage_type():
             torch.utils.rename_privateuse1_backend('foo')
@@ -441,20 +469,30 @@ class TestCppExtensionOpenRgistration(common.TestCase):
             self.assertEqual(out_ref, out_test)
             self.assertEqual(x_ref.grad, x_test.grad)
 
+        def test_open_device_scalar_type_fallback():
+            torch.utils.rename_privateuse1_backend('foo')
+            z_cpu = torch.Tensor([[0, 0, 0, 1, 1, 2], [0, 1, 2, 1, 2, 2]]).to(torch.int64)
+            z = torch.triu_indices(3, 3, device='foo')
+            self.assertEqual(z_cpu, z)
+
         def test_open_device_tensor_type_fallback():
             torch.utils.rename_privateuse1_backend('foo')
             # create tensors located in custom device
-            x = torch.Tensor([1, 2, 3]).to('foo')
+            x = torch.Tensor([[1, 2, 3], [2, 3, 4]]).to('foo')
             y = torch.Tensor([1, 0, 2]).to('foo')
             # create result tensor located in cpu
-            z_cpu = torch.Tensor([0, 2, 1])
+            z_cpu = torch.Tensor([[0, 2, 1], [1, 3, 2]])
             # Check that our device is correct.
             device = self.module.custom_device()
             self.assertTrue(x.device == device)
             self.assertFalse(x.is_cpu)
             # call sub op, which will fallback to cpu
             z = torch.sub(x, y)
-
+            self.assertEqual(z_cpu, z)
+            # call index op, which will fallback to cpu
+            z_cpu = torch.Tensor([3, 1])
+            y = torch.Tensor([1, 0]).long().to('foo')
+            z = x[y, y]
             self.assertEqual(z_cpu, z)
 
         def test_open_device_tensorlist_type_fallback():
@@ -491,10 +529,12 @@ class TestCppExtensionOpenRgistration(common.TestCase):
         test_open_device_storage_type()
         test_open_device_faketensor()
         test_open_device_named_tensor()
+        test_open_device_quantized()
 
         test_compile_autograd_function_returns_self()
         test_compile_autograd_function_aliasing()
 
+        test_open_device_scalar_type_fallback()
         test_open_device_tensor_type_fallback()
         test_open_device_tensorlist_type_fallback()
 

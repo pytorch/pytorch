@@ -21,8 +21,7 @@ using transform::Graph;
  */
 TEST(CommonSubexpressionEliminationTest, TestSimple) {
   NetDef netdef;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  OperatorDef* op;
+  OperatorDef* op [[maybe_unused]] = nullptr;
 
   // This operator simply reads input and outputs it.
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)
@@ -76,8 +75,7 @@ TEST(CommonSubexpressionEliminationTest, TestSimple) {
  */
 TEST(CommonSubexpressionEliminationTest, TestFromExternal) {
   NetDef netdef;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  OperatorDef* op;
+  OperatorDef* op [[maybe_unused]] = nullptr;
 
   // This operator simply reads input and outputs it.
   // NOLINTNEXTLINE(clang-analyzer-deadcode.DeadStores)

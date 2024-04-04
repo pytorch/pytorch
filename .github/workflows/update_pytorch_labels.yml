@@ -12,16 +12,22 @@ jobs:
   update-labels-in-S3:
     runs-on: ubuntu-22.04
     if: ${{ github.repository == 'pytorch/pytorch' }}
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           fetch-depth: 1
           submodules: false
+      - name: configure aws credentials
+        id: aws_creds
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_update_pytorch_labels
+          aws-region: us-east-1
       - name: Update PyTorch labels list in S3
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_OSSCI_METRICS_V2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_OSSCI_METRICS_V2_SECRET_ACCESS_KEY }}
         run: |
           python3 -m pip install boto3==1.19.12
           .github/scripts/export_pytorch_labels.py pytorch pytorch

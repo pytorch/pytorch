@@ -4,7 +4,8 @@ import warnings
 
 from torch._dynamo import config
 from torch._dynamo.testing import make_test_cls_with_patches
-from torch.testing._internal.common_utils import TEST_Z3
+from torch.fx.experimental import _config as fx_config
+from torch.testing._internal.common_utils import slowTest, TEST_Z3
 
 try:
     from . import (
@@ -16,6 +17,7 @@ try:
         test_misc,
         test_modules,
         test_repros,
+        test_sdpa,
         test_subgraphs,
     )
 except ImportError:
@@ -27,6 +29,7 @@ except ImportError:
     import test_misc
     import test_modules
     import test_repros
+    import test_sdpa
     import test_subgraphs
 
 
@@ -44,13 +47,16 @@ def make_dynamic_cls(cls):
         suffix,
         (config, "assume_static_by_default", False),
         (config, "specialize_int", False),
-        (config, "translation_validation", TEST_Z3),
+        (fx_config, "translation_validation", TEST_Z3),
+        (fx_config, "check_shape_env_recorded_events", True),
+        (fx_config, "validate_shape_env_version_key", True),
         xfail_prop="_expected_failure_dynamic",
     )
 
     test_classes[test_class.__name__] = test_class
     # REMOVING THIS LINE WILL STOP TESTS FROM RUNNING
     globals()[test_class.__name__] = test_class
+    test_class.__module__ = __name__
     return test_class
 
 
@@ -65,17 +71,34 @@ tests = [
     test_higher_order_ops.HigherOrderOpTests,
     test_higher_order_ops.FuncTorchHigherOrderOpTests,
     test_aot_autograd.AotAutogradFallbackTests,
+    test_sdpa.TestSDPA,
 ]
 for test in tests:
     make_dynamic_cls(test)
+del test
 
 if TEST_Z3:
     # this only fails when z3 is available
     unittest.expectedFailure(
         # SymPy is incorrectly transforming 's0 / 6 == 0.5' into 'False'.
         # Ref: https://github.com/sympy/sympy/issues/25146
-        DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes
+        DynamicShapesReproTests.test_dynamic_shapes_float_guard_dynamic_shapes  # noqa: F821
     )
+
+    # TODO model is somehow not being freed when z3 is available
+    unittest.expectedFailure(
+        DynamicShapesMiscTests.test_parameter_free_dynamic_shapes  # noqa: F821
+    )
+
+unittest.expectedFailure(
+    # Test is only valid without dynamic shapes
+    DynamicShapesReproTests.test_many_views_with_mutation_dynamic_shapes  # noqa: F821
+)
+
+# Test takes too long ~700s as of 414a1fd29f04d06e41b7f895368dd1f83a4be29d
+DynamicShapesExportTests.test_retracibility_dynamic_shapes = slowTest(  # noqa: F821
+    DynamicShapesExportTests.test_retracibility_dynamic_shapes  # noqa: F821
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

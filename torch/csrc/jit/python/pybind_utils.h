@@ -21,7 +21,6 @@
 #include <torch/csrc/jit/python/python_tracer.h>
 #include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/utils/auto_gil.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/six.h>
@@ -54,8 +53,7 @@
 #define VISIBILITY_HIDDEN __attribute__((visibility("hidden")))
 #endif
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 using ResolutionCallback = std::function<py::object(std::string)>;
 
@@ -361,7 +359,7 @@ inline c10::optional<TypePtr> unifyOrInitializeType(
 
 using InferredType = c10::InferredType;
 
-InferredType tryToInferContainerType(py::handle input);
+InferredType tryToInferContainerType(py::handle input, bool primitiveTypeOnly);
 
 // Try to infer the type of a Python object
 // The type cannot be inferred if:
@@ -399,6 +397,8 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(IntType::get());
   } else if (THPDevice_Check(input.ptr())) {
     return InferredType(DeviceObjType::get());
+  } else if (THPGenerator_Check(input.ptr())) {
+    return InferredType(GeneratorType::get());
   } else if (THPStream_Check(input.ptr())) {
     return InferredType(StreamObjType::get());
   } else if (THPDtype_Check(input.ptr())) {
@@ -496,17 +496,44 @@ inline InferredType tryToInferType(py::handle input) {
   }
 
   // Try container types
-  return tryToInferContainerType(input);
+  return tryToInferContainerType(input, false);
 }
 
-inline InferredType tryToInferContainerType(py::handle input) {
+// This function is similar to tryToInferType, but it only tries to infer
+// primitive types (int, float, bool, complex) or nested container of primitive
+// types.
+inline InferredType tryToInferPrimitiveType(py::handle input) {
+  if (input.is_none()) {
+    return InferredType(NoneType::get());
+  }
+
+  // Only primitive data type
+  if (py::isinstance<py::bool_>(input)) {
+    return InferredType(BoolType::get());
+    // NOLINTNEXTLINE(bugprone-branch-clone)
+  } else if (py::isinstance<py::int_>(input)) {
+    return InferredType(IntType::get());
+  } else if (py::isinstance<py::float_>(input)) {
+    return InferredType(FloatType::get());
+  } else if (PyComplex_CheckExact(input.ptr())) {
+    return InferredType(ComplexType::get());
+  }
+
+  // Try container types
+  return tryToInferContainerType(input, true);
+}
+
+inline InferredType tryToInferContainerType(
+    py::handle input,
+    bool primitiveTypeOnly = false) {
   if (six::isTuple(input)) {
     py::tuple tuple = py::cast<py::tuple>(input);
     std::vector<TypePtr> element_types;
     element_types.reserve(tuple.size());
 
     for (py::handle elem : tuple) {
-      auto type_match = tryToInferType(elem);
+      auto type_match = primitiveTypeOnly ? tryToInferPrimitiveType(elem)
+                                          : tryToInferType(elem);
       if (type_match.success()) {
         element_types.push_back(type_match.type());
       } else {
@@ -528,7 +555,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
 
     for (auto entry : dict) {
       // Try to infer the key type and unify it with the existing one
-      auto entry_key_type_match = tryToInferType(entry.first);
+      auto entry_key_type_match = primitiveTypeOnly
+          ? tryToInferPrimitiveType(entry.first)
+          : tryToInferType(entry.first);
       if (!entry_key_type_match.success()) {
         return entry_key_type_match.reason();
       }
@@ -543,7 +572,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
       }
 
       // Try to infer the value type and unify it with the existing one
-      auto entry_value_type_match = tryToInferType(entry.second);
+      auto entry_value_type_match = primitiveTypeOnly
+          ? tryToInferPrimitiveType(entry.second)
+          : tryToInferType(entry.second);
       if (!entry_value_type_match.success()) {
         return entry_value_type_match.reason();
       }
@@ -571,7 +602,9 @@ inline InferredType tryToInferContainerType(py::handle input) {
 
     TypePtr element_type = nullptr;
     for (auto elem : list) {
-      auto element_type_match = tryToInferType(elem);
+      auto element_type_match = primitiveTypeOnly
+          ? tryToInferPrimitiveType(elem)
+          : tryToInferType(elem);
       if (!element_type_match.success()) {
         return InferredType(c10::str(
             "Could not infer type of list element: ",
@@ -590,16 +623,26 @@ inline InferredType tryToInferContainerType(py::handle input) {
     }
     return InferredType(ListType::create(element_type));
   } else {
-    // TODO: this message is not correct anymore, since this InferredType is
-    // used from a bunch of circumstances unrelated to tracing. We can re-use
-    // this instead of the attribute_failure stuff in concreteType
-    return InferredType(c10::str(
-        "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
-        "are supported ",
-        "as inputs or outputs of traced functions",
-        ", but instead got value of type ",
-        py::str(input.get_type().attr("__name__")),
-        "."));
+    if (primitiveTypeOnly) {
+      return InferredType(c10::str(
+          "Only tuple, list, or dict (possibly nested) of primitive types (bool, float, int, complex)",
+          "are supported ",
+          "as inputs or outputs of traced functions",
+          ", but instead got value of type ",
+          py::str(input.get_type().attr("__name__")),
+          "."));
+    } else {
+      // TODO: this message is not correct anymore, since this InferredType is
+      // used from a bunch of circumstances unrelated to tracing. We can re-use
+      // this instead of the attribute_failure stuff in concreteType
+      return InferredType(c10::str(
+          "Only tensors and (possibly nested) tuples of tensors, lists, or dicts",
+          "are supported ",
+          "as inputs or outputs of traced functions",
+          ", but instead got value of type ",
+          py::str(input.get_type().attr("__name__")),
+          "."));
+    }
   }
 }
 
@@ -1112,5 +1155,4 @@ TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     bool is_overload,
     c10::optional<c10::DispatchKey> dk = c10::nullopt);
 
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

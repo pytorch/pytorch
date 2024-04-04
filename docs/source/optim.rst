@@ -31,6 +31,17 @@ a ``params`` key, containing a list of parameters belonging to it. Other keys
 should match the keyword arguments accepted by the optimizers, and will be used
 as optimization options for this group.
 
+For example, this is very useful when one wants to specify per-layer learning rates::
+
+    optim.SGD([
+                    {'params': model.base.parameters(), 'lr': 1e-2},
+                    {'params': model.classifier.parameters()}
+                ], lr=1e-3, momentum=0.9)
+
+This means that ``model.base``'s parameters will use a learning rate of ``1e-2``, whereas
+``model.classifier``'s parameters will stick to the default learning rate of ``1e-3``.
+Finally a momentum of ``0.9`` will be used for all parameters.
+
 .. note::
 
     You can still pass options as keyword arguments. They will be used as
@@ -38,17 +49,24 @@ as optimization options for this group.
     only want to vary a single option, while keeping all others consistent
     between parameter groups.
 
+Also consider the following example related to the distinct penalization of parameters.
+Remember that :func:`~torch.nn.Module.parameters` returns an iterable that
+contains all learnable parameters, including biases and other
+parameters that may prefer distinct penalization. To address this, one can specify
+individual penalization weights for each parameter group::
 
-For example, this is very useful when one wants to specify per-layer learning rates::
+    bias_params = [p for name, p in self.named_parameters() if 'bias' in name]
+    others = [p for name, p in self.named_parameters() if 'bias' not in name]
 
     optim.SGD([
-                    {'params': model.base.parameters()},
-                    {'params': model.classifier.parameters(), 'lr': 1e-3}
-                ], lr=1e-2, momentum=0.9)
+                    {'params': others},
+                    {'params': bias_params, 'weight_decay': 0}
+                ], weight_decay=1e-2, lr=1e-2)
 
-This means that ``model.base``'s parameters will use the default learning rate of ``1e-2``,
-``model.classifier``'s parameters will use a learning rate of ``1e-3``, and a momentum of
-``0.9`` will be used for all parameters.
+In this manner, bias terms are isolated from non-bias terms, and a ``weight_decay``
+of ``0`` is set specifically for the bias terms, as to avoid any penalization for
+this group.
+
 
 Taking an optimization step
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -409,3 +427,23 @@ We train the model for a total of 300 epochs and start to collect EMA averages i
 >>> torch.optim.swa_utils.update_bn(loader, ema_model)
 >>> # Use ema_model to make predictions on test data
 >>> preds = ema_model(test_input)
+
+
+.. This module needs to be documented. Adding here in the meantime
+.. for tracking purposes
+.. py:module:: torch.optim.adadelta
+.. py:module:: torch.optim.adagrad
+.. py:module:: torch.optim.adam
+.. py:module:: torch.optim.adamax
+.. py:module:: torch.optim.adamw
+.. py:module:: torch.optim.asgd
+.. py:module:: torch.optim.lbfgs
+.. py:module:: torch.optim.lr_scheduler
+.. py:module:: torch.optim.nadam
+.. py:module:: torch.optim.optimizer
+.. py:module:: torch.optim.radam
+.. py:module:: torch.optim.rmsprop
+.. py:module:: torch.optim.rprop
+.. py:module:: torch.optim.sgd
+.. py:module:: torch.optim.sparse_adam
+.. py:module:: torch.optim.swa_utils

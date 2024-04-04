@@ -316,7 +316,11 @@ def is_foreach_func(f: NativeFunction) -> bool:
 # is functional for their backward derivatives (and forward derivatives in the future), i.e.,
 # they would find such one in `functional_info_by_signature`. There however are some exceptions:
 _foreach_with_inplace_ref = {"_foreach_zero_"}
-_foreach_with_tensor_overload = {"_foreach_mul.Tensor"}
+_foreach_with_tensor_overload = {
+    "_foreach_add.Tensor",
+    "_foreach_mul.Tensor",
+    "_foreach_div.Tensor",
+}
 
 
 # Checks if `function_schema` is a native, non-foreach function which `f`, a foreach function

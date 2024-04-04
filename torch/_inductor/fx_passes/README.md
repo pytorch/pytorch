@@ -35,4 +35,4 @@ inputs and outputs have any aliasing, it suffices to check whether the
 storages of the input and the storages of the output have any overlap. See
 `remove_noop_ops` for an example of how to do this.
 
-Additionally, we do have one pass that *does* introduce mutation - `reinplace_scatters`. This pass must run *just before Inductor lowering*, as otherwise this breaks our invariant.
+Additionally, we do have one pass that *does* introduce mutation - `reinplace_inplaceable_ops`. This pass must run *just before Inductor lowering*, as otherwise this breaks our invariant.

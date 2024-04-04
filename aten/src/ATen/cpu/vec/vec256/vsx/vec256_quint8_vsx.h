@@ -94,7 +94,7 @@ struct Vectorized<c10::quint8> {
           vec_vsx_ld(offset0, reinterpret_cast<const value_type*>(ptr)),
           vec_vsx_ld(offset16, reinterpret_cast<const value_type*>(ptr))};
     }
-    __at_align__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()] = {};
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
     return {vec_vsx_ld(offset0, tmp_values), vec_vsx_ld(offset16, tmp_values)};
   }
@@ -170,6 +170,65 @@ struct Vectorized<c10::quint8> {
         Vectorized<float>{
             vec_madd(scale_vec0, vecf0_3, scale_zp_premul0),
             vec_madd(scale_vec1, vecf1_3, scale_zp_premul1)}};
+  }
+
+  float_vec_return_type C10_ALWAYS_INLINE dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point) const {
+    // unpacking unsigned as signed
+    vint16 vecshi0 = vec_unpackh((vint8)_vec0);
+    vint16 vecshi1 = vec_unpackl((vint8)_vec0);
+
+    vint16 vecshi2 = vec_unpackh((vint8)_vec1);
+    vint16 vecshi3 = vec_unpackl((vint8)_vec1);
+
+    // signed ->  unsigned
+    vecshi0 = vec_and(vecshi0, mask_unsigned);
+    vecshi1 = vec_and(vecshi1, mask_unsigned);
+
+    vecshi2 = vec_and(vecshi2, mask_unsigned);
+    vecshi3 = vec_and(vecshi3, mask_unsigned);
+
+    vint32 veci0 = vec_unpackh(vecshi0);
+    vint32 veci1 = vec_unpackl(vecshi0);
+
+    vint32 veci2 = vec_unpackh(vecshi1);
+    vint32 veci3 = vec_unpackl(vecshi1);
+
+    vint32 veci4 = vec_unpackh(vecshi2);
+    vint32 veci5 = vec_unpackl(vecshi2);
+
+    vint32 veci6 = vec_unpackh(vecshi3);
+    vint32 veci7 = vec_unpackl(vecshi3);
+
+    vfloat32 vecf0_0 = vec_float(veci0);
+    vfloat32 vecf1_0 = vec_float(veci1);
+
+    vfloat32 vecf0_1 = vec_float(veci2);
+    vfloat32 vecf1_1 = vec_float(veci3);
+
+    vfloat32 vecf0_2 = vec_float(veci4);
+    vfloat32 vecf1_2 = vec_float(veci5);
+
+    vfloat32 vecf0_3 = vec_float(veci6);
+    vfloat32 vecf1_3 = vec_float(veci7);
+    vfloat32 scale_vec0 = scale.vec0();
+    vfloat32 scale_vec1 = scale.vec1();
+    vfloat32 zero_point0 = zero_point.vec0();
+    vfloat32 zero_point1 = zero_point.vec1();
+    return {
+        Vectorized<float>{
+            (vecf0_0 - zero_point0) * scale_vec0,
+            (vecf1_0 - zero_point1) * scale_vec1},
+        Vectorized<float>{
+            (vecf0_1 - zero_point0) * scale_vec0,
+            (vecf1_1 - zero_point1) * scale_vec1},
+        Vectorized<float>{
+            (vecf0_2 - zero_point0) * scale_vec0,
+            (vecf1_2 - zero_point1) * scale_vec1},
+        Vectorized<float>{
+            (vecf0_3 - zero_point0) * scale_vec0,
+            (vecf1_3 - zero_point1) * scale_vec1}};
   }
 
   static Vectorized<c10::quint8> quantize(

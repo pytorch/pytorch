@@ -1,225 +1,283 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 # Owner(s): ["oncall: distributed"]
 
+from copy import deepcopy
+
 import torch
-import torch.distributed as dist
-from torch.distributed._tensor import DeviceMesh, distribute_tensor, Replicate, Shard
+import torch.nn as nn
+
+from torch.distributed._tensor import Replicate, Shard, init_device_mesh, distribute_tensor, DTensor
+from torch.distributed._tensor.placement_types import _Partial
+from torch.distributed._tensor.debug import CommDebugMode
+from torch.distributed.tensor.parallel import parallelize_module
 from torch.distributed.tensor.parallel.style import (
     ColwiseParallel,
-    make_input_replicate_1d,
-    make_input_reshard_replicate,
-    make_input_shard_1d,
-    make_sharded_output_tensor,
-    make_output_replicate_1d,
-    make_output_reshard_tensor,
-    make_output_shard_1d,
-    make_output_tensor,
+    PrepareModuleInput,
+    PrepareModuleOutput,
     RowwiseParallel,
+    SequenceParallel,
 )
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
+    NUM_DEVICES,
+    RMSNormPython,
 )
 
+
+c10d_functional = torch.ops.c10d_functional
 
 class TensorParallelStyleTest(DTensorTestBase):
     @property
     def world_size(self):
-        gpu_num = torch.cuda.device_count()
-        return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
-
-    def _1d_input_func_check(
-        self, input_local_tensor, expected_local_tensor, func, tensor_input_only=False
-    ) -> None:
-        with self.assertRaisesRegex(
-            RuntimeError, "device_mesh is not passed nor can be inferred"
-        ):
-            dtensor = func(input_local_tensor)
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(self.world_size).reshape(self.world_size // 2, 2),
-        )
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "device_mesh has dims [0-9]+ but expected to be 1 for input.",
-        ):
-            dtensor = func(input_local_tensor, device_mesh)
-
-        device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
-        # test 1: replicate local tensor
-        dtensor = func(input_local_tensor, device_mesh)
-        self.assertEqual(expected_local_tensor, dtensor.to_local())
-        if not tensor_input_only:
-            # test 2: replicate DTensor
-            dtensor = func(dtensor)
-            self.assertEqual(expected_local_tensor, dtensor.to_local())
-            # test 3: replicate DTensor with DeviceMesh passed
-            dtensor = func(dtensor, device_mesh)
-            self.assertEqual(expected_local_tensor, dtensor.to_local())
-
-    @with_comms
-    def test_make_input_replicate_1d(self):
-        tensor = torch.rand(8, 16, device=self.device_type)
-        self._1d_input_func_check(tensor, tensor, make_input_replicate_1d)
-
-    @with_comms
-    def test_make_input_shard_1d(self):
-        tensor = torch.rand(8, 16, device=self.device_type)
-        self._1d_input_func_check(tensor, tensor, make_input_shard_1d)
-
-    @with_comms
-    def test_make_input_reshard_replicate(self):
-        tensor = torch.rand(8, 16, device=self.device_type)
-        gathered_tensor = [
-            torch.empty(8, 16, device=self.device_type)
-            for _ in range(self.world_size)
-        ]
-        dist.all_gather(gathered_tensor, tensor)
-        gathered_tensor = torch.cat(gathered_tensor)
-        self._1d_input_func_check(tensor, gathered_tensor, make_input_reshard_replicate)
-
-    # Common logic for testing prepare output funcs
-    def _test_prepare_output(self, func, spec, dim=None, device_mesh_input_none=False):
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        tensor = torch.rand(8, 16, device=self.device_type)
-        dtensor = distribute_tensor(tensor, device_mesh, spec)
-        device_mesh_input = None if device_mesh_input_none else device_mesh
-        if dim is not None:
-            output = func(dtensor, device_mesh_input, dim)
-        else:
-            output = func(dtensor, device_mesh_input)
-        return output, dtensor, device_mesh
-
-    @with_comms
-    def test_make_output_shard_1d(self):
-        # test when output is sharded.
-        output, dtensor, device_mesh = self._test_prepare_output(
-            make_output_shard_1d, [Shard(0)], 1
-        )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Shard(1)]))
-        #  test when output is replicated.
-        output, dtensor, device_mesh = self._test_prepare_output(
-            make_output_shard_1d, [Replicate()], 0
-        )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Shard(0)]))
-        # test when input device_mesh is None.
-        output, dtensor, device_mesh = self._test_prepare_output(
-            make_output_shard_1d, [Shard(0)], 1, True
-        )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Shard(1)]))
-
-    @with_comms
-    def test_make_output_replicate_1d(self):
-        output, dtensor, device_mesh = self._test_prepare_output(
-            make_output_replicate_1d, [Shard(0)]
-        )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]))
-        # test when input device_mesh is None.
-        output, dtensor, device_mesh = self._test_prepare_output(
-            make_output_replicate_1d, [Shard(0)], None, True
-        )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]))
-
-    @with_comms
-    def test_make_output_tensor(self):
-        # test when output is sharded.
-        output, dtensor, device_mesh = self._test_prepare_output(
-            make_output_tensor, [Shard(0)]
-        )
-        self.assertEqual(
-            output, dtensor.redistribute(device_mesh, [Replicate()]).to_local()
-        )
-        #  test when output is replicated.
-        output, dtensor, device_mesh = self._test_prepare_output(
-            make_output_tensor, [Replicate()]
-        )
-        self.assertEqual(
-            output, dtensor.redistribute(device_mesh, [Replicate()]).to_local()
-        )
-        # test when input device_mesh is None.
-        output, dtensor, device_mesh = self._test_prepare_output(
-            make_output_tensor, [Shard(0)], None, True
-        )
-        self.assertEqual(
-            output, dtensor.redistribute(device_mesh, [Replicate()]).to_local()
-        )
-
-    @with_comms
-    def test_make_output_reshard_tensor(self):
-        # test when output is sharded.
-        output, dtensor, device_mesh = self._test_prepare_output(
-            make_output_reshard_tensor, [Shard(0)]
-        )
-        self.assertEqual(
-            output, dtensor.redistribute(device_mesh, [Shard(0)]).to_local()
-        )
-        #  test when output is replicated.
-        output, dtensor, device_mesh = self._test_prepare_output(
-            make_output_reshard_tensor, [Replicate()]
-        )
-        self.assertEqual(
-            output, dtensor.redistribute(device_mesh, [Shard(0)]).to_local()
-        )
-        # test when input device_mesh is None.
-        output, dtensor, device_mesh = self._test_prepare_output(
-            make_output_reshard_tensor, [Shard(0)], None, True
-        )
-        self.assertEqual(
-            output, dtensor.redistribute(device_mesh, [Shard(0)]).to_local()
-        )
-
-    # Common logic for testing prepare output funcs errors.
-    def _test_prepare_output_error(self, func):
-        tensor = torch.rand(8, 16, device=self.device_type)
-        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        dtensor = distribute_tensor(tensor, device_mesh, [Shard(0)])
-        output = [dtensor]
-        with self.assertRaisesRegex(
-            AssertionError,
-            "Expect output of Tensor Parallel to be a DTensor, but found"
-            f" {type(output)}.",
-        ):
-            func(output, device_mesh)
-        device_mesh = DeviceMesh(
-            self.device_type,
-            torch.arange(self.world_size).reshape(self.world_size // 2, 2),
-        )
-        with self.assertRaisesRegex(
-            AssertionError,
-            "device_mesh has dims 2 but expected to be 1 for output.",
-        ):
-            func(dtensor, device_mesh)
-
-    @with_comms
-    def test_prepare_output_error(self):
-        self._test_prepare_output_error(make_output_shard_1d)
-        self._test_prepare_output_error(make_output_replicate_1d)
-        self._test_prepare_output_error(make_output_tensor)
-
-    @with_comms
-    def test_rowwise_parallel_style(self):
-        tensor = torch.rand(8, 16, device=self.device_type)
-        rs = RowwiseParallel()
-        self._1d_input_func_check(tensor, tensor, rs._prepare_input)
-        # TODO: change output test
-        output, dtensor, device_mesh = self._test_prepare_output(
-            rs._prepare_output, [Shard(0)]
-        )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]).to_local())
-        # test when input device_mesh is None.
-        output, dtensor, device_mesh = self._test_prepare_output(
-            rs._prepare_output, [Shard(0)], None, True
-        )
-        self.assertEqual(output, dtensor.redistribute(device_mesh, [Replicate()]).to_local())
-        self._test_prepare_output_error(rs._prepare_output)
+        return NUM_DEVICES
 
     @with_comms
     def test_colwise_parallel_style(self):
-        tensor = torch.rand(8, 16, device=self.device_type)
-        cs = ColwiseParallel()
-        self._1d_input_func_check(tensor, tensor, cs._prepare_input)
-        self.assertEqual(make_sharded_output_tensor, cs._prepare_output)
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        comm_mode = CommDebugMode()
+        tensor = torch.rand(8, 16, device=self.device_type, requires_grad=True)
+        model = nn.Linear(16, 16, device=self.device_type)
+
+        default_col_parallel = ColwiseParallel()
+        with comm_mode:
+            colwise_mod = parallelize_module(deepcopy(model), mesh, default_col_parallel)
+            out = colwise_mod(tensor)
+            # ensure output shard on the last dim
+            self.assertEqual(out.shape, (8, 16 // self.world_size))
+            # ensure no communication happened in fwd
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+            out.sum().backward()
+            # allreduce in bwd
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+
+        sharded_col_parallel = ColwiseParallel(input_layouts=Shard(0))
+        with comm_mode:
+            colwise_mod = parallelize_module(deepcopy(model), mesh, sharded_col_parallel)
+            out = colwise_mod(tensor)
+            # ensure output shard on the last dim
+            self.assertEqual(out.shape, (8 * self.world_size, 16 // self.world_size))
+            # allgather in fwd
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 1)
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+
+            out.sum().backward()
+            # reduce_scatter in bwd
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.reduce_scatter_tensor], 1)
+            self.assertEqual(comm_mode.get_total_counts(), 2)
+
+    @with_comms
+    def test_colwise_parallel_embedding(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        comm_mode = CommDebugMode()
+        tensor = torch.arange(8, device=self.device_type).reshape(4, 2)
+        model = nn.Embedding(16, 16, device=self.device_type)
+
+        default_col_parallel = ColwiseParallel()
+        with comm_mode:
+            colwise_mod = parallelize_module(deepcopy(model), mesh, default_col_parallel)
+            out = colwise_mod(tensor)
+            # ensure output shard on the last dim
+            self.assertEqual(out.shape, (4, 2, 16 // self.world_size))
+            # ensure no communication happened in fwd
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+            out.sum().backward()
+            # no comm in bwd
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+
+    @with_comms
+    def test_rowwise_parallel_style(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        comm_mode = CommDebugMode()
+        tensor = torch.rand(8, 16 // self.world_size, device=self.device_type, requires_grad=True)
+        model = nn.Linear(16, 16, device=self.device_type)
+
+        default_row_parallel = RowwiseParallel()
+        with comm_mode:
+            rowwise_mod = parallelize_module(deepcopy(model), mesh, default_row_parallel)
+            out = rowwise_mod(tensor)
+            # ensure output replicated
+            self.assertEqual(out.shape, (8, 16))
+            # allreduce in fwd
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+
+            out.sum().backward()
+            # no op in bwd
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+
+        sharded_row_parallel = RowwiseParallel(output_layouts=Shard(0))
+        with comm_mode:
+            rowwise_mod = parallelize_module(deepcopy(model), mesh, sharded_row_parallel)
+            out = rowwise_mod(tensor)
+            # ensure output replicated
+            self.assertEqual(out.shape, (8 // self.world_size, 16))
+            # reduce_scatter in fwd
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.reduce_scatter_tensor], 1)
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+
+            out.sum().backward()
+            # allgather in bwd
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 1)
+            self.assertEqual(comm_mode.get_total_counts(), 2)
+
+    @with_comms
+    def test_rowwise_parallel_embedding(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        comm_mode = CommDebugMode()
+        tensor = torch.arange(8, device=self.device_type).reshape(4, 2)
+        model = nn.Embedding(16, 16, device=self.device_type)
+
+        with comm_mode:
+            rowwise_mod = parallelize_module(deepcopy(model), mesh, RowwiseParallel(input_layouts=Replicate()))
+            out = rowwise_mod(tensor)
+            # ensure output shard on the last dim
+            self.assertEqual(out.shape, (4, 2, 16))
+            # ensure allreduce communication happened in fwd
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 1)
+
+            out.sum().backward()
+            # no comm in bwd
+            self.assertEqual(comm_mode.get_total_counts(), 1)
+
+
+    @with_comms
+    def test_prepare_module_input(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        tensor = torch.ones(2, 16, device=self.device_type)
+        expected_tensor = torch.ones(2 * self.world_size, 16, device=self.device_type)
+        prepare_inp_style = PrepareModuleInput(input_layouts=Shard(0), desired_input_layouts=Replicate())
+
+        model = nn.Identity()
+        allgather_mod = parallelize_module(model, mesh, prepare_inp_style)
+        output = allgather_mod(tensor).full_tensor()
+        self.assertEqual(output, expected_tensor)
+
+
+    @with_comms
+    def test_prepare_module_input_multiple_inputs(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 8)
+
+            def forward(self, x, y):
+                return self.linear(x) + y
+
+        # Raise assertion error if input_layouts and desired_input_layouts do not have same length.
+        test_mod = TestModule().to(self.device_type)
+        with self.assertRaisesRegex(AssertionError, "input_layouts and desired_input_layouts should have same length!"):
+            prepare_inps_dimension_mismatch = PrepareModuleInput(input_layouts=Shard(0), desired_input_layouts=(Replicate(), None))
+        # Raise assertion error if module inputs and input_layouts do not have same length.
+        prepare_inps_short_dimension = PrepareModuleInput(input_layouts=Shard(0), desired_input_layouts=Replicate())
+        parallelize_module(test_mod.linear, mesh, ColwiseParallel())
+        parallelize_module(test_mod, mesh, prepare_inps_short_dimension)
+        with self.assertRaisesRegex(ValueError, "module inputs and input_layouts should have same length!"):
+            output = test_mod(
+                torch.randn(2, 8, device=self.device_type),
+                torch.ones(self.world_size * 2, 8 // self.world_size, device=self.device_type)
+            )
+
+        test_mod = TestModule().to(self.device_type)
+        prepare_inps = PrepareModuleInput(input_layouts=(Shard(0), None), desired_input_layouts=(Replicate(), None))
+
+        parallelize_module(test_mod.linear, mesh, ColwiseParallel())
+        parallelize_module(test_mod, mesh, prepare_inps)
+        output = test_mod(
+            torch.randn(2, 8, device=self.device_type),
+            torch.ones(self.world_size * 2, 8 // self.world_size, device=self.device_type)
+        )
+        self.assertEqual(output.shape, (self.world_size * 2, 8 // self.world_size))
+
+    @with_comms
+    def test_prepare_module_output(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        tensor = torch.ones(8, 16, device=self.device_type)
+        expected_tensor = torch.ones(8 // self.world_size, 16, device=self.device_type)
+        prepare_out_style = PrepareModuleOutput(output_layouts=Replicate(), desired_output_layouts=Shard(0))
+
+        model = nn.Identity()
+        chunk_mod = parallelize_module(model, mesh, prepare_out_style)
+        output = chunk_mod(tensor)
+        self.assertEqual(output, expected_tensor)
+
+    @with_comms
+    def test_sequence_parallel_style(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        comm_mode = CommDebugMode()
+        batch, N, embedding_dim = 20, 8, 12
+
+        global_input = torch.rand(batch, N * self.world_size, embedding_dim, device=self.device_type, requires_grad=True)
+        sharded_input = distribute_tensor(global_input, mesh, [Shard(1)])
+
+        # test LayerNorm
+        for elementwise_affine in [True, False]:
+            norm = nn.LayerNorm(embedding_dim, elementwise_affine=elementwise_affine, device=self.device_type)
+            sp_norm = parallelize_module(deepcopy(norm), mesh, SequenceParallel())
+
+            output = norm(global_input)
+            output.sum().backward()
+
+            with comm_mode:
+                sharded_out = sp_norm(sharded_input)
+                grad_out = torch.ones_like(sharded_out)
+                sharded_out.backward(grad_out)
+                self.assertIsInstance(sharded_out, DTensor)
+                self.assertEqual(sharded_out.placements, (Shard(1),))
+                self.assertEqual(comm_mode.get_total_counts(), 0)
+                self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 0)
+                if elementwise_affine:
+                    self.assertEqual(sp_norm.weight.grad.placements, (_Partial(),))
+                    self.assertEqual(sp_norm.bias.grad.placements, (_Partial(),))
+
+                self.assertEqual(sharded_out.full_tensor(), output)
+
+        # test RMSNorm
+        rmsnorm = RMSNormPython(embedding_dim).to(self.device_type)
+        sp_rmsnorm = parallelize_module(deepcopy(rmsnorm), mesh, SequenceParallel())
+
+        output = rmsnorm(global_input)
+        output.sum().backward()
+
+        with comm_mode:
+            sharded_out = sp_rmsnorm(sharded_input)
+            grad_out = torch.ones_like(sharded_out)
+            sharded_out.backward(grad_out)
+            self.assertIsInstance(sharded_out, DTensor)
+            self.assertEqual(sharded_out.placements, (Shard(1),))
+            self.assertEqual(sp_rmsnorm.weight.grad.placements, (_Partial(),))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
+            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_reduce], 0)
+
+            self.assertEqual(sharded_out.full_tensor(), output)
+
+        # test dropout
+        dropout = nn.Dropout(0.5).to(self.device_type)
+        sp_dropout = parallelize_module(deepcopy(dropout), mesh, SequenceParallel())
+
+        output = dropout(global_input)
+        output.sum().backward()
+        with comm_mode:
+            sharded_out = sp_dropout(sharded_input)
+            grad_out = torch.ones_like(sharded_out)
+            sharded_out.backward(grad_out)
+            self.assertIsInstance(sharded_out, DTensor)
+            self.assertEqual(sharded_out.placements, (Shard(1),))
+            self.assertEqual(comm_mode.get_total_counts(), 0)
 
 
 if __name__ == "__main__":

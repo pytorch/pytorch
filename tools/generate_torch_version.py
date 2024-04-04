@@ -14,13 +14,20 @@ RELEASE_PATTERN = re.compile(r"/v[0-9]+(\.[0-9]+)*(-rc[0-9]+)?/")
 
 def get_sha(pytorch_root: Union[str, Path]) -> str:
     try:
-        return (
-            subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=pytorch_root)
-            .decode("ascii")
-            .strip()
-        )
+        rev = None
+        if os.path.exists(os.path.join(pytorch_root, ".git")):
+            rev = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=pytorch_root
+            )
+        elif os.path.exists(os.path.join(pytorch_root, ".hg")):
+            rev = subprocess.check_output(
+                ["hg", "identify", "-r", "."], cwd=pytorch_root
+            )
+        if rev:
+            return rev.decode("ascii").strip()
     except Exception:
-        return UNKNOWN
+        pass
+    return UNKNOWN
 
 
 def get_tag(pytorch_root: Union[str, Path]) -> str:
@@ -86,11 +93,13 @@ if __name__ == "__main__":
         version = tagged_version
 
     with open(version_path, "w") as f:
+        f.write("from typing import Optional\n\n")
+        f.write("__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip']\n")
         f.write(f"__version__ = '{version}'\n")
         # NB: This is not 100% accurate, because you could have built the
         # library code with DEBUG, but csrc without DEBUG (in which case
         # this would claim to be a release build when it's not.)
         f.write(f"debug = {repr(bool(args.is_debug))}\n")
-        f.write(f"cuda = {repr(args.cuda_version)}\n")
+        f.write(f"cuda: Optional[str] = {repr(args.cuda_version)}\n")
         f.write(f"git_version = {repr(sha)}\n")
-        f.write(f"hip = {repr(args.hip_version)}\n")
+        f.write(f"hip: Optional[str] = {repr(args.hip_version)}\n")

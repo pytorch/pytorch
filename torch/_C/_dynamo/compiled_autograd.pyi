@@ -1,0 +1,9 @@
+from typing import Callable, Optional
+
+from torch._dynamo.compiled_autograd import AutogradCompilerInstance
+
+def set_autograd_compiler(
+    autograd_compiler: Optional[Callable[[], AutogradCompilerInstance]]
+) -> Optional[Callable[[], AutogradCompilerInstance]]: ...
+def clear_cache() -> None: ...
+def is_cache_empty() -> bool: ...

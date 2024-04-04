@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 from typing import Any, Dict, List, Optional, Set, Tuple, Union, Type, Callable
 from torch.ao.quantization.quant_type import QuantType
 import torch
@@ -88,8 +90,7 @@ _QSCHEME_TO_CHOOSE_QPARAMS_OP = {
 }
 
 def _replace_observer_with_quantize_dequantize_node_decomposed(
-        model: torch.nn.Module,
-        graph: Graph,
+        model: torch.fx.GraphModule,
         node: Node,
         modules: Dict[str, torch.nn.Module],
         node_name_to_scope: Dict[str, Tuple[str, type]],
@@ -105,10 +106,14 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
 
     or quantize_per_channel and dequantize_per_channel
     """
+    graph = model.graph
     assert modules is not None
     assert isinstance(node.target, str)
     module_path, prefix = _get_module_path_and_prefix(node, node_name_to_scope, node_name_to_qconfig)
     activation_post_process = modules[node.target]
+    if hasattr(activation_post_process, "convert"):
+        activation_post_process.convert(model, node)
+        return
     # skip replacing observers to quant/dequant nodes if the qconfigs of all
     # consumers and producers of this observer are None
     skip_replacement = all(_has_none_qconfig(n, node_name_to_qconfig) for n in
@@ -131,7 +136,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     if hasattr(activation_post_process, "is_dynamic"):
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[assignment]
 
-    if dtype in [torch.quint8, torch.qint8, torch.qint32] and \
+    if dtype in [torch.quint8, torch.qint8, torch.qint32, torch.uint8, torch.int8, torch.int16, torch.int32] and \
             (not is_dynamic):
         # TODO: probably should cleanup this condition check, it's hard
         # to reason about this if and the following elif
@@ -204,6 +209,15 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 tuple(dq_inputs),
                 {}
             )
+
+            def remap_fn(x):
+                return dequantized_node if x is node else x
+
+            # remap numeric_debug_handle
+            for user_node in node.users:
+                if "numeric_debug_handle" in user_node.meta:
+                    numeric_debug_handle = user_node.meta["numeric_debug_handle"]
+                    user_node.meta["numeric_debug_handle"] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
             node.replace_all_uses_with(dequantized_node)
             graph.erase_node(node)
     elif is_dynamic:
@@ -303,6 +317,15 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 tuple(dq_inputs),
                 {}
             )
+
+            def remap_fn(x):
+                return dequantized_node if x is node else x
+
+            # remap numeric_debug_handle
+            for user_node in node.users:
+                if "numeric_debug_handle" in user_node.meta:
+                    numeric_debug_handle = user_node.meta["numeric_debug_handle"]
+                    user_node.meta["numeric_debug_handle"] = {remap_fn(k): v for k, v in numeric_debug_handle.items()}
             node.replace_all_uses_with(dequantized_node)
             graph.erase_node(node)
     elif dtype == torch.float16:
@@ -312,8 +335,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     # activation_post_process is supported
 
 def _replace_observer_with_quantize_dequantize_node(
-        model: torch.nn.Module,
-        graph: Graph,
+        model: torch.fx.GraphModule,
         node: Node,
         modules: Dict[str, torch.nn.Module],
         node_name_to_scope: Dict[str, Tuple[str, type]],
@@ -328,6 +350,7 @@ def _replace_observer_with_quantize_dequantize_node(
     """
     assert modules is not None
     assert isinstance(node.target, str)
+    graph = model.graph
     module_path, prefix = _get_module_path_and_prefix(node, node_name_to_scope, node_name_to_qconfig)
     activation_post_process = modules[node.target]
     # skip replacing observers to quant/dequant nodes if the qconfigs of all
@@ -454,7 +477,15 @@ def _is_conversion_supported(activation_post_process: torch.nn.Module) -> bool:
         is_dynamic = activation_post_process.is_dynamic  # type: ignore[attr-defined, assignment]
 
     return (
-        (dtype in [torch.quint8, torch.qint8, torch.qint32] and (not is_dynamic)) or  # type: ignore[return-value]
+        (dtype in [
+            torch.quint8,
+            torch.qint8,
+            torch.qint32,
+            torch.uint8,
+            torch.int8,
+            torch.int16,
+            torch.int32
+        ] and (not is_dynamic)) or  # type: ignore[return-value]
         is_dynamic or
         dtype == torch.float16
     )
@@ -927,7 +958,7 @@ def convert(
             "in a future version. Please pass in a QConfigMapping instead.")
         qconfig_mapping = QConfigMapping.from_dict(qconfig_mapping) if qconfig_mapping else None
     qconfig_mapping = copy.deepcopy(qconfig_mapping)
-    assert(qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping))
+    assert qconfig_mapping is None or isinstance(qconfig_mapping, QConfigMapping)
 
     if isinstance(backend_config, Dict):
         warnings.warn(
@@ -1054,11 +1085,11 @@ def convert(
                 else:
                     if is_decomposed:
                         _replace_observer_with_quantize_dequantize_node_decomposed(
-                            model, model.graph, node, modules, node_name_to_scope,
+                            model, node, modules, node_name_to_scope,
                             node_name_to_qconfig)
                     else:
                         _replace_observer_with_quantize_dequantize_node(
-                            model, model.graph, node, modules, node_name_to_scope,
+                            model, node, modules, node_name_to_scope,
                             node_name_to_qconfig)
             elif isinstance(mod, DeQuantStub):
                 _replace_observer_or_dequant_stub_with_dequantize_node(node, model.graph)

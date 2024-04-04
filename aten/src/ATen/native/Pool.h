@@ -67,16 +67,16 @@ static inline T pooling_output_shape(
     TORCH_CHECK(stride != 0, "stride should not be zero");
     TORCH_CHECK(pad >= 0,
                 "pad must be non-negative, but got pad: ", pad);
-    TORCH_CHECK(pad <= kernelSize / 2,
-                "pad should be at most half of kernel size, but got pad=",
-                pad, " and kernel_size=", kernelSize)
+    TORCH_CHECK(pad <= ((kernelSize - 1) * dilation + 1) / 2,
+                "pad should be at most half of effective kernel size, but got pad=",
+                pad, ", kernel_size=", kernelSize, " and dilation=", dilation)
     return pooling_output_shape_pad_lr(
         inputSize, kernelSize, pad, pad, stride, dilation, ceil_mode);
 }
 
 template <typename T>
 std::pair<T, T> _pooling_same_mode_padding_lr(
-    T inputSize, T kernelSize, int64_t stride, int64_t dilation) {
+    T inputSize, T kernelSize, T stride, T dilation) {
   // NOTE: with strides, the output shape is ceil(inputSize/stride)
   auto total_padding = T(dilation) * (kernelSize - 1);
 
@@ -99,8 +99,8 @@ inline std::pair<int64_t, int64_t> pooling_same_mode_padding_lr(
 }
 
 inline std::pair<c10::SymInt, c10::SymInt> pooling_same_mode_padding_lr(
-    c10::SymInt inputSize, c10::SymInt kernelSize, int64_t stride, int64_t dilation) {
-  return _pooling_same_mode_padding_lr(std::move(inputSize), std::move(kernelSize), stride, dilation);
+    c10::SymInt inputSize, c10::SymInt kernelSize, c10::SymInt stride, c10::SymInt dilation) {
+  return _pooling_same_mode_padding_lr(std::move(inputSize), std::move(kernelSize), std::move(stride), std::move(dilation));
 }
 
 // AveragePool2d/DilatedMaxPool2d (forward)

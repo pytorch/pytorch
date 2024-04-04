@@ -65,6 +65,10 @@ struct FileCheck {
   // Checks that source token is highlighted in str (usually an error message).
   TORCH_API FileCheck* check_source_highlighted(const std::string& str);
 
+  // Checks that the regex matched string occurs, starting at the end of the
+  // most recent match
+  TORCH_API FileCheck* check_regex(const std::string& str);
+
   // reset checks
   TORCH_API void reset();
 

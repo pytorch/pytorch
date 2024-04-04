@@ -2,6 +2,7 @@ import logging
 import types
 import weakref
 from dataclasses import dataclass
+from typing import Tuple
 
 from . import config
 
@@ -84,9 +85,15 @@ class CacheSizeRelevantForFrame:
     def will_compilation_exceed(self, limit: int) -> bool:
         # Checks if a compilation will exceed the given limit (thats why >=).
         return (
-            self.num_cache_entries >= config.accumulated_cache_size_limit
-            or self.num_cache_entries_with_same_id_matched_objs >= limit
+            self.will_compilation_exceed_accumulated_limit()
+            or self.will_compilation_exceed_specific_limit(limit)
         )
+
+    def will_compilation_exceed_accumulated_limit(self) -> bool:
+        return self.num_cache_entries >= config.accumulated_cache_size_limit
+
+    def will_compilation_exceed_specific_limit(self, limit: int) -> bool:
+        return self.num_cache_entries_with_same_id_matched_objs >= limit
 
 
 def _get_weakref_from_f_locals(frame: types.FrameType, local_name: str):
@@ -154,8 +161,12 @@ def is_recompilation(cache_size: CacheSizeRelevantForFrame) -> bool:
     return cache_size.will_compilation_exceed(1)
 
 
-def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame) -> bool:
+def exceeds_cache_size_limit(cache_size: CacheSizeRelevantForFrame) -> Tuple[bool, str]:
     """
     Checks if we are exceeding the cache size limit.
     """
-    return cache_size.will_compilation_exceed(config.cache_size_limit)
+    if cache_size.will_compilation_exceed_accumulated_limit():
+        return True, "accumulated_cache_size_limit"
+    if cache_size.will_compilation_exceed_specific_limit(config.cache_size_limit):
+        return True, "cache_size_limit"
+    return False, ""

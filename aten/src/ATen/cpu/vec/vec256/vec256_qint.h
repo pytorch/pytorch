@@ -14,7 +14,6 @@
 
 #include <array>
 #include <cmath>
-#include <iostream>
 
 // This file defines Vectorized<> for the quantized types.
 //
@@ -39,15 +38,20 @@
 // point operations will be carried out in a loop over Vectorized<T>::float_num_vecs
 // iterations.
 
-namespace at {
-namespace vec {
+namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX2)
 
+#ifdef _MSC_VER
+__declspec(align(64)) struct Vectorizedqi {
+ protected:
+  __m256i vals;
+#else
 struct Vectorizedqi {
  protected:
   __m256i vals __attribute__((aligned(64)));
+#endif
 
  public:
   Vectorizedqi() {}
@@ -98,28 +102,36 @@ inline __m256i pack_saturate_and_clamp<uint8_t>(
       _mm256_min_epu8(packed_and_sat, _mm256_set1_epi8(max_val)));
 }
 
-inline Vectorized<float> convert_uint8_to_float(at::vec::Vectorized<uint8_t> src) {
+template <typename T>
+typename std::enable_if_t<std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>, at::vec::Vectorized<float>>
+inline convert_int8_to_float(at::vec::Vectorized<T> src) {
   // Note: this function only convert inputs number of elements equal to at::vec::Vectorized<float>.size()
-  // Only handle first 64 bits
+  // Only handle first 8*8 bits
   __m128i input_128 = _mm256_castsi256_si128(src);
-  // Convert from 8*uint8 to 8*int32
-  __m256i input_256_int32 = _mm256_cvtepu8_epi32(input_128);
+  // Convert from 8*uint8/int8 to 8*int32
+  __m256i input_256_int32;
+  if constexpr (std::is_same_v<T, uint8_t>)
+    input_256_int32 = _mm256_cvtepu8_epi32(input_128);
+  else
+    input_256_int32 = _mm256_cvtepi8_epi32(input_128);
   // Convert from 8*int32 to 8*float
   return _mm256_cvtepi32_ps(input_256_int32);
 }
 
-inline Vectorized<uint8_t> convert_float_to_uint8(at::vec::Vectorized<float> src) {
+template <typename T>
+typename std::enable_if_t<std::is_same_v<T, uint8_t> || std::is_same_v<T, int8_t>, at::vec::Vectorized<T>>
+inline convert_float_to_int8(at::vec::Vectorized<float> src) {
   // Convert from float32 to int32 with truncation
   __m256i x_values_int32 = _mm256_cvttps_epi32(src);
 
   // Convert from int32 to int16 using signed saturation
   __m256i xy_packed_v = _mm256_packs_epi32(x_values_int32, x_values_int32);
 
-  constexpr auto min_val = std::numeric_limits<uint8_t>::min();
-  constexpr auto max_val = std::numeric_limits<uint8_t>::max();
+  constexpr auto min_val = std::numeric_limits<T>::min();
+  constexpr auto max_val = std::numeric_limits<T>::max();
 
-  // Convert from int16 to uint8 using unsigned saturation
-  __m256i xyzw_clamped_v = pack_saturate_and_clamp<uint8_t>(
+  // Convert from int16 to uint8/int8 using unsigned saturation
+  __m256i xyzw_clamped_v = pack_saturate_and_clamp<T>(
       xy_packed_v, xy_packed_v, min_val, max_val);
   __m256i permute_mask_v =
     _mm256_set_epi32(0x07, 0x03, 0x06, 0x02, 0x05, 0x01, 0x04, 0x00);
@@ -127,7 +139,7 @@ inline Vectorized<uint8_t> convert_float_to_uint8(at::vec::Vectorized<float> src
 }
 
 template <typename T>
-inline void __attribute__((always_inline)) QuantizeAvx2(
+__FORCE_INLINE void QuantizeAvx2(
     const float* src,
     T* dst,
     int len,
@@ -307,6 +319,13 @@ struct Vectorized<c10::qint32> : public Vectorizedqi {
       return {vec::fmadd(scale, Vectorized<float>(float_vals), scale_zp_premul)};
     }
 
+    float_vec_return_type dequantize(
+        Vectorized<float> scale,
+        Vectorized<float> zero_point) const {
+      __m256 float_vals = _mm256_cvtepi32_ps(vals);
+      return {(Vectorized<float>(float_vals) - zero_point) * scale};
+    }
+
     static Vectorized<c10::qint32> quantize(
         const float_vec_return_type& rhs,
         float scale,
@@ -389,7 +408,7 @@ __m256i RequantizeAvx2(
     __m256 multiplier,
     __m256i zp) {
   static_assert(
-      std::is_same<T, int8_t>::value || std::is_same<T, uint8_t>::value,
+      std::is_same_v<T, int8_t> || std::is_same_v<T, uint8_t>,
       "Only int8_t/uint8_t are supported");
   constexpr auto min_val = std::numeric_limits<T>::min();
   constexpr auto max_val = std::numeric_limits<T>::max();
@@ -519,6 +538,26 @@ struct Vectorized<c10::qint8> : public Vectorizedqi {
         vec::fmadd(scale, Vectorized<float>(float_val2), scale_neg_zp_premul);
     auto val3 =
         vec::fmadd(scale, Vectorized<float>(float_val3), scale_neg_zp_premul);
+    return {val0, val1, val2, val3};
+  }
+
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point) const {
+    __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
+    __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
+    __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
+    __m128i int_val3 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 3));
+
+    __m256 float_val0 = _mm256_cvtepi32_ps(cvtepi8_epi32(int_val0));
+    __m256 float_val1 = _mm256_cvtepi32_ps(cvtepi8_epi32(int_val1));
+    __m256 float_val2 = _mm256_cvtepi32_ps(cvtepi8_epi32(int_val2));
+    __m256 float_val3 = _mm256_cvtepi32_ps(cvtepi8_epi32(int_val3));
+
+    auto val0 = (Vectorized<float>(float_val0) - zero_point) * scale;
+    auto val1 = (Vectorized<float>(float_val1) - zero_point) * scale;
+    auto val2 = (Vectorized<float>(float_val2) - zero_point) * scale;
+    auto val3 = (Vectorized<float>(float_val3) - zero_point) * scale;
     return {val0, val1, val2, val3};
   }
 
@@ -700,6 +739,26 @@ struct Vectorized<c10::quint8> : public Vectorizedqi {
     return {val0, val1, val2, val3};
   }
 
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point) const {
+    __m128i int_val0 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 0));
+    __m128i int_val1 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 1));
+    __m128i int_val2 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 2));
+    __m128i int_val3 = _mm_set1_epi64x(_mm256_extract_epi64(vals, 3));
+
+    __m256 float_val0 = _mm256_cvtepi32_ps(cvtepu8_epi32(int_val0));
+    __m256 float_val1 = _mm256_cvtepi32_ps(cvtepu8_epi32(int_val1));
+    __m256 float_val2 = _mm256_cvtepi32_ps(cvtepu8_epi32(int_val2));
+    __m256 float_val3 = _mm256_cvtepi32_ps(cvtepu8_epi32(int_val3));
+
+    auto val0 = (Vectorized<float>(float_val0) - zero_point) * scale;
+    auto val1 = (Vectorized<float>(float_val1) - zero_point) * scale;
+    auto val2 = (Vectorized<float>(float_val2) - zero_point) * scale;
+    auto val3 = (Vectorized<float>(float_val3) - zero_point) * scale;
+    return {val0, val1, val2, val3};
+  }
+
   static Vectorized<c10::quint8> quantize(
       const float_vec_return_type& rhs,
       float /*scale*/,
@@ -853,6 +912,13 @@ struct VectorizedQuantizedConverter {
           tmp_vals[7]);
     }
     return rv;
+  }
+
+  float_vec_return_type dequantize(
+      Vectorized<float> scale,
+      Vectorized<float> zero_point) const {
+    Vectorized<float> scale_zp_premul;
+    return dequantize(scale, zero_point, scale_zp_premul);
   }
 
  protected:
@@ -1271,5 +1337,5 @@ Vectorized<c10::quint8> inline maximum(const Vectorized<c10::quint8>& a, const V
   return a.maximum(b);
 }
 
-#endif // if defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
-}}}
+#endif // if defined(CPU_CAPABILITY_AVX2)
+}} // namespace at::vec::CPU_CAPABILITY

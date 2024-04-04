@@ -483,13 +483,12 @@ c10::optional<at::Tensor> runTorchBackendForOnnx(
     at::Tensor indices = inputTensorValues[1];
     auto q = indices.dim();
     // at::index_select only supports indices with rank <= 1.
-    // See https://pytorch.org/docs/master/generated/torch.index_select.html
+    // See https://pytorch.org/docs/main/generated/torch.index_select.html
     if (q > 1) {
       return c10::nullopt;
     }
     // If the device of indices tensor is not the same with it of the input
     // tensor, move it to the device of the input tensor
-    auto indices_val = node->input(1);
     if (inputTensorValues[0].device() != indices.device()) {
       indices = indices.to(inputTensorValues[0].device());
     }

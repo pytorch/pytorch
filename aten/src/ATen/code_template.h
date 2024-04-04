@@ -7,8 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace at {
-namespace jit {
+namespace at::jit {
 
 // A template environment is a mapping from template variable names, e.g.,
 // identifier (corresponding to $identifier) to their expansions.
@@ -207,8 +206,7 @@ struct CodeTemplate {
   // or trailing newlines. It's the responsibility of the calling function
   // to indent correctly in the context.
   void emitIndent(std::ostream& out, size_t indent) const {
-    for (const auto i : c10::irange(indent)) {
-      (void)i; // Suppress unused variable warning
+    for (C10_UNUSED const auto i : c10::irange(indent)) {
       out << " ";
     }
   }
@@ -242,5 +240,4 @@ static inline std::string format(const std::string& fmt, TemplateEnv& env) {
   return CodeTemplate(fmt).format(env);
 }
 
-} // namespace jit
-} // namespace at
+} // namespace at::jit

@@ -8,7 +8,7 @@
 namespace torch {
 namespace jit {
 namespace {
-using CanonicalArg = c10::variant<CanonicalizedSymbolicShape, IValue>;
+using CanonicalArg = std::variant<CanonicalizedSymbolicShape, IValue>;
 using CanonicalArgVec = std::vector<CanonicalArg>;
 using CanonicalRet = std::vector<CanonicalizedSymbolicShape>;
 using ShapeCacheKey = std::tuple<c10::OperatorName, CanonicalArgVec>;
@@ -20,14 +20,14 @@ CanonicalArgVec cannonicalizeVec(
   CanonicalArgVec canonical_args;
   canonical_args.reserve(arg_vec.size());
   for (auto& arg : arg_vec) {
-    if (const IValue* iv = c10::get_if<IValue>(&arg)) {
+    if (const IValue* iv = std::get_if<IValue>(&arg)) {
       if (deep_copy) {
         canonical_args.emplace_back(iv->deepcopy());
       } else {
         canonical_args.emplace_back(*iv);
       }
     } else {
-      auto& ss = c10::get<at::SymbolicShape>(arg);
+      auto& ss = std::get<at::SymbolicShape>(arg);
       canonical_args.emplace_back(CanonicalizedSymbolicShape(ss, ss_map));
     }
   }
@@ -57,7 +57,7 @@ struct ArgumentsHasher {
     hash_val = at::hash_combine(std::hash<size_t>{}(arg_vec.size()), hash_val);
     for (const CanonicalArg& arg : arg_vec) {
       size_t cur_arg = 0;
-      if (const IValue* ival = c10::get_if<IValue>(&arg)) {
+      if (const IValue* ival = std::get_if<IValue>(&arg)) {
         // IValue doesn't hash List (as Python doesn't), so we will do a custom
         // list hash
         if (ival->isList()) {
@@ -70,7 +70,7 @@ struct ArgumentsHasher {
           cur_arg = IValue::hash(ival);
         }
       } else {
-        cur_arg = c10::get<CanonicalizedSymbolicShape>(arg).hash();
+        cur_arg = std::get<CanonicalizedSymbolicShape>(arg).hash();
       }
       hash_val = at::hash_combine(hash_val, cur_arg);
     }

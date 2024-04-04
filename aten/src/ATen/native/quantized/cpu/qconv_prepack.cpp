@@ -283,9 +283,7 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsQnnp<
   auto kernel_dim = kSpatialDim == 2
       ? std::vector<int64_t>{kernel_h, kernel_w}
       : std::vector<int64_t>{kernel_d, kernel_h, kernel_w};
-  std::vector<uint8_t> w_zero_points;
-  at::Tensor w_scales;
-  std::tie(w_zero_points, w_scales) =
+  auto [w_zero_points, w_scales] =
       make_zero_points_and_scales_tensor(weight_contig, transpose, groups);
   // We set the pre-packed conv weights to nullptr below as we call pre-pack
   // during the first invocation of operator run. Refer to qconv.cpp for more
@@ -379,10 +377,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
         "quantized::qconv_prepack: ONEDNN only supports symmetric quantization of weight,"
         " whose zero point must be 0.");
     wgt_zero_points = std::vector<int32_t>(1, weight.q_zero_point());
-#if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION == 0
-    wgt_scales = ideep::scale_t(1, 1.0/weight.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
-#elif defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION > 0
+#if IDEEP_PREREQ(3, 1, 0, 1)
     wgt_scales = ideep::scale_t(1, weight.q_scale());
+#elif IDEEP_PREREQ(3, 1, 0, 0)
+    wgt_scales = ideep::scale_t(1, 1.0/weight.q_scale()); // Scales of ONEDNN and PyTorch are reciprocal
 #else
     TORCH_CHECK(false, "Unexpected IDeep version to do qconv weight prepack.");
 #endif
@@ -398,10 +396,10 @@ c10::intrusive_ptr<ConvPackedParamsBase<kSpatialDim>> PackedConvWeightsOnednn<
           wgt_zero_points[i]==0,
           "quantized::qconv_prepack: ONEDNN only supports symmetric quantization of weight,"
           " whose zero point must be 0.");
-#if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION == 0
-      wgt_scales[i] = 1.0f / weight.q_per_channel_scales()[i].item<float>(); // Scales of ONEDNN and PyTorch are reciprocal
-#elif defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION > 0
+#if IDEEP_PREREQ(3, 1, 0, 1)
       wgt_scales[i] = weight.q_per_channel_scales()[i].item<float>();
+#elif IDEEP_PREREQ(3, 1, 0, 0)
+      wgt_scales[i] = 1.0f / weight.q_per_channel_scales()[i].item<float>(); // Scales of ONEDNN and PyTorch are reciprocal
 #else
       TORCH_CHECK(false, "Unexpected IDeep version to do qconv weight prepack.");
 #endif
@@ -548,20 +546,20 @@ at::Tensor _qconv_prepack_onednn(
     TORCH_CHECK(
         weight_scales.numel() == 1,
         "Weight is quant per tensor, weight scale expects 1 element but got ", weight_scales.numel(), " elements.");
-#if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION == 0
-    weights_scales[0] = 1.0 / weight_scales.item().toDouble(); // Scales of ONEDNN and PyTorch are reciprocal
-#elif defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION > 0
+#if IDEEP_PREREQ(3, 1, 0, 1)
     weights_scales[0] = weight_scales.item().toDouble();
+#elif IDEEP_PREREQ(3, 1, 0, 0)
+    weights_scales[0] = 1.0 / weight_scales.item().toDouble(); // Scales of ONEDNN and PyTorch are reciprocal
 #else
     TORCH_CHECK(false, "Unexpected IDeep version to do qconv weight prepack.");
 #endif
   } else {
     // Weight is quant per channel
     for (int i = 0; i < weight_scales.numel(); ++i) {
-#if defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION == 0
-      weights_scales[i] = 1.0 / weight_scales[i].item().toDouble();
-#elif defined(IDEEP_VERSION_MAJOR) && IDEEP_VERSION_MAJOR>=3 && defined(IDEEP_VERSION_REVISION) && IDEEP_VERSION_REVISION > 0
+#if IDEEP_PREREQ(3, 1, 0, 1)
       weights_scales[i] = weight_scales[i].item().toDouble();
+#elif IDEEP_PREREQ(3, 1, 0, 0)
+      weights_scales[i] = 1.0 / weight_scales[i].item().toDouble();
 #else
       TORCH_CHECK(false, "Unexpected IDeep version to do qconv weight prepack.");
 #endif
@@ -609,7 +607,7 @@ at::Tensor _qconv_prepack_onednn(
 
   auto packed_weight = at::native::new_with_itensor_mkldnn(
       std::move(exp_wgt),
-      optTypeMetaToScalarType(weight_copy.options().dtype_opt()),
+      c10::optTypeMetaToScalarType(weight_copy.options().dtype_opt()),
       weight_copy.options().device_opt());
 
   return packed_weight;
@@ -633,8 +631,7 @@ class QConvPackWeightInt8 final {
       int64_t groups) {
     torch::List<int64_t> output_padding;
     output_padding.reserve(kSpatialDim);
-    for (const auto idx : c10::irange(kSpatialDim)) {
-      (void)idx; //Suppress unused variable warning
+    for (C10_UNUSED const auto idx : c10::irange(kSpatialDim)) {
       output_padding.push_back((int64_t)0);
     }
     return _run(weight, bias, stride, padding, output_padding, dilation, groups,

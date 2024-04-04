@@ -1,7 +1,8 @@
 import torch
 from torch.fx import GraphModule
+from ..export_utils import _WrapperModule
 from ..utils import (
-    get_aten_graph_module,
+    _get_aten_graph_module_for_pattern,
     remove_tensor_overload_for_qdq_ops,
     _replace_literals_with_new_placeholders,
     _replace_literals_with_existing_placeholders,
@@ -381,38 +382,6 @@ def _reference_quantized_max_pool2d(
     out_i8 = out_fp32.to(torch.int8)
     return out_i8
 
-_QUANTIZED_ADAPTIVE_AVG_POOL2D_EXAMPLE_INPUTS = (
-    torch.randint(-128, 127, (1, 3, 3, 3), dtype=torch.int8),
-    torch.randn(1, dtype=torch.float),
-    torch.zeros(1, dtype=torch.int),
-    torch.tensor([-128], dtype=torch.int),
-    torch.tensor([127], dtype=torch.int),
-    torch.randn(1, dtype=torch.float),
-    torch.zeros(1, dtype=torch.int),
-    torch.tensor([-128], dtype=torch.int),
-    torch.tensor([127], dtype=torch.int),
-)
-
-def _qdq_quantized_adaptive_avg_pool2d(
-        x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, out_scale, out_zero_point, out_quant_min, out_quant_max):
-    output_size = (3, 3)
-    x_fp32 = torch.ops.quantized_decomposed.dequantize_per_tensor(x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, torch.int8)
-    out_fp32 = torch.ops.aten.adaptive_avg_pool2d(x_fp32, output_size)
-    out_i8 = torch.ops.quantized_decomposed.quantize_per_tensor(
-        out_fp32, out_scale, out_zero_point, out_quant_min, out_quant_max, torch.int8)
-    return out_i8
-
-def _reference_quantized_adaptive_avg_pool2d(
-        x_i8, x_scale, x_zero_point, x_quant_min, x_quant_max, out_scale, out_zero_point, out_quant_min, out_quant_max):
-    output_size = (3, 3)
-    x_i8 = torch.clamp(x_i8, x_quant_min, x_quant_max)
-    x_i32 = x_i8.to(torch.int32)
-    out_i32 = torch.ops.aten.adaptive_avg_pool2d(x_i32, output_size)
-    out_i32 = out_dtype(torch.ops.aten.mul.Tensor, torch.int32, out_i32, (x_scale / out_scale)) + out_zero_point
-    out_i32 = torch.clamp(out_i32, out_quant_min, out_quant_max)
-    out_i8 = out_i32.to(torch.int8)
-    return out_i8
-
 _QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS = (
     torch.randn(1, 3, 3, 3, dtype=torch.float),
     torch.randn(1, dtype=torch.float),
@@ -533,8 +502,8 @@ class _RewriteInfo:
 _REWRITE_INFO_LIST = [
     _RewriteInfo(
         _DYNAMIC_QUANTIZED_LINEAR_EXAMPLE_INPUTS,
-        _qdq_dynamic_quantized_linear,
-        _reference_dynamic_quantized_linear,
+        _WrapperModule(_qdq_dynamic_quantized_linear),
+        _WrapperModule(_reference_dynamic_quantized_linear),
         partial(
             _replace_literals_with_existing_placeholders,
             literal_to_ph_idx={
@@ -554,62 +523,56 @@ _REWRITE_INFO_LIST = [
     ),
     _RewriteInfo(
         _QUANTIZED_LINEAR_EXAMPLE_INPUTS,
-        _qdq_quantized_linear,
-        _reference_quantized_linear,
+        _WrapperModule(_qdq_quantized_linear),
+        _WrapperModule(_reference_quantized_linear),
         _replace_literals_with_new_placeholders,
         _replace_literals_with_new_placeholders,
     ),
     _RewriteInfo(
         _QUANTIZED_CONV2d_EXAMPLE_INPUTS,
-        _qdq_quantized_conv2d,
-        _reference_quantized_conv2d,
+        _WrapperModule(_qdq_quantized_conv2d),
+        _WrapperModule(_reference_quantized_conv2d),
         partial(_replace_literals_with_new_placeholders, exclude_literals=[-1]),
         partial(_replace_literals_with_new_placeholders, exclude_literals=[-1]),
     ),
     _RewriteInfo(
         _QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS,
-        _qdq_quantized_add_relu,
-        _reference_quantized_add_relu
+        _WrapperModule(_qdq_quantized_add_relu),
+        _WrapperModule(_reference_quantized_add_relu),
     ),
     _RewriteInfo(
         _QUANTIZED_ADD_OR_ADD_RELU_EXAMPLE_INPUTS,
-        _qdq_quantized_add,
-        _reference_quantized_add
+        _WrapperModule(_qdq_quantized_add),
+        _WrapperModule(_reference_quantized_add),
     ),
     _RewriteInfo(
         _QUANTIZED_MAX_POOL2D_EXAMPLE_INPUTS,
-        _qdq_quantized_max_pool2d,
-        _reference_quantized_max_pool2d,
-        _replace_literals_with_new_placeholders,
-        _replace_literals_with_new_placeholders
-    ),
-    _RewriteInfo(
-        _QUANTIZED_ADAPTIVE_AVG_POOL2D_EXAMPLE_INPUTS,
-        _qdq_quantized_adaptive_avg_pool2d,
-        _reference_quantized_adaptive_avg_pool2d,
+        _WrapperModule(_qdq_quantized_max_pool2d),
+        _WrapperModule(_reference_quantized_max_pool2d),
         _replace_literals_with_new_placeholders,
         _replace_literals_with_new_placeholders
     ),
     _RewriteInfo(
         _QUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS,
-        _quantize_per_tensor_int8,
-        _reference_quantize_per_tensor_int8),
+        _WrapperModule(_quantize_per_tensor_int8),
+        _WrapperModule(_reference_quantize_per_tensor_int8),
+    ),
     _RewriteInfo(
         _DEQUANTIZE_PER_TENSOR_INT8_EXAMPLE_INPUTS,
-        _dequantize_per_tensor_int8,
-        _reference_dequantize_per_tensor_int8
+        _WrapperModule(_dequantize_per_tensor_int8),
+        _WrapperModule(_reference_dequantize_per_tensor_int8),
     ),
     _RewriteInfo(
         _QUANTIZE_PER_CHANNEL_INT8_EXAMPLE_INPUTS,
-        _quantize_per_channel_int8,
-        _reference_quantize_per_channel_int8,
+        _WrapperModule(_quantize_per_channel_int8),
+        _WrapperModule(_reference_quantize_per_channel_int8),
         _replace_ph_qdq_per_channel_replacement,
         _replace_ph_qdq_per_channel_replacement
     ),
     _RewriteInfo(
         _DEQUANTIZE_PER_CHANNEL_INT8_EXAMPLE_INPUTS,
-        _dequantize_per_channel_int8,
-        _reference_dequantize_per_channel_int8,
+        _WrapperModule(_dequantize_per_channel_int8),
+        _WrapperModule(_reference_dequantize_per_channel_int8),
         _replace_ph_qdq_per_channel_replacement,
         _replace_ph_qdq_per_channel_replacement
     ),
@@ -623,9 +586,9 @@ def reference_representation_rewrite(model: GraphModule) -> GraphModule:
         replacement = rewrite_info.replacement
         pattern_post_trans = rewrite_info.pattern_post_trans
         replacement_post_trans = rewrite_info.replacement_post_trans
-        pattern = get_aten_graph_module(pattern, example_inputs)  # type: ignore[arg-type, assignment]
+        pattern = _get_aten_graph_module_for_pattern(pattern, example_inputs)  # type: ignore[arg-type, assignment]
         remove_tensor_overload_for_qdq_ops(pattern)  # type: ignore[arg-type]
-        replacement = get_aten_graph_module(replacement, example_inputs)  # type: ignore[arg-type, assignment]
+        replacement = _get_aten_graph_module_for_pattern(replacement, example_inputs)  # type: ignore[arg-type, assignment]
         remove_tensor_overload_for_qdq_ops(replacement)  # type: ignore[arg-type]
         if pattern_post_trans:
             pattern = pattern_post_trans(pattern)

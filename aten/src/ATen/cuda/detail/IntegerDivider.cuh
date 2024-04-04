@@ -5,9 +5,7 @@
 #include <cuda_runtime.h>
 #endif
 
-namespace at {
-namespace cuda {
-namespace detail {
+namespace at::cuda::detail {
 
 // A utility class to implement integer division by multiplication, given a fixed
 // divisor.
@@ -123,4 +121,4 @@ struct IntDivider<unsigned int> {
   unsigned int shift;  // Shift amounts.
 };
 
-}}}  // namespace at::cuda::detail
+}  // namespace at::cuda::detail

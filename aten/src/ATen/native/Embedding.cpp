@@ -32,7 +32,7 @@
 #include <vector>
 
 
-namespace at { namespace native {
+namespace at::native {
 
 Tensor embedding_symint(const Tensor & weight, const Tensor & indices,
                         c10::SymInt padding_idx, bool scale_grad_by_freq, bool sparse) {
@@ -189,7 +189,7 @@ Tensor & embedding_renorm_cpu_(
   auto num_indices = indices.numel();
 
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_renorm_cpu_", [&]() {
-    auto data_ptr = indices_contig.data_ptr<index_t>();
+    auto data_ptr = indices_contig.const_data_ptr<index_t>();
     auto sorted_indices = std::vector<index_t>(data_ptr, data_ptr + num_indices);
     std::sort(sorted_indices.begin(), sorted_indices.end());
 
@@ -212,4 +212,4 @@ Tensor & embedding_renorm_cpu_(
 }
 
 
-}}  // namespace at::native
+}  // namespace at::native

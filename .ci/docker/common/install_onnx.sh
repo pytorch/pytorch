@@ -10,13 +10,13 @@ retry () {
 
 # A bunch of custom pip dependencies for ONNX
 pip_install \
-  beartype==0.10.4 \
+  beartype==0.15.0 \
   filelock==3.9.0 \
   flatbuffers==2.0 \
   mock==5.0.1 \
   ninja==1.10.2 \
   networkx==2.0 \
-  numpy==1.22.4
+  numpy==1.24.2
 
 # ONNXRuntime should be installed before installing
 # onnx-weekly. Otherwise, onnx-weekly could be
@@ -26,23 +26,19 @@ pip_install \
   pytest-cov==4.0.0 \
   pytest-subtests==0.10.0 \
   tabulate==0.9.0 \
-  transformers==4.32.1
+  transformers==4.36.2
 
 pip_install coloredlogs packaging
-retry pip_install -i https://aiinfra.pkgs.visualstudio.com/PublicPackages/_packaging/ORT-Nightly/pypi/simple/ --no-cache-dir --no-input ort-nightly==1.16.0.dev20230824005
 
-# Using 1.15dev branch for the following not yet released features and fixes.
-# - Segfault fix for shape inference.
-# - Inliner to workaround ORT segfault.
-pip_install -i https://test.pypi.org/simple/ onnx==1.14.1rc2
-
-# TODO: change this when onnx-script is on testPypi
-pip_install onnxscript-preview==0.1.0.dev20230828 --no-deps
+pip_install onnxruntime==1.17.0
+pip_install onnx==1.15.0
+# pip_install "onnxscript@git+https://github.com/microsoft/onnxscript@3e869ef8ccf19b5ebd21c10d3e9c267c9a9fa729" --no-deps
+pip_install onnxscript==0.1.0.dev20240315 --no-deps
 
 # Cache the transformers model to be used later by ONNX tests. We need to run the transformers
 # package to download the model. By default, the model is cached at ~/.cache/huggingface/hub/
 IMPORT_SCRIPT_FILENAME="/tmp/onnx_import_script.py"
-as_jenkins echo 'import transformers; transformers.AutoModel.from_pretrained("sshleifer/tiny-gpt2"); transformers.AutoTokenizer.from_pretrained("sshleifer/tiny-gpt2");' > "${IMPORT_SCRIPT_FILENAME}"
+as_jenkins echo 'import transformers; transformers.AutoModel.from_pretrained("sshleifer/tiny-gpt2"); transformers.AutoTokenizer.from_pretrained("sshleifer/tiny-gpt2"); transformers.AutoModelForSpeechSeq2Seq.from_pretrained("openai/whisper-large-v3");' > "${IMPORT_SCRIPT_FILENAME}"
 
 # Need a PyTorch version for transformers to work
 pip_install --pre torch --index-url https://download.pytorch.org/whl/nightly/cpu

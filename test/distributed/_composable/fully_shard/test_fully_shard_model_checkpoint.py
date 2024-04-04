@@ -9,8 +9,8 @@ import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import fully_shard
+from torch.distributed._state_dict_utils import _gather_state_dict
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP, StateDictType
-from torch.distributed.fsdp._shard_utils import _gather_state_dict
 from torch.distributed.fsdp.api import ShardingStrategy
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.nn import TransformerDecoderLayer, TransformerEncoderLayer

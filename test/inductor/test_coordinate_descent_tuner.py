@@ -6,7 +6,7 @@ from unittest import mock
 
 import torch
 
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import IS_LINUX
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -15,7 +15,7 @@ try:
 except ImportError:
     if __name__ == "__main__":
         sys.exit(0)
-    raise unittest.SkipTest("requires triton")
+    raise unittest.SkipTest("requires triton")  # noqa: TRY200
 
 from torch._inductor import config
 from torch._inductor.coordinate_descent_tuner import CoordescTuner

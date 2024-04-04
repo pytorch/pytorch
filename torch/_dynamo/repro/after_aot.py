@@ -35,7 +35,10 @@ from torch._dynamo.debug_utils import (
 )
 from torch._dynamo.utils import clone_inputs, counters, same
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import free_symbols, fx_placeholder_targets
+from torch.fx.experimental.symbolic_shapes import (
+    fx_placeholder_targets,
+    has_free_symbols,
+)
 from torch.hub import tqdm
 
 from .. import config
@@ -266,14 +269,18 @@ def save_graph_repro(
         accuracy = "_accuracy" in compiler_name
     if tracing_mode is None:
         tracing_mode = "real"
-        if any(free_symbols(a) for a in args):
+        if any(has_free_symbols(a) for a in args):
             tracing_mode = "symbolic"
     fd.write("if __name__ == '__main__':\n")
     fd.write("    from torch._dynamo.repro.after_aot import run_repro\n")
     fd.write(
-        f"    run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
-        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r}"
-        ")\n"
+        f"    with torch.no_grad():\n"
+        f"        run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
+        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
+        f"        # To run it separately, do \n"
+        f"        # mod, args = run_repro(mod, load_args, accuracy={accuracy!r}, command='get_args', "
+        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
+        f"        # mod(*args)"
     )
 
 
@@ -564,7 +571,7 @@ def repro_analyze(options, mod, load_args):
         known_names.add(name)
         if not options.skip_saving_inductor_intermediates:
             writer.write_tensor(os.path.join("inductor", name), val)
-        pbar.update(1)
+        pbar.update(1)  # type: ignore[has-type]
 
     writer = torch.utils._content_store.ContentStoreWriter(
         options.save_dir, stable_hash=options.stable_hash
@@ -678,6 +685,11 @@ def repro_analyze(options, mod, load_args):
     assert not args
 
 
+def repro_get_args(options, mod, load_args):
+    mod, args = repro_common(options, mod, load_args)
+    return mod, args
+
+
 def repro_run(options, mod, load_args):
     from torch._inductor.compile_fx import compile_fx_inner
 
@@ -698,9 +710,10 @@ def repro_run(options, mod, load_args):
             if isinstance(arg, torch.Tensor) and arg.is_cuda:
                 need_sync = True
                 break
-        ref = compiled(args)
+        ref = compiled(list(args))
         if need_sync:
             synchronize()  # ensure segfaults are surfaced
+    return lambda: compiled(list(args))
 
 
 # TODO: lazily load the inputs or something, rather than cloning them
@@ -834,6 +847,8 @@ divergences--you just might not end up with a useful repro in the end.""",
         "minify", help="run the minifier on the repro"
     )
     common_flags(parser_minify)
+    parser_get_args = subparsers.add_parser("get_args", help="get the args")
+    common_flags(parser_get_args)
     parser_minify_isolate = parser_minify.add_mutually_exclusive_group()
     parser_minify_isolate.add_argument(
         "--isolate",
@@ -923,5 +938,6 @@ divergences--you just might not end up with a useful repro in the end.""",
         "analyze": repro_analyze,
         "minifier-query": repro_minifier_query,
         "run": repro_run,
+        "get_args": repro_get_args,
     }
-    COMMAND_FNS[options.command](options, mod, load_args)
+    return COMMAND_FNS[options.command](options, mod, load_args)

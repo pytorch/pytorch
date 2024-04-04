@@ -8,7 +8,6 @@
 #include <torch/csrc/jit/runtime/graph_executor.h>
 
 #include <torch/csrc/Export.h>
-#include <torch/csrc/utils/memory.h>
 
 #include <ATen/core/function_schema.h>
 #include <ATen/core/qualified_name.h>
@@ -23,8 +22,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace torch {
-namespace jit {
+namespace torch::jit {
 
 struct Def;
 struct Property;
@@ -132,7 +130,7 @@ struct TORCH_API CompilationUnit {
     if (shouldMangle) {
       name = mangle(name);
     }
-    auto fn = torch::make_unique<GraphFunction>(
+    auto fn = std::make_unique<GraphFunction>(
         std::move(name), std::move(graph), nullptr);
     auto ret = fn.get();
     register_function(std::move(fn));
@@ -322,7 +320,7 @@ struct TORCH_API CompilationUnit {
   std::unordered_map<c10::QualifiedName, size_t> dict_;
   std::unordered_map<c10::QualifiedName, size_t> classDict_;
 
-  // [class ownership] Right now there aree two relationships between classes
+  // [class ownership] Right now there are two relationships between classes
   // and compilation units:
   // 1. Classes have compilation units internally that hold their methods.
   // 2. On load, the TypePtrs of any imported classes are owned by the main
@@ -350,5 +348,4 @@ namespace script {
 // of the public API; new code should not use this type alias.
 using CompilationUnit = ::torch::jit::CompilationUnit;
 } // namespace script
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit

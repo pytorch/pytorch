@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 # Nodes represent a definition of a value in our graph of operators.
 from typing import TYPE_CHECKING, Union, Callable, Any, Tuple, List, Optional, Dict, Set
 from ._compatibility import compatibility
@@ -5,6 +7,7 @@ from .immutable_collections import immutable_dict, immutable_list
 import torch
 import builtins
 import types
+import inspect
 import warnings
 from torch.fx.operator_schemas import normalize_function, normalize_module, ArgsKwargsPair
 from .._ops import ops as _ops
@@ -30,16 +33,29 @@ Argument = Optional[Union[
     BaseArgumentTypes
 ]]
 
+_side_effectful_need_to_be_preserved_pre_dispatch: Set[Callable] = {
+    torch._C._set_grad_enabled,
+    torch.amp._enter_autocast,
+    torch.amp._exit_autocast,
+}
+
+# TODO: Either refactor this into 2 functions 1 dce for functional graphs and 1 dce for all graphs,
+# or add logic to correctly mark all inplace ops as side effectful.
 _side_effectful_functions: Set[Callable] = {
     torch._assert,
     torch._assert_async,
     _ops.aten._assert_async.msg,
+    _ops.aten._assert_scalar.default,
     _ops.aten.copy_.default,
+    _ops.aten.index_put_.default,
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,
     _ops.profiler._record_function_enter_new,
-    _ops.profiler._record_function_exit}
+    _ops.profiler._record_function_exit,
+    _ops.inductor.accumulate_grad_.default,
+    _ops.inductor.resize_storage_bytes_.default,
+} | _side_effectful_need_to_be_preserved_pre_dispatch
 
 
 @compatibility(is_backward_compatible=False)
@@ -73,7 +89,7 @@ def _type_repr(obj):
             return obj.__qualname__
         return f'{obj.__module__}.{obj.__qualname__}'
     if obj is ...:
-        return('...')
+        return '...'
     if isinstance(obj, types.FunctionType):
         return obj.__name__
     return repr(obj)
@@ -87,6 +103,12 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
        and func is getattr(torch.Tensor, func.__name__, None)):
         return f"torch.Tensor.{func.__name__}"
     name = func.__name__
+    if name == "<lambda>":
+        # For lambdas, try to get their defining name in the module
+        try:
+            name = inspect.getsource(func).split("=")[0].strip()
+        except Exception as e:
+            raise RuntimeError("Unable to represent lambda") from e
     module = _find_module_of_method(func)
     module = module.replace('torch._ops', 'torch.ops')  # WAR for bug in how torch.ops assigns module
     # Fixup segment_reduce mismatch
@@ -215,6 +237,7 @@ class Node:
         self._prev = self
         self._next = self
         self._erased = False
+        self._sort_key = ()
 
         # If set, use this fn to print this node
         self._repr_fn : Optional[Callable[[Node], str]] = None
@@ -266,6 +289,30 @@ class Node:
         p = self._prev
         p._next, x._prev = x, p
         x._next, self._prev = self, x
+
+        # compute x._sort_key
+        psk = x._prev._sort_key
+        nsk = x._next._sort_key
+        if len(psk) > len(nsk):
+            *prefix, idx = psk[:len(nsk) + 1]
+            x._sort_key = (*prefix, idx + 1)
+        elif len(psk) < len(nsk):
+            *prefix, idx = nsk[:len(psk) + 1]
+            x._sort_key = (*prefix, idx - 1)
+        else:  # same length, increase length by 1
+            x._sort_key = (*psk, 0)
+
+    def __gt__(self, other: 'Node'):
+        return self._sort_key > other._sort_key
+
+    def __lt__(self, other: 'Node'):
+        return self._sort_key < other._sort_key
+
+    def __ge__(self, other: 'Node'):
+        return self > other or self == other
+
+    def __le__(self, other: 'Node'):
+        return self < other or self == other
 
     @compatibility(is_backward_compatible=True)
     def append(self, x: 'Node') -> None:
@@ -358,6 +405,30 @@ class Node:
         self.args = tuple(args)
 
     @compatibility(is_backward_compatible=True)
+    def insert_arg(self, idx : int, arg : Argument) -> None:
+        """
+        Insert an positional argument to the argument list with given index.
+
+        Args:
+
+            idx (int): The index of the element in ``self.args`` to be inserted before.
+            arg (Argument): The new argument value to insert into ``args``
+        """
+        assert 0 <= idx <= len(self.args), "insert_args index must be between 0 and len(self.args)"
+        args_left = self.args[:idx]
+        args_right = self.args[idx:]
+
+        self._args = args_left + (arg,) + args_right
+
+        _new_input_nodes = {}
+        map_arg(arg, _new_input_nodes.setdefault)
+
+        for new_use in _new_input_nodes.keys():
+            if new_use not in self._input_nodes:
+                self._input_nodes.setdefault(new_use)
+                new_use.users.setdefault(self)
+
+    @compatibility(is_backward_compatible=True)
     def update_kwarg(self, key : str, arg : Argument) -> None:
         """
         Update an existing keyword argument to contain the new value
@@ -401,8 +472,8 @@ class Node:
             old_use.users.pop(self)
 
         self._input_nodes = {}
-        map_arg(self._args, lambda n: self._input_nodes.setdefault(n))
-        map_arg(self._kwargs, lambda n: self._input_nodes.setdefault(n))
+        map_arg(self._args, self._input_nodes.setdefault)
+        map_arg(self._kwargs, self._input_nodes.setdefault)
 
         for new_use in self._input_nodes.keys():
             new_use.users.setdefault(self)
@@ -522,6 +593,7 @@ class Node:
                 replace_with.meta[k] = v
         to_process = list(self.users)
         skipped = []
+        m = self.graph.owning_module
         for use_node in to_process:
             if not delete_user_cb(use_node):
                 skipped.append(use_node)
@@ -532,6 +604,9 @@ class Node:
                     return replace_with
                 else:
                     return n
+
+            if getattr(m, "_replace_hook", None):
+                m._replace_hook(old=self, new=replace_with.name, user=use_node)
 
             new_args = map_arg(use_node.args, maybe_replace_node)
             new_kwargs = map_arg(use_node.kwargs, maybe_replace_node)
@@ -622,11 +697,31 @@ class Node:
         def maybe_replace_node(n : Node) -> Node:
             return new_input if n == old_input else n
 
+        m = self.graph.owning_module
+        if getattr(m, "_replace_hook", None):
+            m._replace_hook(old=old_input, new=new_input.name, user=self)
+
         new_args = map_arg(self.args, maybe_replace_node)
         new_kwargs = map_arg(self.kwargs, maybe_replace_node)
         assert isinstance(new_args, tuple)
         assert isinstance(new_kwargs, dict)
         self.__update_args_kwargs(new_args, new_kwargs)
+
+    def _rename(self, candidate: str):
+        if candidate == self.name:
+            return
+        name = self.graph._graph_namespace.create_name(candidate, None)
+        self.name = name
+        self.graph._graph_namespace._rename_object(self, name)
+
+    def __setattr__(self, name: str, value: Any) -> None:
+        if name == 'name' and hasattr(self, "name"):
+            m = self.graph.owning_module
+            if getattr(m, "_replace_hook", None):
+                assert isinstance(value, str)
+                for user in self.users:
+                    m._replace_hook(old=self, new=value, user=user)
+        object.__setattr__(self, name, value)
 
 
 @compatibility(is_backward_compatible=True)

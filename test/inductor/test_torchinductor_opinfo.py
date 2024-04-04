@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import atexit
+import contextlib
 import functools
 import os
 import sys
@@ -12,7 +13,7 @@ from unittest.mock import patch
 import torch
 
 from torch._dispatch.python import enable_python_dispatcher
-from torch._dynamo.test_case import run_tests
+from torch._inductor.test_case import run_tests, TestCase
 from torch._subclasses.fake_tensor import (
     DataDependentOutputException,
     DynamicOutputShapeException,
@@ -39,16 +40,16 @@ from torch.testing._internal.common_utils import (
     TEST_MKL,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase,
 )
-from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
 try:
     try:
-        from .test_torchinductor import check_model, check_model_cuda
+        from .test_torchinductor import check_model, check_model_gpu
     except ImportError:
-        from test_torchinductor import check_model, check_model_cuda
+        from test_torchinductor import check_model, check_model_gpu
 except (unittest.SkipTest, ImportError) as e:
     sys.stderr.write(f"{type(e)}: {e}\n")
     if __name__ == "__main__":
@@ -64,10 +65,15 @@ i16 = torch.int16  # not tested
 i32 = torch.int32
 i64 = torch.int64
 b8 = torch.bool
-u8 = torch.uint8  # not tested
+u8 = torch.uint8  # not tested except upsampling and interpolate ops
+u16 = torch.uint16  # not tested
+u32 = torch.uint32  # not tested
+u64 = torch.uint64  # not tested
 
 _ops = partial(
-    ops, dtypes=OpDTypes.supported, allowed_dtypes=[f16, f32, f64, i32, i64, b8]
+    ops,
+    dtypes=OpDTypes.supported,
+    allowed_dtypes=[f16, f32, f64, i32, i64, b8, u8, u16, u32, u64],
 )
 
 # Success forces pass; failure forces fail; skip unconditionally skips testing
@@ -137,7 +143,7 @@ def print_seen():
                 f"    {format_op(op)}: {fmt_dtypes(failed_dtypes)},{reasons}"
             )
 
-    for device_type in ("cpu", "cuda"):
+    for device_type in ("cpu", GPU_TYPE):
         expected_failures[device_type]
         nl = "\n"
         print(
@@ -159,9 +165,7 @@ inductor_skips = defaultdict(dict)
 
 
 inductor_skips["cpu"] = {
-    "linalg.ldl_solve": {b8, f16, f32, f64, i32, i64},  # segfault
     "linalg.ldl_factor": {f32, f64},  # flaky
-    "__rdiv__": {b8, f16, f32, f64, i32, i64},  # flaky
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
 }
 
@@ -187,6 +191,7 @@ inductor_skips["cuda"] = {
     "nn.functional.cosine_embedding_loss": {b8},
     "native_batch_norm": {f16, f32, f64},
     "_native_batch_norm_legit": {f16, f32, f64},
+    "_batch_norm_with_update": {f16, f32, f64},
 }
 
 if not SM80OrLater:
@@ -195,123 +200,71 @@ if not SM80OrLater:
 if TEST_WITH_ROCM:
     # Tensors are not alike
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
+    inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
 
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    ("_segment_reduce", "lengths"): {f16, f32, f64},
+    "_softmax_backward_data": {
+        f16
+    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
-    "bernoulli": {f32, f64},
-    "cauchy": {f16},
     "cholesky": {f32, f64},
     "complex": {f16},
-    "exponential": {f16},
-    "geometric": {f16},
-    "log_normal": {f16},
-    "masked_scatter": {f16, f32, f64},
-    ("max", "reduction_with_dim"): {b8},
-    ("min", "reduction_with_dim"): {b8},
-    "multinomial": {f32, f64},
+    "resize_": {b8, f16, f32, f64, i32, i64},
+    "resize_as_": {b8, f16, f32, f64, i32, i64},
+    "histc": {f16},
+    "multinomial": {f16, f32, f64},
     "nn.functional.avg_pool1d": {i64},
     "nn.functional.avg_pool2d": {i64},
+    "nn.functional.avg_pool3d": {i64},
     "nn.functional.local_response_norm": {i64},
     "nn.functional.rrelu": {f32, f64},
-    "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     "nonzero_static": {b8, f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
-    "rand_like": {f16, f32, f64},
-    "randint": {f16, f32, f64, i32, i64},
-    "randint_like": {f16, f32, f64, i32, i64},
-    "randn_like": {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
     "to_sparse": {f32, f64},
-    "uniform": {f16},
     "view_as_complex": {f16},
 }
 
 
 inductor_expected_failures_single_sample["cuda"] = {
-    "__rdiv__": {b8, f16, f32, f64, i32, i64},
-    ("_segment_reduce", "lengths"): {f16, f32, f64},
     "_upsample_bilinear2d_aa": {f16, f32, f64},
-    "addr": {f16},
-    "angle": {f64},
-    ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
-    "asin": {f16},
-    "atanh": {f16, f32},
-    "baddbmm": {f16},
-    "bernoulli": {f16, f32, f64},
-    "cauchy": {f16, f32, f64},
     "cholesky": {f32, f64},
-    "cumprod": {f16},
-    "exponential": {f16, f32, f64},
-    "fft.ihfft2": {f16, f32, f64},
-    "fft.ihfftn": {f16, f32, f64},
-    "geometric": {f16, f32, f64, i32, i64},
-    "kron": {f16},
-    "linalg.eig": {f32, f64},
-    "log_normal": {f16, f32, f64},
-    "masked_scatter": {f16, f32, f64},
-    ("max", "reduction_with_dim"): {b8},
-    ("min", "reduction_with_dim"): {b8},
     "multinomial": {f16, f32, f64},
-    "nanquantile": {f32, f64},
-    "nn.functional.batch_norm": {f16},
-    ("nn.functional.batch_norm", "without_cudnn"): {f16},
-    "nn.functional.cosine_similarity": {f16},
-    "nn.functional.instance_norm": {f16},
-    "nn.functional.local_response_norm": {f16},
     "nn.functional.normalize": {f16},
-    "nn.functional.soft_margin_loss": {f16},
-    "nn.functional.softsign": {f16},
-    "nn.functional.triplet_margin_loss": {f16},
-    "nn.functional.triplet_margin_with_distance_loss": {f16, f32, f64, i32, i64},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
-    "outer": {f16},
-    "rand_like": {f16, f32, f64},
-    "randint": {f16, f32, f64, i32, i64},
-    "randint_like": {f16, f32, f64, i32, i64},
-    "randn_like": {f16, f32, f64},
-    ("round", "decimals_3"): {f16},
     "sparse.sampled_addmm": {f32, f64},
-    ("std_mean", "unbiased"): {f16},
     "to_sparse": {f16, f32, f64},
+    "torch.ops.aten._efficient_attention_forward": {f16, bf16, f32},
+    "torch.ops.aten._flash_attention_forward": {f16, bf16, f32},
 }
+
+
+# intentionally not handled
+intentionally_not_handled = {
+    ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
+    "resize_": {b8, f16, f32, f64, i32, i64},
+    "resize_as_": {b8, f16, f32, f64, i32, i64},
+}
+
+inductor_expected_failures_single_sample["cuda"].update(intentionally_not_handled)
 
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
 inductor_gradient_expected_failures_single_sample["cuda"] = {
-    "asin": {f16},
-    "atanh": {f16, f32},
-    "cumprod": {f16},
-    "kron": {f16},
-    "nanquantile": {f32, f64},
-    ("nn.functional.batch_norm", "without_cudnn"): {f16},
-    "nn.functional.batch_norm": {f16},
-    "nn.functional.cosine_similarity": {f16},
-    "nn.functional.instance_norm": {f16},
     "nn.functional.normalize": {f16},
-    "nn.functional.softsign": {f16},
-    "nn.functional.local_response_norm": {f16},
-    "outer": {f16},
 }
 
 if not TEST_WITH_ROCM:
     inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
 
 if not TEST_MKL:
-    inductor_expected_failures_single_sample["cpu"].update(
-        {
-            "fft.hfft2": {b8, i32, i64, f32, f64},
-            "fft.hfftn": {b8, i32, i64, f32, f64},
-            "fft.ihfft2": {b8, i32, i64, f32, f64},
-            "fft.ihfftn": {b8, i32, i64, f32, f64},
-        }
-    )
+    inductor_expected_failures_single_sample["cpu"].update({})
 
 inductor_should_fail_with_exception = defaultdict(dict)
 inductor_should_fail_with_exception["cpu"] = {}
@@ -350,10 +303,6 @@ torch.testing._internal.common_methods_invocations.wrapper_set_seed = (
     wrapper_noop_set_seed
 )
 
-# This file does a global patch to `disable_global_flags()` - which we should not invoke in non testing cases.
-torch._dynamo.variables.torch.tensor_dunder_fns.append(
-    torch.testing._internal.common_utils.disable_functorch
-)
 
 # key can be either op_name, or (op_name, deivce_type), or (op_name, device_type, dtype)
 inductor_override_kwargs = {
@@ -365,20 +314,69 @@ inductor_override_kwargs = {
     "empty_strided": {"assert_equal": False},
     "new_empty_strided": {"assert_equal": False},
     "randn": {"assert_equal": False},
-    ("masked.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
-    ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
-    ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
-    ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
+    ("cross", "cuda", f16): {"reference_in_float": True},
+    ("linalg.cross", "cuda", f16): {"reference_in_float": True},
+    ("addr", "cuda", f16): {"reference_in_float": True},
+    ("baddbmm", "cuda", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
+    ("angle", "cuda", f64): {"reference_in_float": True},
+    ("asin", "cuda", f16): {"reference_in_float": True},
+    ("atanh", "cuda", f16): {"reference_in_float": True},
+    ("cauchy", "cuda"): {"reference_in_float": True},
     ("cummax", "cuda", f16): {"atol": 5e-4, "rtol": 0.002},
-    ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
+    ("cumsum", "cuda", f16): {"reference_in_float": True},
+    ("cumprod", "cuda"): {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
+    ("logcumsumexp", "cuda"): {"grad_atol": 8e-4, "grad_rtol": 0.001},
+    ("exponential", "cuda"): {"reference_in_float": True},
+    ("geometric", "cuda"): {"reference_in_float": True},
+    ("kron", "cuda", f16): {"reference_in_float": True},
+    ("log_normal", "cuda"): {"reference_in_float": True},
+    ("masked.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("nn.functional.batch_norm", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.batch_norm.without_cudnn", "cuda", f16): {
+        "reference_in_float": True
+    },
+    ("nn.functional.cosine_similarity", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.instance_norm", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.local_response_norm", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.rms_norm", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.soft_margin_loss", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
+    ("nn.functional.softsign", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.tanhshrink", "cuda", f16): {"atol": 3e-4, "rtol": 0.001},
+    ("outer", "cuda", f16): {"reference_in_float": True},
+    ("round.decimals_3", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.triplet_margin_loss", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
+    ("nn.functional.triplet_margin_with_distance_loss", "cuda", f16): {
+        "atol": 1e-4,
+        "rtol": 0.02,
+    },
+    ("sinc", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
     ("softmax", "cpu", f16): {"atol": 1e-4, "rtol": 0.02},
+    ("softmax", "cuda", f16): {"atol": 1e-4, "rtol": 0.02},
     ("_softmax_backward_data", "cuda", f16): {"atol": 0.008, "rtol": 0.002},
-    "gradient": {"check_gradient": False},  # segfault on check_gradient
-    # Following tests failed, and causing subsequent tests failing with unrecoverable CUDA error
-    "linalg.solve_triangular": {"check_gradient": False},
-    "linalg.lu_factor": {"check_gradient": False},
-    "linalg.lu_factor_ex": {"check_gradient": False},
+    ("special.log_ndtr", "cuda", f64): {"atol": 1e-6, "rtol": 1e-5},
+    ("polygamma.polygamma_n_0", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_1", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_2", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_3", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("polygamma.polygamma_n_4", "cpu", f32): {"atol": 1e-3, "rtol": 1e-4},
+    ("special.polygamma.special_polygamma_n_0", "cpu", f32): {
+        "atol": 1e-3,
+        "rtol": 1e-4,
+    },
+    ("std_mean.unbiased", "cuda", f16): {"reference_in_float": True},
+    ("uniform", "cuda"): {"reference_in_float": True},
+    # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
+    ("nn.functional.interpolate.bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
+    ("nn.functional.upsample_bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
+    ("nn.functional.interpolate.bicubic", "cpu", u8): {"atol": 1, "rtol": 0},
+    # High atol due to precision loss
+    ("nn.functional.interpolate.bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
+    ("nn.functional.upsample_bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
+    ("nn.functional.interpolate.bicubic", "cpu", f32): {"atol": 5e-3, "rtol": 0},
+    ("nn.functional.interpolate.bicubic", "cuda", f64): {"atol": 1e-3, "rtol": 0},
 }
+
 
 # Always test with all sample for following ops
 inductor_all_samples = {
@@ -429,8 +427,11 @@ def collection_decorator(fn):
 
 
 class TestInductorOpInfo(TestCase):
+    def tearDown(self):
+        torch._dynamo.reset()
+
     check_model = check_model
-    check_model_cuda = check_model_cuda
+    check_model_gpu = check_model_gpu
 
     @onlyNativeDeviceTypes
     @suppress_warnings
@@ -452,14 +453,27 @@ class TestInductorOpInfo(TestCase):
     def test_comprehensive(self, device, dtype, op):
         torch._dynamo.reset()
         with torch.no_grad():
-            torch.cuda.empty_cache()
+            # TODO: should we move empty_cache to the common device interface
+            if device == "cuda":
+                torch.cuda.empty_cache()
         op_name = op.name
         if op.variant_test_name:
             op_name += f".{op.variant_test_name}"
 
+        # Skip dtype=torch.uint8 for all ops except upsample and interpolate:
+        allowed_dtypes = [f16, f32, f64, i32, i64, b8]
+        if op_name not in (
+            "nn.functional.interpolate.bilinear",
+            "nn.functional.interpolate.bicubic",
+            "nn.functional.upsample_bilinear",
+            "nn.functional.upsample_nearest",
+        ):
+            if dtype not in allowed_dtypes:
+                raise unittest.SkipTest("Skipped!")
+
         device_type = torch.device(device).type
 
-        assert device_type in ("cuda", "cpu")
+        assert device_type in (GPU_TYPE, "cpu")
 
         # with open("test_output.txt", "a") as f:
         #     print(f"CONSIDERING OP {op_name} on {device_type} with {dtype} |
@@ -489,7 +503,6 @@ class TestInductorOpInfo(TestCase):
             overridden_kwargs = inductor_override_kwargs[(op_name, device_type)]
         elif (op_name, device_type, dtype) in inductor_override_kwargs:
             overridden_kwargs = inductor_override_kwargs[(op_name, device_type, dtype)]
-
         func = op.get_op()
 
         def fn(*args, **kwargs):
@@ -512,7 +525,19 @@ class TestInductorOpInfo(TestCase):
             else:
                 samples = [next(samples)]
 
-        def do_nopython(fn, args, kwargs):
+        class HasRngOp(TorchDispatchMode):
+            def __init__(self):
+                super().__init__()
+                self.has_rng_op = False
+
+            def __torch_dispatch__(self, func, types, args, kwargs=None):
+                kwargs = kwargs if kwargs else {}
+                if torch.Tag.nondeterministic_seeded in func.tags:
+                    self.has_rng_op = True
+
+                return func(*args, **kwargs)
+
+        def do_nopython_and_has_rng(fn, args, kwargs):
             try:
                 mode = FakeTensorMode()
 
@@ -523,60 +548,100 @@ class TestInductorOpInfo(TestCase):
                         return e
 
                 args, kwargs = tree_map(map_to_fake, (args, kwargs))
-                with mode:
+                with HasRngOp() as rng_mode, mode:
                     with enable_python_dispatcher():
                         fn(*args, **kwargs)
 
             except (DataDependentOutputException, DynamicOutputShapeException):
-                return False
+                return False, rng_mode.has_rng_op
 
-            return True
+            return True, rng_mode.has_rng_op
+
+        def get_contexts(has_rng_op):
+            if has_rng_op:
+                # TODO - enable this, running into errors
+                return (
+                    # (
+                    #     lambda: torch._inductor.config.patch(
+                    #         {"fallback_random": True, "implicit_fallbacks": True}
+                    #     ),
+                    #     {"assert_equal": True},
+                    # ),
+                    (
+                        contextlib.nullcontext,
+                        {"assert_equal": False},
+                    ),
+                )
+            return ((contextlib.nullcontext, {}),)
 
         try:
+
+            def _get_tolerances(dtype):
+                _custom_tolerances = {
+                    torch.float32: (1.3e-5, 1.5e-5),
+                }
+                if dtype in _custom_tolerances:
+                    return _custom_tolerances[dtype]
+                else:
+                    return None, None
+
             for sample_input in samples:
                 args = [sample_input.input] + list(sample_input.args)
                 kwargs = sample_input.kwargs
                 # UNCOMMENT TO DEBUG SEGFAULTS
+
                 # with open("test_output.txt", "a") as f:
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
                 #     print(f"RUNNING OP {op_name} on {device_type} with {dtype}", flush=True)
-                if device_type == "cuda":
+                rtol, atol = _get_tolerances(dtype)
+                if device_type == GPU_TYPE:
                     # opinfo test case have already place the input on the correct device
-                    # so we don't need do additional copy by setting copy_to_cuda=False
+                    # so we don't need do additional copy by setting copy_to_gpu=False
 
-                    no_python = do_nopython(fn, args, kwargs)
-                    adjusted_kwargs = {
-                        "check_lowp": False,
-                        "nopython": no_python,
-                        "copy_to_cuda": False,
-                        "reference_in_float": False,
-                        "check_gradient": requires_grad,
-                        "check_has_compiled": no_python,
-                    }
-                    adjusted_kwargs.update(overridden_kwargs)
-                    self.check_model_cuda(
-                        fn,
-                        args,
-                        kwargs,
-                        **adjusted_kwargs,
-                    )
+                    no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
+                    for context_fn, kwarg_overrides in get_contexts(has_rng_op):
+                        with context_fn():
+                            adjusted_kwargs = {
+                                "check_lowp": False,
+                                "nopython": no_python,
+                                "copy_to_gpu": False,
+                                "reference_in_float": False,
+                                "check_gradient": requires_grad,
+                                "check_has_compiled": no_python,
+                                "output_process_fn_grad": sample_input.output_process_fn_grad,
+                                "atol": atol,
+                                "rtol": rtol,
+                            }
+                            adjusted_kwargs.update(overridden_kwargs)
+                            adjusted_kwargs.update(kwarg_overrides)
+                            self.check_model_gpu(
+                                fn,
+                                args,
+                                kwargs,
+                                **adjusted_kwargs,
+                            )
                 elif device_type == "cpu":
-                    no_python = do_nopython(fn, args, kwargs)
-                    adjusted_kwargs = {
-                        "check_lowp": False,
-                        "nopython": no_python,
-                        "check_has_compiled": no_python,
-                        # skip checking gradient on CPU for now
-                        "check_gradient": False,
-                    }
-                    adjusted_kwargs.update(overridden_kwargs)
+                    no_python, has_rng_op = do_nopython_and_has_rng(fn, args, kwargs)
+                    for context_fn, kwarg_overrides in get_contexts(has_rng_op):
+                        with context_fn():
+                            adjusted_kwargs = {
+                                "check_lowp": False,
+                                "nopython": no_python,
+                                "check_has_compiled": no_python,
+                                # skip checking gradient on CPU for now
+                                "check_gradient": False,
+                                "atol": atol,
+                                "rtol": rtol,
+                            }
+                            adjusted_kwargs.update(overridden_kwargs)
+                            adjusted_kwargs.update(kwarg_overrides)
 
-                    self.check_model(
-                        fn,
-                        args,
-                        kwargs,
-                        **adjusted_kwargs,
-                    )
+                            self.check_model(
+                                fn,
+                                args,
+                                kwargs,
+                                **adjusted_kwargs,
+                            )
 
         except Exception as e:
             known_failure = False

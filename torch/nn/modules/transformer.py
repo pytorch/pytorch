@@ -17,12 +17,17 @@ __all__ = ['Transformer', 'TransformerEncoder', 'TransformerDecoder', 'Transform
 
 def _generate_square_subsequent_mask(
         sz: int,
-        device: torch.device = torch.device(torch._C._get_default_device()),  # torch.device('cpu'),
-        dtype: torch.dtype = torch.get_default_dtype(),
+        device: Optional[torch.device] = None,
+        dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
-    r"""Generate a square causal mask for the sequence. The masked positions are filled with float('-inf').
-        Unmasked positions are filled with float(0.0).
+    r"""Generate a square causal mask for the sequence.
+
+    The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0).
     """
+    if device is None:
+        device = torch.device('cpu')
+    if dtype is None:
+        dtype = torch.float32
     return torch.triu(
         torch.full((sz, sz), float('-inf'), dtype=dtype, device=device),
         diagonal=1,
@@ -48,7 +53,9 @@ def _get_seq_len(
 
 
 class Transformer(Module):
-    r"""A transformer model. User is able to modify the attributes as needed. The architecture
+    r"""A transformer model.
+
+    User is able to modify the attributes as needed. The architecture
     is based on the paper "Attention Is All You Need". Ashish Vaswani, Noam Shazeer,
     Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez, Lukasz Kaiser, and
     Illia Polosukhin. 2017. Attention is all you need. In Advances in Neural Information
@@ -125,6 +132,13 @@ class Transformer(Module):
                 memory_is_causal: bool = False) -> Tensor:
         r"""Take in and process masked source/target sequences.
 
+        .. note::
+
+            If a boolean tensor is provided for any of the [src/tgt/memory]_mask arguments, positions with a ``True`` value are
+            not allowed to participate in the attention,
+            which is the opposite of the definition for :attr:`attn_mask`
+            in :func:`torch.nn.functional.scaled_dot_product_attention`.
+
         Args:
             src: the sequence to the encoder (required).
             tgt: the sequence to the decoder (required).
@@ -169,7 +183,7 @@ class Transformer(Module):
             - tgt_key_padding_mask: :math:`(T)` for unbatched input otherwise :math:`(N, T)`.
             - memory_key_padding_mask: :math:`(S)` for unbatched input otherwise :math:`(N, S)`.
 
-            Note: [src/tgt/memory]_mask ensures that position i is allowed to attend the unmasked
+            Note: [src/tgt/memory]_mask ensures that position :math:`i` is allowed to attend the unmasked
             positions. If a BoolTensor is provided, positions with ``True``
             are not allowed to attend while ``False`` values will be unchanged. If a FloatTensor
             is provided, it will be added to the attention weight.
@@ -184,14 +198,13 @@ class Transformer(Module):
             the output sequence length of a transformer is same as the input sequence
             (i.e. target) length of the decoder.
 
-            where S is the source sequence length, T is the target sequence length, N is the
-            batch size, E is the feature number
+            where :math:`S` is the source sequence length, :math:`T` is the target sequence length, :math:`N` is the
+            batch size, :math:`E` is the feature number
 
         Examples:
             >>> # xdoctest: +SKIP
             >>> output = transformer_model(src, tgt, src_mask=src_mask, tgt_mask=tgt_mask)
         """
-
         is_batched = src.dim() == 3
         if not self.batch_first and src.size(1) != tgt.size(1) and is_batched:
             raise RuntimeError("the batch number of src and tgt must be equal")
@@ -212,25 +225,26 @@ class Transformer(Module):
     @staticmethod
     def generate_square_subsequent_mask(
             sz: int,
-            device: torch.device = torch.device(torch._C._get_default_device()),  # torch.device('cpu'),
-            dtype: torch.dtype = torch.get_default_dtype(),
+            device: Optional[torch.device] = None,
+            dtype: Optional[torch.dtype] = None,
     ) -> Tensor:
-        r"""Generate a square causal mask for the sequence. The masked positions are filled with float('-inf').
-            Unmasked positions are filled with float(0.0).
+        r"""Generate a square causal mask for the sequence.
+
+        The masked positions are filled with float('-inf'). Unmasked positions are filled with float(0.0).
         """
         return _generate_square_subsequent_mask(sz, dtype=dtype, device=device)
 
     def _reset_parameters(self):
         r"""Initiate parameters in the transformer model."""
-
         for p in self.parameters():
             if p.dim() > 1:
                 xavier_uniform_(p)
 
 
 class TransformerEncoder(Module):
-    r"""TransformerEncoder is a stack of N encoder layers. Users can build the
-    BERT(https://arxiv.org/abs/1810.04805) model with corresponding parameters.
+    r"""TransformerEncoder is a stack of N encoder layers.
+
+    Users can build the BERT(https://arxiv.org/abs/1810.04805) model with corresponding parameters.
 
     Args:
         encoder_layer: an instance of the TransformerEncoderLayer() class (required).
@@ -246,9 +260,17 @@ class TransformerEncoder(Module):
         >>> src = torch.rand(10, 32, 512)
         >>> out = transformer_encoder(src)
     """
+
     __constants__ = ['norm']
 
-    def __init__(self, encoder_layer, num_layers, norm=None, enable_nested_tensor=True, mask_check=True):
+    def __init__(
+        self,
+        encoder_layer: "TransformerEncoderLayer",
+        num_layers: int,
+        norm: Optional[Module] = None,
+        enable_nested_tensor: bool = True,
+        mask_check: bool = True
+    ) -> None:
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(encoder_layer, num_layers)
@@ -271,6 +293,8 @@ class TransformerEncoder(Module):
                                           "(use batch_first for better inference performance)")
         elif not encoder_layer.self_attn._qkv_same_embed_dim:
             why_not_sparsity_fast_path = f"{enc_layer}.self_attn._qkv_same_embed_dim was not True"
+        elif encoder_layer.self_attn.in_proj_bias is None:
+            why_not_sparsity_fast_path = f"{enc_layer}.self_attn was passed bias=False"
         elif not encoder_layer.activation_relu_or_gelu:
             why_not_sparsity_fast_path = f"{enc_layer}.activation_relu_or_gelu was not True"
         elif not (encoder_layer.norm1.eps == encoder_layer.norm2.eps) :
@@ -304,7 +328,7 @@ class TransformerEncoder(Module):
                 compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`~torch.nn.Transformer`.
         """
         src_key_padding_mask = F._canonical_mask(
             mask=src_key_padding_mask,
@@ -330,7 +354,11 @@ class TransformerEncoder(Module):
         why_not_sparsity_fast_path = ''
         str_first_layer = "self.layers[0]"
         batch_first = first_layer.self_attn.batch_first
-        if not hasattr(self, "use_nested_tensor"):
+        is_fastpath_enabled = torch.backends.mha.get_fastpath_enabled()
+
+        if not is_fastpath_enabled:
+            why_not_sparsity_fast_path = "torch.backends.mha.get_fastpath_enabled() was not True"
+        elif not hasattr(self, "use_nested_tensor"):
             why_not_sparsity_fast_path = "use_nested_tensor attribute not present"
         elif not self.use_nested_tensor:
             why_not_sparsity_fast_path = "self.use_nested_tensor (set in init) was not True"
@@ -396,7 +424,7 @@ class TransformerEncoder(Module):
 
 
 class TransformerDecoder(Module):
-    r"""TransformerDecoder is a stack of N decoder layers
+    r"""TransformerDecoder is a stack of N decoder layers.
 
     Args:
         decoder_layer: an instance of the TransformerDecoderLayer() class (required).
@@ -410,9 +438,15 @@ class TransformerDecoder(Module):
         >>> tgt = torch.rand(20, 32, 512)
         >>> out = transformer_decoder(tgt, memory)
     """
+
     __constants__ = ['norm']
 
-    def __init__(self, decoder_layer, num_layers, norm=None):
+    def __init__(
+        self,
+        decoder_layer: "TransformerDecoderLayer",
+        num_layers: int,
+        norm: Optional[Module] = None
+    ) -> None:
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
         self.layers = _get_clones(decoder_layer, num_layers)
@@ -449,7 +483,7 @@ class TransformerDecoder(Module):
                 forward and backward compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`~torch.nn.Transformer`.
         """
         output = tgt
 
@@ -471,6 +505,7 @@ class TransformerDecoder(Module):
 
 class TransformerEncoderLayer(Module):
     r"""TransformerEncoderLayer is made up of self-attn and feedforward network.
+
     This standard encoder layer is based on the paper "Attention Is All You Need".
     Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
     Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
@@ -542,6 +577,7 @@ class TransformerEncoderLayer(Module):
          https://arxiv.org/abs/2205.14135
 
     """
+
     __constants__ = ['norm_first']
 
     def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.1,
@@ -605,7 +641,7 @@ class TransformerEncoderLayer(Module):
                 compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`~torch.nn.Transformer`.
         """
         src_key_padding_mask = F._canonical_mask(
             mask=src_key_padding_mask,
@@ -624,15 +660,21 @@ class TransformerEncoderLayer(Module):
             check_other=False,
         )
 
+        is_fastpath_enabled = torch.backends.mha.get_fastpath_enabled()
+
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
         why_not_sparsity_fast_path = ''
-        if not src.dim() == 3:
+        if not is_fastpath_enabled:
+            why_not_sparsity_fast_path = "torch.backends.mha.get_fastpath_enabled() was not True"
+        elif not src.dim() == 3:
             why_not_sparsity_fast_path = f"input not batched; expected src.dim() of 3 but got {src.dim()}"
         elif self.training:
             why_not_sparsity_fast_path = "training is enabled"
-        elif not self.self_attn.batch_first :
+        elif not self.self_attn.batch_first:
             why_not_sparsity_fast_path = "self_attn.batch_first was not True"
-        elif not self.self_attn._qkv_same_embed_dim :
+        elif self.self_attn.in_proj_bias is None:
+            why_not_sparsity_fast_path = "self_attn was passed bias=False"
+        elif not self.self_attn._qkv_same_embed_dim:
             why_not_sparsity_fast_path = "self_attn._qkv_same_embed_dim was not True"
         elif not self.activation_relu_or_gelu:
             why_not_sparsity_fast_path = "activation_relu_or_gelu was not True"
@@ -726,6 +768,7 @@ class TransformerEncoderLayer(Module):
 
 class TransformerDecoderLayer(Module):
     r"""TransformerDecoderLayer is made up of self-attn, multi-head-attn and feedforward network.
+
     This standard decoder layer is based on the paper "Attention Is All You Need".
     Ashish Vaswani, Noam Shazeer, Niki Parmar, Jakob Uszkoreit, Llion Jones, Aidan N Gomez,
     Lukasz Kaiser, and Illia Polosukhin. 2017. Attention is all you need. In Advances in
@@ -760,6 +803,7 @@ class TransformerDecoderLayer(Module):
         >>> tgt = torch.rand(32, 20, 512)
         >>> out = decoder_layer(tgt, memory)
     """
+
     __constants__ = ['norm_first']
 
     def __init__(self, d_model: int, nhead: int, dim_feedforward: int = 2048, dropout: float = 0.1,
@@ -833,7 +877,7 @@ class TransformerDecoderLayer(Module):
                 forward and backward compatibility.
 
         Shape:
-            see the docs in Transformer class.
+            see the docs in :class:`~torch.nn.Transformer`.
         """
         # see Fig. 1 of https://arxiv.org/pdf/2002.04745v1.pdf
 

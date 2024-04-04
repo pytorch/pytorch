@@ -36,14 +36,14 @@ void topk_impl_loop(
     TensorAccessor<int64_t, 1> mode_indices(
         reinterpret_cast<int64_t*>(data[1] + i * strides[1]),
         &k, &mode_indices_stride);
-    TensorAccessor<scalar_t, 1> tmp_values(
+    TensorAccessor<const scalar_t, 1> tmp_values(
         reinterpret_cast<scalar_t*>(data[2] + i * strides[2]),
         &dim_size, &tmp_values_stride);
 
-    auto n = dim_size;
-    auto use_partial_sort = k * 64 <= n;
+    auto n_2 = dim_size;
+    auto use_partial_sort = k * 64 <= n_2;
 
-    for (const auto j : c10::irange(n)) {
+    for (const auto j : c10::irange(n_2)) {
       queue[j].first = tmp_values[j];
       queue[j].second = j;
     }

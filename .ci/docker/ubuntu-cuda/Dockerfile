@@ -79,12 +79,6 @@ ENV OPENSSL_ROOT_DIR /opt/openssl
 RUN bash ./install_openssl.sh
 ENV OPENSSL_DIR /opt/openssl
 
-# (optional) Install non-default CMake version
-ARG CMAKE_VERSION
-COPY ./common/install_cmake.sh install_cmake.sh
-RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
-RUN rm install_cmake.sh
-
 ARG INDUCTOR_BENCHMARKS
 COPY ./common/install_inductor_benchmark_deps.sh install_inductor_benchmark_deps.sh
 COPY ./common/common_utils.sh common_utils.sh
@@ -92,6 +86,12 @@ COPY ci_commit_pins/huggingface.txt huggingface.txt
 COPY ci_commit_pins/timm.txt timm.txt
 RUN if [ -n "${INDUCTOR_BENCHMARKS}" ]; then bash ./install_inductor_benchmark_deps.sh; fi
 RUN rm install_inductor_benchmark_deps.sh common_utils.sh timm.txt huggingface.txt
+
+# (optional) Install non-default CMake version
+ARG CMAKE_VERSION
+COPY ./common/install_cmake.sh install_cmake.sh
+RUN if [ -n "${CMAKE_VERSION}" ]; then bash ./install_cmake.sh; fi
+RUN rm install_cmake.sh
 
 ARG TRITON
 # Install triton, this needs to be done before sccache because the latter will
@@ -141,6 +141,12 @@ ARG CUDA_VERSION
 COPY ./common/install_cudnn.sh install_cudnn.sh
 RUN if [ "${CUDNN_VERSION}" -eq 8 ]; then bash install_cudnn.sh; fi
 RUN rm install_cudnn.sh
+
+# Install CUSPARSELT
+ARG CUDA_VERSION
+COPY ./common/install_cusparselt.sh install_cusparselt.sh
+RUN bash install_cusparselt.sh
+RUN rm install_cusparselt.sh
 
 # Delete /usr/local/cuda-11.X/cuda-11.X symlinks
 RUN if [ -h /usr/local/cuda-11.6/cuda-11.6 ]; then rm /usr/local/cuda-11.6/cuda-11.6; fi

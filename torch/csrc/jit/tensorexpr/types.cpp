@@ -14,12 +14,14 @@ Dtype Dtype::scalar_dtype() const {
 // NOLINTNEXTLINE
 #define DTYPE_DEFINE(_1, n) TORCH_API Dtype k##n(ScalarType::n, 1);
 
-AT_FORALL_SCALAR_TYPES_AND5(
+AT_FORALL_SCALAR_TYPES_AND7(
     Bool,
     Half,
     BFloat16,
     Float8_e5m2,
+    Float8_e5m2fnuz,
     Float8_e4m3fn,
+    Float8_e4m3fnuz,
     DTYPE_DEFINE)
 DTYPE_DEFINE(c10::quint8, QUInt8);
 DTYPE_DEFINE(c10::qint8, QInt8);
@@ -34,8 +36,15 @@ Dtype ToDtype(ScalarType type) {
 #define TYPE_CASE(_1, n) \
   case ScalarType::n:    \
     return k##n;
-    AT_FORALL_SCALAR_TYPES_AND5(
-        Bool, Half, BFloat16, Float8_e5m2, Float8_e4m3fn, TYPE_CASE)
+    AT_FORALL_SCALAR_TYPES_AND7(
+        Bool,
+        Half,
+        BFloat16,
+        Float8_e5m2,
+        Float8_e5m2fnuz,
+        Float8_e4m3fn,
+        Float8_e4m3fnuz,
+        TYPE_CASE)
     TYPE_CASE(c10::quint8, QUInt8);
     TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
@@ -65,8 +74,15 @@ int Dtype::byte_size() const {
     scalar_size = sizeof(Type); \
     break;
 
-    AT_FORALL_SCALAR_TYPES_AND5(
-        Bool, Half, BFloat16, Float8_e5m2, Float8_e4m3fn, TYPE_CASE);
+    AT_FORALL_SCALAR_TYPES_AND7(
+        Bool,
+        Half,
+        BFloat16,
+        Float8_e5m2,
+        Float8_e4m3fn,
+        Float8_e5m2fnuz,
+        Float8_e4m3fnuz,
+        TYPE_CASE);
     TYPE_CASE(c10::quint8, QUInt8);
     TYPE_CASE(c10::qint8, QInt8);
 #undef TYPE_CASE
@@ -95,6 +111,10 @@ std::string Dtype::ToCppString() const {
       return "float8_e5m2";
     case ScalarType::Float8_e4m3fn:
       return "float8_e4m3fn";
+    case ScalarType::Float8_e5m2fnuz:
+      return "float8_e5m2fnuz";
+    case ScalarType::Float8_e4m3fnuz:
+      return "float8_e4m3fnuz";
     case ScalarType::QInt8:
       return "qint8";
     case ScalarType::QUInt8:

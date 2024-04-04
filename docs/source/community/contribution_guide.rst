@@ -1,8 +1,15 @@
+.. note::
+
+   This page has been deprecated. Please refer to the `Contribution Guide <https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions>`_ on the PyTorch Wiki.
+
 PyTorch Contribution Guide
 ==========================
 
 PyTorch is a GPU-accelerated Python tensor computation package for
 building deep neural networks using a tape-based autograd systems.
+
+
+
 
 Contribution Process
 --------------------
@@ -296,7 +303,7 @@ Frequently Asked Questions
    tasks or pull requests with your environment details is helpful and
    appreciated.
 -  **CI tests failed, what does it mean?** Maybe your PR is based
-   off a broken main bracnh? You can try to rebase your change on top
+   off a broken main branch? You can try to rebase your change on top
    of the latest main branch. You can also see the current status of
    main branch's CI at https://hud.pytorch.org/.
 -  **What are the most high risk changes?** Anything that touches build

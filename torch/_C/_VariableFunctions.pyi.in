@@ -1,4 +1,5 @@
 # ${generated_comment}
+# mypy: disable-error-code="type-arg"
 
 import builtins
 from typing import (
@@ -18,7 +19,7 @@ from typing import (
 )
 
 import torch
-from torch import contiguous_format, Generator, inf, memory_format, strided, Tensor
+from torch import contiguous_format, Generator, inf, memory_format, strided, SymInt, Tensor
 from torch.types import (
     _bool,
     _complex,
@@ -31,8 +32,9 @@ from torch.types import (
     _size,
     Device,
     Number,
-    SymInt,
 )
+
+from torch._prims_common import DeviceLikeType
 
 ${function_hints}
 

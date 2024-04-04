@@ -2892,15 +2892,12 @@ struct to_ir {
 
     // If it's a tensor, copy the RHS data into it
     if (sliceable->type()->isSubtypeOf(*TensorType::get())) {
-      std::vector<Value*> tensorIndices;
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      Value* sliced;
       // Handle multi-dimensional slicing: first emit int/slice indexing
       // TODO: the Python equivalent code has special-cased copy_to
       // broadcasting to match NumPy semantics (see PR#4853). We can't
       // replicate that without knowing the size of the Tensor; so really that
       // code should be moved into the aten function
-      std::tie(sliced, tensorIndices) = emitIntAndSliceIndexing(
+      auto [sliced, tensorIndices] = emitIntAndSliceIndexing(
           lhs.range(), sliceable, lhs.subscript_exprs());
 
       const auto slicedArg = NamedValue(lhs.range(), sliced);
@@ -5432,7 +5429,7 @@ std::unique_ptr<Function> CompilationUnit::define(
   auto graph = std::make_shared<Graph>();
   graph->set_op_version(operator_set_version);
 
-  auto fn = torch::make_unique<GraphFunction>(std::move(name), graph, creator);
+  auto fn = std::make_unique<GraphFunction>(std::move(name), graph, creator);
   if (self) {
     // Register this as a method on `self`'s type
     if (type == CompilationUnit::FunctionType::Hook) {

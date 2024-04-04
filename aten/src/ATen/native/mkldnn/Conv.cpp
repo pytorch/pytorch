@@ -223,10 +223,10 @@ static void _mkldnn_convolution_out (
   auto memory_format = mkldnn_convolution_memory_format(input_t.ndimension(), is_channels_last);
   auto input = input_t.is_mkldnn() ? input_t : input_t.contiguous(memory_format);
   auto weight = weight_t.is_mkldnn() ? weight_t : weight_t.contiguous(memory_format);
-  const ideep::tensor x = itensor_from_tensor(input);
-  const ideep::tensor w = itensor_from_tensor(weight);
+  const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
+  const ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
   if (bias.defined()) {
-    const ideep::tensor b = itensor_from_tensor(bias);
+    const ideep::tensor b = itensor_from_tensor(bias, /*from_const_data_ptr*/true);
     ideep::convolution_forward::compute_v3(
         x,
         w,
@@ -280,10 +280,7 @@ static Tensor _mkldnn_convolution(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  if (input_t.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_convolution: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
+  mkldnn_check_low_precision(input_t.scalar_type(), "mkldnn_convolution");
 
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
@@ -407,7 +404,7 @@ Tensor mkldnn_convolution_pointwise_binary(
   const Tensor& bias = *bias_maybe_owned;
 
   // Make sure inputs have same type(device, layout, dtype), device is cpu and
-  // dtype is float or bfloat16.
+  // dtype is float, bfloat16 or half.
   check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
 
   int64_t dim = input_t.ndimension() - 2;
@@ -578,7 +575,7 @@ Tensor& mkldnn_convolution_pointwise_binary_(
   const Tensor& bias = *bias_maybe_owned;
 
   // Make sure inputs have same type(device, layout, dtype), device is cpu and
-  // dtype is float or bfloat16.
+  // dtype is float, bfloat16 or half.
   check_mkldnn_binary_fusion_inputs(input_t, other_t, weight_t, bias);
   int64_t dim = input_t.ndimension() - 2;
   const auto padding_expanded = expand_param_if_needed(padding, "padding", dim);
@@ -689,10 +686,7 @@ Tensor _mkldnn_convolution_transpose(
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias_opt);
   const Tensor& bias = *bias_maybe_owned;
 
-  if (input_t.scalar_type() == ScalarType::BFloat16) {
-    TORCH_CHECK(mkldnn_bf16_device_check(),
-        "mkldnn_convolution_transpose: bf16 path needs the cpu support avx512bw, avx512vl and avx512dq");
-  }
+  mkldnn_check_low_precision(input_t.scalar_type(), "mkldnn_convolution_transpose");
 
   std::vector<int64_t> weight_IOHW_sizes = weight_t.is_mkldnn() ? _original_deconv_weight_size(weight_t, groups) : weight_t.sizes().vec();
 
@@ -710,9 +704,9 @@ Tensor _mkldnn_convolution_transpose(
   auto output_sizes = conv_input_size(input.sizes(), weight_IOHW_sizes, padding_expanded, output_padding_expanded, stride_expanded, dilation_expanded, groups);
   auto output = at::empty({0}, input.options());
 
-  const ideep::tensor x = itensor_from_tensor(input);
+  const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
 
-  ideep::tensor w = itensor_from_tensor(weight);
+  ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
   if (!weight.is_mkldnn()) {
     // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
     // while PyTorch has IOHW or IODHW, `._tranpose()` switches strides (no memory copy).
@@ -726,7 +720,7 @@ Tensor _mkldnn_convolution_transpose(
   }
 
   if (bias.defined()) {
-    const ideep::tensor b = itensor_from_tensor(bias);
+    const ideep::tensor b = itensor_from_tensor(bias, /*from_const_data_ptr*/true);
     ideep::convolution_transpose_forward::compute_v3(
         x,
         w,

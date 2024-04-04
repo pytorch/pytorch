@@ -32,7 +32,8 @@ Tensor upsample_nearest2d(
           output_sizes[Layout::Parameter::height],
           output_sizes[Layout::Parameter::width],
       },
-      input_arg.scalar_type()};
+      v_input.dtype(),
+  };
 
   if (v_input.is_quantized()) {
     v_output.set_is_quantized();
@@ -116,7 +117,7 @@ Tensor upsample_bilinear2d(
           output_sizes[Layout::Parameter::height],
           output_sizes[Layout::Parameter::width],
       },
-      input_arg.scalar_type(),
+      v_input.dtype(),
   };
 
   const api::utils::uvec3 output_extents = v_output.extents();

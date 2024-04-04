@@ -700,7 +700,7 @@ class Caffe2Backend(Backend):
                 opset_version = 1
 
         # Prior to onnx version update to onnx-1.8.0, errors caused by failures in
-        # in the onnx shape inference call were being supressed. Hence a try-catch block
+        # in the onnx shape inference call were being suppressed. Hence a try-catch block
         # is added around the infer_shapes call to avoid these failures and preserve status
         try:
             model = onnx.shape_inference.infer_shapes(model)
@@ -874,7 +874,7 @@ class Caffe2Backend(Backend):
         device_option = get_device_option(Device(device))
 
         # Prior to onnx version update to onnx-1.8.0, errors caused by failures in
-        # in the onnx shape inference call were being supressed. Hence a try-catch block
+        # in the onnx shape inference call were being suppressed. Hence a try-catch block
         # is added around the infer_shapes call to avoid these failures and preserve status
         try:
             onnx_model = onnx.utils.polish_model(onnx_model)

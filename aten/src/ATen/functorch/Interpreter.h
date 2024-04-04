@@ -4,8 +4,9 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/core/impl/LocalDispatchKeySet.h>
 #include <c10/util/Optional.h>
-#include <c10/util/variant.h>
 #include <bitset>
+#include <utility>
+#include <variant>
 
 namespace at::functorch {
 
@@ -70,7 +71,7 @@ std::ostream& operator<<(std::ostream& os, const TransformType& t);
 //
 // `Interpreter` is the struct for Interpreters. It holds ALL of the
 // relevant information (what type of interpreter it is and the metadata).
-// Metadata for each interpreter is represented as a Union (c10::variant)
+// Metadata for each interpreter is represented as a Union (std::variant)
 // of all possible metadata (VmapInterpreterMeta, GradInterpreterMeta, ...).
 //
 // Given an Interpreter, how do I get a "VmapInterpreter"? You may wish to do this
@@ -110,7 +111,7 @@ struct FunctionalizeInterpreterMeta {
   bool functionalizeAddBackViews_;
 };
 
-typedef c10::variant<
+typedef std::variant<
   int64_t,
   GradInterpreterMeta,
   JvpInterpreterMeta,
@@ -144,7 +145,7 @@ struct Interpreter {
 
   void saveLocalDispatchKeySet(c10::impl::LocalDispatchKeySet keyset) {
     TORCH_INTERNAL_ASSERT(!savedLocalDispatchKeySet_.has_value());
-    savedLocalDispatchKeySet_ = std::move(keyset);
+    savedLocalDispatchKeySet_ = keyset;
   }
   void clearSavedLocalDispatchKeySet() {
     TORCH_INTERNAL_ASSERT(savedLocalDispatchKeySet_.has_value());
@@ -173,11 +174,11 @@ struct Interpreter {
 
  private:
   explicit Interpreter(TransformType type, int64_t level, InterpreterMeta meta):
-    type_(type), level_(level), is_alive_(std::make_shared<bool>(false)), meta_(meta) {}
+    type_(type), level_(level), is_alive_(std::make_shared<bool>(false)), meta_(std::move(meta)) {}
 
   // fields
-  TransformType type_;
-  int64_t level_;
+  TransformType type_{};
+  int64_t level_{};
   optional<c10::impl::LocalDispatchKeySet> savedLocalDispatchKeySet_;
   std::shared_ptr<bool> is_alive_;
   InterpreterMeta meta_;
@@ -195,7 +196,7 @@ void foreachTensorInplace(std::vector<IValue>& args, int64_t begin, int64_t end,
 //     args[i] = func(args[i], i - begin, true)
 //   args[i] = func(args[i], i - begin)
 void foreachTensorInplaceWithFlag(std::vector<IValue>& args, int64_t begin, int64_t end,
-    const std::bitset<64> use_flag_relative, std::function<Tensor(const Tensor&, bool)> func);
+    const std::bitset<64> use_flag_relative, const std::function<Tensor(const Tensor&, bool)>& func);
 
 std::vector<int64_t> findUnwrappedInputs(std::vector<IValue>& args, int64_t begin, int64_t end);
 

@@ -1,6 +1,6 @@
-import collections
 import inspect
-from typing import Any, Dict, List, Optional
+import warnings
+from typing import Any, Dict, List, Optional, Union
 
 import torch.nn
 
@@ -9,6 +9,7 @@ from .bytecode_transformation import (
     create_call_function,
     create_call_method,
     create_instruction,
+    create_load_method,
 )
 from .codegen import PyCodegen
 from .exc import unimplemented
@@ -40,7 +41,7 @@ class AttributeMutation(MutableLocalBase):
     VariableTracker.mutable_local marker to track changes to attributes
     """
 
-    def __init__(self, typ: MutableLocalSource, source: Source):
+    def __init__(self, typ: MutableLocalSource, source: Optional[Source]):
         super().__init__(typ)
         self.source = source
 
@@ -52,7 +53,7 @@ class AttributeMutationExisting(AttributeMutation):
 
 
 class AttributeMutationNew(AttributeMutation):
-    def __init__(self, source: Source, cls_source: Source):
+    def __init__(self, source: Optional[Source], cls_source: Optional[Source]):
         super().__init__(MutableLocalSource.Local, source)
         self.cls_source = cls_source
 
@@ -64,7 +65,7 @@ class SideEffects:
     """
 
     id_to_variable: Dict[int, VariableTracker]
-    store_attr_mutations: Dict[AttributeMutation, Dict[str, VariableTracker]]
+    store_attr_mutations: Dict[MutableLocalBase, Dict[str, VariableTracker]]
     keepalive: List[Any]
 
     def __init__(
@@ -73,12 +74,14 @@ class SideEffects:
         store_attr_mutations=None,
         keepalive=None,
         save_for_backward=None,
+        tensor_hooks=None,
     ):
         super().__init__()
-        self.id_to_variable = id_to_variable or collections.OrderedDict()
-        self.store_attr_mutations = store_attr_mutations or collections.OrderedDict()
+        self.id_to_variable = id_to_variable or {}
+        self.store_attr_mutations = store_attr_mutations or {}
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
+        self.tensor_hooks = tensor_hooks or {}
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -87,6 +90,7 @@ class SideEffects:
             self.id_to_variable == other.id_to_variable
             and self.store_attr_mutations == other.store_attr_mutations
             and self.save_for_backward == other.save_for_backward
+            and self.tensor_hooks == other.tensor_hooks
         )
 
     def diff(self, other: "SideEffects") -> Optional[str]:
@@ -106,35 +110,21 @@ class SideEffects:
             return "store_attr_mutations: unknown diff"
         elif self.save_for_backward != other.save_for_backward:
             return "save_for_backward"
+        elif self.tensor_hooks != other.tensor_hooks:
+            return "tensor_hooks"
         else:
             return None
 
     def clone(self):
         """Create a shallow copy"""
         return self.__class__(
-            id_to_variable=collections.OrderedDict(self.id_to_variable),
-            store_attr_mutations=collections.OrderedDict(
-                (k, collections.OrderedDict(v))
-                for k, v in self.store_attr_mutations.items()
-            ),
+            id_to_variable=dict(self.id_to_variable),
+            store_attr_mutations={
+                k: dict(v) for k, v in self.store_attr_mutations.items()
+            },
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
-        )
-
-    def apply(self, fn, cache=None, skip_fn=lambda _: False):
-        if cache is None:
-            cache = dict()
-
-        self.id_to_variable = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v, cache, skip_fn))
-            for k, v in self.id_to_variable.items()
-        )
-        self.store_attr_mutations = collections.OrderedDict(
-            (k, VariableTracker.apply(fn, v, cache, skip_fn))
-            for k, v in self.store_attr_mutations.items()
-        )
-        self.save_for_backward = VariableTracker.apply(
-            fn, self.save_for_backward, cache, skip_fn
+            tensor_hooks=self.tensor_hooks,
         )
 
     def __contains__(self, item):
@@ -159,7 +149,7 @@ class SideEffects:
         assert self.is_attribute_mutation(item)
         self.check_allowed_side_effect(item)
         if item.mutable_local not in self.store_attr_mutations:
-            self.store_attr_mutations[item.mutable_local] = collections.OrderedDict()
+            self.store_attr_mutations[item.mutable_local] = {}
         self.store_attr_mutations[item.mutable_local][name] = value
 
     def load_attr(self, item, name, deleted_ok=False):
@@ -211,29 +201,25 @@ class SideEffects:
 
     def _track_obj(
         self,
-        source: Source,
         item: Any,
         variable: VariableTracker,
         mutable_cls=MutableSideEffects,
     ):
         """Start tracking a new variable for mutation"""
-        variable = variable.clone(mutable_local=mutable_cls(source), source=source)
+        assert variable.source is not None
+        variable.mutable_local = mutable_cls(variable.source)
         self.id_to_variable[id(item)] = variable
         self.keepalive.append(item)
         return variable
 
-    track_list = _track_obj
-    track_dict = _track_obj
+    track_mutable = _track_obj
 
     def track_object_existing(
         self,
-        source: Source,
         item: Any,
         variable: VariableTracker,
     ):
-        return self._track_obj(
-            source, item, variable, mutable_cls=AttributeMutationExisting
-        )
+        return self._track_obj(item, variable, mutable_cls=AttributeMutationExisting)
 
     def track_object_new(
         self,
@@ -243,7 +229,8 @@ class SideEffects:
         options,
     ):
         if user_cls is torch.autograd.function.FunctionCtx:
-            obj = torch.autograd.Function()
+            with warnings.catch_warnings(record=True):
+                obj = torch.autograd.Function()
         elif issubclass(user_cls, torch.nn.Module):
             obj = nn_module_new(user_cls)
         else:
@@ -288,6 +275,18 @@ class SideEffects:
         assert isinstance(ctx, variables.AutogradFunctionContextVariable)
         self.save_for_backward.append((ctx, args))
 
+    def track_tensor_variables_from_runahead_side_effects(self, other):
+        # In higher order ops we want to keep track of tensors seen in the
+        # speculate_subgraph so that we don't lift them again as a new input in
+        # other speculate_subgraph or in the root tracer.
+        for other_item in other.keepalive:
+            other_id = id(other_item)
+            other_variable = other.id_to_variable[other_id]
+            if other_id not in self.id_to_variable and isinstance(
+                other_variable, variables.TensorVariable
+            ):
+                self.track_object_existing(other_item, other_variable)
+
     def prune_dead_object_new(self, tx):
         live_new_objects = set()
         skip_obj = None
@@ -298,35 +297,33 @@ class SideEffects:
                 and var.mutable_local is not skip_obj
             ):
                 live_new_objects.add(var.mutable_local)
-            return var
 
-        def is_live(var: VariableTracker):
+        def is_live(var: Union[MutableLocalBase, VariableTracker]):
             if isinstance(var, AttributeMutationNew):
                 return var in live_new_objects
             if isinstance(var, VariableTracker):
                 return is_live(var.mutable_local)
             return True
 
-        VariableTracker.apply(visit, (tx.stack, tx.symbolic_locals))
+        VariableTracker.visit(visit, (tx.stack, tx.symbolic_locals))
         for var in self.id_to_variable.values():
             if not isinstance(var.mutable_local, AttributeMutationNew):
-                VariableTracker.apply(visit, var)
+                VariableTracker.visit(visit, var)
 
         for skip_obj, setattrs in self.store_attr_mutations.items():
-            VariableTracker.apply(visit, setattrs)
+            VariableTracker.visit(visit, setattrs)
 
-        self.id_to_variable = collections.OrderedDict(
-            (k, v) for k, v in self.id_to_variable.items() if is_live(v)
-        )
-        self.store_attr_mutations = collections.OrderedDict(
-            (k, v) for k, v in self.store_attr_mutations.items() if is_live(k)
-        )
+        self.id_to_variable = {
+            k: v for k, v in self.id_to_variable.items() if is_live(v)
+        }
+        self.store_attr_mutations = {
+            k: v for k, v in self.store_attr_mutations.items() if is_live(k)
+        }
 
-    def mutation(self, oldvar, newvar):
-        self.check_allowed_side_effect(oldvar)
-        return newvar.clone(
-            mutable_local=MutableSideEffects(oldvar.mutable_local.source, True)
-        )
+    def mutation(self, var):
+        self.check_allowed_side_effect(var)
+        if isinstance(var.mutable_local, MutableSideEffects):
+            var.mutable_local = MutableSideEffects(var.mutable_local.source, True)
 
     def _get_modified_vars(self):
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
@@ -340,7 +337,7 @@ class SideEffects:
                 cg.extend_output(create_call_function(0, True))
                 cg.add_cache(var)
                 if isinstance(var.mutable_local, AttributeMutationNew):
-                    var.mutable_local.source = LocalSource(cg.tempvars[var])
+                    var.mutable_local.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
             elif isinstance(var.mutable_local, AttributeMutationNew):
                 if isinstance(var, variables.AutogradFunctionContextVariable):
                     unimplemented("AutogradFunctionContextVariable escaped")
@@ -363,9 +360,7 @@ class SideEffects:
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)
-            cg.extend_output(
-                [create_instruction("LOAD_METHOD", argval="save_for_backward")]
-            )
+            cg.extend_output([create_load_method("save_for_backward")])
             for arg in args:
                 cg(arg)
             cg.extend_output(
@@ -375,13 +370,82 @@ class SideEffects:
                 ]
             )
 
+    def register_hook(self, tensor, hook, handle, name):
+        assert isinstance(tensor, variables.TensorVariable)
+        assert isinstance(hook, variables.VariableTracker)
+        assert (
+            isinstance(handle, variables.RemovableHandleVariable)
+            and handle.mutable_local
+        )
+        assert hasattr(torch.Tensor, name)
+        idx = len(self.tensor_hooks.keys())
+        # duplicate index possible because of self.remove_hook()
+        while idx in self.tensor_hooks:
+            idx += 1
+        self.tensor_hooks[idx] = (tensor, hook, handle, name)
+        assert not handle.idx
+        handle.idx = idx
+
+    def remove_hook(self, idx):
+        del self.tensor_hooks[idx]
+
+    def codegen_hooks(self, cg):
+        for (
+            tensor,
+            hook,
+            handle,
+            name,
+        ) in self.tensor_hooks.values():
+            # Note: [On tensor.register_hook]
+            #
+            # register_hook on a tensor, AKA backward hooks, have slightly nuanced differences in how they are implemented
+            # when it comes to hooks on objects with sources (inputs, params) vs objects without sources (intermediaries).
+            #
+            # For tensors with a source, we bypass direct inclusion of register_hook calls in the graph.
+            # Instead, these are tracked and stashed as a global variable, enabling their association with tensors in
+            # the residuals. During dynamo's frame creation, these hooks are invoked seamlessly on known reconstructible/fetch-able
+            # tensors. Because a source indicates knowledge of this object outside the torch compile region, and
+            # because we are running residuals firmly before .backward() can be run, it is sound to invoke
+            # `register_hook` on a known tensor.
+            #
+            # For tensors without a source, we support a limited subset of hooks. Global functions only, and
+            # compiled_autograd must be enabled or we will graph break.
+            #
+            # Handling the Handle: When a user retains the register_hook result in a handle, we intercept the
+            # STORE_FAST operation to record the user-designated local variable name. This ensures the reconstructed
+            # bytecode retains this name. If no handle is defined, we simply pop the generated value to keep the
+            # stack intact.
+            #
+            # Dynamo Tensor Hooks Workflow:
+            # - Functions passed to register_hook are lifted globally.
+            # - For tensors with sources:
+            #   - In the "side_effects" phase of codegen, we iterate over tensors with hooks to:
+            #     - Generate the tensor.
+            #     - Issue a register_hook call on the tensor, linking to the globally stored function.
+            #     - Incorporate a handle if one was established in the eager phase.
+            #  - For tensors without sources:
+            #    - We don't generate any instructions for registering a hook.
+            #    - Handles from intermediary hooks are NYI.
+            #    - We produce a call function that utilizes the trace_wrapped higher order op, closing over it.
+            #    - We then manually insert the call function above into the graph.
+            # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
+            assert tensor.source, "Hooks on non input tensors NYI - should not get here"
+            cg(tensor)
+            cg.extend_output([cg.create_load_attr(name)])
+            cg(hook)
+            cg.extend_output(create_call_function(1, True))
+
+            # Adding the handle to the cache means RemovableHandleVariable().reconstruct() will
+            # be associated with the return value of register_hook().  This consumes the top of stack.
+            cg.add_cache(handle)
+
     def codegen_update_mutated(self, cg: PyCodegen):
         suffixes = []
         for var in self._get_modified_vars():
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)
-                cg(var.mutable_local.source)
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
                 cg.extend_output(
                     [
                         cg.create_load_const(None),
@@ -394,12 +458,12 @@ class SideEffects:
                 cg.tx.output.update_co_names("clear")
                 cg.tx.output.update_co_names("update")
 
-                cg(var.mutable_local.source)
-                cg.extend_output([create_instruction("LOAD_METHOD", argval="update")])
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                cg.extend_output([create_load_method("update")])
                 cg(var, allow_cache=False)
 
-                cg(var.mutable_local.source)
-                cg.extend_output([create_instruction("LOAD_METHOD", argval="clear")])
+                cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                cg.extend_output([create_load_method("clear")])
 
                 suffixes.append(
                     [
@@ -435,6 +499,12 @@ class SideEffects:
                         cg(value)
                         cg(var.mutable_local.source)
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
+            elif isinstance(var, variables.TupleIteratorVariable):
+                for _ in range(var.index):
+                    cg.load_import_from(utils.__name__, "iter_next")
+                    cg(var.mutable_local.source)  # type: ignore[attr-defined]
+                    cg.extend_output(create_call_function(1, True))
+                    cg.append_output(create_instruction("POP_TOP"))
             else:
                 raise AssertionError(type(var))
 
@@ -445,7 +515,9 @@ class SideEffects:
     def is_empty(self):
         return not (
             any(map(self.is_modified, self.id_to_variable.values()))
+            or self.tensor_hooks
             or self.save_for_backward
+            or self.tensor_hooks
         )
 
     def clear(self):

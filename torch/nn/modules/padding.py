@@ -65,8 +65,8 @@ class CircularPad1d(_CircularPadNd):
         >>> m(input)
         tensor([[[1., 2., 3., 0., 1., 2., 3., 0.],
                  [5., 6., 7., 4., 5., 6., 7., 4.]]])
-
     """
+
     padding: Tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
@@ -126,8 +126,8 @@ class CircularPad2d(_CircularPadNd):
                   [2., 0., 1., 2., 0.],
                   [5., 3., 4., 5., 3.],
                   [8., 6., 7., 8., 6.]]]])
-
     """
+
     padding: Tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
@@ -177,8 +177,8 @@ class CircularPad3d(_CircularPadNd):
         >>> # using different paddings for different sides
         >>> m = nn.CircularPad3d((3, 3, 6, 6, 1, 1))
         >>> output = m(input)
-
     """
+
     padding: Tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t) -> None:
@@ -250,8 +250,8 @@ class ConstantPad1d(_ConstantPadNd):
         >>> m(input)
         tensor([[[ 3.5000,  3.5000,  3.5000,  1.6616,  1.4523, -1.1255,  3.5000],
                  [ 3.5000,  3.5000,  3.5000, -3.6372,  0.1182, -1.8652,  3.5000]]])
-
     """
+
     padding: Tuple[int, int]
 
     def __init__(self, padding: _size_2_t, value: float):
@@ -300,8 +300,8 @@ class ConstantPad2d(_ConstantPadNd):
                  [ 3.5000,  3.5000,  3.5000,  1.6585,  0.4320],
                  [ 3.5000,  3.5000,  3.5000, -0.8701, -0.4649],
                  [ 3.5000,  3.5000,  3.5000,  3.5000,  3.5000]]])
-
     """
+
     __constants__ = ['padding', 'value']
     padding: Tuple[int, int, int, int]
 
@@ -341,8 +341,8 @@ class ConstantPad3d(_ConstantPadNd):
         >>> # using different paddings for different sides
         >>> m = nn.ConstantPad3d((3, 3, 6, 6, 0, 1), 3.5)
         >>> output = m(input)
-
     """
+
     padding: Tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t, value: float) -> None:
@@ -393,8 +393,8 @@ class ReflectionPad1d(_ReflectionPadNd):
         >>> m(input)
         tensor([[[3., 2., 1., 0., 1., 2., 3., 2.],
                  [7., 6., 5., 4., 5., 6., 7., 6.]]])
-
     """
+
     padding: Tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
@@ -411,6 +411,7 @@ class ReflectionPad2d(_ReflectionPadNd):
         padding (int, tuple): the size of the padding. If is `int`, uses the same
             padding in all boundaries. If a 4-`tuple`, uses (:math:`\text{padding\_left}`,
             :math:`\text{padding\_right}`, :math:`\text{padding\_top}`, :math:`\text{padding\_bottom}`)
+            Note that padding size should be less than the corresponding input dimension.
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})` or :math:`(C, H_{in}, W_{in})`.
@@ -445,8 +446,8 @@ class ReflectionPad2d(_ReflectionPadNd):
                   [1., 0., 1., 2., 1.],
                   [4., 3., 4., 5., 4.],
                   [7., 6., 7., 8., 7.]]]])
-
     """
+
     padding: Tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
@@ -500,6 +501,7 @@ class ReflectionPad3d(_ReflectionPadNd):
                    [3., 2., 3., 2.],
                    [1., 0., 1., 0.]]]]])
     """
+
     padding: Tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t) -> None:
@@ -550,8 +552,8 @@ class ReplicationPad1d(_ReplicationPadNd):
         >>> m(input)
         tensor([[[0., 0., 0., 0., 1., 2., 3., 3.],
                  [4., 4., 4., 4., 5., 6., 7., 7.]]])
-
     """
+
     padding: Tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
@@ -602,8 +604,8 @@ class ReplicationPad2d(_ReplicationPadNd):
                   [0., 0., 1., 2., 2.],
                   [3., 3., 4., 5., 5.],
                   [6., 6., 7., 8., 8.]]]])
-
     """
+
     padding: Tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
@@ -643,8 +645,8 @@ class ReplicationPad3d(_ReplicationPadNd):
         >>> # using different paddings for different sides
         >>> m = nn.ReplicationPad3d((3, 3, 6, 6, 1, 1))
         >>> output = m(input)
-
     """
+
     padding: Tuple[int, int, int, int, int, int]
 
     def __init__(self, padding: _size_6_t) -> None:
@@ -694,8 +696,8 @@ class ZeroPad1d(ConstantPad1d):
         >>> m(input)
         tensor([[[ 0.0000,  0.0000,  0.0000,  1.6616,  1.4523, -1.1255,  0.0000],
                  [ 0.0000,  0.0000,  0.0000, -3.6372,  0.1182, -1.8652,  0.0000]]])
-
     """
+
     padding: Tuple[int, int]
 
     def __init__(self, padding: _size_2_t) -> None:
@@ -747,8 +749,8 @@ class ZeroPad2d(ConstantPad2d):
                   [ 0.0000, -0.1678, -0.4418,  1.9466,  0.0000],
                   [ 0.0000,  0.9604, -0.4219, -0.5241,  0.0000],
                   [ 0.0000, -0.9162, -0.5436, -0.6446,  0.0000]]]])
-
     """
+
     padding: Tuple[int, int, int, int]
 
     def __init__(self, padding: _size_4_t) -> None:
@@ -788,7 +790,6 @@ class ZeroPad3d(ConstantPad3d):
         >>> # using different paddings for different sides
         >>> m = nn.ZeroPad3d((3, 3, 6, 6, 0, 1))
         >>> output = m(input)
-
     """
 
     padding: Tuple[int, int, int, int, int, int]

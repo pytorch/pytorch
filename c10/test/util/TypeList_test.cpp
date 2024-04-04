@@ -3,7 +3,7 @@
 #include <memory>
 
 using namespace c10::guts::typelist;
-
+// NOLINTBEGIN(modernize-unary-static-assert)
 namespace test_size {
 class MyClass {};
 static_assert(0 == size<typelist<>>::value, "");
@@ -377,3 +377,4 @@ static_assert(
         drop_if_nonempty_t<typelist<int64_t, int32_t>, 3>>::value,
     "");
 } // namespace test_drop_if_nonempty
+// NOLINTEND(modernize-unary-static-assert)

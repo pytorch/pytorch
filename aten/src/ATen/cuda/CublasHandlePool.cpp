@@ -1,4 +1,5 @@
 #include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
 
 #include <c10/cuda/CUDACachingAllocator.h>
@@ -9,9 +10,45 @@
 #include <string>
 #include <tuple>
 
+/**
+ * Note [hipblaslt handles]
+ * ~~~~~~~~~~~~~~~~~~~~~~~~
+ * The cublas documentation states:
+ * cuBLAS handle (cublasHandle_t) encapsulates a cuBLASLt handle.
+ * Any valid cublasHandle_t can be used in place of cublasLtHandle_t with a simple cast.
+ *
+ * hipblaslt does not behave in this way.
+ * A hipblas handle does not encapsulate a hipblaslt handle.
+ *
+ * To work around this difference in behavior, a separate handle pool is available for ROCm builds.
+ * For CUDA builds, getCurrentCUDABlasLtHandle will alias for getCurrentCUDABlasHandle,
+ * whereas for ROCm builds, it is a distinct function.
+ */
+
 namespace at::cuda {
 
 namespace {
+
+#if defined(USE_ROCM) && ROCM_VERSION >= 50700
+void createCublasLtHandle(cublasLtHandle_t *handle) {
+  TORCH_CUDABLAS_CHECK(cublasLtCreate(handle));
+}
+
+void destroyCublasLtHandle(cublasLtHandle_t handle) {
+// this is because of something dumb in the ordering of
+// destruction. Sometimes atexit, the cuda context (or something)
+// would already be destroyed by the time this gets destroyed. It
+// happens in fbcode setting. @colesbury and @soumith decided to not destroy
+// the handle as a workaround.
+//   - Comments of @soumith copied from cuDNN handle pool implementation
+#ifdef NO_CUDNN_DESTROY_HANDLE
+#else
+    cublasLtDestroy(handle);
+#endif
+}
+
+using CuBlasLtPoolType = DeviceThreadHandlePool<cublasLtHandle_t, createCublasLtHandle, destroyCublasLtHandle>;
+#endif
 
 std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace() {
   static auto& instance = *new std::map<std::tuple<void *, void *>, at::DataPtr>;
@@ -40,7 +77,9 @@ using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle
 } // namespace
 
 void clearCublasWorkspaces() {
-  cublas_handle_stream_to_workspace().clear();
+  #if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12200
+      cublas_handle_stream_to_workspace().clear();
+  #endif
 }
 
 size_t parseChosenWorkspaceSize() {
@@ -84,8 +123,20 @@ at::DataPtr getNewWorkspace() {
 }
 
 cublasHandle_t getCurrentCUDABlasHandle() {
-  int device;
+  c10::DeviceIndex device = 0;
   AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+
+#if !defined(USE_ROCM)
+  CUcontext pctx = nullptr;
+  at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
+  if (C10_UNLIKELY(!pctx)) {
+    // workaround for corner case where a primary context exists but is not
+    // the current context, seen in multithreaded use-cases
+    TORCH_WARN_ONCE("Attempting to run cuBLAS, but there was no current CUDA context! Attempting to set the primary context...");
+    at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(&pctx, device);
+    at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
+  }
+#endif
 
   // Thread local PoolWindows are lazily-initialized
   // to avoid initialization issues that caused hangs on Windows.
@@ -105,8 +156,10 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   auto handle = myPoolWindow->reserve(device);
   auto stream = c10::cuda::getCurrentCUDAStream();
   TORCH_CUDABLAS_CHECK(cublasSetStream(handle, stream));
-#if !defined(USE_ROCM)
-  // cublasSetWorkspace not available on CUDA 10.2
+#if !defined(USE_ROCM) && defined(CUDA_VERSION) && CUDA_VERSION < 12200
+  // cuBLAS should not need an explicitly allocated workspace after CUDA 12.2
+  // to avoid increasing memory usage during graph captures
+  // original issue: https://github.com/pytorch/pytorch/pull/83461
   cudaStream_t _stream = stream;
   auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
   auto workspace_it = cublas_handle_stream_to_workspace().find(key);
@@ -136,5 +189,34 @@ cublasHandle_t getCurrentCUDABlasHandle() {
 #endif
   return handle;
 }
+
+#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
+cublasLtHandle_t getCurrentCUDABlasLtHandle() {
+#ifdef USE_ROCM
+  c10::DeviceIndex device = 0;
+  AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
+
+  // Thread local PoolWindows are lazily-initialized
+  // to avoid initialization issues that caused hangs on Windows.
+  // See: https://github.com/pytorch/pytorch/pull/22405
+  // This thread local unique_ptrs will be destroyed when the thread terminates,
+  // releasing its reserved handles back to the pool.
+
+  // Use a leaky singleton for the pool following standard practice around
+  // singletons: https://isocpp.org/wiki/faq/ctors#construct-on-first-use-v2
+  static auto pool = std::shared_ptr<CuBlasLtPoolType>(
+      new CuBlasLtPoolType(), [](CuBlasLtPoolType* p) {
+        // Leak the memory.
+      });
+  thread_local std::unique_ptr<CuBlasLtPoolType::PoolWindow> myPoolWindow(
+      pool->newPoolWindow());
+
+  auto handle = myPoolWindow->reserve(device);
+  return handle;
+#else
+  return reinterpret_cast<cublasLtHandle_t>(getCurrentCUDABlasHandle());
+#endif
+}
+#endif
 
 } // namespace at::cuda

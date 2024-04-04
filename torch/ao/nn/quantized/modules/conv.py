@@ -306,8 +306,8 @@ class Conv1d(_ConvNd):
     _FLOAT_MODULE = nn.Conv1d
     _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn1d
     _NNI_CONV_RELU_MODULE = nni.ConvReLU1d
-    _NNI_CONV_ADD_MODULE = None
-    _NNI_CONV_ADD_RELU_MODULE = None
+    _NNI_CONV_ADD_MODULE: None = None
+    _NNI_CONV_ADD_RELU_MODULE: None = None
 
     def __init__(self,
                  in_channels: int,
@@ -520,8 +520,8 @@ class Conv3d(_ConvNd):
     _FLOAT_MODULE = nn.Conv3d
     _NNIQAT_CONV_BN_MODULE = nniqat.ConvBn3d
     _NNI_CONV_RELU_MODULE = nni.ConvReLU3d
-    _NNI_CONV_ADD_MODULE = None
-    _NNI_CONV_ADD_RELU_MODULE = None
+    _NNI_CONV_ADD_MODULE: None = None
+    _NNI_CONV_ADD_RELU_MODULE: None = None
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
                  padding=0, dilation=1, groups=1, bias=True,

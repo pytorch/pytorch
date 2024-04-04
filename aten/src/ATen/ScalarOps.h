@@ -9,8 +9,7 @@
 #include <ATen/ops/scalar_tensor.h>
 #endif
 
-namespace at {
-namespace detail {
+namespace at::detail {
 // When filling a number to 1-element CPU tensor, we want to skip
 // everything but manipulate data ptr directly.
 // Ideally this fast pass should be implemented in TensorIterator,
@@ -21,8 +20,7 @@ TORCH_API Tensor scalar_tensor_static(
     const Scalar& s,
     c10::optional<ScalarType> dtype_opt,
     c10::optional<Device> device_opt);
-} // namespace detail
-} // namespace at
+} // namespace at::detail
 
 // This is in the c10 namespace because we use ADL to find the functions in it.
 namespace c10 {
@@ -35,33 +33,14 @@ inline at::Tensor scalar_to_tensor(
     const Device device = at::kCPU) {
   // This is the fast track we have for CPU scalar tensors.
   if (device == at::kCPU) {
-    if (s.isFloatingPoint()) {
-      return at::detail::scalar_tensor_static(s, at::kDouble, at::kCPU);
-    } else if (s.isComplex()) {
-      return at::detail::scalar_tensor_static(s, at::kComplexDouble, at::kCPU);
-    } else if (s.isBoolean()) {
-      return at::detail::scalar_tensor_static(s, at::kBool, at::kCPU);
-    } else {
-      AT_ASSERT(s.isIntegral(false));
-      return at::detail::scalar_tensor_static(s, at::kLong, at::kCPU);
-    }
+    return at::detail::scalar_tensor_static(s, s.type(), at::kCPU);
   }
-  if (s.isFloatingPoint()) {
-    return at::scalar_tensor(s, at::device(device).dtype(at::kDouble));
-  } else if (s.isBoolean()) {
-    return at::scalar_tensor(s, at::device(device).dtype(at::kBool));
-  } else if (s.isComplex()) {
-    return at::scalar_tensor(s, at::device(device).dtype(at::kComplexDouble));
-  } else {
-    AT_ASSERT(s.isIntegral(false));
-    return at::scalar_tensor(s, at::device(device).dtype(at::kLong));
-  }
+  return at::scalar_tensor(s, at::device(device).dtype(s.type()));
 }
 
 } // namespace c10
 
-namespace at {
-namespace native {
+namespace at::native {
 
 inline Tensor wrapped_scalar_tensor(
     const Scalar& scalar,
@@ -71,5 +50,4 @@ inline Tensor wrapped_scalar_tensor(
   return tensor;
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native

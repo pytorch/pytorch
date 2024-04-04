@@ -25,6 +25,7 @@ with patch.dict(os.environ, {"PYTORCH_NVML_BASED_CUDA_CHECK": "1"}):
         TestCase = NoTest  # type: ignore[misc, assignment] # noqa: F811
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestExtendedCUDAIsAvail(TestCase):
     SUBPROCESS_REMINDER_MSG = (
         "\n REMINDER: Tests defined in test_cuda_nvml_based_avail.py must be run in a process "
@@ -33,7 +34,7 @@ class TestExtendedCUDAIsAvail(TestCase):
 
     def setUp(self):
         super().setUp()
-        torch.cuda.device_count.cache_clear()  # clear the lru_cache on this method before our test
+        torch.cuda._cached_device_count = None  # clear the lru_cache on this method before our test
 
     @staticmethod
     def in_bad_fork_test() -> bool:
@@ -65,6 +66,7 @@ class TestExtendedCUDAIsAvail(TestCase):
                 assert in_bad_fork
 
 
+@torch.testing._internal.common_utils.markDynamoStrictTest
 class TestVisibleDeviceParses(TestCase):
 
     def test_env_var_parsing(self):

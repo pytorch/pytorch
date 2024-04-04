@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <c10/core/SingletonSymNodeImpl.h>
 #include <c10/core/SymInt.h>
 #include <c10/core/SymNodeImpl.h>
 
@@ -23,31 +22,13 @@ TEST(SymIntTest, CheckRange) {
   EXPECT_FALSE(SymInt::check_range(INT64_MIN));
 }
 
-TEST(SymIntTest, SingletonSymNode) {
-  auto a = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1)));
-  auto b = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(1)));
-  auto c = c10::SymInt(
-      c10::SymNode(c10::make_intrusive<c10::SingletonSymNodeImpl>(2)));
-  auto d = c10::SymInt(3);
+TEST(SymIntTest, Overflows) {
+  const auto x = SymInt(INT64_MAX);
+  EXPECT_NE(-(x + 1), 0);
 
-  ASSERT_TRUE(a == a);
-  ASSERT_TRUE(a == b);
-  ASSERT_FALSE(a != a);
-  ASSERT_FALSE(a != b);
-  ASSERT_FALSE(a == c);
-  ASSERT_TRUE(a != c);
-
-  // Tentaively throw an error when comparing with a non-singleton, this is not
-  // necessarily the right behavior.
-  ASSERT_THROW((void)(a == d), c10::Error);
-  ASSERT_THROW((void)(a != d), c10::Error);
-  ASSERT_THROW((void)(d == a), c10::Error);
-  ASSERT_THROW((void)(d != a), c10::Error);
-
-  ASSERT_THROW((void)(a >= b), c10::Error); // "not supported by..."
-  ASSERT_THROW((void)(a >= d), c10::Error); // "not supported by..."
-  ASSERT_THROW((void)(d >= a), c10::Error); // "NYI"
+  const auto y = SymInt(INT64_MIN);
+  EXPECT_NE(-y, 0);
+  EXPECT_NE(0 - y, 0);
 }
+
 #endif

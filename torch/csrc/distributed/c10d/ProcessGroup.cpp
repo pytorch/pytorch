@@ -86,6 +86,10 @@ std::string opTypeToString(OpType opType) {
       return "UNKNOWN";
     case OpType::_REDUCE_SCATTER_BASE:
       return "_REDUCE_SCATTER_BASE";
+    case OpType::COALESCED:
+      return "COALESCED";
+    case OpType::_ALLREDUCE_SPARSE:
+      return "_ALLREDUCE_SPARSE";
     default:
       TORCH_INTERNAL_ASSERT(false, "Unknown op type!");
   }
@@ -153,4 +157,28 @@ void ProcessGroup::init() {
   C10_LOG_API_USAGE_ONCE(
       fmt::format("c10d.process_group_{}", getBackendName()));
 }
+
+const std::string& ProcessGroup::getGroupName() const {
+  TORCH_CHECK(deviceTypeToBackend_.size(), "ProcessGroup name not set");
+  return deviceTypeToBackend_.begin()->second->getGroupName();
+}
+
+void ProcessGroup::setGroupName(const std::string& name) {
+  for (auto& kv : deviceTypeToBackend_) {
+    kv.second->setGroupName(name);
+  }
+}
+
+void ProcessGroup::enableCollectivesTiming() {
+  for (auto& kv : deviceTypeToBackend_) {
+    kv.second->enableCollectivesTiming();
+  }
+}
+
+void ProcessGroup::release_resources() {
+  store_.reset();
+  deviceTypeToBackend_.clear();
+  backendTypeToBackend_.clear();
+}
+
 } // namespace c10d
