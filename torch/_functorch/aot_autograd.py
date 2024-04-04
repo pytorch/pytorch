@@ -408,12 +408,12 @@ AOT_COUNTER = itertools.count()
 # outputs:
 #
 # def gm(self, reader):
-#    token0 = torch.ops.aten._make_dep_token()
+#    token0 = torch.ops.prims._make_token()
 #    token1, frame = with_token(ordered_effect_op, (reader,), token0)
 #    frame = frame * 2
 #    token2, frame2 = with_token(ordered_effect_op, (reader,), token1)
 #    frame2 = frame2 * 2
-#    sink_token = torch.ops.aten._sink_tokens([token2])
+#    sink_token = torch.ops.prims._sink_tokens([token2])
 #    return frame, frame2
 
 #

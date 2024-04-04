@@ -193,10 +193,6 @@
   dispatch:
     CompositeExplicitAutograd: _print
 
-- func: _sink_tokens(Tensor[] tokens) -> ()
-  dispatch:
-    CompositeExplicitAutograd: _sink_tokens
-
 - func: sym_constrain_range(Scalar size, *, int? min=None, int? max=None) -> ()
   dispatch:
     CompositeExplicitAutograd: sym_constrain_range
