@@ -2530,6 +2530,7 @@ if TEST_WITH_ROCM:
             "test_reuse_kernel": fail_cuda(is_skip=True),
             "test_zero_grid_with_unbacked_symbols": fail_cuda(is_skip=True),
             "test_zero_grid_with_backed_symbols": fail_cuda(is_skip=True),
+            "test_reuse_kernel_dynamic": fail_cuda(is_skip=True),
         }
     )
 
