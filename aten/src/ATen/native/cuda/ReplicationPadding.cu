@@ -39,7 +39,7 @@ __host__ __device__ __forceinline__ int imax(int a, int b) {
 namespace {
 template <typename scalar_t>
 __global__ void replication_pad_forward_kernel1d(
-    PackedTensorAccessor64<scalar_t, 3> input,
+    PackedTensorAccessor64<const scalar_t, 3> input,
     PackedTensorAccessor64<scalar_t, 3> output,
     const int padL,
     const int y_shift,
@@ -87,7 +87,7 @@ __global__ void replication_pad_backward_kernel(
 
 template <typename scalar_t>
 __global__ void replication_pad_forward_kernel2d(
-    PackedTensorAccessor64<scalar_t, 4> input,
+    PackedTensorAccessor64<const scalar_t, 4> input,
     PackedTensorAccessor64<scalar_t, 4> output,
     const int padT,
     const int padL,
@@ -145,7 +145,7 @@ __global__ void replication_pad_backward_kernel(
 
 template <typename scalar_t>
 __global__ void replication_pad_forward_kernel3d(
-    PackedTensorAccessor64<scalar_t, 5> input,
+    PackedTensorAccessor64<const scalar_t, 5> input,
     PackedTensorAccessor64<scalar_t, 5> output,
     const int pfront,
     const int ptop,
@@ -446,7 +446,7 @@ TORCH_IMPL_FUNC(replication_pad1d_out_cuda) (
         output_ = output.unsqueeze(0);
       }
 
-      auto devInput = input_.packed_accessor64<scalar_t, 3>();
+      auto devInput = input_.packed_accessor64<const scalar_t, 3>();
       auto devOutput = output_.packed_accessor64<scalar_t, 3>();
 
       int64_t outputPlaneSize = devOutput.size(2);
@@ -551,7 +551,7 @@ TORCH_IMPL_FUNC(replication_pad2d_out_cuda) (
         input_ = input.unsqueeze(0);
         output_ = output.unsqueeze(0);
       }
-      auto devInput = input_.packed_accessor64<scalar_t, 4>();
+      auto devInput = input_.packed_accessor64<const scalar_t, 4>();
       auto devOutput = output_.packed_accessor64<scalar_t, 4>();
       int64_t outputPlaneSize = devOutput.size(2) * devOutput.size(3);
       int64_t size1 = devOutput.size(1);
@@ -644,7 +644,7 @@ TORCH_IMPL_FUNC(replication_pad3d_out_cuda) (
         output_ = output.unsqueeze(0);
       }
 
-      auto devInput = input_.packed_accessor64<scalar_t, 5>();
+      auto devInput = input_.packed_accessor64<const scalar_t, 5>();
       auto devOutput = output_.packed_accessor64<scalar_t, 5>();
 
       const int64_t outputPlaneSize = devOutput.size(2) * devOutput.size(3) * devOutput.size(4);

@@ -206,6 +206,7 @@ skip:
       - hf_T5_generate
       - doctr_det_predictor
       - doctr_reco_predictor
+      - moondream
       # doesnt fit in memory
       - phi_1_5
       - detectron2_fcos_r_50_fpn

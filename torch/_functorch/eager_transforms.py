@@ -74,6 +74,18 @@ def _vjp_treespec_compare(primals_out, cotangents):
             f'primal output: {treespec_pprint(primals_out_spec)}')
 
 
+def _jvp_treespec_compare(primals, tangents):
+    # Revert this once #116264 gets fixed
+    _, primals_spec = tree_flatten(primals)
+    _, tangents_spec = tree_flatten(tangents)
+    if primals_spec != tangents_spec:
+        raise RuntimeError(
+            f'{jvp_str}: Expected primals and tangents to have the same python '
+            f'structure. For example, if primals is a tuple of 3 tensors, '
+            f'tangents also must be. Got primals with structure {primals_spec} '
+            f'and tangents with structure {tangents_spec}')
+
+
 def _set_tensor_requires_grad(x):
     # avoid graph-break on x.requires_grad_()
     # https://github.com/pytorch/pytorch/pull/110053
@@ -305,6 +317,27 @@ def grad_increment_nesting():
         _grad_decrement_nesting()
 
 
+def enter_jvp_nesting():
+    global JVP_NESTING
+    jvp_level = _jvp_increment_nesting()
+    JVP_NESTING += 1
+    return jvp_level
+
+
+def exit_jvp_nesting():
+    global JVP_NESTING
+    _jvp_decrement_nesting()
+    JVP_NESTING -= 1
+
+
+@contextlib.contextmanager
+def jvp_increment_nesting():
+    try:
+        yield enter_jvp_nesting()
+    finally:
+        exit_jvp_nesting()
+
+
 @doesnt_support_saved_tensors_hooks
 def _vjp_with_argnums(func: Callable, *primals, argnums: Optional[argnums_t] = None, has_aux: bool = False):
     # This is the same function as vjp but also accepts an argnums argument
@@ -518,7 +551,6 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError("jacrev: `chunk_size` should be greater than 0.")
 
-    @wraps(func)
     def wrapper_fn(*args):
         error_if_complex("jacrev", args, is_input=True)
         vjp_out = _vjp_with_argnums(func, *args, argnums=argnums, has_aux=has_aux)
@@ -661,6 +693,13 @@ def jacrev(func: Callable, argnums: Union[int, Tuple[int]] = 0, *, has_aux=False
         if has_aux:
             return output_input, aux
         return output_input
+
+    # Dynamo does not support HOP composition if their inner function is
+    # annotated with @functools.wraps(...). We circumvent this issue by applying
+    # wraps only if we're not tracing with dynamo.
+    if not torch._dynamo.is_compiling():
+        wrapper_fn = wraps(func)(wrapper_fn)
+
     return wrapper_fn
 
 # NOTE: [Computing jacobian with vmap and vjp for multiple outputs]
@@ -810,11 +849,6 @@ def _slice_argnums(args, argnums, as_tuple=True):
 
 
 JVP_NESTING = 0
-
-
-@contextlib.contextmanager
-def noop():
-    yield
 
 
 def assert_flat_tuple_of_tensors(elts: Any, api: str, argname: str) -> None:
@@ -975,26 +1009,23 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
     diff_args = primals if argnums is None else _slice_argnums(primals, argnums)
     flat_primals, primals_spec = tree_flatten(diff_args)
     flat_tangents, tangents_spec = tree_flatten(tangents)
-    if primals_spec != tangents_spec:
-        raise RuntimeError(
-            f'{jvp_str}: Expected primals and tangents to have the same python '
-            f'structure. For example, if primals is a tuple of 3 tensors, '
-            f'tangents also must be. Got primals with structure {primals_spec} '
-            f'and tangents with structure {tangents_spec}')
+    _jvp_treespec_compare(diff_args, tangents)
     assert_non_empty_list_of_tensors(flat_primals, jvp_str, 'primals')
     assert_non_empty_list_of_tensors(flat_tangents, jvp_str, 'tangents')
 
-    level = _jvp_increment_nesting()
-    try:
-        global JVP_NESTING
-        JVP_NESTING += 1
+    global JVP_NESTING
+
+    with jvp_increment_nesting() as level:
         with fwAD._set_fwd_grad_enabled(True):
-            ctx = fwAD.dual_level if JVP_NESTING == 1 else noop
+            ctx = fwAD.dual_level if JVP_NESTING == 1 else contextlib.nullcontext
             with ctx():
                 flat_duals = tuple(fwAD.make_dual(p, t)
                                    for p, t in zip(flat_primals, flat_tangents))
                 duals = tree_unflatten(flat_duals, primals_spec)
-                if argnums is not None:
+                # Note for the reviewer: This is extremely odd but it passes the
+                # assertion "len(self.block_stack) == 1" on symbolic_convert.py
+                # The equivalent "if argnums is not None" fails for some reason
+                if isinstance(argnums, (int, tuple)):
                     primals = _wrap_all_tensors(primals, level)
                     duals = _replace_args(primals, duals, argnums)
                 result_duals = func(*duals)
@@ -1023,9 +1054,6 @@ def _jvp_with_argnums(func: Callable, primals: Any, tangents: Any, argnums: Opti
                     return primals_out_unflatten, tangents_out_unflatten, aux
 
                 return primals_out_unflatten, tangents_out_unflatten
-    finally:
-        _jvp_decrement_nesting()
-        JVP_NESTING -= 1
 
 
 def safe_unflatten(tensor, dim, shape):
@@ -1141,7 +1169,6 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         >>> assert torch.allclose(jacobian[1], expectedY)
 
     """
-    @wraps(func)
     def wrapper_fn(*args):
         error_if_complex("jacfwd", args, is_input=True)
         primals = args if argnums is None else _slice_argnums(args, argnums)
@@ -1189,6 +1216,13 @@ def jacfwd(func: Callable, argnums: argnums_t = 0, has_aux: bool = False, *, ran
         if has_aux:
             return tree_unflatten(jac_outs_ins, spec), aux
         return tree_unflatten(jac_outs_ins, spec)
+
+    # Dynamo does not support HOP composition if their inner function is
+    # annotated with @functools.wraps(...). We circumvent this issue by applying
+    # wraps only if we're not tracing with dynamo.
+    if not torch._dynamo.is_compiling():
+        wrapper_fn = wraps(func)(wrapper_fn)
+
     return wrapper_fn
 
 
