@@ -10,6 +10,8 @@ from torch.fx.experimental.optimization import (
     matches_module_pattern,
     replace_node_module,
 )
+from torch.fx.graph import GraphTransformObserver
+
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
@@ -208,7 +210,9 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 inductor_before_change = save_inductor_dict(
                     [pattern_matcher_pass.pass_name]
                 )
-                pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                with GraphTransformObserver(gm, pattern_matcher_pass.pass_name, log_dir="/home/shengfu/share_data"):
+                    pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+                # pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
                 if not is_same_dict(counters["inductor"], inductor_before_change):
                     optimus_scuba_log[
                         f"{pattern_matcher_pass.pass_name}_pre_grad"

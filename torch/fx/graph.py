@@ -17,6 +17,7 @@ import builtins
 import math
 import warnings
 import inspect
+import os
 
 __all__ = ["PythonCode", "CodeGen", "Graph"]
 
@@ -258,6 +259,49 @@ class _InsertPoint:
 
     def __exit__(self, type, value, tb):
         self.graph._insert = self.orig_insert
+
+class GraphTransformObserver:
+    global pass_count
+    pass_count = 0
+
+    def __init__(self, graphModule, passname, log_dir):
+        global pass_count
+        pass_count += 1
+        from .passes.graph_drawer import FxGraphDrawer
+        self.graphModule     = graphModule
+        self.passname        = passname
+        self.log_dir         = log_dir
+        self.input_dot_graph = FxGraphDrawer(self.graphModule, self.passname).get_dot_graph()
+
+    def __enter__(self):
+        self.erased_nodes = []
+        self.created_nodes = []
+        self.graphModule.graph.transfrom_observer = self
+
+    def __exit__(self, type, value, tb):
+        global pass_count
+        self.graphModule.graph.transfrom_observer = None
+
+        if len(self.created_nodes) > 0 or len(self.erased_nodes) > 0:
+            for node in self.erased_nodes:
+                for match in self.input_dot_graph.get_node(node.name):
+                    match.obj_dict["attributes"]['fillcolor'] = 'yellow'
+            self.input_dot_graph.write_pdf(os.path.join(self.log_dir,
+                f'pass_{pass_count}_{self.passname}_input_graph.pdf'))
+
+            from .passes.graph_drawer import FxGraphDrawer
+            output_dot_graph = FxGraphDrawer(self.graphModule, self.passname).get_dot_graph()
+            for node in self.created_nodes:
+                for match in output_dot_graph.get_node(node.name):
+                    match.obj_dict["attributes"]['fillcolor'] = 'yellow'
+            output_dot_graph.write_pdf(os.path.join(self.log_dir,
+                f'pass_{pass_count}_{self.passname}_output_graph.pdf'))
+
+    def on_node_creation(self, node):
+        self.created_nodes.append(node)
+
+    def on_node_erase(self, node):
+        self.erased_nodes.append(node)
 
 class _node_list:
     def __init__(self, graph: 'Graph', direction: str = '_next'):
@@ -814,6 +858,7 @@ class Graph:
         self._tracer_extras = tracer_extras
         self._codegen = CodeGen()
         self._co_fields : Dict[str, Any] = {}
+        self.transfrom_observer = None
 
     @property
     def owning_module(self):
@@ -928,6 +973,10 @@ class Graph:
 
         self._insert(n)
         self._len += 1
+
+        if self.transfrom_observer is not None:
+            self.transfrom_observer.on_node_creation(n)
+
         return n
 
     @compatibility(is_backward_compatible=False)
@@ -973,6 +1022,9 @@ class Graph:
         new_kwargs = map_arg(to_erase.kwargs, lambda n: None)
         assert isinstance(new_kwargs, dict)
         to_erase.kwargs = new_kwargs
+
+        if self.transfrom_observer is not None:
+            self.transfrom_observer.on_node_erase(to_erase)
 
     @compatibility(is_backward_compatible=True)
     def inserting_before(self, n: Optional[Node] = None):
