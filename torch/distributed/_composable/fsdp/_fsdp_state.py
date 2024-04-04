@@ -57,10 +57,10 @@ class FSDPState(_State):
         self._device = device
         self._mp_policy = mp_policy
         self._pre_forward_hook_handle = module.register_forward_pre_hook(
-            functools.partial(FSDPState._pre_forward, self), prepend=True, with_kwargs=True
+            self._pre_forward, prepend=True, with_kwargs=True
         )
         self._post_forward_hook_handle = module.register_forward_hook(
-            functools.partial(FSDPState._post_forward, self), prepend=False
+            self._post_forward, prepend=False
         )
 
     def _root_pre_forward(
@@ -145,7 +145,6 @@ class FSDPState(_State):
             if module in module_to_fsdp_param_group:
                 module_to_fsdp_param_group[module]._module_fqn = module_name
 
-    @staticmethod
     def _pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
@@ -165,7 +164,6 @@ class FSDPState(_State):
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
         return args, kwargs
 
-    @staticmethod
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
         # When composing with module-hook-based activation checkpointing, the
         # post-backward hook is responsible for the reshard
@@ -197,7 +195,6 @@ class FSDPState(_State):
         if self._fsdp_param_group:
             self._fsdp_param_group.pre_backward(forward_grad_fns, *unused)
 
-    @staticmethod
     def _pre_backward_compile_only(self, forward_grad_fns: Tuple[Node, ...], grad) -> None:
         """
         NOTE(yf225): since under compile we use `register_hook` to call pre_backward, to mimic `multi_grad_hook` "any" mode behavior
@@ -215,7 +212,6 @@ class FSDPState(_State):
         # Not needed for eager mode where we use `register_multi_grad_hook`.
         return grad
 
-    @staticmethod
     def _root_post_backward_final_callback(self, *unused) -> None:
         with torch.profiler.record_function("FSDP::root_post_backward_callback"):
             for state in self._state_ctx.all_states:
@@ -254,7 +250,7 @@ class FSDPState(_State):
                 # NOTE(yf225): unfortunately `t.grad_fn` is not supported by Dynamo yet, so we set grad_fns = [] here
                 # and unconditionally do unshard in `_prefetch_unshard()`
                 grad_fns = []
-                pre_backward = functools.partial(FSDPState._pre_backward_compile_only, self, grad_fns)
+                pre_backward = functools.partial(self._pre_backward_compile_only, grad_fns)
                 for tensor in tensors:
                     handle = tensor.register_hook(pre_backward)
                     self._pre_backward_hook_handles.append(handle)
@@ -273,7 +269,7 @@ class FSDPState(_State):
             )
         else:
             queue_callback(
-                functools.partial(FSDPState._root_post_backward_final_callback, self)
+                self._root_post_backward_final_callback
             )
 
 
