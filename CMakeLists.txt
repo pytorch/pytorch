@@ -1158,11 +1158,10 @@ int main() {
   svfloat64_t a;
   a = svdup_n_f64(0);
   return 0;
-}" HAS_SVE1)
+}" COMPILER_HAS_ARM_SVE)
 
-  if(HAS_SVE1)
+  if(COMPILER_HAS_ARM_SVE)
     string(APPEND CMAKE_CXX_FLAGS " -DCOMPILER_HAS_ARM_SVE")
-    set(COMPILER_HAS_ARM_SVE 1)
   endif()
   set(CMAKE_C_FLAGS ${ORIGINAL_CMAKE_C_FLAGS})
 endif()

@@ -89,8 +89,12 @@ static CPUCapability compute_cpu_capability() {
 #endif
 
 #if defined(__linux__) && defined(HAVE_SVE_CPU_DEFINITION)
-  if (cpuinfo_initialize()) {
+  if (cpuinfo_initialize() && cpuinfo_has_arm_sve()) {
+    static bool prctl_call = false; // To cache the prctl system call, so that it is called only once.
+    static int cached_sve_vl = -1; // Storing the cache value
+    if (!prctl_call) {
       int ret = prctl(PR_SVE_GET_VL);
+      prctl_call = true;
       if (ret < 0) {
         if (errno == EINVAL) {
           // SVE is not supported on this system.
@@ -101,14 +105,17 @@ static CPUCapability compute_cpu_capability() {
           // Should report and exit.
           TORCH_INTERNAL_ASSERT(false, "Unexpected error while checking SVE support");
         }
-      } else { // ret >= 0
-        int vl = ret & PR_SVE_VL_LEN_MASK;
-        #ifdef HAVE_SVE256_CPU_DEFINITION
-        if (vl == 32) { // Check for SVE256 (32 bytes vector length)
+      }
+      int vl = ret & PR_SVE_VL_LEN_MASK;
+      cached_sve_vl = vl; // Update the cache
+    }
+    if (cached_sve_vl != -1) {
+      #ifdef HAVE_SVE256_CPU_DEFINITION
+        if (cached_sve_vl == 32) { // Check for SVE256 (32 bytes vector length)
           return CPUCapability::SVE256;
         }
-        #endif
-      }
+      #endif
+    }
   }
 #endif
 #ifdef HAVE_VSX_CPU_DEFINITION
