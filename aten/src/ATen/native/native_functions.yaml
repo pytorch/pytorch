@@ -7260,6 +7260,7 @@
   variants: method
   dispatch:
     SparseCPU, SparseCUDA, SparseMeta: _values_sparse
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: _values_sparse_csr
   device_check: NoCheck
   device_guard: False
 

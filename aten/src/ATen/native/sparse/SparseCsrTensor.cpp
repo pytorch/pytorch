@@ -762,6 +762,10 @@ int64_t _nnz_sparse_csr(const SparseCsrTensor& self) {
   return get_sparse_csr_impl(self)->nnz();
 }
 
+Tensor _values_sparse_csr(const Tensor& self) {
+  return get_sparse_csr_impl(self)->values();
+}
+
 Tensor values_sparse_csr(const Tensor& self) {
   return get_sparse_csr_impl(self)->values().alias();
 }

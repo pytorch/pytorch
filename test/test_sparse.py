@@ -4446,6 +4446,15 @@ class TestSparseMeta(TestCase):
                 result = torch.zeros_like(f, device=f.fake_device)
             self.assertEqual(result, expected)
 
+    @all_sparse_layouts('layout', include_strided=False)
+    @parametrize("dtype", [torch.float64])
+    def test_values_meta(self, dtype, layout):
+        device = 'cpu'
+        index_dtype = torch.int64
+        for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            m = t.to(device='meta')
+            self.assertEqual(t._values().dtype, m._values().dtype)
+
 
 class _SparseDataset(torch.utils.data.Dataset):
     # An utility class used in TestSparseAny.test_dataloader method.
