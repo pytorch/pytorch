@@ -33,6 +33,7 @@ from torch._dynamo import (
 from torch._dynamo.utils import (
     counters,
     detect_fake_mode,
+    flatten_graph_inputs,
     lazy_format_graph_code,
     optimus_scuba_log,
 )
@@ -60,7 +61,12 @@ from .fx_passes.post_grad import post_grad_passes, view_to_reshape
 from .fx_passes.pre_grad import pre_grad_passes
 from .graph import GraphLowering
 from .ir import ExternKernelNode
-from .utils import get_dtype_size, has_incompatible_cudagraph_ops, output_node
+from .utils import (
+    get_cloned_parameter_buffer_name,
+    get_dtype_size,
+    has_incompatible_cudagraph_ops,
+    output_node,
+)
 from .virtualized import V
 
 if config.is_fbcode():
@@ -96,7 +102,9 @@ def index_expanded_dims(t: torch.Tensor, expanded_dims: List[int]) -> torch.Tens
 def complex_memory_overlap(t: torch.Tensor) -> bool:
     # if torch._debug_has_internal_overlap thinks this tensor potentially has
     # memory overlap internally, let's dig deeper to find out whether it's true.
-    t = index_expanded_dims(t, get_expanded_dims(t))
+    #
+    # Call squeeze() so that dimension with size 1 does not cause false positive.
+    t = index_expanded_dims(t, get_expanded_dims(t)).squeeze()
     if torch._debug_has_internal_overlap(t) != 0:
         strides = t.stride()
         sizes = t.shape
@@ -151,12 +159,23 @@ def _unlift_graph(mod, gm, graph_signature):
 
     placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
     lifted_inputs = []
+
+    # In AOTI, module parameters and buffers are not lifted as graph inputs.
+    # As a result, mutation to buffers has side effect which makes their initial
+    # values different from Eager. So we clone them here as a copy.
+    # We are not cloning for parameters, although it will be needed if we want to
+    # support training.
     for node in placeholder_nodes:
         node_name = node.name
         if node_name in graph_signature.inputs_to_parameters:
-            lifted_inputs.append(graph_signature.inputs_to_parameters[node_name])
+            parameter_name = graph_signature.inputs_to_parameters[node_name]
+            lifted_inputs.append(parameter_name)
         elif node_name in graph_signature.inputs_to_buffers:
-            lifted_inputs.append(graph_signature.inputs_to_buffers[node_name])
+            buffer_name = graph_signature.inputs_to_buffers[node_name]
+            lifted_inputs.append(buffer_name)
+            gm.meta[
+                get_cloned_parameter_buffer_name(buffer_name)
+            ] = clone_preserve_strides(state_dict[buffer_name])
         else:
             assert node_name in graph_signature.user_inputs
             lifted_inputs.append(None)
@@ -1432,33 +1451,6 @@ def make_graph_return_tuple(
     @functools.wraps(compiled_fn)
     def wrapper(*args, **kwargs):
         return pytree.tree_unflatten(compiled_fn(*args, **kwargs), spec)
-
-    return wrapper
-
-
-def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
-    """
-    Mutate inputs so that they are flat and wrap gm such that it
-    accepts those inputs.  This is only needed for graphs not created
-    by torchdynamo that take bumpy inputs.
-    """
-    inputs, spec = pytree.tree_flatten(inputs)
-
-    class GmWrapper(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.gm = gm
-
-        def forward(self, *args):
-            args: List[Any] = list(args)
-            return self.gm(*pytree.tree_unflatten(args, spec))
-
-    compiled_fn = compile_gm(GmWrapper(), inputs)
-
-    @functools.wraps(compiled_fn)
-    def wrapper(*args):
-        # note this doesn't check the spec, assuming it is the same
-        return compiled_fn(*pytree.arg_tree_leaves(*args))
 
     return wrapper
 
