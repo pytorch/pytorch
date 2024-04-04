@@ -4930,12 +4930,15 @@ class GraphModule(torch.nn.Module):
     def test_linearize_jvp_fn(self):
         counters.clear()
 
+        if check_dynamic_shape_capture():
+            self.skipTest("test fails with dynamic shapes")
+
         def wrapper_fn(x):
             output, jvp_fn = torch.func.linearize(torch.sin, x)
             return output, jvp_fn(x)
 
         x = torch.randn(3, 3, 3)
-        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False)
+        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False, graph_idx=0)
 
         # Dynamic shapes produce a slightly different graph.
         if check_dynamic_shape_capture():
@@ -4959,6 +4962,26 @@ class GraphModule(torch.nn.Module):
 
         alias_default_2 = torch.ops.aten.alias.default(sin_default)
         return (alias_default, cos_default, sin_default)
+""",
+        )
+
+        wrapped_gm = self._compile_check(wrapper_fn, (x,), fullgraph=False, graph_idx=1)
+        actual = normalize_gm(wrapped_gm.print_readable(print_output=False))
+        self.assertExpectedInline(
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, getattr_L_self_FX_CONST_FOLDED_ATTRS_0_ : torch.nn.parameter.Parameter, getattr_L_self_FX_CONST_FOLDED_ATTRS_1_ : torch.nn.parameter.Parameter, L_flat_tangents_1_ : torch.Tensor):
+        getattr_l_self_fx_const_folded_attrs_0_ = getattr_L_self_FX_CONST_FOLDED_ATTRS_0_
+        getattr_l_self_fx_const_folded_attrs_1_ = getattr_L_self_FX_CONST_FOLDED_ATTRS_1_
+        l_flat_tangents_1_ = L_flat_tangents_1_
+
+        _new_zeros_with_same_feature_meta_default = torch.ops.aten._new_zeros_with_same_feature_meta.default(l_flat_tangents_1_, getattr_l_self_fx_const_folded_attrs_0_);  getattr_l_self_fx_const_folded_attrs_0_ = None
+
+        copy__default = torch.ops.aten.copy_.default(_new_zeros_with_same_feature_meta_default, l_flat_tangents_1_);  _new_zeros_with_same_feature_meta_default = l_flat_tangents_1_ = None
+
+        mul_tensor = torch.ops.aten.mul.Tensor(copy__default, getattr_l_self_fx_const_folded_attrs_1_);  copy__default = getattr_l_self_fx_const_folded_attrs_1_ = None
+        return (mul_tensor,)
 """,
         )
 
