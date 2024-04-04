@@ -483,14 +483,12 @@ class FSDPParam:
 
 def alloc_storage(tensor: torch.Tensor) -> None:
     size = tensor.numel() * tensor.itemsize
-    storage = tensor.untyped_storage()
-    if storage.size() != size:
+    if (storage := tensor.untyped_storage()).size() != size:
         storage.resize_(size)
 
 
 def free_storage(tensor: torch.Tensor) -> None:
-    storage = tensor.untyped_storage()
-    if storage.size() != 0:
+    if (storage := tensor.untyped_storage()).size() != 0:
         storage.resize_(0)
 
 
