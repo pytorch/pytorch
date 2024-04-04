@@ -2,7 +2,7 @@
 #
 
 # You can set these variables from the command line.
-SPHINXOPTS    ?= -j auto -WT --keep-going -vv
+SPHINXOPTS    ?= -j auto -WT --keep-going
 SPHINXBUILD   ?= sphinx-build
 SPHINXPROJ    ?= PyTorch
 SOURCEDIR     ?= source

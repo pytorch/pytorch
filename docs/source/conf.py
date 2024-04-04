@@ -334,7 +334,6 @@ coverage_ignore_functions = [
     "no_observer_set",
     # torch.ao.quantization.quantize
     "get_default_custom_config_dict",
-    "quantize",
     # torch.ao.quantization.quantize_fx
     "attach_preserved_attrs_to_model",
     "convert_to_reference_fx",
