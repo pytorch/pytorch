@@ -969,8 +969,18 @@ class OutputGraph:
                     stored_graph_output_var = True
                 else:
                     output.append(create_instruction("POP_TOP"))
+
+            # TODO: only do pass3 when needed
+            pass3 = PyCodegen(
+                tx,
+                root,
+                graph_output_var,
+                tempvars={val: None for val, count in pass1.uses.items() if count > 1},
+            )
+            self.codegen_suffix(tx, stack_values, pass3)
+
             append_prefix_insts()
-            self.add_output_instructions(output + pass2.get_instructions())
+            self.add_output_instructions(output + pass3.get_instructions())
 
             # restore all the live local vars
             self.add_output_instructions(
