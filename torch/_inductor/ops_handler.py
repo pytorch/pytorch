@@ -214,7 +214,6 @@ class OpsHandler(Protocol[T]):
         dtypes: Tuple[torch.dtype, ...],
         combine_fn: Callable[[Tuple[T, ...], Tuple[T, ...]], Tuple[T, ...]],
         values: Tuple[T, ...],
-        inits: Tuple[int, ...],
     ) -> Tuple[T, ...]:
         """
         Perform an associative scan on 'value'.
@@ -316,6 +315,9 @@ class OpsHandler(Protocol[T]):
         ...
 
     def log10(self, x0: T) -> T:
+        ...
+
+    def log2(self, x0: T) -> T:
         ...
 
     def nextafter(self, x0: T, x1: T) -> T:
@@ -513,7 +515,7 @@ class NoopHandler:
         return (None, None)
 
     @staticmethod
-    def scan(dtypes, combine_fn, values, inits) -> Tuple[None, ...]:
+    def scan(dtypes, combine_fn, values) -> Tuple[None, ...]:
         return tuple(None for i in range(len(values)))
 
     @staticmethod
@@ -547,15 +549,15 @@ class MockHandler:
         return (f"ops.frexp({x})[0]", f"ops.frexp({x})[1]")
 
     @staticmethod
-    def scan(dtypes, combine_fn, values, inits):
+    def scan(dtypes, combine_fn, values):
         return tuple(
-            f"ops.scan({dtypes}, {combine_fn}, {values}, {inits})[{i}]"
+            f"ops.scan({dtypes}, {combine_fn}, {values})[{i}]"
             for i in range(len(values))
         )
 
     @staticmethod
     def indirect_indexing(index_var, size, check=True) -> sympy.Symbol:
-        return sympy_index_symbol(f"({str(index_var)})")
+        return sympy_index_symbol(str(index_var))
 
     @classmethod
     def _init_cls(cls):

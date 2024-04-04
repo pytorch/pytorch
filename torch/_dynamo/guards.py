@@ -31,6 +31,7 @@ import torch
 import torch.utils._device
 from torch._dynamo.source import (
     is_from_local_source,
+    is_from_optimizer_source,
     TensorProperty,
     TensorPropertySource,
 )
@@ -65,11 +66,13 @@ from .source import (
     GlobalSource,
     GlobalStateSource,
     GlobalWeakRefSource,
+    GradSource,
     LocalSource,
     NNModuleSource,
     NotNNModuleSource,
     NumpyTensorSource,
     ODictGetItemSource,
+    OptimizerSource,
     ShapeEnvSource,
     TupleIteratorGetItemSource,
     TypeSource,
@@ -370,6 +373,11 @@ def getitem_on_dict_manager(
     )
 
 
+def match_on_id_for_tensor(guard):
+    source = guard.originating_source
+    return source.is_dict_key() and not isinstance(source, GradSource)
+
+
 # The ready to eval generated code (possibly multiple parts) for a guard, plus
 # the original guard object that created it for provenance
 @dataclasses.dataclass
@@ -523,9 +531,17 @@ class GuardBuilder(GuardBuilderBase):
             return base_guard_manager.type_manager(
                 source=source_name, example_value=example_value
             )
-        elif istype(source, (NNModuleSource, NotNNModuleSource, FSDPNNModuleSource)):
+        elif istype(
+            source,
+            (OptimizerSource, NNModuleSource, NotNNModuleSource, FSDPNNModuleSource),
+        ):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager
+        elif istype(source, GradSource):
+            assert base_guard_manager  # to make mypy happy
+            return base_guard_manager.grad_manager(
+                source=source_name, example_value=example_value
+            )
         elif istype(source, AttrSource):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager.getattr_manager(
@@ -705,6 +721,43 @@ class GuardBuilder(GuardBuilderBase):
         )
         new_guard.create(self)
 
+    # Note: the order of the guards in this file matters since we sort guards on the same object by lineno
+    def HASATTR(self, guard: Guard):
+        source = guard.originating_source
+        if isinstance(source, NNModuleSource):
+            source = source.base
+        assert isinstance(source, AttrSource), f"invalid source {guard.name}"
+        base_source = source.base
+        base = base_source.name()
+        attr = source.member
+
+        ref = self.arg_ref(base)
+        val = hasattr(self.get(base), attr)
+        code = None
+        if val:
+            code = f"hasattr({ref}, {attr!r})"
+        else:
+            code = f"not hasattr({ref}, {attr!r})"
+        self._set_guard_export_info(
+            guard, [code], provided_guarded_object=self.get(base)
+        )
+
+        if config.enable_cpp_guard_manager:
+            base_manager = self.get_guard_manager_from_source(base_source)
+            if val:
+                # Just install a getattr manager. GetAttrGuardAccessor itself
+                # acts as hasattr guard.
+                example_value = self.get(source.name())
+                base_manager.getattr_manager(
+                    attr=attr, source=guard.name, example_value=example_value
+                )
+            else:
+                base_manager.add_no_hasattr_guard(
+                    attr, get_verbose_code_parts(code, guard)
+                )
+        else:
+            self._produce_guard_code(guard, [code])
+
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         t = type(self.get(guard.name))
@@ -810,10 +863,29 @@ class GuardBuilder(GuardBuilderBase):
                 if weak_id is not None:
                     self.id_matched_objs[local_name] = weak_id
 
+    def NOT_NONE_MATCH(self, guard: Guard, value=None):
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        assert isinstance(val, torch.Tensor)
+        code = f"{ref} is not None"
+        self._set_guard_export_info(guard, [code])
+
+        if config.enable_cpp_guard_manager:
+            self.get_guard_manager(guard).add_not_none_guard(
+                get_verbose_code_parts(code, guard)
+            )
+        else:
+            self._produce_guard_code(guard, [code])
+
     def NAME_MATCH(self, guard: Guard):
         self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)
 
     def DATA_PTR_MATCH(self, guard: Guard):
+        # Add a type check. C++ guard has the type check internally, so only
+        # enable it for Python guards.
+        if not config.enable_cpp_guard_manager:
+            self.TYPE_MATCH(guard)
+
         obj = self.get(guard.name)
         code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
         self._set_guard_export_info(guard, [code])
@@ -825,44 +897,29 @@ class GuardBuilder(GuardBuilderBase):
         else:
             self._produce_guard_code(guard, [code])
 
-    def HASATTR(self, guard: Guard):
-        assert isinstance(
-            guard.originating_source, AttrSource
-        ), f"invalid source {guard.name}"
-        base_source = guard.originating_source.base
-        base = base_source.name()
-        attr = guard.originating_source.member
-
-        ref = self.arg_ref(base)
-        val = hasattr(self.get(base), attr)
-        code = None
-        if val:
-            code = f"hasattr({ref}, {attr!r})"
-        else:
-            code = f"not hasattr({ref}, {attr!r})"
-        self._set_guard_export_info(
-            guard, [code], provided_guarded_object=self.get(base)
-        )
-
+    def DUAL_LEVEL(self, guard: Guard):
+        # Invalidate dual level if current dual level is different than the one
+        # in the fx graph
+        dual_level = torch.autograd.forward_ad._current_level
+        code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
+        self._set_guard_export_info(guard, [code])
         if config.enable_cpp_guard_manager:
-            base_manager = self.get_guard_manager_from_source(base_source)
-            if val:
-                # Just install a getattr manager. GetAttrGuardAccessor itself
-                # acts as hasattr guard.
-                base_manager.getattr_manager(
-                    attr=attr, source=guard.name, example_value=val
-                )
-            else:
-                base_manager.add_no_hasattr_guard(
-                    attr, get_verbose_code_parts(code, guard)
-                )
+            # TODO(anijain2305) - Consider this moving this guard to C++
+            forward_ad = torch.autograd.forward_ad
+
+            def fn(x):
+                return forward_ad._current_level == dual_level
+
+            assert self.guard_manager  # to make mypy happy
+            self.guard_manager.root.add_lambda_guard(
+                fn, get_verbose_code_parts(code, guard)
+            )
         else:
-            self._produce_guard_code(guard, [code])
+            self._produce_guard_code(guard, code)
 
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
         # the one when FX graph was generated
-        # if torch._C._functorch.peek_interpreter_stack() is not None:
         cis = torch._functorch.pyfunctorch.retrieve_all_functorch_interpreters()
         states = [ci.get_state() for ci in cis]
         code = [f"torch._functorch.pyfunctorch.compare_functorch_state({states})"]
@@ -1092,6 +1149,11 @@ class GuardBuilder(GuardBuilderBase):
         ref_a = self.arg_ref(guard)
         ref_b = self.arg_ref(source_b.name())
 
+        if is_from_optimizer_source(
+            guard.originating_source
+        ) or is_from_optimizer_source(source_b):
+            return
+
         code = [f"{ref_b} is {ref_a}"]
         self._set_guard_export_info(guard, code)
 
@@ -1133,7 +1195,7 @@ class GuardBuilder(GuardBuilderBase):
 
         self._set_guard_export_info(guard, code)
         if config.enable_cpp_guard_manager:
-            self.get_guard_manager(guard).add_weakref_alive_guard(
+            self.get_guard_manager(guard).add_not_none_guard(
                 get_verbose_code_parts(code, guard)
             )
         else:
@@ -1287,8 +1349,8 @@ class GuardBuilder(GuardBuilderBase):
                 self._produce_guard_code(guard, [shape_guard], shape_env=True)
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
-        if guard.is_nn_module() or guard.originating_source.is_dict_key():
-            self.ID_MATCH(guard)
+        if guard.is_nn_module() or match_on_id_for_tensor(guard):
+            self.DATA_PTR_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
                 value = value()
@@ -1336,8 +1398,8 @@ class GuardBuilder(GuardBuilderBase):
                     else:
                         code.append(f"{tensor_name}.{term} == {real_value}")
             else:
-                self.tensor_check_names.append(tensor_name)
                 self.tensor_check_examples.append(value)
+                self.tensor_check_names.append(tensor_name)
                 self.tensor_check_guards.append(guard)
 
                 if config.enable_cpp_guard_manager:
@@ -1347,12 +1409,11 @@ class GuardBuilder(GuardBuilderBase):
                     self.tensor_check_guard_managers.append(guard_manager)
 
                     output_graph = self.check_fn_manager.output_graph
-                    size = convert_to_concrete_values(
-                        output_graph.tensor_weakref_to_sizes_strides[value]["size"]
-                    )
-                    stride = convert_to_concrete_values(
-                        output_graph.tensor_weakref_to_sizes_strides[value]["stride"]
-                    )
+                    metadata = output_graph.input_source_to_sizes_strides[
+                        guard.originating_source
+                    ]
+                    size = convert_to_concrete_values(metadata["size"])
+                    stride = convert_to_concrete_values(metadata["stride"])
 
                     verbose_code_parts = get_verbose_code_parts(
                         get_tensor_guard_code_part(value, tensor_name, size, stride),
@@ -1760,24 +1821,22 @@ class CheckFunctionManager:
         check_tensors_fn = None
         check_tensors_verbose_fn = None
         if tensor_check_names and not config.enable_cpp_guard_manager:
+            tensor_check_guards = builder.tensor_check_guards
             assert (
                 not self.output_graph.export
             ), "Illegal to set tensor_check_names in export."
             tensor_check_examples = builder.tensor_check_examples
 
-            dynamic_dims_sizes = [
-                convert_to_concrete_values(
-                    self.output_graph.tensor_weakref_to_sizes_strides[t]["size"]
+            dynamic_dims_sizes = []
+            dynamic_dims_strides = []
+            for t, g in zip(tensor_check_examples, tensor_check_guards):
+                metadata = self.output_graph.input_source_to_sizes_strides[
+                    g.originating_source
+                ]
+                dynamic_dims_sizes.append(convert_to_concrete_values(metadata["size"]))
+                dynamic_dims_strides.append(
+                    convert_to_concrete_values(metadata["stride"])
                 )
-                for t in tensor_check_examples
-            ]
-
-            dynamic_dims_strides = [
-                convert_to_concrete_values(
-                    self.output_graph.tensor_weakref_to_sizes_strides[t]["stride"]
-                )
-                for t in tensor_check_examples
-            ]
 
             tensor_guards = TensorGuards(
                 *tensor_check_examples,
@@ -1792,7 +1851,6 @@ class CheckFunctionManager:
             # Do this manually, to un-stagger the guards in log message
             code_parts.append(f"___check_tensors({tensor_check_args})")
             verbose_code_parts.append(f"___check_tensors({tensor_check_args})")
-            tensor_check_guards = builder.tensor_check_guards
 
             for i, name in enumerate(tensor_check_names):
                 # This is a copy of what guards.cpp checks against
