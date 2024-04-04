@@ -4280,10 +4280,10 @@ class ExternKernelOut(ExternKernel):
         self.codegen_comment(wrapper)
         args = [*self.codegen_args(), *self.codegen_kwargs(skip_out=True)]
         wrapper.generate_extern_kernel_out(
-            self.output_view,
-            self.codegen_reference(),
-            args,
             self.get_kernel_name(),
+            self.codegen_reference(),
+            self.output_view.codegen_reference() if self.output_view else None,
+            args,
         )
 
     def __init__(

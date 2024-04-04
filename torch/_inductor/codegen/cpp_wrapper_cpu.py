@@ -1189,14 +1189,15 @@ class CppWrapperCpu(WrapperCodeGen):
         else:
             super().generate_fallback_kernel(fallback_kernel, args)
 
-    def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
-        if output_view:
-            output_as_strided = f"{output_view.codegen_reference()}"
-            output_name = f"{output_view.get_name()}_as_strided"
-            self.writeline(f"auto {output_name} = {output_as_strided};")
-            args.insert(0, output_name)
+    def generate_extern_kernel_out(
+        self, kernel: str, out: str, out_view: Optional[str], args: List[str]
+    ):
+        if out_view:
+            out_name = f"{out}_as_strided"
+            self.writeline(f"auto {out_name} = {out_view};")
+            args.insert(0, out_name)
         else:
-            args.insert(0, f"{codegen_reference}")
+            args.insert(0, out)
 
         if config.abi_compatible:
             self.generate_c_shim_extern_kernel_call(kernel, args)
