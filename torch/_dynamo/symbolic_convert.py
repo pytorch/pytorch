@@ -1384,10 +1384,13 @@ class InstructionTranslatorBase(
             f"should_compile_partial_graph not overridden by subclass {type(self)}"
         )
 
-    @break_graph_if_unsupported(push=0)
-    def STORE_SUBSCR(self, inst):
+    def _store_subscr(self, inst):
         val, obj, key = self.popn(3)
         result = obj.call_method(self, "__setitem__", [key, val], {})
+
+    @break_graph_if_unsupported(push=0)
+    def STORE_SUBSCR(self, inst):
+        self._store_subscr(inst)
 
     def BUILD_TUPLE(self, inst):
         items = self.popn(inst.argval)
@@ -1745,7 +1748,8 @@ class InstructionTranslatorBase(
     BINARY_REMAINDER = stack_op(operator.mod)
     BINARY_ADD = stack_op(operator.add)
     BINARY_SUBTRACT = stack_op(operator.sub)
-    BINARY_SUBSCR = break_graph_if_unsupported(push=1)(stack_op(operator.getitem))
+    _binary_subscr = stack_op(operator.getitem)
+    BINARY_SUBSCR = break_graph_if_unsupported(push=1)(_binary_subscr)
     BINARY_LSHIFT = stack_op(operator.lshift)
     BINARY_RSHIFT = stack_op(operator.rshift)
     BINARY_AND = stack_op(operator.and_)
@@ -1884,17 +1888,19 @@ class InstructionTranslatorBase(
         self.append_prefix_inst(inst)
 
     # 3.12 opcodes
+    @break_graph_if_unsupported(push=1)
     def BINARY_SLICE(self, inst):
         # BUILD_SLICE
         items = self.popn(2)
         self.push(SliceVariable(items))
-        self.BINARY_SUBSCR(inst)
+        self._binary_subscr(inst)
 
+    @break_graph_if_unsupported(push=0)
     def STORE_SLICE(self, inst):
         # BUILD SLICE
         items = self.popn(2)
         self.push(SliceVariable(items))
-        self.STORE_SUBSCR(inst)
+        self._store_subscr(inst)
 
     def END_FOR(self, inst):
         self.popn(2)
