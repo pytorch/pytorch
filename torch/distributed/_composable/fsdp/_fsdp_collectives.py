@@ -108,23 +108,6 @@ def foreach_all_gather(
             all_gather_output, all_gather_event, all_gather_work, inp_split_sizes
         )
 
-lib.define("contiguous_view_as_strided(Tensor tensor, SymInt[] size, SymInt[] stride) -> Tensor")
-
-@torch.library.impl(lib, "contiguous_view_as_strided", "Meta")
-def contiguous_view_as_strided_meta(tensor, size, stride):
-    t = tensor.contiguous().view(tensor.numel())
-    split_unpadded = torch.as_strided(t, size, stride, storage_offset=0)
-    return split_unpadded
-
-def contiguous_view_as_strided_impl(tensor, size, stride):
-    t = tensor.contiguous().view(tensor.numel())
-    split_unpadded = torch.as_strided(t, size, stride, storage_offset=0)
-    return split_unpadded
-
-@torch.library.impl(lib, "contiguous_view_as_strided", "CUDA")
-def contiguous_view_as_strided(tensor, size, stride):
-    return contiguous_view_as_strided_impl(tensor, size, stride)
-
 
 @torch.no_grad()
 def foreach_all_gather_copy_out(
@@ -170,20 +153,13 @@ def foreach_all_gather_copy_out(
             if fsdp_param.is_dtensor:
                 unsharded_param = unsharded_param.to_local()
             with torch.no_grad():
-                if inductor_config.use_fsdp_custom_op:
-                    # TODO(yf225): find a way to merge `contiguous_view_as_strided` and `copy_`
-                    # (currently throws "'NoneType' object has no attribute 'name'" in `and kwargs["out"] in tx.output.graphargs` line in _dynamo/variables/torch.py)
-                    split_unpadded = torch.ops.fsdp.contiguous_view_as_strided(
-                        splits[i],
-                        fsdp_param._orig_size,
-                        fsdp_param._contiguous_orig_stride,
-                    )
-                else:
-                    split_unpadded = contiguous_view_as_strided_impl(
-                        splits[i],
-                        fsdp_param._orig_size,
-                        fsdp_param._contiguous_orig_stride,
-                    )
+                split_flattened = splits[i].contiguous().view(splits[i].numel())
+                split_unpadded = torch.as_strided(
+                    split_flattened,
+                    fsdp_param._orig_size,
+                    fsdp_param._contiguous_orig_stride,
+                    storage_offset=0,
+                )
                 ctx = contextlib.nullcontext()
                 if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
                     ctx = torch.autograd._unsafe_preserve_version_counter(unsharded_param)

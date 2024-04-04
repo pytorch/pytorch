@@ -143,7 +143,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         fsdp_fx_passes.raise_all_gather_to_overlap_with_prev_layer_compute(gm)
         fsdp_fx_passes.sink_reduce_scatter_wait_to_end_of_graph(gm)
         fsdp_fx_passes.decompose_all_gather_copy_in(gm)
-        fsdp_fx_passes.decompose_contiguous_view_as_strided(gm)
     decompose_auto_functionalized(gm.graph)
 
     torch_log.warning(lazy_format_graph_code("after FSDP FX passes: ", gm))

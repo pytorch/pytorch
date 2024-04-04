@@ -487,38 +487,3 @@ def decompose_all_gather_copy_in(mod):
                 mod.graph.erase_node(all_gather_copy_in_node)
     mod.graph.lint()
     mod.recompile()
-
-
-def decompose_contiguous_view_as_strided(mod):
-    """
-    getitem_9: "bf16[8, 256]" = split_with_sizes_1[1]
-    contiguous_view_as_strided_1: "bf16[2048]" = torch.ops.fsdp.contiguous_view_as_strided.default(getitem_9, [2048], [1]);  getitem_9 = None
-    ... (uses contiguous_view_as_strided_1)
-
-    ->
-
-    getitem_9: "bf16[8, 256]" = split_with_sizes_1[1]
-    view_4: "bf16[2048]" = torch.ops.aten.reshape.default(getitem_9, [2048]);  getitem_9 = None
-    as_strided_1: "bf16[2048]" = torch.ops.aten.as_strided.default(view_4, [2048], [1], 0);  view_4 = None
-    ... (uses as_strided_1)
-    """
-    node_list = list(mod.graph.nodes)
-    for i, n in enumerate(node_list):
-        if n.target == torch.ops.fsdp.contiguous_view_as_strided.default:
-            contiguous_view_as_strided_node = n
-            # torch.ops.fsdp.contiguous_view_as_strided(tensor, size, stride)
-            tensor = contiguous_view_as_strided_node.args[0]
-            size = contiguous_view_as_strided_node.args[1]
-            stride = contiguous_view_as_strided_node.args[2]
-            # Decompose the `contiguous_view_as_strided` op
-            with mod.graph.inserting_before(contiguous_view_as_strided_node):
-                # Source: t = tensor.contiguous().view(tensor.numel())
-                reshape_node = mod.graph.call_function(torch.ops.aten.reshape.default, (tensor, size))
-                _propagate_node_meta(contiguous_view_as_strided_node, reshape_node)
-                # Source: split_unpadded = torch.as_strided(t, size, stride, storage_offset=0)
-                as_strided_node = mod.graph.call_function(torch.ops.aten.as_strided.default, (reshape_node, size, stride, 0))
-                _propagate_node_meta(contiguous_view_as_strided_node, as_strided_node)
-            contiguous_view_as_strided_node.replace_all_uses_with(as_strided_node)
-            mod.graph.erase_node(contiguous_view_as_strided_node)
-    mod.graph.lint()
-    mod.recompile()
