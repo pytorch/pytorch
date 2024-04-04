@@ -25,35 +25,12 @@ from ..pattern_matcher import (
 from ..utils import is_cpu_device, pass_execution_and_save
 from .group_batch_fusion import group_batch_fusion_passes
 from .misc_patterns import numpy_compat_normalization
+from .split_cat import PRE_GRAD_PATTERNS
 
 log = logging.getLogger(__name__)
 
-normalization_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="normalization_pass"
-)
-merge_splits_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="merge_splits_pass"
-)
-split_cat_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="split_cat_pass"
-)
-unbind_stack_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="unbind_stack_pass"
-)
 efficient_conv_bn_eval_pass = PatternMatcherPass(
     prevent_match_across_mutations=True, pass_name="efficient_conv_bn_eval_pass"
-)
-merge_getitem_cat_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="merge_getitem_cat_pass"
-)
-merge_stack_tahn_unbind_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="merge_stack_tahn_unbind_pass"
-)
-mutate_cat_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="mutate_cat_pass"
-)
-remove_split_with_size_one_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="remove_split_with_size_one_pass"
 )
 
 fuse_split_linear_add_pass = PatternMatcherPass(
@@ -107,17 +84,12 @@ def remove_split_ops(graph, shape_prop):
     return None
 
 
-pattern_matcher_passes: List[PatternMatcherPass] = [
-    normalization_pass,
-    remove_split_with_size_one_pass,
-    merge_getitem_cat_pass,
-    merge_stack_tahn_unbind_pass,
-    merge_splits_pass,
-    mutate_cat_pass,
-    split_cat_pass,
-    unbind_stack_pass,
-    efficient_conv_bn_eval_pass,
-]
+# split_cat related fusions
+pattern_matcher_passes = list(PRE_GRAD_PATTERNS.values())
+# non-split_cat related fusions
+# TODO: move them to the fusions dict too.
+pattern_matcher_passes.append(efficient_conv_bn_eval_pass)
+
 pattern_matcher_passes_aten: List[PatternMatcherPass] = [
     remove_split_with_size_one_pass_aten,
     merge_getitem_cat_pass_aten,
@@ -489,8 +461,11 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
                     return tensors, dim
 
                 tensors, dim = cat_args(*node.args, **node.kwargs)
+                new_kwargs = {
+                    name: val for name, val in user.kwargs.items() if name != "input"
+                }
                 new_tensors = [
-                    g.create_node(user.op, user.target, args=(arg,), kwargs=user.kwargs)
+                    g.create_node(user.op, user.target, args=(arg,), kwargs=new_kwargs)
                     for arg in tensors
                 ]
                 new_cat = g.create_node(

@@ -379,19 +379,25 @@ class CachingAutotuner(KernelInterface):
         ]
         def_args = [name for name in self.fn.arg_names if name not in cfg.kwargs]
 
+        binary_shared = (
+            binary.shared if hasattr(binary, "shared") else binary.metadata.shared
+        )
+
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
             "launch_enter_hook": binary.launch_enter_hook,
             "launch_exit_hook": binary.launch_exit_hook,
             "metadata": binary.metadata,
-            "torch": torch,
-            "set_device": self.gpu_device.set_device,
-            "current_device": self.gpu_device.current_device,
+            "shared": binary_shared,
         }
 
-        scope["runner"] = get_first_attr(binary, "run", "c_wrapper")
-        scope["function"] = get_first_attr(binary, "function", "cu_function")
+        scope["num_warps"] = (
+            binary.num_warps
+            if hasattr(binary, "num_warps")
+            else binary.metadata.num_warps
+        )
+
         scope["cta_args"] = (
             (binary.num_ctas, *get_first_attr(binary, "cluster_dims", "clusterDims"))
             if hasattr(binary, "num_ctas")
@@ -401,15 +407,81 @@ class CachingAutotuner(KernelInterface):
                 else ()
             )
         )
-        scope["num_warps"] = (
-            binary.num_warps
-            if hasattr(binary, "num_warps")
-            else binary.metadata.num_warps
+
+        scope["function"] = get_first_attr(binary, "function", "cu_function")
+
+        def get_launch_args_without_kernel_launch_metadata(
+            grid,
+            grid_0,
+            grid_1,
+            grid_2,
+            stream,
+            function,
+            metadata,
+            bin,
+            launch_enter_hook,
+            launch_exit_hook,
+            num_warps,
+            shared,
+            cta_args,
+            args,
+        ):
+            """
+            Construct launch args before CompiledKernel.launch_metadata is added.
+            """
+            return (
+                grid_0,
+                grid_1,
+                grid_2,
+                num_warps,
+                *cta_args,
+                shared,
+                stream,
+                function,
+                launch_enter_hook,
+                launch_exit_hook,
+                metadata,
+            )
+
+        def get_launch_args_with_kernel_launch_metadata(
+            grid,
+            grid_0,
+            grid_1,
+            grid_2,
+            stream,
+            function,
+            metadata,
+            bin,
+            launch_enter_hook,
+            launch_exit_hook,
+            num_warps,
+            shared,
+            cta_args,
+            args,
+        ):
+            """
+            Construct launch args after CompiledKernel.launch_metadata is added
+            by https://github.com/openai/triton/pull/3492 .
+            """
+            return (
+                grid_0,
+                grid_1,
+                grid_2,
+                stream,
+                function,
+                metadata,
+                bin.launch_metadata(grid, stream, *args),
+                launch_enter_hook,
+                launch_exit_hook,
+            )
+
+        scope["get_launch_args"] = (
+            get_launch_args_with_kernel_launch_metadata
+            if hasattr(binary, "launch_metadata")
+            else get_launch_args_without_kernel_launch_metadata
         )
-        binary_shared = (
-            binary.shared if hasattr(binary, "shared") else binary.metadata.shared
-        )
-        scope["shared"] = binary_shared
+
+        scope["runner"] = get_first_attr(binary, "run", "c_wrapper")
 
         exec(
             f"""
@@ -419,13 +491,13 @@ class CachingAutotuner(KernelInterface):
                 else:
                     grid_0, grid_1, grid_2 = grid
 
-                runner(grid_0, grid_1, grid_2, num_warps,
-                            *cta_args, shared,
-                            stream, function,
-                            launch_enter_hook,
-                            launch_exit_hook,
-                            metadata,
-                            {', '.join(call_args)})
+                args = {', '.join(call_args)},
+                launch_args = get_launch_args(
+                    grid, grid_0, grid_1, grid_2, stream, function,
+                    metadata, bin, launch_enter_hook, launch_exit_hook,
+                    num_warps, shared, cta_args, args
+                )
+                runner(*launch_args, *args)
                 return bin
             """.lstrip(),
             scope,
@@ -900,8 +972,7 @@ def cached_autotune(
             with open(cache_filename) as fd:
                 best_config = json.loads(fd.read())
         elif remote_cache is not None and remote_cache_key is not None:
-            cache_outs = remote_cache.get([remote_cache_key])
-            best_config = cache_outs.get(remote_cache_key, None)
+            best_config = remote_cache.get(remote_cache_key)
 
         best_config = load_cached_autotuning(best_config, configs_hash, configs)
         if best_config:

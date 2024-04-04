@@ -20,9 +20,9 @@ inline namespace CPU_CAPABILITY {
 #if defined(CPU_CAPABILITY_AVX512)
 
 #ifndef SLEEF_CONST
-#if defined (__GNUC__) || defined (__clang__) || defined(__INTEL_COMPILER)
-#define SLEEF_CONST __attribute__((const))
-#elif defined(_MSC_VER)
+#if (defined(__GNUC__) || defined(__CLANG__)) && !defined(__INTEL_COMPILER)
+#define SLEEF_CONST const
+#else
 #define SLEEF_CONST
 #endif
 #define SLEEF_CONST_OLD SLEEF_CONST
@@ -110,6 +110,11 @@ static inline void cvtfp16_fp32(const __m512i& a, __m512& o1, __m512& o2) {
   __m256i hi = _mm512_extracti32x8_epi32(a, 1);
   cvtfp16_fp32(lo, o1);
   cvtfp16_fp32(hi, o2);
+}
+
+static inline __m256i cvtfp32_fp16(const __m512& src) {
+  return _mm512_cvtps_ph(
+      src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
 }
 
 static inline __m512i cvtfp32_fp16(const __m512& a, const __m512& b) {

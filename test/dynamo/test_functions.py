@@ -76,6 +76,10 @@ def make_test(fn=None, expected_frame_count=1):
     return test_fn
 
 
+class MyCls:
+    a = 1
+
+
 @torch.jit.script_if_tracing
 def inline_script_if_tracing(x):
     return x + 1.2
@@ -196,6 +200,14 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         if c > d:
             return a - b
         return b - a
+
+    @make_test
+    def test_cls_hasattr(self, x):
+        if hasattr(MyCls, "a"):
+            x = x + 1
+        if hasattr(MyCls, "b"):
+            x = x + 2
+        return x
 
     @make_test
     def test_finfo(a, b):
