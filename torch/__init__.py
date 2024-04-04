@@ -1777,6 +1777,10 @@ class _TorchCompileWrapper:
     def __call__(self, model_, inputs_):
         return self.compiler_fn(model_, inputs_, **self.kwargs)
 
+    def reset(self):
+        if hasattr(self.compiler_fn, "reset"):
+            self.compiler_fn.reset()
+
 
 def compile(model: Optional[Callable] = None, *,
             fullgraph: builtins.bool = False,
