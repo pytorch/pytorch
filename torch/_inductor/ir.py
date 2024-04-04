@@ -7217,26 +7217,29 @@ class Conditional(ExternKernel):
 
 @dataclasses.dataclass
 class WhileLoop(ExternKernel):
-    operands: Optional[List[TensorBox]] = None
+    carried_inputs: Optional[List[TensorBox]] = None
+    additional_inputs: Optional[List[TensorBox]] = None
     cond_subgraph: Optional[Subgraph] = None
     body_subgraph: Optional[Subgraph] = None
     outputs: Optional[List[MultiOutput]] = None
 
     def __init__(
         self,
-        operands: List[TensorBox],
+        carried_inputs: List[TensorBox],
+        additional_inputs: List[TensorBox],
         cond_subgraph: Subgraph,
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
     ):
-        self.operands = operands
+        self.carried_inputs = carried_inputs
+        self.additional_inputs = additional_inputs
         self.cond_subgraph = cond_subgraph
         self.body_subgraph = body_subgraph
 
         super().__init__(
             name=None,
             layout=layout,  # type: ignore[arg-type]
-            inputs=operands,  # type: ignore[list-item]
+            inputs=carried_inputs + additional_inputs,  # type: ignore[list-item]
         )
 
         self.name = V.graph.register_buffer(self)
@@ -7246,23 +7249,26 @@ class WhileLoop(ExternKernel):
         cls,
         cond_fn: Subgraph,
         body_fn: Subgraph,
-        operands: List[TensorBox],
+        carried_inputs: List[TensorBox],
+        additional_inputs: List[TensorBox],
     ):
-        operands = [cls.realize_input(x) for x in operands]
+        carried_inputs = [cls.realize_input(x) for x in carried_inputs]
+        additional_inputs = [cls.realize_input(x) for x in additional_inputs]
+        all_inputs = carried_inputs + additional_inputs
 
-        fx_operands = V.graph.current_node.args[-1]
-        fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
+        fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
+        fake_all_inputs = [x.meta["val"] for x in fx_all_inputs]  # type: ignore[union-attr]
 
         for subgraph in (cond_fn, body_fn):
             if subgraph.graph is None:
                 # create and lower subgraphs
                 subgraph.graph = V.graph.make_subgraph(
                     gm=subgraph.graph_module,
-                    example_inputs=fake_operands,
+                    example_inputs=fx_all_inputs,  # type: ignore[arg-type]
                     subgraph_name=subgraph.name,
                 )
                 with V.set_graph_handler(subgraph.graph):
-                    subgraph.graph.run(*fake_operands)
+                    subgraph.graph.run(*fake_all_inputs)
 
         cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
         body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
@@ -7279,24 +7285,25 @@ class WhileLoop(ExternKernel):
         assert len(cond_outputs[0].get_size()) == 0, cond_outputs
 
         assert (
-            len(operands) > 0
+            len(all_inputs) > 0
         ), "torch.while_loop is assumed to have at least one operand."
 
-        device = operands[0].get_device()
+        device = all_inputs[0].get_device()
 
-        # make sure operands and body outputs are structurally equivalent
-        assert len(operands) == len(body_outputs), (operands, body_outputs)
-        for i, (op, bo) in enumerate(zip(operands, body_outputs)):
+        # make sure carried_inputs and body outputs are structurally equivalent
+        assert len(carried_inputs) == len(body_outputs), (carried_inputs, body_outputs)
+        for i, (op, bo) in enumerate(zip(carried_inputs, body_outputs)):
             assert op.get_size() == bo.get_size(), (i, op, bo)
             assert op.get_stride() == bo.get_stride(), (i, op, bo)
-            # assume all operands and outputs are on the same device
+            # assume all carried_inputs and outputs are on the same device
             # as the MultiOutputLayout below requires single device
             assert op.get_device() == bo.get_device() == device, (i, op, bo, device)
             assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
             assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
 
         while_loop = WhileLoop(
-            operands=operands,
+            carried_inputs=carried_inputs,
+            additional_inputs=additional_inputs,
             cond_subgraph=cond_fn,
             body_subgraph=body_fn,
             # asserted above that there is at least one operand
