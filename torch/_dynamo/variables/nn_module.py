@@ -70,7 +70,8 @@ def initialize_lazy_module(tx, mod, args, kwargs):
 def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
     fully_qualified_name = source.name()
     try:
-        tx.nn_module_stack[module_key] = (fully_qualified_name, type(mod))
+        mod_cls = mod.__class__
+        tx.nn_module_stack[module_key] = (fully_qualified_name, mod_cls.__module__ + "." + mod_cls.__qualname__)
         yield
     finally:
         del tx.nn_module_stack[module_key]

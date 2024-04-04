@@ -24,6 +24,7 @@ import inspect
 from dataclasses import dataclass
 import weakref
 import operator
+import traceback
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 import logging
@@ -1116,7 +1117,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                     )
                 ]
                 if stack_trace:  # empty list for strict mode, dynamo should handle stack_trace
-                    stack_trace = CapturedTraceback(stack_trace)
+                    stack_trace = traceback.StackSummary.from_list(stack_trace)
                     node.meta["stack_trace"] = ''.join(stack_trace.format()).strip()
 
         return node
