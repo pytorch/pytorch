@@ -19,6 +19,7 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
 import weakref
 from contextlib import contextmanager
@@ -254,6 +255,11 @@ CI_USE_SGD = {
     "tf_mixnet_l",
 }
 
+# Don't delete the inductor cache dir for these models. Preseving the cache
+# allows us to save the artifacts on a failure (for later debugging).
+CI_PRESERVE_CACHE_DIR = {
+    "mnasnet1_0",
+}
 
 DO_NOT_CAST_INPUTS = {"stable_diffusion"}
 
@@ -1943,12 +1949,14 @@ def get_dynamo_stats():
     )
 
 
-def maybe_fresh_cache(fn, is_cold_start):
+def maybe_fresh_cache(fn, is_cold_start, cache_dir=None):
     def inner(*args, **kwargs):
         cache_minder = contextlib.nullcontext()
         if is_cold_start:
             cache_entries = {}
-            cache_minder = fresh_inductor_cache(cache_entries)
+            cache_minder = fresh_inductor_cache(
+                cache_entries, dir=cache_dir, delete=cache_dir is None
+            )
 
         try:
             with cache_minder:
@@ -3403,8 +3411,14 @@ def process_entry(rank, runner, original_dir, args):
         world_size=args.world_size,
         port=args.distributed_master_port,
     ):
+        cache_dir = None
+        if args.ci and args.only and args.only in CI_PRESERVE_CACHE_DIR:
+            cache_dir = os.path.join(
+                tempfile.gettempdir(), "torchinductor_ci_preserve", args.only
+            )
+
         return maybe_fresh_cache(
-            run, (args.cold_start_latency and args.only) or args.ci
+            run, (args.cold_start_latency and args.only) or args.ci, cache_dir
         )(runner, args, original_dir)
 
 
@@ -3447,6 +3461,9 @@ def main(runner, original_dir=None, args=None):
         # single process path just uses the main process
         args.world_size = 1
         process_entry(0, runner, original_dir, args)
+        # TESTING: delete me
+        if args.only and args.only in CI_PRESERVE_CACHE_DIR:
+            sys.exit(1)
 
 
 def write_csv_when_exception(args, name: str, status: str, device=None):
