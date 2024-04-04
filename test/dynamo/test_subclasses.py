@@ -980,6 +980,20 @@ s1 > 3""",
         res = fn_opt(x)
         self.assertEqual(ref, res)
 
+    def test_two_tensor_graph_break_on_constructor(self):
+        def fn(x):
+            tmp = x + 1
+            print("graph break!")
+            # Dynamo needs to proxy the TwoTensor constructor into the graph
+            two_tensor = TwoTensor(tmp, tmp)
+            return two_tensor * 2
+
+        fn_opt = torch.compile(backend="aot_eager")(fn)
+        x = torch.ones(2, 2)
+        out_ref = fn(x)
+        out_test = fn_opt(x)
+        self.assertEqual(out_ref, out_test)
+
     def test_torch_function_subclass_survives_into_aot_autograd(self):
         # If you have a tensor subclass that relies on dispatch into the same op
         # without unwrapping and calling torch._C.DisableTorchFunctionSubclass(),
@@ -1458,7 +1472,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
     def test_subclass_gives_static_shapes_when_dynamic_false(self):
         def check_graph(gm, *args):
-            first_node_example_val = list(gm.graph.nodes)[0].meta["example_value"]
+            first_node_example_val = next(list(gm.graph.nodes)).meta["example_value"]
             # We compiled with dynamic=False, expect no SymInt sizes on our placeholders
             self.assertTrue(
                 all(isinstance(x, int) for x in first_node_example_val.shape)

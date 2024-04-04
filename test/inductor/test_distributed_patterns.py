@@ -63,13 +63,13 @@ def init_fake_distributed():
         mod.weight.grad = new_grad
 
     torch.manual_seed(1234)
-    m = nn.Linear(20, 10, bias=False)
+    m = nn.Linear(20, 10, bias=False).to(device="cuda")
     m.weight = nn.Parameter(reduce_scatter(m.weight))
     m.register_full_backward_pre_hook(bw_pre_hook)
     m.register_full_backward_hook(bw_post_hook)
     m.register_forward_pre_hook(fw_pre_hook)
     m.register_forward_hook(fw_post_hook)
-    return m, torch.rand(2, 20, requires_grad=True)
+    return m, torch.rand(2, 20, requires_grad=True, device="cuda")
 
 
 def init_module_bw_hooks(allow_eager):

@@ -92,12 +92,12 @@ import importlib
 import torch
 import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
+import torch.utils._pytree as pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map_only
 from torch.utils._triton import has_triton, has_triton_package
 
 
@@ -1780,7 +1780,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:
-        _ = tree_map_only(
+        _ = pytree.tree_map_only(
             torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
         )
     return ret_val
@@ -2625,3 +2625,95 @@ def nn_module_proxy(mod):
     proxy = mod.__class__.__new__(mod.__class__)
     proxy.__dict__ = mod.__dict__
     return proxy
+
+
+def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
+    """
+    Mutate inputs so that they are flat and wrap gm such that it
+    accepts those inputs.  This is needed for graphs that take
+    bumpy inputs.
+    """
+    inputs, spec = pytree.tree_flatten(inputs)
+
+    class GmWrapper(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.gm = gm
+
+        def forward(self, *args):
+            args: List[Any] = list(args)
+            return self.gm(*pytree.tree_unflatten(args, spec))
+
+    compiled_fn = compile_gm(GmWrapper(), inputs)
+
+    def wrapper(*args):
+        # note this doesn't check the spec, assuming it is the same
+        return compiled_fn(*pytree.arg_tree_leaves(*args))
+
+    return wrapper
+
+# This is used to proxy call to subclass constructors:
+# - Subclass()
+# - Subclass.__new__()
+# - Subclass.__init__()
+def proxy_fn_with_non_fx_args(fn, tx, args, kwargs):
+    from .symbolic_convert import InstructionTranslator
+
+    tx = InstructionTranslator.current_tx()
+    # rewrite non-primitive args/kwargs to be included in the on-the-fly function
+    # and rewrite args to have only proxyable args, then insert call_function
+    args = [a.realize() for a in args]
+
+    arg_indices_not_proxied = [
+        i for i, a in enumerate(args) if not a.can_be_proxied_in_fx()
+    ]
+    arg_indices_proxied = [i for i, a in enumerate(args) if a.can_be_proxied_in_fx()]
+
+    kwarg_keys_not_proxied = [
+        k for k, v in kwargs.items() if not v.can_be_proxied_in_fx()
+    ]
+    kwarg_keys_proxied = [k for k, v in kwargs.items() if v.can_be_proxied_in_fx()]
+
+    constant_args = [args[i].as_python_constant() for i in arg_indices_not_proxied]
+    constant_kwargs = {
+        k: kwargs[k].as_python_constant() for k in kwarg_keys_not_proxied
+    }
+
+    proxied_args = [args[i] for i in arg_indices_proxied]
+    proxied_kwargs = {k: kwargs[k] for k in kwarg_keys_proxied}
+
+    def subclass_fn_call_helper(inner_fn, *args, **kwargs):
+        len_args = len(args) + len(constant_args)
+        args_full = []
+        proxies_offset = 0
+        constants_offset = 0
+        for i in range(len_args):
+            if i in arg_indices_not_proxied:
+                args_full.append(constant_args[constants_offset])
+                constants_offset += 1
+            else:
+                args_full.append(args[proxies_offset])
+                proxies_offset += 1
+
+        kwargs_full = {}
+        kwargs_full.update(kwargs)
+        kwargs_full.update(constant_kwargs)
+        return inner_fn(*args_full, **kwargs_full)
+
+    def subclass_fn_call(*args, **kwargs):
+        return subclass_fn_call_helper(fn, *args, **kwargs)
+
+    # attach the same function name for better debugging
+    name_str = fn.__qualname__.replace(".", "_")
+    subclass_fn_call.__name__ = f"dynamo_call__{name_str}"
+
+    from .variables.builder import wrap_fx_proxy
+
+    proxy = tx.output.create_proxy(
+        "call_function",
+        subclass_fn_call,
+        *proxy_args_kwargs(proxied_args, proxied_kwargs),
+    )
+
+    out = wrap_fx_proxy(tx=tx, proxy=proxy)
+    return out
