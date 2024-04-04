@@ -285,6 +285,7 @@ def aot_dispatch_autograd(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
 
+            # See Note [Side-Effectful Tokens in AOTAutograd]
             if num_tokens != 0 and aot_config.backend_name == "inductor":
                 unlift_tokens(fw_module, fw_metadata)
                 num_inner_fwd_outputs -= num_tokens
@@ -837,13 +838,13 @@ def aot_dispatch_autograd(
             grad_output_types_ = [
                 torch.Tensor if x is FakeTensor else x for x in grad_output_types
             ]
-            assert grad_output_types_ == CompiledFunction.metadata.output_types, (
-                "We incorrectly attempted to compile the backward with incorrect "
-                "subclass metadata. If you run into this error, please file an "
-                "issue. Expected grad_output types: "
-                f"{str(CompiledFunction.metadata.output_types)} "
-                f"Got grad_output types: {str(grad_output_types)}"
-            )
+            assert (
+                grad_output_types_ == CompiledFunction.metadata.output_types
+            ), f"""\
+We incorrectly attempted to compile the backward with incorrect subclass metadata.
+If you run into this error, please file an issue.
+Expected grad_output types: {str(CompiledFunction.metadata.output_types)}
+Got grad_output types: {str(grad_output_types)}"""
 
             # TODO: figure out how to refactor the backward properly so I can use aot_dispatch_subclass_wrapper() here.
             if CompiledFunction.maybe_subclass_metadata is not None:

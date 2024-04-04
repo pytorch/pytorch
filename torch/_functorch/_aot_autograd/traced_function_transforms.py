@@ -350,27 +350,25 @@ def create_functionalized_fn(
             torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
         )
 
+        # See Note [Side-Effectful Tokens in AOTAutograd]
+        if trace_joint:
+            assert (
+                isinstance(args, tuple)
+                and len(args) == 2
+                and isinstance(args[0], (list, tuple))
+            )
+            tokens = args[0][: len(meta.tokens)]
+            actual_args = args[0][len(meta.tokens) :]
+            args = (actual_args, args[1])
+        else:
+            tokens = args[: len(meta.tokens)]
+            args = args[len(meta.tokens) :]
+        assert all(token.numel() == 0 for token in tokens)
+
         with disable_above:
-            # See Note [Side-Effectful Tokens in AOTAutograd]
-            if trace_joint:
-                assert (
-                    isinstance(args, tuple)
-                    and len(args) == 2
-                    and isinstance(args[0], (list, tuple))
-                )
-                tokens = args[0][: len(meta.tokens)]
-                actual_args = args[0][len(meta.tokens) :]
-                args = (actual_args, args[1])
-            else:
-                tokens = args[: len(meta.tokens)]
-                args = args[len(meta.tokens) :]
-
-            f_tokens = pytree.tree_map(to_fun, tokens)
-
-            assert all(token.numel() == 0 for token in f_tokens)
-
             # Wrap inputs into functional wrappers
             f_args = pytree.tree_map(to_fun, args)
+            f_tokens = pytree.tree_map(to_fun, tokens)
 
             # Populate the current FunctionalTensorMode with the tokens per
             # operator. See Note [FunctionalTensorMode is Stateful]
@@ -526,7 +524,6 @@ def create_functionalized_fn(
     # Additionally pass in tokens as inputs
     # See Note [Side-Effectful Tokens in AOTAutograd]
     additional_token_inputs = [torch.tensor([])] * len(meta.tokens)
-
     if trace_joint:
         args = ([*additional_token_inputs, *args[0]], *args[1:])
     else:
