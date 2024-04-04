@@ -58,6 +58,8 @@ log = logging.getLogger(__name__)
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
+ALIGNMENT = 16
+
 
 def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
     """
@@ -1480,3 +1482,7 @@ def collect_defined_kernels(kernel_list):
 
     with unittest.mock.patch.object(WrapperCodeGen, "define_kernel", new_define_kernel):
         yield
+
+
+def should_assume_input_aligned(example_input):
+    return example_input.data_ptr() % ALIGNMENT == 0 or config.assume_aligned_inputs

@@ -41,7 +41,7 @@ from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
-from torch._inductor.utils import BoxedBool, count_tangents
+from torch._inductor.utils import ALIGNMENT, BoxedBool, count_tangents, should_assume_input_aligned
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
@@ -74,7 +74,6 @@ else:
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 post_grad_graphs_log = torch._logging.getArtifactLogger(__name__, "post_grad_graphs")
-ALIGNMENT = 16
 
 
 @dataclasses.dataclass
@@ -799,17 +798,19 @@ def get_input_idxs_to_check(
     inputs: Union[List[torch.Tensor], Sequence[int]],
     static_input_idxs: Sequence[int],
 ) -> Sequence[int]:
-    def is_aligned(storage_offset, dtype):
+    def is_aligned(input):
+        # See Note: [Input Alignment handling in Inductor]
+        if not should_assume_input_aligned(input):
+            return False
+        storage_offset = input.storage_offset()
+        dtype = input.dtype
         return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
 
     ids_to_check = []
     for i, input in enumerate(inputs):
         if (
             isinstance(input, torch.Tensor)
-            and (
-                i not in static_input_idxs
-                or not is_aligned(input.storage_offset(), input.dtype)
-            )
+            and (i not in static_input_idxs or not is_aligned(input))
             and input.device.type == "cuda"
         ):
             ids_to_check.append(i)
@@ -834,10 +835,7 @@ def align_inputs(
     inputs: List[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
 ):
-    if config.assume_aligned_inputs:
-        inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
-    else:
-        inputs_to_check = []
+    inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
     return align_inputs_from_check_idxs(model, inputs_to_check)
 
 

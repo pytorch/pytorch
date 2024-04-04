@@ -9560,8 +9560,13 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
             def fn(x: torch.Tensor) -> torch.Tensor:
                 return x.sin() + x.cos()
 
-            for offset in (0, 1, 2):
-                base = torch.randn(64 * 64 + 64, device=GPU_TYPE)
+            # TODO(dberard) fix this comment ............................................................................................................
+            # views: since these are views, we should expect codegen that assumes
+            # unaligned inputs (even if the offset is 0).
+            # If this handling is at some point improved, it would be reasonable to
+            # remove the unaligned check for the offset-0 case.
+            for offset in (0, 1, 2, 3, 4):
+                base = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
                 inps = torch.as_strided(base, (64, 64), (64, 1), offset)
                 torch._dynamo.reset()
                 kernels = self.get_kernels(fn, [inps])
@@ -9572,7 +9577,20 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 #             NO_ALIGN ALIGN     ALIGN
                 # def triton_(in_ptr0, out_ptr0, xnumel, XBLOCK : tl.constexpr)
 
-                self.assertEqual(arguments_that_are_divisible_by_16, (1, 2))
+                if offset % 4 == 0:
+                    expected_aligned = (0, 1, 2)
+                else:
+                    expected_aligned = (1, 2)
+                self.assertEqual(arguments_that_are_divisible_by_16, expected_aligned)
+
+            # If input isn't a view, storage offset != , inductor will assume alignment.
+            torch._dynamo.reset()
+            inp = torch.randn((64, 64), device=GPU_TYPE)
+            kernels = self.get_kernels(fn, [inp])
+            arguments_that_are_divisible_by_16 = (
+                kernels[0].triton_meta["configs"][0].divisible_by_16
+            )
+            self.assertEqual(arguments_that_are_divisible_by_16, (0, 1, 2))
 
         def test_optimize_indexing_dtype(self):
             def fn(x: torch.Tensor) -> torch.Tensor:
