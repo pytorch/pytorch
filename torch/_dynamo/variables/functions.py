@@ -18,7 +18,6 @@ from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import check_constant_args, get_first_attr, identity, istype, make_cell
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
-from .distributed import ProcessGroupVariable
 
 if TYPE_CHECKING:
     from torch._guards import Source
@@ -719,10 +718,11 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 f"CollectiveFunctionRewriteVariable can't support async_op=True for {self.fn}"
             )
 
-        if kwargs.get("group") is None or kwargs["group"].value is None:
-            kwargs["group"] = ProcessGroupVariable.get_global_pg_variable()
-
-        if self.fn == dist.all_reduce:
+        if self.fn in (
+            dist.all_reduce,
+            dist.reduce_scatter_tensor,
+            dist._reduce_scatter_base,
+        ):
             reduce_op_var = kwargs.get("op")
             reduce_op = (
                 reduce_op_var.value
