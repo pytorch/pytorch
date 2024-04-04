@@ -3972,9 +3972,6 @@ def max_pool2d_with_indices(
     indices = max_pool2d_offsets_to_indices_impl(
         offsets, kernel_size[1], x.get_size()[-1], stride, padding
     )
-    # If we landed here, the indices are not used for the backward pass, realize
-    # hint here so the conversion is fused into the forward loop.
-    indices.realize_hint()
     return out, indices
 
 
@@ -4028,10 +4025,6 @@ def max_pool2d_offsets_to_indices_impl(
 def _low_memory_max_pool2d_offsets_to_indices(
     offsets, kernel_w, input_w, stride, padding
 ):
-    # Routing through the prim means we are going to compute backward,
-    # realize_hint here so the int8 offsets are saved for backward, the
-    # converion will be moved/duplicated to the backward graph
-    offsets.realize_hint()
     return max_pool2d_offsets_to_indices_impl(
         offsets, kernel_w, input_w, stride, padding
     )
