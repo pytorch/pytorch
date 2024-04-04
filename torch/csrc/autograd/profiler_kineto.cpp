@@ -268,7 +268,8 @@ struct AddGenericMetadata : public MetadataBase {
       addMetadata("Sequence number", std::to_string(op_event.sequence_number_));
     }
     if (op_event.record_function_id_ >= 0) {
-      addMetadata("Record function ID", std::to_string(op_event.record_function_id_));
+      addMetadata(
+          "Record function ID", std::to_string(op_event.record_function_id_));
     }
   }
 
