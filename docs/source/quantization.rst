@@ -1346,6 +1346,7 @@ Please take a look at `Limitations of Symbolic Tracing <https://pytorch.org/docs
 .. py:module:: torch.ao.quantization.quant_type
 .. py:module:: torch.ao.quantization.quantization_mappings
 .. py:module:: torch.ao.quantization.quantize
+   :noindex:
 .. py:module:: torch.ao.quantization.quantize_fx
 .. py:module:: torch.ao.quantization.quantize_jit
 .. py:module:: torch.ao.quantization.quantize_pt2e
