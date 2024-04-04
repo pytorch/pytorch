@@ -2314,6 +2314,98 @@ class DictGetItemGuardAccessor : public GuardAccessor {
 };
 
 /**
+ * Represents list[index] accessor. It is faster than generic
+ * GetItemGuardAccessor.
+ */
+class ListGetItemGuardAccessor : public GuardAccessor {
+ public:
+  ListGetItemGuardAccessor(
+      RootGuardManager* root,
+      const py::object& index,
+      std::string source,
+      py::handle example_value)
+      : GuardAccessor(root, index, std::move(source), example_value),
+        _index(py::cast<Py_ssize_t>(index)) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = PyList_GetItem(obj, _index); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyList_GetItem(obj, _index); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false, std::string("IndexError on ") + get_source(), 0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return "ListGetItemGuardAccessor(" + std::to_string(_index) + ")";
+  }
+
+ private:
+  Py_ssize_t _index;
+};
+
+/**
+ * Represents tuple[index] accessor. It is faster than generic
+ * GetItemGuardAccessor.
+ */
+class TupleGetItemGuardAccessor : public GuardAccessor {
+ public:
+  TupleGetItemGuardAccessor(
+      RootGuardManager* root,
+      const py::object& index,
+      std::string source,
+      py::handle example_value)
+      : GuardAccessor(root, index, std::move(source), example_value),
+        _index(py::cast<Py_ssize_t>(index)) {}
+
+  // NB: Intentional duplication between check_nopybind and
+  // check_verbose_nopybind.
+  bool check_nopybind(PyObject* obj) override { // borrowed ref
+    PyObject* x = PyTuple_GetItem(obj, _index); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return false;
+    }
+    bool result = _guard_manager->check_nopybind(x);
+    return result;
+  }
+
+  GuardDebugInfo check_verbose_nopybind(
+      PyObject* obj) override { // borrowed ref
+    PyObject* x = PyTuple_GetItem(obj, _index); // borrowed ref
+    if (x == nullptr) {
+      PyErr_Clear();
+      return GuardDebugInfo(
+          false, std::string("IndexError on ") + get_source(), 0);
+    }
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(x);
+    return result;
+  }
+
+  std::string repr() const override {
+    return "TupleGetItemGuardAccessor(" + std::to_string(_index) + ")";
+  }
+
+ private:
+  Py_ssize_t _index;
+};
+
+/**
  * Represents tensor.grad acccessor.
  */
 class GradGuardAccessor : public GuardAccessor {
@@ -2930,6 +3022,18 @@ PyObject* torch_c_dynamo_guards_init() {
       py_m, "DictGetItemGuardAccessor");
   // NOLINTNEXTLINE(bugprone-unused-raii)
   py::class_<
+      ListGetItemGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<ListGetItemGuardAccessor>>(
+      py_m, "ListGetItemGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
+      TupleGetItemGuardAccessor,
+      GuardAccessor,
+      std::unique_ptr<TupleGetItemGuardAccessor>>(
+      py_m, "TupleGetItemGuardAccessor");
+  // NOLINTNEXTLINE(bugprone-unused-raii)
+  py::class_<
       FuncDefaultsGuardAccessor,
       GuardAccessor,
       std::unique_ptr<FuncDefaultsGuardAccessor>>(
@@ -3133,6 +3237,24 @@ PyObject* torch_c_dynamo_guards_init() {
       .def(
           "dict_getitem_manager",
           &GuardManager::get_child_manager<DictGetItemGuardAccessor>,
+          py::arg("key"),
+          py::arg("source"),
+          py::arg("example_value"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "list_getitem_manager",
+          &GuardManager::get_child_manager<ListGetItemGuardAccessor>,
+          py::arg("key"),
+          py::arg("source"),
+          py::arg("example_value"),
+          py::return_value_policy::reference)
+      // return by reference because GuardManager has the ownership of accessors
+      // and guard managers
+      .def(
+          "tuple_getitem_manager",
+          &GuardManager::get_child_manager<TupleGetItemGuardAccessor>,
           py::arg("key"),
           py::arg("source"),
           py::arg("example_value"),
