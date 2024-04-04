@@ -972,21 +972,18 @@ quantized_decomposed_lib.define(
 class FakeQuantPerChannel(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input, scales, zero_points, axis, quant_min, quant_max):
-        with torch._C._AutoDispatchBelowAutograd():
-            if input.dtype in [torch.float16, torch.bfloat16]:
-                input = input.to(torch.float32)
-            if scales.dtype != torch.float32:
-                scales = scales.to(torch.float32)
-            if zero_points.dtype != torch.int32:
-                zero_points = zero_points.to(torch.int32)
-            assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
-            assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
-            broadcast_dims = list(range(0, axis)) + list(range(axis + 1, input.ndim))
-            unsqueeze_scales = _unsqueeze_multiple(scales, broadcast_dims)
-            unsqueeze_zero_points = _unsqueeze_multiple(zero_points, broadcast_dims)
-            temp = torch.round(input * (1.0 / unsqueeze_scales)) + unsqueeze_zero_points
-            out = (torch.clamp(temp, quant_min, quant_max) - unsqueeze_zero_points) * unsqueeze_scales
-            mask = torch.logical_and((temp >= quant_min), (temp <= quant_max))
+        if scales.dtype != torch.float32:
+            scales = scales.to(torch.float32)
+        if zero_points.dtype != torch.int32:
+            zero_points = zero_points.to(torch.int32)
+        assert input.dtype == torch.float32, f"Expecting input to have dtype torch.float32, but got dtype: {input.dtype}"
+        assert axis < input.dim(), f"Expecting axis to be < {input.dim()}"
+        broadcast_dims = list(range(0, axis)) + list(range(axis + 1, input.ndim))
+        unsqueeze_scales = _unsqueeze_multiple(scales, broadcast_dims)
+        unsqueeze_zero_points = _unsqueeze_multiple(zero_points, broadcast_dims)
+        temp = torch.round(input * (1.0 / unsqueeze_scales)) + unsqueeze_zero_points
+        out = (torch.clamp(temp, quant_min, quant_max) - unsqueeze_zero_points) * unsqueeze_scales
+        mask = torch.logical_and((temp >= quant_min), (temp <= quant_max))
 
         ctx.save_for_backward(mask)
         return out
@@ -996,7 +993,7 @@ class FakeQuantPerChannel(torch.autograd.Function):
         mask, = ctx.saved_tensors
         return gy * mask, None, None, None, None, None
 
-@impl(quantized_decomposed_lib, "fake_quant_per_channel", "AutogradCPU")
+@impl(quantized_decomposed_lib, "fake_quant_per_channel", "Autograd")
 def fake_quant_per_channel(
         input: torch.Tensor,
         scales: torch.Tensor,
