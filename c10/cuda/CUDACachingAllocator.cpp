@@ -1450,8 +1450,6 @@ class DeviceCachingAllocator {
   }
 
   void freeBlocksAllocatedToPool(PrivatePool* private_pool, RestoreResult& rr) {
-    std::unordered_map<void*, Block*> orig_ptrs_to_blocks;
-
     auto pool_blocks = get_private_pool_head_blocks(private_pool);
 
     std::vector<Block*> head_blocks;

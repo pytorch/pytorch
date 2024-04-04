@@ -75,6 +75,10 @@ def _replace_with_hop(node: torch.fx.Node):
                     call_func_node.meta["nn_module_stack"] = copy.copy(
                         set_grad_node.meta["nn_module_stack"]
                     )
+                    call_func_node.meta["torch_fn"] = (
+                        f"{wrap_with_set_grad_enabled.__name__}",
+                        f"{wrap_with_set_grad_enabled.__class__.__name__}.{wrap_with_set_grad_enabled.__name__}",
+                    )
                     node_replace_(node, call_func_node, delete_old=True)
 
                     # Rename the name of getitem nodes to the actual name of its contents

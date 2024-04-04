@@ -71,6 +71,7 @@ static PyObject* check(PyObject* pyresult) {
     // see https://github.com/pytorch/pytorch/pull/34845
     python_error err;
     err.persist();
+    // NOLINTNEXTLINE(misc-throw-by-value-catch-by-reference)
     throw err;
   }
   return pyresult;
@@ -311,7 +312,9 @@ CacheNode* _compiled_autograd_impl(
   AutogradCompilerCall compiler_call;
 
   for (const auto i : c10::irange(output_edges.size())) {
-    compiler_call.node_calls.lookup(output_edges[i].function)
+    compiler_call.node_calls
+        .lookup(output_edges[i].function)
+        // NOLINTNEXTLINE(*-narrowing-conversions)
         .mark_output(output_edges[i].input_nr, i);
   }
   const bool check_exec_info = !graph_task.exec_info_.empty();
@@ -510,7 +513,7 @@ variable_list compiled_autograd(
 
 static PyObject* set_autograd_compiler(PyObject* dummy, PyObject* args) {
   HANDLE_TH_ERRORS;
-  PyObject* obj;
+  PyObject* obj = nullptr;
   if (!PyArg_ParseTuple(args, "O", &obj)) {
     return nullptr;
   }
