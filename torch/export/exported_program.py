@@ -477,9 +477,15 @@ class ExportedProgram:
         for name in buffers_to_remove:
             delattr(self.graph_module, name)
         # TODO(zhxhchen17) Return the new graph_signature directly.
-        gm, graph_signature = aot_export_module(
-            self.graph_module, fake_args, decompositions=decomp_table, trace_joint=False
-        )
+        from torch.export._trace import _ignore_backend_decomps
+
+        with _ignore_backend_decomps():
+            gm, graph_signature = aot_export_module(
+                self.graph_module,
+                fake_args,
+                decompositions=decomp_table,
+                trace_joint=False,
+            )
 
         # Update the signatures with the new placeholder names in case they
         # changed when calling aot_export
@@ -575,7 +581,12 @@ class ExportedProgram:
 
     def _transform_do_not_use(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
-        res = pm(self.graph_module)
+        # Since we abstractly run the passes, we need to disable backend decomp here
+        # again.
+        from torch.export._trace import _ignore_backend_decomps
+
+        with _ignore_backend_decomps():
+            res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
