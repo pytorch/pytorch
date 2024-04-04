@@ -924,8 +924,10 @@ class OrtBackend:
             )
 
             try:
-                from onnxscript import optimizer
-                from onnxscript.rewriter import onnxruntime as ort_rewriter
+                from onnxscript import optimizer  # type: ignore[import]
+                from onnxscript.rewriter import (
+                    onnxruntime as ort_rewriter,  # type: ignore[import]
+                )
 
                 onnx_model = optimizer.optimize(onnx_model)
                 onnx_model = ort_rewriter.rewrite(onnx_model)
