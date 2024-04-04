@@ -2321,8 +2321,7 @@ IValue::IValue(c10::intrusive_ptr<T> custom_class) : tag(Tag::Object) {
     } catch (const c10::Error&) {
       throw c10::Error(
           "Trying to instantiate a class that isn't a registered custom class: " +
-          std::string(c10::util::get_fully_qualified_type_name<T>()),
-          "");
+          std::string(c10::util::get_fully_qualified_type_name<T>()));
     }
   }();
   auto ivalue_obj = c10::ivalue::Object::create(std::move(classType), /* numSlots */1);
