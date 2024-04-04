@@ -137,11 +137,17 @@ class TagActivationCheckpoint(HigherOrderOperator):
         gmod_kwargs = {name: kwargs[name] for name in kwargs.keys() if name not in checkpoint_keys}
         return checkpoint_kwargs, gmod_kwargs
 
-    def tag_nodes(self, gmod):
+    def tag_nodes(self, gmod, memory_budget=None):
         unique_graph_id = next(uid)
         for node in gmod.graph.nodes:
             if node.op in ("call_function", "call_method", "call_module"):
-                node.meta["recompute"] = unique_graph_id
+                # for now, we fully disable manual annotations when memory
+                # budget is set. Also, it currently applies to full graph and
+                # not subgraph
+                if memory_budget is not None:
+                    node.meta["memory_budget"] = memory_budget
+                else:
+                    node.meta["recompute"] = unique_graph_id
         return gmod
 
     def __call__(self, gmod, *args, **kwargs):
@@ -167,12 +173,12 @@ Please make sure the checkpointed region does not contain in-place ops (e.g. tor
             kwargs["context_fn"] = gmod.meta["_checkpoint_context_fn"]
             # We first tag all nodes as "recompute" in this graph, and then we undo the "recompute" tag
             # for specific nodes in _CachingTorchDispatchMode in torch/utils/checkpoint.py.
-            gmod = self.tag_nodes(gmod)
+            gmod = self.tag_nodes(gmod, kwargs.get("memory_budget", None))
             # Using interpreter allows preservation of metadata through torch.compile stack.
             with fx_traceback.preserve_node_meta():
                 return checkpoint(Interpreter(gmod).run, *args, **kwargs)
         else:
-            gmod = self.tag_nodes(gmod)
+            gmod = self.tag_nodes(gmod, kwargs.get("memory_budget", None))
             # Using interpreter allows preservation of metadata through torch.compile stack.
             # TODO: We want to use the same `checkpoint(Interpreter(gmod).run, *args, **kwargs)` here
             # as the `context_fn != None` case, but that depends on in-place op support in TorchDispatchMode + torch.compile.
