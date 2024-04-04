@@ -3,6 +3,7 @@
 import copy
 import dataclasses
 import io
+import re
 import unittest
 import warnings
 from contextlib import contextmanager
@@ -3489,6 +3490,67 @@ graph():
         gm_flat_strict = ep_strict.module()
 
         self.assertEqual(gm_flat_non_strict(*inp), gm_flat_strict(*inp))
+
+    def test_stack_trace(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+            def forward(self, x):
+                x = self.linear(x)
+                x *= 2.0
+                return x
+
+        ep = export(
+            Foo(),
+            (torch.randn(4, 4), ),
+        )
+        # check correct lines are in stack trace
+        trace_mul = [
+            node for node in ep.graph.nodes
+            if node.name == "mul"
+        ][0].meta.get("stack_trace", "")
+        self.assertTrue(
+            re.search(r"test_export.py.*in forward\n.*x \*= 2.0", trace_mul)
+        )
+        trace_addmm = [
+            node for node in ep.graph.nodes
+            if node.name in ["addmm", "linear"]
+        ][0].meta.get("stack_trace", "")
+        self.assertTrue(
+            re.search(r"test_export.py.*in forward\n.*x = self.linear\(x\)", trace_addmm)
+        )
+
+    def test_sym_stack_trace(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y):
+                y = torch._constrain_as_size(y.item(), min=2)
+                z = x.shape[0] == 4
+                z = torch.sym_ite(z, x.shape[0], x.shape[1])
+                return z
+
+        ep = export(
+            Foo(),
+            (torch.randn(4, 4), torch.tensor(5)),
+            dynamic_shapes={
+                "x": (Dim("dx0"), Dim("dx1")),
+                "y": None
+            }
+        )
+        # stack trace for sym call constrain_range
+        trace_constrain_range = [  # different names for serdes/pre-dispatch
+            node for node in ep.graph.nodes
+            if node.name in [
+                "sym_constrain_range_for_size",
+                "sym_constrain_range_for_size_default"
+            ]
+        ][0].meta.get("stack_trace", None)
+        self.assertTrue(
+            re.search(
+                r"torch/__init__.py.*in _constrain_as_size\n.*torch.sym_constrain_range_for_size",
+                trace_constrain_range
+            )
+        )
 
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
