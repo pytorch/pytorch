@@ -165,7 +165,7 @@ class CachingAutotuner(KernelInterface):
         self.device_type = (
             triton_meta["device_type"] if "device_type" in triton_meta else "cuda"
         )
-        self.device = get_interface_for_device(self.device_type)
+        self.device_interface = get_interface_for_device(self.device_type)
 
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
@@ -222,7 +222,7 @@ class CachingAutotuner(KernelInterface):
 
             seen_configs = set(self.configs)
 
-            device_prop = self.device.Worker.get_device_properties(
+            device_prop = self.device_interface.Worker.get_device_properties(
                 self.triton_meta["device"]
             )
             if (
@@ -321,7 +321,7 @@ class CachingAutotuner(KernelInterface):
             device_type = self.device_type if torch.version.hip is None else "cuda"
             device_id = compile_meta["device"]
             device = torch.device(device_type, device_id)
-            cc = self.device.get_compute_capability(device)
+            cc = self.device_interface.get_compute_capability(device)
 
         compile_meta["cc"] = cc
 
@@ -356,9 +356,9 @@ class CachingAutotuner(KernelInterface):
             )
 
         # load binary to the correct device
-        with DeviceGuard(self.device, compile_meta["device"]):  # type: ignore[attr-defined]
+        with DeviceGuard(self.device_interface, compile_meta["device"]):  # type: ignore[attr-defined]
             # need to initialize context
-            self.device.synchronize(self.device.current_device())
+            self.device_interface.synchronize(self.device.current_device())
 
             try:
                 binary = triton.compile(*compile_args, **compile_kwargs)
@@ -531,8 +531,8 @@ class CachingAutotuner(KernelInterface):
             )
             return float("inf")
 
-        stream = self.device.get_raw_stream(  # type: ignore[call-arg]
-            self.device.current_device()
+        stream = self.device_interface.get_raw_stream(  # type: ignore[call-arg]
+            self.device_interface.current_device()
         )
 
         def kernel_call():
