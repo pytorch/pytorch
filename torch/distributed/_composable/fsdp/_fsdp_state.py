@@ -12,6 +12,7 @@ from torch.distributed._composable_state import (
     _insert_module_state,
     _State,
 )
+from torch.distributed.utils import wait_stream, wait_event
 from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
 from torch.utils.hooks import RemovableHandle
@@ -70,11 +71,10 @@ class FSDPState(_State):
             return args, kwargs
         self._state_ctx.iter_forward_root = self
         with torch.profiler.record_function("FSDP::root_pre_forward"):
-            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-                # Wait for optimizer before implicitly prefetched all-gathers
-                current_stream = torch.cuda.current_stream()
-                self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
-                self._comm_ctx.all_gather_stream.wait_stream(current_stream)
+            # Wait for optimizer before implicitly prefetched all-gathers
+            current_stream = torch.cuda.current_stream()
+            wait_stream(self._comm_ctx.all_gather_copy_in_stream, current_stream)
+            wait_stream(self._comm_ctx.all_gather_stream, current_stream)
             if self._device.type == "cuda":
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
@@ -177,13 +177,10 @@ class FSDPState(_State):
         self._training_state = TrainingState.IDLE
         if self._state_ctx.iter_forward_root is self:
             if all_gather_state := self._comm_ctx.all_gather_state:
-                if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-                    # Free the last all-gather result if needed; refer to
-                    # [Note: Overlapping all-gather copy-in and all-gather]
-                    self._comm_ctx.all_gather_copy_in_stream.wait_event(
-                        all_gather_state.event
-                    )
-                    self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
+                # Free the last all-gather result if needed; refer to
+                # [Note: Overlapping all-gather copy-in and all-gather]
+                wait_event(self._comm_ctx.all_gather_copy_in_stream, all_gather_state.event)
+                wait_event(self._comm_ctx.all_gather_stream, all_gather_state.event)
                 self._comm_ctx.all_gather_state = None  # free the all-gather result
             self._state_ctx.iter_forward_root = None
         if self._mp_policy.output_dtype is not None:

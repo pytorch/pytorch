@@ -8,6 +8,7 @@ import torch.nn as nn
 
 from torch.autograd.graph import Node
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
+from torch.distributed.utils import wait_event
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
 from ._fsdp_api import MixedPrecisionPolicy
@@ -67,10 +68,7 @@ class FSDPCommContext:
         if training_state in (TrainingState.FORWARD, TrainingState.PRE_BACKWARD):
             # Use separate streams for implicit prefetching
             return self.all_gather_copy_in_stream, self.all_gather_stream
-        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-            current_stream = torch.cuda.current_stream()
-        else:
-            current_stream = None
+        current_stream = torch.cuda.current_stream()
         return current_stream, current_stream
 
 
@@ -217,8 +215,7 @@ class FSDPParamGroup:
         if self._reshard_after_forward_event is not None:
             # Resharded parameter data is allocated in the default stream and
             # used in the all-gather streams
-            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-                self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
+            self._wait_all_gather_streams_on_event(self._reshard_after_forward_event)
             self._reshard_after_forward_event = None
         self._all_gather_result = foreach_all_gather(
             self.fsdp_params,
@@ -241,8 +238,7 @@ class FSDPParamGroup:
             return  # no preceding unshard
         if self._training_state == TrainingState.FORWARD:  # implicit prefetch
             if prev_all_gather_state := self.comm_ctx.all_gather_state:
-                if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-                    self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
+                self._wait_all_gather_streams_on_event(prev_all_gather_state.event)
                 self.comm_ctx.all_gather_state = None  # free the all-gather result
         foreach_all_gather_copy_out(
             self._all_gather_result, self.fsdp_params, self._all_gather_process_group
@@ -250,23 +246,19 @@ class FSDPParamGroup:
         for fsdp_param in self.fsdp_params:
             fsdp_param.init_unsharded_param()  # no-op after 1st call
         self._to_unsharded()
-        if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-            all_gather_copy_out_event = torch.cuda.Event()
-            all_gather_copy_out_event.record()
-        else:
-            all_gather_copy_out_event = None
+        all_gather_copy_out_event = torch.cuda.Event()
+        all_gather_copy_out_event.record()
         if self._training_state == TrainingState.FORWARD:
             self.comm_ctx.all_gather_state = AllGatherState(
                 self._all_gather_result, all_gather_copy_out_event
             )
         else:
-            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-                self._wait_all_gather_streams_on_event(all_gather_copy_out_event)
+            self._wait_all_gather_streams_on_event(all_gather_copy_out_event)
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
     def _wait_all_gather_streams_on_event(self, event: torch.cuda.Event):
-        self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
-        self.comm_ctx.all_gather_stream.wait_event(event)
+        wait_event(self.comm_ctx.all_gather_copy_in_stream, event)
+        wait_event(self.comm_ctx.all_gather_stream, event)
 
     def reshard(self):
         if self._training_state == TrainingState.FORWARD:
@@ -349,8 +341,7 @@ class FSDPParamGroup:
 
     def finalize_backward(self):
         if self._post_reduce_view_out_event is not None:
-            if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-                torch.cuda.current_stream().wait_event(self._post_reduce_view_out_event)
+            wait_event(torch.cuda.current_stream(), self._post_reduce_view_out_event)
             self._post_reduce_view_out_event = None
         self._training_state = TrainingState.IDLE
         self._post_forward_indices.clear()
