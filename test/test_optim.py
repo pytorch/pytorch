@@ -112,7 +112,7 @@ class TestOptimRenewed(TestCase):
 
             initial_value = closure().item()
             for _ in range(20):
-                if torch._dynamo.is_compiling() and optim_cls != torch.optim.LBFGS:
+                if torch._dynamo.is_compiling() and not optim_info.step_requires_closure:
                     # we disable torch.compile with the closure argument, so in order to actually
                     # test compiling the optimizer, we separate out the closure here.
                     # LBFGS requires the closure arg but torch.compile doesn't support LBFGS
@@ -1057,7 +1057,7 @@ class TestOptimRenewed(TestCase):
 
             # Prime the optimizer
             for _ in range(10):
-                if torch._dynamo.is_compiling() and optim_cls != torch.optim.LBFGS:
+                if torch._dynamo.is_compiling() and not optim_info.step_requires_closure:
                     closure()
                     optimizer.step()
                 else:
@@ -1076,7 +1076,7 @@ class TestOptimRenewed(TestCase):
 
             # Run both optimizers in parallel
             for _ in range(10):
-                if torch._dynamo.is_compiling() and optim_cls != torch.optim.LBFGS:
+                if torch._dynamo.is_compiling() and not optim_info.step_requires_closure:
                     closure()
                     closure_c()
                     optimizer.step()
