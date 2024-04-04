@@ -330,7 +330,7 @@ Does ``torch.func`` work with ``torch.compile`` (for `grad` and `vmap` transform
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Applying a ``torch.func`` transform to a function that uses ``torch.compile``
-does not work:
+does work:
 
 .. code-block:: python
 
@@ -342,25 +342,6 @@ does not work:
 
     def g(x):
         return torch.grad(f)(x)
-
-    x = torch.randn(2, 3)
-    g(x)
-
-This code will not work. There is an `issue <https://github.com/pytorch/pytorch/issues/100320>`__
-that you can track for this.
-
-As a workaround, use ``torch.compile`` outside of the ``torch.func`` function:
-
-.. code-block:: python
-
-    import torch
-
-    def f(x):
-        return torch.sin(x)
-
-    @torch.compile
-    def g(x):
-        return torch.vmap(f)(x)
 
     x = torch.randn(2, 3)
     g(x)
@@ -395,93 +376,6 @@ Compiling ``torch.vmap`` with ``torch.compile``
     x = torch.randn(3, 3, 3)
     output = torch.compile(my_fn)(x)
 
-Limitations
------------
-
-There are currently a few cases which are not supported and lead to graph breaks
-(that is, torch.compile falls back to eager-mode PyTorch on these). We are working
-on improving the situation for the next release (PyTorch 2.2)
-
-1. The inputs and outputs of the function being transformed over must be tensors.
-We do not yet support things like tuple of Tensors.
-
-.. code-block:: python
-
-    import torch
-
-    def fn(x):
-        x1, x2 = x
-        return x1 + x2
-
-    def my_fn(x):
-        return torch.func.vmap(fn)(x)
-
-    x1 = torch.randn(3, 3, 3)
-    x2 = torch.randn(3, 3, 3)
-    # Unsupported, falls back to eager-mode PyTorch
-    output = torch.compile(my_fn)((x1, x2))
-
-2. Keyword arguments are not supported.
-
-.. code-block:: python
-
-    import torch
-
-    def fn(x, y):
-        return (x + y).sum()
-
-    def my_fn(x, y):
-        return torch.func.grad(fn)(x, y=y)
-
-    x = torch.randn(3, 3)
-    y = torch.randn(3, 3)
-    # Unsupported, falls back to eager-mode PyTorch
-    output = torch.compile(my_fn)(x, y)
-
-3. Functions with observable side effects. For example, it is OK to mutate a list created in the function,
-but not OK to mutate a list created outside of the function.
-
-.. code-block:: python
-
-    import torch
-
-    some_list = []
-
-    def f(x, y):
-        some_list.append(1)
-        return x + y
-
-    def my_fn(x, y):
-        return torch.func.vmap(f)(x, y)
-
-    x = torch.ones(2, 3)
-    y = torch.randn(2, 3)
-    # Unsupported, falls back to eager-mode PyTorch
-    output = torch.compile(my_fn)(x, y)
-
-4. ``torch.vmap`` over a function that calls one or more operators in the following list.
-
-.. note::
-    'stride', 'requires_grad', 'storage_offset', 'layout', 'data', 'is_coalesced', 'is_complex',
-    'is_conj', 'is_contiguous', 'is_cpu', 'is_cuda', 'is_distributed', 'is_floating_point',
-    'is_inference', 'is_ipu', 'is_leaf', 'is_meta', 'is_mkldnn', 'is_mps', 'is_neg', 'is_nested',
-    'is_nonzero', 'is_ort', 'is_pinned', 'is_quantized', 'is_same_size', 'is_set_to', 'is_shared',
-    'is_signed', 'is_sparse', 'is_sparse_csr', 'is_vulkan', 'is_xla', 'is_xpu'
-
-.. code-block:: python
-
-    import torch
-
-    def bad_fn(x):
-        x.stride()
-        return x
-
-    def my_fn(x):
-        return torch.func.vmap(bad_fn)(x)
-
-    x = torch.randn(3, 3, 3)
-    # Unsupported, falls back to eager-mode PyTorch
-    output = torch.compile(my_fn)(x)
 
 Compiling functions besides the ones which are supported (escape hatch)
 -----------------------------------------------------------------------
