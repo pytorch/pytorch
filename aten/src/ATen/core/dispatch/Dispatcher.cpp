@@ -502,24 +502,26 @@ int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchK
   int64_t seq_num = -1;
   // Setting sequence number in the Autograd case to associate
   // the forward range with the corresponding Autograd's node
-  bool dispatchHasAutograd = (
-    // the usual case, where we're dealing with Autograd dispatchKey
-    isIncludedInAlias(dispatchKey, DispatchKey::Autograd) ||
-    // Note [Sequence Numbers for Python Subclasses]
-    // See https://github.com/pytorch/pytorch/issues/121758 for more details
-    // The first entry into the dispatch is usually going to be a call(), but
-    // after that we usually redispatch().
-    // We only profile call() and callBoxed(), not redispatch.*()
-    // dispatcher calls, and when running with python subclasses, the top-level
-    // call is a PythonTLSSnapshot call, not an Autograd call. That means that
-    // we need special handling for subclasses if we want to collect the
-    // sequence number for operators on python subclasses.
-    //
-    // This is the special case: if we're profiling a PythonTLSSnapshot call
-    // and we have an autograd dispatch key in the dispatchKeySet, then we'll
-    // also collect the sequence number
-    (dispatchKey == DispatchKey::PythonTLSSnapshot && !(dispatchKeySet & autograd_dispatch_keyset).empty())
-  );
+
+  // the usual case, where we're dealing with Autograd dispatchKey
+  bool dispatchHasAutograd = isIncludedInAlias(dispatchKey, DispatchKey::Autograd);
+
+  // Note [Sequence Numbers for Python Subclasses]
+  // See https://github.com/pytorch/pytorch/issues/121758 for more details
+  // The first entry into the dispatch is usually going to be a call(), but
+  // after that we usually redispatch().
+  // We only profile call() and callBoxed(), not redispatch.*()
+  // dispatcher calls, and when running with python subclasses, the top-level
+  // call is a PythonTLSSnapshot call, not an Autograd call. That means that
+  // we need special handling for subclasses if we want to collect the
+  // sequence number for operators on python subclasses.
+  //
+  // This is the special case: if we're profiling a PythonTLSSnapshot call
+  // and we have an autograd dispatch key in the dispatchKeySet, then we'll
+  // also collect the sequence number
+  dispatchHasAutograd |=
+      (dispatchKey == DispatchKey::PythonTLSSnapshot && !(dispatchKeySet & autograd_dispatch_keyset).empty());
+
   if (dispatchHasAutograd && at::GradMode::is_enabled()) {
     seq_num = at::sequence_number::peek();
   }
