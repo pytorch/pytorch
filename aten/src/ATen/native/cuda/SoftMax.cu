@@ -860,8 +860,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
 
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
-            auto warps = block.x / C10_WARP_SIZE;
-            size_t smem_reduction_sz = warps * sizeof(accscalar_t);
+            size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
             auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
               smem_reduction_sz) / sizeof(scalar_t);
 
@@ -876,7 +875,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
                 <<<grid, block, smem_sz, stream>>>(output_ptr, input_ptr, dim_size);
             } else {
               cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, scalar_t, Epilogue>
-                <<<grid, block, warps * sizeof(accscalar_t), stream>>>(output_ptr, input_ptr, dim_size);
+                <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
             }
 
             C10_CUDA_KERNEL_LAUNCH_CHECK();
@@ -898,8 +897,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
 
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
-            auto warps = block.x / C10_WARP_SIZE;
-            size_t smem_reduction_sz = warps * sizeof(accscalar_t);
+            size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
             auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
               smem_reduction_sz) / sizeof(scalar_t);
 
@@ -914,7 +912,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
                 <<<grid, block, smem_sz, stream>>>(output_ptr, input_ptr, dim_size);
             } else {
               cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, accscalar_t, Epilogue>
-                <<<grid, block, warps * sizeof(accscalar_t), stream>>>(output_ptr, input_ptr, dim_size);
+                <<<grid, block, smem_reduction_sz, stream>>>(output_ptr, input_ptr, dim_size);
             }
 
             C10_CUDA_KERNEL_LAUNCH_CHECK();
