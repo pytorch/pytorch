@@ -2,7 +2,6 @@ import dataclasses
 import importlib
 import logging
 import os
-import warnings
 
 from typing import (
     Any,
@@ -925,14 +924,14 @@ class OrtBackend:
 
             try:
                 from onnxscript import optimizer  # type: ignore[import]
-                from onnxscript.rewriter import (
+                from onnxscript.rewriter import (  # type: ignore[import]
                     onnxruntime as ort_rewriter,  # type: ignore[import]
                 )
 
                 onnx_model = optimizer.optimize(onnx_model)
                 onnx_model = ort_rewriter.rewrite(onnx_model)
             except ImportError:
-                warnings.warn(
+                logger.warning(
                     "ONNXScript optimizer is not available. Skipping optimization. "
                     "Please `pip install onnxscript -U` to enable post-export optimization."
                 )
