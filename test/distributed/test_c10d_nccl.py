@@ -3397,6 +3397,22 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_all_reduce_coalesced_manager_nccl(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(backend="nccl", store=store, rank=self.rank, world_size=self.world_size)
+        process_group = c10d.distributed_c10d._get_default_group()
+        device = torch.device("cuda:%d" % self.rank)
+        tensors = [torch.full((60 + i,), self.rank + 1 + i, device=device, dtype=torch.float) for i in range(5)]
+        with torch.distributed._coalescing_manager(group=process_group, device=device, async_ops=True) as cm:
+            for tensor in tensors:
+                torch.distributed.all_reduce(tensor)
+        self.assertEqual(len(cm.works), 1)
+        cm.wait()
+        for i, t in enumerate(tensors):
+            self.assertEqual(t, torch.full_like(t, self.world_size * (i + (self.world_size + 1.) / 2.)))
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     @skip_if_rocm
     def test_intra_node_comm_all_reduce(self):
         from torch._C._distributed_c10d import _get_intra_node_comm_usage_counter
