@@ -972,8 +972,7 @@ def cached_autotune(
             with open(cache_filename) as fd:
                 best_config = json.loads(fd.read())
         elif remote_cache is not None and remote_cache_key is not None:
-            cache_outs = remote_cache.get([remote_cache_key])
-            best_config = cache_outs.get(remote_cache_key, None)
+            best_config = remote_cache.get(remote_cache_key)
 
         best_config = load_cached_autotuning(best_config, configs_hash, configs)
         if best_config:
