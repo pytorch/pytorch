@@ -201,6 +201,28 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_constructor_w_graph_break(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in DTensor as inputs/outputs and run some tensor computation
+        def fn(x):
+            print("graph break!")
+            return DTensor(
+                x,
+                mesh,
+                (Replicate(), Shard(0)),
+                shape=[128, 32],
+                dtype=x.dtype,
+                requires_grad=x.requires_grad,
+                stride=[32, 1],
+            )
+
+        x = torch.randn(64, 32, requires_grad=True)
+        out = fn(x)
+        print(type(out))
+        out2 = torch.compile(fn, backend="eager")(x)
+        print(type(out2))
+
     def test_dtensor_noncontiguous_output(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 

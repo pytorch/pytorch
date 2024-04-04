@@ -980,6 +980,20 @@ s1 > 3""",
         res = fn_opt(x)
         self.assertEqual(ref, res)
 
+    def test_two_tensor_graph_break_on_constructor(self):
+        def fn(x):
+            tmp = x + 1
+            print("graph break!")
+            # Dynamo needs to proxy the TwoTensor constructor into the graph
+            two_tensor = TwoTensor(tmp, tmp)
+            return two_tensor * 2
+
+        fn_opt = torch.compile(backend="aot_eager")(fn)
+        x = torch.ones(2, 2)
+        out_ref = fn(x)
+        out_test = fn_opt(x)
+        self.assertEqual(out_ref, out_test)
+
     def test_torch_function_subclass_survives_into_aot_autograd(self):
         # If you have a tensor subclass that relies on dispatch into the same op
         # without unwrapping and calling torch._C.DisableTorchFunctionSubclass(),
