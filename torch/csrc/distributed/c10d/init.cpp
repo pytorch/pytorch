@@ -1877,14 +1877,13 @@ Arguments:
               py::call_guard<py::gil_scoped_acquire>(),
               "Enable timing of collectives by all backends. This might incur in additional overhead.")
           .def(
-              "_set_group_name",
-              &::c10d::ProcessGroup::setGroupName,
+              "_set_pg_name",
+              &::c10d::ProcessGroup::setProcessGroupName,
               py::call_guard<py::gil_scoped_acquire>(),
-              "Sets the process group name. This is an internal C10D method, do not use.")
-          .def_property_readonly(
-              "group_name",
-              &::c10d::ProcessGroup::getGroupName,
-              "(Gets this process group name. It's cluster unique)")
+              "Sets pg_name tuple(group_name, group_uid). This is an internal C10D method, do not use.")
+          .def_property_readonly("group_name", &::c10d::ProcessGroup::getGroupName)
+          .def_property_readonly("group_uid", &::c10d::ProcessGroup::getGroupUid)
+          .def_property_readonly("pg_name", &::c10d::ProcessGroup::getProcessGroupNameTuple)
           .def_property(
               "bound_device_id",
               &::c10d::ProcessGroup::getBoundDeviceId,
@@ -1953,6 +1952,10 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
           .def("rank", &::c10d::Backend::getRank)
           .def("size", &::c10d::Backend::getSize)
           .def("name", &::c10d::Backend::getBackendName)
+          .def_property_readonly("group_name", &::c10d::Backend::getGroupName)
+          .def_property_readonly("group_uid", &::c10d::Backend::getGroupUid)
+          .def_property_readonly(
+              "pg_name", &::c10d::Backend::getProcessGroupNameTuple)
           .def_property_readonly(
               "supports_splitting",
               &::c10d::Backend::supportsSplitting,
@@ -2509,7 +2512,8 @@ Example::
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
       .def_readwrite(
           "global_ranks_in_group",
-          &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group);
+          &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
+      .def_readwrite("pg_name", &::c10d::ProcessGroupNCCL::Options::pg_name);
 
 #endif
 

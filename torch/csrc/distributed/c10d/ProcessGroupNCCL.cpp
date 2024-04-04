@@ -729,6 +729,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+  this->setProcessGroupName(options_->pg_name);
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   abortInDestroyProcessGroup_ =
@@ -831,7 +832,8 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
-            << ", ID=" << this->getID();
+            << ", PG: <NAME=" << this->getGroupName()
+            << ", UID=" << this->getGroupUid() << ">";
 
   if (options_->global_ranks_in_group.empty()) {
     this->globalRankStart = 0;
@@ -1490,7 +1492,14 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
 }
 
 std::string ProcessGroupNCCL::createLogPrefix() const {
-  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+  return c10::str(
+      "[PG ",
+      this->getGroupName(),
+      " UID ",
+      this->getGroupUid(),
+      " Rank ",
+      rank_,
+      "] ");
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {

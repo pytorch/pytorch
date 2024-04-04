@@ -693,7 +693,10 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
   }
 
   const std::string& getGroupName() const;
-  void setGroupName(const std::string& name);
+  const std::string& getGroupUid() const;
+  const ProcessGroupName& getProcessGroupNameTuple() const;
+  void setProcessGroupName(const ProcessGroupName& pg_name);
+
   void enableCollectivesTiming();
 
   void release_resources() override;

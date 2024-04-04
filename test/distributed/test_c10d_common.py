@@ -150,7 +150,7 @@ class TimeoutTest(TestCase):
                     c10d._store_based_barrier(
                         rank=rank,
                         store=barrier_store,
-                        group_name="_",
+                        group_uid="_",
                         rendezvous_count=world_size,
                         timeout=timeout,
                         logging_interval=timeout / 2
