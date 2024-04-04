@@ -4170,10 +4170,14 @@ class ExternKernel(InputsKernel):
         else:
             raise AssertionError(f"{arg_name} not in self.kwarg_properties")
 
-    def codegen_kwargs(self):
+    def codegen_kwargs(self, skip_out=False):
         if V.graph.cpp_wrapper:
             kwargs = []
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                if skip_out and arg_name == "out":
+                    # ExternKernelOut has its own logic for inserting the out parameter
+                    continue
+
                 v = self.get_kwargs_value(arg_name)
                 if isinstance(v, sympy.Expr):
                     kwargs.append(v)
@@ -4274,7 +4278,7 @@ class ExternKernel(InputsKernel):
 class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
-        args = [*self.codegen_args(), *self.codegen_kwargs()]
+        args = [*self.codegen_args(), *self.codegen_kwargs(skip_out=True)]
         wrapper.generate_extern_kernel_out(
             self.output_view,
             self.codegen_reference(),
@@ -4324,7 +4328,13 @@ class RandomSeeds(ExternKernelOut):
             inputs=[],
             constant_args=[limits.min, limits.max, [count]],
             python_kernel_name="aten.randint.low_out",
-            cpp_kernel_name="at::randint_out",
+            # FIXME: Ideally we should only use at::_ops::randint_low_out::call here,
+            # but the signature is different from is at::randint_out. Again,
+            # we can simplify the code when only keeping an ABI-compatible version.
+            cpp_kernel_name="at::_ops::randint_low_out::call"
+            if config.abi_compatible
+            else "at::randint_out",
+            op_overload=aten.randint.low_out,
         )
 
 
