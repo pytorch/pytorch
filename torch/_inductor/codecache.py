@@ -46,7 +46,12 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.utils import cache_dir, developer_warning, is_linux
+from torch._inductor.utils import (
+    cache_dir,
+    clear_on_fresh_inductor_cache,
+    developer_warning,
+    is_linux,
+)
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
@@ -169,6 +174,7 @@ class CacheBase:
         return system
 
     @staticmethod
+    @clear_on_fresh_inductor_cache
     @functools.lru_cache(None)
     def get_local_cache_path() -> Path:
         return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
@@ -188,22 +194,21 @@ class CacheBase:
 
         self.system = CacheBase.get_system()
 
-        self.local_cache_path = CacheBase.get_local_cache_path()
-        self.global_cache_path = CacheBase.get_global_cache_path()
-
     def get_local_cache(self) -> Dict[str, Any]:
-        if not self.local_cache_path.is_file():
+        local_cache_path = self.get_local_cache_path()
+        if not local_cache_path.is_file():
             return {}
-        with open(self.local_cache_path) as local_cache_fp:
+        with open(local_cache_path) as local_cache_fp:
             local_cache = json.load(local_cache_fp)
         return local_cache["cache"]
 
     def update_local_cache(self, local_cache: Dict[str, Any]) -> None:
-        if not os.path.exists(self.local_cache_path.parent):
-            os.makedirs(self.local_cache_path.parent, exist_ok=True)
+        local_cache_path = self.get_local_cache_path()
+        if not os.path.exists(local_cache_path.parent):
+            os.makedirs(local_cache_path.parent, exist_ok=True)
 
         write_atomic(
-            str(self.local_cache_path),
+            str(local_cache_path),
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
         )
 
@@ -236,9 +241,10 @@ class LocalCache(CacheBase):
 class PersistentCache(CacheBase):
     @functools.lru_cache(None)
     def get_global_cache(self):
-        if self.global_cache_path is None or not self.global_cache_path.is_file():
+        global_cache_path = self.get_global_cache_path()
+        if global_cache_path is None or not global_cache_path.is_file():
             return {}
-        with open(self.global_cache_path) as global_cache_fp:
+        with open(global_cache_path) as global_cache_fp:
             global_cache = json.load(global_cache_fp)
         return global_cache["cache"]
 
@@ -1595,9 +1601,10 @@ def split_aot_inductor_output_path(path: str) -> Tuple[str, str]:
         return path, ""
 
 
+@clear_on_fresh_inductor_cache
 class CudaKernelParamCache:
     cache: Dict[str, Dict[str, str]] = dict()
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
 
     @classmethod
     def set(cls, key: str, params: Dict[str, str], cubin: str) -> None:
@@ -1838,6 +1845,7 @@ class AotCodeCompiler:
 # - valid_vec_isa_list()
 # - VecISA.__bool__() <-- takes out a lock
 # - compile_file() <-- imports cpp_prefix_path from cpp, which causes us to try to take out the same lock.
+@clear_on_fresh_inductor_cache
 @functools.lru_cache
 def cpp_prefix_path() -> str:
     path = Path(__file__).parent / "codegen/cpp_prefix.h"
@@ -1950,9 +1958,10 @@ def custom_op_wrapper(op: str, *args):
         return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
 
 
+@clear_on_fresh_inductor_cache
 class CppCodeCache:
     cache: Dict[str, Union[CDLL, ModuleType]] = {}
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags: Dict[str, Any] = {}
 
     @staticmethod
@@ -2012,9 +2021,10 @@ class CppCodeCache:
 
 
 # Customized Python binding for cpp kernels
+@clear_on_fresh_inductor_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
     cache: Dict[str, Union[CDLL, ModuleType]] = {}
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
         "include_pytorch": False,
@@ -2143,9 +2153,10 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         return getattr(result, cls.entry_function)
 
 
+@clear_on_fresh_inductor_cache
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Union[CDLL, ModuleType]] = {}
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         "include_pytorch": not config.abi_compatible,
         "shared": True,
@@ -2202,10 +2213,11 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     )
 
 
+@clear_on_fresh_inductor_cache
 class PyCodeCache:
     cache: Dict[str, ModuleType] = dict()
     linemaps: Dict[str, List[Tuple[Any, ...]]] = dict()
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
 
     @classmethod
     def write(cls, source_code: str, extra: str = "") -> Tuple[str, str]:
@@ -2298,17 +2310,18 @@ def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
     if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
-        return os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc")
+        return os.path.realpath(os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc"))
     return "nvcc"
 
 
 def _cutlass_include_paths() -> List[str]:
     cutlass_path = config.cuda.cutlass_dir
     return [
-        os.path.join(cutlass_path, "include"),
-        os.path.join(cutlass_path, "tools/library/include"),
-        os.path.join(cutlass_path, "tools/library/src"),
-        os.path.join(cutlass_path, "tools/util/include"),
+        # Use realpath to get canonical absolute paths, in order not to mess up cache keys
+        os.path.realpath(os.path.join(cutlass_path, "include")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/library/include")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/library/src")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/util/include")),
     ]
 
 
@@ -2390,13 +2403,17 @@ def cuda_compile_command(
     src_files: List[str],
     dst_file: str,
     dst_file_ext: str,
+    extra_args: Optional[List[str]] = None,
 ) -> str:
+    if extra_args is None:
+        extra_args = []
     include_paths = _cutlass_include_paths()
     cuda_lib_options = _cuda_lib_options()
     nvcc_host_compiler_options = _nvcc_host_compiler_options()
     nvcc_compiler_options = _nvcc_compiler_options()
     options = (
         nvcc_compiler_options
+        + extra_args
         + [
             f"-Xcompiler {opt}" if "=" in opt else f"-Xcompiler={opt}"
             for opt in nvcc_host_compiler_options
@@ -2410,6 +2427,8 @@ def cuda_compile_command(
         res = f"{_cuda_compiler()} {' '.join(options)} -c -o {dst_file} {src_file}"
     elif dst_file_ext == "so":
         options.append("-shared")
+        res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
+    elif dst_file_ext == "exe":
         res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
@@ -2478,6 +2497,7 @@ class DLLWrapper:
         self.close()
 
 
+@clear_on_fresh_inductor_cache
 class CUDACodeCache:
     @dataclasses.dataclass
     class CacheEntry:
@@ -2485,7 +2505,7 @@ class CUDACodeCache:
         output_path: str
 
     cache: Dict[str, CacheEntry] = dict()
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cu"
 
     @classmethod
@@ -2504,12 +2524,13 @@ class CUDACodeCache:
         return key, input_path
 
     @classmethod
-    def compile(cls, source_code, dst_file_ext) -> Tuple[str, str, str]:
+    def compile(
+        cls, source_code, dst_file_ext, extra_args: Optional[List[str]] = None
+    ) -> Tuple[str, str, str]:
         """
         Compiles CUDA source_code into a file with dst_file_ext extension.
         Returns a tuple of dst_file_path, hash_key, source_code_path
         """
-
         key, input_path = cls.write(source_code, dst_file_ext)
         if key not in cls.cache:
             from filelock import FileLock
@@ -2520,14 +2541,25 @@ class CUDACodeCache:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 if not os.path.exists(output_path):
                     cmd = cuda_compile_command(
-                        [input_path], output_path, dst_file_ext
-                    ).split(" ")
+                        [input_path], output_path, dst_file_ext, extra_args
+                    )
+                    start_time = time()
+                    log.debug("CUDA Compilation: %s", cmd)
+                    cmd_parts = cmd.split(" ")
                     try:
                         subprocess.check_output(
-                            cmd, stderr=subprocess.STDOUT, env=os.environ
+                            cmd_parts, stderr=subprocess.STDOUT, env=os.environ
                         )
                     except subprocess.CalledProcessError as error:
-                        raise exc.CUDACompileError(cmd, error.output) from error
+                        raise exc.CUDACompileError(cmd_parts, error.output) from error
+                    end_time = time()
+                    log_duration_msg = f"CUDA Compilation took {end_time-start_time} seconds. Compile command: {cmd}"
+                    log.info(log_duration_msg)
+                else:
+                    log.debug(
+                        "CUDA Compilation skipped: %s since output already exists",
+                        input_path,
+                    )
                 cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path)
 
         return (cls.cache[key].output_path, key, input_path)
