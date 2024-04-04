@@ -648,11 +648,10 @@ class WrapperCodeGen(CodeGen):
                 f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
             )
 
-    def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
-        if output_view:
-            args.append(f"out={output_view.codegen_reference()}")
-        else:
-            args.append(f"out={codegen_reference}")
+    def generate_extern_kernel_out(
+        self, kernel: str, out: str, out_view: Optional[str], args: List[str]
+    ):
+        args.append(f"out={out_view if out_view else out}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(
