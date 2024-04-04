@@ -61,13 +61,13 @@ class AbstractImplHolder:
         meta_kernel = construct_meta_kernel(self.qualname, self)
         self.lib.impl(self.qualname, meta_kernel, "Meta")
 
-        def deregister_abstract_impl():
+        def deregister_fake_class():
             if self.lib:
                 self.lib._destroy()
                 self.lib = None
             self.kernel = None
 
-        return RegistrationHandle(deregister_abstract_impl)
+        return RegistrationHandle(deregister_fake_class)
 
 
 def construct_meta_kernel(
@@ -119,8 +119,9 @@ class AbstractImplCtx:
     Context object for writing abstract implementations for custom operators.
     """
 
-    def __init__(self, _shape_env, _op):
-        self._shape_env = _shape_env
+    def __init__(self, _fake_mode, _op):
+        self._fake_mode = _fake_mode
+        self._shape_env = _fake_mode.shape_env
         self._op = _op
 
     def create_unbacked_symint(self, *, min=2, max=None) -> torch.SymInt:
@@ -204,3 +205,38 @@ class AbstractImplCtx:
             result, min=min, max=max
         )
         return result
+
+    def to_fake_tensor(self, tensor: torch.Tensor):
+        """
+        Creates a fake tensor from a concrete tensor. Note: this is not needed for impl_abstract.
+
+        This is useful for register_fake_class (which is necessary for torch.compile) for custom class.
+        Users need to implement a from_real method that takes a real custom object and creates a fake
+        custom object. Users can use this API to create fake tensors for the tensor states in the custom object.
+
+        Args:
+            tensor (torch.Tensor): A concrete tensor.
+
+        Example::
+            >>> import torch
+            >>> @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")  # xdoctest: +SKIP
+            ... class FakeTensorQueue:
+            ...     def __init__(self, q):
+            ...         self.queue = q
+            ...
+            ...     @classmethod
+            ...     def from_real(cls, real_tq):
+            ...         ctx = torch.library.get_ctx()
+            ...         fake_queue = [ctx.to_fake_tensor(t) for t in real_tq.get_raw_queue()]
+            ...         return cls(fake_queue)
+            ...
+            ...     def push(self, x):
+            ...         self.queue.append(x)
+            ...
+            ...     def pop(self):
+            ...         return self.queue.pop(0)
+            ...
+            ...     def size(self):
+            ...         return len(self.queue)
+        """
+        return self._fake_mode.from_tensor(tensor)
