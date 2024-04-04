@@ -858,7 +858,6 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             }
           } else {
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
-
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
             size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
             auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
@@ -895,7 +894,6 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_, const bool half_t
             }
           } else {
             constexpr int ILP = sizeof(float4) / sizeof(scalar_t);
-
             dim3 block = SoftMaxForward_getBlockSize(dim_size);
             size_t smem_reduction_sz = block.x / C10_WARP_SIZE * sizeof(accscalar_t);
             auto max_elements_per_smem = (at::cuda::getCurrentDeviceProperties()->sharedMemPerBlock -
