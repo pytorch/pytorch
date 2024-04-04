@@ -1014,7 +1014,6 @@ exclude_patterns = [
     'test/_nvfuser/test_dynamo.py',
     'test/_nvfuser/test_python_frontend.py',
     'test/_nvfuser/test_torchscript.py',
-    'test/_test_bazel.py',
     'test/ao/sparsity/test_activation_sparsifier.py',
     'test/ao/sparsity/test_composability.py',
     'test/ao/sparsity/test_data_scheduler.py',
