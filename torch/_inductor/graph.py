@@ -1285,6 +1285,19 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 real_inputs = [materialize(x) for x in V.real_inputs]
 
+            if self.mutated_inputs:
+                mutated_input_idxs = [
+                    idx
+                    for idx, name in enumerate(self.graph_inputs)
+                    if name in self.mutated_inputs
+                    and isinstance(real_inputs[idx], torch.Tensor)
+                ]
+                for idx in mutated_input_idxs:
+                    # clone mutated Tensor inputs to avoid mutating the them
+                    # in the first pass of the CPP wrapper compilation, as this
+                    # will lead to double mutation otherwise
+                    real_inputs[idx] = real_inputs[idx].clone()
+
             with torch.utils._python_dispatch._disable_current_modes():
                 assert self.example_inputs is not None
                 compiled(real_inputs)
