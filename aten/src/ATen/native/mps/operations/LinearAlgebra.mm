@@ -573,6 +573,25 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   return out;
 }
 
+static void LogTensor(const Tensor& tensor, bool logContents = true) {
+  std::stringstream ss;
+
+  // Log tensor size
+  ss << "Tensor Size: ";
+  for (auto& dim : tensor.sizes()) {
+    ss << dim << " ";
+  }
+
+  // Optionally log tensor contents
+  if (logContents) {
+    ss << "\nContents:\n";
+    ss << tensor << "\n";
+  }
+
+  // Output the log
+  std::cout << ss.str() << std::endl;
+}
+
 static void lu_factor_stub_mps(const Tensor& LU, const Tensor& pivots, const Tensor& info, bool compute_pivots) {
   TORCH_CHECK(compute_pivots, "linalg.lu_factor: LU without pivoting is not implemented on MPS device");
 
@@ -580,23 +599,18 @@ static void lu_factor_stub_mps(const Tensor& LU, const Tensor& pivots, const Ten
     return;
   }
 
-  auto LU_continous = LU;
-  if (!LU.is_contiguous()) {
-    LU_continous = LU.contiguous();
-  }
-
-  // set info to 0
-  info.fill_(0);
+  auto LU_continous = LU.is_contiguous() ? LU : LU.contiguous();
+  auto pivots_continous =
+      at::zeros_like(pivots, pivots.options().dtype(ScalarType::Int).memory_format(MemoryFormat::Contiguous));
 
   id<MTLBuffer> luBuffer = getMTLBufferStorage(LU_continous);
-  id<MTLBuffer> infoBuffer = getMTLBufferStorage(info);
-  id<MTLBuffer> pivotsBuffer = getMTLBufferStorage(pivots);
+  id<MTLBuffer> pivotsBuffer = getMTLBufferStorage(pivots_continous);
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
 
   uint64_t luRows = LU.size(-2);
   uint64_t luCols = LU.size(-1);
-  // uint64_t batchSize = LU.sizes().size() > 2 ? LU.size(0) : 1;
+  uint64_t pivotCols = pivots.size(-1);
   auto batchSize = batchCount(LU);
   uint64_t luElemSize = LU.element_size();
 
@@ -613,7 +627,7 @@ static void lu_factor_stub_mps(const Tensor& LU, const Tensor& pivots, const Ten
                                                                                dataType:getMPSDataType(LU)];
 
       MPSMatrixDescriptor* pivotDescriptor = [MPSMatrixDescriptor matrixDescriptorWithRows:1
-                                                                                   columns:luCols
+                                                                                   columns:pivotCols
                                                                                   matrices:batchSize
                                                                                   rowBytes:sizeof(uint32_t) * luCols
                                                                                matrixBytes:sizeof(uint32_t) * luCols
@@ -627,8 +641,7 @@ static void lu_factor_stub_mps(const Tensor& LU, const Tensor& pivots, const Ten
 
       for (const auto i : c10::irange(batchSize)) {
         const uint64_t luBatchOffset = i * luRows * luCols;
-        const uint64_t infoBatchOffset = i * luRows;
-        const uint64_t pivotsBatchOffset = i * luCols;
+        const uint64_t pivotsBatchOffset = i * pivotCols;
         MPSMatrix* luMatrix =
             [[MPSMatrix alloc] initWithBuffer:luBuffer
                                        offset:(LU_continous.storage_offset() + luBatchOffset) * luElemSize
@@ -642,14 +655,28 @@ static void lu_factor_stub_mps(const Tensor& LU, const Tensor& pivots, const Ten
                          sourceMatrix:luMatrix
                          resultMatrix:luMatrix
                          pivotIndices:pivotMatrix
-                               status:nil]; // TODO: add infoBuffer
+                               status:nil];
       }
 
       getMPSProfiler().endProfileKernel(filter);
     }
   });
 
+  // copy into results
   LU.copy_(LU_continous);
+
+  // copy calculated pivots into pivots tensor
+  pivots.copy_(pivots_continous);
+  // add 1 to pivots to match the 1-based indexing in CPU
+  pivots.add_(1);
+
+  // set info to first index +1 that where the diagonal is zero
+  auto diagonal_zeros = LU_continous.diagonal(0, -2, -1).eq_(0);
+  auto didFail = diagonal_zeros.any(-1);
+  auto firstFailDim = diagonal_zeros.argmax(-1, false).to(info.dtype());
+
+  info.zero_();
+  info.copy_(firstFailDim.add_(1).where(didFail, info));
 }
 
 REGISTER_MPS_DISPATCH(lu_factor_stub, &lu_factor_stub_mps);

@@ -8150,8 +8150,14 @@ class TestLinalgMPS(TestCaseMPS):
 
             # Convert MPS results back to CPU for comparison
             LU_mps_cpu = LU_mps.to('cpu')
+            pivot_mps_cpu = pivots_mps.to('cpu')
+            info_mps_cpu = info_mps.to('cpu')
 
-            print(info_cpu, info_mps)
+            # compare info
+            self.assertEqual(
+                info_cpu, info_mps_cpu,
+                f"Info differ between CPU and MPS for shape {shape}"
+            )
 
             # Compare results
             self.assertTrue(
@@ -8161,7 +8167,37 @@ class TestLinalgMPS(TestCaseMPS):
                     torch.max(torch.abs(LU_cpu - LU_mps_cpu))
                 )
             )
-            # NOTE: Skip pivot comparison for now as MPS uses 0-based indexing while CPU uses 1-based indexing
+
+            # compare pivots
+            self.assertEqual(
+                pivots_cpu, pivot_mps_cpu,
+                f"Pivots differ between CPU and MPS for shape {shape}"
+            )
+
+    def test_lu_factor_ex_info(self, device="mps", dtype=torch.float32):
+        sizes = [(3, 3), (5, 5), (2, 4), (6, 3)]
+        batches = [(), (2,), (1, 3)]
+        pivot_options = [True]
+
+        for size, batch, pivot in itertools.product(sizes, batches, pivot_options):
+            shape = batch + size
+            A_cpu = torch.ones(*shape, device='cpu', dtype=dtype)
+
+            # Perform LU decomposition on CPU
+            _, _, info_cpu = torch.linalg.lu_factor_ex(A_cpu, pivot=pivot)
+
+            A_mps = A_cpu.to(device)
+
+            # Perform LU decomposition on MPS (or CPU if MPS is not available)
+            _, _, info_mps = torch.linalg.lu_factor_ex(A_mps, pivot=pivot)
+
+            # Convert MPS results back to CPU for comparison
+            info_mps_cpu = info_mps.to('cpu')
+
+            self.assertEqual(
+                info_cpu, info_mps_cpu,
+                f"Info differ between CPU and MPS for shape {shape}"
+            )
 
 
 class TestGatherScatter(TestCaseMPS):
