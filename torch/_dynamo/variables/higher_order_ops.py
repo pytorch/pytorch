@@ -906,9 +906,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
         input_meta = input.as_proxy().node.meta["example_value"]
         with tx.fake_mode:
             example_vals = [
-                torch.full(
-                    (), float("nan"), device=input_meta.device, dtype=input_meta.dtype
-                )
+                torch.empty((), device=input_meta.device, dtype=input_meta.dtype)
                 for _ in range(2)
             ]
 
@@ -946,7 +944,6 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"Combine fn had unexpected freevars: {subtracer.lifted_freevars}"
             )
 
-        cond_nn_modules = dict(tx.output.nn_modules)
         if combine_result.python_type() != torch.Tensor:
             unimplemented(
                 f"Expected combine_fn to return a tensor but got {combine_result.python_type()}",
