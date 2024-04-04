@@ -33,6 +33,7 @@ from torch._dynamo import (
 from torch._dynamo.utils import (
     counters,
     detect_fake_mode,
+    flatten_graph_inputs,
     lazy_format_graph_code,
     optimus_scuba_log,
 )
@@ -101,7 +102,9 @@ def index_expanded_dims(t: torch.Tensor, expanded_dims: List[int]) -> torch.Tens
 def complex_memory_overlap(t: torch.Tensor) -> bool:
     # if torch._debug_has_internal_overlap thinks this tensor potentially has
     # memory overlap internally, let's dig deeper to find out whether it's true.
-    t = index_expanded_dims(t, get_expanded_dims(t))
+    #
+    # Call squeeze() so that dimension with size 1 does not cause false positive.
+    t = index_expanded_dims(t, get_expanded_dims(t)).squeeze()
     if torch._debug_has_internal_overlap(t) != 0:
         strides = t.stride()
         sizes = t.shape
@@ -1448,33 +1451,6 @@ def make_graph_return_tuple(
     @functools.wraps(compiled_fn)
     def wrapper(*args, **kwargs):
         return pytree.tree_unflatten(compiled_fn(*args, **kwargs), spec)
-
-    return wrapper
-
-
-def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
-    """
-    Mutate inputs so that they are flat and wrap gm such that it
-    accepts those inputs.  This is only needed for graphs not created
-    by torchdynamo that take bumpy inputs.
-    """
-    inputs, spec = pytree.tree_flatten(inputs)
-
-    class GmWrapper(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.gm = gm
-
-        def forward(self, *args):
-            args: List[Any] = list(args)
-            return self.gm(*pytree.tree_unflatten(args, spec))
-
-    compiled_fn = compile_gm(GmWrapper(), inputs)
-
-    @functools.wraps(compiled_fn)
-    def wrapper(*args):
-        # note this doesn't check the spec, assuming it is the same
-        return compiled_fn(*pytree.arg_tree_leaves(*args))
 
     return wrapper
 

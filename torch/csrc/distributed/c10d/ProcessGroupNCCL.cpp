@@ -162,7 +162,7 @@ ncclRedOpRAII getNcclReduceOp(
 #endif
     }
     return ncclOp.at(reduceOp);
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     switch (reduceOp) {
       case ReduceOp::AVG:
         C10_THROW_ERROR(
@@ -2547,6 +2547,21 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   auto device = getDevice(inputs[0]);
   const auto key = getKeyFromDevice(device);
   auto ncclComm = getNCCLComm(key, device, opType);
+
+  if (coalescing_state_ & CoalActive) {
+    coalescing_state_ |= CoalColl;
+    if (coalescedDevice_.index() < 0) {
+      coalescedDevice_ = device;
+    } else {
+      TORCH_CHECK(
+          coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+    }
+    if (coalescedComm_ == nullptr) {
+      coalescedComm_ = ncclComm;
+    } else {
+      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
+    }
+  }
 
   // Used many times below, so we stash the unordered_map lookup
   auto ncclStream = ncclStreams_.at(key);
