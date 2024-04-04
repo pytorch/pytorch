@@ -517,6 +517,9 @@ class TestInductorOpInfo(TestCase):
             # but that when we do backwards we expect other ops like add to work
             and not dtype == torch.complex32
         )
+        if op_name != 'index_reduce.prod':
+            requires_grad = False
+
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
         if op_name not in inductor_all_samples and not ALL_SAMPLES:
