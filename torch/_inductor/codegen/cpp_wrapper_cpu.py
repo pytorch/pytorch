@@ -3,7 +3,7 @@ import math
 import os
 import sys
 from itertools import count
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import sympy
 from sympy import Expr
@@ -698,7 +698,8 @@ class CppWrapperCpu(WrapperCodeGen):
                 ), f"input {name=} cannot be symbolic"
                 self.write_input_output_info("inputs_info_", idx, name)
 
-            for idx, (name, tensor) in enumerate(V.graph.constants.items()):
+            for idx, name in enumerate(V.graph.constants.keys()):
+                tensor = V.graph.get_original_value_of_constant(name)
                 assert isinstance(tensor, torch.Tensor)
                 self.prefix.writeline(f"""constants_info_[{idx}].name = "{name}";""")
                 self.prefix.writeline(
@@ -880,13 +881,13 @@ class CppWrapperCpu(WrapperCodeGen):
     @cache_on_self
     def get_output_refs(self):
         return [
-            f"at::scalar_tensor({x.codegen_reference(self.wrapper_call)})"
+            f"torch::tensor({x.codegen_reference(self.wrapper_call)})"
             if isinstance(x, ir.ShapeAsConstantBuffer) and not config.abi_compatible
             else x.codegen_reference(self.wrapper_call)
             for x in V.graph.graph_outputs
         ]
 
-    def generate_return(self, output_refs):
+    def generate_return(self, output_refs: List[str]):
         cst_names = V.graph.constants.keys()
         arr_iface = (
             not V.graph.is_const_graph and config.use_minimal_arrayref_interface
@@ -924,9 +925,17 @@ class CppWrapperCpu(WrapperCodeGen):
             self.wrapper_call.writeline(
                 "AOTInductorModelOutputs output_arrayref_tensors;"
             )
+
+        output2idx: Dict[str, int] = {}
         for idx, output in enumerate(output_refs):
+            is_constant_buffer = output in cst_names
+            output_buffer = V.graph.graph_outputs[idx]
+            if isinstance(output_buffer, ir.BaseView):
+                output_storage = output_buffer.unwrap_view()
+                if isinstance(output_storage.data, ir.ConstantBuffer):
+                    is_constant_buffer = True
+
             if config.abi_compatible:
-                output_buffer = V.graph.graph_outputs[idx]
                 if isinstance(output_buffer, ir.ShapeAsConstantBuffer):
                     # Need to wrap scalar into tensor as the main function returns a vector of tensors
                     output_tensor = self.codegen_scalar_to_tensor(output)
@@ -955,7 +964,7 @@ class CppWrapperCpu(WrapperCodeGen):
                         self.wrapper_call.writeline(
                             f"thread_local RAIIAtenTensorHandle {cached_output_name};"
                         )
-                        if output in cst_names:
+                        if is_constant_buffer:
                             # NOTE(return_constant): In some rare cases where we return
                             # a constant, we have to return a copy of this constant,
                             # because (1) constants are not owned by the Model instance
@@ -981,15 +990,21 @@ class CppWrapperCpu(WrapperCodeGen):
                             f"std::get<{idx}>(output_arrayref_tensors));"
                         )
                     else:
-                        if output in cst_names:
+                        if is_constant_buffer:
                             # See NOTE(return_constant) above.
                             self.wrapper_call.writeline(
                                 f"aoti_torch_clone({output}, &output_handles[{idx}]);"
                             )
                         else:
-                            self.wrapper_call.writeline(
-                                f"output_handles[{idx}] = {output}.release();"
-                            )
+                            if output in output2idx:
+                                src_idx = output2idx[output]
+                                self.wrapper_call.writeline(
+                                    f"output_handles[{idx}] = output_handles[{src_idx}];"
+                                )
+                            else:
+                                self.wrapper_call.writeline(
+                                    f"output_handles[{idx}] = {output}.release();"
+                                )
                 self.wrapper_call.writeline("} else {")
                 with self.wrapper_call.indent():
                     use_thread_local_cached_output_tensor(idx, output)
@@ -999,7 +1014,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 assert (
                     not arr_iface
                 ), "minimal ArrayRef interface is only supported in ABI-compatible mode"
-                if output in cst_names:
+                if is_constant_buffer:
                     output_expr = f"{output}.clone()"
                     # See NOTE(return_constant) above.
                 else:
@@ -1008,6 +1023,9 @@ class CppWrapperCpu(WrapperCodeGen):
                     f"output_handles[{idx}] = reinterpret_cast<AtenTensorHandle>("
                     + f"new at::Tensor({output_expr}));"
                 )
+
+            if output not in output2idx:
+                output2idx[output] = idx
         if arr_iface:
             self.wrapper_call.writeline("return output_arrayref_tensors;")
 
@@ -1098,11 +1116,13 @@ class CppWrapperCpu(WrapperCodeGen):
         if config.c_shim_version == "1":
             # For sdpa, we need the v2 version since v1 didn't consider optional arg
             # FIXME: no need to do this after we switch to the torchgen-ed C shim
-            shim_fn = (
-                f"aoti_torch_{kernel_suffix}_v2"
-                if kernel_suffix == "_scaled_dot_product_flash_attention"
-                else f"aoti_torch_{kernel_suffix}"
-            )
+            if kernel_suffix == "_scaled_dot_product_flash_attention":
+                shim_fn = "aoti_torch__scaled_dot_product_flash_attention_v2"
+            elif kernel_suffix.startswith("wrapped_fbgemm"):
+                assert self.device == "cpu", "Using wrapped_fbgemm out of CPU!"
+                shim_fn = f"aoti_torch_cpu_{kernel_suffix}"
+            else:
+                shim_fn = f"aoti_torch_{kernel_suffix}"
         else:
             shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
         return shim_fn
@@ -1170,7 +1190,7 @@ class CppWrapperCpu(WrapperCodeGen):
             elif output is None:
                 output_args.append("nullptr")
             else:
-                raise NotImplementedError("unsupported type of {output=}")
+                raise NotImplementedError(f"unsupported type of {output=}")
         args = args + output_args
         self.generate_c_shim_extern_kernel_call(fallback_kernel.cpp_kernel_name, args)
         for raii_handle in output_raii_handles:

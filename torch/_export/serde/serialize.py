@@ -541,6 +541,9 @@ class GraphModuleSerializer:
             ]
             ret["source_fn_stack"] = ST_DELIMITER.join(source_fn_list)
 
+        if torch_fn := node.meta.get("torch_fn"):
+            ret["torch_fn"] = ST_DELIMITER.join(list(torch_fn))
+
         return ret
 
     def serialize_script_obj_meta(
@@ -1986,6 +1989,9 @@ class GraphModuleDeserializer:
                 name, target_str = source_fn_str.split(",")
                 source_fn_st.append((name, deserialize_meta_func(target_str)))
             ret["source_fn_stack"] = source_fn_st
+
+        if torch_fn_str := metadata.get("torch_fn"):
+            ret["torch_fn"] = tuple(torch_fn_str.split(ST_DELIMITER))
         return ret
 
     def deserialize_argument_spec(self, x: Argument) -> ep.ArgumentSpec:
