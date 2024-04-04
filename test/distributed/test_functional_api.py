@@ -400,6 +400,43 @@ class TestGradCollectives(MultiThreadedTestCase):
         (out + y).sum().backward()
         self.assertIsNone(x.grad)
 
+@instantiate_parametrized_tests
+class TestAutogradCollectives(MultiThreadedTestCase):
+    @property
+    def world_size(self):
+        return 2
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
+    @parametrize("compile", [True, False])
+    def test_all_to_all_single(self, compile: bool) -> None:
+        group = "0"
+
+        t = torch.rand((self.world_size, 2), requires_grad=True)
+
+        def my_func(t: torch.Tensor, world_size: int) -> torch.Tensor:
+            sizes = [1] * world_size
+            t = t * 10
+            out = ft_c.all_to_all_single(
+                t,
+                sizes,
+                sizes,
+                group
+            )
+            out = out + 2
+            return out
+
+        if compile:
+            my_func = torch.compile(my_func, fullgraph=True, backend="aot_eager")
+        out = my_func(t, self.world_size)
+        self.assertIsNotNone(out.grad_fn)
+        self.assertTrue(out.requires_grad)
+        loss = out.sum()
+        loss.backward()
+        self.assertIsNotNone(t.grad)
+
 
 @instantiate_parametrized_tests
 class TestMakeFx(MultiThreadedTestCase):

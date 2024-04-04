@@ -445,6 +445,40 @@ def _is_view_op(tgt):
         return first_arg.alias_info is not None and not first_arg.alias_info.is_write
 
 
+class _AllToAllSingle(torch.autograd.Function):
+    @staticmethod
+    def forward(
+        ctx, output_size, self, output_split_sizes, input_split_sizes, group_name
+    ):
+        ctx.save_for_backward(output_split_sizes, input_split_sizes)
+        ctx.group_name = group_name
+        ctx.input_size = self.size(0)
+
+        tensor = torch.ops._c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
+            output_size,
+            self,
+            output_split_sizes,
+            input_split_sizes,
+            group_name,
+        )
+        return _maybe_wrap_tensor(tensor)
+
+    @staticmethod
+    def backward(ctx, grad_out):
+        output_split_sizes, input_split_sizes = ctx.saved_tensors
+
+        d_input = torch.ops._c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
+            ctx.input_size,
+            grad_out,
+            # swap input and output to return to original
+            input_split_sizes,
+            output_split_sizes,
+            ctx.group_name,
+        )
+
+        return None, _maybe_wrap_tensor(d_input), None, None, None
+
+
 def all_to_all_single(
     self: torch.Tensor,
     output_split_sizes: Optional[List[int]],
@@ -470,11 +504,11 @@ def all_to_all_single(
     if output_split_sizes is not None:
         assert all(
             isinstance(size, (int, torch.SymInt)) for size in output_split_sizes
-        ), output_split_sizes
+        ), "invalid type for output_split_sizes"
     if input_split_sizes is not None:
         assert all(
             isinstance(size, (int, torch.SymInt)) for size in input_split_sizes
-        ), input_split_sizes
+        ), "invalid type for input_split_sizes"
     if native_funcol_enabled():
         group_name = _resolve_group_name(group, tag)
         group_size = c10d._get_group_size_by_name(group_name)
@@ -485,10 +519,11 @@ def all_to_all_single(
             )
             output_split_sizes = [self.shape[0] // group_size] * group_size
             input_split_sizes = output_split_sizes
-        tensor = torch.ops._c10d_functional.all_to_all_single(  # type: ignore[attr-defined]
+        return _AllToAllSingle.apply(
+            sum(output_split_sizes),
             self,
-            output_split_sizes,
-            input_split_sizes,
+            torch.tensor(output_split_sizes),
+            torch.tensor(input_split_sizes),
             group_name,
         )
     else:
@@ -848,15 +883,18 @@ def _reduce_scatter_tensor_coalesced_meta(inputs, reduceOp, tag, rankset, group_
 # but then you pass those sizes explicitly, and the all to all itself
 # isn't dynamic, it just follows the specified output splits
 def _all_to_all_single_meta(
-    input, output_split_sizes, input_split_sizes, *args, **kwargs
+    output_size: int,
+    input,
+    output_split_sizes: torch.Tensor,
+    input_split_sizes: torch.Tensor,
+    *args,
+    **kwargs,
 ):
     if output_split_sizes is None:
         return input.new_empty(input.size())
     else:
-        for s in output_split_sizes:
-            torch._check_is_size(s)
         out_size = list(input.size())
-        out_size[0] = sum(output_split_sizes)
+        out_size[0] = output_size
         return input.new_empty(out_size)
 
 

@@ -10,6 +10,7 @@ from torch.distributed._tensor.experimental.attention import (
     _CausalBehavior,
     _is_causal_behavior,
     _scaled_dot_product_chunk_flash_attention,
+    _scaled_dot_product_ring_flash_attention,
     attention_context_parallel,
     AttentionContextParallel,
 )
@@ -161,6 +162,97 @@ class RingAttentionTest(DTensorTestBase):
         out_parallel_grad = dquery.grad.full_tensor()
         dquery.grad = None
         self.assertEqual(out_parallel_grad, out_chunk_grad)
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(
+        not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Does not support flash attention"
+    )
+    @with_comms
+    @parametrize("is_causal", [True, False])
+    def test_ring_attention_sdpa_autograd(self, is_causal: bool) -> None:
+        device_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(0, self.world_size),
+        )
+        dtype = torch.bfloat16
+        bs = 8
+        query_tokens = 8
+        context_tokens = query_tokens if is_causal else 8
+        dim = 32
+        nheads = 8
+        query = torch.rand(
+            (bs, nheads, self.world_size * query_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        key = torch.rand(
+            (bs, nheads, self.world_size * context_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+        )
+        value = torch.rand(
+            (bs, nheads, self.world_size * context_tokens, dim),
+            device=self.device_type,
+            dtype=dtype,
+        )
+
+        query_placement = [Shard(2)]
+        dquery = distribute_tensor(query, device_mesh, query_placement)
+        self.assertEqual(query.shape, (bs, nheads, self.world_size * query_tokens, dim))
+
+        context_placement = [Shard(2)]
+        dkey = distribute_tensor(key, device_mesh, context_placement)
+        dvalue = distribute_tensor(value, device_mesh, context_placement)
+        for t in [dkey, dvalue]:
+            self.assertEqual(
+                t.shape, (bs, nheads, context_tokens * self.world_size, dim)
+            )
+            self.assertEqual(t.to_local().shape, (bs, nheads, context_tokens, dim))
+
+        # chunked implementation
+        (
+            out_chunk,
+            *others,
+        ) = _scaled_dot_product_chunk_flash_attention(
+            query,
+            key,
+            value,
+            size=self.world_size,
+            is_causal=is_causal,
+        )
+
+        out_chunk.sum().backward()
+        self.assertEqual(
+            out_chunk.shape, (bs, nheads, self.world_size * query_tokens, dim)
+        )
+        out_chunk_grad = query.grad
+        query.grad = None
+
+        out_chunk_local = out_chunk[
+            :, :, self.rank * query_tokens : (self.rank + 1) * query_tokens
+        ]
+        out_chunk_grad_local = out_chunk_grad[
+            :, :, self.rank * query_tokens : (self.rank + 1) * query_tokens
+        ]
+
+        # autograd collectives
+        local_query = dquery.to_local().detach().clone()
+        local_query.requires_grad = True
+        local_key = dkey.to_local().detach().clone()
+        local_value = dvalue.to_local().detach().clone()
+
+        out_autograd, *others = _scaled_dot_product_ring_flash_attention(
+            device_mesh, local_query, local_key, local_value, is_causal=is_causal
+        )
+        self.assertEqual(out_autograd, out_chunk_local)
+        self.assertIsNone(local_query.grad)
+
+        out_autograd.sum().backward()
+        out_autograd_grad = local_query.grad
+        local_query.grad = None
+        self.assertIsNotNone(out_autograd_grad)
+        self.assertEqual(out_autograd_grad, out_chunk_grad_local)
 
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(

@@ -6140,10 +6140,13 @@ try:
         )
 
     @register_lowering(_c10d_functional.all_to_all_single)
-    def _all_to_all_single(inp, output_split_sizes, input_split_sizes, group_name):
+    def _all_to_all_single(
+        output_size, inp, output_split_sizes, input_split_sizes, group_name
+    ):
         return ir.TensorBox.create(
             ir._CollectiveKernel.create_out_of_place(
                 _c10d_functional.all_to_all_single.default,
+                output_size,
                 inp,
                 output_split_sizes,
                 input_split_sizes,

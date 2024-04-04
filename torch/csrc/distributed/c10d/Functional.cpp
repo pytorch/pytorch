@@ -1,3 +1,4 @@
+#include <iterator>
 #include <shared_mutex>
 
 #include <ATen/ATen.h>
@@ -235,21 +236,33 @@ at::Tensor reduce_scatter_tensor(
 }
 
 at::Tensor all_to_all_single(
+    int64_t output_size,
     const at::Tensor& input,
-    std::vector<int64_t> output_split_sizes,
-    std::vector<int64_t> input_split_sizes,
+    const at::Tensor& output_split_sizes,
+    const at::Tensor& input_split_sizes,
     std::string group_name) {
   std::vector<int64_t> output_sizes = input.sizes().vec();
-  output_sizes[0] =
-      std::accumulate(output_split_sizes.begin(), output_split_sizes.end(), 0);
+  output_sizes[0] = output_split_sizes.sum().item<int64_t>();
   auto output = input.new_empty(output_sizes);
+
+  auto output_split_sizes_contig = output_split_sizes.contiguous();
+  std::vector<int64_t> output_split_sizes_vec(
+      output_split_sizes_contig.data_ptr<int64_t>(),
+      output_split_sizes_contig.data_ptr<int64_t>() +
+          output_split_sizes_contig.numel());
+
+  auto input_split_sizes_contig = input_split_sizes.contiguous();
+  std::vector<int64_t> input_split_sizes_vec(
+      input_split_sizes_contig.data_ptr<int64_t>(),
+      input_split_sizes_contig.data_ptr<int64_t>() +
+          input_split_sizes_contig.numel());
 
   auto group = c10d::resolve_process_group(group_name);
   auto work = group->alltoall_base(
       output,
       const_cast<at::Tensor&>(input),
-      output_split_sizes,
-      input_split_sizes);
+      output_split_sizes_vec,
+      input_split_sizes_vec);
   c10d::RankLocal<WorkRegistry>::get().register_work(output, work);
   return output;
 }
@@ -337,9 +350,10 @@ TORCH_LIBRARY(_c10d_functional, m) {
 
   m.def(
       "all_to_all_single("
+      "SymInt output_size,"
       "Tensor input, "
-      "SymInt[] output_split_sizes, "
-      "SymInt[] input_split_sizes, "
+      "Tensor output_split_sizes, "
+      "Tensor input_split_sizes, "
       "str group_name) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::all_to_all_single),
