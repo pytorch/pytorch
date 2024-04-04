@@ -41,8 +41,7 @@ void run_cudnn_SDP_bprop(
     Tensor& dK,
     Tensor& dV,
     const Tensor& dropoutseed,
-    const Tensor& dropoutoffset
-    );
+    const Tensor& dropoutoffset);
 
-}
+} // namespace native
 } // namespace at
