@@ -384,7 +384,7 @@ only_allow_pt2_compliant_ops = False
 capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
-capture_func_transforms = False
+capture_func_transforms = True
 
 # enable/disable user-defined triton kernel optimizations
 optimize_user_defined_triton_kernels = True
