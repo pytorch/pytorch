@@ -251,6 +251,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
+        from ..side_effects import SideEffects
         from .builder import SourcelessBuilder, wrap_fx_proxy
         from .builtin import BuiltinVariable
 
@@ -350,7 +351,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             assert all(x is not None for x in items)
             return variables.NamedTupleVariable(items, self.value)
-        elif self.is_standard_new() and self.source:
+        elif (
+            self.is_standard_new()
+            and SideEffects.cls_supports_mutation_side_effects(self.value)
+            and self.source
+        ):
             var = tx.output.side_effects.track_object_new(
                 self.source,
                 self.value,
