@@ -3891,26 +3891,6 @@ class TestNestedTensorSubclass(TestCase):
         nt_t_copy_dtype = torch.ops.aten._to_copy(nt_t, dtype=torch.float16)
         self.assertEqual(torch.float16, nt_t_copy_dtype.dtype)
 
-    def test_is_same_size(self, device):
-        def get_3_tensors():
-            return [torch.randn(i + 2, 3, 4, requires_grad=True, dtype=torch.float64, device=device) for i in range(3)]
-
-        nt1, offsets1 = jagged_from_list(get_3_tensors(), None)
-        nt2, offsets1 = jagged_from_list(get_3_tensors(), offsets1)
-
-        nt3, offsets2 = jagged_from_list(get_3_tensors(), None)
-        nt4, offsets2 = jagged_from_list(get_3_tensors(), offsets2)
-
-        def check_size(nt1, nt2, nt3, nt4):
-            self.assertTrue(torch.ops.aten.is_same_size(nt1, nt2))
-            self.assertTrue(torch.ops.aten.is_same_size(nt3, nt4))
-            self.assertFalse(torch.ops.aten.is_same_size(nt1, nt3))
-
-        check_size(nt1, nt2, nt3, nt4)
-
-        nt1_t, nt2_t, nt3_t, nt4_t = (x.transpose(1, 2) for x in (nt1, nt2, nt3, nt4))
-        check_size(nt1_t, nt2_t, nt3_t, nt4_t)
-
     @skipIfTorchDynamo("Dynamo doesn't know how to trace prof.events()")
     def test_profiler_sequence_nr(self):
         # See Note [Sequence Numbers for Python Subclasses] for more context.
@@ -3949,6 +3929,26 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(len(fwd_seq_nrs), 1)
         self.assertEqual(len(bwd_seq_nrs), 1)
         self.assertEqual(fwd_seq_nrs[0], bwd_seq_nrs[0])
+
+    def test_is_same_size(self, device):
+        def get_3_tensors():
+            return [torch.randn(i + 2, 3, 4, requires_grad=True, dtype=torch.float64, device=device) for i in range(3)]
+
+        nt1, offsets1 = jagged_from_list(get_3_tensors(), None)
+        nt2, offsets1 = jagged_from_list(get_3_tensors(), offsets1)
+
+        nt3, offsets2 = jagged_from_list(get_3_tensors(), None)
+        nt4, offsets2 = jagged_from_list(get_3_tensors(), offsets2)
+
+        def check_size(nt1, nt2, nt3, nt4):
+            self.assertTrue(torch.ops.aten.is_same_size(nt1, nt2))
+            self.assertTrue(torch.ops.aten.is_same_size(nt3, nt4))
+            self.assertFalse(torch.ops.aten.is_same_size(nt1, nt3))
+
+        check_size(nt1, nt2, nt3, nt4)
+
+        nt1_t, nt2_t, nt3_t, nt4_t = (x.transpose(1, 2) for x in (nt1, nt2, nt3, nt4))
+        check_size(nt1_t, nt2_t, nt3_t, nt4_t)
 
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
     # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
