@@ -6945,8 +6945,7 @@ Tensor take_backward(
   // For Composite Compliance,
   // if `grad` and `indices` are CCT but `grad_self` is not
   // then we use the out-of-place variant of `put`.
-  if (!isTensorSubclassLike(grad_self) &&
-      areAnyTensorSubclassLike({grad, indices})) {
+  if (areAnyTensorSubclassLike({grad, indices})) {
     return grad_self.put(indices, grad, true);
   }
   return grad_self.put_(indices, grad, true);

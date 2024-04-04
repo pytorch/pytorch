@@ -837,7 +837,6 @@ class TestOperators(TestCase):
         xfail("sparse.sampled_addmm"),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail("sparse.mm", "reduce"),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail("svd_lowrank"),  # calls random op
-        xfail("take"),  # vmap: inplace into a regular tensor
         xfail("to"),  # rank 4 tensor for channels_last
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
         # got a batched tensor as input while the running_mean or running_var,
@@ -1571,7 +1570,6 @@ class TestOperators(TestCase):
         xfail('sparse.sampled_addmm'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('sparse.mm', 'reduce'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('svd_lowrank'),  # calls random op
-        xfail('take'),  # vmap: inplace into regular tensor
         xfail('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('to_sparse'),  # Forward AD not implemented and no decomposition
         xfail('view_as_complex'),  # RuntimeError: Tensor must have a last dimension with stride 1
