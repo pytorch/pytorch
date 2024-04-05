@@ -633,8 +633,6 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
-        if torch.xpu.is_available():
-            test_bases.append(XPUTestBase)
 
         device_type = torch._C._get_privateuse1_backend_name()
         device_mod = getattr(torch, device_type, None)

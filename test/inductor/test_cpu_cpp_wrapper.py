@@ -89,7 +89,6 @@ if config.abi_compatible:
         "test_qlinear_cpu",
         "test_qlinear_dequant_promotion_cpu",
         "test_qlinear_relu_cpu",
-        "test_randint_cpu",
         "test_randn_with_dtype_and_device_cpu",
         "test_scatter5_cpu",
         "test_scatter6_cpu",
@@ -103,7 +102,6 @@ if config.abi_compatible:
             f"{test_name}_dynamic_shapes"
         ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=False)
     skip_list = [
-        "test_linear1_cpu",  # segfault from double free
         "test_multihead_attention_cpu",
     ]
     for test_name in skip_list:
