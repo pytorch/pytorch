@@ -723,11 +723,10 @@ class OutputGraph:
                 # are registered as get_attr nodes in the root graph.
                 tracer = self.root_tracer
 
-            if not is_constant_source(source):
-                install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
-
             if get_static_address_type(target) == "guarded":
                 install_guard(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
+            elif not is_constant_source(source):
+                install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
                 assert self.param_name_to_source is not None
@@ -743,10 +742,19 @@ class OutputGraph:
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
 
-            install_guard(source.make_guard(GuardBuilder.NN_MODULE))
+            if source:
+                install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
-            def wrap_name(module_key):
-                return NNModuleVariable(type(target), module_key, target, **options)
+                def wrap_name(module_key):
+                    return NNModuleVariable(type(target), module_key, target, **options)
+
+            else:
+                # This is Dynamo created graph module, e.g., graph module coming
+                # from higher order ops. NNModuleVariable tracker can't be
+                # sourceless, so let's return a unspecializedNNModule variable
+                # tracker.
+                def wrap_name(module_key):
+                    return variables.UnspecializedNNModuleVariable(target, **options)
 
         elif isinstance(target, (torch.SymInt, torch.SymFloat)):
             # HACKY CODE REGION BEGIN
