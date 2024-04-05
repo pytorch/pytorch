@@ -373,7 +373,8 @@ class CustomOpDef:
         ):
             raise NotImplementedError(
                 f"NYI: registering autograd formula for operator {self} that "
-                f"accepts or takes Tensor lists"
+                f"accepts or takes Tensor lists. "
+                f"Please open an issue if you want us to prioritize this feature"
             )
 
         self._backward_fn = backward_fn
@@ -386,6 +387,8 @@ class CustomOpDef:
 
         def fake_impl(*args, **kwargs):
             if self._abstract_fn is None:
+                if _library.utils.can_generate_trivial_fake_impl(self._opoverload):
+                    return None
                 raise RuntimeError(
                     f"There was no fake impl registered for {self}. "
                     f"This is necessary for torch.compile/export/fx tracing to work. "

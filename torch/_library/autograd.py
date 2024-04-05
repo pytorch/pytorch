@@ -17,7 +17,8 @@ def make_autograd_impl(opdef: Any) -> Callable:
         if opdef._backward_fn:
             return opdef._backward_fn(ctx, *grads)
         raise RuntimeError(
-            f"There was no autograd formula registered for {opdef}. "
+            f"Trying to backward through {opdef} but no autograd "
+            f"formula was registered. "
             f"Please use register_autograd to add one."
         )
 
