@@ -850,6 +850,15 @@ class TestProfiler(TestCase):
         if use_cuda:
             z = z.cpu()
 
+    def _check_stats(self, profiler_stats):
+        self.assertGreater(profiler_stats.profiling_window_duration_sec, 0)
+        self.assertGreater(profiler_stats.number_of_events, 0)
+        self.assertGreater(profiler_stats.profiler_prepare_call_duration_us, 0)
+        self.assertGreater(profiler_stats.profiler_enable_call_duration_us, 0)
+        self.assertGreater(profiler_stats.profiler_disable_call_duration_us, 0)
+        self.assertGreater(profiler_stats.parse_kineto_call_duration_us, 0)
+        self.assertGreater(profiler_stats.function_events_build_tree_call_duration_us, 0)
+
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
@@ -877,6 +886,7 @@ class TestProfiler(TestCase):
             self.assertTrue(found_memcpy)
         else:
             self.assertTrue(found_mm)
+        self._check_stats(p._stats)
         # p.export_chrome_trace("/tmp/test_trace.json")
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
@@ -907,6 +917,7 @@ class TestProfiler(TestCase):
         self.assertTrue(found_gemm_0)
         self.assertTrue(found_gemm_1)
         self.assertTrue(found_cuda)
+        self._check_stats(prof._stats())
 
     def test_memory_profiler(self):
         def run_profiler(tensor_creation_fn):
