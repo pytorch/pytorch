@@ -406,8 +406,8 @@ class TestExecutionTrace(TestCase):
             )
 
         # Uncomment for debugging
-        print("Output kineto = ", kt.name)
-        print("Output ET = ", fp.name)
+        # print("Output kineto = ", kt.name)
+        # print("Output ET = ", fp.name)
 
         p.export_chrome_trace(kt.name)
         self.assertEqual(trace_called_num, 1)
@@ -1542,10 +1542,10 @@ class TestProfiler(TestCase):
             prof.export_chrome_trace(fname)
             with open(fname) as f:
                 j = json.load(f)
-                events = j["traceEvents"]
-                for e in events:
+                op_events = [e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"]
+                for e in op_events:
+                    args = e["args"]
                     if e["name"] == "aten::ones":
-                        args = e["args"]
                         self.assertEqual(
                             args["Input type"],
                             ["ScalarList", "Scalar", "", "", "Scalar"],
@@ -1555,9 +1555,15 @@ class TestProfiler(TestCase):
                         )
 
                     if e["name"] == "aten::cat":
-                        args = e["args"]
                         self.assertEqual(args["Input Dims"], [[[64, 32], [64, 32]], []])
                         self.assertEqual(args["Input type"], ["TensorList", "Scalar"])
+
+                    # check that each op has record function id
+                    self.assertGreaterEqual(
+                        args.get("Record function id", -1),
+                        0,
+                        f"Failed finding record funciont for op = {e}"
+                    )
 
 
     def test_profiler_fwd_bwd_link(self):
