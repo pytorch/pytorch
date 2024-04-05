@@ -8,7 +8,6 @@ import operator
 import os
 import pprint
 import textwrap
-from enum import IntEnum
 from typing import (
     Any,
     Counter,
@@ -1974,7 +1973,9 @@ class Scheduler:
             for node_grouping in group_grouping.values():
                 check_all_pairs(node_grouping)
 
-        possible_fusions = self.filter_possible_fusions_by_priority(possible_fusions)
+        possible_fusions = self.get_possible_fusions_with_highest_priority(
+            possible_fusions
+        )
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
         fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
@@ -2230,36 +2231,35 @@ class Scheduler:
         }
         return sum(dep.numbytes_hint() for dep in common_memory_deps)
 
-    def filter_possible_fusions_by_priority(self, possible_fusions):
+    def get_possible_fusions_with_highest_priority(self, possible_fusions):
         # Group the possible fusions based on their priority from the backend.
         # Only return the group of possible fusions with highest priority.
         if len(possible_fusions) == 0:
             return possible_fusions
-        possible_fusions_group_by_priority: List[
-            List[Tuple["BaseSchedulerNode", "BaseSchedulerNode"]]
-        ] = []
-        for _ in range(len(FusionPriority)):
-            possible_fusions_group_by_priority.append([])
+        possible_fusions_group_by_priority: Dict[
+            int, List[Tuple["BaseSchedulerNode", "BaseSchedulerNode"]]
+        ] = {}
 
         for node1, node2 in possible_fusions:
             assert node1.get_device() == node2.get_device()
             device = node1.get_device()
-            fusion_pair_priority = self.get_backend(device).get_fusion_pair_priority(
-                node1, node2
+            fusion_pair_priority = int(
+                self.get_backend(device).get_fusion_pair_priority(node1, node2)
             )
-            possible_fusions_group_by_priority[int(fusion_pair_priority)].append(
-                (node1, node2)
-            )
-
-        assert any(
-            len(possible_fusions) > 0
-            for possible_fusions in possible_fusions_group_by_priority
-        )
-        return next(
-            possible_fusions
-            for possible_fusions in possible_fusions_group_by_priority
-            if possible_fusions
-        )
+            if fusion_pair_priority not in possible_fusions_group_by_priority:
+                possible_fusions_group_by_priority[fusion_pair_priority] = [
+                    (node1, node2),
+                ]
+            else:
+                possible_fusions_group_by_priority[fusion_pair_priority].append(
+                    (node1, node2)
+                )
+        # Sorted by fusion_pair_priority and return the possible fusions with highest priority
+        possible_fusions_with_highest_priority = sorted(
+            possible_fusions_group_by_priority.items(), key=lambda item: item[0]
+        )[0][1]
+        assert len(possible_fusions_with_highest_priority) > 0
+        return possible_fusions_with_highest_priority
 
     def score_fusion_key(self, nodes):
         """
@@ -2491,11 +2491,6 @@ class Scheduler:
         return node.node.get_layout()
 
 
-class FusionPriority(IntEnum):
-    One = 0
-    Two = 1
-
-
 class BaseScheduling:
     def can_fuse_vertical(self, node1: BaseSchedulerNode, node2: BaseSchedulerNode):
         """
@@ -2567,5 +2562,9 @@ class BaseScheduling:
         """
         raise NotImplementedError()
 
-    def get_fusion_pair_priority(self, node1, node2):
-        return FusionPriority.One
+    def get_fusion_pair_priority(self, node1, node2) -> int:
+        """
+        Return an unsigned integer which represents the priority of this fusion pair.
+        The smaller is with higher priority.
+        """
+        return 0

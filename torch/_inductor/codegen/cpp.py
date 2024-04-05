@@ -28,7 +28,6 @@ from ..scheduler import (
     BaseScheduling,
     ForeachKernelSchedulerNode,
     FusedSchedulerNode,
-    FusionPriority,
     Scheduler,
     SchedulerNode,
 )
@@ -3796,9 +3795,9 @@ class CppScheduling(BaseScheduling):
     def get_fusion_pair_priority(self, node1, node2):
         if self.can_fuse_vertical_outer_loop(node1, node2):
             # Outer loop fusion with lower priority
-            return FusionPriority.Two
+            return 1
         else:
-            return FusionPriority.One
+            return 0
 
     def can_fuse_vertical(self, node1, node2):
         return (
