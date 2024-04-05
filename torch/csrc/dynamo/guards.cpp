@@ -2425,8 +2425,11 @@ class GradGuardAccessor : public GuardAccessor {
     if (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)) {
       return false;
     }
-    PyObject* grad = THPVariable_Wrap(THPVariable_Unpack(obj).grad());
-    return _guard_manager->check_nopybind(grad);
+    PyObject* grad =
+        THPVariable_Wrap(THPVariable_Unpack(obj).grad()); // New reference
+    bool result = _guard_manager->check_nopybind(grad);
+    Py_XDECREF(grad);
+    return result;
   }
 
   GuardDebugInfo check_verbose_nopybind(
@@ -2436,8 +2439,11 @@ class GradGuardAccessor : public GuardAccessor {
       return GuardDebugInfo(
           false, "not a tensor - grad field is accessed " + get_source(), 0);
     }
-    PyObject* grad = THPVariable_Wrap(THPVariable_Unpack(obj).grad());
-    return _guard_manager->check_verbose_nopybind(grad);
+    PyObject* grad =
+        THPVariable_Wrap(THPVariable_Unpack(obj).grad()); // New reference
+    GuardDebugInfo result = _guard_manager->check_verbose_nopybind(grad);
+    Py_XDECREF(grad);
+    return result;
   }
 
   std::string repr() const override {
