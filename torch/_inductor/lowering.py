@@ -56,6 +56,7 @@ from .utils import (
     ceildiv,
     decode_device,
     is_dynamic,
+    is_gpu,
     is_pointwise_use,
     pad_listlike,
     parallel_num_threads,
@@ -436,7 +437,7 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                if i.get_device().type == "cuda":
+                if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
             if not device:
@@ -515,7 +516,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
                 outputs[output_ind] = output
 
-                if device.type == "cuda" and use_foreach and realize_outputs:
+                if is_gpu(device.type) and use_foreach and realize_outputs:
                     buffer_list.append(output.realize())
 
             if buffer_list:
@@ -1141,7 +1142,10 @@ def quantized_decomposed_dequantize_per_channel(
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
-    if all(input.get_dtype() in [torch.int8, torch.uint8] for input in inputs):
+    cpu_device = inputs[0].get_device().type == "cpu"
+    if cpu_device and all(
+        input.get_dtype() in [torch.int8, torch.uint8] for input in inputs
+    ):
         # TODO <leslie> Remove this fallback when we support vectorization
         # code gen with uint8 data type directly.
         for input in inputs:
@@ -1206,7 +1210,7 @@ def cat(inputs, dim=0):
 
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.
-    if inputs[0].get_device().type == "cpu" or fusable_reduction:
+    if cpu_device or fusable_reduction:
         return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
     def op_count(x):
@@ -3331,7 +3335,7 @@ def scatter_fallback(
         reduce not in {None, reduce_ty}
         or (
             isinstance(src, TensorBox)
-            and src.get_device().type == torch.device("cuda").type
+            and is_gpu(src.get_device().type)
             and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
         )
         or (
