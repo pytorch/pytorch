@@ -158,12 +158,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
     # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
     # and this reordering doesnt work well with mutation
     first_copy = next(
-        (
-            node
-            for node in graph.nodes
-            if node.op == "call_function"
-            and node.target == torch.ops.aten.copy_.default
-        ),
+        iter(graph.find_nodes(op="call_function", target=torch.ops.aten.copy_.default)),
         None,
     )
     past_mutating_epilogue = True if first_copy is None else False
@@ -639,12 +634,9 @@ def remove_noop_ops(graph: torch.fx.Graph):
     input_storages = set()
     output_storages = set()
 
-    for node in graph.nodes:
-        if node.op == "placeholder":
-            inputs.add(node)
-            input_storages.add(get_node_storage(node))
-        else:
-            break
+    for node in graph.find_nodes(op="placeholder"):
+        inputs.add(node)
+        input_storages.add(get_node_storage(node))
 
     output_node = next(iter(reversed(graph.nodes)))
     assert output_node.op == "output"
@@ -722,9 +714,10 @@ def decompose_auto_functionalized(graph):
             match.replace_by_example(decomp, flat_args, run_dce=False)
 
     graph_pass.apply(graph)
-    for node in graph.nodes:
-        if node.target is torch.ops.higher_order.auto_functionalized:
-            raise AssertionError("auto_functionalized was not removed")
+    for node in graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized
+    ):
+        raise AssertionError("auto_functionalized was not removed")
 
 
 @register_lowering_pattern(
@@ -810,9 +803,10 @@ def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
     """
-    for nd in gm.graph.nodes:
-        if nd.target == torch.ops.aten.view.default:
-            nd.target = torch.ops.aten.reshape.default
+    for nd in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.aten.view.default
+    ):
+        nd.target = torch.ops.aten.reshape.default
 
 
 def should_prefer_unfused_addmm(match):
