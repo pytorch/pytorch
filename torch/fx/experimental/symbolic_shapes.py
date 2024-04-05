@@ -3588,6 +3588,8 @@ class ShapeEnv:
             elif isinstance(e, sympy.Lt):
                 add_expr(sympy.Le(e.lhs, e.rhs))
                 add_expr(sympy.Ne(e.lhs, e.rhs))
+            elif isinstance(expr, sympy.Le):
+                add_expr(sympy.Lt(expr.lhs, expr.rhs + 1))
 
         expr = expr.subs(subst)
 
@@ -3651,7 +3653,19 @@ class ShapeEnv:
             if out.is_singleton():
                 return out.lower
 
-        return new_expr if unbacked_only else None
+        if unbacked_only:
+            return new_expr
+        else:
+            if isinstance(expr, sympy.Le):
+                # We try to evaluate lhs < rhs + 1 with the same axioms
+                new_expr = sympy.Lt(expr.lhs, expr.rhs + 1)
+                return self._maybe_evaluate_static(new_expr,
+                                                   unbacked_only=unbacked_only,
+                                                   compute_hint=compute_hint,
+                                                   expect_rational=expect_rational,
+                                                   size_oblivious=size_oblivious)
+            return None
+
 
     @_lru_cache
     def replace(self, expr: "sympy.Expr") -> "sympy.Expr":
