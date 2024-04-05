@@ -8,6 +8,8 @@ import inspect
 import re
 import contextlib
 import sys
+from torch._library.custom_ops import custom_op
+
 
 __all__ = [
     'Library',
@@ -16,6 +18,7 @@ __all__ = [
     'fallthrough_kernel',
     'impl_abstract',
     'get_ctx',
+    'custom_op',
 ]
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
@@ -93,8 +96,7 @@ class Library:
             name of the operator as inferred from the schema.
 
         Example::
-            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LIBRARY)
-            >>> my_lib = Library("foo", "DEF")
+            >>> my_lib = Library("mylib", "DEF")
             >>> my_lib.define("sum(Tensor self) -> Tensor")
         '''
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
@@ -178,6 +180,8 @@ class Library:
         for handle in self._registration_handles:
             handle.destroy()
         self._registration_handles.clear()
+        global _impls
+        _impls -= self._op_impls
         for name in self._op_defs:
             # Delete the cached torch.ops.ns.foo if it was registered.
             # Otherwise, accessing it leads to a segfault.
@@ -249,7 +253,6 @@ def define(qualname, schema, *, lib=None, tags=()):
             torch.Tag carefully before applying it.
 
     Example::
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LIBRARY)
         >>> import torch
         >>> import numpy as np
         >>>
@@ -257,14 +260,14 @@ def define(qualname, schema, *, lib=None, tags=()):
         >>> torch.library.define("mylib::sin", "(Tensor x) -> Tensor")
         >>>
         >>> # Add implementations for the operator
-        >>> @torch.library.impl("mylibrary::sin", "cpu")
+        >>> @torch.library.impl("mylib::sin", "cpu")
         >>> def f(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
         >>> # Call the new operator from torch.ops.
         >>> x = torch.randn(3)
         >>> y = torch.ops.mylib.sin(x)
-        >>> assert torch.allclose(y, x)
+        >>> assert torch.allclose(y, x.sin())
 
     """
     if not isinstance(qualname, str):
@@ -317,15 +320,15 @@ def impl(qualname, types, func=None, *, lib=None):
         >>> import numpy as np
         >>>
         >>> # Define the operator
-        >>> torch.library.define("mylibrary::sin", "(Tensor x) -> Tensor")
+        >>> torch.library.define("mylib::mysin", "(Tensor x) -> Tensor")
         >>>
         >>> # Add implementations for the cpu device
-        >>> @torch.library.impl("mylibrary::sin", "cpu")
+        >>> @torch.library.impl("mylib::mysin", "cpu")
         >>> def f(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
         >>> x = torch.randn(3)
-        >>> y = torch.ops.mylibrary.sin(x)
+        >>> y = torch.ops.mylib.mysin(x)
         >>> assert torch.allclose(y, x.sin())
     """
     if isinstance(types, str):
@@ -413,7 +416,7 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
         >>>     "(Tensor x, Tensor weight, Tensor bias) -> Tensor")
         >>>
         >>> @torch.library.impl_abstract("mylib::custom_linear")
-        >>> def custom_linear_abstract(x, weight):
+        >>> def custom_linear_abstract(x, weight, bias):
         >>>     assert x.dim() == 2
         >>>     assert weight.dim() == 2
         >>>     assert bias.dim() == 1
@@ -422,6 +425,14 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
         >>>     assert x.device == weight.device
         >>>
         >>>     return (x @ weight.t()) + bias
+        >>>
+        >>> with torch._subclasses.fake_tensor.FakeTensorMode():
+        >>>     x = torch.randn(2, 3)
+        >>>     w = torch.randn(3, 3)
+        >>>     b = torch.randn(3)
+        >>>     y = torch.ops.mylib.custom_linear(x, w, b)
+        >>>
+        >>> assert y.shape == (2, 3)
         >>>
         >>> # Example 2: an operator with data-dependent output shape
         >>> torch.library.define("mylib::custom_nonzero", "(Tensor x) -> Tensor")
@@ -443,6 +454,14 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
         >>>     x_np = x.numpy()
         >>>     res = np.stack(np.nonzero(x_np), axis=1)
         >>>     return torch.tensor(res, device=x.device)
+        >>>
+        >>> from torch.fx.experimental.proxy_tensor import make_fx
+        >>>
+        >>> x = torch.tensor([0, 1, 2, 3, 4, 0])
+        >>> trace = make_fx(torch.ops.mylib.custom_nonzero, tracing_mode="symbolic")(x)
+        >>> trace.print_readable()
+        >>>
+        >>> assert torch.allclose(trace(x), torch.ops.mylib.custom_nonzero(x))
 
     """
     source = torch._library.utils.get_source(_stacklevel + 1)
