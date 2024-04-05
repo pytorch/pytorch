@@ -813,6 +813,9 @@ def remove_jump_if_none(instructions: List[Instruction]) -> None:
                 )
             else:
                 jump_op = create_instruction("POP_JUMP_IF_TRUE", target=inst.target)
+            # update inst.exn_tab_entry.end if necessary
+            if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
+                inst.exn_tab_entry.end = jump_op
             # preserve exception table entries
             is_op.exn_tab_entry = copy.copy(inst.exn_tab_entry)
             jump_op.exn_tab_entry = copy.copy(inst.exn_tab_entry)
