@@ -1410,6 +1410,17 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
+    def test_view_outputs(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                y = torch.sin(x)
+                y_same_size = y.view(*y.shape)
+                y_diff_size = y.view(1, *y.shape)
+                return y, y_same_size, y_diff_size
+
+        example_inputs = (torch.randn(3, 10, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
     @skip_if_no_torchvision
     def test_missing_cubin(self):
         from torchvision.models.resnet import Bottleneck, ResNet
