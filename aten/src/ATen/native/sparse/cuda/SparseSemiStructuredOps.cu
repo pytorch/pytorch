@@ -23,10 +23,6 @@
     TORCH_CHECK(status == cutlass::Status::kSuccess,                      \
                 "Got CUTLASS error: ", cutlassGetStatusString(status));   \
   }
-
-namespace {
-    enum class Activation{NONE, RELU, SILU};
-}
 #endif
 
 namespace at::native {
@@ -35,7 +31,7 @@ namespace at::native {
 #else
 // Wrapper function for CUTLASS sparse GEMM implementation, used
 // solely to simplify dispatching from
-// _sparse_semi_structured_linear() function below.
+// sparse_semi_structured_mad_op() function below.
 template <
     typename ElementInputA,
     typename ElementInputB,
@@ -46,14 +42,13 @@ template <
     typename InstructionShape,
     typename LayoutInputA,
     typename LayoutInputB,
-    bool use_bias,
-    Activation activation>
-Tensor two_four_sgemm(
+    bool use_tensor_c>
+void spgemm_cutlass(
     const Tensor& tensor_a,
     const at::IntArrayRef::value_type& tensor_a_stride,
     const Tensor& tensor_b,
     const at::IntArrayRef::value_type& tensor_b_stride,
-    const Tensor& tensor_c, const Tensor& meta) {
+    const Tensor& tensor_c, const Tensor& tensor_e, Tensor& tensor_d) {
     // Fix CUTLASS sparse GEMM template arguments that are not
     // provided as template argument of this function, and create an
     // alias for particular instantiation of this template.
@@ -75,7 +70,7 @@ Tensor two_four_sgemm(
     using LayoutC = LayoutOutput;
     constexpr int AlignmentC = 128 / cutlass::sizeof_bits<ElementC>::value;
 
-    using BiasTileThreadMap = cutlass::epilogue::threadblock::OutputTileThreadLayout<
+    using TensorCTileThreadMap = cutlass::epilogue::threadblock::OutputTileThreadLayout<
         ThreadblockShape,
         WarpShape,
         ElementC,
@@ -90,50 +85,23 @@ Tensor two_four_sgemm(
 
     using Accum = cutlass::epilogue::threadblock::VisitorAccFetch;
 
-    using BiasScalar =
+    using TensorCScalar =
         cutlass::epilogue::threadblock::VisitorScalarBroadcast<ElementC>;
-    using BiasTensor =
+    using TensorCTensor =
         cutlass::epilogue::threadblock::VisitorColBroadcast<
-            BiasTileThreadMap,
+            TensorCTileThreadMap,
             ElementC,
             cute::Stride<cute::_1, cute::_0, int64_t>>;
-    using Bias = std::conditional_t<use_bias, BiasTensor, BiasScalar>;
-    using BiasArguments = typename Bias::Arguments;
+    using TensorC = std::conditional_t<use_tensor_c, TensorCTensor, TensorCScalar>;
+    using TensorCArguments = typename TensorC::Arguments;
 
-    using ApplyBias = cutlass::epilogue::threadblock::VisitorCompute<
+    using ApplyTensorC = cutlass::epilogue::threadblock::VisitorCompute<
         cutlass::plus, ElementComputeEpilogue, ElementComputeEpilogue,
         cutlass::FloatRoundStyle::round_to_nearest>;
-    using EVTApplyBias = cutlass::epilogue::threadblock::Sm80EVT<
-        ApplyBias,
+    using EVTApplyTensorC = cutlass::epilogue::threadblock::Sm80EVT<
+        ApplyTensorC,
         Accum,
-        Bias>;
-
-    using ApplyActivationNone = cutlass::epilogue::threadblock::VisitorCompute<
-        cutlass::epilogue::thread::Identity,
-        ElementComputeEpilogue,
-        ElementComputeEpilogue,
-        cutlass::FloatRoundStyle::round_to_nearest>;
-    using ApplyActivationReLu = cutlass::epilogue::threadblock::VisitorCompute<
-        cutlass::epilogue::thread::ReLu,
-        ElementComputeEpilogue,
-        ElementComputeEpilogue,
-        cutlass::FloatRoundStyle::round_to_nearest>;
-    using ApplyActivationSiLu = cutlass::epilogue::threadblock::VisitorCompute<
-        cutlass::epilogue::thread::SiLu,
-        ElementComputeEpilogue,
-        ElementComputeEpilogue,
-        cutlass::FloatRoundStyle::round_to_nearest>;
-    using ApplyActivation =
-        std::conditional_t<
-            activation == Activation::NONE,
-            ApplyActivationNone,
-            std::conditional_t<
-                activation == Activation::RELU,
-                ApplyActivationReLu,
-                ApplyActivationSiLu>>;
-    using EVTApplyActivation = cutlass::epilogue::threadblock::Sm80EVT<
-        ApplyActivation,
-        EVTApplyBias>;
+        TensorC>;
 
     using Output = cutlass::epilogue::threadblock::VisitorAuxStore<
         OutputTileThreadMap, ElementOutput, cutlass::FloatRoundStyle::round_to_nearest,
@@ -141,7 +109,7 @@ Tensor two_four_sgemm(
 
     using EVTOutput = cutlass::epilogue::threadblock::Sm80EVT<
         Output,
-        EVTApplyActivation>;
+        EVTApplyTensorC>;
 
     using Gemm = cutlass::gemm::device::SparseGemmWithVisitor<
         ElementInputA,
@@ -183,51 +151,24 @@ Tensor two_four_sgemm(
     const int length_m = tensor_a.size(0);
     const int length_k = tensor_b.size(0);
     const int length_n = tensor_b.size(1);
-    const auto meta_ncols = length_k / kSparse / kElementsPerElementE;
+    const auto tensor_e_ncols = length_k / kSparse / kElementsPerElementE;
 
     // Determine PyTorch datatype for the metadata matrix.
-    auto meta_dtype = at::kChar;
+    auto tensor_e_dtype = at::kChar;
     switch (sizeof(ElementInputE)) {
     case 2:
-        meta_dtype = at::kShort;
+        tensor_e_dtype = at::kShort;
         break;
     case 4:
-        meta_dtype = at::kInt;
+        tensor_e_dtype = at::kInt;
         break;
     default:
-        AT_ERROR("two_four_sgemm: invalid size of meta tensor datatype "
+        AT_ERROR("spgemm_cutlass: invalid size of meta tensor datatype "
                  "encountered");
     }
-    TORCH_CHECK(meta.dtype() == meta_dtype,
-                "two_four_sgemm: Expected meta datatype ", meta_dtype,
-                ", but got ", meta.dtype());
-
-    // Determine PyTorch datatype for the output matrix.
-    auto tensor_d_dtype = at::kChar;
-    if constexpr (std::is_same_v<ElementOutput, int8_t>) {
-        tensor_d_dtype = at::kChar;
-    } else if constexpr (std::is_same_v<ElementOutput, int32_t>) {
-        tensor_d_dtype = at::kInt;
-    } else if constexpr (std::is_same_v<ElementOutput, cutlass::half_t>) {
-        tensor_d_dtype = at::kHalf;
-    } else if constexpr (std::is_same_v<ElementOutput, cutlass::bfloat16_t>) {
-        tensor_d_dtype = at::kBFloat16;
-    } else if constexpr (std::is_same_v<ElementOutput, float>) {
-        tensor_d_dtype = at::kFloat;
-    } else {
-        AT_ERROR("two_four_sgemm: invalid datatype for sparse GEMM output ",
-                 "encountered");
-    }
-    if constexpr (use_bias) {
-        TORCH_CHECK(tensor_c.dtype() == tensor_d_dtype,
-                    "two_four_sgemm: Expected sparse GEMM bias datatype ",
-                    tensor_d_dtype, ", but got ", tensor_c.dtype());
-    }
-
-    // Create output matrix.
-    Tensor tensor_d =
-        tensor_a.new_empty({length_m, length_n},
-                           at::TensorOptions().dtype(tensor_d_dtype));
+    TORCH_CHECK(tensor_e.dtype() == tensor_e_dtype,
+                "spgemm_cutlass: Expected meta datatype ", tensor_e_dtype,
+                ", but got ", tensor_e.dtype());
 
     // Prepare arguments for CUTLASS sparse GEMM kernel.
     cutlass::gemm::GemmCoord problem_size(length_m, length_n, length_k);
@@ -241,12 +182,12 @@ Tensor two_four_sgemm(
             (ElementInputB*)tensor_b.data_ptr(), layout_b);
     auto tensor_e_reordered_device_ref =
         cutlass::TensorRef<ElementInputE, ReorderedLayoutInputE>(
-            (ElementInputE*)meta.data_ptr(),
-            ReorderedLayoutInputE::packed({length_m, meta_ncols}));
+            (ElementInputE*)tensor_e.data_ptr(),
+            ReorderedLayoutInputE::packed({length_m, tensor_e_ncols}));
 
-    BiasArguments bias_arguments{
-        [&]() -> BiasArguments {
-            if constexpr (use_bias) {
+    TensorCArguments tensor_c_arguments{
+        [&]() -> TensorCArguments {
+            if constexpr (use_tensor_c) {
                 return {(ElementC*)tensor_c.data_ptr(),
                         ElementC(0),
                         {cute::_1{}, cute::_0{}, problem_size.m()}};
@@ -257,17 +198,14 @@ Tensor two_four_sgemm(
     };
     typename Output::Arguments output_arguments{
         (ElementOutput*)tensor_d.data_ptr(),
-        {problem_size.n(), cute::_1{}, problem_size.mn().product()}
+            {problem_size.n(), cute::_1{}, problem_size.mn().product()}
     };
     typename EVTOutput::Arguments callback_arguments{
         {
-            {
-                {},                 // Accum
-                bias_arguments,     // Bias
-                {}                  // ApplyBias
-            },                      // EVTApplyBias
-            {}                      // ApplyActivation
-        },                          // EVTApplyActivation
+            {},                     // Accum
+            tensor_c_arguments,     // TensorC
+            {}                      // ApplyTensorC
+        },                          // EVTApplyTensorC
         output_arguments,           // Output
     };                              // EVTOutput
 
@@ -304,8 +242,6 @@ Tensor two_four_sgemm(
     CUTLASS_STATUS_CHECK(status);
 
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-    return tensor_d;
 }
 
 // Dispatch according to the input tensors layouts combination.
@@ -321,11 +257,10 @@ template <
     bool EnableRowMajorColumnMajorLayouts,
     bool EnableColumnMajorRowMajorLayouts,
     bool EnableColumnMajorColumnMajorLayouts,
-    bool use_bias,
-    Activation activation>
-Tensor two_four_sgemm_dispatch_layouts(
+    bool use_tensor_c>
+void spgemm_cutlass_dispatch_layouts(
     const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
-    const Tensor& meta) {
+    const Tensor& tensor_e, Tensor& tensor_d) {
     // Determine layouts (row-major or column-major) of input tensors.
     const auto strides_a = tensor_a.strides();
     auto tensor_a_row_major = strides_a[1] == 1;
@@ -337,7 +272,7 @@ Tensor two_four_sgemm_dispatch_layouts(
     // Perform dispatching.
     if constexpr (EnableRowMajorRowMajorLayouts) {
         if (tensor_a_row_major && tensor_b_row_major) {
-            return two_four_sgemm<
+            spgemm_cutlass<
                 ElementInputA,
                 ElementInputB,
                 ElementOutput,
@@ -347,19 +282,20 @@ Tensor two_four_sgemm_dispatch_layouts(
                 InstructionShape,
                 cutlass::layout::RowMajor,
                 cutlass::layout::RowMajor,
-                use_bias,
-                activation>(
+                use_tensor_c>(
                 tensor_a,
                 tensor_a_stride,
                 tensor_b,
                 tensor_b_stride,
                 tensor_c,
-                meta);
+                tensor_e,
+                tensor_d);
+            return;
         }
     }
     if constexpr (EnableRowMajorColumnMajorLayouts) {
         if (tensor_a_row_major && !tensor_b_row_major) {
-            return two_four_sgemm<
+            spgemm_cutlass<
                 ElementInputA,
                 ElementInputB,
                 ElementOutput,
@@ -369,19 +305,20 @@ Tensor two_four_sgemm_dispatch_layouts(
                 InstructionShape,
                 cutlass::layout::RowMajor,
                 cutlass::layout::ColumnMajor,
-                use_bias,
-                activation>(
+                use_tensor_c>(
                 tensor_a,
                 tensor_a_stride,
                 tensor_b,
                 tensor_b_stride,
                 tensor_c,
-                meta);
+                tensor_e,
+                tensor_d);
+            return;
         }
     }
     if constexpr (EnableColumnMajorRowMajorLayouts) {
         if (!tensor_a_row_major && tensor_b_row_major) {
-            return two_four_sgemm<
+            spgemm_cutlass<
                 ElementInputA,
                 ElementInputB,
                 ElementOutput,
@@ -391,19 +328,20 @@ Tensor two_four_sgemm_dispatch_layouts(
                 InstructionShape,
                 cutlass::layout::ColumnMajor,
                 cutlass::layout::RowMajor,
-                use_bias,
-                activation>(
+                use_tensor_c>(
                 tensor_a,
                 tensor_a_stride,
                 tensor_b,
                 tensor_b_stride,
                 tensor_c,
-                meta);
+                tensor_e,
+                tensor_d);
+            return;
         }
     }
     if constexpr (EnableColumnMajorColumnMajorLayouts) {
         if (!tensor_a_row_major && !tensor_b_row_major) {
-            return two_four_sgemm<
+            spgemm_cutlass<
                 ElementInputA,
                 ElementInputB,
                 ElementOutput,
@@ -413,25 +351,25 @@ Tensor two_four_sgemm_dispatch_layouts(
                 InstructionShape,
                 cutlass::layout::ColumnMajor,
                 cutlass::layout::ColumnMajor,
-                use_bias,
-                activation>(
+                use_tensor_c>(
                 tensor_a,
                 tensor_a_stride,
                 tensor_b,
                 tensor_b_stride,
                 tensor_c,
-                meta);
+                tensor_e,
+                tensor_d);
+            return;
         }
     }
 
-    AT_ERROR("two_four_sgemm_dispatch_layouts: Combination of ",
+    AT_ERROR("spgemm_cutlass_dispatch_layouts: Combination of ",
              tensor_a_row_major ? "row-major" : "column_major", " and ",
              tensor_b_row_major ? "row-major" : "column_major",
              " layouts for input tensors is not supported");
-    return Tensor{};
 }
 
-// Dispatch according to the bias tensor being provided or not.
+// Dispatch according to the tensor_c tensor being provided or not.
 template <
     typename ElementInputA,
     typename ElementInputB,
@@ -443,13 +381,12 @@ template <
     bool EnableRowMajorRowMajorLayouts,
     bool EnableRowMajorColumnMajorLayouts,
     bool EnableColumnMajorRowMajorLayouts,
-    bool EnableColumnMajorColumnMajorLayouts,
-    Activation activation>
-Tensor two_four_sgemm_dispatch_layouts_bias(
+    bool EnableColumnMajorColumnMajorLayouts>
+void spgemm_cutlass_dispatch_layouts_tensor_c(
     const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
-    const Tensor& meta) {
+    const Tensor& tensor_e, Tensor& tensor_d) {
     if (tensor_c.numel() > 0) {
-        return two_four_sgemm_dispatch_layouts<
+        spgemm_cutlass_dispatch_layouts<
             ElementInputA,
             ElementInputB,
             ElementOutput,
@@ -461,14 +398,14 @@ Tensor two_four_sgemm_dispatch_layouts_bias(
             EnableRowMajorColumnMajorLayouts,
             EnableColumnMajorRowMajorLayouts,
             EnableColumnMajorColumnMajorLayouts,
-            true,
-            activation>(
+            true>(
             tensor_a,
             tensor_b,
             tensor_c,
-            meta);
+            tensor_e,
+            tensor_d);
     } else {
-        return two_four_sgemm_dispatch_layouts<
+        spgemm_cutlass_dispatch_layouts<
             ElementInputA,
             ElementInputB,
             ElementOutput,
@@ -480,217 +417,133 @@ Tensor two_four_sgemm_dispatch_layouts_bias(
             EnableRowMajorColumnMajorLayouts,
             EnableColumnMajorRowMajorLayouts,
             EnableColumnMajorColumnMajorLayouts,
-            false,
-            activation>(
+            false>(
             tensor_a,
             tensor_b,
             tensor_c,
-            meta);
+            tensor_e,
+            tensor_d);
     }
-}
-
-// Dispatch according to the activation functions enabled.
-template <
-    typename ElementInputA,
-    typename ElementInputB,
-    typename ElementOutput,
-    typename ElementAccumulator,
-    typename ThreadblockShape,
-    typename WarpShape,
-    typename InstructionShape,
-    bool EnableRowMajorRowMajorLayouts,
-    bool EnableRowMajorColumnMajorLayouts,
-    bool EnableColumnMajorRowMajorLayouts,
-    bool EnableColumnMajorColumnMajorLayouts,
-    bool EnableActivationNone,
-    bool EnableActivationReLU,
-    bool EnableActivationSiLU>
-Tensor two_four_sgemm_dispatch_layouts_bias_activation(
-    const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
-    const Tensor& meta, const c10::string_view& activation) {
-    // Perform dispatching.
-    if constexpr (EnableActivationNone) {
-        if (activation == "none") {
-            return two_four_sgemm_dispatch_layouts_bias<
-                ElementInputA,
-                ElementInputB,
-                ElementOutput,
-                ElementAccumulator,
-                ThreadblockShape,
-                WarpShape,
-                InstructionShape,
-                EnableRowMajorRowMajorLayouts,
-                EnableRowMajorColumnMajorLayouts,
-                EnableColumnMajorRowMajorLayouts,
-                EnableColumnMajorColumnMajorLayouts,
-                Activation::NONE>(
-                tensor_a,
-                tensor_b,
-                tensor_c,
-                meta);
-        }
-    }
-    if constexpr (EnableActivationReLU) {
-        if (activation == "relu") {
-            return two_four_sgemm_dispatch_layouts_bias<
-                ElementInputA,
-                ElementInputB,
-                ElementOutput,
-                ElementAccumulator,
-                ThreadblockShape,
-                WarpShape,
-                InstructionShape,
-                EnableRowMajorRowMajorLayouts,
-                EnableRowMajorColumnMajorLayouts,
-                EnableColumnMajorRowMajorLayouts,
-                EnableColumnMajorColumnMajorLayouts,
-                Activation::RELU>(
-                tensor_a,
-                tensor_b,
-                tensor_c,
-                meta);
-        }
-    }
-    if constexpr (EnableActivationSiLU) {
-        if (activation == "silu") {
-            return two_four_sgemm_dispatch_layouts_bias<
-                ElementInputA,
-                ElementInputB,
-                ElementOutput,
-                ElementAccumulator,
-                ThreadblockShape,
-                WarpShape,
-                InstructionShape,
-                EnableRowMajorRowMajorLayouts,
-                EnableRowMajorColumnMajorLayouts,
-                EnableColumnMajorRowMajorLayouts,
-                EnableColumnMajorColumnMajorLayouts,
-                Activation::SILU>(
-                tensor_a,
-                tensor_b,
-                tensor_c,
-                meta);
-        }
-    }
-
-    AT_ERROR("two_four_sgemm_dispatch_layouts: Activation \"", activation,
-             "\" is not supported for given input tensors");
-    return Tensor{};
 }
 #endif
 
-// Perform linear transformation, but using corresponding CUTLASS
+// Perform multiply-add operation, using corresponding CUTLASS
 // sparse GEMM kernel, to given arguments:
-//     output = input * weight.T + bias
-// The "input" tensor is a dense tensor, while the "weight" tensor is
-// a matrix with 2:4 sparsity pattern.  The "bias" tensor is optional;
-// if provided, it should be a vector, with the number of elements
-// equal to the number of rows of "weight" matrix.  It is assumed
-// that.  It is assumed that "input", after squashing eventual batch
-// dimensions with the next-to-last dimension of this tensor, and
-// "weight" tensors are supplied either in row-major or column-major
-// layouts (different layouts between these two tensors are OK, but
-// not all combinations of formats are supported for some datatypes of
-// these matrices).  The "meta" argument contains metadata matrix. The
-// function returns the output tensor.
+//     result = input + mat1 * mat2
+// The "mat2" tensor is a dense tensor, while the "mat1" tensor is a
+// sparse semi-structured matrix.  The "input" tensor is optional; if
+// provided, it should be a vector, with the number of elements equal
+// to the number of rows of "mat1" matrix.  It is assumed that "mat1"
+// and "mat2" are 2D tensors, supplied either in row-major or
+// column-major layouts (different layouts between these two tensors
+// are OK, but not all combinations of formats are supported for some
+// datatypes of these matrices).  The "mat1_meta" argument contains
+// sparse semi-strucutred metadata.
 //
 // There exists numerous limitations of CUTLASS sparse GEMM kernel,
 // with regards to sizes and alignments of input tensors, their
 // layouts and datatypes, and so on; this is the reason for large
 // number of checks throughout the code.
-Tensor _sparse_semi_structured_linear(
-      const Tensor& input, const Tensor& weight,
-      const Tensor& meta, const c10::optional<Tensor>& bias_opt,
-      const c10::optional<c10::string_view> activation_opt,
+//
+// TODO: The "input" tensor has to be a vector, such that it could be
+// broadcasted to columns of mat1 * mat2.  The case of broadcasting to
+// rows of mat1 * mat2 could be also supported, if "input" tensor is a
+// vector of corresponding length; and same for the case when "input"
+// tensor is a matrix of same size as mat1 * mat2 product.  If these
+// updates made here, then remember to update corresponding bits in
+// the Inductor code that are handling meta registrations and
+// lowerings of aten._sparse_semi_structured_mm and
+// aten._sparse_semi_structured_addmm operators.
+Tensor sparse_semi_structured_mad_op(
+      const Tensor& mat1, const Tensor& mat1_meta, const Tensor& mat2,
+      const c10::optional<Tensor>& input_opt,
       const c10::optional<c10::ScalarType> out_dtype_opt) {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-    AT_ERROR("_sparse_semi_structured_linear: CUTLASS not supported");
+    AT_ERROR("sparse_semi_structured_mad_op: CUTLASS not supported");
     return Tensor{};
 #else
     // No need to check that all tensors are on CUDA device, as this
     // is provided by dispatch.
 
     // Introduce alias names for arguments, according to the CUTLASS
-    // naming conventions.  Also, squash the batch dimensions of the
-    // input tensor with its next-to-last dimensions.
-    const auto input_sizes = input.sizes().vec();
-    const auto tensor_a = weight;
-    const auto tensor_b =
-        input.reshape({-1, input_sizes.back()}).transpose(-1, -2);
-    const auto tensor_c = bias_opt.has_value() ? *bias_opt : Tensor{};
-
-    const auto activation =
-        activation_opt.has_value() ? *activation_opt : "none";
-
-    TORCH_CHECK(!out_dtype_opt.has_value() ||
-                (tensor_a.dtype() == at::ScalarType::Char &&
-                 out_dtype_opt.value() == at::ScalarType::Int),
-                "_sparse_semi_structured_linear: Setting out_dtype is only "
-                "supported for int8 input and int32 output");
+    // naming conventions.
+    const auto& tensor_a = mat1;
+    const auto& tensor_e = mat1_meta;
+    const auto& tensor_b = mat2;
+    const auto& tensor_c = input_opt.value_or(Tensor{});
+    const auto out_dtype = out_dtype_opt.value_or(tensor_b.scalar_type());
 
     // For now, only CC 8.x devices are supported.
     const auto dprops = at::cuda::getCurrentDeviceProperties();
     const auto is_sm8x = dprops->major == 8;
     TORCH_CHECK(is_sm8x,
-                "_sparse_semi_structured_linear: Supported only on GPUs with "
+                "sparse_semi_structured_mad_op: Supported only on GPUs with "
                 "compute capability 8.x");
 
     // Validate datatypes of input tensors.
-    TORCH_CHECK(tensor_a.dtype() == at::kChar ||
-                tensor_a.dtype() == at::kHalf ||
-                tensor_a.dtype() == at::kBFloat16 ||
-                tensor_a.dtype() == at::kFloat,
-                "_sparse_semi_structured_linear: The weight datatype ",
-                tensor_a.dtype(), " is not supported");
-    TORCH_CHECK(tensor_b.dtype() == tensor_a.dtype(),
-                "_sparse_semi_structured_linear: Expected input datatype ",
-                tensor_a.dtype(), ", but got ", tensor_b.dtype());
+    TORCH_CHECK(tensor_b.dtype() == at::kChar ||
+                tensor_b.dtype() == at::kHalf ||
+                tensor_b.dtype() == at::kBFloat16 ||
+                tensor_b.dtype() == at::kFloat,
+                "sparse_semi_structured_mad_op: The mat2 datatype ",
+                tensor_b.dtype(), " is not supported");
+    TORCH_CHECK(tensor_a.dtype() == tensor_b.dtype(),
+                "sparse_semi_structured_mad_op: Expected mat1 datatype ",
+                tensor_b.dtype(), ", but got ", tensor_a.dtype());
+    if (tensor_c.numel() != 0) {
+        TORCH_CHECK(tensor_c.dtype() == out_dtype,
+                    "sparse_semi_structured_mad_op: Expected input datatype ",
+                    out_dtype, ", but got ", tensor_c.dtype());
+    }
 
     // Validate layouts of input tensors.
     TORCH_CHECK(tensor_a.layout() == Layout::Strided,
-                "_sparse_semi_structured_linear: Expected weight argument "
-                "to be strided, but got layout ", tensor_a.layout());
+                "sparse_semi_structured_mad_op: Expected mat1 argument to be "
+                "strided, but got layout ", tensor_a.layout());
     TORCH_CHECK(tensor_a.dim() == 2,
-                "_sparse_semi_structured_linear: Expected weight argument "
-                "to be 2D tensor, got ", tensor_a.dim(), " dims");
+                "sparse_semi_structured_mad_op: Expected mat1 argument to be "
+                "2D tensor, got ", tensor_a.dim(), " dims");
     const auto strides_a = tensor_a.strides();
-    TORCH_CHECK((strides_a[0] == 1 || strides_a[1] == 1) &&
-                strides_a[0] != strides_a[1],
-                "_sparse_semi_structured_linear: Invalid strides for weight "
+    TORCH_CHECK(strides_a[0] == 1 || strides_a[1] == 1,
+                "sparse_semi_structured_mad_op: Invalid strides for mat1 "
                 "argument: row stride = ", strides_a[0], ", column stride = ",
                 strides_a[1]);
     TORCH_CHECK(tensor_b.layout() == Layout::Strided,
-                "_sparse_semi_structured_linear: Expected input argument "
-                "to be strided, but got layout ", tensor_b.layout());
+                "sparse_semi_structured_mad_op: Expected mat2 argument to be "
+                "strided, but got layout ", tensor_b.layout());
     TORCH_CHECK(tensor_b.dim() == 2,
-                "_sparse_semi_structured_linear: Expected input argument "
-                "to be 2D tensor, got ", tensor_b.dim(), " dims");
+                "sparse_semi_structured_mad_op: Expected mat2 argument to be "
+                "2D tensor, got ", tensor_b.dim(), " dims");
     const auto strides_b = tensor_b.strides();
-    TORCH_CHECK((strides_b[0] == 1 || strides_b[1] == 1) &&
-                strides_b[0] != strides_b[1],
-                "_sparse_semi_structured_linear: Invalid strides for input "
+    TORCH_CHECK(strides_b[0] == 1 || strides_b[1] == 1,
+                "sparse_semi_structured_mad_op: Invalid strides for mat2 "
                 "argument: row stride = ", strides_b[0], ", column stride = ",
                 strides_b[1]);
     if (tensor_c.numel() != 0) {
         TORCH_CHECK(tensor_c.layout() == Layout::Strided,
-                    "_sparse_semi_structured_linear: Expected bias argument "
-                    "to be strided, but got layout ", tensor_c.layout());
+                    "sparse_semi_structured_mad_op: Expected input argument to "
+                    "be strided, but got layout ", tensor_c.layout());
         TORCH_CHECK(tensor_c.dim() == 1,
-                    "_sparse_semi_structured_linear: Expected bias argument "
-                    "to be 1D tensor, got ", tensor_c.dim(), " dims");
+                    "sparse_semi_structured_mad_op: Expected input argument to "
+                    "be 1D tensor, got ", tensor_c.dim(), " dims");
     }
 
     // Validate sizes of input tensors.
     TORCH_CHECK(tensor_a.size(1) == tensor_b.size(0) / 2,
-                "_sparse_semi_structured_linear: Expected weight argument "
-                "to have ", tensor_b.size(0) / 2, " columns, but got ",
+                "sparse_semi_structured_mad_op: Expected mat1 argument to "
+                "have ", tensor_b.size(0) / 2, " columns, but got ",
                 tensor_a.size(1));
     if (tensor_c.numel() != 0) {
         TORCH_CHECK(tensor_c.size(0) == tensor_a.size(0),
-                    "_sparse_semi_structured_linear: Expected bias argument "
-                    "to have ", tensor_a.size(0), " elements, but got ",
+                    "sparse_semi_structured_mad_op: Expected input argument to "
+                    "have ", tensor_a.size(0), " elements, but got ",
                     tensor_c.size(0));
     }
+
+    // Create output tensor.
+    Tensor tensor_d =
+        tensor_b.new_empty({tensor_a.size(0), tensor_b.size(1)},
+                           at::TensorOptions().dtype(out_dtype));
 
     // Call wrapper function for CUTLASS sparse GEMM, dispatching on
     // the input datatype, and then on input tensors layouts.
@@ -699,10 +552,9 @@ Tensor _sparse_semi_structured_linear(
     // the wrapper function.  The tile sizes template arguments are
     // selected according to the CUTLASS profiler results, for number
     // of runs.
-    Tensor output;
     AT_DISPATCH_SWITCH(
         tensor_a.scalar_type(),
-        "_sparse_semi_structured_linear",
+        "sparse_semi_structured_mad_op",
         AT_DISPATCH_CASE(
             at::ScalarType::Char,
             [&]() {
@@ -717,12 +569,9 @@ Tensor _sparse_semi_structured_linear(
                 const auto EnableRowMajorColumnMajorLayouts = true;
                 const auto EnableColumnMajorRowMajorLayouts = false;
                 const auto EnableColumnMajorColumnMajorLayouts = false;
-                const auto EnableActivationNone = true;
-                const auto EnableActivationReLU = true;
-                const auto EnableActivationSiLU = false;
-                if (out_dtype_opt.has_value()) {
+                if (out_dtype == at::kInt) {
                   using ElementOutput = int32_t;
-                  output = two_four_sgemm_dispatch_layouts_bias_activation<
+                  spgemm_cutlass_dispatch_layouts_tensor_c<
                       ElementInputA,
                       ElementInputB,
                       ElementOutput,
@@ -733,18 +582,15 @@ Tensor _sparse_semi_structured_linear(
                       EnableRowMajorRowMajorLayouts,
                       EnableRowMajorColumnMajorLayouts,
                       EnableColumnMajorRowMajorLayouts,
-                      EnableColumnMajorColumnMajorLayouts,
-                      EnableActivationNone,
-                      EnableActivationReLU,
-                      EnableActivationSiLU>(
+                      EnableColumnMajorColumnMajorLayouts>(
                       tensor_a,
                       tensor_b,
                       tensor_c,
-                      meta,
-                      activation);
-                } else {
+                      tensor_e,
+                      tensor_d);
+                } else if (out_dtype == at::kChar) {
                   using ElementOutput = int8_t;
-                  output = two_four_sgemm_dispatch_layouts_bias_activation<
+                  spgemm_cutlass_dispatch_layouts_tensor_c<
                       ElementInputA,
                       ElementInputB,
                       ElementOutput,
@@ -755,17 +601,13 @@ Tensor _sparse_semi_structured_linear(
                       EnableRowMajorRowMajorLayouts,
                       EnableRowMajorColumnMajorLayouts,
                       EnableColumnMajorRowMajorLayouts,
-                      EnableColumnMajorColumnMajorLayouts,
-                      EnableActivationNone,
-                      EnableActivationReLU,
-                      EnableActivationSiLU>(
+                      EnableColumnMajorColumnMajorLayouts>(
                       tensor_a,
                       tensor_b,
                       tensor_c,
-                      meta,
-                      activation);
+                      tensor_e,
+                      tensor_d);
                 }
-                return;
             })
         AT_DISPATCH_CASE(
             at::ScalarType::Half,
@@ -781,10 +623,7 @@ Tensor _sparse_semi_structured_linear(
                 const auto EnableRowMajorColumnMajorLayouts = true;
                 const auto EnableColumnMajorRowMajorLayouts = true;
                 const auto EnableColumnMajorColumnMajorLayouts = true;
-                const auto EnableActivationNone = true;
-                const auto EnableActivationReLU = true;
-                const auto EnableActivationSiLU = true;
-                output = two_four_sgemm_dispatch_layouts_bias_activation<
+                spgemm_cutlass_dispatch_layouts_tensor_c<
                     ElementInputA,
                     ElementInputB,
                     ElementOutput,
@@ -795,16 +634,12 @@ Tensor _sparse_semi_structured_linear(
                     EnableRowMajorRowMajorLayouts,
                     EnableRowMajorColumnMajorLayouts,
                     EnableColumnMajorRowMajorLayouts,
-                    EnableColumnMajorColumnMajorLayouts,
-                    EnableActivationNone,
-                    EnableActivationReLU,
-                    EnableActivationSiLU>(
+                    EnableColumnMajorColumnMajorLayouts>(
                     tensor_a,
                     tensor_b,
                     tensor_c,
-                    meta,
-                    activation);
-                return;
+                    tensor_e,
+                    tensor_d);
             })
             AT_DISPATCH_CASE(
             at::ScalarType::BFloat16,
@@ -820,10 +655,7 @@ Tensor _sparse_semi_structured_linear(
                 const auto EnableRowMajorColumnMajorLayouts = true;
                 const auto EnableColumnMajorRowMajorLayouts = true;
                 const auto EnableColumnMajorColumnMajorLayouts = true;
-                const auto EnableActivationNone = true;
-                const auto EnableActivationReLU = true;
-                const auto EnableActivationSiLU = true;
-                output = two_four_sgemm_dispatch_layouts_bias_activation<
+                spgemm_cutlass_dispatch_layouts_tensor_c<
                     ElementInputA,
                     ElementInputB,
                     ElementOutput,
@@ -834,16 +666,12 @@ Tensor _sparse_semi_structured_linear(
                     EnableRowMajorRowMajorLayouts,
                     EnableRowMajorColumnMajorLayouts,
                     EnableColumnMajorRowMajorLayouts,
-                    EnableColumnMajorColumnMajorLayouts,
-                    EnableActivationNone,
-                    EnableActivationReLU,
-                    EnableActivationSiLU>(
+                    EnableColumnMajorColumnMajorLayouts>(
                     tensor_a,
                     tensor_b,
                     tensor_c,
-                    meta,
-                    activation);
-                return;
+                    tensor_e,
+                    tensor_d);
             })
             AT_DISPATCH_CASE(
             at::ScalarType::Float,
@@ -859,10 +687,7 @@ Tensor _sparse_semi_structured_linear(
                 const auto EnableRowMajorColumnMajorLayouts = true;
                 const auto EnableColumnMajorRowMajorLayouts = true;
                 const auto EnableColumnMajorColumnMajorLayouts = true;
-                const auto EnableActivationNone = true;
-                const auto EnableActivationReLU = true;
-                const auto EnableActivationSiLU = true;
-                output = two_four_sgemm_dispatch_layouts_bias_activation<
+                spgemm_cutlass_dispatch_layouts_tensor_c<
                     ElementInputA,
                     ElementInputB,
                     ElementOutput,
@@ -873,23 +698,33 @@ Tensor _sparse_semi_structured_linear(
                     EnableRowMajorRowMajorLayouts,
                     EnableRowMajorColumnMajorLayouts,
                     EnableColumnMajorRowMajorLayouts,
-                    EnableColumnMajorColumnMajorLayouts,
-                    EnableActivationNone,
-                    EnableActivationReLU,
-                    EnableActivationSiLU>(
+                    EnableColumnMajorColumnMajorLayouts>(
                     tensor_a,
                     tensor_b,
                     tensor_c,
-                    meta,
-                    activation);
-                return;
+                    tensor_e,
+                    tensor_d);
             }));
 
-    // Re-introduce batch dimensions into the output, and return.
-    auto output_sizes = input_sizes;
-    output_sizes.back() = weight.size(0);
-    return output.transpose(-1, -2).reshape(output_sizes);
+    return tensor_d;
 #endif
+}
+
+// Implementation of aten._sparse_semi_structured_mm operator.
+Tensor _sparse_semi_structured_mm(
+      const Tensor& mat1, const Tensor& mat1_meta, const Tensor& mat2,
+      const c10::optional<c10::ScalarType> out_dtype_opt) {
+    return sparse_semi_structured_mad_op(mat1, mat1_meta, mat2,
+                                         c10::optional<Tensor>(),
+                                         out_dtype_opt);
+}
+
+// Implementation of aten._sparse_semi_structured_addmm operator.
+Tensor _sparse_semi_structured_addmm(
+      const Tensor& input, const Tensor& mat1, const Tensor& mat1_meta,
+      const Tensor& mat2, const c10::optional<c10::ScalarType> out_dtype_opt) {
+    return sparse_semi_structured_mad_op(mat1, mat1_meta, mat2, input,
+                                         out_dtype_opt);
 }
 
 } // namespace at::native

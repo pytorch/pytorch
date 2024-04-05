@@ -397,36 +397,59 @@ def meta_unsqueeze_(self, dim):
     return self
 
 
-@register_meta(aten._sparse_semi_structured_linear)
-def meta_sparse_structured_linear(
-    input: Tensor,
-    weight: Tensor,
-    _meta: Tensor,
-    bias: Optional[Tensor] = None,
-    _activation_opt: Optional[str] = None,
+@register_meta(aten._sparse_semi_structured_mm)
+def meta_sparse_structured_mm(
+    mat1: Tensor,
+    mat1_meta: Tensor,
+    mat2: Tensor,
     out_dtype: Optional[torch.dtype] = None,
 ):
-    output_sizes = list(input.shape)
-    if bias is not None:
-        assert weight.size(0) == bias.size(0), "output size mismatch"
-    assert weight.size(1) == input.size(-1) / 2
-    output_sizes[-1] = weight.size(0)
-
-    # see: https://github.com/pytorch/pytorch/pull/114477#issuecomment-1830121375
-    # We assume that we have already squashed the inputs into a 2-D tensor
-    # Then, as the output is transposed, we need to propagate the transposed
-    # stride information to the output tensor
-    assert len(input.shape) == 2, "we can only handle the squashed input case"
-    transposed_strides = (1, input.size(0))
+    assert len(mat1.shape) == 2
+    assert len(mat1_meta.shape) == 2
+    assert len(mat2.shape) == 2
+    assert mat1.size(1) == mat2.size(0) / 2
+    output_sizes = [mat1.size(0), mat2.size(1)]
 
     if out_dtype is not None:
         assert (
-            input.dtype == torch.int8 and out_dtype == torch.int32
+            mat2.dtype == torch.int8 and out_dtype == torch.int32
         ), "out_dtype is only supported for i8i8->i32 linear operator"
-    output = input.new_empty(
+    output = mat2.new_empty(
         output_sizes,
-        dtype=input.dtype if out_dtype is None else out_dtype,
-    ).as_strided(output_sizes, transposed_strides)
+        dtype=mat2.dtype if out_dtype is None else out_dtype,
+    )
+
+    return output
+
+
+@register_meta(aten._sparse_semi_structured_addmm)
+def meta_sparse_structured_addmm(
+    input: Tensor,
+    mat1: Tensor,
+    mat1_meta: Tensor,
+    mat2: Tensor,
+    out_dtype: Optional[torch.dtype] = None,
+):
+    assert (
+        len(input.shape) == 1
+    ), "only input broadcasted to columns of mat1 * mat2 product is supported"
+    assert len(mat1.shape) == 2
+    assert len(mat1_meta.shape) == 2
+    assert len(mat2.shape) == 2
+    assert input.size(0) == mat1.size(
+        0
+    ), "only input broadcasted to columns of mat1 * mat2 product is supported"
+    assert mat1.size(1) == mat2.size(0) / 2
+    output_sizes = [mat1.size(0), mat2.size(1)]
+
+    if out_dtype is not None:
+        assert (
+            mat2.dtype == torch.int8 and out_dtype == torch.int32
+        ), "out_dtype is only supported for i8i8->i32 linear operator"
+    output = mat2.new_empty(
+        output_sizes,
+        dtype=mat2.dtype if out_dtype is None else out_dtype,
+    )
 
     return output
 
