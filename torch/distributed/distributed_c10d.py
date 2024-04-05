@@ -1533,6 +1533,7 @@ def _new_process_group_helper(
                 pg_options.split_from = split_from
                 pg_options.split_color = _process_group_color(global_ranks_in_group)
             pg_options.global_ranks_in_group = global_ranks_in_group
+            pg_options.group_name = group_name
             backend_class = ProcessGroupNCCL(
                 backend_prefix_store, group_rank, group_size, pg_options)
             backend_type = ProcessGroup.BackendType.NCCL
