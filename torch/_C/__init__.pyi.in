@@ -854,6 +854,7 @@ class FunctionSchema:
     returns: List[Argument]
     name: str
     overload_name: str
+    is_mutable: _bool
 
 class _UpgraderEntry:
     bumped_at_version: _int

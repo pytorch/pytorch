@@ -78,24 +78,29 @@ def is_functional_schema(schema: Any) -> bool:
     - it has at least one return
     """
 
-    # Lazy import because not all PyTorch builds have torchgen
-    from torchgen.model import FunctionSchema, SchemaKind
+    def is_functional(schema):
+        if schema.is_mutable:
+            return False
+        rets = schema.returns
+        is_non_mutating_view = len(rets) > 0 and any(
+            r.alias_info is not None and not r.alias_info.is_write for r in rets
+        )
+        if is_non_mutating_view:
+            return False
+        if not schema.returns:
+            return False
+        return True
 
-    assert isinstance(schema, (str, FunctionSchema))
+    if isinstance(schema, torch._C.FunctionSchema):
+        return is_functional(schema)
+
+    # Lazy import because not all PyTorch builds have torchgen
+    from torchgen.model import FunctionSchema
+
     if isinstance(schema, str):
         schema = FunctionSchema.parse(schema)
-
-    if schema.kind() != SchemaKind.functional:
-        return False
-    rets = schema.returns
-    is_non_mutating_view = len(rets) > 0 and any(
-        r.annotation is not None and not r.annotation.is_write for r in rets
-    )
-    if is_non_mutating_view:
-        return False
-    if not schema.returns:
-        return False
-    return True
+    assert isinstance(schema, FunctionSchema)
+    return is_functional(schema)
 
 
 def mutates_and_returns_first_arg(op: torch._ops.OpOverload):

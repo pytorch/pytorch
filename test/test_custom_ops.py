@@ -1742,6 +1742,28 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
         lib.impl("foo", lambda x: x.sin().cos(), key)
         self._test_backward_impl_raises(qualname, key)
 
+    def test_is_functional_schema(self):
+        tests = {
+            "foo(Tensor x) -> Tensor": True,
+            "foo(Tensor(a) x) -> Tensor": True,
+            "foo(Tensor(a!) x) -> Tensor": False,
+            "foo(Tensor(a) x) -> Tensor(a)": False,
+            "foo(Tensor x) -> ()": False,
+        }
+        for schema_str, expected in tests.items():
+            res = torch._library.utils.is_functional_schema(schema_str)
+            self.assertEqual(res, expected)
+
+            from torchgen.model import FunctionSchema
+
+            schema = FunctionSchema.parse(schema_str)
+            res = torch._library.utils.is_functional_schema(schema)
+            self.assertEqual(res, expected)
+
+            schema = torch._C.parse_schema(schema_str)
+            res = torch._library.utils.is_functional_schema(schema)
+            self.assertEqual(res, expected)
+
     def test_backward_impl_on_existing_op(self):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
