@@ -1616,7 +1616,8 @@ static at::Tensor _quantized_convolution_onednn(
   );
 
 #if IDEEP_PREREQ(3, 1, 0, 0)
-  // Use oneDNN's APIs instead of prepare/compute from ideep to reduce framework overhead.
+  // Use oneDNN's APIs instead of prepare/compute from ideep to reduce integration overhead.
+  // The functions from ideep are heavy because they have complex data structures for unified API
   // oneDNN version >= 3.1.0 is required.
   using ideep::tensor;
   auto weights_desc = packed_weight.get_desc();
