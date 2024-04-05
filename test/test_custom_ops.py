@@ -692,20 +692,6 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             infer_schema(foo)
 
-        with self.assertRaisesRegex(ValueError, "default value"):
-
-            def foo(x: Optional[Tensor] = None):
-                raise NotImplementedError()
-
-            infer_schema(foo)
-
-        with self.assertRaisesRegex(ValueError, "default value"):
-
-            def foo(x: Optional[Tensor] = None):
-                raise NotImplementedError()
-
-            infer_schema(foo)
-
         with self.assertRaisesRegex(ValueError, "unsupported"):
 
             def foo(x: Tensor) -> Tuple[Tensor, ...]:
@@ -2157,6 +2143,24 @@ class TestCustomOpAPI(TestCase):
         z = add(x, y)
         self.assertEqual(z, x + y)
         self.assertTrue(cpu_called)
+
+    def test_default_values(self):
+        defaults = []
+
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def f(
+            x: Tensor,
+            a: Optional[int] = None,
+            b: float = 3.14,
+            c: bool = True,
+            d: int = 3,
+        ) -> Tensor:
+            defaults.extend([a, b, c, d])
+            return x.clone()
+
+        x = torch.randn(3)
+        f(x)
+        self.assertEqual(defaults, [None, 3.14, True, 3])
 
     def test_mutated_error(self):
         with self.assertRaisesRegex(
