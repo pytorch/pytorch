@@ -1076,22 +1076,21 @@ class GuardBuilder(GuardBuilderBase):
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
-        if guard.is_local():
-            return self.ID_MATCH(guard)
+        return self.ID_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard):
         """matches a closure by __code__ id."""
-        if guard.is_local():
-            val = self.get(guard.name)
-            # Strictly only want user-defined functions
-            if type(val) == types.FunctionType and hasattr(val, "__code__"):
-                self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)
-                self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)
-            else:
-                self.FUNCTION_MATCH(guard)
+        val = self.get(guard.name)
+        # Strictly only want user-defined functions
+        if type(val) == types.FunctionType and hasattr(val, "__code__"):
+            self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)
+            self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)
+        else:
+            self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
-        return self.FUNCTION_MATCH(guard)
+        if guard.is_local():
+            return self.ID_MATCH(guard)
 
     def PYMODULE_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
