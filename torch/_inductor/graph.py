@@ -66,7 +66,12 @@ from .lowering import (
     unsupported_output_tensor,
 )
 from .sizevars import SizeVarAllocator
-from .utils import convert_shape_to_inductor, gather_origins, get_sympy_Expr_dtype
+from .utils import (
+    convert_shape_to_inductor,
+    gather_origins,
+    get_cloned_parameter_buffer_name,
+    get_sympy_Expr_dtype,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -669,6 +674,22 @@ class GraphLowering(torch.fx.Interpreter):
         for user in self.name_to_users[name]:
             user.realize()
 
+    def get_original_value_of_constant(self, name: str):
+        """
+        In AOTI, module buffers may have been mutated during the tracing and compilation.
+        Thus we need to read from previously stored original buffers, to make sure the
+        generated model.so uses correct initial values.
+        """
+        assert name in self.allocated_constant_name and name in self.constants, (
+            "Can not find the original value for " + name
+        )
+        orig_name = get_cloned_parameter_buffer_name(self.allocated_constant_name[name])
+        return (
+            self.module.meta[orig_name]
+            if orig_name in self.module.meta
+            else self.constants[name]
+        )
+
     def add_tensor_constant(self, data, name=None):
         def allocate(name):
             if not config.aot_inductor.use_runtime_constant_folding:
@@ -679,7 +700,8 @@ class GraphLowering(torch.fx.Interpreter):
                         and data.stride() == value.stride()
                         and data.dtype == value.dtype
                         and data.device == value.device
-                        and torch.eq(data, value).all()
+                        and data.untyped_storage().data_ptr()
+                        == value.untyped_storage().data_ptr()
                     ):
                         return constant_name
 
@@ -1048,6 +1070,8 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.aten.as_strided.default,
                 torch.ops.aten.as_strided_.default,
                 torch.ops.aten.as_strided_scatter.default,
+                torch.ops.aten.resize.default,
+                torch.ops.aten.resize_as.default,
             ]
             is_output = any(user.op == "output" for user in n.users)
             is_input_for_as_strided = any(
