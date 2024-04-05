@@ -103,6 +103,8 @@ class CustomOpDef:
 
         self._backend_fns: Dict[Union[str, None], Callable] = {}
         self._abstract_fn: Optional[Callable] = None
+        self._setup_context_fn: Optional[Callable] = None
+        self._backward_fn: Optional[Callable] = None
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
@@ -283,6 +285,80 @@ class CustomOpDef:
         self._abstract_fn = fn
         return fn
 
+    def register_autograd(
+        self, setup_context_fn: Callable, backward_fn: Callable, /
+    ) -> None:
+        r"""Register a backward formula for this custom op.
+
+        In order for an operator to work with autograd, you need to register
+        a backward formula. There are two pieces to this:
+        1. You must tell us what we need to save from the forward pass for
+           the backward pass. This is the "setup_context" function.
+        2. You must tell us how to compute gradients during the backward pass.
+           This is the "backward" function.
+
+        ``setup_context_fn(ctx, inputs, output)`` runs during the forward pass.
+        Please save quantities needed for backward onto the ``ctx`` object via
+        either :func:`ctx.save_for_backward` or assigning them as attributes of
+        ``ctx``.
+
+        ``backward_fn`` runs during the backward pass. It accepts ``(ctx, *grads)``:
+        - ``grads`` is one or more gradients. The number of gradients matches
+          the number of outputs of the operator.
+
+        Both ``setup_context_fn`` and ``backward_fn`` must be traceable. That is,
+        they may not directly access Tensor.data_ptr and they must not depend on
+        or mutate global state. If you need a non-traceable backward, you can make
+        it a separate custom_op that you call inside ``backward_fn``.
+
+        Examples:
+            >>> import torch
+            >>> import numpy as np
+            >>> from torch import Tensor
+            >>>
+            >>> @torch.library.custom_op("mylib::numpy_sin", mutated_args=())
+            >>> def numpy_sin(x: Tensor) -> Tensor:
+            >>>     x_np = x.cpu().numpy()
+            >>>     y_np = np.sin(x_np)
+            >>>     return torch.from_numpy(y_np).to(device=x.device)
+            >>>
+            >>> def setup_context(ctx, inputs, output) -> Tensor:
+            >>>     x, = inputs
+            >>>     ctx.save_for_backward(x)
+            >>>
+            >>> def backward(ctx, grad):
+            >>>     x, = ctx.saved_tensors
+            >>>     return grad * x.cos()
+            >>>
+            >>> numpy_sin.register_autograd(setup_context, backward)
+            >>>
+            >>> x = torch.randn(3, requires_grad=True)
+            >>> y = numpy_sin(x)
+            >>> grad_x, = torch.autograd.grad(y, x, torch.ones_like(y))
+            >>> assert torch.allclose(grad_x, x.cos())
+
+        """
+        schema = self._opoverload._schema
+        if not _library.utils.is_functional_schema(schema):
+            raise RuntimeError(
+                f"Cannot register autograd formula for non-functional operator "
+                f"{self} with schema {schema}. Please create "
+                f"a functional operator and register an autograd formula for that."
+            )
+
+        if any(
+            _library.utils.is_tensorlist_like_type(a.type)
+            for a in (*schema.arguments, *schema.returns)
+        ):
+            raise NotImplementedError(
+                f"NYI: registering autograd formula for operator {self} that "
+                f"accepts or takes Tensor lists. "
+                f"Please open an issue if you want us to prioritize this feature"
+            )
+
+        self._backward_fn = backward_fn
+        self._setup_context_fn = setup_context_fn
+
     def _register_to_dispatcher(self) -> None:
         lib = self._lib
         lib.define(f"{self._name}{self._schema}")
@@ -299,6 +375,9 @@ class CustomOpDef:
             return self._abstract_fn(*args, **kwargs)
 
         library.impl_abstract(self._qualname, lib=lib)(fake_impl)
+
+        autograd_impl = _library.autograd.make_autograd_impl(self)
+        lib.impl(self._name, autograd_impl, "Autograd")
 
     def __call__(self, *args, **kwargs):
         return self._opoverload(*args, **kwargs)
