@@ -17,6 +17,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
+from .. import config
 from .collect_metadata_analysis import coerce_tangent
 from .schemas import (
     BackwardSignature,
@@ -27,7 +28,6 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .utils import strict_zip
-from .. import config
 
 zip = strict_zip
 
@@ -343,9 +343,16 @@ def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
         for j in range(num_aliases):
             j_ = aliased_input_indices[j]
             curr_inp = fwd_inputs[j_]
-            if any(isinstance(x, torch.SymInt) for x in itertools.chain(curr_inp.shape, curr_inp.stride(), [curr_inp.storage_offset()])):
+            if any(
+                isinstance(x, torch.SymInt)
+                for x in itertools.chain(
+                    curr_inp.shape, curr_inp.stride(), [curr_inp.storage_offset()]
+                )
+            ):
                 dynamic_shape_indices.add(j_)
-        assert len(dynamic_shape_indices) == 0, f"""\
+        assert (
+            len(dynamic_shape_indices) == 0
+        ), f"""\
 Encountered a graph where:
 - {num_aliases} graph inputs all share the same storage (input indices: {str(aliased_input_indices)})
 - at least one of these aliased inputs was mutated

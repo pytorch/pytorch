@@ -4267,8 +4267,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
     def test_overlapping_inputs_with_dynamic_shapes_error(self):
-
-        @torch.compile(backend='aot_eager')
+        @torch.compile(backend="aot_eager")
         def fn(a, b, c, d, e, f):
             a.mul_(2)
             b.mul_(2)
@@ -4286,7 +4285,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             f = base[:, 10:12]
             f2 = base[:, 10:14]
             out = fn(a, b, c, d, e, f)
-            with self.assertRaisesRegex(AssertionError, "is being compiled with dynamic shapes"):
+            with self.assertRaisesRegex(
+                AssertionError, "is being compiled with dynamic shapes"
+            ):
                 out2 = fn(a, b, c, d, e, f2)
 
     def test_user_ctor_ctx_manager_custom_init(self):
