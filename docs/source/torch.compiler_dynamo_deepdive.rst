@@ -496,7 +496,7 @@ Symbolic Shapes
 
 Another point we discussed in the introduction is that Dynamo knows how
 to trace integers. In order to implement this, we use a symbolic class
-`torch.SymInt <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/__init__.py#L244-L249>`__ 
+`torch.SymInt <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/__init__.py#L244-L249>`__
 that acts like an ``int`` but it records all the operations performed on
 it in the output FX graph. [4]_ We already saw this class in the introduction
 when introducing symbolic integer tracing.
