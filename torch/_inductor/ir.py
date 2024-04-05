@@ -5791,7 +5791,7 @@ class ConvolutionBinary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.mkldnn._convolution_pointwise.binary"
+            python_kernel_name="torch.ops.mkldnn._convolution_pointwise.binary",
             cpp_kernel_name="mkldnn::_convolution_pointwise",
         )
         self.cpp_kernel_overload_name = "binary"
