@@ -2,7 +2,6 @@
 
 import functools
 import itertools
-import os
 import sys
 import unittest
 from copy import deepcopy
@@ -49,10 +48,6 @@ from torch.utils._foreach_utils import (
     _get_foreach_kernels_supported_devices,
     _get_fused_kernels_supported_devices,
 )
-
-
-def is_dynamo_enabled() -> bool:
-    return os.environ.get("PYTORCH_TEST_WITH_DYNAMO") == "1"
 
 
 class OptimizerInput:
@@ -1207,7 +1202,7 @@ optim_db: List[OptimizerInfo] = [
                 toleranceOverride({torch.float64: tol(atol=4.5e-7, rtol=2.2e-6)}),
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
-                active_if=lambda kwargs: is_dynamo_enabled()
+                active_if=lambda kwargs: TEST_WITH_TORCHDYNAMO
                 and kwargs["dtype"] == torch.float64,
             ),
         ),
@@ -1375,7 +1370,7 @@ optim_db: List[OptimizerInfo] = [
                 toleranceOverride({torch.float64: tol(atol=4.5e-7, rtol=2.2e-6)}),
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
-                active_if=lambda kwargs: is_dynamo_enabled()
+                active_if=lambda kwargs: TEST_WITH_TORCHDYNAMO
                 and kwargs["dtype"] == torch.float64,
             ),
         ),
