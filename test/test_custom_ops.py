@@ -1764,6 +1764,28 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
             res = torch._library.utils.is_functional_schema(schema)
             self.assertEqual(res, expected)
 
+    def test_is_tensorlist_like_type(self):
+        tensorlists = [
+            # Tensor[]
+            torch.ops.aten.where.default._schema.returns[0].type,
+            # Tensor?[]
+            torch.ops.aten.index.Tensor._schema.arguments[1].type,
+            # Tensor[]?
+            torch._C.parse_schema("foo(Tensor[]? x) -> ()").arguments[0].type,
+            # Tensor?[]?
+            torch._C.parse_schema("foo(Tensor?[]? x) -> ()").arguments[0].type,
+        ]
+        non_tensorlists = [
+            # Tensor
+            torch.ops.aten.sin.default._schema.arguments[0].type,
+            # IntList
+            torch.ops.aten.sum.dim_IntList._schema.arguments[1].type,
+        ]
+        for a in tensorlists:
+            self.assertTrue(torch._library.utils.is_tensorlist_like_type(a))
+        for a in non_tensorlists:
+            self.assertFalse(torch._library.utils.is_tensorlist_like_type(a))
+
     def test_backward_impl_on_existing_op(self):
         lib = self.lib()
         lib.define("foo(Tensor x) -> Tensor")
