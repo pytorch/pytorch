@@ -159,6 +159,14 @@ class TestTemplatedSDPA(InductorTestCase):
         ):
             _templated_attention(query, key, value, _identity_mod)
 
+    @supported_platform
+    def test_different_sequence_length_fails(self):
+        query = torch.randn((1, 1, 2048, 64), dtype=torch.float32, device="cuda")
+        key = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
+        value = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
+        with self.assertRaisesRegex(ValueError, "NYI: The target sequence length"):
+            _templated_attention(query, key, value, _identity_mod)
+
 
 common_utils.instantiate_parametrized_tests(TestTemplatedSDPA)
 
