@@ -73,9 +73,13 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_foreach_momentum_nesterov_weight_decay_cpu": 16,
     "test_sgd_momentum_dampening_foreach_cuda": 5,
     "test_sgd_momentum_foreach_cuda": 5,
-    "test_rmsprop_tensor_lr_capturable_foreach_cuda": 4,
+    "test_sgd_weight_decay_maximize_cuda": 4,
+    "test_sgd_weight_decay_maximize_cpu": 4,
     "test_sgd_momentum_weight_decay_foreach_cuda": 2,
     "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": 2,
+    "test_sgd_cuda": 4,
+    "test_sgd_cpu": 4,
+    "test_rmsprop_tensor_lr_capturable_foreach_cuda": 4,
 }
 
 # also tracks currently supported optimizers
@@ -87,8 +91,8 @@ KERNEL_COUNTS = {
     RMSprop: KernelCounts(multitensor=2, singletensor=8),
     Adadelta: KernelCounts(multitensor=2, singletensor=8),
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
+    SGD: KernelCounts(multitensor=1, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=8),
-    SGD: KernelCounts(multitensor=2, singletensor=8),
     RAdam: KernelCounts(multitensor=2, singletensor=8),
     Adamax: KernelCounts(multitensor=2, singletensor=8),
 }
@@ -304,22 +308,24 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
             # Adagrad doesn't reinitialize state on each step
             if optim_cls is Adagrad:
                 opt_compiled.param_groups[0]["lr"] = 0.02
+            elif optim_cls is Adam:  # ensure we are guarding on the data_ptr of states
+                state_tensor = opt_compiled.state[
+                    opt_compiled.param_groups[0]["params"][0]
+                ]["exp_avg"]
+                opt_compiled.state[opt_compiled.param_groups[0]["params"][0]][
+                    "exp_avg"
+                ] = torch.zeros_like(state_tensor)
             else:
                 opt_compiled.state.clear()
 
             compiled_step()
 
         if self.check_kernel_count:
-            if optim_cls is SGD:
-                # SGD triggers an additional recompile
-                # because of momentum buffer list mutation in step()
-                multiplier = 3
-            else:
-                # currently, we compile the step and the rest of the computation
-                # separately because the step is a single element tensor
-                # hence, the usual kernel count is 2
-                # multiply by 2 to account for the recompile
-                multiplier = 2
+            # currently, we compile the step and the rest of the computation
+            # separately because the step is a single element tensor
+            # hence, the usual kernel count is 2
+            # multiply by 2 to account for the recompile
+            multiplier = 2
 
             self.assertEqual(
                 torch._inductor.metrics.generated_kernel_count,
@@ -599,6 +605,19 @@ class CompiledOptimizerTests(TestCase):
         loop(optimizer_c, closure_c)
 
         self.assertEqual(param, param_c)
+
+    def test_get_value_on_static_address(self):
+        from torch._dynamo.decorators import mark_static_address
+        from torch.optim.optimizer import _get_value
+
+        compiled = torch.compile(_get_value)
+
+        x = torch.ones(2, 2)
+        mark_static_address(x)
+
+        ret_val = compiled(x)
+
+        self.assertEqual(ret_val, x)
 
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
