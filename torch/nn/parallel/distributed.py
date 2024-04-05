@@ -890,6 +890,11 @@ class DistributedDataParallel(Module, Joinable):
         if self._use_python_reducer:
             torch._inductor.config._fuse_ddp_communication = True
             torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
+            # Directly adding this to the trace rule will disturb the users
+            # who are using DDPOptimizer.
+            torch._dynamo.trace_rules.LEGACY_MOD_INLINELIST.add(
+                "torch.nn.parallel.distributed"
+            )
         self._force_to_disable_cpp_reducer = (
             optimize_ddp == "python_reducer_without_compiled_forward"
         )
