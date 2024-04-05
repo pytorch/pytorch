@@ -1208,7 +1208,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, relu, mul_6, round_4, add_4 (optional),
             #     clamp_min_3, clamp_max_3, convert_element_type_6]
             self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_count"], 1)
-            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_nodes"], 12)
+            self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_nodes"], 11)
 
         self._test_common(
             mod,
@@ -1730,15 +1730,16 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 2. Dequant-conv pattern matched in quantization weight prepack * 1
             #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
             # 3. qconv2d_relu fusion in post-grad fusion pass * 1
-            #    [qconv2d_pointwise_default, relu, mul_2, round_2, add_1 (optional), clamp_min_1, clamp_max_1, convert_element_type_2]
+            #    [qconv2d_pointwise_default, relu, mul_2, round_2, add_1 (optional), clamp_min_1, clamp_max_1,
+            #     convert_element_type_2]
             # 4. qmaxpool2d * 1
-            #    [convert_element_type_3, sub_1 (optional), mul_3, max_pool2d_with_indices, getitem, mul_4, round_3, add_2 (optional),
-            #    clamp_min_2, clamp_max_2, convert_element_type_4]
+            #    [convert_element_type_3, sub_1 (optional), mul_3, max_pool2d_with_indices, getitem, mul_4,
+            #    round_3, add_2 (optional), clamp_min_2, clamp_max_2, convert_element_type_4]
             self._test_common(
                 mod,
                 (v,),
                 6,
-                31,
+                28,
                 check_quantization=True,
             )
 
@@ -1827,7 +1828,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             mod,
             (v,),
             10,
-            49,
+            48,
             check_quantization=True,
         )
 

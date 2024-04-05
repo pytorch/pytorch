@@ -4553,6 +4553,8 @@ class CommonTemplate:
             / torch.ones(
                 [256, 256], dtype=torch.float32, device=x.device
             ),  # noqa: E731
+            lambda x: x * 1.0 + 0.0,  # noqa: E731
+            lambda x: x * 1 + 0,  # noqa: E731
         )
 
         inps = [torch.rand([256, 256], device=self.device) for _ in range(2)]
