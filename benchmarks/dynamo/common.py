@@ -3824,6 +3824,10 @@ def run(runner, args, original_dir=None):
             # Go back to main branch
             repo.git.checkout(main_branch)
     elif args.only:
+        # XXX a hack to cleanup
+        if args.only in ["nvidia_deeprecommender"]:
+            inductor_config.skip_grad_layout_contract = True
+            
         model_name = args.only
         for device in args.devices:
             batch_size = args.batch_size

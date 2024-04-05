@@ -432,6 +432,7 @@ shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 comprehensive_padding = (
     os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "1") == "1"
 )
+skip_grad_layout_contract = False
 # XXX: Just for testing. Will remove before landing.
 pad_fixed_layout = os.environ.get("TORCHINDUCTOR_PAD_FIXED_LAYOUT") == "1"
 pad_channels_last = False
