@@ -506,6 +506,7 @@ aten::_sparse_addmm.out
 aten::_sparse_broadcast_to
 aten::_sparse_broadcast_to_copy
 aten::_sparse_broadcast_to_copy.out
+aten::_sparse_compressed_tensor_with_dims
 aten::_sparse_coo_tensor_with_dims
 aten::_sparse_coo_tensor_with_dims.out
 aten::_sparse_coo_tensor_with_dims_and_tensors

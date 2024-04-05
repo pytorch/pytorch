@@ -493,6 +493,7 @@ class WrapperCodeGen(CodeGen):
 
                 aten = torch.ops.aten
                 inductor_ops = torch.ops.inductor
+                _quantized = torch.ops._quantized
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
