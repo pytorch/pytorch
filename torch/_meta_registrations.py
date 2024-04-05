@@ -6161,7 +6161,7 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
     return torch.empty_like(self, dtype=result_dtype)
 
 
-@register_meta(aten.channel_shuffle)
+@register_meta(aten.channel_shuffle.default)
 def meta_channel_shuffle(input, groups):
     # Assume the input shape is (*, C, H, W), where * represents any number of leading dimensions
     *leading_dims, C, H, W = input.size()

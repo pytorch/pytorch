@@ -8828,6 +8828,20 @@ def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwarg
         ]
     )
 
+def sample_inputs_channel_shuffle(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_groups = [
+        ((1, 4, 10, 10), 2),
+        ((2, 6, 8, 8), 3),
+        ((2, 8, 5, 5), 4),
+    ]
+
+    yield from (
+        SampleInput(make_arg(shape), args=(groups,))
+        for shape, groups in shapes_groups
+    )
+
 def sample_inputs_binary_cross_entropy(op_info, device, dtype, requires_grad, logits=False, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype)
     # Lower bounds must be greater than 'eps' defined in gradcheck.py::gradgradcheck() -> eps
@@ -19648,6 +19662,14 @@ op_db: List[OpInfo] = [
                 dtypes=(torch.float32, torch.complex64),
             ),
         ),
+    ),
+    OpInfo(
+        "nn.functional.channel_shuffle",
+        sample_inputs_func=sample_inputs_channel_shuffle,
+        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
     ),
     OpInfo(
         "nn.functional.kl_div",
