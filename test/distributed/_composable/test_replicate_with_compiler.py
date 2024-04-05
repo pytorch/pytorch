@@ -36,8 +36,6 @@ from torch.utils.checkpoint import checkpoint
 
 
 DIM = 2000
-# TODO: figure out why buffer reuse conflicts with bucketing
-torch._inductor.config.allow_buffer_reuse = False
 
 
 class Net(nn.Module):
@@ -201,9 +199,7 @@ class ReplicateTest(MultiProcessTestCase):
                 None, ddp_default_hooks.bf16_compress_hook
             )
 
-        self._test_compile(
-            use_gpu=True, no_sync=False, setup_func=setup, no_inductor=True
-        )
+        self._test_compile(use_gpu=True, no_sync=False, setup_func=setup)
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_rocm
