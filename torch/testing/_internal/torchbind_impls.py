@@ -28,5 +28,15 @@ def register_fake_operators():
         return tq.push(x)
 
     @register_if_not("_TorchScriptTesting::queue_size")
-    def fake_queue_size(tq, x):
+    def fake_queue_size(tq):
         return tq.size()
+
+    torch.ops._TorchScriptTesting.queue_pop.default.fallthrough(
+        torch._C.DispatchKey.AutogradCPU
+    )
+    torch.ops._TorchScriptTesting.queue_push.default.fallthrough(
+        torch._C.DispatchKey.AutogradCPU
+    )
+    torch.ops._TorchScriptTesting.queue_size.default.fallthrough(
+        torch._C.DispatchKey.AutogradCPU
+    )

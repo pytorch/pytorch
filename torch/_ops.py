@@ -96,6 +96,9 @@ class OperatorBase:
                 return True
         return False
 
+    def fallthrough(self, dispatch_key):
+        self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
+
     def py_impl(self, k):
         def inner(fn):
             if inspect.isclass(k) and issubclass(k, TorchDispatchMode):
@@ -369,9 +372,6 @@ class HigherOrderOperator(OperatorBase):
     @property
     def namespace(self):
         return self._ns
-
-    def fallthrough(self, dispatch_key):
-        self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
     def dispatch(self, dispatch_key, *args, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
@@ -827,7 +827,6 @@ class OpOverload(OperatorBase):
                     add_cached_op(self)
                 return handler
 
-        # print(self, key, final_key)
         r = self.py_kernels.get(final_key, final_key)
         if cache_result:
             self._dispatch_cache[key] = r
@@ -872,24 +871,48 @@ class TorchBindOpOverload(OpOverload):
         self.non_fallthrough_keys = torch._C.DispatchKeySet(
             DispatchKey.PreDispatch
         ).add(DispatchKey.Python)
+        self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
+
+        _TORCH_BIND_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
+            DispatchKey.PythonDispatcher,  # type: ignore[attr-defined]
+            DispatchKey.PythonTLSSnapshot,  # type: ignore[attr-defined]
+            DispatchKey.ADInplaceOrView,
+            DispatchKey.BackendSelect,
+        ]
+        for key in _TORCH_BIND_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
+            self.non_fallthrough_keys = self.non_fallthrough_keys.remove(key)
 
     # use `self_` to avoid naming collide with arguments that
     # are named "self". This way, they can be called by kwargs.
     def __call__(self_, *args, **kwargs):  # noqa: B902
         # The path when any inputs are FakeScriptObject, we need to
-        # skip c++ dispatcher and dispatch in python like a higher order op.
-        if pytree.tree_any(
-            lambda obj: isinstance(
-                obj, torch._library.fake_class_registry.FakeScriptObject
-            ),
-            (args, kwargs),
-        ):
+        # skip c++ dispatcher and dispatch in python through _get_dispatch of python_dispatcher.
+        if must_dispatch_in_python(args, kwargs):
             dispatch_key_set = _compute_keyset(args, kwargs, self_.non_fallthrough_keys)
-            return dispatch_in_python(
-                dispatch_key_set.highestPriorityTypeId(), self_, *args, **kwargs
+            highest_dispatch_key = dispatch_key_set.highestPriorityTypeId()
+            handler = (
+                self_._get_dispatch(highest_dispatch_key)
+                if highest_dispatch_key not in self_._dispatch_cache
+                else self_._dispatch_cache[highest_dispatch_key]
             )
-        # The normal path when we're not tracing: go through C++ Dispatcher
+            if isinstance(handler, DispatchKey):
+                raise RuntimeError(
+                    f"Cannot handle FakeScriptObject with python dispatcher with dispatch key {handler}."
+                    f"Please implement it by annotating a python callable with py_impl({handler})."
+                )
+            assert isinstance(handler, Callable)
+            return handler(*args, **kwargs)
+        # The normal path when we're not tracing, which goes through C++ Dispatcher
         return self_._op(*args, **kwargs)
+
+
+def must_dispatch_in_python(args, kwargs):
+    return pytree.tree_any(
+        lambda obj: isinstance(
+            obj, torch._library.fake_class_registry.FakeScriptObject
+        ),
+        (args, kwargs),
+    )
 
 
 def _has_script_object_arg(schema: torch.FunctionSchema) -> bool:
@@ -1005,23 +1028,39 @@ class OpOverloadPacket:
         # OpOverloadPacket to access it here.
 
         # Directly calling OverloadPacket goes into C++, which will check
-        # the schema and cause an error for torchbind op when inputs FakeScriptObject so we
+        # the schema and cause an error for torchbind op when inputs consist of FakeScriptObject so we
         # intercept it here and call TorchBindOpverload instead.
-        if self_._has_torchbind_op_overload:
-            # Try the overloads one by one to match an op.
-            for overload_name in self_._schemas.keys():
-                try:
-                    ret = getattr(self_, overload_name)(*args, **kwargs)
-                except RuntimeError as e:
-                    continue
-                return ret
-
+        if self_._has_torchbind_op_overload and must_dispatch_in_python(args, kwargs):
+            return _call_overload_packet_from_python(self_, args, kwargs)
         return self_._op(*args, **(kwargs or {}))
 
     # TODO: use this to make a __dir__
     def overloads(self):
         return [n if n else "default" for n in self._overload_names]
 
+
+# Note - this mirrors the logic of the cpp_function defined in jit/python/init.cpp
+# _jit_get_operations, which calls _get_operation_for_overload_or_packet.
+def _call_overload_packet_from_python(op: OpOverloadPacket, args, kwargs):
+    # Re-use the torch function handling logic in cpp
+    torch_function_called, ret = torch._C._maybe_call_torch_function_for_op_packet(op, *args, **kwargs)
+
+    if torch_function_called:
+        return ret
+
+    # In cpp, we do a schema matching for the arguments, and call ToIValue to
+    # to check whether the arguments are valid. But need to do similar things here
+    # and skip the ToIValue check because FakeScriptObject won't convert to IValue.
+    exceptions = {}
+    for overload_name in op.overloads():
+        try:
+            return getattr(op, overload_name)(*args, **kwargs)
+        except RuntimeError as e:
+            exceptions[overload_name] = e
+            continue
+    raise RuntimeError(
+        f"Fail to call all TorchBindOverloads of {op} with exceptions {exceptions}"
+    )
 
 # Resolution of torch.fn is different from torch.ops.aten.fn
 # torch.fn uses the Python argparser, matches with the
