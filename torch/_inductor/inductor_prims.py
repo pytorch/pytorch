@@ -109,7 +109,7 @@ def _low_memory_max_pool2d_with_offsets_meta(
 
 
 _low_memory_max_pool2d_with_offsets = _prims._make_prim(
-    schema="_low_memory_max_pool2d_with_offsets(Tensor self, int[2] kernel_size, int[2] stride,  int[2] padding, int[2] dilation, bool ceil_mode, *, ScalarType offset_dtype) -> (Tensor, Tensor)",
+    schema="_low_memory_max_pool2d_with_offsets(Tensor self, SymInt[2] kernel_size, SymInt[2] stride,  SymInt[2] padding, SymInt[2] dilation, bool ceil_mode, *, ScalarType offset_dtype) -> (Tensor, Tensor)",
     return_type=(_prims.RETURN_TYPE.NEW, _prims.RETURN_TYPE.NEW),
     meta=_low_memory_max_pool2d_with_offsets_meta,
     impl_aten=_low_memory_max_pool2d_with_offsets_aten,
@@ -117,7 +117,7 @@ _low_memory_max_pool2d_with_offsets = _prims._make_prim(
 )
 
 _low_memory_max_pool2d_offsets_to_indices = make_prim(
-    "_low_memory_max_pool2d_offsets_to_indices(Tensor self, int kernel_h, int input_w, int[2] stride, int[2] padding) -> Tensor",
+    "_low_memory_max_pool2d_offsets_to_indices(Tensor self, SymInt kernel_h, SymInt input_w, SymInt[2] stride, SymInt[2] padding) -> Tensor",
     lambda self, *args: self.to(torch.int64),
     doc="Convert small int offsets to regular indices.",
 )

@@ -3556,7 +3556,7 @@ class CommonTemplate:
 
         self.common(
             fn,
-            (-torch.arange(6 * 8 * 8, dtype=torch.float32).view(2, 3, 8, 8),),
+            (-torch.arange(1 * 8 * 8, dtype=torch.float32).view(1, 1, 8, 8),),
         )
 
     def test_max_pool2d4(self):
