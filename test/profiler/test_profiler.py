@@ -96,7 +96,6 @@ except ModuleNotFoundError:
 
 @unittest.skipIf(not HAS_PSUTIL, "Requires psutil to run")
 @unittest.skipIf(TEST_WITH_ASAN, "Cannot test with ASAN")
-@unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerCUDA(TestCase):
     @skipCUDAVersionIn([(11, 5)])  # https://github.com/pytorch/pytorch/issues/69023
