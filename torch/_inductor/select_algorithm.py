@@ -127,7 +127,6 @@ class TritonTemplateKernel(TritonKernel):
         self.triton_meta: Optional[Dict[str, object]] = None
         # For Templated Attention
         self.subgraphs = subgraphs
-        self.modification_cache = None
 
     def need_numel_args(self):
         return False
@@ -268,15 +267,19 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_stride()[index]
         return texpr(self.rename_indexing(val))
 
-    def modification(self, **fixed_inputs):
-        """TODO come up with standardized way to modify the template"""
+    def modification(self, **fixed_inputs) -> str:
+        """This function generates the code body to populate
+        a 'modification' placeholder within a template
+
+        TODO come up with standardized way to modify templates, with
+        potential multiple modifications
+        """
 
         class PlaceholderSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
             self.name = "PlaceholderSubstitution"
 
             def load(self, name: str, index: sympy.Expr):
                 if name not in fixed_inputs:
-                    # return self._inner.load(name, index)
                     raise AssertionError(
                         f"All loads should be coming from fixed inputs - {name}"
                     )
@@ -287,23 +290,23 @@ class TritonTemplateKernel(TritonKernel):
                 return self._inner.indirect_indexing(index_var, size, False)
                 # return sympy_symbol(str(index_var))
 
-        if self.modification_cache is None:
-            with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
-                assert isinstance(
-                    self.subgraphs, ir.ComputedBuffer
-                ), "Expected the subgraph to be a ComputedBuffer"
-                if isinstance(self.subgraphs.data, ir.InputBuffer):
-                    out = self.subgraphs.data.make_loader()((1,))
-                else:
-                    out = self.subgraphs.data.inner_fn((1,))
+        # if self.modification_cache is None:
+        with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
+            assert isinstance(
+                self.subgraphs, ir.ComputedBuffer
+            ), "Expected the subgraph to be a ComputedBuffer"
+            if isinstance(self.subgraphs.data, ir.InputBuffer):
+                out = self.subgraphs.data.make_loader()((1,))
+            else:
+                out = self.subgraphs.data.inner_fn((1,))
 
-            self.codegen_body()
-            self.body.writeline(f"{fixed_inputs['out']} = {out.value}")
+        self.codegen_body()
+        self.body.writeline(f"{fixed_inputs['out']} = {out.value}")
 
-            self.modification_cache = self.body.getvalue()
-            self.body.clear()
-            self.cse.invalidate(set())
-        return self.modification_cache
+        body_val = self.body.getvalue()
+        self.body.clear()
+        self.cse.invalidate(set())
+        return body_val
 
     def store_output(
         self,

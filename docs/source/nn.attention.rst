@@ -17,7 +17,6 @@ Utils
 
 Submodules
 ----------
-
 .. autosummary::
     :nosignatures:
 
