@@ -82,6 +82,9 @@ struct TORCH_API ComparatorSize {
  * we do not enforce that free(Block* block) => block->event_count == 0. This is
  * for compatibility reasons, and we can explore enforcing these in subsequent
  * versions.
+ *
+ * Note that this caching host allocator does not split larger allocations into
+ * smaller blocks, unlike the caching device allocator.
  */
 
 template <
@@ -94,7 +97,7 @@ struct TORCH_API CachingHostAllocatorImplInterface {
 
  public:
   // return data_ptr and block pair.
-  std::pair<void*, void*> allocate(size_t size) {
+  virtual std::pair<void*, void*> allocate(size_t size) {
     if (size == 0) {
       return {nullptr, nullptr};
     }
@@ -120,7 +123,7 @@ struct TORCH_API CachingHostAllocatorImplInterface {
     return {block->ptr_, reinterpret_cast<void*>(block)};
   }
 
-  void free(void* ctx) {
+  virtual void free(void* ctx) {
     if (!ctx) {
       return;
     }
@@ -158,7 +161,7 @@ struct TORCH_API CachingHostAllocatorImplInterface {
     }
   }
 
-  bool record_event(void* ptr, void* ctx, S stream) {
+  virtual bool record_event(void* ptr, void* ctx, S stream) {
     auto* block = reinterpret_cast<B*>(ctx);
 
     // Note: we need to check if the passed-in `ctx` is valid. This is because
@@ -188,7 +191,7 @@ struct TORCH_API CachingHostAllocatorImplInterface {
     return false;
   }
 
-  void empty_cache() {
+  virtual void empty_cache() {
     // Flush any available blocks into the free_list.
     process_events();
 
@@ -210,23 +213,18 @@ struct TORCH_API CachingHostAllocatorImplInterface {
     }
   }
 
-  void copy_data(void* dest, const void* src, std::size_t count) const {
+  virtual void copy_data(void* dest, const void* src, std::size_t count) const {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for copy_data");
   }
 
  private:
-  void add_allocated_block(B* block) {
+  virtual void add_allocated_block(B* block) {
     std::lock_guard<std::mutex> g(blocks_mutex_);
     blocks_.insert(block);
     ptr_to_block_.insert({block->ptr_, block});
   }
 
-  virtual void allocate_host_memory(size_t size, void** ptr) {
-    TORCH_CHECK_NOT_IMPLEMENTED(
-        false, "Not implemented for allocate_host_memory");
-  }
-
-  B* get_free_block(size_t size) {
+  virtual B* get_free_block(size_t size) {
     std::lock_guard<std::mutex> g(free_list_mutex_);
     B key(size);
     auto it = free_list_.lower_bound(&key);
@@ -239,19 +237,7 @@ struct TORCH_API CachingHostAllocatorImplInterface {
     return nullptr;
   }
 
-  virtual void free_block(B* block) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for free_block");
-  }
-
-  virtual void record_stream(c10::optional<std::vector<E>>& events, S stream) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for record_stream");
-  }
-
-  virtual bool query_event(E& event) {
-    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for query_event");
-  }
-
-  void process_events() {
+  virtual void process_events() {
 
     while (true) {
       // Avoid calling cudaEventDestroy while holding a mutex, so move
@@ -302,6 +288,23 @@ struct TORCH_API CachingHostAllocatorImplInterface {
         free_list_.insert(block);
       }
     }
+  }
+
+  virtual void allocate_host_memory(size_t size, void** ptr) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, "Not implemented for allocate_host_memory");
+  }
+
+  virtual void free_block(B* block) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for free_block");
+  }
+
+  virtual void record_stream(c10::optional<std::vector<E>>& events, S stream) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for record_stream");
+  }
+
+  virtual bool query_event(E& event) {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for query_event");
   }
 
   alignas(64) std::mutex blocks_mutex_;
