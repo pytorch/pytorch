@@ -1,7 +1,7 @@
 import itertools
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, cast, List, Optional, Tuple
+from typing import Any, cast, List, Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
@@ -94,6 +94,18 @@ class ParamModuleInfo:
     shared_param_names: List[str] = field(default_factory=list)
 
 
+@dataclass
+class ExtensionsData:
+    # User-defined metadata passed from pre to post-all-gather
+    all_gather_metadata: Optional[Any] = None
+    # Save the all-gather input sizes to unflatten the all-gather outputs to ND
+    all_gather_input_sizes: Sequence[torch.Size] = ()  # ND
+
+    def clear(self):
+        self.all_gather_metadata = None
+        self.all_gather_input_sizes = ()
+
+
 class FSDPParam:
     """
     This class manages a parameter with FSDP or FSDP variants applied,
@@ -117,11 +129,11 @@ class FSDPParam:
     _global_placements: Tuple[Placement, ...]
     _global_size: torch.Size
     _global_stride: Tuple[int, ...]
+    all_gather_outputs: List[torch.Tensor]  # 1D
     # DTensor attributes (only defined for DTensor `param`):
     _tp_spec: DTensorSpec
     # All-gather extension attributes
-    _use_all_gather_extensions: bool
-    _all_gather_metadata: Optional[Any]  # passed from pre to post-all-gather
+    _extensions_data: ExtensionsData
     _unsharded_inner_tensors: List[torch.Tensor]
 
     def __init__(
@@ -257,7 +269,7 @@ class FSDPParam:
                     "FSDP all-gather extensions require even sharding on dim-0.\n"
                     f"{self._orig_size} is not divisible by FSDP world size {self.mesh_info.mesh.size()}."
                 )
-            self._all_gather_metadata: Optional[Any] = None
+            self._extensions_data = ExtensionsData()
         self._unsharded_inner_tensors: List[torch.Tensor] = []
 
     def init_all_gather_outputs(
@@ -281,25 +293,27 @@ class FSDPParam:
                 return  # already initialized
             for tensor in self._unsharded_inner_tensors:
                 alloc_storage(tensor)
+            all_gather_outputs = self._unflatten_all_gather_outputs()
             inner_tensor.fsdp_post_all_gather(
-                tuple(self.all_gather_outputs),
-                self._all_gather_metadata,
+                all_gather_outputs,
+                self._extensions_data.all_gather_metadata,
                 self.param_dtype or self.orig_dtype,
                 out=self._unsharded_param,
             )
-            self._all_gather_metadata = None
+            self._extensions_data.clear()
             return
         inner_tensor = self._sharded_local_tensor
         if hasattr(inner_tensor, "fsdp_post_all_gather"):
+            all_gather_outputs = self._unflatten_all_gather_outputs()
             (
                 unsharded_tensor,
                 self._unsharded_inner_tensors,
             ) = inner_tensor.fsdp_post_all_gather(
-                self.all_gather_outputs,
-                self._all_gather_metadata,
+                all_gather_outputs,
+                self._extensions_data.all_gather_metadata,
                 self.param_dtype or self.orig_dtype,
             )
-            self._all_gather_metadata = None
+            self._extensions_data.clear()
         else:
             # For the default path (no post-all-gather), the all-gather output
             # gives the unsharded parameter data directly
@@ -321,6 +335,14 @@ class FSDPParam:
             )
         self._unsharded_param = nn.Parameter(unsharded_param)
         self._unsharded_param.requires_grad_(self.sharded_param.requires_grad)
+
+    def _unflatten_all_gather_outputs(self) -> Tuple[torch.Tensor, ...]:
+        return tuple(
+            t.view(-1, *s[1:])
+            for t, s in zip(
+                self.all_gather_outputs, self._extensions_data.all_gather_input_sizes
+            )
+        )
 
     def to_sharded(self) -> None:
         self._setattr_on_modules(self.sharded_param)
@@ -430,15 +452,20 @@ class FSDPParam:
     def all_gather_inputs(self) -> List[torch.Tensor]:  # 1D
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
-            sharded_param_data = self._sharded_param_data
             if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
                 (
                     all_gather_inputs,
-                    self._all_gather_metadata,
+                    self._extensions_data.all_gather_metadata,
                 ) = self._sharded_local_tensor.fsdp_pre_all_gather()
+                self._extensions_data.all_gather_input_sizes = [
+                    t.size() for t in all_gather_inputs
+                ]
                 return [t.view(-1) for t in all_gather_inputs]
+            sharded_param_data = self._sharded_param_data
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
+            if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
+                raise NotImplementedError()
             all_gather_input = _to_dtype_if_needed(
                 cast(torch.Tensor, self._sharded_post_forward_param_data),
                 self.param_dtype,
