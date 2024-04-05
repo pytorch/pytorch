@@ -4,7 +4,7 @@ import torch
 from torch import Tensor
 from .optimizer import (Optimizer, ParamsT, _use_grad_for_differentiable, _get_value,
                         _stack_if_compiling, _dispatch_sqrt, _default_to_fused_or_foreach,
-                        _get_scalar_dtype, _capturable_doc, _differentiable_doc, _foreach_doc,
+                        _get_scalar_dtype, _capturable_doc, _differentiable_doc, _foreach_doc, _disable_dynamo_if_closure,
                         _fused_doc, _maximize_doc, _view_as_real)
 from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
@@ -133,6 +133,7 @@ class Adam(Optimizer):
         return has_complex
 
     @_use_grad_for_differentiable
+    @_disable_dynamo_if_closure
     def step(self, closure=None):
         """Perform a single optimization step.
 
