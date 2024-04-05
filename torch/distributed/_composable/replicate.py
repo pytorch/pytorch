@@ -66,11 +66,6 @@ class _ReplicateState(_State):
         ignored_modules: Set[nn.Module],
         **kwargs,
     ) -> None:
-        if _is_fully_sharded(module):
-            raise RuntimeError(
-                "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
-            )
-
         if self.has_initialized:
             return
 
@@ -135,18 +130,19 @@ class _ReplicateState(_State):
 
 def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> typing_extensions.Never:
     raise AssertionError(
-        "FSDP does not support deepcopy. Please use state dict for serialization."
+        "DDP does not support deepcopy. Please use state dict for serialization."
     )
 
 
+# Follow the same pattern as FSDP/fully_shard
 class DDP:
     def __new__(cls, *args, **kwargs):
         """
-        Override ``__new__`` to remove the FSDP class and directly construct
+        Override ``__new__`` to remove the DDP class and directly construct
         the original class for cases like indexing into a container module.
         """
-        # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
-        # and index 1 is the `FSDP` class itself
+        # Use index 2 since 0 is the dynamically constructed `DDP<...>` class
+        # and index 1 is the `DDP` class itself
         orig_cls = cls.__mro__[2]
         self = orig_cls.__new__(orig_cls, *args, **kwargs)
         self.__init__(*args, **kwargs)
@@ -155,8 +151,7 @@ class DDP:
     def set_requires_gradient_sync(self, requires_gradient_sync: bool) -> None:
         """
         Sets if the module should sync gradients. This can be used to implement
-        gradient accumulation without communication. For HSDP, this controls
-        both reduce-scatter and all-reduce together.
+        gradient accumulation without communication.
 
         Args:
             requires_gradient_sync (bool): Whether to reduce gradients for the
@@ -195,6 +190,11 @@ def replicate(
                 f"but got {type(kwargs['device_id'])}"
             )
 
+    if _is_fully_sharded(module):
+        raise RuntimeError(
+            "Cannot apply `replicate()` on a Module already managed by `fully_shard`"
+        )
+
     if ignored_modules is None:
         ignored_modules = {}
     else:
@@ -219,7 +219,7 @@ def replicate(
             _pre_dp_module_transform(module)
     state.record_init_args(module, ignored_modules, **kwargs)
 
-    # Place FSDP leftmost for highest priority in the method resolution order
+    # Place DDP leftmost for highest priority in the method resolution order
     cls = module.__class__
     dct = {"__deepcopy__": unimplemented_deepcopy}
     new_cls = type(f"DDP{cls.__name__}", (DDP, cls), dct)
