@@ -33,6 +33,8 @@ class SGD(Optimizer):
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
 
+    # See #123400
+    @torch._disable_dynamo
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:

@@ -1069,13 +1069,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_complex_2d",
             ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
-            ),
             # Note on tolerances:
             # test_correctness_Adadelta_cuda_float32
             # Mismatched elements: 10 / 100 (10.0%)
@@ -1154,13 +1147,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_complex_2d",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1245,13 +1231,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "This test uses mocks, which dynamo does not support"
                 ),
                 "TestOptimRenewed",
@@ -1305,13 +1284,6 @@ optim_db: List[OptimizerInfo] = [
                 unittest.skip("Uses too much memory, even for H100, surprisingly."),
                 "TestOptimRenewed",
                 "test_foreach_large_tensor",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1394,13 +1366,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "This test uses mocks, which dynamo does not support"
                 ),
                 "TestOptimRenewed",
@@ -1452,13 +1417,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "This test uses mocks, which dynamo does not support"
                 ),
                 "TestOptimRenewed",
@@ -1478,13 +1436,6 @@ optim_db: List[OptimizerInfo] = [
             # Fails on MacOS 13.2.1 in CI https://github.com/pytorch/pytorch/issues/117094
             DecorateInfo(
                 skipIfMps, "TestOptimRenewed", "test_can_load_older_state_dict"
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
                 unittest.skip("Does not support param groups"),
@@ -1577,13 +1528,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "This test uses mocks, which dynamo does not support"
                 ),
                 "TestOptimRenewed",
@@ -1623,13 +1567,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_complex_2d",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
                 toleranceOverride(
@@ -1699,13 +1636,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "This test uses mocks, which dynamo does not support"
                 ),
                 "TestOptimRenewed",
@@ -1749,13 +1679,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_complex_2d",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1856,13 +1779,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_mixed_device_dtype",
                 active_if=TEST_WITH_TORCHDYNAMO,
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(

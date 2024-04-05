@@ -1548,7 +1548,11 @@ class TestOptimRenewed(TestCase):
 
             # Make some state
             for _ in range(3):
-                optimizer.step(closure)
+                if torch._dynamo.is_compiling() and not optim_info.step_requires_closure:
+                    closure()
+                    optimizer.step()
+                else:
+                    optimizer.step(closure)
 
             self.assertEqual(getPublicAttrs(optimizer), getPublicAttrs(deepcopy(optimizer)))
 

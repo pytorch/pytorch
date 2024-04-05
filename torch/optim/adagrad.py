@@ -61,6 +61,8 @@ class Adagrad(Optimizer):
                     p, init_value, memory_format=torch.preserve_format
                 )
 
+    # See #123400
+    @torch._disable_dynamo
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
