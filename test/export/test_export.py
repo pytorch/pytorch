@@ -918,8 +918,8 @@ class TestExport(TestCase):
         ):
             ep.module()(torch.randn(3, 2))
         vr = list(ep.range_constraints.values())[0]
-        self.assertEquals(vr.lower, 1)
-        self.assertEquals(vr.upper, 2)
+        self.assertEqual(vr.lower, 1)
+        self.assertEqual(vr.upper, 2)
 
     @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_1_2(self):
@@ -936,8 +936,8 @@ class TestExport(TestCase):
         ep.module()(torch.randn(1, 2), torch.randn(2, 2))
         range_lower_bounds = sorted(vr.lower for vr in ep.range_constraints.values())
         range_upper_bounds = sorted(vr.upper for vr in ep.range_constraints.values())
-        self.assertEquals(range_lower_bounds, [1, 2])
-        self.assertEquals(range_upper_bounds, [2, 3])
+        self.assertEqual(range_lower_bounds, [1, 2])
+        self.assertEqual(range_upper_bounds, [2, 3])
 
     def test_raise_user_error_when_guard_on_data_dependent_operation(self):
         class M(torch.nn.Module):
@@ -2440,7 +2440,7 @@ def forward(self, arg_0):
         for gm in epm.named_modules():
             if not isinstance(gm, torch.fx.GraphModule):
                 continue
-            self.assertEquals(
+            self.assertEqual(
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]),
                 1
             )
@@ -2473,7 +2473,7 @@ def forward(self, arg_0):
         for gm in epm.named_modules():
             if not isinstance(gm, torch.fx.GraphModule):
                 continue
-            self.assertEquals(
+            self.assertEqual(
                 len([node for node in gm.graph.nodes if node.op == "placeholder"]),
                 2
             )

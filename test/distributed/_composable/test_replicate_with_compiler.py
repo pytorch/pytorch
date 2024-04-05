@@ -176,12 +176,10 @@ class ReplicateTest(MultiProcessTestCase):
                     optim.zero_grad()
 
         self.assertEqual(
-            tuple(model.parameters()),
-            tuple(compiled_replicate_model.parameters())
+            tuple(model.parameters()), tuple(compiled_replicate_model.parameters())
         )
         self.assertEqual(
-            tuple(model.parameters()),
-            tuple(compiled_ddp_model.parameters())
+            tuple(model.parameters()), tuple(compiled_ddp_model.parameters())
         )
 
     def test_compile_cpu(self):
