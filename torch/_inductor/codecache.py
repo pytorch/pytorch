@@ -2846,7 +2846,7 @@ class AsyncCompile:
 
 if (
     os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
-    or os.environ.get("TORCH_WARM_POOL", "1") == "1"
+    or os.environ.get("TORCH_WARM_POOL", "1") != "1"
 ):
     pass
 elif sys.version_info >= (3, 12):
