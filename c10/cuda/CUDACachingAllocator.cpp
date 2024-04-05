@@ -67,8 +67,8 @@ namespace Native {
 // - To reduce fragmentation, requests between 1MB and 10MB will allocate and
 //   split a 20MB block, if no free block of sufficient size is available.
 // - To further reduce fragmentation, blocks >= max_split_size are not allowed
-//   to be split. These oversize cached blocks will still satisfy requests within
-//   1MB of the oversize cached block size.
+//   to be split. These oversize cached blocks will still satisfy requests
+//   within 1MB of the oversize cached block size.
 //
 // With this allocator, allocations and frees should logically be considered
 // "usages" of the memory segment associated with streams, just like kernel
