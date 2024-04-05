@@ -167,11 +167,10 @@ def get_device_op_overrides(device: str):
 
     if not device_op_overrides_dict.keys():
         from .cuda import device_op_overrides  # noqa: F401
+        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
     if device in device_op_overrides_dict.keys():
         return device_op_overrides_dict[device]
-
-    return DeviceOpOverrides()
 
 
 @functools.lru_cache(None)
@@ -421,6 +420,9 @@ class PythonPrinter(ExprPrinter):
     def _helper_sqrt(self, expr):
         return f"math.sqrt({self._print(expr)})"
 
+    def _print_OpaqueUnaryFn_sqrt(self, expr):
+        return self._helper_sqrt(expr.args[0])
+
     def _print_Pow(self, expr):
         # Pow() confuses triton
         base, exp = expr.args
@@ -463,39 +465,39 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) >= 2
         return f"min({', '.join(map(self._print, expr.args))})"
 
-    def _print_cos(self, expr):
+    def _print_OpaqueUnaryFn_cos(self, expr):
         assert len(expr.args) == 1
         return f"math.cos({self._print(expr.args[0])})"
 
-    def _print_cosh(self, expr):
+    def _print_OpaqueUnaryFn_cosh(self, expr):
         assert len(expr.args) == 1
         return f"math.cosh({self._print(expr.args[0])})"
 
-    def _print_acos(self, expr):
+    def _print_OpaqueUnaryFn_acos(self, expr):
         assert len(expr.args) == 1
         return f"math.acos({self._print(expr.args[0])})"
 
-    def _print_sin(self, expr):
+    def _print_OpaqueUnaryFn_sin(self, expr):
         assert len(expr.args) == 1
         return f"math.sin({self._print(expr.args[0])})"
 
-    def _print_sinh(self, expr):
+    def _print_OpaqueUnaryFn_sinh(self, expr):
         assert len(expr.args) == 1
         return f"math.sinh({self._print(expr.args[0])})"
 
-    def _print_asin(self, expr):
+    def _print_OpaqueUnaryFn_asin(self, expr):
         assert len(expr.args) == 1
         return f"math.asin({self._print(expr.args[0])})"
 
-    def _print_tan(self, expr):
+    def _print_OpaqueUnaryFn_tan(self, expr):
         assert len(expr.args) == 1
         return f"math.tan({self._print(expr.args[0])})"
 
-    def _print_tanh(self, expr):
+    def _print_OpaqueUnaryFn_tanh(self, expr):
         assert len(expr.args) == 1
         return f"math.tanh({self._print(expr.args[0])})"
 
-    def _print_atan(self, expr):
+    def _print_OpaqueUnaryFn_atan(self, expr):
         assert len(expr.args) == 1
         return f"math.atan({self._print(expr.args[0])})"
 
@@ -1405,7 +1407,6 @@ class Kernel(CodeGen):
             [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
         ],
         values: Tuple[CSEVariable, ...],
-        inits: Tuple[int, ...],
     ) -> Tuple[CSEVariable, ...]:
         raise NotImplementedError()
 
@@ -1588,9 +1589,8 @@ class Kernel(CodeGen):
                     Tuple[CSEVariable, ...],
                 ],
                 values: Tuple[CSEVariable, ...],
-                inits: Tuple[int, ...],
             ) -> Tuple[CSEVariable, ...]:
-                return self.scan(dtypes, combine_fn, values, inits)
+                return self.scan(dtypes, combine_fn, values)
 
             @staticmethod
             def bucketize(

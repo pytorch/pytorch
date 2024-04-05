@@ -6,7 +6,6 @@ import itertools
 import numpy as np
 import operator
 import random
-import sys
 import unittest
 from typing import NamedTuple, List
 
@@ -3401,9 +3400,6 @@ class TestDynamicQuantizedOps(TestCase):
 
             self.assertEqual(out, ref)
 
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @skipIfNoFBGEMM
     def test_wrapped_fbgemm_pack_gemm_matrix_fp16_pt2_compliant(self):
         # We are not using opcheck over here because the output for the op we're testing
