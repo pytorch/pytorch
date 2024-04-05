@@ -76,6 +76,7 @@ if TEST_WITH_ROCM:
         "test_foreach_cpp_wrapper_cuda",
         "test_index_put_deterministic_fallback_cuda",
         "test_index_tensor_cuda",
+        "test_inductor_layout_optimization_input_mutations",
         "test_linear_relu_cuda",
         "test_multi_device_cuda",
         "test_mm_plus_mm2_cuda",
