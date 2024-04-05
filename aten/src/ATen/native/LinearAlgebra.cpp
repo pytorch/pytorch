@@ -40,6 +40,7 @@
 #include <ATen/ops/_unsafe_view.h>
 #include <ATen/ops/_weight_int4pack_mm_native.h>
 #include <ATen/ops/_weight_int8pack_mm_native.h>
+#include <ATen/ops/abs.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr.h>
@@ -120,6 +121,7 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/mv.h>
 #include <ATen/ops/narrow.h>
+#include <ATen/ops/ne.h>
 #include <ATen/ops/norm.h>
 #include <ATen/ops/nuclear_norm_native.h>
 #include <ATen/ops/ones.h>
@@ -2815,6 +2817,36 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   // values larger than 10^53 (same for negative numbers), so that's fine.
   auto ord = scalar_ord.toDouble();
   auto dim = opt_dim.value_or(IntArrayRef{});
+  auto size = self.sizes();
+  auto ndim = self.dim();
+
+  auto opt_dim_ = dim.vec();
+  maybe_wrap_dims(opt_dim_, ndim);
+
+  using Int = IntArrayRef::value_type;
+  std::vector<Int> all_dim(ndim);
+  std::iota(all_dim.begin(), all_dim.end(), 0);
+
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
+  auto reduce_dim = is_all_reduce ? all_dim : opt_dim_;
+
+  bool is_reduce_over_1D_vector = true;
+  for (auto i : reduce_dim) {
+    if (size[i] != 1){
+      is_reduce_over_1D_vector = false;
+      break;
+    }
+  }
+
+  if (is_reduce_over_1D_vector) {
+    if (ord != 0.0) {
+      keepdim ? at::abs_outf(self, const_cast<Tensor&>(result)) : at::abs_outf(self.squeeze(reduce_dim), const_cast<Tensor&>(result));
+    } else {
+      keepdim ? at::ne_outf(self, 0, const_cast<Tensor&>(result)) : at::ne_outf(self.squeeze(reduce_dim), 0, const_cast<Tensor&>(result));
+    }
+    return;
+  }
+
   // No need to handle opt_dtype explicitly as it is already encoded in the dtype of result
 
   // https://github.com/pytorch/pytorch/issues/52648

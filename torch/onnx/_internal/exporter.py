@@ -10,6 +10,7 @@ import io
 import logging
 import os
 
+import tempfile
 import warnings
 from collections import defaultdict
 from typing import (
@@ -705,25 +706,53 @@ class ONNXProgram:
         Returns:
             The model output as computed by ONNX Runtime
         """
-        import onnxruntime  # type: ignore[import]
 
-        # model specified by the user has precedence, when specified
-        model_with_state_dict = model_with_state_dict or self._model_torch
+        # TODO: If ONNX used absolute paths on the initializers external data files,
+        # users could call ONNXProgram.save and use ONNXProgram.__call__ without the internal save below
+        with contextlib.ExitStack() as stack:
+            # model specified by the user has precedence, when specified
+            model_with_state_dict = model_with_state_dict or self._model_torch
 
-        onnx_input = self.adapt_torch_inputs_to_onnx(
-            *args, model_with_state_dict=model_with_state_dict, **kwargs
-        )
-        options = options or ONNXRuntimeOptions()
-        providers = options.execution_providers or onnxruntime.get_available_providers()
-        onnx_model = self.model_proto.SerializeToString()
-        ort_session = onnxruntime.InferenceSession(onnx_model, providers=providers)
+            if self.fake_context:
+                tmpdir_path = stack.enter_context(tempfile.TemporaryDirectory())
+                warnings.warn(
+                    "Cannot run model directly from `ONNXProgram` because"
+                    " the model was exported using `enable_fake_mode`."
+                    " The model will be serialized to disk using a temporary folder ({tmpdir_path})"
+                    " to populate the model with initializers before being execution."
+                )
+                # TODO: Revisit the need of `model_with_state_dict` being a real model and not just its state
+                onnx_model = os.path.join(tmpdir_path, "model.onnx")
+                if isinstance(model_with_state_dict, torch.nn.Module):
+                    model_state = model_with_state_dict.state_dict()
+                elif isinstance(model_with_state_dict, torch_export.ExportedProgram):
+                    model_state = model_with_state_dict.state_dict
+                else:
+                    model_state = None
+                self.save(
+                    onnx_model,
+                    model_state=model_state,
+                )
+            else:
+                onnx_model = self.model_proto.SerializeToString()  # type: ignore[assignment]
 
-        onnxruntime_input = {
-            k.name: v.numpy(force=True)
-            for k, v in zip(ort_session.get_inputs(), onnx_input)
-        }
+            import onnxruntime  # type: ignore[import]
 
-        return ort_session.run(None, onnxruntime_input)
+            onnx_input = self.adapt_torch_inputs_to_onnx(
+                *args, model_with_state_dict=model_with_state_dict, **kwargs
+            )
+            options = options or ONNXRuntimeOptions()
+            providers = (
+                options.execution_providers or onnxruntime.get_available_providers()
+            )
+            ort_session = onnxruntime.InferenceSession(onnx_model, providers=providers)
+
+            onnxruntime_input = {
+                k.name: v.numpy(force=True)
+                for k, v in zip(ort_session.get_inputs(), onnx_input)
+            }
+
+            return ort_session.run(None, onnxruntime_input)
 
     @property
     def model_proto(self) -> onnx.ModelProto:  # type: ignore[name-defined]
@@ -833,7 +862,7 @@ class ONNXProgram:
             Union[torch.nn.Module, Callable, torch_export.ExportedProgram]
         ] = None,
         **model_kwargs,
-    ) -> Sequence[Union[torch.Tensor, int, float, bool]]:
+    ) -> Sequence[Union[torch.Tensor, int, float, bool, torch.dtype]]:
         """Converts the PyTorch model inputs to exported ONNX model inputs format.
 
         Due to design differences, input/output format between PyTorch model and exported
@@ -1161,12 +1190,18 @@ class Exporter:
             self._assert_fake_tensor_mode()
 
     def export(self) -> ONNXProgram:
+        from torch.export._trace import (  # TODO: Prevent circular dependency
+            DEFAULT_EXPORT_DYNAMO_CONFIG,
+        )
+
         # TODO: Defer `import onnxscript` out of `import torch` path
         # https://github.com/pytorch/pytorch/issues/103764
         from torch.onnx._internal.fx import decomposition_skip
 
         with self.options.diagnostic_context, decomposition_skip.enable_decomposition_skips(
             self.options
+        ), torch._dynamo.config.patch(
+            dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
         ):
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
@@ -1202,6 +1237,16 @@ class Exporter:
             onnx_model = onnxscript_graph.to_model_proto(
                 self.options.onnx_registry.opset_version,
             )
+
+            try:
+                from onnxscript import optimizer
+
+                onnx_model = optimizer.optimize(onnx_model)
+            except ImportError:
+                warnings.warn(
+                    "ONNXScript optimizer is not available. Skipping optimization. "
+                    "Please `pip install onnxscript -U` to enable post-export optimization."
+                )
 
             return torch.onnx.ONNXProgram(
                 onnx_model,

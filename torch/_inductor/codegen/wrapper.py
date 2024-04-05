@@ -356,7 +356,9 @@ class FreeIfNotReusedLine(MemoryPlanningLine):
     is_reused: bool = False
 
     def plan(self, state: MemoryPlanningState) -> MemoryPlanningLine:
-        if isinstance(self.node.layout, (ir.AliasedLayout, ir.MultiOutputLayout)):
+        if len(self.node.get_inputs_that_alias_output()) > 0:
+            return self
+        if isinstance(self.node.layout, ir.MultiOutputLayout):
             return self
         assert not self.is_reused
         if self.node.get_name() in V.graph.removed_buffers:
@@ -439,7 +441,7 @@ class WrapperCodeGen(CodeGen):
         # or (nested) subgraph---is currently codegened; the primary use case is
         # including the graph instance into a cache key to avoid cross-graph
         # caching during lowering of nested subgraphs
-        self.codegened_graph_stack = [V.graph]
+        self.codegened_graph_stack = []
 
         self.write_header()
         self.write_prefix()
@@ -491,6 +493,7 @@ class WrapperCodeGen(CodeGen):
 
                 aten = torch.ops.aten
                 inductor_ops = torch.ops.inductor
+                _quantized = torch.ops._quantized
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
@@ -645,11 +648,10 @@ class WrapperCodeGen(CodeGen):
                 f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
             )
 
-    def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
-        if output_view:
-            args.append(f"out={output_view.codegen_reference()}")
-        else:
-            args.append(f"out={codegen_reference}")
+    def generate_extern_kernel_out(
+        self, kernel: str, out: str, out_view: Optional[str], args: List[str]
+    ):
+        args.append(f"out={out_view if out_view else out}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(
@@ -689,17 +691,18 @@ class WrapperCodeGen(CodeGen):
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
-        name,
-        kernel,
-        codegen_args,
-        cpp_op_schema,
-        cpp_kernel_key,
-        cpp_kernel_overload_name="",
-        op_overload=None,
+        buf_name: str,
+        python_kernel_name: str,
+        cpp_kernel_name: str,
+        codegen_args: List[str],
+        cpp_op_schema: str,
+        cpp_kernel_key: str,
+        cpp_kernel_overload_name: str = "",
+        op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
     ):
-        self.writeline(f"{name} = {kernel}({', '.join(codegen_args)})")
+        self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
     def generate_inf_and_nan_checker(self, node):
         # TODO: Add check for python too.
@@ -711,6 +714,10 @@ class WrapperCodeGen(CodeGen):
             self.write_triton_header_once()
         result = IndentedBuffer()
         result.splice(self.header)
+        # We do not want the cpp header for intermediate const graph. Headers would be
+        # rendered by the main module instead.
+        if V.graph.aot_mode and V.graph.cpp_wrapper and V.graph.is_const_graph:
+            result = IndentedBuffer()
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
@@ -1296,6 +1303,10 @@ class WrapperCodeGen(CodeGen):
     def writeline(self, line):
         self.lines.append(line)
 
+    def writelines(self, lines):
+        for line in lines:
+            self.lines.append(line)
+
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
 
@@ -1309,7 +1320,7 @@ class WrapperCodeGen(CodeGen):
             import triton
 
         if isinstance(s, SymTypes):
-            return pexpr(sympy.expand(repr(s)))
+            return pexpr(s.node.expr)
         elif isinstance(s, sympy.Expr):
             return pexpr(s)
         elif isinstance(s, (tuple, list)):
@@ -1414,9 +1425,9 @@ class WrapperCodeGen(CodeGen):
             return
 
         layout = buffer.get_layout()
-        if isinstance(layout, ir.MutationLayout):
+        if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
             return
-        if isinstance(layout, ir.AliasedLayout):
+        if isinstance(layout, ir.NonOwningLayout):
             assert isinstance(
                 layout.view, ir.ReinterpretView
             ), f"unexpected {type(layout.view)}: {layout.view}"
@@ -1510,11 +1521,19 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_conditional(self, conditional):
         name = conditional.get_name()
+
+        self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
+
         outer_inputs = [buf.codegen_reference() for buf in conditional.operands]
         outer_outputs = [f"{name}[{i}]" for i in range(len(conditional.outputs))]
 
+        predicate = conditional.predicate.codegen_reference()
+        if not isinstance(conditional.predicate, ir.ShapeAsConstantBuffer):
+            # move the Tensor predicate to host
+            predicate = f"{predicate}.item()"
+
         self.writeline(f"{name} = [None] * {len(conditional.outputs)}")
-        self.writeline(f"if {conditional.predicate.codegen_reference()}.item():")
+        self.writeline(f"if {predicate}:")
         self.writeline(EnterSubgraphLine(self, conditional.true_subgraph.graph))
         self.codegen_subgraph(conditional.true_subgraph, outer_inputs, outer_outputs)
         self.writeline(ExitSubgraphLine(self))
@@ -1523,11 +1542,51 @@ class WrapperCodeGen(CodeGen):
         self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
         self.writeline(ExitSubgraphLine(self))
 
+    def codegen_while_loop(self, while_loop):
+        name = while_loop.get_name()
+        outer_carried_inputs = [
+            buf.codegen_reference() for buf in while_loop.carried_inputs
+        ]
+        outer_additional_inputs = [
+            buf.codegen_reference() for buf in while_loop.additional_inputs
+        ]
+        outer_inputs = outer_carried_inputs + outer_additional_inputs
+
+        self.writeline(f"{name} = [None] * {len(outer_inputs)}")
+        for i, inp in enumerate(outer_inputs):
+            # set the initial state before the loop
+            self.writeline(f"{name}[{i}] = {inp}")
+
+        cond_outer_inputs = [f"{name}[{i}]" for i in range(len(outer_inputs))]
+        cond_outer_outputs = [f"{name}_cond_result"]
+        body_outer_inputs = list(
+            cond_outer_inputs
+        )  # same inputs for cond_fn and body_fn
+
+        # Carry over the state from body_fn.  Note: We only carry over the carried_inputs part of the inputs,
+        # the additional ones are passed in as they're before.
+        body_outer_outputs = [f"{name}[{i}]" for i in range(len(outer_carried_inputs))]
+
+        self.writeline("while True:")
+        self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
+        self.codegen_subgraph(
+            while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+        )
+        self.writeline(
+            f"if not {cond_outer_outputs[0]}.item(): break"
+        )  # condition doesn't hold
+        self.writeline(ExitSubgraphLine(self))
+        self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+        self.codegen_subgraph(
+            while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
+        )
+        self.writeline(ExitSubgraphLine(self))
+
     @staticmethod
     def statically_known_int_or_none(x):
         try:
             val = V.graph._shape_env._maybe_evaluate_static(x)
-            return int(x)
+            return int(val)
         except Exception:
             return None
 

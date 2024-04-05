@@ -492,6 +492,7 @@ TORCH_LIBRARY_IMPL(aten, PrivateUse1, m) {
   m.impl("sub.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
   m.impl("_foreach_add.List", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
   m.impl("index.Tensor", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
+  m.impl("triu.indices", torch::CppFunction::makeFromBoxedFunction<&custom_cpu_fallback>());
 }
 
 // This basic implementation doesn't bother dealing with different device indices

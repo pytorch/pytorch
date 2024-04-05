@@ -250,7 +250,7 @@ static PyObject* getPythonTensorClass(c10::Device d) {
   return device_to_py_class_[static_cast<size_t>(d.type())];
 }
 
-void activateCUDATrace() {
+void activateGPUTrace() {
   c10::impl::GPUTrace::set_trace(getPyInterpreter());
 }
 
@@ -533,7 +533,25 @@ static std::vector<T> map_py_func(
   std::vector<T> new_items;
   new_items.reserve(items.size());
   for (auto& item : items) {
-    new_items.push_back(py::cast<T>(func(item)));
+    new_items.emplace_back(py::cast<T>(func(item)));
+  }
+  return new_items;
+}
+
+template <>
+std::vector<at::Tensor> map_py_func(
+    const py::function& func,
+    const std::vector<at::Tensor>& items) {
+  std::vector<at::Tensor> new_items;
+  new_items.reserve(items.size());
+  for (auto& item : items) {
+    auto output = func(item);
+    if (output.is(py::none())) {
+      // treat None value as an undefined tensor
+      new_items.emplace_back();
+    } else {
+      new_items.emplace_back(py::cast<at::Tensor>(output));
+    }
   }
   return new_items;
 }
