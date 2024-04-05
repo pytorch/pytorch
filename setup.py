@@ -545,8 +545,12 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 assert rpath.startswith("path ")
                 rpaths.append(rpath.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
 
-        omp_lib_name = "libiomp5.dylib"
-        if os.path.join("@rpath", omp_lib_name) not in libs:
+        omp_lib_name = (
+            "libomp.dylib" if os.uname().machine == "arm64" else "libiomp5.dylib"
+        )
+        omp_rpath_lib_path = os.path.join("@rpath", omp_lib_name)
+        omp_loader_lib_path = os.path.join("@loader_path", omp_lib_name)
+        if omp_rpath_lib_path not in libs:
             return
 
         # Copy libiomp5 from rpath locations
@@ -556,6 +560,20 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             target_lib = os.path.join(self.build_lib, "torch", "lib", omp_lib_name)
             self.copy_file(source_lib, target_lib)
+            # Change OMP library load path to loader_path and delete old rpath
+            # This should prevent delocate from attempting to package another instance
+            # of OpenMP library in torch wheel
+            subprocess.check_call(
+                [
+                    "install_name_tool",
+                    "-change",
+                    omp_rpath_lib_path,
+                    omp_loader_lib_path,
+                    "-delete_rpath",
+                    rpath,
+                    libtorch_cpu_path,
+                ]
+            )
             break
 
     def run(self):
