@@ -394,8 +394,9 @@ class OutputGraph:
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
         self.backward_state_var: Optional[str] = None
 
-        self.name_of_builtins_dict_key_in_fglobals: Optional[str] = None
-        self.install_builtins_dict_in_fglobals()
+        self.name_of_builtins_dict_key_in_fglobals: str = (
+            self.install_builtins_dict_in_fglobals()
+        )
 
     def install_builtins_dict_in_fglobals(self):
         # f_globals["__builtins__"] can be a dict or a module. This is an
@@ -414,9 +415,7 @@ class OutputGraph:
         f_builtins = self.global_scope["__builtins__"]
         if not isinstance(f_builtins, dict):
             f_builtins = f_builtins.__dict__
-        self.name_of_builtins_dict_key_in_fglobals = self.install_global(
-            "__builtins_dict__", f_builtins
-        )
+        return self.install_global("__builtins_dict__", f_builtins)
 
     def add_backward_state_hook(self, hook: VariableTracker, prefix="hook"):
         name = f"{prefix}{len(self.backward_state)}"
