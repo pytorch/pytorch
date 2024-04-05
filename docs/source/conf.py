@@ -3566,6 +3566,7 @@ ignore_duplicated_modules = {
     "torch.ao.quantization.quantize",
 }
 
+
 def coverage_post_process(app, exception):
     if exception is not None:
         return
