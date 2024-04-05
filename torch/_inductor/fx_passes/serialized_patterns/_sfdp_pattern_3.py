@@ -169,7 +169,7 @@ permute_default_4 = CallFunction(aten.permute.default, view_default_10, Ignored(
 permute_default_5 = CallFunction(aten.permute.default, view_default_3, Ignored())
 bmm_default_5 = CallFunction(aten.bmm.default, permute_default_5, view_default_6)
 view_default_11 = CallFunction(aten.view.default, bmm_default_5, Ignored())
-_sfdp_pattern_3_training_half = MultiOutputPattern([view_default_5,
+_sfdp_pattern_3_half_training = MultiOutputPattern([view_default_5,
   view_default_9,
   permute_default_4,
   view_default_11,
@@ -199,4 +199,4 @@ view_default_3 = CallFunction(aten.view.default, expand_default_2, Ignored())
 expand_default_3 = CallFunction(aten.expand.default, KeywordArg('value'), Ignored())
 view_default_4 = CallFunction(aten.view.default, expand_default_3, Ignored())
 bmm_default_1 = CallFunction(aten.bmm.default, view_default_3, view_default_4)
-_sfdp_pattern_3_inference_half = CallFunction(aten.view.default, bmm_default_1, Ignored())
+_sfdp_pattern_3_half_inference = CallFunction(aten.view.default, bmm_default_1, Ignored())

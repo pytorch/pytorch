@@ -19,8 +19,7 @@
 
 #include <utility>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 
 // NOTE: [What is a batching rule?]
@@ -287,7 +286,7 @@ std::vector<Tensor> unbind_batching_rule(const Tensor& self, int64_t dim) {
 // can be indexed (or nullopt if such a location doesn't exist, e.g., tensors
 // with zero-size dims).
 static optional<c10::SymInt> maximum_indexable_location(
-    c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides, c10::SymInt storage_offset) {
+    c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides, const c10::SymInt& storage_offset) {
   auto result = native::storage_size_for(sizes, strides);
   if (result == 0) {
     return nullopt;
@@ -304,7 +303,7 @@ static void checkBasicAsStridedValidForSlice(
     int64_t num_batch_dims,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    optional<c10::SymInt> maybe_storage_offset) {
+    const optional<c10::SymInt>& maybe_storage_offset) {
   auto slice_sizes = physical_tensor.sym_sizes().slice(num_batch_dims);
   auto slice_strides = physical_tensor.sym_strides().slice(num_batch_dims);
   auto base_offset = physical_tensor.sym_storage_offset();
@@ -694,17 +693,17 @@ Tensor new_empty_strided_batching_rule(
 }
 
 Tensor nested_cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
-  TORCH_CHECK(tensors.size() > 0, "cat() not supported on empty tensor list");
+  TORCH_CHECK(!tensors.empty(), "cat() not supported on empty tensor list");
 
   std::vector<std::vector<Tensor>> unbound;
-  for (auto tensor_iter = tensors.begin(); tensor_iter != tensors.end(); ++tensor_iter) {
-    auto* maybe_batched_impl = maybeGetBatchedImpl(*tensor_iter);
+  for (const auto & tensor : tensors) {
+    auto* maybe_batched_impl = maybeGetBatchedImpl(tensor);
     TORCH_CHECK(maybe_batched_impl, "Tried to run batching rule for cat() on a non-batched tensor");
     auto nt = maybe_batched_impl->value();
     TORCH_CHECK(nt.is_nested(), "Tried to run batching rule for cat() on a non-nested tensor");
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
     auto this_unbound = nt.unbind();
-    if (unbound.size() > 0) {
+    if (!unbound.empty()) {
       TORCH_INTERNAL_ASSERT(unbound.front().size() == this_unbound.size(),
           "cat() not supported for differently-sized nested arguments");
     }
@@ -764,5 +763,5 @@ TORCH_LIBRARY_IMPL(_, BatchedNestedTensor, m) {
 TORCH_LIBRARY_IMPL(aten, BatchedNestedTensor, m) {
   m.impl("cat", nested_cat_batching_rule);
 }
-} // namespace functorch
-} // namespace at
+
+} // namespace at::functorch

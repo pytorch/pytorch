@@ -116,8 +116,8 @@ def _init_process_group_state(
             # passed in, there is no way to ensure all wrapped FSDP instances use the same
             # process groups.
             raise ValueError(
-                f"Manual wrapping with {sharding_strategy}",
-                "requires explicit specification of process group or device_mesh.",
+                f"Manual wrapping with {sharding_strategy} "
+                "requires explicit specification of process group or device_mesh."
             )
         else:
             state = _init_process_group_state_for_hybrid_shard(
@@ -204,12 +204,6 @@ def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
 
 @no_type_check
 def _is_valid_hybrid_shard_device_mesh(device_mesh: DeviceMesh) -> bool:
-    parent_mesh = _mesh_resources.get_parent_mesh(device_mesh)
-    if parent_mesh is not None:
-        raise RuntimeError(
-            f"Found device_mesh {device_mesh} passed in has a parent device_mesh {parent_mesh}.",
-            "Hybrid sharding + TP is not supported yet.",
-        )
     return isinstance(device_mesh, DeviceMesh) and device_mesh.ndim == 2
 
 
@@ -446,6 +440,14 @@ def _init_core_state(
                 "the world size is 1."
             )
         sharding_strategy = ShardingStrategy.NO_SHARD
+    elif sharding_strategy == ShardingStrategy.NO_SHARD:
+        warnings.warn(
+            "The `NO_SHARD` sharding strategy is deprecated. If having issues, "
+            "please use DistributedDataParallel instead.",
+            # Level 1 is here, level 2 is from `FullyShardedDataParallel`, and
+            # level 3 is from the true caller
+            stacklevel=3,
+        )
     state.sharding_strategy = sharding_strategy or ShardingStrategy.FULL_SHARD
     state.mixed_precision = mixed_precision or MixedPrecision()
     if mixed_precision is not None:

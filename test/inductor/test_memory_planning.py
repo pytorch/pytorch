@@ -3,6 +3,7 @@
 import sys
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -17,9 +18,9 @@ import unittest
 import torch
 from test_torchinductor import run_and_get_cpp_code
 from torch._C import FileCheck
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import same
 from torch._inductor import config
+from torch._inductor.test_case import run_tests, TestCase
 from torch.export import Dim
 from torch.utils._triton import has_triton
 
@@ -86,7 +87,7 @@ class TestMemoryPlanning(TestCase):
         f, args = self._generate(device="cuda")
         dim0_x = Dim("dim0_x", min=1, max=2048)
         dynamic_shapes = ({0: dim0_x}, None, None)
-        with config.patch("aot_inductor.abi_compatible", True):
+        with config.patch("abi_compatible", True):
             result, code = run_and_get_cpp_code(
                 lambda: AOTIRunnerUtil.run(
                     "cuda", f, args, dynamic_shapes=dynamic_shapes
@@ -116,4 +117,5 @@ class TestMemoryPlanning(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if HAS_CUDA:
+        run_tests()

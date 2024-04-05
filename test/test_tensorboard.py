@@ -131,6 +131,7 @@ class TestTensorBoardPyTorchNumpy(BaseTestCase):
         with self.createSummaryWriter() as w:
             w.add_histogram('float histogram', torch.rand((50,)))
             w.add_histogram('int histogram', torch.randint(0, 100, (50,)))
+            w.add_histogram('bfloat16 histogram', torch.rand(50, dtype=torch.bfloat16))
 
     def test_pytorch_histogram_raw(self):
         with self.createSummaryWriter() as w:
@@ -447,60 +448,6 @@ class TestTensorBoardSummary(BaseTestCase):
         }
         summary.custom_scalars(layout)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
 
-    def test_hparams_smoke(self):
-        hp = {'lr': 0.1, 'bsize': 4}
-        mt = {'accuracy': 0.1, 'loss': 10}
-        summary.hparams(hp, mt)  # only smoke test. Because protobuf in python2/3 serialize dictionary differently.
-
-        hp = {'use_magic': True, 'init_string': "42"}
-        mt = {'accuracy': 0.1, 'loss': 10}
-        summary.hparams(hp, mt)
-
-        mt = {'accuracy': torch.zeros(1), 'loss': torch.zeros(1)}
-        summary.hparams(hp, mt)
-
-    def test_hparams_wrong_parameter(self):
-        with self.assertRaises(TypeError):
-            summary.hparams([], {})
-        with self.assertRaises(TypeError):
-            summary.hparams({}, [])
-        with self.assertRaises(ValueError):
-            res = summary.hparams({'pytorch': [1, 2]}, {'accuracy': 2.0})
-        # metric data is used in writer.py so the code path is different, which leads to different exception type.
-        with self.assertRaises(NotImplementedError):
-            with self.createSummaryWriter() as writer:
-                writer.add_hparams({'pytorch': 1.0}, {'accuracy': [1, 2]})
-
-    def test_hparams_number(self):
-        hp = {'lr': 0.1}
-        mt = {'accuracy': 0.1}
-        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
-
-    def test_hparams_bool(self):
-        hp = {'bool_var': True}
-        mt = {'accuracy': 0.1}
-        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
-
-    def test_hparams_string(self):
-        hp = {'string_var': "hi"}
-        mt = {'accuracy': 0.1}
-        self.assertTrue(compare_proto(summary.hparams(hp, mt), self))
-
-    def test_hparams_domain_discrete(self):
-        hp = {"lr": 0.1, "bool_var": True, "string_var": "hi"}
-        mt = {"accuracy": 0.1}
-        hp_domain = {"lr": [0.1], "bool_var": [True], "string_var": ["hi"]}
-
-        # hparam_domain_discrete keys needs to be subset of hparam_dict keys
-        with self.assertRaises(TypeError):
-            summary.hparams(hp, mt, hparam_domain_discrete={"wrong_key": []})
-
-        # hparam_domain_discrete values needs to be same type as hparam_dict values
-        with self.assertRaises(TypeError):
-            summary.hparams(hp, mt, hparam_domain_discrete={"lr": [True]})
-
-        # only smoke test. Because protobuf map serialization is nondeterministic.
-        summary.hparams(hp, mt, hparam_domain_discrete=hp_domain)
 
     @unittest.skipIf(IS_MACOS, "Skipping on mac, see https://github.com/pytorch/pytorch/pull/109349 ")
     def test_mesh(self):

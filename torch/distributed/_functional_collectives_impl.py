@@ -7,6 +7,7 @@ from typing import cast, Dict, List, Optional
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
+from torch._logging import warning_once
 
 """
 Moved eager kernel implementations to a separate file partly for readability and partly as it is currently
@@ -24,29 +25,46 @@ _wait_all
 
 """
 
-_use_native_funcol = "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ
-
-
-# These are for testing purposes only and will be removed after we fully
-# migrate to native funcol.
-def native_funcol_enabled():
-    return _use_native_funcol
-
-
-def enable_native_funcol():
-    global _use_native_funcol
-    os.environ["_USE_NATIVE_C10D_FUNCTIONAL"] = "1"
-    _use_native_funcol = True
-
-
-def disable_native_funcol():
-    global _use_native_funcol
-    if "_USE_NATIVE_C10D_FUNCTIONAL" in os.environ:
-        del os.environ["_USE_NATIVE_C10D_FUNCTIONAL"]
-    _use_native_funcol = False
-
-
 logger = logging.getLogger(__name__)
+
+_use_native_funcol: Optional[bool] = None
+
+
+if torch._running_with_deploy():
+
+    def native_funcol_enabled():
+        return False
+
+else:
+    from torch._dynamo import assume_constant_result
+
+    @assume_constant_result
+    def native_funcol_enabled():
+        global _use_native_funcol
+        if _use_native_funcol is None:
+            try:
+                # Disable native funcol when torch_xla is installed. This check
+                # will be removed once torch_xla adopts the native_funcol IR.
+                import torch_xla  # noqa: F401
+
+                _use_native_funcol = False
+            except Exception:
+                # When TORCH_DISABLE_NATIVE_FUNCOL is set, fallback to py funcol
+                _use_native_funcol = (
+                    os.environ.get("TORCH_DISABLE_NATIVE_FUNCOL") != "1"
+                )
+        if not _use_native_funcol:
+            warning_once(
+                logger,
+                "The legacy backend for functional collective (selected via "
+                "setting TORCH_DISABLE_NATIVE_FUNCOL) has been deprecated. "
+                "There won't be active support for it and it will be removed "
+                "before 2.14. Please switch to the new (a.k.a native) backend "
+                "soon.",
+            )
+
+        return _use_native_funcol
+
 
 data_ptr_to_work: Dict[int, "_WaitRegistration"] = dict()
 work_version = 0
@@ -117,14 +135,21 @@ def _wait_reg_dec(ptr, wait_reg):
 def _register_tensor_wrapper(tensor) -> None:
     if native_funcol_enabled():
         # Tensor storage -> work mapping is maintained in C++
-        weakref.finalize(
-            tensor,
-            torch.ops._c10d_functional.wait_tensor,
-            tensor,
-        )
         return
     global data_ptr_to_work
-    data_ptr = tensor.elem.data_ptr()
+
+    # FIXME: This is almost definitely a bug.
+    if isinstance(
+        tensor.elem,
+        (
+            torch._subclasses.fake_tensor.FakeTensor,
+            torch._subclasses.functional_tensor.FunctionalTensor,
+        ),
+    ):
+        data_ptr = 0
+    else:
+        data_ptr = tensor.elem.data_ptr()
+
     # Note: we should NEVER try to trace this, bc it registers runtime stuff during trace.
     # Instead, backends must call this themselves when implementing traced collectives.
     wait_reg = data_ptr_to_work.get(data_ptr, None)

@@ -100,6 +100,15 @@ def _chunk_with_empty(
     return chunks
 
 
+def _get_dim0_chunked_size(
+    chunk: torch.Tensor, unchunked_size: torch.Size
+) -> torch.Size:
+    if chunk.numel() > 0:
+        return chunk.size()
+    # For 0 numel, we need to preserve trailing dims for DTensor APIs
+    return cast(torch.Size, torch.Size([0]) + unchunked_size[1:])
+
+
 def _from_local_no_grad(
     local_tensor: torch.Tensor,
     device_mesh: DeviceMesh,
@@ -130,3 +139,13 @@ def _to_dtype_if_needed(
     if dtype is not None and tensor.dtype != dtype:
         return tensor.to(dtype)
     return tensor
+
+
+def _cast_fp_tensor(dtype: torch.dtype, x: torch.Tensor) -> torch.Tensor:
+    if (
+        not isinstance(x, torch.Tensor)
+        or not torch.is_floating_point(x)
+        or x.dtype == dtype
+    ):
+        return x
+    return x.to(dtype)

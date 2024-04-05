@@ -846,7 +846,7 @@ struct HelperInterpBase {
     return wt_max;
   }
 
-  // Note [ Support for antialias=False as a subcase of antilias=True ]
+  // Note [ Support for antialias=False as a subcase of antialias=True ]
   // This function was originally written with the hard assumption that
   // antialias=True and it was later extended to support antialias=False.
   // The only difference between aa and no-aa is in how the
@@ -952,7 +952,7 @@ struct HelperInterpBase {
   uint8 in basic_loop_aa_horizontal<uint8_t> (and vertical)
 
   In essence the idea is to avoid a multiplication between a float (the
-  weight) and an int (the pixel value) and instead run a multpilication between
+  weight) and an int (the pixel value) and instead run a multiplication between
   2 ints:
 
   ```py
@@ -1242,10 +1242,8 @@ struct HelperInterpLinear : public HelperInterpBase {
             input_size, output_size, align_corners, opt_scale);
 
         auto interp_size = HelperInterpLinear::interp_size;
-        int unused;
-        scalar_t unused_2;
 
-        std::tie(indices_weights, unused, unused_2) = HelperInterpLinear::_compute_index_ranges_weights<scalar_t>(
+        indices_weights = std::get<0>(HelperInterpLinear::_compute_index_ranges_weights<scalar_t>(
             input_size,
             output_size,
             stride,
@@ -1255,7 +1253,7 @@ struct HelperInterpLinear : public HelperInterpBase {
             interp_size,
             &HelperInterpLinear::aa_filter<scalar_t>,
             /*antialias=*/antialias,
-            /*align_corners=*/align_corners);
+            /*align_corners=*/align_corners));
       }
     );
     return indices_weights;
@@ -1378,10 +1376,8 @@ struct HelperInterpCubic : public HelperInterpBase {
             input_size, output_size, align_corners, opt_scale);
 
         auto interp_size = HelperInterpCubic::interp_size;
-        int unused;
-        scalar_t unused_2;
 
-        std::tie(indices_weights, unused, unused_2) = HelperInterpCubic::_compute_index_ranges_weights<scalar_t>(
+        indices_weights = std::get<0>(HelperInterpCubic::_compute_index_ranges_weights<scalar_t>(
             input_size,
             output_size,
             stride,
@@ -1391,7 +1387,7 @@ struct HelperInterpCubic : public HelperInterpBase {
             interp_size,
             &HelperInterpCubic::aa_filter<scalar_t>,
             /*antialias=*/antialias,
-            /*align_corners=*/align_corners);
+            /*align_corners=*/align_corners));
       }
     );
     return indices_weights;
@@ -1478,11 +1474,11 @@ void upsample_generic_Nd_kernel_impl(
   config.check_all_same_dtype(false)
     .declare_static_dtype_and_device(input.scalar_type(), input.device())
     .add_output(output)
-    .add_input(restrided_input);
+    .add_const_input(restrided_input);
 
   for (auto & idx_weight: indices_weights) {
     for (auto& tensor : idx_weight) {
-      config.add_input(tensor);
+      config.add_const_input(tensor);
     }
   }
 
@@ -1594,10 +1590,10 @@ void _separable_upsample_generic_Nd_kernel_impl_single_dim(
   config.check_all_same_dtype(false)
       .declare_static_dtype_and_device(input.scalar_type(), input.device())
       .add_output(output)
-      .add_input(restrided_input);
+      .add_const_input(restrided_input);
 
   for (auto& tensor : indices_weights) {
-    config.add_input(tensor);
+    config.add_const_input(tensor);
   }
 
   auto iter = config.build();
