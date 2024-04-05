@@ -1500,3 +1500,12 @@ def collect_defined_kernels(kernel_list):
 
 def get_cloned_parameter_buffer_name(name: str):
     return name + "__original__"
+
+
+def is_gpu(device: str):
+    return device in ["cuda", "xpu"]
+
+
+def device_need_guard(device: str):
+    assert isinstance(device, str)
+    return is_gpu(device)
