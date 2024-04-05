@@ -27,7 +27,7 @@ from torch._prims_common import (
 )
 
 from . import config, inductor_prims
-from .utils import use_scatter_fallback
+from .utils import needs_fallback_due_to_atomic_add_limitations, use_scatter_fallback
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -694,12 +694,19 @@ def put_(self, index, source, accumulate=False):
 def index_reduce(
     self, dim: int, index, src, reduction_type: str, *, include_self: bool = True
 ):
-    if reduction_type == "mean":
+    if reduction_type == "mean" and not needs_fallback_due_to_atomic_add_limitations(
+        self.dtype
+    ):
         tmp = (torch.ones_like if include_self else torch.zeros_like)(self)
         counts = tmp.index_add(dim, index, torch.ones_like(src))
         out = self if include_self else tmp  # tmp is torch.zeros_like(self)
-        out = out.index_add(dim, index, src) / counts
-        out = out if include_self else torch.where(counts == 0, self, out)
+        out = out.index_add(dim, index, src)
+        mask = counts == 0
+        if self.dtype.is_floating_point:
+            out = out / counts
+        else:
+            out = out // counts.masked_fill(mask, 1)
+        out = out if include_self else torch.where(mask, self, out)
         return out
 
     if use_scatter_fallback(
