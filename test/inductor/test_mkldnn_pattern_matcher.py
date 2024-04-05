@@ -1145,7 +1145,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 12
             )
             # 2. Qconv2d Binary fusion in post-grad fusion pass * 1
-            #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, mul_6, round_4, add_4,
+            #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, mul_6, round_4, add_4 (optional),
             #     clamp_min_3, clamp_max_3, convert_element_type_6]
             self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_count"], 1)
             self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_nodes"], 11)
@@ -1205,7 +1205,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
                 counters["inductor"]["qconv2d_weight_prepack_matcher_nodes"], 12
             )
             # 2. Qconv2d Binary fusion in post-grad fusion pass * 1
-            #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, relu, mul_6, round_4, add_4,
+            #    [qconv2d_pointwise_default_1, convert_element_type_5, sub_2, mul_5, add_3, relu, mul_6, round_4, add_4 (optional),
             #     clamp_min_3, clamp_max_3, convert_element_type_6]
             self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_count"], 1)
             self.assertEqual(counters["inductor"]["qconv2d_binary_matcher_nodes"], 12)
@@ -1730,9 +1730,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
             # 2. Dequant-conv pattern matched in quantization weight prepack * 1
             #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
             # 3. qconv2d_relu fusion in post-grad fusion pass * 1
-            #    [qconv2d_pointwise_default, relu, mul_2, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
+            #    [qconv2d_pointwise_default, relu, mul_2, round_2, add_1 (optional), clamp_min_1, clamp_max_1, convert_element_type_2]
             # 4. qmaxpool2d * 1
-            #    [convert_element_type_3, sub_1, mul_3, max_pool2d_with_indices, getitem, mul_4, round_3, add_2,
+            #    [convert_element_type_3, sub_1 (optional), mul_3, max_pool2d_with_indices, getitem, mul_4, round_3, add_2 (optional),
             #    clamp_min_2, clamp_max_2, convert_element_type_4]
             self._test_common(
                 mod,
@@ -1817,7 +1817,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         # 1. Pair of to_int8 and to_fp32 * 5, matched in pointless_convert pass at
         #    torch/_inductor/fx_passes/joint_graph.py: [convert_element_type, convert_element_type_1]
         # 2. Dequant-conv pattern matched in quantization weight prepack * 2
-        #    [convert_element_type_1, sub, mul_1, dequantize_per_channel, clone, convolution]
+        #    [convert_element_type_1, sub (optional), mul_1, dequantize_per_channel, clone, convolution]
         # 3. qconv2d fusion in post-grad fusion pass * 2
         #    [qconv2d_pointwise_default, mul_2, round_2, add_1, clamp_min_1, clamp_max_1, convert_element_type_2]
         # 4. qcat * 1

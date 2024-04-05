@@ -331,8 +331,8 @@ def _register_quantized_conv_lowering(
         )
         assert output_dtype in [None, torch.float32, torch.bfloat16]
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype is None else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype is None else 0
+        o_inv_scale = kwargs.get("o_inv_scale", 1.0) if output_dtype is None else 1.0
+        o_zero_point = kwargs.get("o_zp", 0) if output_dtype is None else 0
         assert (
             kwargs["output_dtype"] is original_pattern_output_dtype
         )  # Expected int8-in fp32-out qconv in weight prepack phase
@@ -416,8 +416,8 @@ def _register_quantized_linear_lowering(
         b = kwargs["b"] if "b" in kwargs else None
 
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype is None else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype is None else 0
+        o_inv_scale = kwargs.get("o_inv_scale", 1.0) if output_dtype is None else 1.0
+        o_zero_point = kwargs.get("o_zp", 0) if output_dtype is None else 0
         assert (
             kwargs["output_dtype"] is original_pattern_output_dtype
         )  # Expected int8-in fp32/bf16-out qlinear in weight prepack phase
@@ -462,7 +462,8 @@ def _is_valid_quantized_conv_binary_optimization_pattern(output_dtype):
         if len(compute_node.users) != 1:
             return False
         binary_node_inputs = next(iter(compute_node.users)).args
-        assert len(binary_node_inputs) == 2, "Expects binary node with 2 inputs"
+        if len(binary_node_inputs) != 2:
+            return False
         if output_dtype is not None:
             extra_input_of_binary_node = None
             for arg in binary_node_inputs:
@@ -551,8 +552,8 @@ def _register_quantized_conv_binary_lowering(
             kwargs["groups"],
         )
         # Output QParams
-        o_inv_scale = kwargs["o_inv_scale"] if output_dtype is None else 1.0
-        o_zero_point = kwargs["o_zp"] if output_dtype is None else 0
+        o_inv_scale = kwargs.get("o_inv_scale", 1.0) if output_dtype is None else 1.0
+        o_zero_point = kwargs.get("o_zp", 0) if output_dtype is None else 0
 
         accum.realize()
         from .mkldnn_fusion import _can_be_inplace
@@ -1006,8 +1007,9 @@ def _is_input_output_same_scale_zp(check_node):
         sub_nodes = filter_nodes(match.nodes, aten.sub.Tensor)
         zero_points = [node.args[1] for node in sub_nodes]
         add_nodes = filter_nodes(match.nodes, aten.add.Tensor)
-        assert len(add_nodes) == 1, "expect only 1 add node at output quant pattern"
-        zero_points.append(add_nodes[0].args[1])
+        assert len(add_nodes) in (0, 1), f"expect 0 or 1 add node at output quant pattern, got {len(add_nodes)}"
+        if len(add_nodes) > 0:
+            zero_points.append(add_nodes[0].args[1])
         if not all(zero_point == zero_points[0] for zero_point in zero_points):
             return False
 
@@ -1214,11 +1216,25 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
                 ]  # pattern: linear <- to_bf16 <- mul
             )
 
-        sub_node = mul_node.args[0]
-        to_fp32_node = sub_node.args[0]
+        # As we relaxed matching the pattern convert_dtype <- sub <- mul with optional sub and mul nodes
+        # we can match a convert_dtype node which can be the first op of the graph. In this case
+        # dequant_pattern_end_node.target is prims.convert_element_type.default and
+        # mul_node=dequant_pattern_end_node.args[0] can be an input arg, thus we have to check the size of
+        # mul_node.args before calling mul_node.args[0]
+        if len(mul_node.args) < 1:
+            return False
+
+        node = mul_node.args[0]
+        if node.target is aten.sub.Tensor:
+            sub_node = node
+            to_fp32_node = sub_node.args[0]
+        else:
+            sub_node = None
+            to_fp32_node = node
+
         if (
             mul_node.target is aten.mul.Tensor
-            and sub_node.target is aten.sub.Tensor
+            and (sub_node is None or sub_node.target is aten.sub.Tensor)
             and to_fp32_node.target is prims.convert_element_type.default
             and len(list(dequant_pattern_end_node.users)) > 1
         ):
@@ -1351,15 +1367,23 @@ def _is_valid_dequant_conv2d_pattern(dtype):
         else:
             convert_to_bf16 = conv_node.args[0]
             mul_node = convert_to_bf16.args[0]
-        sub_node = mul_node.args[0]
-        to_fp32_node = sub_node.args[0]
+
+        node = mul_node.args[0]
+        assert node.target in (aten.sub.Tensor, prims.convert_element_type.default)
+        if node.target is aten.sub.Tensor:
+            sub_node = node
+            to_fp32_node = sub_node.args[0]
+        else:
+            sub_node = None
+            to_fp32_node = node
 
         assert to_fp32_node.target is prims.convert_element_type.default
-        assert sub_node.target is aten.sub.Tensor
+        if sub_node is not None:
+            assert sub_node.target is aten.sub.Tensor
         assert mul_node.target is aten.mul.Tensor
         if (
             len(list(to_fp32_node.users)) != 1
-            or len(list(sub_node.users)) != 1
+            or (sub_node is not None and len(list(sub_node.users)) != 1)
             or len(list(mul_node.users)) != 1
         ):
             # Ensure the dequant pattern only has 1 user
@@ -1398,8 +1422,15 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
         else:
             convert_to_bf16 = conv_node.args[0]
             mul_node = convert_to_bf16.args[0]  # type: ignore[union-attr]
-        sub_node = mul_node.args[0]  # type: ignore[union-attr]
-        to_fp32_node = sub_node.args[0]  # type: ignore[union-attr]
+
+        node = mul_node.args[0]  # type: ignore[union-attr]
+        if node.target is aten.sub.Tensor:
+            sub_node = node
+            to_fp32_node = sub_node.args[0]  # type: ignore[union-attr]
+        else:
+            sub_node = None
+            to_fp32_node = node
+
         has_clone_to_channel_last_node_in_pattern = (
             conv_node.args[1].target is aten.clone.default  # type: ignore[union-attr]
         )
@@ -1429,7 +1460,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
         # Activation QParams
         qx, x_zp, x_scale = (
             kwargs["x"],
-            kwargs["x_zp"],
+            kwargs.get("x_zp", 0),
             kwargs["x_scale"],
         )
 
@@ -1504,7 +1535,8 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
                 graph.erase_node(convert_to_bf16)  # type: ignore[possibly-undefined]
             # Erase the dequant pattern
             graph.erase_node(mul_node)
-            graph.erase_node(sub_node)
+            if sub_node is not None:
+                graph.erase_node(sub_node)
             graph.erase_node(to_fp32_node)
             # Erase the dequant per channel pattern
             if clone_node is not None:
@@ -1642,15 +1674,22 @@ def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two, input_contigu
             linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
         )
 
-        sub_node = mul_node.args[0]
-        to_fp32_node = sub_node.args[0]
+        node = mul_node.args[0]
+        assert node.target in (aten.sub.Tensor, prims.convert_element_type.default)
+        if node.target is aten.sub.Tensor:
+            sub_node = node
+            to_fp32_node = sub_node.args[0]
+        else:
+            sub_node = None
+            to_fp32_node = node
 
         assert to_fp32_node.target is prims.convert_element_type.default
-        assert sub_node.target is aten.sub.Tensor
+        if sub_node is not None:
+            assert sub_node.target is aten.sub.Tensor
         assert mul_node.target is aten.mul.Tensor
         if (
             len(list(to_fp32_node.users)) != 1
-            or len(list(sub_node.users)) != 1
+            or (sub_node is not None and len(list(sub_node.users)) != 1)
             or len(list(mul_node.users)) != 1
         ):
             # Ensure the dequant pattern only has 1 user
@@ -1745,8 +1784,14 @@ def _register_qlinear_weight_prepack_pass(
             linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
         )
 
-        sub_node = mul_node.args[0]
-        to_fp32_node = sub_node.args[0]
+        node = mul_node.args[0]
+        assert node.target in (aten.sub.Tensor, prims.convert_element_type.default)
+        if node.target is aten.sub.Tensor:
+            sub_node = node
+            to_fp32_node = sub_node.args[0]
+        else:
+            sub_node = None
+            to_fp32_node = node
 
         if input_dim_exceeds_two and not input_contiguous:
             wgt_expand_node = linear_node.args[weight_index]
@@ -1768,7 +1813,7 @@ def _register_qlinear_weight_prepack_pass(
         # Activation QParams
         qx, x_zp, x_scale = (
             kwargs["x"],
-            kwargs["x_zp"],
+            kwargs.get("x_zp", 0),
             kwargs["x_scale"],
         )
 
@@ -1856,7 +1901,8 @@ def _register_qlinear_weight_prepack_pass(
                 graph.erase_node(activation_to_bf16_node)
             # Erase the dequant pattern
             graph.erase_node(mul_node)
-            graph.erase_node(sub_node)
+            if sub_node is not None:
+                graph.erase_node(sub_node)
             graph.erase_node(to_fp32_node)
             # Erase the dequant per channel pattern
             graph.erase_node(t_node)

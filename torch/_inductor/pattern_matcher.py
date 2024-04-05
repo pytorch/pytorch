@@ -354,8 +354,17 @@ class _TargetArgsExpr(_TargetExpr):
     Base class for filtering match by node.{target,args,kwargs}
     """
 
-    def __init__(self, fns, *args, _users=1, **kwargs):
+    def __init__(self, fns, *args, _users=1, is_optional=None, **kwargs):
         super().__init__(fns, _users)
+
+        if is_optional is None:
+            maybe_optional_ops = (aten.mul.Tensor, aten.add.Tensor, aten.sub.Tensor, aten.div.Tensor)
+            if len(self.fns) == 1 and self.fns[0] in maybe_optional_ops:
+                is_optional = True
+            else:
+                is_optional = False
+        self.is_optional = is_optional
+
         self.args = tuple(args)
         self.kwargs = dict(kwargs)
         if any(
@@ -448,6 +457,16 @@ class _TargetArgsExpr(_TargetExpr):
         for i, pattern, child_node in zip(itertools.count(), self_items, node_items):
             if isinstance(pattern, PatternExpr):
                 child_match = ctx.match(pattern, child_node)
+                while (
+                    isinstance(pattern, CallFunction)
+                    and pattern.is_optional
+                    and len(pattern.args) > 0
+                    and not child_match
+                ):
+                    # if pattern is optional let's skip it and continue matching
+                    pattern = pattern.args[0]
+                    child_match = ctx.match(pattern, child_node)
+
                 if not child_match:
                     return child_match
                 m.extend(child_match)
