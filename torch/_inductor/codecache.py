@@ -35,7 +35,18 @@ from pathlib import Path
 from threading import Thread
 from time import sleep, time
 from types import ModuleType
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 
@@ -2595,7 +2606,7 @@ def _worker_compile(
     source_code: str,
     cc: int,
     device: torch.device,
-    device_interface: type[DeviceInterface],
+    device_interface: Type[DeviceInterface],
 ) -> None:
     device_interface.Worker.set_device(device.index)
     kernel = TritonCodeCache.load(kernel_name, source_code)
