@@ -3668,7 +3668,7 @@ class ShapeEnv:
             return new_expr
         else:
             if isinstance(expr, sympy.Le):
-                # We try to evaluate lhs < rhs + 1 with the same axioms
+                # Try to evaluate lhs < rhs + 1
                 new_expr = sympy.Lt(expr.lhs, expr.rhs + 1)
                 return self._maybe_evaluate_static(new_expr,
                                                    unbacked_only=unbacked_only,
