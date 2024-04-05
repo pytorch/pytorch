@@ -102,7 +102,9 @@ def index_expanded_dims(t: torch.Tensor, expanded_dims: List[int]) -> torch.Tens
 def complex_memory_overlap(t: torch.Tensor) -> bool:
     # if torch._debug_has_internal_overlap thinks this tensor potentially has
     # memory overlap internally, let's dig deeper to find out whether it's true.
-    t = index_expanded_dims(t, get_expanded_dims(t))
+    #
+    # Call squeeze() so that dimension with size 1 does not cause false positive.
+    t = index_expanded_dims(t, get_expanded_dims(t)).squeeze()
     if torch._debug_has_internal_overlap(t) != 0:
         strides = t.stride()
         sizes = t.shape
