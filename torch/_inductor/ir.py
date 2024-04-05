@@ -3846,8 +3846,12 @@ class ExternKernel(InputsKernel):
         self.constant_args = constant_args
         self.kwargs = kwargs if kwargs else {}
         self.output_view = output_view
-        self.python_kernel_name = python_kernel_name
-        self.cpp_kernel_name = cpp_kernel_name
+        self.python_kernel_name = python_kernel_name or (
+            str(op_overload) if op_overload else None
+        )
+        self.cpp_kernel_name = cpp_kernel_name or (
+            get_cpp_kernel_name(op_overload) if op_overload else None
+        )
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.op_overload = op_overload
         self.collect_arg_kwarg_properties()
@@ -4327,7 +4331,6 @@ class RandomSeeds(ExternKernelOut):
             ),
             inputs=[],
             constant_args=[limits.min, limits.max, [count]],
-            python_kernel_name="aten.randint.low_out",
             # FIXME: Ideally we should only use at::_ops::randint_low_out::call here,
             # but the signature is different from is at::randint_out. Again,
             # we can simplify the code when only keeping an ABI-compatible version.
@@ -4941,20 +4944,22 @@ has_c_shim = {
 }
 
 
-def get_aten_cpp_kernel_name(kernel):
+def get_cpp_kernel_name(op_overload: torch._ops.OpOverload):
+    # FIXME: we will not need this function once we move to the ABI-compatible mode,
+    # we will always call a C shim.
     # Calling with the default kernel name can lead to ambiguous behavior like the following example.
     # repeat_interleave(const at::Tensor & repeats, c10::optional<int64_t> output_size=c10::nullopt)
     # repeat_interleave(const at::Tensor & self, int64_t repeats,
     #       c10::optional<int64_t> dim=c10::nullopt, c10::optional<int64_t> output_size=c10::nullopt)
-    assert (
-        isinstance(kernel, torch._ops.OpOverload) and kernel.namespace == "aten"
-    ), "Invalid aten kernel"
-    opname = (
-        kernel.__name__.split(".")[0]
-        if kernel._overloadname == "default"
-        else kernel.__name__.replace(".", "_")
-    )
-    return f"at::_ops::{opname}::call"
+    if op_overload.namespace == "aten":
+        opname = (
+            op_overload.__name__.split(".")[0]
+            if op_overload._overloadname == "default"
+            else op_overload.__name__.replace(".", "_")
+        )
+        return f"at::_ops::{opname}::call"
+    else:
+        return op_overload.name().replace(".", "_")
 
 
 class FallbackKernel(ExternKernelAlloc):
@@ -5301,11 +5306,9 @@ class FallbackKernel(ExternKernelAlloc):
                     self.use_runtime_dispatch = True
                     self.set_cpp_kernel(kernel)
                 else:
-                    self.cpp_kernel_name = get_aten_cpp_kernel_name(kernel)
+                    self.cpp_kernel_name = get_cpp_kernel_name(kernel)
                     schema = kernel._schema
                     self.init_args_default_value(schema)
-            else:
-                self.python_kernel_name = str(kernel)
         elif kernel.namespace == "_quantized":  # type: ignore[union-attr]
             # Internal Quantized Fallback Ops
             assert isinstance(kernel, torch._ops.OpOverload)
@@ -5313,8 +5316,6 @@ class FallbackKernel(ExternKernelAlloc):
                 self.set_cpp_kernel(kernel)
                 if not config.abi_compatible:
                     self.use_runtime_dispatch = True
-            else:
-                self.python_kernel_name = str(kernel)
         elif isinstance(kernel, torch._ops.HigherOrderOperator):
             self.python_kernel_name = f"torch.ops.higher_order.{kernel.__name__}"
         else:
@@ -5719,8 +5720,8 @@ class ConvolutionUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.mkldnn._convolution_pointwise",
             cpp_kernel_name="mkldnn::_convolution_pointwise",
+            op_overload=torch.ops.mkldnn._convolution_pointwise,
         )
         self.cpp_kernel_key = "convolution_pointwise"
         self.cpp_op_schema = """
@@ -5790,8 +5791,8 @@ class ConvolutionBinary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            python_kernel_name="torch.ops.mkldnn._convolution_pointwise.binary",
             cpp_kernel_name="mkldnn::_convolution_pointwise",
+            op_overload=torch.ops.mkldnn._convolution_pointwise.binary,
         )
         self.cpp_kernel_overload_name = "binary"
         self.cpp_kernel_key = "convolution_pointwise_binary"
