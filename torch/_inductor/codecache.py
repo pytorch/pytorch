@@ -89,6 +89,8 @@ else:
         return False
 
 
+output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
+
 LOCK_TIMEOUT = 600
 
 # timing metrics for time spent in the compilation
@@ -1661,6 +1663,7 @@ class AotCodeCompiler:
             extra=cpp_command,
             specified_dir=specified_output_path,
         )
+        output_code_log.info("Output code written to: %s", input_path)
 
         def _compile_consts_linux(consts: bytes) -> str:
             _, consts_path = write(
@@ -1678,14 +1681,6 @@ class AotCodeCompiler:
                 cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
-
-            cmd = (
-                f"{objcopy_command} --rename-section"
-                " .data=.lrodata,alloc,load,readonly,data,contents"
-                f" {consts_o} {consts_o}"
-            )
-            log.debug("aot constant obj command: %s", cmd)
-            run_command_and_check(cmd)
 
             cmd = f"rm {consts_path}"
             log.debug("aot constant bin removal command: %s", cmd)
@@ -1713,7 +1708,7 @@ class AotCodeCompiler:
 
         def _compile_consts_darwin(consts: bytes) -> str:
             is_large_consts = len(consts) > 1024
-            consts_asm = "\t.section\t__TEXT,__const\n"
+            consts_asm = "\t.section\t__DATA,__data\n"
             consts_asm += "\t.globl\t__binary_constants_bin_start\n"
             consts_asm += "__binary_constants_bin_start:\n"
             if not is_large_consts:
@@ -1802,8 +1797,8 @@ class AotCodeCompiler:
                 return bytes(raw_array.contents)
 
             aot_constants = b"".join(
-                _to_bytes(tensor)
-                for name, tensor in graph.constants.items()
+                _to_bytes(graph.get_original_value_of_constant(name))
+                for name in graph.constants.keys()
                 if name not in graph.folded_constants
             )
             consts_o = {
@@ -2303,17 +2298,18 @@ def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
     if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
-        return os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc")
+        return os.path.realpath(os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc"))
     return "nvcc"
 
 
 def _cutlass_include_paths() -> List[str]:
     cutlass_path = config.cuda.cutlass_dir
     return [
-        os.path.join(cutlass_path, "include"),
-        os.path.join(cutlass_path, "tools/library/include"),
-        os.path.join(cutlass_path, "tools/library/src"),
-        os.path.join(cutlass_path, "tools/util/include"),
+        # Use realpath to get canonical absolute paths, in order not to mess up cache keys
+        os.path.realpath(os.path.join(cutlass_path, "include")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/library/include")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/library/src")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/util/include")),
     ]
 
 
@@ -2395,13 +2391,17 @@ def cuda_compile_command(
     src_files: List[str],
     dst_file: str,
     dst_file_ext: str,
+    extra_args: Optional[List[str]] = None,
 ) -> str:
+    if extra_args is None:
+        extra_args = []
     include_paths = _cutlass_include_paths()
     cuda_lib_options = _cuda_lib_options()
     nvcc_host_compiler_options = _nvcc_host_compiler_options()
     nvcc_compiler_options = _nvcc_compiler_options()
     options = (
         nvcc_compiler_options
+        + extra_args
         + [
             f"-Xcompiler {opt}" if "=" in opt else f"-Xcompiler={opt}"
             for opt in nvcc_host_compiler_options
@@ -2415,6 +2415,8 @@ def cuda_compile_command(
         res = f"{_cuda_compiler()} {' '.join(options)} -c -o {dst_file} {src_file}"
     elif dst_file_ext == "so":
         options.append("-shared")
+        res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
+    elif dst_file_ext == "exe":
         res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
@@ -2509,12 +2511,13 @@ class CUDACodeCache:
         return key, input_path
 
     @classmethod
-    def compile(cls, source_code, dst_file_ext) -> Tuple[str, str, str]:
+    def compile(
+        cls, source_code, dst_file_ext, extra_args: Optional[List[str]] = None
+    ) -> Tuple[str, str, str]:
         """
         Compiles CUDA source_code into a file with dst_file_ext extension.
         Returns a tuple of dst_file_path, hash_key, source_code_path
         """
-
         key, input_path = cls.write(source_code, dst_file_ext)
         if key not in cls.cache:
             from filelock import FileLock
@@ -2525,14 +2528,25 @@ class CUDACodeCache:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 if not os.path.exists(output_path):
                     cmd = cuda_compile_command(
-                        [input_path], output_path, dst_file_ext
-                    ).split(" ")
+                        [input_path], output_path, dst_file_ext, extra_args
+                    )
+                    start_time = time()
+                    log.debug("CUDA Compilation: %s", cmd)
+                    cmd_parts = cmd.split(" ")
                     try:
                         subprocess.check_output(
-                            cmd, stderr=subprocess.STDOUT, env=os.environ
+                            cmd_parts, stderr=subprocess.STDOUT, env=os.environ
                         )
                     except subprocess.CalledProcessError as error:
-                        raise exc.CUDACompileError(cmd, error.output) from error
+                        raise exc.CUDACompileError(cmd_parts, error.output) from error
+                    end_time = time()
+                    log_duration_msg = f"CUDA Compilation took {end_time-start_time} seconds. Compile command: {cmd}"
+                    log.info(log_duration_msg)
+                else:
+                    log.debug(
+                        "CUDA Compilation skipped: %s since output already exists",
+                        input_path,
+                    )
                 cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path)
 
         return (cls.cache[key].output_path, key, input_path)
@@ -2731,12 +2745,6 @@ class AsyncCompile:
             return task()
         return cls.pool().submit(task)
 
-    @classmethod
-    def map(cls, fn: Callable[..., Any], seq: List[Any]) -> List[Any]:
-        if config.compile_threads <= 1 or len(seq) <= 1:
-            return list(map(fn, seq))
-        return [t.result() for t in [cls.pool().submit(fn, x) for x in seq]]
-
     def triton(
         self, kernel_name: str, source_code: str, device_str: str = "cuda"
     ) -> Union[TritonFuture, ModuleType]:
@@ -2753,17 +2761,11 @@ class AsyncCompile:
         else:
             return _load_kernel(kernel_name, source_code)
 
-    def multi_kernel(self, *args, **kwargs) -> ModuleType:
-        """
-        Async compile the python shim for multi-kernel.
-        """
+    def multi_kernel(self, *args, **kwargs) -> Any:
+        from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
-        def task():
-            from torch._inductor.codegen.multi_kernel import MultiKernelCall
-
-            return MultiKernelCall(*args, **kwargs)
-
-        return self.submit(task)
+        # no need to call this in parallel since the sub-kernels are already parallel tasks
+        return MultiKernelCall(*args, **kwargs)
 
     def cpp(self, source_code: str) -> ModuleType:
         def task():
