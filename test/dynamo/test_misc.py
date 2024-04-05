@@ -9867,6 +9867,19 @@ fn
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(inp)
 
+    def test_312_binary_slice_with_graph_break(self):
+        l1 = torch.nn.Linear(5, 5)
+        l2 = torch.nn.Linear(5, 5)
+
+        def fn(x):
+            # causes a graph break with items in the stack
+            n = torch.nn.Sequential(l1, l2)
+            out = n[1:](x)
+            return out
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(5, 5))
+
     def test_raises_importerror1(self):
         @torch.compile(backend="eager")
         def fn(x):
