@@ -302,9 +302,11 @@ static void copy_kernel_cuda(TensorIterator& iter, bool non_blocking) {
     Tensor src_contig;
 
     // If non_blocking is true - type conversions are performed on the GPU
-    // for CPU-GPU copies, otherwise type conversions are performed on the CPU.
-    // Type conversions are performed on the src device for GPU-GPU copies.
-    if (iter.device_type(0) == kCUDA || non_blocking) {
+    // For blocking transfers conversions are performed on CPU to avoid allocating
+    // extra GPU memory
+    // for GPU-GPU transfers conversions are performed on the source device
+    auto conversion_device = non_blocking ? kCUDA : kCPU;
+    if (iter.device_type(1) == conversion_device) {
       dst_contig = dst.is_contiguous() ? dst : at::empty_like(dst, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
       src_contig = iter.tensor(1).to(iter.dtype(0)).expand_as(dst).contiguous();
     } else {

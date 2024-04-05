@@ -1,8 +1,10 @@
 # Owner(s): ["module: c10d"]
+import threading
 import unittest
 from typing import List
 
 import torch
+
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._C import FileCheck
@@ -54,7 +56,7 @@ if not dist.is_available():
 
 
 @requires_nccl()
-class C10DFunctionalNativeTest(MultiProcessTestCase):
+class TestWithNCCL(MultiProcessTestCase):
     def setUp(self) -> None:
         super().setUp()
         self._spawn_processes()
@@ -379,8 +381,51 @@ class C10DFunctionalNativeTest(MultiProcessTestCase):
             "default",
         )
 
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    @run_with_native_funcol
+    def test_threading(self):
+        self._init_process_group()
+        device = torch.device(f"cuda:{self.rank}")
 
-class C10DFunctionalNativeCompileTest(TestCase):
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            buf0 = arg + 42
+            ar0 = funcol.all_reduce(buf0, "avg", "0")
+            ar0 = funcol.wait_tensor(ar0)
+            return ar0 + 1
+
+        arg = torch.rand(4, 4, device=device)
+        func(arg)
+
+        compiled = torch.compile(func, fullgraph=True)
+        code = run_and_get_triton_code(compiled, arg)
+        FileCheck().check("all_reduce_.default(buf0, 'avg', '0')").run(code)
+
+        # Unless explicitly specified (e.g. in a custom runtime), the process
+        # group registry is shared among all threads in a process. Here we
+        # verify that a process group registered in main thread can be resolved
+        # in a different thread.
+        class TestThread(threading.Thread):
+            def run(self):
+                self.exc = None
+                try:
+                    func(arg)
+                    compiled(arg)
+                except BaseException as exc:
+                    self.exc = exc
+
+            def join(self):
+                threading.Thread.join(self)
+                if self.exc:
+                    raise self.exc
+
+        t = TestThread()
+        t.start()
+        t.join()
+
+
+class CompileTest(TestCase):
     def setUp(self):
         # Allow testing aoti after torch.compile
         torch._inductor.config.triton.store_cubin = True

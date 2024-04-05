@@ -67,5 +67,12 @@ class ComposableQuantizer(Quantizer):
             self._record_and_validate_annotations(model, quantizer)
         return model
 
+    def transform_for_annotation(
+        self, model: torch.fx.GraphModule
+    ) -> torch.fx.GraphModule:
+        for quantizer in self.quantizers:
+            model = quantizer.transform_for_annotation(model)
+        return model
+
     def validate(self, model: torch.fx.GraphModule) -> None:
         pass

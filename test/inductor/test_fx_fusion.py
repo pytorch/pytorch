@@ -11,8 +11,8 @@ from torch._inductor.fx_passes.pre_grad import (
     transpose_linear,
     transpose_matmul,
 )
+from torch._inductor.test_case import run_tests, TestCase
 from torch.fx.passes.shape_prop import ShapeProp
-from torch.testing._internal.common_utils import run_tests, TestCase
 
 PassFunc = Callable[[torch.fx.GraphModule, Any], torch.fx.GraphModule]
 

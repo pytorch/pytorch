@@ -5,12 +5,13 @@ from typing import cast, Dict, List, Optional, Union
 
 import torch
 import torch.distributed as dist
-import torch.distributed.checkpoint as dcp
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed.checkpoint import FileSystemReader
+from torch.distributed.checkpoint import FileSystemReader, FileSystemWriter
 from torch.distributed.checkpoint._nested_dict import flatten_state_dict
-from torch.distributed.checkpoint._traverse import set_element
-from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
+from torch.distributed.checkpoint.default_planner import (
+    _EmptyStateDictLoadPlanner,
+    DefaultLoadPlanner,
+)
 from torch.distributed.checkpoint.metadata import (
     Metadata,
     STATE_DICT_TYPE,
@@ -21,6 +22,7 @@ from torch.distributed.checkpoint.metadata import (
 from torch.distributed.checkpoint.planner import LoadItemType, LoadPlan, LoadPlanner
 from torch.distributed.checkpoint.planner_helpers import _create_chunk_list
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict
+from torch.distributed.checkpoint.state_dict_saver import _save_state_dict
 from torch.distributed.checkpoint.storage import StorageReader
 from torch.futures import Future
 
@@ -31,43 +33,6 @@ __all__ = [
     "BroadcastingTorchSaveReader",
     "DynamicMetaLoadPlanner",
 ]
-
-
-class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
-    """
-    Extension of DefaultLoadPlanner, which rebuilds state_dict from the saved metadata.
-    Useful for loading in state_dict without first initializing a model, such as
-    when converting a DCP checkpoint into a Torch save file.
-
-    . N.B. `state_dict` must be an empty dictionary when used with this LoadPlanner
-
-    .. warning::
-        Because the entire state dict is initialized, It's recommended to only utilize
-        this LoadPlanner on a single rank or process to avoid OOM.
-
-    """
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def set_up_planner(
-        self,
-        state_dict: STATE_DICT_TYPE,
-        metadata: Metadata,
-        is_coordinator: bool,
-    ) -> None:
-        assert not state_dict
-
-        # rebuild the state dict from the metadata
-        for k, v in metadata.state_dict_metadata.items():
-            if isinstance(v, TensorStorageMetadata):
-                v = torch.empty(v.size, dtype=v.properties.dtype)  # type: ignore[assignment]
-            if k in metadata.planner_data:
-                set_element(state_dict, metadata.planner_data[k], v)
-            else:
-                state_dict[k] = v
-
-        super().set_up_planner(state_dict, metadata, is_coordinator)
 
 
 class BroadcastingTorchSaveReader(StorageReader):
@@ -240,11 +205,9 @@ def dcp_to_torch_save(
         To avoid OOM, it's recommended to only run this function on a single rank.
     """
     sd: STATE_DICT_TYPE = {}
-    storage_reader = FileSystemReader(dcp_checkpoint_dir)
-
     _load_state_dict(
         sd,
-        storage_reader=storage_reader,
+        storage_reader=FileSystemReader(dcp_checkpoint_dir),
         planner=_EmptyStateDictLoadPlanner(),
         no_dist=True,
     )
@@ -267,7 +230,11 @@ def torch_save_to_dcp(
     """
 
     state_dict = torch.load(torch_save_path)
-    dcp.save(state_dict, checkpoint_id=dcp_checkpoint_dir, no_dist=True)
+    # we don't need stateful behavior here because the expectation is anything loaded by
+    # torch.load would not contain stateful objects.
+    _save_state_dict(
+        state_dict, storage_writer=FileSystemWriter(dcp_checkpoint_dir), no_dist=True
+    )
 
 
 if __name__ == "__main__":
@@ -295,13 +262,15 @@ if __name__ == "__main__":
     checkpoint_missing_warning = (
         f"No checkpoint found at {args.src}. Skipping conversion."
     )
-    if args.mode == FormatMode.TORCH_TO_DCP:
+    if args.mode == FormatMode.TORCH_TO_DCP.value:
         if os.path.isfile(args.src):
             torch_save_to_dcp(args.src, args.dst)
         else:
             print(checkpoint_missing_warning)
-    elif args.mode == FormatMode.DCP_TO_TORCH:
+    elif args.mode == FormatMode.DCP_TO_TORCH.value:
         if os.path.isdir(args.src):
             dcp_to_torch_save(args.src, args.dst)
         else:
             print(checkpoint_missing_warning)
+    else:
+        raise ValueError(f"Unknown conversion mode: {args.mode}")

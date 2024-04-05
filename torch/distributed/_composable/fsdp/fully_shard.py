@@ -113,7 +113,7 @@ def fully_shard(
 
     managed_modules = _get_managed_modules(module)
     params, buffers = _get_managed_states(managed_modules)
-    _move_states_to_device(params, buffers, device, mesh_info)
+    _move_states_to_device(params, buffers, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
             params, module, mesh_info, post_forward_mesh_info, device, mp_policy
@@ -188,7 +188,7 @@ class FSDP:
             if isinstance(module, FSDP):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
-                    fsdp_param_group.reduce_scatter_grads = requires_gradient_sync
+                    fsdp_param_group.reduce_grads = requires_gradient_sync
                     fsdp_param_group.all_reduce_grads = requires_gradient_sync
 
     def set_requires_all_reduce(self, requires_all_reduce: bool, recurse: bool = True):
@@ -197,6 +197,9 @@ class FSDP:
         implement gradient accumulation with only reduce-scatter but not
         all-reduce for HSDP.
         """
+        # TODO: post_reduce_output += fsdp_param.sharded_param.grad
+        # after reduce-scatter and before all-reduce
+        raise NotImplementedError("requires_all_reduce is not yet supported in HSDP")
         for module in cast(nn.Module, self).modules():
             if isinstance(module, FSDP):
                 state = module._get_fsdp_state()
@@ -232,12 +235,15 @@ class FSDP:
                             "Please set torch.__future__.set_swap_module_params_on_conversion(True) "
                             "to use _apply methods with FSDP"
                         )
-                new_local_tensor = new_param._local_tensor
+                local_tensor = new_param._local_tensor
                 padded_sharded_size = fsdp_param.padded_sharded_param_size
-                if new_param._local_tensor.size() != padded_sharded_size:
-                    new_local_tensor.resize_(padded_sharded_size)
-                fsdp_param._sharded_param_data = new_local_tensor.view(-1)
-                cast(
-                    DTensor, fsdp_param.sharded_param
-                )._local_tensor = new_local_tensor[: fsdp_param.sharded_size[0]]
+                if local_tensor.size() != padded_sharded_size:
+                    padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
+                    padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
+                    local_tensor = padded_local_tensor
+                fsdp_param._sharded_param_data = local_tensor.view(-1)
+                assert isinstance(fsdp_param.sharded_param, DTensor)  # mypy
+                fsdp_param.sharded_param._local_tensor = local_tensor[
+                    : fsdp_param.sharded_size[0]
+                ]
         return ret

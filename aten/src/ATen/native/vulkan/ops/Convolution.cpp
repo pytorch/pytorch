@@ -294,7 +294,8 @@ static api::ShaderInfo get_shader(
 
   if (quantized) {
     if (transposed) {
-      TORCH_CHECK(false, "Quantized TConv not supported!");
+      shader = VK_KERNEL(quantized_conv_transpose2d);
+      return shader;
     }
 
     switch (method) {
@@ -1125,13 +1126,36 @@ c10::intrusive_ptr<Conv2dPackedContext> create_qconv2d_context(
       output_max));
 }
 
+c10::intrusive_ptr<Conv2dPackedContext> create_qtconv2d_context(
+    Tensor&& weight,
+    c10::optional<Tensor>&& bias,
+    std::vector<int64_t>&& stride,
+    std::vector<int64_t>&& padding,
+    std::vector<int64_t>&& output_padding,
+    std::vector<int64_t>&& dilation,
+    const int64_t groups,
+    const c10::optional<Scalar>& output_min,
+    const c10::optional<Scalar>& output_max) {
+  return c10::make_intrusive<Conv2dPackedContext>(Conv2dPackedContext(
+      weight,
+      bias,
+      stride,
+      padding,
+      dilation,
+      /* transposed = */ true,
+      /* quantized = */ true,
+      output_padding,
+      groups,
+      output_min,
+      output_max));
+}
+
 Tensor run_conv2d_context_impl(
     const Tensor& input_arg,
     const c10::intrusive_ptr<Conv2dPackedContext>& conv_context,
     double scale,
     int64_t zero_point) {
   api::Context* const context = api::context();
-
   // Validate input tensor is a Vulkan tensor, then convert to vTensor
   TORCH_CHECK(input_arg.is_vulkan(), "Input tensor must be Vulkan!");
   const vTensor& v_input = convert(input_arg);

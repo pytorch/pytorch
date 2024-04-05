@@ -25,48 +25,77 @@ from ..pattern_matcher import (
 from ..utils import is_cpu_device, pass_execution_and_save
 from .group_batch_fusion import group_batch_fusion_passes
 from .misc_patterns import numpy_compat_normalization
+from .split_cat import PRE_GRAD_PATTERNS
 
 log = logging.getLogger(__name__)
 
-normalization_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="normalization_pass"
-)
-merge_splits_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="merge_splits_pass"
-)
-split_cat_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="split_cat_pass"
-)
-unbind_stack_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="unbind_stack_pass"
-)
 efficient_conv_bn_eval_pass = PatternMatcherPass(
     prevent_match_across_mutations=True, pass_name="efficient_conv_bn_eval_pass"
 )
-merge_getitem_cat_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="merge_getitem_cat_pass"
+
+fuse_split_linear_add_pass = PatternMatcherPass(
+    prevent_match_across_mutations=True,
+    pass_name="fuse_split_linear_add_pass",
 )
-predispatch_pass = PatternMatcherPass(
-    prevent_match_across_mutations=True, pass_name="predispatch_pass"
+fuse_chunk_squeeze_cat_pass = PatternMatcherPass(
+    prevent_match_across_mutations=True,
+    pass_name="fuse_chunk_squeeze_cat_pass",
 )
+remove_reshape_pass = PatternMatcherPass(
+    prevent_match_across_mutations=True,
+    pass_name="remove_reshape_pass",
+)
+
 # based on predispatch aten IR
 normalization_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_splits_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
 split_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
 unbind_stack_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
 merge_getitem_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
+merge_stack_tahn_unbind_pass_aten = PatternMatcherPass(
+    prevent_match_across_mutations=True
+)
+mutate_cat_pass_aten = PatternMatcherPass(prevent_match_across_mutations=True)
+remove_split_with_size_one_pass_aten = PatternMatcherPass(
+    prevent_match_across_mutations=True
+)
 
-pattern_matcher_passes: List[PatternMatcherPass] = [
-    normalization_pass,
-    merge_getitem_cat_pass,
-    merge_splits_pass,
-    split_cat_pass,
-    unbind_stack_pass,
-    efficient_conv_bn_eval_pass,
-]
+
+def save_inductor_dict(pass_to_compare=None):
+    if not pass_to_compare:
+        pass_to_compare = list(config.pre_grad_fusion_options.keys()) + list(
+            config.post_grad_fusion_options.keys()
+        )
+    return {p: dict(counters["inductor"]).get(p, 0) for p in pass_to_compare}
+
+
+def is_same_dict(inductor_dict, optimus_dict):
+    for pass_name, count in optimus_dict.items():
+        if count != dict(inductor_dict).get(pass_name, 0):
+            return False
+    return True
+
+
+def fuse_parallel_linear_pass(graph):
+    return None
+
+
+def remove_split_ops(graph, shape_prop):
+    return None
+
+
+# split_cat related fusions
+pattern_matcher_passes = list(PRE_GRAD_PATTERNS.values())
+# non-split_cat related fusions
+# TODO: move them to the fusions dict too.
+pattern_matcher_passes.append(efficient_conv_bn_eval_pass)
+
 pattern_matcher_passes_aten: List[PatternMatcherPass] = [
+    remove_split_with_size_one_pass_aten,
     merge_getitem_cat_pass_aten,
+    merge_stack_tahn_unbind_pass_aten,
     merge_splits_pass_aten,
+    mutate_cat_pass_aten,
     split_cat_pass_aten,
     unbind_stack_pass_aten,
 ]
@@ -100,22 +129,39 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             gm_before_fx_passes = gm.__copy__()
         # explicitly run with predispatch atenIR based passes
         if config.is_predispatch:
+
+            def shape_prop(mod) -> None:
+                ShapeProp(
+                    gm=mod,
+                    fake_mode=detect_fake_mode(example_inputs),
+                ).propagate(*example_inputs)
+
             # normalization pass
             pass_execution_and_save(
                 normalization_pass_aten.apply,
                 gm,
+                example_inputs,
                 "[Pre grad(predispatch IR)]Apply normalization pass",
             )
             pass_execution_and_save(
                 group_batch_fusion_passes,
                 gm,
+                example_inputs,
                 "[Pre grad(predispatch IR)] Apply group_batch_fusion",
             )
             pass_execution_and_save(
-                predispatch_pass.apply,
+                fuse_chunk_squeeze_cat_pass.apply,
                 gm,
-                "[Pre grad(predispatch IR)] Apply predispatch_pass",
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply fuse_chunk_squeeze_cat_pass",
             )
+            pass_execution_and_save(
+                fuse_split_linear_add_pass.apply,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply fuse_split_linear_add_pass",
+            )
+
             log.debug(
                 "[Pre grad(predispatch IR)]Before split cat in pre grad pass. graph: %s",
                 gm.graph,
@@ -126,26 +172,46 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
                 pass_execution_and_save(
                     pattern_matcher_pass_aten.apply,
                     gm,
+                    example_inputs,
                     f"[Pre grad(predispatch IR)]Apply split_cat, index: {ind}",
                 )
+            pass_execution_and_save(
+                remove_reshape_pass.apply,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply remove_reshape_pass",
+            )
+            pass_execution_and_save(
+                fuse_parallel_linear_pass,
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply fuse_parallel_linear_pass",
+            )
+            pass_execution_and_save(
+                lambda graph: remove_split_ops(graph.owning_module, shape_prop),
+                gm,
+                example_inputs,
+                "[Pre grad(predispatch IR)] Apply remove_split_ops",
+            )
+            shape_prop(gm)
+
         else:
             # We only log the graph with changes to avoid the excessive compilation time
             # https://fb.workplace.com/groups/257735836456307/permalink/633533465543207/
             if example_inputs is not None:
                 gm = fuse_fx(gm, example_inputs)
             numpy_compat_normalization(gm.graph)
-            inductor_before_change = copy.deepcopy(counters["inductor"])
+
+            optimus_scuba_log["before_recompile_pre_grad"] = upload_graph(gm.graph)
             group_batch_fusion_passes(gm.graph, pre_grad=True)
-            if counters["inductor"] != inductor_before_change:
-                optimus_scuba_log["group_batch_fusion_pre_grad"] = upload_graph(
-                    gm.graph
-                )
             for pattern_matcher_pass in pattern_matcher_passes:
-                inductor_before_change = copy.deepcopy(counters["inductor"])
+                inductor_before_change = save_inductor_dict(
+                    [pattern_matcher_pass.pass_name]
+                )
                 pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
-                if counters["inductor"] != inductor_before_change:
+                if not is_same_dict(counters["inductor"], inductor_before_change):
                     optimus_scuba_log[
-                        f"split_cat_pattern_{pattern_matcher_pass.pass_name}_pre_grad"
+                        f"{pattern_matcher_pass.pass_name}_pre_grad"
                     ] = upload_graph(gm.graph)
 
     if config.pre_grad_custom_pass is not None:
@@ -153,6 +219,7 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
     stable_topological_sort(gm.graph)
     gm.graph.lint()
     gm.recompile()
+    optimus_scuba_log["after_recompile_pre_grad"] = upload_graph(gm.graph)
 
     if (
         config.pattern_matcher
@@ -394,8 +461,11 @@ def sink_cat_after_pointwise(module: torch.fx.GraphModule) -> torch.fx.GraphModu
                     return tensors, dim
 
                 tensors, dim = cat_args(*node.args, **node.kwargs)
+                new_kwargs = {
+                    name: val for name, val in user.kwargs.items() if name != "input"
+                }
                 new_tensors = [
-                    g.create_node(user.op, user.target, args=(arg,), kwargs=user.kwargs)
+                    g.create_node(user.op, user.target, args=(arg,), kwargs=new_kwargs)
                     for arg in tensors
                 ]
                 new_cat = g.create_node(

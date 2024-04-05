@@ -23,9 +23,17 @@ concurrency:
 permissions: read-all
 
 jobs:
+  llm-td:
+    name: before-test
+    uses: ./.github/workflows/llm_td_retrieval.yml
+    permissions:
+      id-token: write
+      contents: read
+
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
+    needs: llm-td
     permissions:
       id-token: write
       contents: read

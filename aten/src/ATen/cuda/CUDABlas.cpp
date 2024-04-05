@@ -183,31 +183,22 @@ uint32_t _getAlignment(uintptr_t address) {
 
 static size_t _parseChosenWorkspaceSize() {
   const char * val = getenv("CUBLASLT_WORKSPACE_SIZE");
-  size_t workspace_size = 1024;
 #ifdef USE_ROCM
   if (!val) {
     // accept either env var
     val = getenv("HIPBLASLT_WORKSPACE_SIZE");
   }
-#else
-  cudaDeviceProp* p = at::cuda::getDeviceProperties(c10::cuda::current_device());
-  // Keep workspace_size = 1024 for small Ampere GPUs
-  // See https://github.com/pytorch/pytorch/pull/120925#issuecomment-1977556485
-  if (p->major == 8 && p->totalGlobalMem / 1073741824 >= 24) {
-    workspace_size = 4096;
-  } else if (p->major >= 9) {
-    workspace_size = 32768;
-  }
 #endif
+  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
   if (val) {
     try {
       workspace_size = std::stoi(val);
     } catch(std::invalid_argument const& e) {
       TORCH_WARN("invalid CUBLASLT_WORKSPACE_SIZE,",
-                 " using default workspace size of ", workspace_size, " bytes.");
+                 " using default workspace size of ", workspace_size, " KiB.");
     } catch(std::out_of_range const& e) {
       TORCH_WARN("CUBLASLT_WORKSPACE_SIZE out of range,",
-                 " using default workspace size of ", workspace_size, " bytes.");
+                 " using default workspace size of ", workspace_size, " KiB.");
     }
   }
   return workspace_size * 1024;
@@ -1169,7 +1160,9 @@ void scaled_gemm(
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_B_SCALE_POINTER, mat2_scale_ptr);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_D_SCALE_POINTER, result_scale_ptr);
 #ifndef USE_ROCM
+if (isFloat8Type(result_dtype)) {
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_AMAX_D_POINTER, amax_ptr);
+}
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_FAST_ACCUM, fastAccuMode);
 #endif
   CuBlasLtMatrixLayout Adesc(ScalarTypeToCudaDataType(mat1_dtype), m, k, mat1_ld, transa == 't');
