@@ -1968,13 +1968,6 @@ class DistributedDataParallel(Module, Joinable):
             >>> ddp.register_comm_hook(state=None, hook=encode_and_decode)
         """
         self._check_comm_hook(hook)
-        if hook.__name__ in ["bf16_compress_hook", "fp16_compress_hook"]:
-            # If we pass None, then the hook will try to get the world size
-            # by calling `dist.group.WORLD.size()`, which causes compilation
-            # errors. So we pre-decode the process group and pass it to the
-            # hook.
-            if state is None:
-                state = dist.group.WORLD
         assert self.logger is not None
         self.logger._set_comm_hook_name(hook.__qualname__)
         self._comm_hooks.append((hook, state))
