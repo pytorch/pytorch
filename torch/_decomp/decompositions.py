@@ -3530,25 +3530,67 @@ def _upsample_linear(
     return result
 
 
-@register_decomposition(
-    [
-        aten.upsample_linear1d_backward,
-        aten.upsample_bilinear2d_backward,
-        aten.upsample_trilinear3d_backward,
-    ]
-)
+@register_decomposition(aten.upsample_linear1d_backward)
+@out_wrapper("grad_input")
+def upsample_linear1d_backward(
+    grad_output: Tensor,
+    output_size: List[int],
+    input_size: List[int],
+    align_corners: bool,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    return _upsample_linear_backward(
+        grad_output, output_size, input_size, align_corners, [scales_w]
+    )
+
+
+@register_decomposition(aten.upsample_bilinear2d_backward)
+@out_wrapper("grad_input")
+def upsample_bilinear2d_backward(
+    grad_output: Tensor,
+    output_size: List[int],
+    input_size: List[int],
+    align_corners: bool,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    return _upsample_linear(
+        grad_output, output_size, input_size, align_corners, [scales_h, scales_w]
+    )
+
+
+@register_decomposition(aten.upsample_trilinear3d_backward)
+@out_wrapper("grad_input")
+def upsample_trilinear3d_backward(
+    grad_output: Tensor,
+    output_size: List[int],
+    input_size: List[int],
+    align_corners: bool,
+    scales_d: Optional[float] = None,
+    scales_h: Optional[float] = None,
+    scales_w: Optional[float] = None,
+) -> Tensor:
+    return _upsample_linear(
+        grad_output,
+        output_size,
+        input_size,
+        align_corners,
+        [scales_d, scales_h, scales_w],
+    )
+
+
 @pw_cast_for_opmath
 def _upsample_linear_backward(
     grad_output: Tensor,
     output_size: List[int],
     input_size: List[int],
     align_corners: bool,
+    scales: List[Optional[float]],
 ) -> Tensor:
     # get dimensions of original image
     n_batch, n_channels = input_size[:2]
     inp_sizes = input_size[2:]
     n_dims = len(inp_sizes)
-    scales = [None] * n_dims
 
     _, dtype = utils.elementwise_dtypes(
         grad_output,
