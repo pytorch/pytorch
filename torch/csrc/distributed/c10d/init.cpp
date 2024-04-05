@@ -2443,7 +2443,9 @@ Example::
       .def_readwrite(
           "split_from", &::c10d::ProcessGroupNCCL::Options::split_from)
       .def_readwrite(
-          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color);
+          "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
+      .def_readwrite(
+          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name);
 
 #endif
 

@@ -3641,6 +3641,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         t = t['entries']
         self.assertEqual(len(t), 2)
         last = t[-1]
+        self.assertEqual(last['process_group_name'], '0')
         self.assertEqual(last['state'], 'completed')
         s = last['time_discovered_started_ns']
         f = last['time_discovered_completed_ns']

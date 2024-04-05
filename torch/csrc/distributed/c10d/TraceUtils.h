@@ -370,6 +370,7 @@ struct NCCLTraceBuffer {
                 // buffer this entry will be located to
                 // update state information
     size_t pg_id_;
+    std::string pg_name_;
     size_t seq_id_; // as tracked by the process group
     std::string profiling_name_;
 
@@ -413,6 +414,7 @@ struct NCCLTraceBuffer {
 
   c10::optional<size_t> record(
       size_t pg_id,
+      const std::string& pg_name,
       size_t seq_id,
       std::string profiling_name,
       const std::vector<at::Tensor>& inputs,
@@ -429,6 +431,7 @@ struct NCCLTraceBuffer {
     auto te = Entry{
         id_,
         pg_id,
+        pg_name,
         seq_id,
         std::move(profiling_name),
         std::move(traceback),
@@ -575,6 +578,7 @@ struct NCCLTraceBuffer {
     c10::IValue version_val = "1.1";
 
     c10::IValue pg_id_key = "pg_id";
+    c10::IValue pg_name_key = "process_group_name";
     c10::IValue seq_id_key = "seq_id";
     c10::IValue profiling_name_key = "profiling_name";
     c10::IValue input_sizes_key = "input_sizes";
@@ -610,6 +614,7 @@ struct NCCLTraceBuffer {
       auto& tb = stracebacks.tracebacks.at(i);
       auto dict = new_dict();
       dict.insert(pg_id_key, int64_t(e.pg_id_));
+      dict.insert(pg_name_key, e.pg_name_);
       dict.insert(seq_id_key, int64_t(e.seq_id_));
       dict.insert(profiling_name_key, e.profiling_name_);
       dict.insert(time_created_key, int64_t(e.time_created_));
@@ -660,7 +665,7 @@ struct NCCLTraceBuffer {
       dict.insert(frames_key, frames);
       entries.push_back(dict);
     }
-
+    auto pg_config = new_dict();
     // convert ncclDumpMap into a dictionary
     auto per_comm_dict = new_dict();
     if (ncclDumpMap.has_value()) {
