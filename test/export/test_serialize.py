@@ -116,6 +116,61 @@ class TestSerialize(TestCase):
         loaded_out = loaded_model.module()(*loaded_args, **loaded_kwargs)
         self.assertEqual(orig_out, loaded_out)
 
+    def test_metadata_parsing_with_layer_split(self):
+        # Tests that modules with more complicated layer patterns can be serialized
+        # and deserialized correctly.
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.layers = torch.nn.Sequential(
+                    torch.nn.SiLU(),
+                    torch.nn.SiLU(),
+                    torch.nn.SiLU(),
+                )
+
+            def forward(self, x):
+                # Splitting layers of a sequential stack introduces commas and parens
+                # into metadata trace.
+                out_start, out_rest = self.layers[0], self.layers[1:]
+                h = out_start(x)
+                h = out_rest(h)
+                return h
+
+        inp = (torch.ones(10),)
+        # Module will only be able to roundtrip if metadata
+        # can be correctly parsed.
+        ep = export(MyModule(), inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        loaded_ep = load(buffer)
+
+        # Check that both modules run to confirm load was successful.
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertEqual(exp_out, actual_out)
+
+    def test_serialize_constant_outputs(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                # Along with tensor output, return Nonetype
+                # and constant. Although these outputs aren't
+                # very useful, they do show up in graphs.
+                return x + 1, None, 1024
+
+        # Check that module can be roundtripped, thereby confirming proper deserialization.
+        inp = (torch.ones(10),)
+        ep = export(MyModule(), inp)
+        buffer = io.BytesIO()
+        save(ep, buffer)
+        loaded_ep = load(buffer)
+
+        exp_out = ep.module()(*inp)
+        actual_out = loaded_ep.module()(*inp)
+        self.assertEqual(exp_out, actual_out)
+
     def test_serialize_multiple_returns_from_node(self) -> None:
         class MyModule(torch.nn.Module):
             def __init__(self):
