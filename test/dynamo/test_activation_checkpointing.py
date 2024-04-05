@@ -1082,6 +1082,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
             )
         )
 
+    @requires_cuda
     def test_distributed_utils_checkpoint_wrapper(self):
         class MockModule(torch.nn.Module):
             def __init__(self):
