@@ -27,7 +27,7 @@ import torch._custom_ops as custom_ops
 def to_numpy(tensor):
     return tensor.cpu().numpy()
 
-@torch.library.custom_op("_torch_testing::numpy_cube", mutated_args=())
+@torch.library.custom_op("_torch_testing::numpy_cube", mutates_args=())
 def numpy_cube(x: Tensor) -> Tuple[Tensor, Tensor]:
     x_np = to_numpy(x)
     dx = torch.tensor(3 * x_np ** 2, device=x.device)
@@ -49,7 +49,7 @@ def numpy_cube_backward(ctx, grad_out, grad_dx):
 
 numpy_cube.register_autograd(numpy_cube_setup_context, numpy_cube_backward)
 
-@torch.library.custom_op("_torch_testing::numpy_mul", mutated_args=())
+@torch.library.custom_op("_torch_testing::numpy_mul", mutates_args=())
 def numpy_mul(x: Tensor, y: Tensor) -> Tensor:
     return torch.tensor(to_numpy(x) * to_numpy(y), device=x.device)
 
@@ -69,7 +69,7 @@ def numpy_mul_backward(ctx, grad_out):
 
 numpy_mul.register_autograd(numpy_mul_setup_context, numpy_mul_backward)
 
-@torch.library.custom_op("_torch_testing::numpy_sort", mutated_args=())
+@torch.library.custom_op("_torch_testing::numpy_sort", mutates_args=())
 def numpy_sort(x: Tensor, dim: int) -> Tuple[Tensor, Tensor, Tensor]:
     device = x.device
     x = to_numpy(x)
@@ -99,7 +99,7 @@ def numpy_sort_backward(ctx, grad_out, grad_ind, grad_ind_inv):
 numpy_sort.register_autograd(numpy_sort_setup_context, numpy_sort_backward)
 
 
-@torch.library.custom_op("_torch_testing::numpy_take", mutated_args=())
+@torch.library.custom_op("_torch_testing::numpy_take", mutates_args=())
 def numpy_take(x: Tensor, ind: Tensor, ind_inv: Tensor, dim: int) -> Tensor:
     device = x.device
     x = to_numpy(x)
@@ -126,7 +126,7 @@ def numpy_take_backward(ctx, grad_out):
 
 numpy_take.register_autograd(numpy_take_setup_context, numpy_take_backward)
 
-@torch.library.custom_op("_torch_testing::numpy_nonzero", mutated_args=())
+@torch.library.custom_op("_torch_testing::numpy_nonzero", mutates_args=())
 def numpy_nonzero(x: Tensor) -> Tensor:
     x_np = to_numpy(x)
     res = np.stack(np.nonzero(x_np), axis=1)
