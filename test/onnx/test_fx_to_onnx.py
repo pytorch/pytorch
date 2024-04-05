@@ -712,13 +712,13 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
     def test_export_with_logging_logger(self):
         logger = logging.getLogger(__name__)
 
-        class PrintModule(torch.nn.Module):
+        class LoggingLoggerModule(torch.nn.Module):
             def forward(self, x):
                 logger.log("abc")
                 return x + 1
 
         input = torch.randn(2, 3)
-        model = PrintModule()
+        model = LoggingLoggerModule()
         _ = torch.onnx.dynamo_export(model, input)
 
     def test_checkpoint_cast(self):
