@@ -9,9 +9,8 @@ def gen_linker_script(
         prioritized_text = [
             line.replace("\n", "") for line in prioritized_text if line != "\n"
         ]
-    f.close()
 
-    linker_script_lines = os.popen("ld -verbose").read().split("\n")
+    linker_script_lines = subprocess.check_output(["ld", "-verbose"]).split("\n")
     indices = [
         i
         for i, x in enumerate(linker_script_lines)
@@ -33,4 +32,3 @@ def gen_linker_script(
                     f.write(f"      .text.{plines}\n")
                 f.write("    )\n")
             f.write(f"{line}\n")
-    f.close()
