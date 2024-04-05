@@ -14,6 +14,7 @@ class TestDeviceGuard(torch._dynamo.test_case.TestCase):
     """
     Unit tests for the DeviceGuard class using a mock DeviceInterface.
     """
+
     def setUp(self):
         super().setUp()
         self.device_interface = Mock()
@@ -51,6 +52,7 @@ class TestCUDADeviceGuard(torch._dynamo.test_case.TestCase):
     """
     Unit tests for the DeviceGuard class using a CudaInterface.
     """
+
     def setUp(self):
         super().setUp()
         self.device_interface = CudaInterface
