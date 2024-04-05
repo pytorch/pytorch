@@ -4,6 +4,8 @@ on:
   schedule:
     - cron: 0 7 * * 1-6
     - cron: 0 7 * * 0
+  # NB: GitHub has an upper limit of 10 inputs here, so before we can sort it
+  # out, let try to run torchao cudagraphs_low_precision as part of cudagraphs
   workflow_dispatch:
     inputs:
       training:
@@ -53,11 +55,6 @@ on:
         default: false
       maxautotune:
         description: Run inductor_max_autotune?
-        required: false
-        type: boolean
-        default: false
-      cudagraphs_low_precision:
-        description: Run cudagraphs_low_precision with auto quant from torchao?
         required: false
         type: boolean
         default: false
@@ -131,7 +128,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9-sm80
-      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs_low_precision }}
+      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
       docker-image: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-focal-cuda12_1-py3_10-gcc9-inductor-build.outputs.test-matrix }}
       use-gha: anything-non-empty-to-use-gha
