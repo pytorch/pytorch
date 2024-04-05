@@ -585,8 +585,12 @@ def forward(self, arg0_1, arg1_1):
             def forward(self, tq, x):
                 torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
                 torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
-                x_sin = torch.ops._TorchScriptTesting.queue_pop(tq)
-                x_cos = torch.ops._TorchScriptTesting.queue_pop(tq)
+                x_sin = torch.ops._TorchScriptTesting.queue_pop(
+                    tq
+                ) - torch.ops._TorchScriptTesting.queue_size(tq)
+                x_cos = torch.ops._TorchScriptTesting.queue_pop(
+                    tq
+                ) + torch.ops._TorchScriptTesting.queue_size(tq)
                 return x_sin, x_cos, tq
 
         mod = Model()
@@ -616,8 +620,12 @@ def forward(self, arg0_1, arg1_1):
     sin = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
     queue_push_1 = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, sin);  sin = None
     queue_pop = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
+    queue_size = torch.ops._TorchScriptTesting.queue_size.default(arg0_1)
+    sub = torch.ops.aten.sub.Tensor(queue_pop, 1);  queue_pop = None
     queue_pop_1 = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
-    return (queue_pop, queue_pop_1, arg0_1)""",
+    queue_size_1 = torch.ops._TorchScriptTesting.queue_size.default(arg0_1)
+    add = torch.ops.aten.add.Tensor(queue_pop_1, 0);  queue_pop_1 = None
+    return (sub, add, arg0_1)""",
         )
         self._assertEqualSkipScriptObject(gm(tq1, x), mod(tq2, x))
 
@@ -629,18 +637,17 @@ def forward(self, arg0_1, arg1_1):
             def forward(self, tq, x):
                 torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
                 torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
-                x_sin = torch.ops._TorchScriptTesting.queue_pop(tq)
-                x_cos = torch.ops._TorchScriptTesting.queue_pop(tq)
+                x_sin = torch.ops._TorchScriptTesting.queue_pop(
+                    tq
+                ) - torch.ops._TorchScriptTesting.queue_size(tq)
+                x_cos = torch.ops._TorchScriptTesting.queue_pop(
+                    tq
+                ) + torch.ops._TorchScriptTesting.queue_size(tq)
                 return x_sin, x_cos, tq
 
         mod = Model()
 
         tq1 = torch.classes._TorchScriptTesting._TensorQueue(
-            torch.empty(
-                0,
-            ).fill_(-1)
-        )
-        tq2 = torch.classes._TorchScriptTesting._TensorQueue(
             torch.empty(
                 0,
             ).fill_(-1)
@@ -667,10 +674,16 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     with_effects_2 = torch._higher_order_ops.effects.with_effects(getitem_2, torch.ops._TorchScriptTesting.queue_pop.default, arg1_1);  getitem_2 = None
     getitem_4 = with_effects_2[0]
     getitem_5 = with_effects_2[1];  with_effects_2 = None
-    with_effects_3 = torch._higher_order_ops.effects.with_effects(getitem_4, torch.ops._TorchScriptTesting.queue_pop.default, arg1_1);  getitem_4 = None
-    getitem_6 = with_effects_3[0]
-    getitem_7 = with_effects_3[1];  with_effects_3 = None
-    return (getitem_6, getitem_5, getitem_7, arg1_1)""",  # noqa: B950
+    with_effects_3 = torch._higher_order_ops.effects.with_effects(getitem_4, torch.ops._TorchScriptTesting.queue_size.default, arg1_1);  getitem_4 = None
+    getitem_6 = with_effects_3[0];  with_effects_3 = None
+    sub = torch.ops.aten.sub.Tensor(getitem_5, 1);  getitem_5 = None
+    with_effects_4 = torch._higher_order_ops.effects.with_effects(getitem_6, torch.ops._TorchScriptTesting.queue_pop.default, arg1_1);  getitem_6 = None
+    getitem_8 = with_effects_4[0]
+    getitem_9 = with_effects_4[1];  with_effects_4 = None
+    with_effects_5 = torch._higher_order_ops.effects.with_effects(getitem_8, torch.ops._TorchScriptTesting.queue_size.default, arg1_1);  getitem_8 = None
+    getitem_10 = with_effects_5[0];  with_effects_5 = None
+    add = torch.ops.aten.add.Tensor(getitem_9, 0);  getitem_9 = None
+    return (getitem_10, sub, add, arg1_1)""",  # noqa: B950
         )
 
 
