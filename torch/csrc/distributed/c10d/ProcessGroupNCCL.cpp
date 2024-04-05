@@ -162,7 +162,7 @@ ncclRedOpRAII getNcclReduceOp(
 #endif
     }
     return ncclOp.at(reduceOp);
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     switch (reduceOp) {
       case ReduceOp::AVG:
         C10_THROW_ERROR(
@@ -737,7 +737,10 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
-  dumpOnTimeout_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
+  // TODO, we should either deprecate TORCH_NCCL_DUMP_ON_TIMEOUT
+  // or change its name to reflect that dump happens on exception including
+  // both timeout and other errors.
+  dumpOnException_ = getCvarBool(TORCH_NCCL_DUMP_ON_TIMEOUT, false) ||
       (dist_debug_level_ >= DebugLevel::Detail);
   heartbeat_ = 1ULL;
   monitorThreadEnabled_.store(getCvarBool(TORCH_NCCL_ENABLE_MONITORING, true));
@@ -807,7 +810,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << "NCCL version: " << getNcclVersion() << ", size: " << size
             << ", global rank: " << globalRank()
             << ", TORCH_NCCL_ASYNC_ERROR_HANDLING: " << asyncErrorHandling_
-            << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnTimeout_
+            << ", TORCH_NCCL_DUMP_ON_TIMEOUT: " << dumpOnException_
             << ", TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC: "
             << waitTimeoutDumpInMilSec_
             << ", TORCH_NCCL_DESYNC_DEBUG: " << desyncDebug_
@@ -1193,9 +1196,9 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   uint64_t heartBeatCounter = 0ULL;
   std::string errorMsg;
   std::string exitMsg;
-  bool checkTimeoutSignal = (dumpOnTimeout_ && uid_ == 0);
-  int monitorPollInterval = checkTimeoutSignal ? coordCheckIntervalMilSec_
-                                               : heartbeatTimeoutInSec_ * 1000;
+  bool checkDumpSignal = (dumpOnException_ && uid_ == 0);
+  int monitorPollInterval = checkDumpSignal ? coordCheckIntervalMilSec_
+                                            : heartbeatTimeoutInSec_ * 1000;
   auto lastTimePollStore = std::chrono::steady_clock::now();
   auto lastTimeHeartBeatCheck = std::chrono::steady_clock::now();
   c10::optional<DumpPipe> dumpPipe = c10::nullopt;
@@ -1227,7 +1230,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
     // to see if any PG on any rank observed a timeout and signaled peers to
     // dump debugging info, and we avoid hammering the TCPStore from all PGs on
     // the same rank.
-    if (checkTimeoutSignal) {
+    if (checkDumpSignal) {
       // There are two scenarios where monitor thread will dump on timeout:
       // 1. The local rank is the first to observe a timeout.shouldDump_ will be
       // set to true.
@@ -1237,7 +1240,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       if (shouldDump_.load()) {
         errorMsg = c10::str(
             logPrefix(),
-            "Received a timeout signal from this local rank and will ",
+            "Received a dump signal from this local rank and will ",
             "start to dump the debug info. ",
             "Last enqueued NCCL work: ",
             lastEnqueuedSeq_,
@@ -1245,7 +1248,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
             lastCompletedSeq_,
             ".");
         exitMsg = c10::str(
-            "ProcessGroupNCCL's watchdog detected a collective timeout from the local rank. ",
+            "ProcessGroupNCCL's watchdog detected an exception from the local rank. ",
             "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
             "sizes used across ranks, the order of collectives is not same for all ranks ",
             "or the scheduled collective, for some reason, didn't run. Additionally, ",
@@ -1262,10 +1265,10 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           computeDeltaMS(lastTimePollStore, currentTime) >=
               coordCheckIntervalMilSec_) {
         lastTimePollStore = currentTime;
-        if (globalStore_->check({std::string(TIMEOUT_DUMP)})) {
+        if (globalStore_->check({std::string(EXCEPTION_DUMP)})) {
           int timeOutRank = -1;
           try {
-            auto vec = globalStore_->get(std::string(TIMEOUT_DUMP));
+            auto vec = globalStore_->get(std::string(EXCEPTION_DUMP));
             TORCH_CHECK_WITH(
                 DistBackendError,
                 vec.size() == sizeof(int),
@@ -1277,7 +1280,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
           }
           errorMsg = c10::str(
               logPrefix(),
-              "Received a global timeout signal from rank ",
+              "Received a global dump signal from rank ",
               timeOutRank,
               ", and will start to dump the debug info. ",
               "Last enqueued NCCL work: ",
@@ -1286,7 +1289,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
               lastCompletedSeq_,
               ".");
           exitMsg = c10::str(
-              "ProcessGroupNCCL's watchdog detected a collective timeout signal from rank ",
+              "ProcessGroupNCCL's watchdog detected a dump signal from rank ",
               timeOutRank,
               " and notified the current rank. ",
               "This is most likely caused by incorrect usages of collectives, e.g., wrong ",
@@ -1567,6 +1570,28 @@ void ProcessGroupNCCL::watchdogHandler() {
 
       // If work hits an exception (either an error or timeout)
       if (work.exception()) {
+        // try to dump flight records if exception happens.
+        // Flight recorder behavior should be independent of desync Debug
+        if (dumpOnException_) {
+          try {
+            auto rank = globalRank();
+            auto vec = std::vector<uint8_t>(
+                reinterpret_cast<uint8_t*>(&rank),
+                reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
+            globalStore_->set(std::string(EXCEPTION_DUMP), vec);
+            // signal the monitor thread to start dumping
+            shouldDump_.store(true);
+            // This sleep is used to give time for dumping before throwing
+            // exception
+            std::this_thread::sleep_for(
+                std::chrono::seconds(heartbeatTimeoutInSec_));
+          } catch (const std::exception& e) {
+            LOG(ERROR) << logPrefix()
+                       << "Failed to set dump signal in tcpstore. "
+                       << "Error: " << e.what();
+          }
+        }
+
         if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
           // Abort work and corresponding communicators
           work.abort();
@@ -1586,40 +1611,22 @@ void ProcessGroupNCCL::watchdogHandler() {
               ", last completed NCCL work: ",
               lastCompletedSeq_,
               ".");
-          try {
-            if (desyncDebug_ || dumpOnTimeout_) {
-              // Set shutdown mode, so the heartbeat monitor thread will not
-              // abort process immediately.
+          if (desyncDebug_) {
+            try {
               collectiveDebugInfoMode_.store(true);
-              auto rank = globalRank();
-              auto vec = std::vector<uint8_t>(
-                  reinterpret_cast<uint8_t*>(&rank),
-                  reinterpret_cast<uint8_t*>(&rank) + sizeof(rank));
-              globalStore_->set(std::string(TIMEOUT_DUMP), vec);
-            }
-
-            if (dumpOnTimeout_) {
-              // signal the monitor thread to start dumping
-              shouldDump_.store(true);
-              // This sleep is used to give time for dumping before throwing
-              // exeption
-              std::this_thread::sleep_for(
-                  std::chrono::seconds(heartbeatTimeoutInSec_));
-            }
-
-            if (desyncDebug_) {
               auto desyncMsg = getNCCLWatchdogDebugInfo();
               LOG(ERROR) << logPrefix() << desyncMsg;
+            } catch (const std::exception& e) {
+              LOG(ERROR)
+                  << logPrefix()
+                  << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
+                  << " Please file an issue. Error: " << e.what();
+            } catch (...) {
+              LOG(ERROR)
+                  << logPrefix()
+                  << "Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
+                  << " Please file an issue.";
             }
-          } catch (const std::exception& e) {
-            LOG(ERROR) << logPrefix()
-                       << "Failed to retrieve TORCH_NCCL_DESYNC_DEBUG report. "
-                       << " Please file an issue. Error: " << e.what();
-          } catch (...) {
-            LOG(ERROR)
-                << logPrefix()
-                << "Failed to rerieve TORCH_NCCL_DESYNC_DEBUG report with unknown error."
-                << " Please file an issue.";
           }
         }
         // Throw exception
@@ -2540,6 +2547,21 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
   auto device = getDevice(inputs[0]);
   const auto key = getKeyFromDevice(device);
   auto ncclComm = getNCCLComm(key, device, opType);
+
+  if (coalescing_state_ & CoalActive) {
+    coalescing_state_ |= CoalColl;
+    if (coalescedDevice_.index() < 0) {
+      coalescedDevice_ = device;
+    } else {
+      TORCH_CHECK(
+          coalescedDevice_.index() == device.index(), MULTI_DEVICE_ERROR_MSG);
+    }
+    if (coalescedComm_ == nullptr) {
+      coalescedComm_ = ncclComm;
+    } else {
+      TORCH_CHECK(coalescedComm_ == ncclComm, MULTI_DEVICE_ERROR_MSG);
+    }
+  }
 
   // Used many times below, so we stash the unordered_map lookup
   auto ncclStream = ncclStreams_.at(key);
