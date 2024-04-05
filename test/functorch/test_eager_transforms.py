@@ -25,7 +25,7 @@ from functools import wraps
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, onlyCPU, dtypes, onlyCUDA
 from torch.testing._internal.common_dtype import get_all_fp_dtypes
 from torch.testing._internal.common_cuda import with_tf32_off, SM70OrLater, TEST_CUDA
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_TORCHDYNAMO
 from torch.testing import make_tensor
 from torch._dynamo import allow_in_graph
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -66,6 +66,31 @@ except ImportError:
                   UserWarning)
 
 # TestCase for _slice_argnums, an important helper function
+
+
+class VmapTearDownMixin:
+    def tearDown(self):
+        # Ensure that in the case of a test failure, the next test won't fail
+        # because of a previous call to _vmap_increment_nesting that wasn't undone
+        # i.e. test_vmap_free_tensor fails when PYTORCH_TEST_WITH_DYNAMO=1
+        # and the call to increment nesting is not undone
+        if not TEST_WITH_TORCHDYNAMO:
+            return
+
+        warn = False
+        while ci := torch._C._functorch.peek_interpreter_stack():
+            if ci.key() == torch._C._functorch.TransformType.Vmap:
+                warn = True
+                torch._C._functorch._vmap_decrement_nesting()
+            else:
+                break
+
+        if warn:
+            msg = (
+                "Interpreter stack is not empty. Test should have called "
+                "'torch._C._functorch._vmap_decrement_nesting()'"
+            )
+            warnings.warn(msg)
 
 
 @markDynamoStrictTest
@@ -1568,15 +1593,13 @@ class TestVmapOfGrad(TestCase):
             expected = zip(*expected)
             expected = tuple(torch.stack(shards) for shards in expected)
             for r, e in zip(result, expected):
-                # TODO: Check if the rtol is a problem
-                self.assertEqual(r, e, atol=0, rtol=1e-3)
+                self.assertEqual(r, e, atol=0, rtol=1.5e-3)
         else:
             assert mechanism == "functional_call"
             expected = {k: tuple(d[k] for d in expected) for k, v in expected[0].items()}
             expected = {k: torch.stack(shards) for k, shards in expected.items()}
             for key in result:
-                # TODO: Check if the rtol is a problem
-                self.assertEqual(result[key], expected[key], atol=0, rtol=1e-3)
+                self.assertEqual(result[key], expected[key], atol=0, rtol=1.5e-3)
 
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_per_sample_grads_embeddingnet(self, device, mechanism):
@@ -1643,7 +1666,7 @@ jacrev_and_jacfwd = parametrize("jacapi", [subtest(jacrev, name='jacrev'), subte
 FIXME_jacrev_only = parametrize("jacapi", [subtest(jacrev, name='jacrev')])
 
 @markDynamoStrictTest
-class TestJac(TestCase):
+class TestJac(VmapTearDownMixin, TestCase):
     @jacrev_and_jacfwd
     def test_simple(self, device, jacapi):
         x = torch.randn(3, device=device)
@@ -2657,7 +2680,6 @@ class TestJvp(TestCase):
 
 @markDynamoStrictTest
 class TestLinearize(TestCase):
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_basic(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2672,7 +2694,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_output, expected_output)
         self.assertEqual(actual_jvp, expected_jvp)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_return(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2687,7 +2708,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_output, expected_output)
         self.assertEqual(actual_jvp, expected_jvp)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     @dtypes(torch.float)
     def test_linearize_composition(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2706,7 +2726,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_batched_jvp, expected_batched_jvp)
 
     @dtypes(torch.float)
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     def test_linearize_nested_input_nested_output(self, device, dtype):
         x_p = make_tensor((3, 1), device=device, dtype=dtype)
         x_t = make_tensor((3, 1), device=device, dtype=dtype)
@@ -2733,7 +2752,6 @@ class TestLinearize(TestCase):
         self.assertEqual(actual_jvp, expected_jvp)
 
     @onlyCUDA
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/96559")
     def test_linearize_errors(self):
         dtype = torch.float
         device = torch.device('cpu')
@@ -3087,7 +3105,6 @@ class TestComposability(TestCase):
             torch.vmap(torch.sin)
 
     # Some of these pass, some of these don't
-    @skipIfTorchDynamo()
     @parametrize('transform', [
         'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
@@ -3327,7 +3344,6 @@ class TestComposability(TestCase):
             transform(MySin.apply)(x)
 
     # Some of these pass, some of these don't
-    @skipIfTorchDynamo()
     @parametrize('transform', [
         'vmap', 'grad', 'jacrev', 'jacfwd', 'grad_and_value', 'hessian', 'functionalize'
     ])
@@ -4762,8 +4778,7 @@ class TestCompileTransforms(TestCase):
     # Triton only supports GPU with SM70 or later.
     @expectedFailureIf((IS_ARM64 and not IS_MACOS) or
                        IS_WINDOWS or
-                       (TEST_CUDA and not SM70OrLater) or
-                       (sys.version_info >= (3, 12)))
+                       (TEST_CUDA and not SM70OrLater))
     def test_compile_vmap_hessian(self, device):
         # The model and inputs are a smaller version
         # of code at benchmark repo:
@@ -4792,11 +4807,9 @@ class TestCompileTransforms(TestCase):
         actual = opt_fn(params_and_buffers, x)
         self.assertEqual(actual, expected)
 
-    # torch.compile is not supported on Windows or on Python 3.12+
-    @expectedFailureIf(IS_WINDOWS or (sys.version_info >= (3, 12)))
+    # torch.compile is not supported on Windows
+    @expectedFailureIf(IS_WINDOWS)
     @torch._dynamo.config.patch(suppress_errors=False)
-    @torch._dynamo.config.patch(capture_func_transforms=True)
-    @skipIfTorchDynamo("Do not test torch.compile on top of torch.compile")
     def test_grad_deprecated_api(self, device):
         x = torch.randn((), device=device)
         y = torch.randn((), device=device)

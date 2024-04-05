@@ -270,9 +270,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         model = CustomFuncBwdPrintModule()
         opt_model = torch._dynamo.optimize("eager", nopython=True)(model)
         x = torch.randn(2, 2, dtype=torch.double, requires_grad=True)
-        with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, ".*BuiltinVariable\\(print\\).*"
-        ):
+        with self.assertRaisesRegex(torch._dynamo.exc.Unsupported, "builtin: print"):
             opt_model(x)
 
     def test_stride_in_bwd(self):
@@ -755,8 +753,6 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                     return FooTensor(new_data, args[0]._config, args[0]._scale)
 
                 raise NotImplementedError()
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
         class foo_autograd_fn(torch.autograd.Function):
             @staticmethod

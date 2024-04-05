@@ -689,6 +689,11 @@ def add_decorate_info(
         assert (
             opinfo is not None
         ), f"Couldn't find OpInfo for {decorate_meta}. Did you need to specify variant_name?"
+        assert decorate_meta.model_type is None, (
+            f"Tested op: {decorate_meta.op_name} in wrong position! "
+            "If model_type needs to be specified, it should be "
+            "put under SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE."
+        )
         decorators = list(opinfo.decorators)
         new_decorator = opinfo_core.DecorateInfo(
             decorate_meta.decorator,

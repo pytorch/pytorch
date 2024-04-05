@@ -43,16 +43,6 @@ def clone_me(x):
     return x.detach().clone().requires_grad_(x.requires_grad)
 
 
-def named_parameters_for_optimized_module(mod):
-    assert isinstance(mod, eval_frame.OptimizedModule)
-    return mod._orig_mod.named_parameters
-
-
-def named_buffers_for_optimized_module(mod):
-    assert isinstance(mod, eval_frame.OptimizedModule)
-    return mod._orig_mod.named_buffers
-
-
 def remove_optimized_module_prefix(name) -> str:
     return re.sub(r"^_orig_mod[.]", "", name)
 
@@ -340,6 +330,12 @@ def skipIfNotPy311(fn):
     if sys.version_info >= (3, 11):
         return fn
     return unittest.skip(fn)
+
+
+def xfailIfPy311(fn):
+    if sys.version_info >= (3, 11):
+        return unittest.expectedFailure(fn)
+    return fn
 
 
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py

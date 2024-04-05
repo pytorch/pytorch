@@ -6296,6 +6296,8 @@ def _infer_scalar_type(obj):
             return torch.cfloat
         elif default_dtype is torch.double:
             return torch.cdouble
+        elif default_dtype is torch.half:
+            return torch.chalf
         else:
             raise RuntimeError("invalid default scalar type for complex")
     if isinstance(obj, torch.Tensor):
@@ -6422,7 +6424,8 @@ def tensor(data, *, dtype=None, device=None, pin_memory=False, requires_grad=Fal
         pin_memory=pin_memory,
     )
     new_tensor.detach_()
-    new_tensor.requires_grad_(requires_grad)
+    if requires_grad:
+        new_tensor.requires_grad_(requires_grad)
     return new_tensor
 
 

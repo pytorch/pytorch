@@ -359,7 +359,7 @@ bool UnionType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
   });
 }
 
-std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str)
+std::string UnionType::unionStr(const TypePrinter& printer, bool is_annotation_str)
     const {
   std::stringstream ss;
 
@@ -399,7 +399,7 @@ std::string UnionType::unionStr(TypePrinter printer, bool is_annotation_str)
       ss << ", ";
     }
     if (is_annotation_str) {
-      ss << NumberType::get()->annotation_str(std::move(printer));
+      ss << NumberType::get()->annotation_str(printer);
     } else {
       ss << NumberType::get()->str();
     }
@@ -412,8 +412,8 @@ std::string UnionType::str() const {
   return this->unionStr(nullptr, /*is_annotation_str=*/false);
 }
 
-std::string UnionType::annotation_str_impl(TypePrinter printer) const {
-  return this->unionStr(std::move(printer), /*is_annotation_str=*/true);
+std::string UnionType::annotation_str_impl(const TypePrinter& printer) const {
+  return this->unionStr(printer, /*is_annotation_str=*/true);
 }
 
 bool UnionType::canHoldType(const Type& type) const {

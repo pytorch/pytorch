@@ -193,7 +193,7 @@ permute_default_10 = CallFunction(aten.permute.default, view_default_3, Ignored(
 bmm_default_5 = CallFunction(aten.bmm.default, permute_default_10, view_default_6)
 view_default_11 = CallFunction(aten.view.default, bmm_default_5, Ignored())
 permute_default_11 = CallFunction(aten.permute.default, view_default_11, Ignored())
-_sfdp_pattern_12_training_half = MultiOutputPattern([view_default_5,
+_sfdp_pattern_12_half_training = MultiOutputPattern([view_default_5,
   permute_default_6,
   permute_default_9,
   permute_default_11,
@@ -229,4 +229,4 @@ expand_default_3 = CallFunction(aten.expand.default, permute_default_3, Ignored(
 clone_default_3 = CallFunction(aten.clone.default, expand_default_3, memory_format=torch.contiguous_format)
 view_default_4 = CallFunction(aten.view.default, clone_default_3, Ignored())
 bmm_default_1 = CallFunction(aten.bmm.default, view_default_3, view_default_4)
-_sfdp_pattern_12_inference_half = CallFunction(aten.view.default, bmm_default_1, Ignored())
+_sfdp_pattern_12_half_inference = CallFunction(aten.view.default, bmm_default_1, Ignored())

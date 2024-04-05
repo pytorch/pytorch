@@ -46,7 +46,7 @@ def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
     See https://github.com/pytorch/pytorch/issues/103681.
     """
     # Avoid circular dependencies
-    from .utils import get_aten_graph_module
+    from .utils import _get_aten_graph_module_for_pattern
 
     # Needed to ensure subgraph matches are self-contained
     m.graph.eliminate_dead_code()
@@ -62,17 +62,17 @@ def _replace_dropout(m: torch.fx.GraphModule, train_to_eval: bool):
 
         example_inputs = (torch.randn(1),)
         if train_to_eval:
-            match_pattern = get_aten_graph_module(
+            match_pattern = _get_aten_graph_module_for_pattern(
                 _WrapperModule(dropout_train), example_inputs
             )
-            replacement_pattern = get_aten_graph_module(
+            replacement_pattern = _get_aten_graph_module_for_pattern(
                 _WrapperModule(dropout_eval), example_inputs
             )
         else:
-            match_pattern = get_aten_graph_module(
+            match_pattern = _get_aten_graph_module_for_pattern(
                 _WrapperModule(dropout_eval), example_inputs
             )
-            replacement_pattern = get_aten_graph_module(
+            replacement_pattern = _get_aten_graph_module_for_pattern(
                 _WrapperModule(dropout_train), example_inputs
             )
 
@@ -101,7 +101,7 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
     # Enable this support in future updates.
 
     # Avoid circular dependencies
-    from .utils import get_aten_graph_module
+    from .utils import _get_aten_graph_module_for_pattern
 
     # Needed to ensure subgraph matches are self-contained
     m.graph.eliminate_dead_code()
@@ -137,13 +137,17 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
         torch.randn(1),  # bn_running_var
     )
     if train_to_eval:
-        match_pattern = get_aten_graph_module(_WrapperModule(bn_train), example_inputs)
-        replacement_pattern = get_aten_graph_module(
+        match_pattern = _get_aten_graph_module_for_pattern(
+            _WrapperModule(bn_train), example_inputs
+        )
+        replacement_pattern = _get_aten_graph_module_for_pattern(
             _WrapperModule(bn_eval), example_inputs
         )
     else:
-        match_pattern = get_aten_graph_module(_WrapperModule(bn_eval), example_inputs)
-        replacement_pattern = get_aten_graph_module(
+        match_pattern = _get_aten_graph_module_for_pattern(
+            _WrapperModule(bn_eval), example_inputs
+        )
+        replacement_pattern = _get_aten_graph_module_for_pattern(
             _WrapperModule(bn_train), example_inputs
         )
 
