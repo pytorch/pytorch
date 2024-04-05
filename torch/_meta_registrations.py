@@ -3347,7 +3347,7 @@ def meta__foreach_addcop__scalarlist(self, tensor1, tensor2, scalars):
     torch._check(
         all(isinstance(l, List) for l in [self, tensor1, tensor2, scalars]),
         lambda: (
-            "All arguments of _foreach_addc*_ must be List[Tensor], "
+            "_foreach_addc*_ op expects arguments of type: List[Tensor], List[Tensor], List[Tensor], List[Scalar], "
             f"but got {type(self)}, {type(tensor1)}, {type(tensor2)}, and {type(scalars)}"
         ),
     )
