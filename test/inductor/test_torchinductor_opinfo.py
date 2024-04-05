@@ -167,6 +167,8 @@ inductor_skips = defaultdict(dict)
 inductor_skips["cpu"] = {
     "linalg.ldl_factor": {f32, f64},  # flaky
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
+    ("index_reduce", "prod"): {f16},  # flaky
+    ("index_reduce", "mean"): {f16},  # flaky
 }
 
 if IS_MACOS and IS_X86:
@@ -377,6 +379,10 @@ inductor_all_samples = {
     "softmax.with_dtype",
     "index_add",
     "index_copy",
+    "index_reduce.prod",
+    "index_reduce.mean",
+    "index_reduce.amax",
+    "index_reduce.amin",
     "scatter_reduce.sum",
     "select_scatter",
     "squeeze",
@@ -507,9 +513,6 @@ class TestInductorOpInfo(TestCase):
             # but that when we do backwards we expect other ops like add to work
             and not dtype == torch.complex32
         )
-        if op_name != "index_reduce.prod":
-            requires_grad = False
-
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
         if op_name not in inductor_all_samples and not ALL_SAMPLES:
