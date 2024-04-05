@@ -8891,6 +8891,7 @@ class TestNNDeviceType(NNTestCase):
 
     @onlyCUDA
     @largeTensorTest('16GB')
+    @serialTest()
     def test_prelu_backward_32bit_indexing(self, device):
         m = torch.nn.PReLU().cuda().half()
         input_ = torch.ones((1024, 1024, 1024, 2), dtype=torch.half, device=device)
