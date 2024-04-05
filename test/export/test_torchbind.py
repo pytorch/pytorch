@@ -584,8 +584,12 @@ def forward(self, arg0_1, arg1_1):
             def forward(self, tq, x):
                 torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
                 torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
-                x_sin = torch.ops._TorchScriptTesting.queue_pop(tq)
-                x_cos = torch.ops._TorchScriptTesting.queue_pop(tq)
+                x_sin = torch.ops._TorchScriptTesting.queue_pop(
+                    tq
+                ) - torch.ops._TorchScriptTesting.queue_size(tq)
+                x_cos = torch.ops._TorchScriptTesting.queue_pop(
+                    tq
+                ) + torch.ops._TorchScriptTesting.queue_size(tq)
                 return x_sin, x_cos, tq
 
         mod = Model()
@@ -615,8 +619,12 @@ def forward(self, arg0_1, arg1_1):
     sin = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
     queue_push_1 = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, sin);  sin = None
     queue_pop = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
+    queue_size = torch.ops._TorchScriptTesting.queue_size.default(arg0_1)
+    sub = torch.ops.aten.sub.Tensor(queue_pop, 1);  queue_pop = None
     queue_pop_1 = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
-    return (queue_pop, queue_pop_1, arg0_1)""",
+    queue_size_1 = torch.ops._TorchScriptTesting.queue_size.default(arg0_1)
+    add = torch.ops.aten.add.Tensor(queue_pop_1, 0);  queue_pop_1 = None
+    return (sub, add, arg0_1)""",
         )
         self._assertEqualSkipScriptObject(gm(tq1, x), mod(tq2, x))
 
