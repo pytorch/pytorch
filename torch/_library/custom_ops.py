@@ -25,7 +25,7 @@ def custom_op(
     name: str,
     /,
     *,
-    mutated_args: Iterable[str],
+    mutates_args: Iterable[str],
     device_types: device_types_t = None,
     qualname: Optional[str] = None,
 ) -> Callable:
@@ -42,10 +42,11 @@ def custom_op(
 
     Args:
         name (str): A name for the custom op that looks like "{namespace}::{name}",
-            e.g. "mylib::my_linear". The name is used as a stable identifier for
-            if you wish to serialize the custom op, e.g., via torch.save/torch.export.
-            To avoid name collisions, please use your project name as the namespace.
-        mutated_args (Iterable[str]): The names of args that the function mutates.
+            e.g. "mylib::my_linear". The name is used as the op's stable identifier
+            in PyTorch subsystems (e.g. torch.export, FX graphs).
+            To avoid name collisions, please use your project name as the namespace;
+            e.g. all custom ops in pytorch/fbgemm use "fbgemm" as the namespace.
+        mutates_args (Iterable[str]): The names of args that the function mutates.
             This MUST be accurate, otherwise, the behavior is undefined.
         device_types (None | str | Sequence[str]): The device type(s) the function
             is valid for. If no device type is provided, then the function
@@ -58,7 +59,7 @@ def custom_op(
         >>> from torch.library import custom_op
         >>> import numpy as np
         >>>
-        >>> @custom_op("mylib::numpy_sin", mutated_args=())
+        >>> @custom_op("mylib::numpy_sin", mutates_args=())
         >>> def numpy_sin(x: Tensor) -> Tensor:
         >>>     x_np = x.cpu().numpy()
         >>>     y_np = np.sin(x_np)
@@ -69,7 +70,7 @@ def custom_op(
         >>> assert torch.allclose(y, x.sin())
         >>>
         >>> # Example of a custom op that only works for one device type.
-        >>> @custom_op("mylib::numpy_sin_cpu", mutated_args=(), device_types="cpu")
+        >>> @custom_op("mylib::numpy_sin_cpu", mutates_args=(), device_types="cpu")
         >>> def numpy_sin_cpu(x: Tensor) -> Tensor:
         >>>     x_np = x.numpy()
         >>>     y_np = np.sin(x_np)
@@ -80,7 +81,7 @@ def custom_op(
         >>> assert torch.allclose(y, x.sin())
         >>>
         >>> # Example of a custom op that mutates an input
-        >>> @custom_op("mylib::numpy_sin_inplace", mutated_args={"x"}, device_types="cpu")
+        >>> @custom_op("mylib::numpy_sin_inplace", mutates_args={"x"}, device_types="cpu")
         >>> def numpy_sin_inplace(x: Tensor) -> None:
         >>>     x_np = x.numpy()
         >>>     np.sin(x_np, out=x_np)
@@ -95,7 +96,7 @@ def custom_op(
     def inner(fn):
         import torch
 
-        schema = torch._custom_op.impl.infer_schema(fn, mutated_args)
+        schema = torch._custom_op.impl.infer_schema(fn, mutates_args)
         namespace, opname = name.split("::")
         result = CustomOpDef(namespace, opname, schema, fn)
         result.register_impl(device_types)(fn)
@@ -158,7 +159,7 @@ class CustomOpDef:
             >>> import numpy as np
             >>>
             >>> # Example of split cpu and cuda definitions
-            >>> @custom_op("mylib::numpy_sin", mutated_args=(), device_types="cpu")
+            >>> @custom_op("mylib::numpy_sin", mutates_args=(), device_types="cpu")
             >>> def numpy_sin(x: Tensor) -> Tensor:
             >>>     x_np = x.numpy()
             >>>     y_np = np.sin(x_np)
@@ -255,7 +256,7 @@ class CustomOpDef:
             >>> from torch import Tensor
             >>>
             >>> # Example 1: an operator without data-dependent output shape
-            >>> @torch.library.custom_op("mylib::linear", mutated_args=())
+            >>> @torch.library.custom_op("mylib::linear", mutates_args=())
             >>> def linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
             >>>     return (x @ weight.t()) + bias
             >>>
@@ -278,7 +279,7 @@ class CustomOpDef:
             >>> assert torch.allclose(out, torch.nn.functional.linear(x, weight, bias))
             >>>
             >>> # Example 2: an operator with data-dependent output shape
-            >>> @torch.library.custom_op("mylib::nonzero", mutated_args=())
+            >>> @torch.library.custom_op("mylib::nonzero", mutates_args=())
             >>> def nonzero(x: Tensor) -> Tensor:
             >>>     x_np = x.cpu().numpy()
             >>>     res = np.stack(np.nonzero(x_np), axis=1)
@@ -337,7 +338,7 @@ class CustomOpDef:
             >>> import numpy as np
             >>> from torch import Tensor
             >>>
-            >>> @torch.library.custom_op("mylib::numpy_sin", mutated_args=())
+            >>> @torch.library.custom_op("mylib::numpy_sin", mutates_args=())
             >>> def numpy_sin(x: Tensor) -> Tensor:
             >>>     x_np = x.cpu().numpy()
             >>>     y_np = np.sin(x_np)
