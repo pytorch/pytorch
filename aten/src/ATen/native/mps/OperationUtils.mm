@@ -277,28 +277,29 @@ std::string getArrayRefString(const IntArrayRef s) {
 }
 
 std::string getTensorsStringKey(const TensorList& tensors, bool short_dtype, bool exclude_shape) {
-    std::string str;
-    // The key format per tensor would look like ":Float32[1,1,1,10]:"
-    for (const Tensor& tensor: tensors) {
-      str += ":";
-      if (tensor.defined()) {
-        str += getMPSTypeString(tensor.scalar_type(), short_dtype) + "[";
-        // if tensor is a scalar
-        if (tensor.dim() == 0) {
-          str += "Scalar";
+  std::string str;
+  // The key format per tensor would look like ":Float32[1,1,1,10]:"
+  for (const Tensor& tensor : tensors) {
+    str += ":";
+    if (tensor.defined()) {
+      str += getMPSTypeString(tensor.scalar_type(), short_dtype) + "[";
+      // if tensor is a scalar
+      if (tensor.dim() == 0) {
+        str += "Scalar";
+      } else {
+        if (exclude_shape) {
+          str += "[-1]";
         } else {
-          if (exclude_shape) {
-            str += "[-1]";
-          } else {
-            str += std::string([[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","].UTF8String);
-          }
+          str +=
+              std::string([[getMPSShape(tensor) valueForKey:@"description"] componentsJoinedByString:@","].UTF8String);
         }
-        str += "]";
-       } else {
-        str += "Undefined";
-       }
-     }
-    return str;
+      }
+      str += "]";
+    } else {
+      str += "Undefined";
+    }
+  }
+  return str;
 }
 
 MPSShape* getMPSShape(const Tensor& t, c10::MemoryFormat memory_format) {
