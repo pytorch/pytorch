@@ -2144,6 +2144,7 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(z, x + y)
         self.assertTrue(cpu_called)
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_default_values(self):
         defaults = []
 
