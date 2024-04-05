@@ -1501,14 +1501,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116499"
-                ),
-                "TestOptimRenewed",
-                "test_can_load_older_state_dict",
-                device_type="cuda",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "Errors, https://github.com/pytorch/pytorch/issues/117150"
                 ),
                 "TestOptimRenewed",
