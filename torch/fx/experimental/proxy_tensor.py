@@ -24,7 +24,9 @@ import inspect
 from dataclasses import dataclass
 import weakref
 import operator
+import traceback
 from torch.utils._stats import count
+from torch.utils._traceback import CapturedTraceback
 import logging
 from torch._library.fake_class_registry import FakeScriptObject
 
@@ -597,6 +599,7 @@ class PythonKeyTracer(Tracer):
         else:
             return e
 
+
 @contextmanager
 def _temp_remove_pre_dispatch_torch_function_mode():
     from torch.overrides import _len_torch_function_stack, _pop_mode, _push_mode
@@ -1076,17 +1079,47 @@ class _ModuleStackTracer(PythonKeyTracer):
 
     def create_node(self, *args, **kwargs):
         '''
-        Add nn_module_stack metadata here instead of TracerBase,
-        since calls to make_fx() might not want to record module stack metadata
+        Create node and add on metadata.
+        Add nn_module_stack here instead of TracerBase,
+        since calls to make_fx() might not want to record module stack metadata.
+        Add torch_fn by looking at torch_fn_metadata and torch_fn_counts.
+        Add stack_trace by filtering out forward() stack frames.
         '''
         node = super().create_node(*args, **kwargs)
+
+        # nn_module_stack
         if "nn_module_stack" not in node.meta and node.op not in ["placeholder", "output"]:
             node.meta["nn_module_stack"] = self.module_stack
+
+        # torch_fn
         if node.op == "call_function" and self.torch_fn_metadata is not None and "torch_fn" not in node.meta:
             node.meta["torch_fn"] = (
                 f"{self.torch_fn_metadata.__name__}_{self.torch_fn_counts[self.torch_fn_metadata]}",
                 f"{self.torch_fn_metadata.__class__.__name__}.{self.torch_fn_metadata.__name__}"
             )
+
+        # stack_trace
+        if 'stack_trace' not in node.meta and node.op not in ["placeholder", "output"]:
+            user_frame_summary = CapturedTraceback.extract().summary()
+            if user_frame_summary:
+                # we retain frames from forward() calls, or ops
+                # located in torch/__init__.py (e.g. sym_int, sym_constrain_range, vmap)
+                stack_trace = [frame for frame in user_frame_summary if (
+                    frame.name == 'forward'
+                    or frame.filename.endswith('torch/__init__.py')
+                )]
+                # filter out forward() frames from fx/_symbolic_trace.py, export/_trace.py
+                # this is hardcoded, but leads to a much cleaner stack trace
+                stack_trace = [
+                    frame for frame in stack_trace if not (
+                        frame.filename.endswith('fx/_symbolic_trace.py')
+                        or frame.filename.endswith('export/_trace.py')
+                    )
+                ]
+                if stack_trace:  # empty list for strict mode, dynamo should handle stack_trace
+                    stack_trace = traceback.StackSummary.from_list(stack_trace)
+                    node.meta["stack_trace"] = ''.join(stack_trace.format()).strip()
+
         return node
 
 
