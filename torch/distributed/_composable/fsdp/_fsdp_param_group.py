@@ -257,8 +257,8 @@ class FSDPParamGroup:
         self._all_gather_result = None  # free unless saved in `all_gather_state`
 
     def _wait_all_gather_streams_on_event(self, event: torch.cuda.Event):
-        wait_event(self.comm_ctx.all_gather_copy_in_stream, event)
-        wait_event(self.comm_ctx.all_gather_stream, event)
+        self.comm_ctx.all_gather_copy_in_stream.wait_event(event)
+        self.comm_ctx.all_gather_stream.wait_event(event)
 
     def reshard(self):
         if self._training_state == TrainingState.FORWARD:
@@ -341,7 +341,7 @@ class FSDPParamGroup:
 
     def finalize_backward(self):
         if self._post_reduce_view_out_event is not None:
-            wait_event(torch.cuda.current_stream(), self._post_reduce_view_out_event)
+            torch.cuda.current_stream().wait_event(self._post_reduce_view_out_event)
             self._post_reduce_view_out_event = None
         self._training_state = TrainingState.IDLE
         self._post_forward_indices.clear()

@@ -73,8 +73,8 @@ class FSDPState(_State):
         with torch.profiler.record_function("FSDP::root_pre_forward"):
             # Wait for optimizer before implicitly prefetched all-gathers
             current_stream = torch.cuda.current_stream()
-            wait_stream(self._comm_ctx.all_gather_copy_in_stream, current_stream)
-            wait_stream(self._comm_ctx.all_gather_stream, current_stream)
+            self._comm_ctx.all_gather_copy_in_stream.wait_stream(current_stream)
+            self._comm_ctx.all_gather_stream.wait_stream(current_stream)
             if self._device.type == "cuda":
                 with torch.profiler.record_function("FSDP::inputs_to_device"):
                     args_tuple, kwargs_tuple = _to_kwargs(
@@ -177,8 +177,8 @@ class FSDPState(_State):
             if all_gather_state := self._comm_ctx.all_gather_state:
                 # Free the last all-gather result if needed; refer to
                 # [Note: Overlapping all-gather copy-in and all-gather]
-                wait_event(self._comm_ctx.all_gather_copy_in_stream, all_gather_state.event)
-                wait_event(self._comm_ctx.all_gather_stream, all_gather_state.event)
+                self._comm_ctx.all_gather_copy_in_stream.wait_event(all_gather_state.event)
+                self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
                 self._comm_ctx.all_gather_state = None  # free the all-gather result
             self._state_ctx.iter_forward_root = None
         if self._mp_policy.output_dtype is not None:
