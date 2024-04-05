@@ -1,7 +1,8 @@
 import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _default_to_fused_or_foreach, _use_grad_for_differentiable, _get_scalar_dtype,
-                        _differentiable_doc, _foreach_doc, _maximize_doc, _capturable_doc, _view_as_real)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _capturable_doc, _view_as_real,
+                        _disable_dynamo_if_closure)
 from typing import List, Optional
 
 __all__ = ["RMSprop", "rmsprop"]
@@ -104,6 +105,7 @@ class RMSprop(Optimizer):
         return has_complex
 
     @_use_grad_for_differentiable
+    @_disable_dynamo_if_closure
     def step(self, closure=None):
         """Performs a single optimization step.
 

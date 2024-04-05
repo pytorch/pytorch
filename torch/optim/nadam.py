@@ -2,7 +2,7 @@ import torch
 from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _get_value, _dispatch_sqrt,
                         _stack_if_compiling, _get_scalar_dtype, _default_to_fused_or_foreach,
-                        _view_as_real, _capturable_doc, _differentiable_doc, _foreach_doc,)
+                        _view_as_real, _capturable_doc, _differentiable_doc, _foreach_doc, _disable_dynamo_if_closure)
 from typing import List, Optional
 
 __all__ = ['NAdam', 'nadam']
@@ -86,6 +86,7 @@ class NAdam(Optimizer):
         return has_complex
 
     @_use_grad_for_differentiable
+    @_disable_dynamo_if_closure
     def step(self, closure=None):
         """Performs a single optimization step.
 
