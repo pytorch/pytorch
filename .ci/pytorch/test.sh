@@ -6,6 +6,23 @@
 
 set -ex
 
+# shellcheck source=./common.sh
+source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+
+# Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
+WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
+cleanup_workspace() {
+  echo "sudo may print the following warning message that can be ignored. The chown command will still run."
+  echo "    sudo: setrlimit(RLIMIT_STACK): Operation not permitted"
+  echo "For more details refer to https://github.com/sudo-project/sudo/issues/42"
+  sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
+}
+# Disable shellcheck SC2064 as we want to parse the original owner immediately.
+# shellcheck disable=SC2064
+trap_add cleanup_workspace EXIT
+sudo chown -R jenkins /var/lib/jenkins/workspace
+git config --global --add safe.directory /var/lib/jenkins/workspace
+
 echo "Environment variables:"
 env
 
@@ -89,9 +106,6 @@ if [[ -n $TESTS_TO_INCLUDE ]]; then
   echo "Setting INCLUDE_CLAUSE"
   INCLUDE_CLAUSE="--include $TESTS_TO_INCLUDE"
 fi
-
-# shellcheck source=./common.sh
-source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Environment variables"
 env
@@ -211,8 +225,6 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export LD_PRELOAD=/usr/lib/llvm-15/lib/clang/15.0.7/lib/linux/libclang_rt.asan-x86_64.so
     # Disable valgrind for asan
     export VALGRIND=OFF
-    # Increase stack size, because ASAN red zones use more stack
-    ulimit -s 81920
 
     (cd test && python -c "import torch; print(torch.__version__, torch.version.git_version)")
     echo "The next four invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
