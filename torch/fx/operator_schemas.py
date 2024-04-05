@@ -56,7 +56,7 @@ _type_eval_globals = {'Tensor' : torch.Tensor, 'Device' : torch.device, 'Layout'
 for k in dir(typing):
     _type_eval_globals[k] = getattr(typing, k)
 
-def _torchscript_type_to_python_type(ts_type : torch.Type) -> Any:
+def _torchscript_type_to_python_type(ts_type : 'torch._C.JitType') -> Any:
     """
     Convert a TorchScript type to a Python type (including subtypes) via
     eval'ing the annotation_str. _type_eval_globals sets up expressions
