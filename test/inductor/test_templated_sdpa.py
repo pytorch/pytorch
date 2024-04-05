@@ -8,7 +8,7 @@ from unittest import expectedFailure, skipUnless
 
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
-from torch.nn.attention.templated_attention import _compose, templated_attention
+from torch.nn.attention.templated_attention import _compose, _templated_attention
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.utils._triton import has_triton
@@ -22,7 +22,7 @@ Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
 
 
 def create_attention(score_mod):
-    return functools.partial(templated_attention, score_mod=score_mod)
+    return functools.partial(_templated_attention, score_mod=score_mod)
 
 
 test_dtypes = (
@@ -143,7 +143,7 @@ class TestTemplatedSDPA(InductorTestCase):
             requires_grad=True,
         )
         q, k, v = make_tensor(), make_tensor(), make_tensor()
-        out = templated_attention(q, k, v, _identity_mod)
+        out = _templated_attention(q, k, v, _identity_mod)
         with self.assertRaisesRegex(
             RuntimeError, "Autograd not implemented for templated_attention"
         ):
@@ -157,7 +157,7 @@ class TestTemplatedSDPA(InductorTestCase):
         with self.assertRaisesRegex(
             ValueError, "Expected query, key, and value to have the same dtype"
         ):
-            templated_attention(query, key, value, _identity_mod)
+            _templated_attention(query, key, value, _identity_mod)
 
 
 common_utils.instantiate_parametrized_tests(TestTemplatedSDPA)

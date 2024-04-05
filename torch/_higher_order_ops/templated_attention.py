@@ -39,6 +39,8 @@ def math_attention(
         score_mod: The score_mod function
         other_buffers: Other buffers that are passed to the score_mod function
     """
+    assert len(other_buffers) == 0, "Other buffers are not yet supported."
+
     scores = query @ key.transpose(-2, -1)
 
     b = torch.arange(0, scores.size(0), device=scores.device)
@@ -46,13 +48,13 @@ def math_attention(
     m = torch.arange(0, scores.size(2), device=scores.device)
     n = torch.arange(0, scores.size(3), device=scores.device)
 
-    score_mod_vmap = score_mod
-    score_mod_vmap = torch.vmap(score_mod_vmap, in_dims=(0, None, None, None, 0))
-    score_mod_vmap = torch.vmap(score_mod_vmap, in_dims=(0, None, None, 0, None))
-    score_mod_vmap = torch.vmap(score_mod_vmap, in_dims=(0, None, 0, None, None))
-    score_mod_vmap = torch.vmap(score_mod_vmap, in_dims=(0, 0, None, None, None))
+    in_dim_buffers = (None,) * len(other_buffers)
+    score_mod = torch.vmap(score_mod, in_dims=(0, None, None, None, 0) + in_dim_buffers)
+    score_mod = torch.vmap(score_mod, in_dims=(0, None, None, 0, None) + in_dim_buffers)
+    score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
+    score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None) + in_dim_buffers)
 
-    scores = score_mod_vmap(scores, b, h, m, n, *other_buffers)
+    scores = score_mod(scores, b, h, m, n, *other_buffers)
 
     scores = scores.softmax(dim=-1)
     return scores @ value
