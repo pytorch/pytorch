@@ -74,9 +74,10 @@ def create_runtime_wrapper(
 
     def runtime_wrapper(*args):
         num_tokens = len(runtime_metadata.tokens)
-
-        # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-        if num_tokens > 0:
+        if config.unlift_effect_tokens:
+            assert num_tokens == 0
+        elif num_tokens > 0:
+            # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
             args = ([None] * num_tokens, *args)
 
         if trace_joint:
