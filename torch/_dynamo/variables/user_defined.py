@@ -705,7 +705,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 ).call_function(tx, [var], kwargs)
 
             if self.source is None:
-                unimplemented("Sourceless UserDefinedObjectVariable method not supported")
+                unimplemented(
+                    "Sourceless UserDefinedObjectVariable method not supported"
+                )
             func_src = AttrSource(self.source, "__func__")
             func_var = VariableBuilder(tx, func_src)(func)
             obj_src = AttrSource(self.source, "__self__")
