@@ -16,7 +16,7 @@ ground up. We will discuss the functionality it provides, and how it is
 implemented. By the end of this post, you will have a better
 understanding of what went wrong when you ``torch.compiled`` a PyTorch
 program and the compilation errored out, or succeeded but the speed-up
-was not what you expected. [1]_
+was not what you expected.
 
 A Gentle Introduction to Dynamo
 -------------------------------
@@ -62,11 +62,11 @@ we see the output that Dynamo traced
 
 We call this a **graph (or trace) of the function for the given
 inputs**. This is represented via an `FX
-graph <https://pytorch.org/docs/stable/fx.html>`__. We will simply think
+graph <https://pytorch.org/docs/main/fx.html>`__. We will simply think
 of an FX graph as a container that stores a list of function calls.
 
 The first thing we should notice is that the graph is a linear sequence
-of PyTorch operations. [2]_ Dynamo records all the PyTorch operations
+of PyTorch operations. [1]_ Dynamo records all the PyTorch operations
 and stores them sequentially. For example, it split ``z = (x - y) ** 2``
 into its two constituting operations, ``sub = l_x_ - l_y_`` and
 ``z = sub ** 2``.
@@ -217,10 +217,10 @@ variables and their names - The builtin functions like ``abs`` or
 ``print``
 
 You can see all the fields
-`here <https://github.com/pytorch/pytorch/blob/e891a3bba9f05697d72776f6e89347231a141f03/torch/csrc/dynamo/eval_frame.c#L50-L59>`__. [3]_
+`here <https://github.com/pytorch/pytorch/blob/e891a3bba9f05697d72776f6e89347231a141f03/torch/csrc/dynamo/eval_frame.c#L50-L59>`__. [2]_
 
 In summary, CPython provides the user’s interpreter with all the
-information necessary to execute the function. [4]_
+information necessary to execute the function. [3]_
 
 With this API, we can implement a tracer by implementing an interpreter
 that runs the code and records in a graph all the PyTorch operations
@@ -261,8 +261,7 @@ of Dynamo.
 The parent class of the internal class structure is ``VariableTracker``
 and represents the different objects that Dynamo understands. For
 example, ``ListVariable``, represents a ``list`` object, and keeps
-internally a `list of
-``VariableTracker``\ s <https://github.com/pytorch/pytorch/blob/e38a3a6079a3861b4bc9f256120ec661f34e726d/torch/_dynamo/variables/lists.py#L48-L56>`__.
+internally a `list of VariableTrackers <https://github.com/pytorch/pytorch/blob/e38a3a6079a3861b4bc9f256120ec661f34e726d/torch/_dynamo/variables/lists.py#L48-L56>`__.
 Another example of ``VariableTracker`` is
 `ConstantVariable <https://github.com/pytorch/pytorch/blob/83c0763dda1f93c6cf552ba88260a0dc7a3ecb70/torch/_dynamo/variables/constant.py#L30>`__.
 ConstantVariable wraps all the `objects considered constant by
@@ -334,8 +333,7 @@ the PyTorch operations that happen during the symbolic execution of a
 program given some inputs. This is implemented in Dynamo via the
 `OutputGraph <https://github.com/pytorch/pytorch/blob/69f112d5867f785a3a090a0c6d6644ae047033ac/torch/_dynamo/output_graph.py#L221-L230>`__
 object. The ``OutputGraph`` object is `bound to an
-``InstructionTranslator``
-object <https://github.com/pytorch/pytorch/blob/69f112d5867f785a3a090a0c6d6644ae047033ac/torch/_dynamo/symbolic_convert.py#L2060-L2071>`__
+`InstructionTranslator object <https://github.com/pytorch/pytorch/blob/69f112d5867f785a3a090a0c6d6644ae047033ac/torch/_dynamo/symbolic_convert.py#L2060-L2071>`__
 and it tracks all the data necessary to create the FX graph which will
 be returned by Dynamo.
 
@@ -360,7 +358,7 @@ Making Dynamo Sound: Guards
 At this point, we have a way to trace programs completely disregarding control flow.
 And for that, we have reimplemented all of CPython… If this sounds like a bit of an
 overkill, that is because it is.
-`torch.jit.trace <https://pytorch.org/docs/stable/generated/torch.jit.trace.html>`__
+`torch.jit.trace <https://pytorch.org/docs/main/generated/torch.jit.trace.html>`__
 already implements this without all this machinery, so what gives?
 
 The issue with ``torch.jit.trace``, as it is warned in its docs, is that
@@ -401,7 +399,7 @@ with ``TORCH_LOGS=guards`` prints (among other guards)
    L['b'] == 'Hello'
 
 This reads as “the local variable ``b`` should have a specific type
-(``str`` in this case, represented by the constant `9433...`) and
+(``str`` in this case, represented by the constant ``9433...``) and
 its value should be ``'Hello'``”. If we then execute the function
 again passing a different argument
 
@@ -498,9 +496,9 @@ Symbolic Shapes
 
 Another point we discussed in the introduction is that Dynamo knows how
 to trace integers. In order to implement this, we use a symbolic class
-`torch.SymInt <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/__init__.py#L244-L249>`__\  [5]_
+`torch.SymInt <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/__init__.py#L244-L249>`__ 
 that acts like an ``int`` but it records all the operations performed on
-it in the output FX graph. We already saw this class in the introduction
+it in the output FX graph. [4]_ We already saw this class in the introduction
 when introducing symbolic integer tracing.
 
 Let us now discuss the three properties that define symbolic shape
@@ -673,7 +671,7 @@ arbitrary Python code” is perhaps a bit too general. Dynamo implements a
 good part of Python, but does it implement the more complex parts, like
 coroutines or async? Does it implement the whole Python standard
 library? NumPy also has a Python API. Does ``torch.compile`` also
-understand NumPy? and Django? [6]_
+understand NumPy? and Django? [5]_
 
 Python’s ecosystem is massive, and a good part of it is written in other
 more performant languages like C++ or Rust, and it just exposes Python
@@ -693,7 +691,7 @@ Here is another place where having access to CPython is interesting.
 Rather than erroring out, Dynamo can let CPython run that problematic
 code! To do this, Dynamo generates at trace time one graph with all the
 operations before the problematic code, and one with all the operations
-after. [7]_ Then, at runtime, it will delegate to CPython to execute the
+after. [6]_ Then, at runtime, it will delegate to CPython to execute the
 first graph, then the problematic code, and then the second graph. This
 process of stopping the tracing and generating multiple graphs is called
 a **graph break**.
@@ -844,34 +842,24 @@ github <https://github.com/pytorch/pytorch/issues?q=is%3Aissue+is%3Aopen+label%3
 Many of them require very minor changes in the code, once you find where
 you need to make those changes.
 
-.. [1]
-   In the same way that Dynamo takes its name from
-   [Dynamorio].(https://dynamorio.org/), this blog post’s name is a
-   small nod to `You Could Have Invented Spectral
-   Sequences <https://www.ams.org/notices/200601/fea-chow.pdf>`__.
+Footnotes
+---------
 
-.. [2]
-   In the literature, this is called a Directed Acyclical Graph (DAG).
+.. [1] In the literature, this is called a Directed Acyclical Graph (DAG).
 
-.. [3]
-   All this binding code lives in ``torch/csrc/dynamo/eval_frame.c``.
+.. [2] All this binding code lives in ``torch/csrc/dynamo/eval_frame.c``.
 
-.. [4]
-   In CPython lingo, the set of all these objects are called `a
+.. [3] In CPython lingo, the set of all these objects are called `a
    frame <https://github.com/python/cpython/blob/f26bfe4b25f7e5a4f68fcac26207b7175abad208/Include/internal/pycore_frame.h#L57-L71>`__.
 
-.. [5]
-   There are also ``SymBool`` and ``SymFloat`` classes. The latter one
+.. [4] There are also ``SymBool`` and ``SymFloat`` classes. The latter one
    is not used all that much at the time of this writing.
 
-.. [6]
-   Interestingly enough, it does understand NumPy code! Have a look at
+.. [5] Interestingly enough, it does understand NumPy code! Have a look at
    `this blogpost <https://pytorch.org/blog/compiling-numpy-code/>`__
-   and `the
-   docs <https://pytorch.org/docs/stable/torch.compiler_faq.html#does-numpy-work-with-torch-compile>`__.
+   and `the docs <https://pytorch.org/docs/main/torch.compiler_faq.html#does-numpy-work-with-torch-compile>`__.
    Now, this is just possible because we reimplemented NumPy using
    PyTorch. Good luck implementing Django in PyTorch though…
 
-.. [7]
-   Assuming there is just one piece of problematic code. If there are
+.. [6] Assuming there is just one piece of problematic code. If there are
    more, Dynamo can split the code into as many graphs as it needs.
