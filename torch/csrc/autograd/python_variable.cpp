@@ -250,7 +250,7 @@ static PyObject* getPythonTensorClass(c10::Device d) {
   return device_to_py_class_[static_cast<size_t>(d.type())];
 }
 
-void activateCUDATrace() {
+void activateGPUTrace() {
   c10::impl::GPUTrace::set_trace(getPyInterpreter());
 }
 
