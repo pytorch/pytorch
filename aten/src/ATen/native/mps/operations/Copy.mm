@@ -11,7 +11,6 @@
 #include <ATen/ops/real.h>
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/zeros_like.h>
-#include <fmt/format.h>
 
 namespace at::native {
 namespace mps {
