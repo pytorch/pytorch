@@ -56,6 +56,7 @@ from .utils import (
     ceildiv,
     decode_device,
     is_dynamic,
+    is_gpu,
     is_pointwise_use,
     pad_listlike,
     parallel_num_threads,
@@ -436,7 +437,7 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                if i.get_device().type == "cuda":
+                if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
             if not device:
@@ -515,7 +516,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
                 outputs[output_ind] = output
 
-                if device.type == "cuda" and use_foreach and realize_outputs:
+                if is_gpu(device.type) and use_foreach and realize_outputs:
                     buffer_list.append(output.realize())
 
             if buffer_list:
@@ -1141,7 +1142,10 @@ def quantized_decomposed_dequantize_per_channel(
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
-    if all(input.get_dtype() in [torch.int8, torch.uint8] for input in inputs):
+    cpu_device = inputs[0].get_device().type == "cpu"
+    if cpu_device and all(
+        input.get_dtype() in [torch.int8, torch.uint8] for input in inputs
+    ):
         # TODO <leslie> Remove this fallback when we support vectorization
         # code gen with uint8 data type directly.
         for input in inputs:
@@ -1206,7 +1210,7 @@ def cat(inputs, dim=0):
 
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.
-    if inputs[0].get_device().type == "cpu" or fusable_reduction:
+    if cpu_device or fusable_reduction:
         return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
     def op_count(x):
@@ -2274,12 +2278,6 @@ make_fallback(aten.searchsorted)  # bucketized is implemented (see eager impl)
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
-# See resize_storage_bytes
-make_fallback(aten.resize)
-make_fallback(aten.resize_)
-make_fallback(aten.resize_as)
-make_fallback(aten.resize_as_)
-
 
 # 2) Medium
 make_fallback(aten.max_unpool2d)
@@ -2349,6 +2347,9 @@ make_fallback(aten.mode)
 make_fallback(aten.median)
 make_fallback(aten.nanmedian)
 make_fallback(aten.randperm)
+# see: https://github.com/pytorch/pytorch/pull/121354
+make_fallback(aten.resize_)
+make_fallback(aten.resize_as_)
 
 # Linalg
 make_fallback(aten._linalg_det)
@@ -3334,7 +3335,7 @@ def scatter_fallback(
         reduce not in {None, reduce_ty}
         or (
             isinstance(src, TensorBox)
-            and src.get_device().type == torch.device("cuda").type
+            and is_gpu(src.get_device().type)
             and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
         )
         or (
@@ -5859,6 +5860,71 @@ def create_nn_parameter(self, placeholder):
     return TensorBox.create(ir.BindNNParameter(self, placeholder))
 
 
+@register_lowering(torch.ops.aten.resize)
+def resize(x, size, *, memory_format=None):
+    assert isinstance(x, TensorBox)
+    assert isinstance(size, (list, tuple))
+
+    if memory_format is None:
+        memory_format = torch.contiguous_format
+    if memory_format == torch.preserve_format:
+        raise RuntimeError(f"unsupported memory format: {memory_format}")
+
+    if memory_format == torch.channels_last:
+        assert len(size) == 4
+    if memory_format == torch.channels_last_3d:
+        assert len(size) == 5
+
+    old_numel = x.get_numel()
+    dtype = x.get_dtype()
+    device = x.get_device()
+
+    if isinstance(x.data, ir.BaseView):
+        x.data = x.data.unwrap_view()
+
+    if (
+        torch.are_deterministic_algorithms_enabled()
+        and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+    ):
+        if is_float_dtype(dtype):
+            uninitalized_val = float("nan")
+        elif is_integer_dtype(dtype):
+            uninitalized_val = torch.iinfo(dtype).max
+        else:
+            uninitalized_val = True
+    else:
+        # using zero as that is what empty does
+        uninitalized_val = 0.0
+
+    if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
+        return full(size, uninitalized_val, dtype=dtype, device=device)
+
+    x_flat = as_strided(
+        x,
+        [
+            old_numel,
+        ],
+        [
+            1,
+        ],
+    )
+    flat_loader = x_flat.make_loader()
+    out_stride = ir.FlexibleLayout.stride_ordered_for_memory_format(size, memory_format)
+    out_indexer = ir.FixedLayout(device, dtype, size, out_stride).make_indexer()
+
+    def inner_fn(idx):
+        flat_index = out_indexer(idx)
+        flat_index_expr = ops.index_expr(flat_index, torch.int64)
+        limit = ops.index_expr(old_numel, torch.int64)
+        mask = ops.lt(flat_index_expr, limit)
+        return ops.masked(mask, lambda: flat_loader([flat_index]), uninitalized_val)
+
+    out = Pointwise.create(
+        device=device, dtype=dtype, inner_fn=inner_fn, ranges=list(size)
+    )
+    return out
+
+
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 
 make_fallback(auto_functionalized)
@@ -5923,14 +5989,14 @@ def cond(pred, true_fn, false_fn, operands):
 
 
 @register_lowering(torch.ops.higher_order.while_loop)
-def while_loop(cond_fn, body_fn, operands):
-    if any(map(is_triton, operands)):
+def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
+    if any(map(is_triton, carried_inputs + additional_inputs)):
         msg = "control flow operator: torch.while_loop."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result = ir.WhileLoop.create(cond_fn, body_fn, operands)
+    result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
     return list(map(TensorBox.create, result))
 
 

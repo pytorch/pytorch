@@ -15,7 +15,7 @@ from torch.fx.graph_module import _assign_attr
 from weakref import WeakKeyDictionary
 from collections import defaultdict
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
-from torch._dispatch.python import enable_python_dispatcher, enable_pre_dispatch
+from torch._dispatch.python import enable_python_dispatcher
 import torch.fx as fx
 from torch.fx.node import _side_effectful_need_to_be_preserved_pre_dispatch
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
@@ -24,7 +24,9 @@ import inspect
 from dataclasses import dataclass
 import weakref
 import operator
+import traceback
 from torch.utils._stats import count
+from torch.utils._traceback import CapturedTraceback
 import logging
 from torch._library.fake_class_registry import FakeScriptObject
 
@@ -597,6 +599,7 @@ class PythonKeyTracer(Tracer):
         else:
             return e
 
+
 @contextmanager
 def _temp_remove_pre_dispatch_torch_function_mode():
     from torch.overrides import _len_torch_function_stack, _pop_mode, _push_mode
@@ -1076,17 +1079,47 @@ class _ModuleStackTracer(PythonKeyTracer):
 
     def create_node(self, *args, **kwargs):
         '''
-        Add nn_module_stack metadata here instead of TracerBase,
-        since calls to make_fx() might not want to record module stack metadata
+        Create node and add on metadata.
+        Add nn_module_stack here instead of TracerBase,
+        since calls to make_fx() might not want to record module stack metadata.
+        Add torch_fn by looking at torch_fn_metadata and torch_fn_counts.
+        Add stack_trace by filtering out forward() stack frames.
         '''
         node = super().create_node(*args, **kwargs)
+
+        # nn_module_stack
         if "nn_module_stack" not in node.meta and node.op not in ["placeholder", "output"]:
             node.meta["nn_module_stack"] = self.module_stack
+
+        # torch_fn
         if node.op == "call_function" and self.torch_fn_metadata is not None and "torch_fn" not in node.meta:
             node.meta["torch_fn"] = (
                 f"{self.torch_fn_metadata.__name__}_{self.torch_fn_counts[self.torch_fn_metadata]}",
                 f"{self.torch_fn_metadata.__class__.__name__}.{self.torch_fn_metadata.__name__}"
             )
+
+        # stack_trace
+        if 'stack_trace' not in node.meta and node.op not in ["placeholder", "output"]:
+            user_frame_summary = CapturedTraceback.extract().summary()
+            if user_frame_summary:
+                # we retain frames from forward() calls, or ops
+                # located in torch/__init__.py (e.g. sym_int, sym_constrain_range, vmap)
+                stack_trace = [frame for frame in user_frame_summary if (
+                    frame.name == 'forward'
+                    or frame.filename.endswith('torch/__init__.py')
+                )]
+                # filter out forward() frames from fx/_symbolic_trace.py, export/_trace.py
+                # this is hardcoded, but leads to a much cleaner stack trace
+                stack_trace = [
+                    frame for frame in stack_trace if not (
+                        frame.filename.endswith('fx/_symbolic_trace.py')
+                        or frame.filename.endswith('export/_trace.py')
+                    )
+                ]
+                if stack_trace:  # empty list for strict mode, dynamo should handle stack_trace
+                    stack_trace = traceback.StackSummary.from_list(stack_trace)
+                    node.meta["stack_trace"] = ''.join(stack_trace.format()).strip()
+
         return node
 
 
@@ -1129,23 +1162,25 @@ def make_fx(f,
             import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
             if fake_tensor_mode is None:
-                fake_tensor_mode = FakeTensorMode(
-                    allow_fallback_kernels=True,
-                    allow_non_fake_inputs=_allow_non_fake_inputs,
-                    shape_env=ShapeEnv(),
-                    static_shapes=True,
-                    _allow_unsafe_data_ptr_access=False,
-                )
+                import torch._functorch.config as _config
+                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                    fake_tensor_mode = FakeTensorMode(
+                        allow_fallback_kernels=True,
+                        allow_non_fake_inputs=_allow_non_fake_inputs,
+                        shape_env=ShapeEnv(),
+                        static_shapes=True,
+                    )
         elif tracing_mode == "symbolic":
             import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
             if fake_tensor_mode is None:
                 shape_env = ShapeEnv()
-                fake_tensor_mode = FakeTensorMode(
-                    allow_fallback_kernels=False,
-                    allow_non_fake_inputs=_allow_non_fake_inputs,
-                    shape_env=shape_env,
-                    _allow_unsafe_data_ptr_access=False)
+                import torch._functorch.config as _config
+                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                    fake_tensor_mode = FakeTensorMode(
+                        allow_fallback_kernels=False,
+                        allow_non_fake_inputs=_allow_non_fake_inputs,
+                        shape_env=shape_env)
             else:
                 shape_env = fake_tensor_mode.shape_env
                 assert shape_env is not None, "shape_env should be set if tracing with 'symbolic'"
@@ -1154,13 +1189,10 @@ def make_fx(f,
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
         python_dispatcher_mode: Any = nullcontext()
-        pre_dispatch_mode: Any = nullcontext()
         # pre-autograd tracing uses per-dispatch-key modes,
         # which requires the python dispatcher
         if tracing_mode == "symbolic" or pre_dispatch:
             python_dispatcher_mode = enable_python_dispatcher()
-        if pre_dispatch:
-            pre_dispatch_mode = enable_pre_dispatch()
 
         proxy_function_mode: Any = nullcontext()
         if pre_dispatch:
@@ -1218,7 +1250,7 @@ def make_fx(f,
         # We also disable tracing by any other tensor proxy-based tracers except the current. The
         # purpose of `make_fx` is to produce graphmodules as a side effect; its internal execution is
         # thus irrelevant to any external functional trace.
-        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, pre_dispatch_mode, proxy_function_mode, \
+        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, proxy_function_mode, \
              sym_mode, torch_fn_metadata_mode, proxy_mode, disable_autocast_cache():
             t = dispatch_trace(wrap_key(func, args, fx_tracer, pre_dispatch), tracer=fx_tracer, concrete_args=tuple(phs))
 
