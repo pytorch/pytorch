@@ -18,9 +18,6 @@ namespace at::cuda {
 // call between host and device, and passed the corresponding context from the
 // allocation. This is currently invoked by at::native::copy_kernel_cuda.
 //
-// Note that this allocator does not split larger allocations into smaller
-// blocks, unlike the caching device allocator.
-//
 TORCH_CUDA_CPP_API c10::Allocator* getCachingHostAllocator();
 
 // Records an event in the specified stream. The allocation corresponding to the
