@@ -281,8 +281,7 @@ class saved_tensors_hooks:
     def __exit__(self, *args: object):
         torch._C._autograd._pop_saved_tensors_default_hooks()
 
-
-class save_on_cpu(saved_tensors_hooks):
+class save_on_cpu2(saved_tensors_hooks):
     """Context manager under which tensors saved by the forward pass will be stored on cpu, then retrieved for backward.
 
     When performing operations within this context manager, intermediary
@@ -342,6 +341,87 @@ class save_on_cpu(saved_tensors_hooks):
         def unpack_from_cpu(packed):
             device, tensor = packed
             return tensor.to(device, non_blocking=pin_memory)
+
+        super().__init__(pack_to_cpu, unpack_from_cpu)
+
+class save_on_cpu(saved_tensors_hooks):
+    """Context manager under which tensors saved by the forward pass will be stored on cpu, then retrieved for backward.
+
+    When performing operations within this context manager, intermediary
+    results saved in the graph during the forward pass will be moved to CPU,
+    then copied back to the original device when needed for the backward pass.
+    If the graph was already on CPU, no tensor copy is performed.
+
+    Use this context-manager to trade compute for GPU memory usage (e.g.
+    when your model doesn't fit in GPU memory during training).
+
+    Args:
+        pin_memory (bool): If ``True`` tensors will be saved to CPU pinned memory
+                           during packing and copied to GPU asynchronously during unpacking.
+                           Defaults to ``False``.
+                           Also see :ref:`cuda-memory-pinning`.
+
+
+    Example::
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_AUTOGRAD)
+        >>> a = torch.randn(5, requires_grad=True, device="cuda")
+        >>> b = torch.randn(5, requires_grad=True, device="cuda")
+        >>> c = torch.randn(5, requires_grad=True, device="cuda")
+        >>>
+        >>> def f(a, b, c):
+        ...     prod_1 = a * b           # a and b are saved on GPU
+        ...     with torch.autograd.graph.save_on_cpu():
+        ...         prod_2 = prod_1 * c  # prod_1 and c are saved on CPU
+        ...     y = prod_2 * a           # prod_2 and a are saved on GPU
+        ...     return y
+        >>>
+        >>> y = f(a, b, c)
+        >>> del a, b, c  # for illustration only
+        >>> # the content of a, b, and prod_2 are still alive on GPU
+        >>> # the content of prod_1 and c only live on CPU
+        >>> y.sum().backward()  # all CPU tensors are moved back to GPU, for backward
+        >>> # all intermediary tensors are released (deleted) after the call to backward
+
+    """
+
+    def __init__(self, pinned_memory=True, device_type="cuda"):
+        device_module = getattr(torch, device_type, torch.cuda)
+        cpu_tensor_stack = []
+        last_tensor = None
+
+        def pack_to_cpu(tensor):
+            # if not pin_memory:
+            #     return (tensor.device, tensor.cpu())
+            nonlocal last_tensor
+            if last_tensor is None:
+                last_tensor = tensor
+            else:
+                packed = torch.empty(
+                    last_tensor.size(),
+                    dtype=last_tensor.dtype,
+                    layout=last_tensor.layout,
+                    pin_memory=True  # (device_module.is_available() and not last_tensor.is_sparse),
+                )
+                # ASSUMPTION THAT NO ONE IS READING PACKED WITHOUT SYNCHRONIZING
+                packed.copy_(last_tensor, non_blocking=True)
+                print(f"just MOVED OFF last_tensor to cpu, and memory on cuda is: {torch.cuda.memory_allocated()}")
+                # res = (last_tensor.device, packed)
+                cpu_tensor_stack.append(packed)
+                last_tensor = tensor
+                print(f"just REPLACED last_tensor and memory on cuda is: {torch.cuda.memory_allocated()}")
+                # return res
+
+        def unpack_from_cpu(packed=None):   # packed):
+            nonlocal last_tensor
+            res = last_tensor
+            if len(cpu_tensor_stack) != 0:
+                print(f"about to BRING BACK next tensor from cpu, and memory on cuda is: {torch.cuda.memory_allocated()}")
+                last_tensor = cpu_tensor_stack.pop().to(device="cuda", non_blocking=True)
+            else:
+                last_tensor = None
+            return res
 
         super().__init__(pack_to_cpu, unpack_from_cpu)
 
