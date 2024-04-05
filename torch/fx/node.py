@@ -723,7 +723,6 @@ class Node:
                     m._replace_hook(old=self, new=value, user=user)
         update = False
         if (
-                name in ("target", "op") and
                 hasattr(self, name) and
                 getattr(self, name) != value and
                 hasattr(self.graph, "_find_nodes_lookup_table") and
