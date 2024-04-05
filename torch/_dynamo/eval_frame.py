@@ -1464,6 +1464,23 @@ class TorchPatcher:
             if inspect.isclass(opt) and issubclass(opt, torch.optim.Optimizer)
         ]
 
+        # We don't support calling step() with a closure, disable in this case
+        def _disable_dynamo_if_closure(fn):
+            def inner(self, *args, **kwargs):
+                if (len(args) == 1 and args[0] is not None) or kwargs.get(
+                    "closure", None
+                ) is not None:
+
+                    @torch._disable_dynamo
+                    def disabled_wrapper(self, *args, **kwargs):
+                        return fn(self, *args, **kwargs)
+
+                    return disabled_wrapper(self, *args, **kwargs)
+                else:
+                    return fn(self, *args, **kwargs)
+
+            return inner
+
         # Note: we don't support sparsity or tracing through backwards
         excluded_optimizer_classes = {
             torch.optim.SparseAdam,
@@ -1471,6 +1488,9 @@ class TorchPatcher:
         }
 
         for opt in optimizer_classes:
+            if hasattr(opt, "step"):
+                opt.step = _disable_dynamo_if_closure(opt.step)
+
             if opt in excluded_optimizer_classes:
                 opt.step = disable(opt.step)
 
