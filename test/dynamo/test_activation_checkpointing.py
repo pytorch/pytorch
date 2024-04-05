@@ -1109,7 +1109,7 @@ class ActivationCheckpointingViaTagsTests(torch._dynamo.test_case.TestCase):
         )
 
     @requires_cuda
-    @requires_distributed
+    @requires_distributed()
     def test_distributed_utils_checkpoint_wrapper(self):
         from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
             checkpoint_wrapper as dist_checkpoint_wrapper,
