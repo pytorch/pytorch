@@ -292,12 +292,14 @@ class OutputGraph:
 
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=shape_env,
-            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
-            allow_non_fake_inputs=True if self.export else False,
-            _allow_unsafe_data_ptr_access=False,
-        )
+        import torch._functorch.config as _config
+
+        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=shape_env,
+                # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
+                allow_non_fake_inputs=True if self.export else False,
+            )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.init_ambient_guards()
 
@@ -870,6 +872,12 @@ class OutputGraph:
         self.cleanup_graph()
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
+
+        # realize any unrealized tensor VTs in case they
+        # need to be added to self.nn_modules as attributes
+        for value in stack_values:
+            value.realize()
+
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
         # This prevents a strong ref cycle where Dynamo created code holds on to references
@@ -1145,11 +1153,13 @@ class OutputGraph:
         self.call_cleanup_hooks()
         old_fake_mode = self.tracing_context.fake_mode
         if not self.export:
-            # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
-            backend_fake_mode = torch._subclasses.FakeTensorMode(
-                shape_env=old_fake_mode.shape_env,
-                _allow_unsafe_data_ptr_access=False,
-            )
+            import torch._functorch.config as _config
+
+            with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+                backend_fake_mode = torch._subclasses.FakeTensorMode(
+                    shape_env=old_fake_mode.shape_env,
+                )
             # TODO(voz): Ostensibily, this should be scoped and
             # restore back to old_fake_mode, but doing so currently violates
             # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
