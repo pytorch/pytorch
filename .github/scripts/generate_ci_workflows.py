@@ -347,6 +347,7 @@ S390X_BINARY_BUILD_WORKFLOWS = [
     ),
 ]
 
+
 def main() -> None:
     jinja_env = jinja2.Environment(
         variable_start_string="!{{",
