@@ -85,11 +85,12 @@ def forward_and_backward_pass(m, inputs):
     loss = m(*inputs).sum().backward()
 
 
+USE_CUDA_GRAPHS = os.environ.get("USE_CUDA_GRAPHS", "1") == "1"
 @config.patch(
     {
         "benchmark_kernel": True,
         "triton.unique_kernel_names": True,
-        "triton.cudagraphs": True,
+        "triton.cudagraphs": USE_CUDA_GRAPHS,
     }
 )
 class PaddingTest(TestCase):
@@ -108,8 +109,8 @@ class PaddingTest(TestCase):
         )
 
     def common_numeric_check(self, f, *args, tol=1e-3, **kwargs):
-        opt_f = torch.compile(f)
         ref = f(*args, **kwargs)
+        opt_f = torch.compile(f)
         act = opt_f(*args, **kwargs)
         self.check_close(ref, act, tol)
 
@@ -332,6 +333,8 @@ class PaddingTest(TestCase):
                                 pred = pred.logits
                             elif isinstance(pred, dict):
                                 pred = pred["loss"]
+                            elif isinstance(pred, torch.Tensor):
+                                pass
                             else:
                                 raise NotImplementedError("unexpected model output")
                             loss = pred.sum()
@@ -344,12 +347,10 @@ class PaddingTest(TestCase):
             print("Benchmark with padding")
             with config.patch(
                 comprehensive_padding=True
-            ), torch.autograd.skip_grad_layout_contract():
+            ):
                 m_copy_with_padding = copy.deepcopy(model)
                 optim_with_padding = get_optim(m_copy_with_padding)
-                opt_f_with_padding = torch.compile(
-                    get_f(m_copy_with_padding, optim_with_padding)
-                )
+                opt_f_with_padding = torch.compile(get_f(m_copy_with_padding, optim_with_padding))
                 latency_with_padding = do_bench(lambda: opt_f_with_padding(*perf_args, **perf_kwargs))
             latency_without_padding = None
             print("bencmark without padding")
@@ -376,7 +377,7 @@ class PaddingTest(TestCase):
            for _ in range(niter):
                with torch.profiler.record_function(
                    tag_lhs
-               ), torch.autograd.skip_grad_layout_contract():
+               ):
                    f_lhs(*args, **kwargs)
 
                with torch.profiler.record_function(tag_rhs):

@@ -1177,7 +1177,8 @@ def compile_fx(
     decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,
 ):
     """Main entrypoint to a compile given FX graph"""
-    torch._C._autograd._set_skip_grad_layout_contract(True)
+    if config.comprehensive_padding:
+        torch._C._autograd._set_skip_grad_layout_contract(True)
     if config_patches:
         with config.patch(config_patches):
             return compile_fx(
