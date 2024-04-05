@@ -134,7 +134,7 @@ def _is_backward_state(node):
 
 
 def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
-    outputs = pytree.arg_tree_leaves(*(node.args for node in joint_module.graph.nodes if node.op == 'output'))
+    outputs = pytree.arg_tree_leaves(*(node.args for node in joint_module.graph.find_nodes(op="output")))
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
     return fwd_outputs, bwd_outputs
@@ -146,20 +146,10 @@ def _remove_by_name(saved_values, name):
             saved_values.remove(saved_value)
             break
 
-def _placeholders(nodes):
-    # Avoid making an entire pass over the graph if we only care about the input placeholders
-    result = []
-    for node in nodes:
-        if node.op == 'placeholder':
-            result.append(node)
-        else:
-            break  # placeholders are all at the start of graph
-    return result
-
 
 def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_sym_nodes, *, num_fwd_outputs):
     fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-    placeholders = _placeholders(joint_module.graph.nodes)
+    placeholders = joint_module.graph.find_nodes(op="placeholder")
     primal_inputs = [*filter(_is_primal, placeholders)]
     tangent_inputs = [*filter(_is_tangent, placeholders)]
     fwd_seed_offset_inputs = [*filter(_is_fwd_seed_offset, placeholders)]
@@ -172,8 +162,7 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
         bwd_outputs
     )
 
-    for node in _placeholders(bwd_graph.nodes):
-        assert node.op == 'placeholder'
+    for node in bwd_graph.find_nodes(op="placeholder"):
         # This is to filter out saved values that don't actually end up being used by the backwards pass
         if not node.users:
             _remove_by_name(saved_values, node.name)
@@ -415,9 +404,8 @@ def reordering_to_mimic_autograd_engine(gm):
     env = {}
 
     # Add new placeholder nodes in the order specified by the inputs
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            env[node] = new_graph.node_copy(node, lambda x: env[x])
+    for node in gm.graph.find_nodes(op="placeholder"):
+        env[node] = new_graph.node_copy(node, lambda x: env[x])
 
     order = {}
     for idx, node in enumerate(gm.graph.nodes):
@@ -425,7 +413,7 @@ def reordering_to_mimic_autograd_engine(gm):
 
     # Populate depth for the nodes. Depth is the distance from the inputs.
     depths = {}
-    output_node = next(node for node in gm.graph.nodes if node.op == "output")
+    output_node = next(iter(gm.graph.find_nodes(op="output")))
     for node in gm.graph.nodes:
         if node.op == 'placeholder':
             depths[node] = 0
@@ -541,8 +529,8 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
     run_and_save_rng = torch._prims.rng_prims.run_and_save_rng_state
     run_with_rng_state = torch._prims.rng_prims.run_with_rng_state
 
-    for node in bw_module.graph.nodes:
-        if node.op == "placeholder" and "tangent" in node.name:
+    for node in bw_module.graph.find_nodes(op="placeholder"):
+        if "tangent" in node.name:
             bw_tangent_start_node = node
             break
 
@@ -589,7 +577,7 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
     # Add the rng states in the output of the fwd graph. AOT Autograd assumes
     # that symints are at the end of forward graph outputs. So, insert the new
     # rng states accordingly.
-    fw_output_node = next(node for node in fw_module.graph.nodes if node.op == "output")
+    fw_output_node = next(iter(fw_module.graph.find_nodes(op="output")))
     fw_outputs = fw_output_node.args[0]
     sym_node_start_idx = len(fw_outputs) - num_sym_nodes
     outputs = fw_outputs[:sym_node_start_idx] + fw_rng_state_outputs + fw_outputs[sym_node_start_idx:]

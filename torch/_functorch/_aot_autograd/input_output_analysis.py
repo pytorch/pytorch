@@ -347,7 +347,7 @@ def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
 
 
 def _graph_input_names(gm):
-    return [node.name for node in gm.graph.nodes if node.op == "placeholder"]
+    return [node.name for node in gm.graph.find_nodes(op="placeholder")]
 
 
 def _graph_output_names(gm):
