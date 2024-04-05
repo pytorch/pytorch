@@ -1,5 +1,7 @@
 import weakref
-from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from typing import Any, cast, Dict, Iterable, List, Optional, Set, Tuple
+
+import typing_extensions
 
 import torch
 import torch.nn as nn
@@ -20,6 +22,10 @@ class _ReplicateState(_State):
         # TODO(@fegin): this variable is originally create for testing, we
         # should remove this if possible.
         self._param_names: List[str] = []
+        self._no_sync: bool = False
+        self._init_args: Optional[Tuple[Any, ...]] = None
+        self._init_kwargs: Dict[str, Any] = {}
+        self._comm_hook_args: List[Any] = []
 
     def _collect_params(
         self,
@@ -53,6 +59,7 @@ class _ReplicateState(_State):
                 prefix=f"{recurse_prefix}{name}",
             )
 
+    @torch._dynamo.disable(recursive=True)
     def init(
         self,
         module: nn.Module,
@@ -70,27 +77,9 @@ class _ReplicateState(_State):
         self.has_initialized = True
 
         device_mesh = kwargs.get("device_mesh", None)
-        if device_mesh is not None:
-            from torch.distributed.device_mesh import _mesh_resources
-
-            if _mesh_resources.get_parent_mesh(device_mesh) is not None:
-                # TODO: This is a temporary work around to enable DDP + TP.
-                # We should do the logic in DDP so that the 2D implementation is
-                # sound and the state_dict works out of the box.
-                #
-                # This won't conflict with what is done in DDP class as the module
-                # replicate is going to pass is NOT the original module.
-                from torch.distributed.tensor.parallel.ddp import (
-                    _pre_dp_module_transform,
-                )
-
-                _pre_dp_module_transform(module)
-
         self.module = module
         ignored_params = {p for m in ignored_modules for p in m.parameters()}
         self._collect_params(module, ignored_modules, ignored_params)
-        module.register_forward_pre_hook(self.forward_pre_hook, with_kwargs=True)
-        module.register_forward_hook(self.forward_post_hook)  # type: ignore[arg-type]
 
         if "device_id" in kwargs:
             # replicate() supports a small usability enhancement where
@@ -114,9 +103,25 @@ class _ReplicateState(_State):
         # Weakref to the DDP instance is currently only used for testing.
         replicate.state(self.module)._ddp_weakref = weakref.ref(self._ddp)
 
+    @torch._dynamo.disable(recursive=True)
+    def register_comm_hook(self) -> None:
+        for comm_args, comm_kwargs in self._comm_hook_args:
+            self._ddp.register_comm_hook(*comm_args, **comm_kwargs)
+        self._comm_hook_args.clear()
+
+    def record_init_args(self, *args, **kwargs) -> None:
+        self._init_args = args
+        self._init_kwargs = kwargs
+
     def forward_pre_hook(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
+        if self._init_args or self._init_kwargs:
+            self.init(*self._init_args, **self._init_kwargs)
+            self.register_comm_hook()
+            self._init_args = tuple()
+            self._init_kwargs = {}
+        self._ddp.require_backward_grad_sync = not self._no_sync
         return self._ddp._pre_forward(*args, **kwargs)
 
     def forward_post_hook(
@@ -126,6 +131,41 @@ class _ReplicateState(_State):
         output: torch.Tensor,
     ) -> torch.Tensor:
         return self._ddp._post_forward(output)
+
+
+def unimplemented_deepcopy(*args: Any, **kwargs: Any) -> typing_extensions.Never:
+    raise AssertionError(
+        "FSDP does not support deepcopy. Please use state dict for serialization."
+    )
+
+
+class DDP:
+    def __new__(cls, *args, **kwargs):
+        """
+        Override ``__new__`` to remove the FSDP class and directly construct
+        the original class for cases like indexing into a container module.
+        """
+        # Use index 2 since 0 is the dynamically constructed `FSDP<...>` class
+        # and index 1 is the `FSDP` class itself
+        orig_cls = cls.__mro__[2]
+        self = orig_cls.__new__(orig_cls, *args, **kwargs)
+        self.__init__(*args, **kwargs)
+        return self
+
+    def set_requires_gradient_sync(self, requires_gradient_sync: bool) -> None:
+        """
+        Sets if the module should sync gradients. This can be used to implement
+        gradient accumulation without communication. For HSDP, this controls
+        both reduce-scatter and all-reduce together.
+
+        Args:
+            requires_gradient_sync (bool): Whether to reduce gradients for the
+                module's parameters.
+        """
+        replicate.state(self)._no_sync = not requires_gradient_sync
+
+    def register_comm_hook(self, *args, **kwargs) -> None:
+        replicate.state(self)._comm_hook_args.append((args, kwargs))
 
 
 @contract(state_cls=_ReplicateState)
@@ -159,8 +199,31 @@ def replicate(
         ignored_modules = {}
     else:
         ignored_modules = set(ignored_modules)
-    replicate.state(module).init(module, ignored_modules, **kwargs)
 
+    state = cast(_ReplicateState, replicate.state(module))
+    module.register_forward_pre_hook(state.forward_pre_hook, with_kwargs=True)
+    module.register_forward_hook(state.forward_post_hook)  # type: ignore[arg-type]
+    device_mesh = kwargs.get("device_mesh", None)
+    if device_mesh is not None:
+        from torch.distributed.device_mesh import _mesh_resources
+
+        if _mesh_resources.get_parent_mesh(device_mesh) is not None:
+            # TODO: This is a temporary work around to enable DDP + TP.
+            # We should do the logic in DDP so that the 2D implementation is
+            # sound and the state_dict works out of the box.
+            #
+            # This won't conflict with what is done in DDP class as the module
+            # replicate is going to pass is NOT the original module.
+            from torch.distributed.tensor.parallel.ddp import _pre_dp_module_transform
+
+            _pre_dp_module_transform(module)
+    state.record_init_args(module, ignored_modules, **kwargs)
+
+    # Place FSDP leftmost for highest priority in the method resolution order
+    cls = module.__class__
+    dct = {"__deepcopy__": unimplemented_deepcopy}
+    new_cls = type(f"DDP{cls.__name__}", (DDP, cls), dct)
+    module.__class__ = new_cls
     return module
 
 
