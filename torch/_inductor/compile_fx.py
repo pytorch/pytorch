@@ -1372,12 +1372,9 @@ def compile_fx(
         with V.set_fake_mode(fake_mode), compiled_autograd.disable():
             return inference_compiler(unlifted_gm, example_inputs_)
 
-    with (
-        V.set_fake_mode(fake_mode),
-        torch._guards.tracing(tracing_context),
-        compiled_autograd.disable(),
-        functorch_config.patch(unlift_effect_tokens=True),
-    ):
+    with V.set_fake_mode(fake_mode), torch._guards.tracing(
+        tracing_context
+    ), compiled_autograd.disable(), functorch_config.patch(unlift_effect_tokens=True):
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
