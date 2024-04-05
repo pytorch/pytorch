@@ -5720,8 +5720,8 @@ class ConvolutionUnary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
+            python_kernel_name="torch.ops.mkldnn._convolution_pointwise",
             cpp_kernel_name="mkldnn::_convolution_pointwise",
-            op_overload=torch.ops.mkldnn._convolution_pointwise,
         )
         self.cpp_kernel_key = "convolution_pointwise"
         self.cpp_op_schema = """
@@ -5791,8 +5791,8 @@ class ConvolutionBinary(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
+            python_kernel_name="torch.ops.mkldnn._convolution_pointwise.binary"
             cpp_kernel_name="mkldnn::_convolution_pointwise",
-            op_overload=torch.ops.mkldnn._convolution_pointwise.binary,
         )
         self.cpp_kernel_overload_name = "binary"
         self.cpp_kernel_key = "convolution_pointwise_binary"
