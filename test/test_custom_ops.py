@@ -2433,7 +2433,7 @@ Please use `add.register_fake` to add an fake impl.""",
 
         x = torch.randn(3)
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
-            f(x)
+            numpy_sin_inplace(x)
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):
