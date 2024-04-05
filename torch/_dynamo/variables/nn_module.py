@@ -242,7 +242,9 @@ class NNModuleVariable(VariableTracker):
                 # Support possibly common cases of class members
                 return VariableBuilder(tx, NNModuleSource(source))(subobj)
             else:
-                unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
+                unimplemented(
+                    f"class property {name} - {typestr(base)} {typestr(subobj)}"
+                )
 
         return variables.GetAttrVariable(self, name, source=source)
 
