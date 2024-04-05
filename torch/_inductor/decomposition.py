@@ -694,6 +694,14 @@ def put_(self, index, source, accumulate=False):
 def index_reduce(
     self, dim: int, index, src, reduction_type: str, *, include_self: bool = True
 ):
+    if reduction_type == "mean":
+        tmp = (torch.ones_like if include_self else torch.zeros_like)(self)
+        counts = tmp.index_add(dim, index, torch.ones_like(src))
+        out = self if include_self else tmp  # tmp is torch.zeros_like(self)
+        out = out.index_add(dim, index, src) / counts
+        out = out if include_self else torch.where(counts == 0, self, out)
+        return out
+
     if use_scatter_fallback(
         "aten.scatter_reduce_",
         reduction_type,

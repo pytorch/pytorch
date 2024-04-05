@@ -5223,6 +5223,7 @@ def sample_inputs_index(op_info, device, dtype, requires_grad, reference=False, 
 
 def sample_inputs_index_reduce(op_info, device, dtype, requires_grad, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
     def make_idx(n, m):
         return make_tensor((n,), device=device, dtype=torch.int64, low=0, high=m)
 

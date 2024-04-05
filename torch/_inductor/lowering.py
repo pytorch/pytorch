@@ -56,6 +56,7 @@ from .utils import (
     ceildiv,
     decode_device,
     is_dynamic,
+    is_gpu,
     is_pointwise_use,
     needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
@@ -437,7 +438,7 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                if i.get_device().type == "cuda":
+                if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
             if not device:
@@ -516,7 +517,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
                 outputs[output_ind] = output
 
-                if device.type == "cuda" and use_foreach and realize_outputs:
+                if is_gpu(device.type) and use_foreach and realize_outputs:
                     buffer_list.append(output.realize())
 
             if buffer_list:

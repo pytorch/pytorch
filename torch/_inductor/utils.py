@@ -1498,9 +1498,17 @@ def collect_defined_kernels(kernel_list):
         yield
 
 
-
 def get_cloned_parameter_buffer_name(name: str):
     return name + "__original__"
+
+
+def is_gpu(device: str):
+    return device in ["cuda", "xpu"]
+
+
+def device_need_guard(device: str):
+    assert isinstance(device, str)
+    return is_gpu(device)
 
 
 def needs_fallback_due_to_atomic_add_limitations(dtype):
@@ -1517,7 +1525,7 @@ def use_scatter_fallback(
         reduction_type not in {None, reduce_ty}
         or (
             src_is_tensor
-            and src_device_type == "cuda"
+            and is_gpu(src_device_type)
             and needs_fallback_due_to_atomic_add_limitations(src_dtype)
         )
         or (
