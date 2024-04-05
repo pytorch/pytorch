@@ -2566,6 +2566,10 @@ class BenchmarkRunner:
                     accuracy_status = "fail_accuracy"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
+        # TESTING: delete me
+        if name in CI_PRESERVE_CACHE_DIR:
+            accuracy_status = "fail_accuracy"
+
         return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
     def check_tolerance(
@@ -3461,9 +3465,6 @@ def main(runner, original_dir=None, args=None):
         # single process path just uses the main process
         args.world_size = 1
         process_entry(0, runner, original_dir, args)
-        # TESTING: delete me
-        if args.only and args.only in CI_PRESERVE_CACHE_DIR:
-            sys.exit(1)
 
 
 def write_csv_when_exception(args, name: str, status: str, device=None):
