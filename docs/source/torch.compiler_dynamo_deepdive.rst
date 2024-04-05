@@ -242,10 +242,10 @@ Implementing CPython in Python
 So, we are back in the Python world. We have the bytecode of a function,
 and all the context necessary to execute it. In particular, we have
 landed at
-```_convert_frame_assert`` <https://github.com/pytorch/pytorch/blob/b6df8414601e1e086e830ca9e919e7fdc8874e71/torch/_dynamo/convert_frame.py#L272-L274>`__.
+`_convert_frame_assert <https://github.com/pytorch/pytorch/blob/b6df8414601e1e086e830ca9e919e7fdc8874e71/torch/_dynamo/convert_frame.py#L272-L274>`__.
 This is the function that the decorator ``torch.compile`` returns! We
 get to this function from
-```_dynamo.optimize`` <https://github.com/pytorch/pytorch/blob/b6df8414601e1e086e830ca9e919e7fdc8874e71/torch/_dynamo/eval_frame.py#L715-L727>`__.
+`_dynamo.optimize <https://github.com/pytorch/pytorch/blob/b6df8414601e1e086e830ca9e919e7fdc8874e71/torch/_dynamo/eval_frame.py#L715-L727>`__.
 The decorator ``torch.compile`` is just a nice API around
 ``_dynamo.optimize``.
 
@@ -269,12 +269,12 @@ We also have special subclasses for objects that require special
 attention, like
 `TensorVariable <https://github.com/pytorch/pytorch/blob/83c0763dda1f93c6cf552ba88260a0dc7a3ecb70/torch/_dynamo/variables/tensor.py#L68-L69>`__.
 All these internal classes are defined in the
-```torch/_dynamo/variables`` <https://github.com/pytorch/pytorch/tree/83c0763dda1f93c6cf552ba88260a0dc7a3ecb70/torch/_dynamo/variables>`__
+`torch/_dynamo/variables <https://github.com/pytorch/pytorch/tree/83c0763dda1f93c6cf552ba88260a0dc7a3ecb70/torch/_dynamo/variables>`__
 folder.
 
 Python objects are wrapped into their corresponding ``VariableTracker``
 class in
-```VariableBuilder._wrap`` <https://github.com/pytorch/pytorch/blob/83c0763dda1f93c6cf552ba88260a0dc7a3ecb70/torch/_dynamo/variables/builder.py#L365>`__.
+`VariableBuilder._wrap <https://github.com/pytorch/pytorch/blob/83c0763dda1f93c6cf552ba88260a0dc7a3ecb70/torch/_dynamo/variables/builder.py#L365>`__.
 This function is just a very long chain of ``elif``\ s that tries to
 recursively pattern-match the Python inputs into the appropriate type of
 ``VariableTracker``.
@@ -304,9 +304,9 @@ traced into the right ``VariableTracker``.
 
 Ok, so we have an IR for our tracer, now we *just* need to reimplement
 CPython’s stack machine. This is implemented by
-```InstructorTranslatorBase`` <https://github.com/pytorch/pytorch/blob/69f112d5867f785a3a090a0c6d6644ae047033ac/torch/_dynamo/symbolic_convert.py#L576-L594>`__
+`InstructorTranslatorBase <https://github.com/pytorch/pytorch/blob/69f112d5867f785a3a090a0c6d6644ae047033ac/torch/_dynamo/symbolic_convert.py#L576-L594>`__
 in
-```symbolic_convert.py`` <https://github.com/pytorch/pytorch/blob/69f112d5867f785a3a090a0c6d6644ae047033ac/torch/_dynamo/symbolic_convert.py>`__.
+`symbolic_convert.py <https://github.com/pytorch/pytorch/blob/69f112d5867f785a3a090a0c6d6644ae047033ac/torch/_dynamo/symbolic_convert.py>`__.
 
 ``InstructionTranslatorBase`` has about 200 methods, implementing almost
 all of Python bytecodes. As an example, we can see the implementation of
@@ -330,7 +330,7 @@ Generating the Output Graph
 With a way to symbolically execute Python code, we are set to extract
 the PyTorch operations that happen during the symbolic execution of a
 program given some inputs. This is implemented in Dynamo via the
-```OutputGraph`` <https://github.com/pytorch/pytorch/blob/69f112d5867f785a3a090a0c6d6644ae047033ac/torch/_dynamo/output_graph.py#L221-L230>`__
+`OutputGraph <https://github.com/pytorch/pytorch/blob/69f112d5867f785a3a090a0c6d6644ae047033ac/torch/_dynamo/output_graph.py#L221-L230>`__
 object. The ``OutputGraph`` object is `bound to an
 ``InstructionTranslator``
 object <https://github.com/pytorch/pytorch/blob/69f112d5867f785a3a090a0c6d6644ae047033ac/torch/_dynamo/symbolic_convert.py#L2060-L2071>`__
@@ -342,9 +342,9 @@ All the inputs and intermediary elements of the FX graph are
 ``fx.Proxy``\ s. ``fx.Proxy``\ s are used to build the FX graph.
 In particular, they record every PyTorch operation performed on them
 into the graph. You can can create a new operation to be added to
-the graph by calling ```create_proxy`` <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/_dynamo/output_graph.py#L430-L431>`__.
+the graph by calling `create_proxy <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/_dynamo/output_graph.py#L430-L431>`__.
 Then, we can add it to the graph through the function
-```wrap_fx_proxy`` <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/_dynamo/variables/builder.py#L1311>`__.
+`wrap_fx_proxy <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/_dynamo/variables/builder.py#L1311>`__.
 
 A graph stores operations on tensors… and operations on symbolic
 integers. We will discuss symbolic integers later on, but first we will
@@ -358,7 +358,7 @@ Making Dynamo Sound: Guards
 At this point, we have a way to trace programs completely disregarding control flow.
 And for that, we have reimplemented all of CPython… If this sounds like a bit of an
 overkill, that is because it is.
-```torch.jit.trace`` <https://pytorch.org/docs/stable/generated/torch.jit.trace.html>`__
+`torch.jit.trace <https://pytorch.org/docs/stable/generated/torch.jit.trace.html>`__
 already implements this without all this machinery, so what gives?
 
 The issue with ``torch.jit.trace``, as it is warned in its docs, is that
@@ -442,15 +442,15 @@ the objects they contain. In
        return a * x
 
 ``x`` and ``y`` have
-```LocalSource`` <https://github.com/pytorch/pytorch/blob/40dc0580a69565b06ec5263efe5d87cecc8200f7/torch/_dynamo/source.py#L80-L92>`__
+`LocalSource <https://github.com/pytorch/pytorch/blob/40dc0580a69565b06ec5263efe5d87cecc8200f7/torch/_dynamo/source.py#L80-L92>`__
 as their source, and ``y[0]`` has
-```GetItemSource`` <https://github.com/pytorch/pytorch/blob/40dc0580a69565b06ec5263efe5d87cecc8200f7/torch/_dynamo/source.py#L302>`__,
+`GetItemSource <https://github.com/pytorch/pytorch/blob/40dc0580a69565b06ec5263efe5d87cecc8200f7/torch/_dynamo/source.py#L302>`__,
 which stores a ``LocalSource`` inside. On the other hand, ``a`` will not
 have a source as it is an intermediate variable that only exists within
 the fx graph.
 
 All these are defined in
-```torch/_dynamo/source.py`` <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/source.py>`__.
+`torch/_dynamo/source.py <https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/source.py>`__.
 We can see the guard generated by ``GetItemSource`` in the following
 example:
 
@@ -496,7 +496,7 @@ Symbolic Shapes
 
 Another point we discussed in the introduction is that Dynamo knows how
 to trace integers. In order to implement this, we use a symbolic class
-```torch.SymInt`` <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/__init__.py#L244-L249>`__\  [5]_
+`torch.SymInt <https://github.com/pytorch/pytorch/blob/fb80f05ee2e1cba17892980701bfd5dbce58349f/torch/__init__.py#L244-L249>`__\  [5]_
 that acts like an ``int`` but it records all the operations performed on
 it in the output FX graph. We already saw this class in the introduction
 when introducing symbolic integer tracing.
@@ -588,7 +588,7 @@ more general guards on this more generic kernel.
 
 **Compilation performance tip**. If you know that a dimension will vary
 in size, you can mark it as dynamic by calling
-```torch._dynamo.mark_dynamic`` <https://github.com/pytorch/pytorch/blob/66a76516bfc341b2b55bb2056d2faa9c2de46d69/torch/_dynamo/decorators.py#L176>`__
+`torch._dynamo.mark_dynamic <https://github.com/pytorch/pytorch/blob/66a76516bfc341b2b55bb2056d2faa9c2de46d69/torch/_dynamo/decorators.py#L176>`__
 before calling ``torch.compile``. This will avoid the first compilation
 with a static shape. There are other useful utility functions like
 ``maybe_mark_dynamic`` or ``mark_static``. You can also have all
@@ -683,8 +683,8 @@ The usual way machine learning tracers handle this issue is by informing
 the user that the operation they choked on and giving up tracing
 altogether. This would pose a real usability issue in the case of
 PyTorch, where its users are used to the flexibility it gives them. As a
-real-world example the ```doctr_det_predictor`` model uses NumPy and the
-``cv2`` library to postprocess the model’s
+real-world example the ``doctr_det_predictor`` model uses NumPy and the
+``cv2`` library to `postprocess the model’s
 result <https://github.com/mindee/doctr/blob/f2114758d529ed8d3d0030581638f0520b6b98d8/doctr/models/detection/core.py#L86>`__.
 
 Here is another place where having access to CPython is interesting.
@@ -811,10 +811,9 @@ implementing the strategy that we described before
 
 The code generation of the stack in Dynamo is delegated to
 ``VariableTracker`` subclasses. Every ``VariableTracker`` object in
-Dynamo has a ```reconstruct``
-method <https://github.com/pytorch/pytorch/blob/e891a3bba9f05697d72776f6e89347231a141f03/torch/_dynamo/variables/lists.py#L307-L309>`__
-that generates the necessary bytecode to create the python object it
-represents on the stack.
+Dynamo has a `reconstruct <https://github.com/pytorch/pytorch/blob/e891a3bba9f05697d72776f6e89347231a141f03/torch/_dynamo/variables/lists.py#L307-L309>`__
+method that generates the necessary bytecode to create the python object
+it represents on the stack.
 
 **Debugging tip**. Graph breaks hamper performance, and as such, it is
 best to avoid them. Running a program with ``TORCH_LOGS=graph_breaks``
