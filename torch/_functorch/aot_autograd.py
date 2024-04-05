@@ -911,10 +911,18 @@ def aot_module_simplified(
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
     def forward(*runtime_args):
-        full_args = []
-        full_args.extend(params_flat)
-        full_args.extend(runtime_args)
-        return compiled_fn(full_args)
+        # args is a list because compiled_fw is boxed_call
+        # args may contain lists of tensors from dynamo we should free
+        flat_args = []
+        flat_args.extend(params_flat)
+        for arg in runtime_args:
+            if isinstance(arg, list):
+                flat_args.extend(arg)
+                arg.clear()
+            else:
+                flat_args.append(arg)
+
+        return compiled_fn(flat_args)
 
     # Just for convenience
     forward.zero_grad = mod.zero_grad
