@@ -185,6 +185,14 @@ class OptimizerVariable(UserDefinedObjectVariable):
             )
         )
 
+        state_vt = VariableBuilder(tx, AttrSource(self.source, "state"))(
+            self.value.state
+        )
+
+        # We need to realize the top level state dict to populate
+        # the guard locals
+        state_vt.realize()
+
         # Populate self.grad_to_source and self.tensor_to_source so that we can
         # manually update_list_args
         for g_ind, (group, group_vt) in enumerate(
