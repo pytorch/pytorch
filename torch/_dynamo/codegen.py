@@ -6,6 +6,7 @@ import types
 from typing import Counter, Dict, List, Optional
 
 import torch.nn
+from torch._dynamo.source import GetItemSource, LocalSource
 from . import utils
 
 from .bytecode_transformation import (
@@ -362,70 +363,71 @@ class PyCodegen:
         global_name = self.tx.output.install_global_by_id(prefix, mod)
         return self.create_load_global(global_name, push_null, add=True)
 
-    def make_call_generated_code(self, fn_name: str) -> None:
+    def get_attr_mutations_on_stolen_lists(
+        self,
+    ):
+        from .side_effects import AttributeMutationExisting
+
+        attr_mutations_on_stolen_lists: Dict[str, List[AttributeMutationExisting]] = {}
+
+        maybe_gm = self.tx.output.local_scope.get("self")
+        if not isinstance(maybe_gm, torch.fx.GraphModule):
+            return {}
+        stolen_list_names = maybe_gm.meta.get("locals_to_steal", [])
+
+        for attr_mutation in self.tx.output.side_effects.store_attr_mutations.keys():
+            list_name = attr_mutation.source.base.local_name
+            if list_name not in stolen_list_names:
+                continue
+
+            if isinstance(attr_mutation.source, GetItemSource) and isinstance(
+                attr_mutation.source.base, LocalSource
+            ):
+                # mutation is of type `stolen_list[i].attr_name`, so we need to keep stolen_list[i] alive
+                if list_name not in attr_mutations_on_stolen_lists:
+                    attr_mutations_on_stolen_lists[list_name] = []
+                attr_mutations_on_stolen_lists[list_name].append(attr_mutation)
+
+        return attr_mutations_on_stolen_lists
+
+    def make_call_generated_code(self, fn_name: str) -> bool:
         """Call the generated code function stored in fn_name"""
         self.extend_output(self.load_function_name(fn_name, True))
 
-        from torch._dynamo.source import GetItemSource, LocalSource
-
-        # TODO: move into helpers
-        from .side_effects import AttributeMutationExisting
-
-        alias_if_stolen: Dict[str, List[AttributeMutationExisting]] = {}
-        for (
-            attr_mutation,
-            mapping,
-        ) in self.tx.output.side_effects.store_attr_mutations.items():
-            var = mapping.get("grad", None)
-            if var:
-                # is a .grad mutation
-                if isinstance(attr_mutation.source, GetItemSource) and isinstance(
-                    attr_mutation.source.base, LocalSource
-                ):
-                    # x.grad, and x is a list
-                    list_name = attr_mutation.source.base.local_name
-                    if list_name not in alias_if_stolen:
-                        alias_if_stolen[list_name] = []
-
-                    alias_if_stolen[list_name].append(attr_mutation)
-
+        updated_mutations = False
+        attr_mutations_on_stolen_lists = self.get_attr_mutations_on_stolen_lists()
         graphargs = self.tx.output.graphargs
         for arg in graphargs:
-            if isinstance(arg._example, list):
-                maybe_gm = self.tx.output.local_scope.get("self")
-                if isinstance(arg.source, LocalSource) and isinstance(
-                    maybe_gm, torch.fx.GraphModule
-                ):
-                    locals_to_steal = maybe_gm.meta.get("locals_to_steal", [])
-                    if (
-                        arg.source.local_name in locals_to_steal
-                        and arg.source.local_name in alias_if_stolen
-                    ):
-                        # arg is a list that will be cleared in inductor
-                        # yet grad mutation requires one of its elements
-                        # so, we create an alias to keep those tensors alive
+            if (
+                isinstance(arg._example, list)
+                and isinstance(arg.source, LocalSource)
+                and arg.source.local_name in attr_mutations_on_stolen_lists
+            ):
+                # arg is a list that will be cleared in inductor
+                # but there are mutations on its elements that require them to stay alive
+                list_name = arg.source.local_name
+                mutations = attr_mutations_on_stolen_lists[list_name]
+                for mutation in mutations:
+                    assert mutation.source is not None
+                    assert isinstance(mutation.source, GetItemSource)
+                    list_idx = mutation.source.index
+                    alias_name = self.new_var(
+                        f"{list_name}_ref"
+                    )  # self.new_var already adds unique id suffix
 
-                        # compute index
-                        list_name = arg.source.local_name
-                        mutations = alias_if_stolen[list_name]
-                        for mutation in mutations:
-                            assert mutation.source is not None
-                            assert isinstance(mutation.source, GetItemSource)
-                            list_idx = mutation.source.index
-                            alias_name = self.new_var(
-                                f"{list_name}_ref"
-                            )  # suffixed with unique id
-                            self.extend_output(
-                                [
-                                    self.create_load(list_name),
-                                    self._create_load_const(list_idx),
-                                    create_instruction("BINARY_SUBSCR"),
-                                    self.create_store(alias_name),
-                                ]
-                            )
+                    # alias_name = list_name[list_idx]
+                    self.extend_output(
+                        [
+                            self.create_load(list_name),
+                            self._create_load_const(list_idx),
+                            create_instruction("BINARY_SUBSCR"),
+                            self.create_store(alias_name),
+                        ]
+                    )
 
-                            # perform mutation on alias
-                            mutation.source = LocalSource(alias_name)
+                    # perform mutation on alias
+                    mutation.source = LocalSource(alias_name)
+                    updated_mutations = True
 
             if arg.is_unspecialized:
                 self.extend_output(
@@ -440,6 +442,7 @@ class PyCodegen:
                 self.call_reconstruct(arg)
 
         self.extend_output(create_call_function(len(graphargs), False))
+        return updated_mutations
 
     def load_import_from(self, module_name, object_name) -> None:
         self(AttrSource(self.tx.import_source(module_name), object_name))
