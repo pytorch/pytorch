@@ -54,6 +54,10 @@ class _RequiredParameter:
 required = _RequiredParameter()
 
 
+# we currently don't support compiling
+# the optimizer with a closure argument
+# See https://github.com/pytorch/pytorch/issues/123479
+# for more information
 def _disable_dynamo_if_closure(fn):
     def inner(self, *args, **kwargs):
         if (len(args) == 1 and args[0] is not None) or (len(kwargs) == 1 and kwargs.get("closure", None) is not None):
