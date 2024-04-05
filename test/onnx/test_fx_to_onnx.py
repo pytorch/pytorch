@@ -736,6 +736,16 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
             onnx_program.save(tmp_onnx_file.name)
             onnx.checker.check_model(tmp_onnx_file.name, full_check=True)
 
+    def test_export_with_print(self):
+        class PrintModule(torch.nn.Module):
+            def forward(self, x):
+                print("abc")
+                return x + 1
+
+        input = torch.randn(2, 3)
+        model = PrintModule()
+        _ = torch.onnx.dynamo_export(model, input)
+
 
 if __name__ == "__main__":
     common_utils.run_tests()
