@@ -2428,7 +2428,9 @@ class GradGuardAccessor : public GuardAccessor {
     PyObject* grad =
         THPVariable_Wrap(THPVariable_Unpack(obj).grad()); // New reference
     bool result = _guard_manager->check_nopybind(grad);
-    Py_XDECREF(grad);
+    // For undefined tensor, THPVariable_Wrap returns Py_RETURN_NONE. So, no
+    // need of Py_XDECREF.
+    Py_DECREF(grad);
     return result;
   }
 
@@ -2442,7 +2444,9 @@ class GradGuardAccessor : public GuardAccessor {
     PyObject* grad =
         THPVariable_Wrap(THPVariable_Unpack(obj).grad()); // New reference
     GuardDebugInfo result = _guard_manager->check_verbose_nopybind(grad);
-    Py_XDECREF(grad);
+    // For undefined tensor, THPVariable_Wrap returns Py_RETURN_NONE. So, no
+    // need of Py_XDECREF.
+    Py_DECREF(grad);
     return result;
   }
 
