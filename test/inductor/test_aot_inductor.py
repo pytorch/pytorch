@@ -1357,6 +1357,19 @@ class AOTInductorTestsTemplate:
         x = torch.randn(5, device=self.device)
         self.check_model(Model(self.device), (x,))
 
+    def test_return_view_constant(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.cst = torch.randn(5, 5, device=device)
+
+            def forward(self, x):
+                a = torch.transpose(self.cst, 0, 1)
+                return (x, a)
+
+        x = torch.randn(5, device=self.device)
+        self.check_model(Model(self.device), (x,))
+
     def test_with_profiler(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -2439,6 +2452,7 @@ CPU_TEST_FAILURES = {
     "test_non_contiguous_output_alias": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
+    "test_return_view_constant": fail_minimal_arrayref_interface(is_skip=True),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
     "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
