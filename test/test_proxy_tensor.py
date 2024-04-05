@@ -1868,6 +1868,12 @@ make_fx_failures = {
 
     # AssertionError: Tensor-likes are not close!
     skip('empty_strided', '', device_type='cpu'),
+
+    # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
+    skip('index_reduce', 'prod'),
+    skip('index_reduce', 'mean'),
+    skip('index_reduce', 'amax'),
+    skip('index_reduce', 'amin'),
 }
 
 fake_tensor_failures = {

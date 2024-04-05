@@ -1190,12 +1190,18 @@ class Exporter:
             self._assert_fake_tensor_mode()
 
     def export(self) -> ONNXProgram:
+        from torch.export._trace import (  # TODO: Prevent circular dependency
+            DEFAULT_EXPORT_DYNAMO_CONFIG,
+        )
+
         # TODO: Defer `import onnxscript` out of `import torch` path
         # https://github.com/pytorch/pytorch/issues/103764
         from torch.onnx._internal.fx import decomposition_skip
 
         with self.options.diagnostic_context, decomposition_skip.enable_decomposition_skips(
             self.options
+        ), torch._dynamo.config.patch(
+            dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
         ):
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
@@ -1231,6 +1237,16 @@ class Exporter:
             onnx_model = onnxscript_graph.to_model_proto(
                 self.options.onnx_registry.opset_version,
             )
+
+            try:
+                from onnxscript import optimizer
+
+                onnx_model = optimizer.optimize(onnx_model)
+            except ImportError:
+                warnings.warn(
+                    "ONNXScript optimizer is not available. Skipping optimization. "
+                    "Please `pip install onnxscript -U` to enable post-export optimization."
+                )
 
             return torch.onnx.ONNXProgram(
                 onnx_model,
