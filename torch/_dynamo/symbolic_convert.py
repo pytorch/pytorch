@@ -794,9 +794,6 @@ class InstructionTranslatorBase(
                         # If we really escape from a block and the current
                         # instruction is not in another block, then there
                         # should be no other nested blocks that we are in.
-                        if len(self.block_stack) != 1:
-                            dis.dis(self.f_code)
-                            breakpoint()
                         assert len(self.block_stack) == 1
                         self.block_stack.pop()
                 elif (
