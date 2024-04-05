@@ -928,6 +928,9 @@ class CppWrapperCpu(WrapperCodeGen):
 
         output2idx: Dict[str, int] = {}
         for idx, output in enumerate(output_refs):
+            if output == self.none_str:
+                continue
+
             is_constant_buffer = output in cst_names
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
