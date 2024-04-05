@@ -1,9 +1,20 @@
 import inspect
-from typing import Any, Callable, Dict, Iterator, List, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    Iterator,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 
 from torch.utils._exposed_in import exposed_in
 
-from .. import _C, _library, library, Tensor
+from .. import _C, _library, autograd, library, Tensor
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
@@ -14,7 +25,7 @@ def custom_op(
     name: str,
     /,
     *,
-    mutated_args: Sequence[str],
+    mutated_args: Iterable[str],
     device_types: device_types_t = None,
     qualname: Optional[str] = None,
 ) -> Callable:
@@ -34,7 +45,7 @@ def custom_op(
             e.g. "mylib::my_linear". The name is used as a stable identifier for
             if you wish to serialize the custom op, e.g., via torch.save/torch.export.
             To avoid name collisions, please use your project name as the namespace.
-        mutated_args (Sequence[str]): The names of args that the function mutates.
+        mutated_args (Iterable[str]): The names of args that the function mutates.
             This MUST be accurate, otherwise, the behavior is undefined.
         device_types (None | str | Sequence[str]): The device type(s) the function
             is valid for. If no device type is provided, then the function
@@ -67,9 +78,19 @@ def custom_op(
         >>> x = torch.randn(3)
         >>> y = numpy_sin_cpu(x)
         >>> assert torch.allclose(y, x.sin())
+        >>>
+        >>> # Example of a custom op that mutates an input
+        >>> @custom_op("mylib::numpy_sin_inplace", mutated_args={"x"}, device_types="cpu")
+        >>> def numpy_sin_inplace(x: Tensor) -> None:
+        >>>     x_np = x.numpy()
+        >>>     np.sin(x_np, out=x_np)
+        >>>
+        >>> x = torch.randn(3)
+        >>> expected = x.sin()
+        >>> numpy_sin_inplace(x)
+        >>> assert torch.allclose(x, expected)
 
     """
-    assert len(mutated_args) == 0, "NYI"
 
     def inner(fn):
         import torch
@@ -366,6 +387,8 @@ class CustomOpDef:
 
         def fake_impl(*args, **kwargs):
             if self._abstract_fn is None:
+                if _library.utils.can_generate_trivial_fake_impl(self._opoverload):
+                    return None
                 raise RuntimeError(
                     f"There was no fake impl registered for {self}. "
                     f"This is necessary for torch.compile/export/fx tracing to work. "
@@ -378,6 +401,26 @@ class CustomOpDef:
 
         autograd_impl = _library.autograd.make_autograd_impl(self)
         lib.impl(self._name, autograd_impl, "Autograd")
+
+        schema = self._opoverload._schema
+        if schema.is_mutable:
+
+            def adinplaceorview_impl(*args, **kwargs):
+                for arg, val in _library.utils.zip_schema(schema, args, kwargs):
+                    if not arg.alias_info:
+                        continue
+                    if not arg.alias_info.is_write:
+                        continue
+                    if isinstance(val, Tensor):
+                        autograd.graph.increment_version(val)
+                    elif isinstance(val, (tuple, list)):
+                        for v in val:
+                            if isinstance(v, Tensor):
+                                autograd.graph.increment_version(v)
+                with _C._AutoDispatchBelowADInplaceOrView():
+                    return self._opoverload(*args, **kwargs)
+
+            lib.impl(self._name, adinplaceorview_impl, "ADInplaceOrView")
 
     def __call__(self, *args, **kwargs):
         return self._opoverload(*args, **kwargs)
