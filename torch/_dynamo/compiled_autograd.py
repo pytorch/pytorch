@@ -199,7 +199,7 @@ class AutogradCompilerInstance:
         graph = GraphModule(
             self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
-        graph.meta["locals_to_steal"] = ["inputs"]
+        torch._dynamo.utils.set_locals_to_steal(graph, ["inputs"])
         compiled_autograd_log.info(
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
         )

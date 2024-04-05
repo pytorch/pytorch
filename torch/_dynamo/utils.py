@@ -2618,3 +2618,12 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         return compiled_fn(*pytree.arg_tree_leaves(*args))
 
     return wrapper
+
+
+def get_locals_to_steal(maybe_gm):
+    if isinstance(maybe_gm, torch.fx.GraphModule):
+        return maybe_gm.meta.get("locals_to_steal", [])
+
+
+def set_locals_to_steal(gm, locals_to_steal):
+    gm.meta["locals_to_steal"] = locals_to_steal
