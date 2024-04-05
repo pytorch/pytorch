@@ -117,6 +117,17 @@ class OptimizedModule(torch.nn.Module):
     _torchdynamo_orig_callable: Callable[..., Any]
     get_compiler_config: Callable[[], Any]
 
+    _opt_mod_attributes = {
+        "_orig_mod",
+        "dynamo_ctx",
+        "_torchdynamo_orig_callable",
+        "get_compiler_config",
+        "forward",
+        "_forward",
+        "__dict__",
+        "named_children_walk",
+    }
+
     def __init__(self, mod: torch.nn.Module, dynamo_ctx):
         super().__init__()
         # Installs the params/buffer
@@ -155,6 +166,15 @@ class OptimizedModule(torch.nn.Module):
         if name == "_orig_mod":
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
+
+    def __setattr__(self, name, val):
+        # Allow patching over class attributes
+        if hasattr(type(self), name):
+            return super().__setattr__(name, val)
+
+        if name in OptimizedModule._opt_mod_attributes:
+            return super().__setattr__(name, val)
+        return setattr(self._orig_mod, name, val)
 
     def _call_lazy_check(self, *args, **kwargs):
         if hasattr(self._orig_mod, "_initialize_hook"):
@@ -528,8 +548,8 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 
 
 def check_if_dynamo_supported():
-    if sys.version_info >= (3, 12):
-        raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 13):
+        raise RuntimeError("Python 3.13+ not yet supported for torch.compile")
 
 
 def is_dynamo_supported():

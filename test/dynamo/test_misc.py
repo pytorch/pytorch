@@ -8236,6 +8236,8 @@ def ___make_guard_fn():
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
 
+    # See https://github.com/pytorch/pytorch/issues/119689
+    @unittest.expectedFailure
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
         @torch.compile(backend="aot_eager")
@@ -9836,6 +9838,7 @@ fn
 
         self._test_compile_model_free(model_inp_ctr, lambda mod: mod.fc_ref)
 
+    @unittest.skipIf(sys.version_info >= (3, 12), "leaks in 3.12+")
     def test_parameter_free(self):
         def model_inp_ctr():
             param = torch.nn.Parameter(torch.randn(100, 100))
@@ -10019,6 +10022,27 @@ fn
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected.stride(), actual.stride())
         self.assertEqual(expected.storage_offset(), actual.storage_offset())
+
+    @torch._dynamo.config.patch(guard_nn_modules=True)
+    def test_hasattr_nn_module_guard(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                if hasattr(self, "a"):
+                    return self.a(x)
+                else:
+                    return x
+
+        m = M()
+        x = torch.randn(3, 3)
+        ref = m(x)
+
+        opt_m = torch.compile(backend="eager")(m)
+        res = opt_m(x)
+        self.assertEqual(ref, res)
 
 
 class TestTracer(JitTestCase):

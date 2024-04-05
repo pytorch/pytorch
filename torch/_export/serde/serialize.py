@@ -10,6 +10,7 @@ import math
 import operator
 import typing
 import copyreg
+import re
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -540,6 +541,9 @@ class GraphModuleSerializer:
                 for source_fn in source_fn_st
             ]
             ret["source_fn_stack"] = ST_DELIMITER.join(source_fn_list)
+
+        if torch_fn := node.meta.get("torch_fn"):
+            ret["torch_fn"] = ST_DELIMITER.join(list(torch_fn))
 
         return ret
 
@@ -1437,13 +1441,17 @@ class GraphModuleDeserializer:
             class_fqn=script_obj_meta.class_fqn,
         )
 
-    def deserialize_graph_output(self, output) -> torch.fx.Node:
+    def deserialize_graph_output(self, output) -> Optional[Union[torch.fx.Node, int]]:
         if output.type == "as_tensor":
             return self.serialized_name_to_node[output.as_tensor.name]
         elif output.type == "as_sym_int":
             return self.serialized_name_to_node[output.as_sym_int.as_name]
         elif output.type == "as_sym_bool":
             return self.serialized_name_to_node[output.as_sym_bool.as_name]
+        elif output.type == "as_int":
+            return output.as_int
+        elif output.type == "as_none":
+            return None
         else:
             raise SerializeError(f"Unable to deserialize output node {output}")
 
@@ -1471,6 +1479,9 @@ class GraphModuleDeserializer:
             if input_.type in ("as_tensor", "as_sym_int", "as_custom_obj"):
                 node_name = input_.value.name
                 placeholder_node = self.graph.placeholder(node_name)
+                # FX might declare a name illegal (e.g. some nn.Modules use "input" as forward() arguments)
+                # we will overwrite it
+                placeholder_node.name = node_name
                 self.sync_fx_node(node_name, placeholder_node)
             elif input_.type in (
                 "as_int",
@@ -1513,7 +1524,8 @@ class GraphModuleDeserializer:
             output_node.meta["val"] = output_node.args[0].meta["val"]
         else:
             output_node.meta["val"] = tuple(
-                arg.meta["val"] for arg in output_node.args[0]
+                arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
+                for arg in output_node.args[0]
             )
 
         return self.graph
@@ -1973,8 +1985,20 @@ class GraphModuleDeserializer:
             def import_nn_module_stack(key, path, ty):
                 return key, (path, ty)
 
+            # Helper function that splits strings by commas except for those
+            # encapsulated by parens, which are valid traces.
+            # TODO: Currently this is needed due to indexing Sequential
+            # layers introducing names in the form "layer.slice(1, None, None)".
+            # If that naming is improved, this fancier splitting can probably be
+            # reverted to a simple split by comma.
+            def metadata_split(metadata):
+                # Remove the parentheses and commas inside them
+                metadata = re.sub(r'\(.*?\)', '', metadata)
+                # Split the string by comma, except for those inside parentheses
+                return re.split(r'(?<!\()\s*,\s*(?!\()', metadata)
+
             nn_module_stack = dict(
-                import_nn_module_stack(*item.split(","))
+                import_nn_module_stack(*metadata_split(item))
                 for item in nn_module_stack_str.split(ST_DELIMITER)
             )
             ret["nn_module_stack"] = nn_module_stack
@@ -1986,6 +2010,9 @@ class GraphModuleDeserializer:
                 name, target_str = source_fn_str.split(",")
                 source_fn_st.append((name, deserialize_meta_func(target_str)))
             ret["source_fn_stack"] = source_fn_st
+
+        if torch_fn_str := metadata.get("torch_fn"):
+            ret["torch_fn"] = tuple(torch_fn_str.split(ST_DELIMITER))
         return ret
 
     def deserialize_argument_spec(self, x: Argument) -> ep.ArgumentSpec:

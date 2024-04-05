@@ -487,7 +487,6 @@ class TestExecutionTrace(TestCase):
         assert loop_count == expected_loop_events
 
     @unittest.skipIf(IS_WINDOWS, 'torch.compile does not support WINDOWS')
-    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_execution_trace_with_pt2(self):
 
         class ConvAndRelu(nn.Module):
@@ -850,6 +849,15 @@ class TestProfiler(TestCase):
         if use_cuda:
             z = z.cpu()
 
+    def _check_stats(self, profiler_stats):
+        self.assertGreater(profiler_stats.profiling_window_duration_sec, 0)
+        self.assertGreater(profiler_stats.number_of_events, 0)
+        self.assertGreater(profiler_stats.profiler_prepare_call_duration_us, 0)
+        self.assertGreater(profiler_stats.profiler_enable_call_duration_us, 0)
+        self.assertGreater(profiler_stats.profiler_disable_call_duration_us, 0)
+        self.assertGreater(profiler_stats.parse_kineto_call_duration_us, 0)
+        self.assertGreater(profiler_stats.function_events_build_tree_call_duration_us, 0)
+
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_kineto(self):
         use_cuda = torch.profiler.ProfilerActivity.CUDA in supported_activities()
@@ -877,6 +885,7 @@ class TestProfiler(TestCase):
             self.assertTrue(found_memcpy)
         else:
             self.assertTrue(found_mm)
+        self._check_stats(p._stats)
         # p.export_chrome_trace("/tmp/test_trace.json")
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
@@ -907,6 +916,7 @@ class TestProfiler(TestCase):
         self.assertTrue(found_gemm_0)
         self.assertTrue(found_gemm_1)
         self.assertTrue(found_cuda)
+        self._check_stats(prof._stats())
 
     def test_memory_profiler(self):
         def run_profiler(tensor_creation_fn):
@@ -1826,24 +1836,31 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
     def test_record_function_fast(self):
         x, y = (torch.rand((4, 4)) for _ in range(2))
-        with profile() as p:
+        with profile(record_shapes=True) as p:
             for _ in range(4):
+                # Test first with no optional args
                 with torch._C._profiler._RecordFunctionFast("add_test_fast_rf1"):
                     x.add(y)
 
         self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf1"]), 4)
-
-        with profile() as p:
-            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf2")
+        for e in p.events():
+            if e.name == "add_test_fast_rf1":
+                self.assertTrue(e.input_shapes == [])
+        with profile(record_shapes=True) as p:
+            # add optional args
+            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf2", [x, y])
             for _ in range(4):
                 with cm:
                     x.add(y)
 
         self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf2"]), 4)
 
+        for e in p.events():
+            if e.name == "add_test_fast_rf2":
+                self.assertTrue(e.input_shapes == [[4, 4], [4, 4]])
 
-        with profile() as p:
-            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf3")
+        with profile(record_shapes=True) as p:
+            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf3", ["hi"])
             for _ in range(4):
                 try:
                     with cm:
@@ -1856,14 +1873,25 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf3"]), 4)
         self.assertFalse(any((e.name and "relu" in e.name) for e in p.events()))
 
+        for e in p.events():
+            if e.name == "add_test_fast_rf3":
+                self.assertTrue(e.input_shapes == [[]])
+
+
         with profile() as p:
             for _ in range(4):
-                with torch._C._profiler._RecordFunctionFast("add_test_fast_rf4"):
+                with torch._C._profiler._RecordFunctionFast("add_test_fast_rf4", [x, y]):
                     x.add(y)
                     with torch._C._profiler._RecordFunctionFast("add_test_fast_rf5"):
                         x.relu()
 
         self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf4"]), 4)
+
+        for e in p.events():
+            if e.name == "add_test_fast_rf4":
+                self.assertTrue(e.input_shapes == [])
+
+
         self.assertGreaterEqual(len([e for e in p.events() if e.name == "add_test_fast_rf5"]), 4)
 
     def test_is_profiler_enabled(self):
