@@ -852,6 +852,19 @@ void initDispatchBindings(PyObject* module) {
         ->set_throw_on_mutable_data_ptr();
   });
 
+  // Invariant: you must ONLY call this with FakeTensors.
+  m.def("_set_warn_deprecated_on_mutable_data_ptr", [](const at::Tensor& t) {
+    if (!t.unsafeGetTensorImpl()->has_storage()) {
+      // If the Tensor doesn't have a storage, then accessing .data_ptr()
+      // will already raise an error.
+      return;
+    }
+    t.unsafeGetTensorImpl()
+        ->storage()
+        .unsafeGetStorageImpl()
+        ->set_warn_deprecated_on_mutable_data_ptr();
+  });
+
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
       .value("FUNCTIONAL", TorchDispatchModeKey::FUNCTIONAL)
