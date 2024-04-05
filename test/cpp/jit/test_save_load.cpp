@@ -285,8 +285,7 @@ TEST(SerializationTest, WindowsDrivePathTest) {
 
 TEST(SerializationTest, WindowsTempPathTest) {
   // Test for verifying file saving and loading in the temporary folder
-  const char* temp_env = std::getenv("TEMP");
-  std::string temp_dir = temp_env;
+  std::string temp_dir = std::getenv("TEMP");
   std::string file_path = temp_dir + "/file.pt";
   auto t1 = torch::tensor(1.0);
   torch::save(t1, file_path);
