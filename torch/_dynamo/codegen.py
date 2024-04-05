@@ -365,6 +365,7 @@ class PyCodegen:
     def make_call_generated_code(self, fn_name: str) -> None:
         """Call the generated code function stored in fn_name"""
         self.extend_output(self.load_function_name(fn_name, True))
+
         graphargs = self.tx.output.graphargs
         for arg in graphargs:
             if arg.is_unspecialized:

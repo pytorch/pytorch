@@ -1029,12 +1029,12 @@ class OutputGraph:
                 output.extend(
                     self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
                 )
+
                 if len(pass2.graph_outputs) != 0:
                     output.append(pass2.create_store(graph_output_var))
                     stored_graph_output_var = True
                 else:
                     output.append(create_instruction("POP_TOP"))
-
             append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
 
