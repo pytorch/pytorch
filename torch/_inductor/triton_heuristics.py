@@ -358,7 +358,7 @@ class CachingAutotuner(KernelInterface):
         # load binary to the correct device
         with DeviceGuard(self.device_interface, compile_meta["device"]):  # type: ignore[attr-defined]
             # need to initialize context
-            self.device_interface.synchronize(self.device.current_device())
+            self.device_interface.synchronize(self.device_interface.current_device())
 
             try:
                 binary = triton.compile(*compile_args, **compile_kwargs)
