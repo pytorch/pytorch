@@ -51,7 +51,7 @@ class TORCH_API Reducer {
   explicit Reducer(
       std::vector<at::Tensor> params,
       std::vector<std::vector<size_t>> bucket_indices,
-      const std::vector<size_t>& per_bucket_size_limits,
+      std::vector<size_t> per_bucket_size_limits,
       c10::intrusive_ptr<c10d::ProcessGroup> process_group,
       std::vector<bool> expect_sparse_gradients,
       int64_t bucket_bytes_cap,
@@ -303,9 +303,11 @@ class TORCH_API Reducer {
   using GradCallback = std::function<bool(at::Tensor&)>;
 #ifndef _WIN32
   static_assert(
-      std::is_same_v<
+      std::is_same<
           GradCallback,
-          torch::distributed::autograd::DistAutogradContext::GradCallback>);
+          torch::distributed::autograd::DistAutogradContext::GradCallback>::
+          value,
+      "");
 #endif
   void runGradCallbackForVariable(at::Tensor& variable, GradCallback&& cb);
 
