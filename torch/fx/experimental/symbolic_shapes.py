@@ -3541,7 +3541,8 @@ class ShapeEnv:
     @_lru_cache
     def _maybe_evaluate_static(
         self, expr: "sympy.Expr", *, unbacked_only: bool = False, compute_hint: bool = False,
-        expect_rational=True, size_oblivious: bool = False
+        expect_rational=True, size_oblivious: bool = False, axioms: Tuple[sympy.Expr] = (),
+        var_to_range: Tuple[Tuple[sympy.Symbol, ValueRanges]] = ()
     ) -> "Optional[sympy.Expr]":
         """
         Tries to evaluate expr without introducing guards
@@ -3555,6 +3556,17 @@ class ShapeEnv:
         hint for the particular hint values of backed SymInts, e.g., if
         s0 happens to be 3 this run, compute_hint will subsitute s0 with 3.
         """
+
+        # axioms with compute hint NYE
+        assert not compute_hint or not axioms
+        # Should provide both
+        assert bool(axioms) == bool(var_to_range)
+
+        if var_to_range:
+            var_ranges = {**dict(var_to_range), **self.var_to_range}
+        else:
+            var_ranges = self.var_to_range
+
         expr = self.simplify(expr)
 
         if compute_hint:
@@ -3576,8 +3588,7 @@ class ShapeEnv:
                 subst[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
 
         symbols = tuple(expr.free_symbols)
-        axioms = self._get_axioms(symbols)
-        for e in axioms:
+        for e in itertools.chain(axioms, self._get_axioms(symbols)):
             if compute_hint:
                 e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
             add_expr(e)
@@ -3588,6 +3599,8 @@ class ShapeEnv:
             elif isinstance(e, sympy.Lt):
                 add_expr(sympy.Le(e.lhs, e.rhs))
                 add_expr(sympy.Ne(e.lhs, e.rhs))
+            elif isinstance(expr, sympy.Le):
+                add_expr(sympy.Lt(expr.lhs, expr.rhs + 1))
 
         expr = expr.subs(subst)
 
@@ -3596,10 +3609,10 @@ class ShapeEnv:
         new_range_env = {}
         for idx, k in enumerate(symbols):
             if isinstance(self.var_to_val.get(k, None), SingletonInt):
-                # Skip var_to_range logic for SingletonInt which is only used
+                # Skip var_ranges logic for SingletonInt which is only used
                 # for jagged layout NestedTensors today
                 continue
-            vr = self.var_to_range[k]
+            vr = var_ranges[k]
             if size_oblivious and k in self.size_like:
                 lower = max(2, vr.lower)
             else:
@@ -3650,6 +3663,23 @@ class ShapeEnv:
             _assert_bound_is_rational(new_expr, out)
             if out.is_singleton():
                 return out.lower
+
+        if unbacked_only:
+            return new_expr
+        else:
+            if isinstance(expr, sympy.Le):
+                # We try to evaluate lhs < rhs + 1 with the same axioms
+                new_expr = sympy.Lt(expr.lhs, expr.rhs + 1)
+                return self._maybe_evaluate_static(new_expr,
+                                                   unbacked_only=unbacked_only,
+                                                   compute_hint=compute_hint,
+                                                   expect_rational=expect_rational,
+                                                   size_oblivious=size_oblivious,
+                                                   axioms=axioms,
+                                                   var_to_range=var_to_range)
+            return None
+
+
 
         return new_expr if unbacked_only else None
 
