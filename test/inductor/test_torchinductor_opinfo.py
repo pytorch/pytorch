@@ -236,8 +236,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "to_sparse": {f16, f32, f64},
-    "torch.ops.aten._flash_attention_forward": {f16, bf16, f32},
 }
 
 
