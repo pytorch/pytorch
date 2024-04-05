@@ -682,6 +682,13 @@ def has_incompatible_cudagraph_ops(gm):
     return False
 
 
+def output_node(gm: torch.fx.GraphModule):
+    """Get the output node from an FX graph"""
+    last_node = next(iter(reversed(gm.graph.nodes)))
+    assert last_node.op == "output"
+    return last_node
+
+
 # Attempt to import AttrsDescriptor from Triton
 try:
     from triton.compiler.compiler import AttrsDescriptor
@@ -988,7 +995,12 @@ def use_triton_template(layout, *, enable_int32=False):
     )
 
 
-def use_cutlass_template(layout):
+def use_cutlass_template(layout, m, n, k):
+    from .virtualized import V
+
+    gemm_size = V.graph.sizevars.size_hint(m * n * k, fallback=-1)
+    if gemm_size <= 0 or gemm_size < config.cuda.cutlass_backend_min_gemm_size:
+        return False
     from .codegen.cuda.cutlass_utils import try_import_cutlass
 
     # Do not use cutlass template on ROCm
@@ -1486,9 +1498,11 @@ def collect_defined_kernels(kernel_list):
         yield
 
 
+def get_cloned_parameter_buffer_name(name: str):
+    return name + "__original__"
+
 def is_gpu(device: str):
     return device in ["cuda", "xpu"]
-
 
 def device_need_guard(device: str):
     assert isinstance(device, str)
