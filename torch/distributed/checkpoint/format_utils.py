@@ -205,16 +205,12 @@ def dcp_to_torch_save(
         To avoid OOM, it's recommended to only run this function on a single rank.
     """
     sd: STATE_DICT_TYPE = {}
-    print("sanity")
     _load_state_dict(
         sd,
         storage_reader=FileSystemReader(dcp_checkpoint_dir),
         planner=_EmptyStateDictLoadPlanner(),
         no_dist=True,
     )
-    print(sd.keys())
-    print(len(sd))
-    print(torch_save_path)
     torch.save(sd, torch_save_path)
 
 
