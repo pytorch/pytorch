@@ -27,6 +27,7 @@ from .schemas import (
     ViewAndMutationMeta,
 )
 from .utils import strict_zip
+from .. import config
 
 zip = strict_zip
 
@@ -336,10 +337,35 @@ def _tensors_definitely_do_not_overlap(x, y):
 
 def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
     actual_aliased_indices = set()
-    for j in range(len(aliased_input_indices)):
-        for i in range(j):
-            i_ = aliased_input_indices[i]
+    num_aliases = len(aliased_input_indices)
+    if num_aliases > config._max_aliased_inputs_with_dynamic_shapes_enabled:
+        dynamic_shape_indices = set()
+        for j in range(num_aliases):
             j_ = aliased_input_indices[j]
+            curr_inp = fwd_inputs[j_]
+            if any(isinstance(x, torch.SymInt) for x in itertools.chain(curr_inp.shape, curr_inp.stride(), [curr_inp.storage_offset()])):
+                dynamic_shape_indices.add(j_)
+        assert len(dynamic_shape_indices) == 0, f"""\
+Encountered a graph where:
+- {num_aliases} graph inputs all share the same storage (input indices: {str(aliased_input_indices)})
+- at least one of these aliased inputs was mutated
+- at least one of these inputs is being compiled with dynamic shapes (indices: {str(dynamic_shape_indices)})
+
+The most common way to run into this situation is when your model parameters are allocated as one giant buffer
+and are all mutated by the optimizer, and some of your parameters end up getting compiled with dynamic shapes.
+
+You can avoid this problem by marking your parameters so they explicitly do not participate in dynamic shapes,
+by marking each dim of your parameter static:
+
+torch._dynamo.mark_static(param, 0) # (1, 2, ... for every dimension on the parameter).
+
+If you are running into this issue in a situation where your parameters are static but some other inputs
+are aliased and mutated, and they should be dynamic, please file an issue.
+"""
+    for j in range(num_aliases):
+        for i in range(j):
+            j_ = aliased_input_indices[j]
+            i_ = aliased_input_indices[i]
             if not _tensors_definitely_do_not_overlap(fwd_inputs[i_], fwd_inputs[j_]):
                 actual_aliased_indices.add(i_)
                 actual_aliased_indices.add(j_)
