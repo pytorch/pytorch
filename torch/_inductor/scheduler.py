@@ -1,5 +1,4 @@
 import collections
-import contextlib
 import dataclasses
 import functools
 import itertools
@@ -1684,54 +1683,24 @@ class Scheduler:
         """
         Mutates self.nodes to combine nodes into FusedSchedulerNodes.
         """
-        # Only check outer loop fusion on CPU
-        all_node_in_cpu = all(
-            _node.get_device() == torch.device("cpu") for _node in self.nodes
-        )
-        check_outer_loop_fusion_list = (
-            [False, True]
-            if (
-                all_node_in_cpu
-                and getattr(
-                    self.get_backend(torch.device("cpu")),
-                    "enable_outer_loop_fusion",
-                    None,
-                )
+        for i in range(10):
+            old_len = len(self.nodes)
+            fusion_log.debug(
+                "===== attempting fusion (%d/10): %d nodes =====",
+                i + 1,
+                old_len,
             )
-            else [
-                False,
-            ]
-        )
-
-        for _check_outer_loop_fusion in check_outer_loop_fusion_list:
-            # Full loop fusion should be prioritized in the fusion process, as it typically leads to better performance.
-            # Perform outer loop fusion for the left nodes with lower priority when backend support is available.
-            ctx_manager = (
-                self.get_backend(torch.device("cpu")).enable_outer_loop_fusion()
-                if _check_outer_loop_fusion
-                else contextlib.nullcontext()
+            self.fuse_nodes_once()
+            new_len = len(self.nodes)
+            fusion_log.debug(
+                "completed fusion round (%d/10): fused %d nodes into %d nodes\n",
+                i + 1,
+                old_len,
+                new_len,
             )
-            with ctx_manager:
-                for i in range(10):
-                    old_len = len(self.nodes)
-                    fusion_log.debug(
-                        "===== attempting fusion (%d/10): %d nodes =====",
-                        i + 1,
-                        old_len,
-                    )
-                    self.fuse_nodes_once()
-                    new_len = len(self.nodes)
-                    fusion_log.debug(
-                        "completed fusion round (%d/10): fused %d nodes into %d nodes\n",
-                        i + 1,
-                        old_len,
-                        new_len,
-                    )
-                    if new_len == old_len or new_len == 1:
-                        fusion_log.debug(
-                            "===== fusion complete (%d iterations) =====", i + 1
-                        )
-                        break
+            if new_len == old_len or new_len == 1:
+                fusion_log.debug("===== fusion complete (%d iterations) =====", i + 1)
+                break
 
     def benchmark_fused_nodes(self, nodes) -> Tuple[float, str]:
         """
@@ -2007,6 +1976,9 @@ class Scheduler:
             for node_grouping in group_grouping.values():
                 check_all_pairs(node_grouping)
 
+        possible_fusions = self.get_possible_fusions_with_highest_priority(
+            possible_fusions
+        )
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
         fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
@@ -2261,6 +2233,36 @@ class Scheduler:
             dep for dep in common_memory_deps if not dep.has_unbacked_symbols()
         }
         return sum(dep.numbytes_hint() for dep in common_memory_deps)
+
+    def get_possible_fusions_with_highest_priority(self, possible_fusions):
+        # Group the possible fusions based on their priority from the backend.
+        # Only return the group of possible fusions with highest priority.
+        if len(possible_fusions) == 0:
+            return possible_fusions
+        possible_fusions_group_by_priority: Dict[
+            int, List[Tuple["BaseSchedulerNode", "BaseSchedulerNode"]]
+        ] = {}
+
+        for node1, node2 in possible_fusions:
+            assert node1.get_device() == node2.get_device()
+            device = node1.get_device()
+            fusion_pair_priority = int(
+                self.get_backend(device).get_fusion_pair_priority(node1, node2)
+            )
+            if fusion_pair_priority not in possible_fusions_group_by_priority:
+                possible_fusions_group_by_priority[fusion_pair_priority] = [
+                    (node1, node2),
+                ]
+            else:
+                possible_fusions_group_by_priority[fusion_pair_priority].append(
+                    (node1, node2)
+                )
+        # Sorted by fusion_pair_priority and return the possible fusions with highest priority
+        possible_fusions_with_highest_priority = sorted(
+            possible_fusions_group_by_priority.items(), key=lambda item: item[0]
+        )[0][1]
+        assert len(possible_fusions_with_highest_priority) > 0
+        return possible_fusions_with_highest_priority
 
     def score_fusion_key(self, nodes):
         """
@@ -2571,3 +2573,10 @@ class BaseScheduling:
         in milliseconds on randomly generated inputs.
         """
         raise NotImplementedError()
+
+    def get_fusion_pair_priority(self, node1, node2) -> int:
+        """
+        Return an unsigned integer which represents the priority of this fusion pair.
+        The smaller is with higher priority.
+        """
+        return 0
