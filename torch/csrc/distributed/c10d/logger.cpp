@@ -410,4 +410,33 @@ at::DDPLoggingData Logger::get_ddp_logging_data() {
   return *ddp_logging_data_;
 }
 
+// initialization of static variables in C10dLogger
+std::unique_ptr<C10dLogger> C10dLogger::logger_ = nullptr;
+std::atomic<bool> C10dLogger::registered_(false);
+
+C10dLogger* C10dLogger::getLogger() {
+  if (!registered_.load()) {
+    return nullptr;
+  }
+  return logger_.get();
+}
+
+void C10dLogger::registerLogger(std::unique_ptr<C10dLogger> logger) {
+  if (registered_.load()) {
+    LOG(WARNING) << "C10dLogger has already been registered.";
+    return;
+  }
+  registered_.store(true);
+  logger_ = std::move(logger);
+}
+
+void C10dLogger::log(const C10dLoggingData& data) {
+  for (const auto& [key, value] : data.integers) {
+    LOG(INFO) << key << ": " << value;
+  }
+  for (const auto& [key, value] : data.strings) {
+    LOG(INFO) << key << ": " << value;
+  }
+  return;
+}
 } // namespace c10d

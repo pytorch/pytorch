@@ -10,9 +10,19 @@ from typing import Any, Callable, List, Optional, Tuple
 
 import torch
 import torch.utils._pytree as pytree
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import py_sym_types
 
-KNOWN_TYPES = [torch.Tensor, int, str, float, bool, type(None)] + list(py_sym_types)
+KNOWN_TYPES = [
+    torch.Tensor,
+    BackwardState,
+    int,
+    str,
+    float,
+    bool,
+    type(None),
+    *py_sym_types,
+]
 
 original_zip = zip
 

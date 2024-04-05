@@ -1,10 +1,15 @@
 # Owner(s): ["oncall: distributed"]
+import copy
+import io
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 
 from torch.distributed._state_dict_utils import (
+    _check_state_dict_similarity,
+    _copy_state_dict,
+    _create_cpu_state_dict,
     _gather_state_dict,
     _offload_state_dict_to_cpu,
 )
@@ -114,6 +119,58 @@ class TestStateDictUtils(DTensorTestBase):
             "arange": torch.arange(10, device=torch.device("cuda")),
         }
         self.assertEqual(state_dict, _gather_state_dict(dist_state_dict))
+
+    @skip_if_lt_x_gpu(2)
+    def test_create_cpu_state_dict(self):
+        device = torch.device("cuda")
+        buffer = io.BytesIO()
+        torch.save(torch.ones(10), buffer)
+        buffer.seek(0)
+        state_dict = {
+            "tensor1": torch.arange(10, device=device),
+            "tensor2": torch.ones(10, device=device),
+            "non_tensor_bytes_io": copy.deepcopy(buffer),
+            "non_tensor_bytes": buffer.read(),
+            "step": torch.tensor(7, dtype=torch.float),
+            "lr": 1.5,
+            "nested": {"list": [1, 2, 3, 4]},
+        }
+
+        def _verify(cpu_state_dict):
+            # Verify the correctness of _check_state_dict_similarity()
+            self.assertTrue(_check_state_dict_similarity(state_dict, cpu_state_dict))
+            tensor1 = cpu_state_dict["tensor1"]
+            cpu_state_dict["tensor1"] = torch.arange(11)
+            self.assertFalse(_check_state_dict_similarity(state_dict, cpu_state_dict))
+            cpu_state_dict["tensor1"] = tensor1
+
+            _copy_state_dict(state_dict, cpu_state_dict)
+
+            # Verify if _copy_state_dict works
+            for v in cpu_state_dict.values():
+                if isinstance(v, torch.Tensor):
+                    self.assertFalse(v.is_cuda)
+            self.assertEqual(cpu_state_dict["tensor1"], torch.arange(10))
+            self.assertEqual(cpu_state_dict["tensor2"], torch.ones(10))
+            buffer.seek(0)
+            cpu_state_dict["non_tensor_bytes_io"].seek(0)
+            self.assertEqual(
+                cpu_state_dict["non_tensor_bytes_io"].read(), buffer.read()
+            )
+            buffer.seek(0)
+            self.assertEqual(cpu_state_dict["non_tensor_bytes"], buffer.read())
+            self.assertEqual(cpu_state_dict["lr"], 1.5)
+            self.assertEqual(cpu_state_dict["step"], 7)
+            self.assertEqual(cpu_state_dict["nested"], {"list": [1, 2, 3, 4]})
+
+        cpu_state_dict = _create_cpu_state_dict(state_dict, pin_memory=True)
+        _verify(cpu_state_dict)
+        cpu_state_dict = _create_cpu_state_dict(state_dict, share_memory=True)
+        _verify(cpu_state_dict)
+        cpu_state_dict = _create_cpu_state_dict(
+            state_dict, share_memory=True, pin_memory=True
+        )
+        _verify(cpu_state_dict)
 
 
 if __name__ == "__main__":

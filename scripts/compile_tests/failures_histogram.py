@@ -117,8 +117,10 @@ def as_issue(count, msg, repro, tests):
 `{repro}`
 
 You will need to remove the skip or expectedFailure before running the repro command.
-This may be just removing a line in
-[dynamo_test_failures.py](https://github.com/pytorch/pytorch/blob/main/torch/testing/_internal/dynamo_test_failures.py)
+This may be just removing a sentinel file from in
+[dynamo_expected_failures](https://github.com/pytorch/pytorch/blob/main/test/dynamo_expected_failures)
+or [dynamo_skips](https://github.com/pytorch/pytorch/blob/main/test/dynamo_skips).
+
 
 ## Failing tests
 

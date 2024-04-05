@@ -10,13 +10,13 @@ from torch._dynamo.testing import reset_rng_state
 
 from torch._inductor import config, test_operators
 from torch._inductor.codegen.multi_kernel import MultiKernelCall
+from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
-    TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -88,7 +88,13 @@ class MultiKernelTest(TestCase):
         if expect_multi_kernel:
             self.assertTrue(_contains_multi_kernel_code(wrapper_code))
         else:
-            self.assertFalse(_contains_multi_kernel_code(wrapper_code))
+            # Skip verifying the wrapper_code in fbcode since we may fail
+            # compiling the cpp wrapper cuda code due to lacking proper setup of
+            # cuda compiler in fbcode environment. In that case, the last
+            # collected wrapper_code will corresponds to the first pass
+            # cpp-wrapper codegen which contains the multi-kernel.
+            if not config.is_fbcode():
+                self.assertFalse(_contains_multi_kernel_code(wrapper_code))
 
     @parametrize("force_kernel", (0, 1))
     @unittest.mock.patch.dict(
@@ -273,7 +279,7 @@ class MultiKernelTest(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CUDA:
         run_tests()

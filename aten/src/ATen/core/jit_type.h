@@ -17,14 +17,13 @@
 #include <memory>
 #include <ostream>
 #include <sstream>
-#include <type_traits>
 #include <utility>
 
-namespace torch {
-namespace jit {
+
+namespace torch::jit {
 struct Function;
-} // namespace jit
-} // namespace torch
+} // namespace torch::jit
+
 
 namespace c10 {
 
@@ -171,9 +170,9 @@ struct TORCH_API UnionType : public SharedType {
 
  protected:
     explicit UnionType(std::vector<TypePtr> types, TypeKind kind=TypeKind::UnionType);
-    std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
+    std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override;
     std::string unionStr(
-        TypePrinter printer = nullptr,
+        const TypePrinter& printer = nullptr,
         bool is_annotation_str = false) const;
     // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
     bool has_free_variables_;
@@ -240,9 +239,9 @@ struct TORCH_API OptionalType : public UnionType {
 
   TypePtr contained_;
 
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Optional[" << getElementType()->annotation_str(std::move(printer)) << "]";
+    ss << "Optional[" << getElementType()->annotation_str(printer) << "]";
     return ss.str();
   }
 };
@@ -546,6 +545,7 @@ struct VaryingShape {
       return c10::nullopt;
     }
     std::vector<T> sizes;
+    sizes.reserve(dims_.value().size());
     for (auto d : *dims_) {
       if (!d) {
         return c10::nullopt;
@@ -909,9 +909,9 @@ struct TORCH_API ListType
  private:
   ListType(TypePtr elem) : SingleElementType(std::move(elem)) {}
 
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "List[" << getElementType()->annotation_str(std::move(printer)) << "]";
+    ss << "List[" << getElementType()->annotation_str(printer) << "]";
     return ss.str();
   }
 };
@@ -1003,7 +1003,7 @@ struct TORCH_API DictType : public SharedType {
     types.push_back(std::move(value));
   }
 
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
+  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override;
 
   std::vector<TypePtr> types;
   bool has_free_variables;
@@ -1044,9 +1044,9 @@ struct TORCH_API FutureType
  private:
   FutureType(TypePtr elem) : SingleElementType(std::move(elem)) {}
 
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "Future[" << getElementType()->annotation_str(std::move(printer)) << "]";
+    ss << "Future[" << getElementType()->annotation_str(printer) << "]";
     return ss.str();
   }
 };
@@ -1086,7 +1086,7 @@ struct TORCH_API AwaitType
  private:
   AwaitType(TypePtr elem) : SingleElementType(std::move(elem)) {}
 
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
     ss << "Await[" << getElementType()->annotation_str(printer) << "]";
     return ss.str();
@@ -1118,9 +1118,9 @@ struct TORCH_API RRefType
  private:
   RRefType(TypePtr elem) : SingleElementType(std::move(elem)) {}
 
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     std::stringstream ss;
-    ss << "RRef[" << getElementType()->annotation_str(std::move(printer)) << "]";
+    ss << "RRef[" << getElementType()->annotation_str(printer) << "]";
     return ss.str();
   }
 };
@@ -1225,7 +1225,7 @@ struct TORCH_API TupleType : public NamedType {
     return true;
   }
 
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override;
+  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override;
 
   std::vector<TypePtr> elements_;
   bool has_free_variables_;
@@ -1278,7 +1278,7 @@ struct TORCH_API NumberType : public Type {
  protected:
   NumberType(TypeKind kind = TypeKind::NumberType) : Type(kind) {}
 
-  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
     return "number"; // technically not a valid python type, but
                      // we need to use it when parsing back in annotations
                      // for implicit conversions
@@ -1305,7 +1305,7 @@ struct TORCH_API FloatType : public NumberType {
 
  private:
   FloatType() : NumberType(TypeKind::FloatType) {}
-  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
     return "float";
   }
 };
@@ -1330,7 +1330,7 @@ struct TORCH_API ComplexType : public NumberType {
 
  private:
   ComplexType() : NumberType(TypeKind::ComplexType) {}
-  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
     return "complex";
   }
 };
@@ -1348,7 +1348,7 @@ struct TORCH_API SymIntType : public Type {
   std::string str() const override {
     return "SymInt";
   }
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     return "int";
   }
   static const TypeKind Kind = TypeKind::SymIntType;
@@ -1368,7 +1368,7 @@ struct TORCH_API SymFloatType : public Type {
   std::string str() const override {
     return "SymFloat";
   }
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     return "float";
   }
   static const TypeKind Kind = TypeKind::SymFloatType;
@@ -1388,7 +1388,7 @@ struct TORCH_API SymBoolType : public Type {
   std::string str() const override {
     return "SymBool";
   }
-  std::string annotation_str_impl(TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(const TypePrinter& printer = nullptr) const override {
     return "bool";
   }
   static const TypeKind Kind = TypeKind::SymBoolType;
@@ -1419,7 +1419,7 @@ struct TORCH_API IntType : public NumberType {
 
  private:
   IntType() : NumberType(TypeKind::IntType) {}
-  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
     return "int";
   }
 };
@@ -1453,7 +1453,7 @@ struct TORCH_API StringType : public Type {
     // we only use "str" (not "string") in both FunctionSchema and script
     return annotation_str();
   }
-  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
     return "str";
   }
   static const TypeKind Kind = TypeKind::StringType;
@@ -1473,7 +1473,7 @@ struct TORCH_API StorageType : public Type {
   std::string str() const override {
     return annotation_str();
   }
-  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
     return "Storage";
   }
   static const TypeKind Kind = TypeKind::StorageType;
@@ -1508,7 +1508,7 @@ struct TORCH_API FunctionType : public NamedType {
 
  private:
   FunctionType(torch::jit::Function* function);
-  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
     const auto& n = name().value();
     return n.qualifiedName();
   }
@@ -2199,7 +2199,7 @@ struct TORCH_API InterfaceType : public NamedType {
       const InterfaceType& rhs,
       std::ostream* why_not);
 
-  std::string annotation_str_impl(C10_UNUSED TypePrinter printer = nullptr) const override {
+  std::string annotation_str_impl(C10_UNUSED const TypePrinter& printer = nullptr) const override {
     return name()->qualifiedName();
   }
 

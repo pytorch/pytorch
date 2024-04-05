@@ -15,10 +15,9 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
-from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
-from .functional_utils import _get_mutation_type
+from .collect_metadata_analysis import coerce_tangent
 from .schemas import (
     BackwardSignature,
     GraphSignature,
@@ -30,8 +29,6 @@ from .schemas import (
 from .utils import strict_zip
 
 zip = strict_zip
-
-aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
 
 def remove_dupe_metadata(
@@ -48,6 +45,7 @@ def remove_dupe_metadata(
     other_traced_tangents = m.traced_tangents[num_data_mutations:]
     inp_traced_tangents = m.traced_tangents[:num_data_mutations]
     filtered_inp_traced_tangents = [
+        # See Note [Tangents must be contiguous]
         x
         for i, x in enumerate(inp_traced_tangents)
         if keep_arg_mask[m.mutated_inp_runtime_indices[i]]
@@ -151,14 +149,6 @@ def create_synthetic_base_metadata(
             m.input_info[x].mutations_under_no_grad_or_inference_mode
             for x in outer_indices
         )
-        mutation_type = _get_mutation_type(
-            m.keep_input_mutations,
-            mutates_data,
-            mutates_metadata,
-            mutations_hidden_from_autograd,
-            mutations_under_no_grad_or_inference_mode,
-            requires_grad,
-        )
 
         inpt_info = InputAliasInfo(
             # If len(outer_indices) > 1, then this input is a synthetic base.
@@ -176,7 +166,7 @@ def create_synthetic_base_metadata(
             mutations_under_no_grad_or_inference_mode=mutations_under_no_grad_or_inference_mode,
             is_leaf=any_leaf,
             requires_grad=requires_grad,
-            mutation_type=mutation_type,
+            keep_input_mutations=m.keep_input_mutations,
         )
         input_infos.append(inpt_info)
 
@@ -235,7 +225,8 @@ def create_synthetic_base_metadata(
         )
 
     inner_mutated_tangents = [
-        x
+        # See Note [Tangents must be contiguous]
+        coerce_tangent(x)
         for inner_idx, x in enumerate(inner_args)
         if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad
     ]
@@ -263,6 +254,13 @@ def create_synthetic_base_metadata(
     )
 
 
+def _get_last_mem_address(x):
+    out = x.storage_offset()
+    for size, stride in zip(x.size(), x.stride()):
+        out += (size - 1) * stride
+    return out
+
+
 # Assumption: x and y are known to share a storage, and we are trying to determine
 # if their memory is actually completely disjoint, based on sizes/strides/storage_offset
 def _tensors_definitely_do_not_overlap(x, y):
@@ -282,6 +280,11 @@ def _tensors_definitely_do_not_overlap(x, y):
         else:
             # definitely no overlap
             return True
+
+    # Short-circuit: if last memory address of x is < start of y, then not overlapping.
+    x_last = _get_last_mem_address(x)
+    if x_last < y.storage_offset():
+        return True
 
     if x.dim() == 2 and y.dim() == 2 and x.stride(1) == 1 and y.stride(1) == 1:
         # This cases is needed for the shampoo optimizer.
@@ -374,9 +377,10 @@ def create_graph_signature(
     graph_output_names = _graph_output_names(fx_g)
 
     num_params_buffers = len(param_names) + len(buffer_names)
+    num_tokens = len(fw_metadata.tokens)
     # We have enough restrictions on the graph (no de-duping, synthetic bases, etc),
     # Such that # graph inps = # user inps + # params + # buffers
-    num_user_args = len(graph_input_names) - num_params_buffers
+    num_user_args = len(graph_input_names) - num_params_buffers - num_tokens
 
     if trace_joint:
         assert num_user_fw_outs is not None
@@ -411,7 +415,9 @@ def create_graph_signature(
     else:
         backward_signature = None
         num_user_fw_outs = (
-            len(graph_output_names) - fw_metadata.num_mutated_inp_runtime_indices
+            len(graph_output_names)
+            - fw_metadata.num_mutated_inp_runtime_indices
+            - num_tokens
         )
 
     return GraphSignature.from_tracing_metadata(
