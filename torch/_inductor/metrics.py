@@ -53,7 +53,6 @@ def reset():
     global cpp_to_dtype_count
     global cpp_outer_loop_fused_inner_counts
 
-
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
     num_bytes_accessed = 0
