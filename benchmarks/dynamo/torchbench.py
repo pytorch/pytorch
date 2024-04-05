@@ -25,6 +25,20 @@ from torch._dynamo.utils import clone_inputs
 torch.backends.cuda.matmul.allow_tf32 = True
 
 
+def _reassign_parameters(model):
+    # torch_geometric models register parameter as tensors due to
+    # https://github.com/pyg-team/pytorch_geometric/blob/master/torch_geometric/nn/dense/linear.py#L158-L168
+    # Since it is unusual thing to do, we just reassign them to parameters
+    def state_dict_hook(module, destination, prefix, local_metadata):
+        for name, param in module.named_parameters():
+            if isinstance(destination[name], torch.Tensor) and not isinstance(
+                destination[name], torch.nn.Parameter
+            ):
+                destination[name] = torch.nn.Parameter(destination[name])
+
+    model._register_state_dict_hook(state_dict_hook)
+
+
 def setup_torchbench_cwd():
     original_dir = abspath(os.getcwd())
 
@@ -265,6 +279,9 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 extra_args=extra_args,
             )
         model, example_inputs = benchmark.get_module()
+        if model_name in ["basic_gnn_edgecnn", "basic_gnn_gcn", "basic_gnn_sage"]:
+            _reassign_parameters(model)
+
         # Models that must be in train mode while training
         if is_training and (
             not use_eval_mode or model_name in self._config["only_training"]

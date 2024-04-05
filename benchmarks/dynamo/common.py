@@ -1135,12 +1135,12 @@ class AOTInductorModelCache:
                 example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
             _register_dataclass_output_as_pytree(example_outputs)
 
-            # TODO(angelayi): change this to predispatch
-            gm = torch.export._trace._export_to_torch_ir(
+            gm = torch.export._trace._export(
                 model,
                 example_args,
                 example_kwargs,
-            )
+                pre_dispatch=True,
+            ).module()
             with torch.no_grad():
                 so_path = torch._inductor.aot_compile(
                     gm, example_args, example_kwargs
