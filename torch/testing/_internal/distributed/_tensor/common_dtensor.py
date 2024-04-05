@@ -79,9 +79,9 @@ class MLPModule(nn.Module):
 
 
 class MLPStacked(nn.Module):
-    def __init__(self, device):
+    def __init__(self, device, n_layers: int = 2):
         super().__init__()
-        self.layers = nn.ModuleList([MLPModule(device) for i in range(2)])
+        self.layers = nn.ModuleList([MLPModule(device) for i in range(n_layers)])
 
     def forward(self, x):
         for layer in self.layers:
