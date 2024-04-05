@@ -956,13 +956,27 @@ class OutputGraph:
                 tempvars={val: None for val, count in pass1.uses.items() if count > 1},
             )
             self.codegen_suffix(tx, stack_values, pass2)
+            final_pass = pass2
 
             stored_graph_output_var = False
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
-                output.extend(
-                    self.compile_and_call_fx_graph(tx, pass2.graph_output_vars(), root)
+                instructions, updated_mutations = self.compile_and_call_fx_graph(
+                    tx, pass2.graph_output_vars(), root
                 )
+                output.extend(instructions)
+                if updated_mutations:
+                    # TODO: avoidable if we can only regenerate mutations
+                    pass3 = PyCodegen(
+                        tx,
+                        root,
+                        graph_output_var,
+                        tempvars={
+                            val: None for val, count in pass1.uses.items() if count > 1
+                        },
+                    )
+                    self.codegen_suffix(tx, stack_values, pass3)
+                    final_pass = pass3
 
                 if len(pass2.graph_outputs) != 0:
                     output.append(pass2.create_store(graph_output_var))
@@ -970,17 +984,8 @@ class OutputGraph:
                 else:
                     output.append(create_instruction("POP_TOP"))
 
-            # TODO: only do pass3 when needed
-            pass3 = PyCodegen(
-                tx,
-                root,
-                graph_output_var,
-                tempvars={val: None for val, count in pass1.uses.items() if count > 1},
-            )
-            self.codegen_suffix(tx, stack_values, pass3)
-
             append_prefix_insts()
-            self.add_output_instructions(output + pass3.get_instructions())
+            self.add_output_instructions(output + final_pass.get_instructions())
 
             # restore all the live local vars
             self.add_output_instructions(
@@ -1165,8 +1170,8 @@ class OutputGraph:
         self.install_global_unsafe(name, compiled_fn)
 
         cg = PyCodegen(tx)
-        cg.make_call_generated_code(name)
-        return cg.get_instructions()
+        updated_mutations = cg.make_call_generated_code(name)
+        return cg.get_instructions(), updated_mutations
 
     @property
     def placeholders(self) -> List[fx.Node]:
