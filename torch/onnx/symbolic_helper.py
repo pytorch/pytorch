@@ -483,8 +483,7 @@ def _is_tensor(x: _C.Value) -> bool:
     return x.type().isSubtypeOf(_C.TensorType.get())
 
 
-# Note: _C.JitType is not exposed to Python and cannot be checked in runtime.
-def _as_list_type(jit_type: _C.JitType) -> Optional[_C.ListType]:
+def _as_list_type(jit_type: torch.Type) -> Optional[torch.Type]:
     if isinstance(jit_type, _C.ListType):
         return jit_type
     return None
