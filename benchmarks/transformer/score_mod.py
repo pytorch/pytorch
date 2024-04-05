@@ -8,7 +8,7 @@ import numpy as np
 import torch
 import torch.utils.benchmark as benchmark
 from tabulate import tabulate
-from torch.nn.attention.templated_attention import _compose, templated_attention
+from torch.nn.attention._templated_attention import _compose, _templated_attention
 from tqdm import tqdm
 
 torch._dynamo.config.automatic_dynamic_shapes = False
@@ -110,7 +110,7 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         config.dtype,
         device,
     )
-    eager_sdpa = templated_attention
+    eager_sdpa = _templated_attention
     compiled_sdpa = torch.compile(eager_sdpa)
 
     score_mod = config.score_mod
