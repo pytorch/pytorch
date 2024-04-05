@@ -1363,7 +1363,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module() or match_on_id_for_tensor(guard):
-            self.DATA_PTR_MATCH(guard)
+            self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
                 value = value()
