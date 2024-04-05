@@ -352,7 +352,8 @@ class CustomOpDef:
         ):
             raise NotImplementedError(
                 f"NYI: registering autograd formula for operator {self} that "
-                f"accepts or takes Tensor lists"
+                f"accepts or takes Tensor lists. "
+                f"Please open an issue if you want us to prioritize this feature"
             )
 
         self._backward_fn = backward_fn
