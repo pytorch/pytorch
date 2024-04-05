@@ -237,15 +237,18 @@ static void norm_kernel_tensor_iterator_impl(
         binary_kernel_reduce_lastdim(iter, [](char* result_data_bytes, char* self_data_bytes, int64_t size) {
           scalar_t* result_data = (scalar_t*)result_data_bytes;
           scalar_t* self_data = (scalar_t*)self_data_bytes;
-
           using Vec = Vectorized<scalar_t>;
           using fVec = Vectorized<acc_t>;
-          fVec acc_vec{acc_t(0)};
+          Vec acc_vec{acc_t(0)};
+          Vec c_vec{acc_t(0)};
           acc_t buffer[fVec::size()];
           int64_t d = 0;
           for (; d < size - (size % Vec::size()); d += Vec::size()) {
             Vec data_vec = Vec::loadu(self_data + d);
-            norm_two_reduce_step(acc_vec, data_vec);
+            Vec y = data_vec * data_vec - c_vec;
+            Vec t = acc_vec + y;
+            c_vec = t - acc_vec - y;
+            acc_vec = t;
           }
           acc_vec.store(buffer);
           for (int j = 1; j < fVec::size(); j++) {
