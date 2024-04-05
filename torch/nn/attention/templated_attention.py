@@ -26,7 +26,7 @@ _score_mod_signature = Callable[
 ]
 
 
-def templated_attention(
+def _templated_attention(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
