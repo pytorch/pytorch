@@ -17,3 +17,7 @@ runs:
     - name: Runner diskspace health check
       uses: ./.github/actions/diskspace-cleanup
       if: always()
+    - name: Chown workspace back to pytorchci (Fallout of PR 122922)
+      if: always()
+      run: |
+        sudo chown -R pytorchci /home/pytorchci/actions-runner/_work/pytorch/pytorch
