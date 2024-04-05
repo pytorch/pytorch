@@ -358,7 +358,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref0, res0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
-    def test_cuda_event_method_define_stream_outside_of_compile(self):
+    def test_cuda_event_method_create_stream_outside_of_compile(self):
         def fn(x, cur_stream, new_stream):
             x = torch.mul(x, 1)
             x = torch.add(x, 2)
