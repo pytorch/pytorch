@@ -4,6 +4,7 @@ import sys
 from typing import Any, Callable, Tuple
 
 import torch
+from torch import _C
 
 
 @dataclasses.dataclass
@@ -101,6 +102,15 @@ def is_functional_schema(schema: Any) -> bool:
         schema = FunctionSchema.parse(schema)
     assert isinstance(schema, FunctionSchema)
     return is_functional(schema)
+
+
+def is_tensorlist_like_type(typ: torch.Type):
+    return (
+        typ == _C.ListType(_C.TensorType.get())
+        or typ == _C.ListType(_C.OptionalType(_C.TensorType.get()))
+        or typ == _C.OptionalType(_C.ListType(_C.TensorType.get()))
+        or typ == _C.OptionalType(_C.ListType(_C.OptionalType(_C.TensorType.get())))
+    )
 
 
 def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
