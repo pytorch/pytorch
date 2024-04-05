@@ -128,7 +128,7 @@ class DeviceGuard:
     The device is switched using the provided device interface.
     """
 
-    def __init__(self, device_interface: type[DeviceInterface], index: int | None):
+    def __init__(self, device_interface: Type[DeviceInterface], index: int | None):
         self.device_interface = device_interface
         self.idx = index
         self.prev_idx = -1
