@@ -414,10 +414,6 @@ test_perf_for_dashboard() {
         python "benchmarks/dynamo/$suite.py" \
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv"
-
-        # TODO: DEBUG, REMOVE ME
-        cp "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv" \
-          "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_cuda_${target}.csv"
       fi
       if [[ "$DASHBOARD_TAG" == *dynamic-true* ]]; then
         python "benchmarks/dynamo/$suite.py" \
@@ -453,7 +449,7 @@ test_perf_for_dashboard() {
       if [[ "$DASHBOARD_TAG" == *cudagraphs_low_precision-true* ]]; then
         # TODO: This has a new dtype called quant and the benchmarks script needs to be updated to support this.
         # The tentative command is as follows. It doesn't work now, but it's ok because we only need mock data
-        # to fill the dashboard
+        # to fill the dashboard.
         python "benchmarks/dynamo/$suite.py" \
           "${target_flag[@]}" --"$mode" --quant --backend "$backend" "$@" \
           --output "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_cuda_${target}.csv" || true
