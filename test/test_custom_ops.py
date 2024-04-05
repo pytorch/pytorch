@@ -7,7 +7,6 @@ import collections
 import itertools
 import os
 import re
-import sys
 import typing
 
 import torch._custom_ops as custom_ops
@@ -27,9 +26,6 @@ import numpy as np
 
 def requires_compile(fun):
     fun = unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")(fun)
-    fun = unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )(fun)
     return fun
 
 
@@ -1567,9 +1563,6 @@ def forward(self, x_1):
         )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     def test_data_dependent_compile(self):
         import torch._dynamo.testing
         from torch._dynamo.utils import counters
@@ -2115,9 +2108,6 @@ class TestCustomOpAPI(TestCase):
         self.assertTrue(cpu_called)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     def test_fake(self):
         @torch.library.custom_op("_torch_testing::add", mutated_args=())
         def add(x: Tensor, y: float) -> Tensor:
@@ -2174,9 +2164,6 @@ Please use `add.register_fake` to add an fake impl.""",
 
     @skipIfTorchDynamo("recursive dynamo")
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     def test_compile(self):
         called_impl = False
         called_abstract = False
