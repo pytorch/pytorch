@@ -704,9 +704,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     obj.__class__
                 ).call_function(tx, [var], kwargs)
 
-            func_src = AttrSource(self.source, "__func__") if self.source else None
+            if self.source is None:
+                unimplemented("Sourceless UserDefinedObjectVariable method not supported")
+            func_src = AttrSource(self.source, "__func__")
             func_var = VariableBuilder(tx, func_src)(func)
-            obj_src = AttrSource(self.source, "__self__") if self.source else None
+            obj_src = AttrSource(self.source, "__self__")
             obj_var = VariableBuilder(tx, obj_src)(obj)
             return func_var.call_function(tx, [obj_var] + args, kwargs)
         elif (
