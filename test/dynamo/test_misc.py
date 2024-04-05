@@ -9856,6 +9856,17 @@ fn
 
         self._test_compile_model_free(model_inp_ctr, lambda mod: mod.param)
 
+    def test_conditional_list_comp_in_context(self):
+        def fn(inp):
+            try:
+                return [torch.sin(x) for x in inp if x is not None]
+            except Exception:
+                pass
+
+        inp = [torch.randn(3, 3) for _ in range(3)] + [None]
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(inp)
+
     def test_raises_importerror1(self):
         @torch.compile(backend="eager")
         def fn(x):
