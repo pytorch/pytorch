@@ -863,10 +863,29 @@ class GuardBuilder(GuardBuilderBase):
                 if weak_id is not None:
                     self.id_matched_objs[local_name] = weak_id
 
+    def NOT_NONE_MATCH(self, guard: Guard, value=None):
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        assert isinstance(val, torch.Tensor)
+        code = f"{ref} is not None"
+        self._set_guard_export_info(guard, [code])
+
+        if config.enable_cpp_guard_manager:
+            self.get_guard_manager(guard).add_not_none_guard(
+                get_verbose_code_parts(code, guard)
+            )
+        else:
+            self._produce_guard_code(guard, [code])
+
     def NAME_MATCH(self, guard: Guard):
         self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)
 
     def DATA_PTR_MATCH(self, guard: Guard):
+        # Add a type check. C++ guard has the type check internally, so only
+        # enable it for Python guards.
+        if not config.enable_cpp_guard_manager:
+            self.TYPE_MATCH(guard)
+
         obj = self.get(guard.name)
         code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
         self._set_guard_export_info(guard, [code])
@@ -1176,7 +1195,7 @@ class GuardBuilder(GuardBuilderBase):
 
         self._set_guard_export_info(guard, code)
         if config.enable_cpp_guard_manager:
-            self.get_guard_manager(guard).add_weakref_alive_guard(
+            self.get_guard_manager(guard).add_not_none_guard(
                 get_verbose_code_parts(code, guard)
             )
         else:
@@ -1331,7 +1350,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module() or match_on_id_for_tensor(guard):
-            self.ID_MATCH(guard)
+            self.DATA_PTR_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
                 value = value()
@@ -1380,6 +1399,8 @@ class GuardBuilder(GuardBuilderBase):
                         code.append(f"{tensor_name}.{term} == {real_value}")
             else:
                 self.tensor_check_examples.append(value)
+                self.tensor_check_names.append(tensor_name)
+                self.tensor_check_guards.append(guard)
 
                 if config.enable_cpp_guard_manager:
                     guard_manager = self.get_guard_manager(guard)
@@ -1405,15 +1426,6 @@ class GuardBuilder(GuardBuilderBase):
                         tensor_name,
                         verbose_code_parts,
                     )
-
-                    if not is_from_optimizer_source(guard.originating_source):
-                        # Skip no tensor aliasing guard for optimizers. We know
-                        # they do not alias.
-                        self.tensor_check_names.append(tensor_name)
-                        self.tensor_check_guards.append(guard)
-                else:
-                    self.tensor_check_names.append(tensor_name)
-                    self.tensor_check_guards.append(guard)
 
             # A frame is valid for reuse with dynamic dimensions if the new
             # (user-requested) dynamic dimensions are a subset of the old
