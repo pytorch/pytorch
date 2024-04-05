@@ -539,6 +539,13 @@ def run_meta_crossref(
     try:
         rs = func(*args, **kwargs)
     except Exception as e:
+        if "foreach" in func.__name__:
+            # Some foreach inputs are meant to verify that they pass AND fail the same way as their
+            # counterparts. For example, _foreach_addcdiv and addcdiv will both fail with
+            # `RuntimeError: value cannot be converted to type float without overflow` if the input
+            # Scalar/ScalarList contain Python complex numbers. Since we want to keep this coverage
+            # for the foreach tests, we allow the meta test here to continue without crying out.
+            return
         raise AssertionError("Original OpInfo is broken") from e
 
     # TODO: also handle cases where func raise an exception
