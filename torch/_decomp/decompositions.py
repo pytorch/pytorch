@@ -3554,7 +3554,7 @@ def upsample_bilinear2d_backward(
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ) -> Tensor:
-    return _upsample_linear(
+    return _upsample_linear_backward(
         grad_output, output_size, input_size, align_corners, [scales_h, scales_w]
     )
 
@@ -3570,7 +3570,7 @@ def upsample_trilinear3d_backward(
     scales_h: Optional[float] = None,
     scales_w: Optional[float] = None,
 ) -> Tensor:
-    return _upsample_linear(
+    return _upsample_linear_backward(
         grad_output,
         output_size,
         input_size,
