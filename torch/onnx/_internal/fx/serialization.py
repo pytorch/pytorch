@@ -155,6 +155,10 @@ def save_model_with_external_data(
     # FIXME: Avoid importing onnx into torch.onnx.
     import onnx
 
+    initializers_to_be_deleted = {}  # Using dict because it is **ordered**
+    existing_initializers = {
+        k.name: idx for idx, k in enumerate(onnx_model.graph.initializer)
+    }
     onnx_input_names = {input.name for input in onnx_model.graph.input}
     for el in torch_state_dicts:
         if isinstance(el, dict):
@@ -182,6 +186,7 @@ def save_model_with_external_data(
                         state_dict = torch.load(el, map_location="cpu")
                     else:
                         raise e
+
         for name, tensor in state_dict.items():
             if rename_initializer:
                 # Basically, "transformer.attention.self.query.weight" is mapped
@@ -217,6 +222,9 @@ def save_model_with_external_data(
             # os.path.join(basepath, relative_tensor_file_path).
             model_input_types = {k.name: k.type for k in onnx_model.graph.input}
 
+            # Mark for deletion - a replacement will be appended next
+            if name in existing_initializers:
+                initializers_to_be_deleted[existing_initializers[name]] = name
             tensor_proto = _create_tensor_proto_with_external_data(
                 tensor,
                 name,
@@ -226,6 +234,12 @@ def save_model_with_external_data(
             )
             # Add the tensor_proto to the ONNX model as an initializer with external data.
             onnx_model.graph.initializer.append(tensor_proto)
+    # Remove old duplicated initializers, if any. delete in desc order to not invalidate deletion indices
+    initializers_to_be_deleted = dict(
+        sorted(initializers_to_be_deleted.items(), reverse=True)
+    )
+    for idx in initializers_to_be_deleted.keys():
+        del onnx_model.graph.initializer[idx]
 
     # model_location should be a pure file name such as "file_name.onnx", not "folder/file_name.onnx".
     onnx.save(onnx_model, os.path.join(basepath, model_location))  # type: ignore[attr-defined]

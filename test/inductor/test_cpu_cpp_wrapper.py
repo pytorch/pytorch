@@ -75,7 +75,6 @@ if config.abi_compatible:
         "test_conv2d_binary_inplace_fusion_failed_cpu",
         "test_conv2d_binary_inplace_fusion_pass_cpu",
         "test_cumsum_cpu",
-        "test_custom_op_cpu",  # needs custom op support
         "test_dtype_sympy_expr_cpu",
         "test_dynamic_qlinear_cpu",
         "test_dynamic_qlinear_qat_cpu",
@@ -90,7 +89,6 @@ if config.abi_compatible:
         "test_qlinear_cpu",
         "test_qlinear_dequant_promotion_cpu",
         "test_qlinear_relu_cpu",
-        "test_randint_cpu",
         "test_randn_with_dtype_and_device_cpu",
         "test_scatter5_cpu",
         "test_scatter6_cpu",
@@ -104,7 +102,6 @@ if config.abi_compatible:
             f"{test_name}_dynamic_shapes"
         ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=False)
     skip_list = [
-        "test_linear1_cpu",  # segfault from double free
         "test_multihead_attention_cpu",
     ]
     for test_name in skip_list:
@@ -212,7 +209,9 @@ if RUN_CPU:
         ),
         BaseTest("test_conv_transpose2d_packed", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest("test_cumsum"),
-        BaseTest("test_custom_op"),
+        BaseTest("test_custom_op_1"),
+        BaseTest("test_custom_op_2"),
+        BaseTest("test_custom_op_3"),
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put1"),
@@ -318,6 +317,7 @@ if RUN_CPU:
         BaseTest("test_relu"),  # multiple inputs
         BaseTest("test_repeat_interleave", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_scalar_input"),
+        BaseTest("test_scalar_output"),
         BaseTest("test_scaled_dot_product_attention"),
         BaseTest("test_scatter1"),
         BaseTest("test_scatter2"),
