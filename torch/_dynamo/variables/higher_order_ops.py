@@ -137,7 +137,7 @@ def validate_args_and_maybe_create_graph_inputs(
     set_subgraph_inputs,
     description,
 ):
-    from . import AutogradFunctionContextVariable, ConstantVariable, EnumVariable
+    from . import AutogradFunctionContextVariable, EnumVariable
     from .builder import wrap_fx_proxy_cls
 
     assert tracer.parent is not None
@@ -543,7 +543,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import (
-            ConstantVariable,
             ListVariable,
             NestedUserFunctionVariable,
             TensorVariable,
@@ -1305,44 +1304,46 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
 
 class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     @staticmethod
-    def normalize_to_kwargs(args, kwargs):
-        if len(args) == 3:
-            return args, kwargs
-        elif len(args) > 3:
-            return args[:3], {"score_mod": args[3]}
-        else:
-            raise NotImplementedError(
-                f"Expected 3 or 4 arguments but got {len(args)}.\n"
-            )
+    def normalize_to_args(args, kwargs):
+        # input signature is (query, key, value, score_mod, *other_buffers)
+        # Flatten args and kwargs into lists
+        flat_args = pytree.tree_flatten(args)[0]
+        flat_kwargs = pytree.tree_flatten(kwargs)[0]
+
+        # Combine the flattened lists
+        all_args = flat_args + flat_kwargs
+        return all_args
 
     def create_wrapped_node(
-        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+        self, tx, query: "VariableTracker", score_function: "VariableTracker"
     ):
         from torch._dynamo.symbolic_convert import InstructionTranslator
+        from .builder import SourcelessBuilder
 
         tx: InstructionTranslator = tx
 
-        scores_require_grad: bool = args[0].requires_grad
-        score = args[0].call_method(
+        scores_require_grad: bool = query.requires_grad
+        score = query.call_method(
             tx,
             "new_empty",
-            (TupleVariable([]),),
-            {"requires_grad": ConstantVariable(scores_require_grad)},
+            (SourcelessBuilder.create(tx, []),),
+            {"requires_grad": SourcelessBuilder.create(tx, scores_require_grad)},
         )
 
         def create_scalar():
-            return args[0].call_method(tx, "new_empty", (TupleVariable([]),), {})
+            return query.call_method(
+                tx, "new_empty", (SourcelessBuilder.create(tx, []),), {}
+            )
 
         bhmn = [create_scalar() for _ in range(4)]
         new_args = [score, *bhmn]
-        function = kwargs["score_mod"]
         (
             (body_output, body_treespec),
             body_graph,
             body_lifted_freevars,
         ) = speculate_subgraph(
             tx,
-            function,
+            score_function,
             new_args,
             {},  # expect only args no kwargs for now
             description="templated_attention",
@@ -1378,15 +1379,17 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
     ) -> "VariableTracker":
         from .builder import wrap_fx_proxy
 
-        norm_args, norm_kwargs = self.normalize_to_kwargs(args, kwargs)
-        p_args, p_kwargs, example_value = self.create_wrapped_node(
-            tx, norm_args, norm_kwargs
+        query, key, value, score_mod, *other_buffers = self.normalize_to_args(
+            args, kwargs
         )
+
+        p_args, p_kwargs, example_value = self.create_wrapped_node(tx, query, score_mod)
+        proxied_args = [query, key, value, *other_buffers]
 
         # Store the invocation as a call
         # Norm_kwargs contains the score_function and we dont want to proxy this because
         # Proxying user defined functions is not supported.
-        inp_args, _ = proxy_args_kwargs(norm_args, {})
+        inp_args, _ = proxy_args_kwargs(proxied_args, {})
         return wrap_fx_proxy(
             tx=tx,
             proxy=tx.output.create_proxy(

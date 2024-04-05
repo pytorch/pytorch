@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Tuple
 
 import torch
 import torch.utils._pytree as pytree
@@ -16,7 +16,26 @@ from torch.fx.experimental.proxy_tensor import (
     track_tensor_tree,
 )
 
-templated_attention = HigherOrderOperator("templated_attention")
+
+class TemplatedAttentionHOP(HigherOrderOperator):
+    def __init__(self):
+        super().__init__("templated_attention")
+
+    def __call__(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        score_mod: Callable,
+        *other_buffers: torch.Tensor,
+    ):
+        if not all(isinstance(buf, torch.Tensor) for buf in other_buffers):
+            raise RuntimeError("Other buffers must be tensors.")
+        return super().__call__(query, key, value, score_mod, *other_buffers)
+
+
+templated_attention = TemplatedAttentionHOP()
+templated_attention.__module__ = "torch.ops.higher_order"
 
 
 def math_attention(
@@ -145,6 +164,14 @@ def templated_attention_functionalize(
     key_unwrapped = ctx.unwrap_tensors(key)
     value_unwrapped = ctx.unwrap_tensors(value)
     other_buffers_unwrapped = ctx.unwrap_tensors(other_buffers)
+
+    # Appease the mypy overlords
+    assert isinstance(query_unwrapped, torch.Tensor)
+    assert isinstance(key_unwrapped, torch.Tensor)
+    assert isinstance(value_unwrapped, torch.Tensor)
+    assert isinstance(other_buffers_unwrapped, tuple)
+    assert all(isinstance(item, torch.Tensor) for item in other_buffers_unwrapped)
+
     example_vals = [torch.zeros((), dtype=query.dtype)] + [
         torch.zeros((), dtype=torch.int) for _ in range(4)
     ]
@@ -176,7 +203,7 @@ def templated_attention_fake_tensor_mode(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: Callable,
-    *other_buffers: torch.Tensor,
+    *other_buffers: Tuple[torch.Tensor, ...],
 ) -> torch.Tensor:
     with mode:
         return torch.empty_like(query, memory_format=torch.contiguous_format)
