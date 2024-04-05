@@ -938,7 +938,7 @@ class DebuggingVariable(VariableTracker):
 
 class LoggingLoggerVariable(VariableTracker):
     """
-    Represents a call to loggin.Logger function.
+    Represents a call to any of logging.Logger methods
     """
 
     def __init__(self, value, **kwargs):
