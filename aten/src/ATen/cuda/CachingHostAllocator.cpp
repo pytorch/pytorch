@@ -69,36 +69,6 @@ class EventPool {
   std::vector<PerDevicePool> pools_;
 };
 
-/**
- * Note [CUDAHostAllocator design]
- * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
- * We have three key data structures - the free list which stores blocks that
- * are not currently used, the block list which stores all blocks that have been
- * allocated, and the event queue which stores CUDA events and their
- * corresponding blocks.
- *
- * Each of these are protected by a separate mutex. The key design principles
- * are to 1) only hold each mutex for the minimal amount of time possible, 2)
- * never do any possible expensive operations (such as CUDA runtime API calls)
- * while holding the lock.
- *
- * There are three public methods: allocate, free, and record_event. In the
- * allocate path, we first check to see if we can service our request from this
- * free list, and otherwise we create a new block with cudaHostAlloc. In the
- * free path, we insert events (if required) into the event queue, and if
- * possible insert our block back into the free list. In allocate, we first
- * eagerly query events until we find one that is not ready, and insert the
- * corresponding block onto the free list if all the events recorded for a
- * block are ready. In the record_event path, we simply insert the given
- * stream into the set of streams tracked by the specified block. This set of
- * streams is then consumed in the free path.
- *
- * Some of the invariants here are less strict than they could be - for example,
- * we do not enforce that free(Block* block) => block->event_count == 0. This is
- * for compatibility reasons, and we can explore enforcing these in subsequent
- * versions.
- */
-
 using AllocatorImplInterface =
     CachingHostAllocatorImplInterface<CUDAStream, EventPool::Event, Block, Comparator>;
 
@@ -205,7 +175,7 @@ private:
         "");
   }
 
-  inline void allocWithCudaHostRegister(void** ptr, size_t roundSize) {
+  void allocWithCudaHostRegister(void** ptr, size_t roundSize) {
     // Here we do regular allocation, pre-fault/map the pages, and then do
     // cudaHostRegister with GPU mapping flags to lock the pages, so we
     // can minimize the cost for the cuda global lock.
@@ -251,7 +221,7 @@ private:
   }
 };
 
-} // namespace
+} // anonymous namespace
 
 void raw_local_deleter(void* ptr);
 
@@ -273,7 +243,7 @@ void raw_local_deleter(void* ptr) {
   host_allocator.free(ptr);
 }
 
-static inline  CUDAHostAllocator& getCUDAHostAllocator() {
+static inline CUDAHostAllocator& getCUDAHostAllocator() {
   return host_allocator;
 }
 
