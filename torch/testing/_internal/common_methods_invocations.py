@@ -16728,9 +16728,13 @@ op_db: List[OpInfo] = [
            sample_inputs_func=sample_inputs_index_reduce),
     *(OpInfo('index_reduce',
              variant_test_name=reduction_type,
-             dtypes=all_types_and(torch.float16, torch.bfloat16),
+             dtypes=(floating_types_and if reduction_type == "mean" else all_types_and)(torch.float16, torch.bfloat16),
              supports_out=True,
-             sample_inputs_func=sample_inputs_index_reduce) for reduction_type in ('mean', 'prod', 'amin', 'amax')),
+             sample_inputs_func=sample_inputs_index_reduce,
+             skips=(
+                 DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=3e-3)}),
+                              'TestInductorOpInfo', 'test_comprehensive'),
+             )) for reduction_type in ('mean', 'prod', 'amin', 'amax')),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes

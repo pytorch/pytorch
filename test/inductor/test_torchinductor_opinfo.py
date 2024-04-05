@@ -225,7 +225,6 @@ inductor_expected_failures_single_sample["cpu"] = {
     ("normal", "number_mean"): {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "to_sparse": {f32, f64},
     "view_as_complex": {f16},
 }
 
@@ -234,7 +233,6 @@ inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "cholesky": {f32, f64},
     "multinomial": {f16, f32, f64},
-    "nn.functional.normalize": {f16},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
@@ -256,12 +254,7 @@ inductor_expected_failures_single_sample["cuda"].update(intentionally_not_handle
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
-inductor_gradient_expected_failures_single_sample["cuda"] = {
-    "nn.functional.normalize": {f16},
-}
-
-if not TEST_WITH_ROCM:
-    inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
+inductor_gradient_expected_failures_single_sample["cuda"] = {}
 
 if not TEST_MKL:
     inductor_expected_failures_single_sample["cpu"].update({})
