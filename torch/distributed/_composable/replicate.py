@@ -21,6 +21,7 @@ class _ReplicateState(_State):
         self._param_list: nn.ParameterList = nn.ParameterList()
         # TODO(@fegin): this variable is originally create for testing, we
         # should remove this if possible.
+        self._orig_module = self.module
         self._param_names: List[str] = []
         self._no_sync: bool = False
         self._init_args: Optional[Tuple[Any, ...]] = None
@@ -58,6 +59,14 @@ class _ReplicateState(_State):
                 ignored_params,
                 prefix=f"{recurse_prefix}{name}",
             )
+
+
+    @torch._dynamo.disable(recursive=True)
+    def lazy_init(self) -> None:
+        self.init(*self._init_args, **self._init_kwargs)
+        self.register_comm_hook()
+        self._init_args = tuple()
+        self._init_kwargs = {}
 
     @torch._dynamo.disable(recursive=True)
     def init(
@@ -112,10 +121,7 @@ class _ReplicateState(_State):
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Any:
         if self._init_args or self._init_kwargs:
-            self.init(*self._init_args, **self._init_kwargs)
-            self.register_comm_hook()
-            self._init_args = tuple()
-            self._init_kwargs = {}
+            self.lazy_init()
         self._ddp.require_backward_grad_sync = not self._no_sync
         return self._ddp._pre_forward(*args, **kwargs)
 
@@ -144,9 +150,7 @@ class DDP:
         # Use index 2 since 0 is the dynamically constructed `DDP<...>` class
         # and index 1 is the `DDP` class itself
         orig_cls = cls.__mro__[2]
-        self = orig_cls.__new__(orig_cls, *args, **kwargs)
-        self.__init__(*args, **kwargs)
-        return self
+        return orig_cls.__new__(orig_cls, *args, **kwargs)
 
     def set_requires_gradient_sync(self, requires_gradient_sync: bool) -> None:
         """
