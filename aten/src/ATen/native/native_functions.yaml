@@ -5695,8 +5695,8 @@
   variants: function, method
   dispatch:
     CompositeExplicitAutograd: sum
-    SparseCPU, SparseCUDA: sum_coo
-    SparseCsrCPU, SparseCsrCUDA: sum_csr
+    SparseCPU, SparseCUDA, SparseMeta: sum_coo
+    SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sum_csr
   autogen: sum.out
 
 - func: sum.dim_IntList(Tensor self, int[1]? dim, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
