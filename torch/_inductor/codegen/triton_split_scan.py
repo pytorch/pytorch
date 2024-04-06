@@ -8,7 +8,6 @@ from torch._inductor.codegen.triton import (
     IterationRangesRoot,
     triton_compute_type,
     TritonKernel,
-    TritonKernelOverrides,
 )
 
 from torch._prims_common import prod
@@ -81,12 +80,11 @@ class TritonSplitScanKernel(TritonKernel):
     def reduction(self, dtype, src_dtype, reduction_type, value):
         raise NotImplementedError("NYI TritonSplitDimKernel reductions")
 
-    def scan(self, dtypes, combine_fn, values, inits):
+    def scan(self, dtypes, combine_fn, values):
         import triton.language as tl
 
         (dtype,) = dtypes
         (value,) = values
-        (init,) = inits
 
         compute_type = triton_compute_type(dtype)
         compute_type_triton = getattr(tl, compute_type[3:])
@@ -119,25 +117,16 @@ class TritonSplitScanKernel(TritonKernel):
         masks = {f"{tree.prefix}mask" for tree in self.range_trees}
         self.filter_masks(masks)
         masks = sorted(masks)
-        if self._load_mask:
-            masks.append(self._load_mask)
+        assert not self._load_mask, "ops.scan not supported inside ops.masked"
 
         value = cse_compute(f"{value}.to({compute_type})")
         value = cse_compute(f"tl.broadcast_to({value}, {self.dense_size_str()})")
-        init = cse_compute(f"tl.full([], {init}, {compute_type})")
-        if masks:
-            cond = " & ".join(masks)
-            masked_value = cse_compute(TritonKernelOverrides.where(cond, value, init))
-        else:
-            masked_value = value
 
         combine_helper_fn = self._lift_helper(combine_fn, 1)
         dim = self.triton_tensor_ndim() - 1
         assert dim == 0, ""
 
-        block_sum = cse_compute(
-            f"tl.reduce({masked_value}, {dim}, {combine_helper_fn})"
-        )
+        block_sum = cse_compute(f"tl.reduce({value}, {dim}, {combine_helper_fn})")
         exclusive_prefix = self.cse.newvar()
         if element_nbits == 64:
             self.compute.splice(
@@ -147,7 +136,6 @@ class TritonSplitScanKernel(TritonKernel):
                     {block_sum},
                     {self.range_trees[-1].get_pid()},
                     {combine_helper_fn},
-                    {init},
                 )
                 """,
                 strip=True,
@@ -164,7 +152,6 @@ class TritonSplitScanKernel(TritonKernel):
                     {block_sum},
                     {self.range_trees[-1].get_pid()},
                     {combine_helper_fn},
-                    {init},
                     DTYPE_VALUE_AS_UINT={value_as_uint_dtype},
                     DTYPE_PACK={scratch_type},
                 )
@@ -173,9 +160,14 @@ class TritonSplitScanKernel(TritonKernel):
             )
         # Compute final cumsum
         block_scan = cse_compute(
-            f"tl.associative_scan({masked_value}, {dim}, {combine_helper_fn})"
+            f"tl.associative_scan({value}, {dim}, {combine_helper_fn})"
         )
-        return (cse_compute(f"{combine_helper_fn}({exclusive_prefix}, {block_scan})"),)
+        combined_result = cse_compute(
+            f"{combine_helper_fn}({exclusive_prefix}, {block_scan})"
+        )
+        return (
+            cse_compute(f"tl.where(roffset == 0, {block_scan}, {combined_result})"),
+        )
 
     def _get_heuristic(self):
         return "split_scan"
