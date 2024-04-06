@@ -19692,6 +19692,8 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
+            # NYI: The operator 'aten::segment_reduce' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, 'TestConsistency', 'test_output_grad_match'),
         ),
     ),
 ]
