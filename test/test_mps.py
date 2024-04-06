@@ -668,7 +668,10 @@ def mps_ops_modifier(ops):
         'igamma': None,
         'igammac': None,
         'index_copy': None,
-        'index_reduce': None,
+        'index_reduce.prod': None,
+        'index_reduce.mean': None,
+        'index_reduce.amax': None,
+        'index_reduce.amin': None,
         'isin': None,
         'isneginf': None,
         'isposinf': None,
@@ -989,7 +992,7 @@ def mps_ops_modifier(ops):
         op.decorators.append(d)
 
     for op in ops:
-        key = op.name + op.variant_test_name
+        key = op.name + "." + op.variant_test_name
         if key in EMPTY_OPS_SKIPLIST:
             addDecorator(op, DecorateInfo(
                          unittest.skip("Skipping empty ops."),
