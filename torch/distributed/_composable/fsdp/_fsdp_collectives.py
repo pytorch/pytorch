@@ -4,6 +4,7 @@ from typing import List, NamedTuple, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
 from torch.distributed.distributed_c10d import ReduceOp
+from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.utils import record_event, wait_work, wait_stream, wait_event
 from ._fsdp_common import (
     _get_dim0_padded_size,
@@ -114,7 +115,7 @@ def foreach_all_gather_copy_out(
     ) = all_gather_result
     if all_gather_event is not None:  # sync op
         torch.cuda.current_stream().wait_event(all_gather_event)
-    if all_gather_work is not None:  # async op
+    if isinstance(all_gather_work, AsyncCollectiveTensor):  # async op
         all_gather_work.wait()
     world_size = group.size()
     dtype, device = all_gather_output.dtype, all_gather_output.device
