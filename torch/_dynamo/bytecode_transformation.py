@@ -813,12 +813,37 @@ def remove_jump_if_none(instructions: List[Instruction]) -> None:
                 )
             else:
                 jump_op = create_instruction("POP_JUMP_IF_TRUE", target=inst.target)
+            # update inst.exn_tab_entry.end if necessary
+            if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
+                inst.exn_tab_entry.end = jump_op
+            # preserve exception table entries
+            is_op.exn_tab_entry = copy.copy(inst.exn_tab_entry)
+            jump_op.exn_tab_entry = copy.copy(inst.exn_tab_entry)
             # modify inst in-place to preserve jump target
             inst.opcode = dis.opmap["LOAD_CONST"]
             inst.opname = "LOAD_CONST"
             inst.arg = None
             inst.argval = None
             new_insts.extend([is_op, jump_op])
+    instructions[:] = new_insts
+
+
+def remove_binary_store_slice(instructions: List[Instruction]) -> None:
+    new_insts = []
+    for inst in instructions:
+        new_insts.append(inst)
+        if inst.opname in ("BINARY_SLICE", "STORE_SLICE"):
+            # new instruction
+            subscr_inst = create_instruction(inst.opname.replace("SLICE", "SUBSCR"))
+            if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
+                inst.exn_tab_entry.end = subscr_inst
+            subscr_inst.exn_tab_entry = copy.copy(inst.exn_tab_entry)
+            # modify inst in-place to preserve jump target
+            inst.opcode = dis.opmap["BUILD_SLICE"]
+            inst.opname = "BUILD_SLICE"
+            inst.arg = 2
+            inst.argval = 2
+            new_insts.append(subscr_inst)
     instructions[:] = new_insts
 
 
@@ -1142,6 +1167,8 @@ def cleaned_instructions(code, safe=False) -> List[Instruction]:
             devirtualize_jumps(instructions)
         if sys.version_info < (3, 12):
             explicit_super(code, instructions)
+        else:
+            remove_binary_store_slice(instructions)
     return instructions
 
 
