@@ -9856,6 +9856,30 @@ fn
 
         self._test_compile_model_free(model_inp_ctr, lambda mod: mod.param)
 
+    def test_conditional_list_comp_in_context(self):
+        def fn(inp):
+            try:
+                return [torch.sin(x) for x in inp if x is not None]
+            except Exception:
+                pass
+
+        inp = [torch.randn(3, 3) for _ in range(3)] + [None]
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(inp)
+
+    def test_312_binary_slice_with_graph_break(self):
+        l1 = torch.nn.Linear(5, 5)
+        l2 = torch.nn.Linear(5, 5)
+
+        def fn(x):
+            # causes a graph break with items in the stack
+            n = torch.nn.Sequential(l1, l2)
+            out = n[1:](x)
+            return out
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(5, 5))
+
     def test_raises_importerror1(self):
         @torch.compile(backend="eager")
         def fn(x):

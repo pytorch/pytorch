@@ -212,7 +212,10 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                     except Exception:  # TODO(zhxchen17) Remove this.
                         return path
 
-                nn_module_stack = {root_key: (root, root_cls), **nn_module_stack}
+                nn_module_stack = {
+                    root_key: (root, root_cls.__module__ + "." + root_cls.__qualname__),
+                    **nn_module_stack,
+                }
                 node.meta["nn_module_stack"] = {
                     key: (normalize_path(path), ty)
                     for key, (path, ty) in nn_module_stack.items()
@@ -714,9 +717,22 @@ def _verify_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
         for node in mod.graph.nodes:
             if node.op in ["call_function", "get_attr"]:
                 if i == 0:
-                    if node.meta.get("nn_module_stack", None) is None:
+                    if (
+                        nn_module_stack := node.meta.get("nn_module_stack", None)
+                    ) is None:
                         raise SpecViolationError(
                             f"Node {node} of type {node.op} is missing nn_module_stack metadata"
+                        )
+                    if not all(
+                        isinstance(k, str)
+                        and isinstance(v, tuple)
+                        and len(v) == 2
+                        and all(isinstance(x, str) for x in v)
+                        for k, v in nn_module_stack.items()
+                    ):
+                        raise SpecViolationError(
+                            f"Node {node} of type {node.op} has incorrect nn_module_stack metadata format"
+                            f"expected Dict[str, Tuple[str, str]], but got {nn_module_stack}"
                         )
             elif node.op in ["placeholder", "output"]:
                 if node.meta.get("nn_module_stack", None):
