@@ -44,7 +44,9 @@ import torch
 import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
+from ..fx import GraphModule
 from ..utils import _config_module
+from . import config
 from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 
@@ -197,17 +199,17 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms._wrap_all_tensors": UserFunctionVariable,
     "torch._functorch.eager_transforms._wrap_tensor_for_grad": UserFunctionVariable,
     # functorch/jacrev
-    "torch._functorch.eager_transforms.jacrev": UserFunctionVariable,
+    "torch._functorch.eager_transforms.jacrev": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms.error_if_complex": UserFunctionVariable,
     "torch._functorch.eager_transforms._chunked_standard_basis_for_": UserFunctionVariable,
     "torch._functorch.eager_transforms._safe_zero_index": UserFunctionVariable,
     # functorch/vjp
-    "torch._functorch.eager_transforms.vjp": UserFunctionVariable,
+    "torch._functorch.eager_transforms.vjp": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms._vjp_with_argnums": UserFunctionVariable,
     "torch._functorch.eager_transforms.assert_non_empty_tensor_output": UserFunctionVariable,
     # functorch/jvp
     "torch._functorch.eager_transforms._jvp_with_argnums": UserFunctionVariable,
-    "torch._functorch.eager_transforms.jvp": UserFunctionVariable,
+    "torch._functorch.eager_transforms.jvp": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms._replace_args": UserFunctionVariable,
     "torch._functorch.eager_transforms.safe_unpack_dual": UserFunctionVariable,
     "torch._functorch.eager_transforms.assert_non_empty_list_of_tensors": UserFunctionVariable,
@@ -217,11 +219,11 @@ manual_torch_name_rule_map = {
     "torch.autograd.forward_ad.make_dual": UserFunctionVariable,
     "torch.autograd.forward_ad.unpack_dual": UserFunctionVariable,
     # functorch/jacfwd
-    "torch._functorch.eager_transforms.jacfwd": UserFunctionVariable,
+    "torch._functorch.eager_transforms.jacfwd": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms._construct_standard_basis_for": UserFunctionVariable,
     "torch._functorch.eager_transforms.safe_unflatten": UserFunctionVariable,
     # functorch/hessian
-    "torch._functorch.eager_transforms.hessian": UserFunctionVariable,
+    "torch._functorch.eager_transforms.hessian": FunctorchHigherOrderVariable,
     # functorch/deprecated
     "torch._functorch.deprecated.jvp": UserFunctionVariable,
     "torch._functorch.deprecated.hessian": UserFunctionVariable,
@@ -2590,6 +2592,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.mps.set_per_process_memory_fraction",
         "torch.mps.set_rng_state",
         "torch.mps.synchronize",
+        "torch.nested._internal.nested_tensor.buffer_from_jagged",
         "torch.nested._internal.nested_tensor.get_tensor_symint",
         "torch.nested._internal.nested_tensor.is_expandable_to",
         "torch.nested._internal.nested_tensor.jagged_from_list",
@@ -3198,6 +3201,7 @@ MOD_INLINELIST = {
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
     "torch._functorch.vmap",
+    "torch._library.custom_ops",
     "torch._functorch.eager_transforms",
     "torch._inductor.test_operators",
     "torch.amp.autocast_mode",
@@ -3255,6 +3259,12 @@ SKIP_DIRS = [
 SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
+
+# FSDP hooks
+FSDP_HOOKS = {
+    "_forward_pre_hooks": "torch.distributed._composable.fsdp._fsdp_state#_pre_forward",
+    "_forward_hooks": "torch.distributed._composable.fsdp._fsdp_state#_post_forward",
+}
 
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 # Skip fbcode paths(including torch.package paths) containing
@@ -3529,3 +3539,31 @@ def lookup_inner(
         return SkipFunctionVariable
     else:
         return UserFunctionVariable
+
+
+def skip_module_hook_by_config(module):
+    from torch.fx._lazy_graph_module import _LazyGraphModule
+
+    if isinstance(module, (_LazyGraphModule, GraphModule)):
+        return
+    if not isinstance(module, torch.nn.Module):
+        return
+    for hook_type, func_name in FSDP_HOOKS.items():
+        _skip_module_hook_by_config(
+            module, hook_type, func_name, config.skip_fsdp_hooks
+        )
+
+
+def _skip_module_hook_by_config(
+    module: torch.nn.Module, hook_type: str, func_name: str, skip_hooks: bool
+):
+    from .decorators import disable
+    from .eval_frame import innermost_fn
+
+    hooks = getattr(module, hook_type)
+    for hook_id, hook in hooks.items():
+        if func_name == "#".join([hook.__module__, hook.__name__]):
+            if skip_hooks:
+                hooks[hook_id] = disable(hook)
+            else:
+                hooks[hook_id] = innermost_fn(hook)

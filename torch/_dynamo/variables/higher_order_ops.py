@@ -22,7 +22,7 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
 
 from ..exc import UncapturedHigherOrderOpError, unimplemented, Unsupported
-from ..source import AttrSource, FSDPNNModuleSource, GetItemSource, NNModuleSource
+from ..source import AttrSource
 from ..utils import proxy_args_kwargs
 from .dicts import ConstDictVariable
 from .lazy import LazyVariableTracker
@@ -472,7 +472,7 @@ def make_attr(tx, name):
     return node
 
 
-def add_subgraph(tx, source, name, gm):
+def add_subgraph(tx, name, gm):
     next_name = None
     i = 0
     while not next_name:
@@ -483,12 +483,10 @@ def add_subgraph(tx, source, name, gm):
             next_name = candidate
 
     gm.__name__ = next_name
-    if source.guard_source().is_fsdp_module():
-        src = FSDPNNModuleSource(GetItemSource(source, next_name))
-    else:
-        src = NNModuleSource(GetItemSource(source, next_name))
     gm.torchdynamo_force_dynamic = False
-    tx.output.register_attr_or_module(gm, next_name, source=src)
+    # This graph module is not present in the user space, so it can't be
+    # accessed by a source. Set source=None.
+    tx.output.register_attr_or_module(gm, next_name, source=None)
     return next_name
 
 
@@ -710,13 +708,11 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         true_name = add_subgraph(
             tx,
-            self.source,
             "cond_true",
             torch.fx.GraphModule(true_nn_modules, true_graph),
         )
         false_name = add_subgraph(
             tx,
-            self.source,
             "cond_false",
             torch.fx.GraphModule(false_nn_modules, false_graph),
         )
@@ -760,9 +756,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
                 f"torch.while_loop: Got unexpected kwargs: {list(kwargs.keys())}"
             )
 
-        if len(args) != 3:
+        if len(args) != 4:
             unimplemented(
-                f"Expected 3 arguments but got {len(args)}.\n"
+                f"Expected 4 arguments but got {len(args)}.\n"
                 f"Usage: while_loop(cond_fn, body_fn, operands)",
             )
 
@@ -785,12 +781,18 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             unimplemented(
                 f"Expected a tuple but got {args[2].python_type()}",
             )
-
         operands = args[2].unpack_var_sequence(tx)
         if not only_consist_of(args[2], (TensorVariable,)):
             unimplemented(
                 "Expect operands to be a tuple of pytrees that only consists of tensor leaves."
             )
+
+        # additional inputs check
+        if not isinstance(args[3], (ListVariable, TupleVariable)):
+            unimplemented(
+                f"Expected a tuple but got {args[3].python_type()}",
+            )
+        additional_inputs = args[3].unpack_var_sequence(tx)
 
         (
             (cond_r, cond_treespec),
@@ -799,18 +801,12 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             args[0],
-            operands,
+            operands + additional_inputs,
             {},
             "while_loop",
             source_target=self.value,
             set_subgraph_inputs="manual",
         )
-        if len(cond_lifted_freevars) > 0:
-            unimplemented(
-                f"while_loop's cond_fn doesn't support capturing free variables yet."
-                f" All used inputs must be passed in as arguments explicitly."
-                f" Proxies for the lifted vars:{cond_lifted_freevars}."
-            )
         cond_nn_modules = dict(tx.output.nn_modules)
         if not isinstance(cond_r, TensorVariable):
             unimplemented(
@@ -834,30 +830,42 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
         ) = speculate_subgraph(
             tx,
             args[1],
-            operands,
+            operands + additional_inputs,
             {},
             "while_loop",
             source_target=self.value,
             set_subgraph_inputs="manual",
             should_flatten_outputs=True,
         )
+        (
+            cond_graph,
+            body_graph,
+            cond_shared,
+            body_shared,
+            cond_unique,
+            body_unique,
+        ) = _merge_graph_inputs(
+            cond_graph,
+            cond_lifted_freevars,
+            "cond_fn",
+            body_graph,
+            body_lifted_freevars,
+            "body_fn",
+        )
+
+        # Note: cond_shared and body_shared refer to the same proxy in parent graph
+        # so using either of them is OK. Use cond_shared as it doesnt matter.
+        additional_lifted_inputs = cond_shared + cond_unique + body_unique
+
         body_nn_modules = dict(tx.output.nn_modules)
 
-        if len(body_lifted_freevars) > 0:
-            unimplemented(
-                f"while_loop's body_fn doesn't support capturing free variables yet."
-                f" All used inputs must be passed in as arguments explicitly."
-                f" Proxies for the lifted vars:{body_lifted_freevars}."
-            )
         cond_name = add_subgraph(
             tx,
-            self.source,
             "cond_fn",
             torch.fx.GraphModule(cond_nn_modules, cond_graph),
         )
         body_name = add_subgraph(
             tx,
-            self.source,
             "body_fn",
             torch.fx.GraphModule(body_nn_modules, body_graph),
         )
@@ -869,6 +877,9 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             cond_node,
             body_node,
             tuple([operand.as_proxy() for operand in operands]),
+            tuple(
+                [inp.as_proxy() for inp in additional_inputs] + additional_lifted_inputs
+            ),
         )
 
         return _call_function_and_unflatten_output(
@@ -940,7 +951,6 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         body_name = add_subgraph(
             tx,
-            self.source,
             "map_body",
             torch.fx.GraphModule(body_nn_modules, body_graph),
         )
@@ -1012,8 +1022,16 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
     ) -> "VariableTracker":
         if not torch._dynamo.config.capture_func_transforms:
             name = self.get_name()
-            assert name in ("grad_impl", "vmap_impl")
-            fn = name.split("_")[0]
+            fn = {
+                "grad_impl": "grad",
+                "vmap_impl": "vmap",
+                "vjp": "vjp",
+                "jvp": "jvp",
+                "jacrev": "jacrev",
+                "jacfwd": "jacfwd",
+                "hessian": "hessian",
+            }.get(name)
+            assert name is not None
             unimplemented(
                 f"torch.func.{fn} capture is disabled, "
                 "it can be turned on by setting "
@@ -1043,7 +1061,6 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
         body_name = add_subgraph(
             tx,
-            self.source,
             "wrap_body",
             body_gmod,
         )
@@ -1151,7 +1168,6 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         strict_mode_name = add_subgraph(
             tx,
-            self.source,
             "strict_mode_body",
             torch.fx.GraphModule(strict_mode_nn_modules, ret_graph),
         )
@@ -1445,7 +1461,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
         fwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
         fwd_name = add_subgraph(
             tx,
-            fwd_src,
             "fwd_body",
             torch.fx.GraphModule(fwd_nn_modules.nn_modules, fwd_graph),
         )
@@ -1456,7 +1471,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
         bwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
         bwd_name = add_subgraph(
             tx,
-            bwd_src,
             "bwd_body",
             torch.fx.GraphModule(bwd_nn_modules.nn_modules, bwd_graph),
         )
