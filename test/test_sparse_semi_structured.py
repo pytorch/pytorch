@@ -527,6 +527,14 @@ class TestSparseSemiStructured(TestCase):
             mat2 = make_tensor((n, k), dtype=dtype, device=device).t()
             input = make_tensor((m,), dtype=dtype_out, device=device) if use_input else None
 
+            if use_input:
+                if dtype.is_floating_point:
+                    alpha = 1.3
+                    beta = -0.7
+                else:
+                    alpha = 2
+                    beta = -3
+
             dtype_dense = torch.float32
             mat1_dense = mat1.to(dtype_dense)
             mat2_dense = mat2.to(dtype_dense)
@@ -534,7 +542,7 @@ class TestSparseSemiStructured(TestCase):
                 output0 = torch.mm(mat1_dense, mat2_dense)
             else:
                 input_dense = input.to(dtype_dense)[:, None]
-                output0 = torch.addmm(input_dense, mat1_dense, mat2_dense)
+                output0 = torch.addmm(input_dense, mat1_dense, mat2_dense, alpha=alpha, beta=beta)
 
             compressed = to_sparse_semi_structured(mat1)
 
@@ -544,7 +552,7 @@ class TestSparseSemiStructured(TestCase):
             if not use_input:
                 output1 = torch._sparse_semi_structured_mm(mat1_sparse, mat1_meta, mat2, out_dtype=dtype_out)
             else:
-                output1 = torch._sparse_semi_structured_addmm(input, mat1_sparse, mat1_meta, mat2, out_dtype=dtype_out)
+                output1 = torch._sparse_semi_structured_addmm(input, mat1_sparse, mat1_meta, mat2, alpha=alpha, beta=beta, out_dtype=dtype_out)
             torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=rtol, atol=atol)
 
         if dtype == torch.float32:
@@ -559,7 +567,7 @@ class TestSparseSemiStructured(TestCase):
             rtol, atol = 5e-3, 5e-3
         elif dtype == torch.float32:
             rtol, atol = 1e-3, 75e-2
-        for m, n, k, use_input, in \
+        for m, n, k, use_input in \
                 itertools.product(range(3), range(3), range(3), (False, True)):
             m = 2 ** m * 32
             n = 2 ** n * 32

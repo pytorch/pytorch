@@ -44,11 +44,10 @@ template <
     typename LayoutInputB,
     bool use_tensor_c>
 void spgemm_cutlass(
-    const Tensor& tensor_a,
-    const at::IntArrayRef::value_type& tensor_a_stride,
-    const Tensor& tensor_b,
-    const at::IntArrayRef::value_type& tensor_b_stride,
-    const Tensor& tensor_c, const Tensor& tensor_e, Tensor& tensor_d) {
+    const Tensor& tensor_a, const at::IntArrayRef::value_type& tensor_a_stride,
+    const Tensor& tensor_b, const at::IntArrayRef::value_type& tensor_b_stride,
+    const Tensor& tensor_c, const Tensor& tensor_e, const Scalar& alpha,
+    const Scalar& beta, Tensor& tensor_d) {
     // Fix CUTLASS sparse GEMM template arguments that are not
     // provided as template argument of this function, and create an
     // alias for particular instantiation of this template.
@@ -64,7 +63,7 @@ void spgemm_cutlass(
     constexpr int AlignmentInputB = 128 / cutlass::sizeof_bits<ElementInputB>::value;
     constexpr int AlignmentOutput = 128 / cutlass::sizeof_bits<ElementOutput>::value;
 
-    using ElementComputeEpilogue = ElementAccumulator;
+    using ElementComputeEpilogue = ElementAccumulator; // Typically slightly slower, but more precise than if ElementOutput used.
     constexpr int AlignmentComputeEpilogue = 128 / cutlass::sizeof_bits<ElementComputeEpilogue>::value;
     using ElementC = ElementOutput;
     using LayoutC = LayoutOutput;
@@ -85,6 +84,22 @@ void spgemm_cutlass(
 
     using Accum = cutlass::epilogue::threadblock::VisitorAccFetch;
 
+    using Alpha =
+        cutlass::epilogue::threadblock::VisitorScalarBroadcast<ElementComputeEpilogue>;
+    using AlphaArguments = typename Alpha::Arguments;
+
+    using ApplyAlpha = cutlass::epilogue::threadblock::VisitorCompute<
+        cutlass::multiplies, ElementComputeEpilogue, ElementComputeEpilogue,
+        cutlass::FloatRoundStyle::round_to_nearest>;
+    using EVTApplyAlpha = cutlass::epilogue::threadblock::Sm80EVT<
+        ApplyAlpha,
+        Alpha,
+        Accum>;
+
+    using Beta =
+        cutlass::epilogue::threadblock::VisitorScalarBroadcast<ElementComputeEpilogue>;
+    using BetaArguments = typename Beta::Arguments;
+
     using TensorCScalar =
         cutlass::epilogue::threadblock::VisitorScalarBroadcast<ElementC>;
     using TensorCTensor =
@@ -95,13 +110,21 @@ void spgemm_cutlass(
     using TensorC = std::conditional_t<use_tensor_c, TensorCTensor, TensorCScalar>;
     using TensorCArguments = typename TensorC::Arguments;
 
-    using ApplyTensorC = cutlass::epilogue::threadblock::VisitorCompute<
+    using ApplyBeta = cutlass::epilogue::threadblock::VisitorCompute<
+        cutlass::multiplies, ElementComputeEpilogue, ElementComputeEpilogue,
+        cutlass::FloatRoundStyle::round_to_nearest>;
+    using EVTApplyBeta = cutlass::epilogue::threadblock::Sm80EVT<
+        ApplyBeta,
+        Beta,
+        TensorC>;
+
+    using ApplySum = cutlass::epilogue::threadblock::VisitorCompute<
         cutlass::plus, ElementComputeEpilogue, ElementComputeEpilogue,
         cutlass::FloatRoundStyle::round_to_nearest>;
-    using EVTApplyTensorC = cutlass::epilogue::threadblock::Sm80EVT<
-        ApplyTensorC,
-        Accum,
-        TensorC>;
+    using EVTApplySum = cutlass::epilogue::threadblock::Sm80EVT<
+        ApplySum,
+        EVTApplyAlpha,
+        EVTApplyBeta>;
 
     using Output = cutlass::epilogue::threadblock::VisitorAuxStore<
         OutputTileThreadMap, ElementOutput, cutlass::FloatRoundStyle::round_to_nearest,
@@ -109,7 +132,7 @@ void spgemm_cutlass(
 
     using EVTOutput = cutlass::epilogue::threadblock::Sm80EVT<
         Output,
-        EVTApplyTensorC>;
+        EVTApplySum>;
 
     using Gemm = cutlass::gemm::device::SparseGemmWithVisitor<
         ElementInputA,
@@ -185,6 +208,26 @@ void spgemm_cutlass(
             (ElementInputE*)tensor_e.data_ptr(),
             ReorderedLayoutInputE::packed({length_m, tensor_e_ncols}));
 
+    AlphaArguments alpha_arguments{
+        [&]() -> AlphaArguments {
+            if constexpr (std::is_same<ElementComputeEpilogue, cutlass::half_t>::value ||
+                          std::is_same<ElementComputeEpilogue, cutlass::bfloat16_t>::value) {
+                return {ElementComputeEpilogue{alpha.to<float>()}};
+            } else {
+                return {alpha.to<ElementComputeEpilogue>()};
+            }
+        }()
+    };
+    BetaArguments beta_arguments{
+        [&]() -> BetaArguments {
+            if constexpr (std::is_same<ElementComputeEpilogue, cutlass::half_t>::value ||
+                          std::is_same<ElementComputeEpilogue, cutlass::bfloat16_t>::value) {
+                return {ElementComputeEpilogue{beta.to<float>()}};
+            } else {
+                return {beta.to<ElementComputeEpilogue>()};
+            }
+        }()
+    };
     TensorCArguments tensor_c_arguments{
         [&]() -> TensorCArguments {
             if constexpr (use_tensor_c) {
@@ -198,16 +241,24 @@ void spgemm_cutlass(
     };
     typename Output::Arguments output_arguments{
         (ElementOutput*)tensor_d.data_ptr(),
-            {problem_size.n(), cute::_1{}, problem_size.mn().product()}
+        {problem_size.n(), cute::_1{}, problem_size.mn().product()}
     };
     typename EVTOutput::Arguments callback_arguments{
         {
-            {},                     // Accum
-            tensor_c_arguments,     // TensorC
-            {}                      // ApplyTensorC
-        },                          // EVTApplyTensorC
-        output_arguments,           // Output
-    };                              // EVTOutput
+            {
+                alpha_arguments,     // Alpha
+                {},                  // Accum
+                {}                   // ApplyAlpha
+            },                       // EVTApplyAlpha
+            {
+                beta_arguments,      // Beta
+                tensor_c_arguments,  // TensorC
+                {}                   // ApplyBeta
+            },                       // EVTApplyBeta
+            {}                       // ApplySum
+        },                           // EVTApplySum
+        output_arguments             // Output
+    };                               // EVTOutput
 
     // Create a tuple of CUTLASS sparse GEMM kernel arguments.
     typename Gemm::Arguments arguments{
@@ -260,7 +311,8 @@ template <
     bool use_tensor_c>
 void spgemm_cutlass_dispatch_layouts(
     const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
-    const Tensor& tensor_e, Tensor& tensor_d) {
+    const Tensor& tensor_e, const Scalar& alpha, const Scalar& beta,
+    Tensor& tensor_d) {
     // Determine layouts (row-major or column-major) of input tensors.
     const auto strides_a = tensor_a.strides();
     auto tensor_a_row_major = strides_a[1] == 1;
@@ -289,6 +341,8 @@ void spgemm_cutlass_dispatch_layouts(
                 tensor_b_stride,
                 tensor_c,
                 tensor_e,
+                alpha,
+                beta,
                 tensor_d);
             return;
         }
@@ -312,6 +366,8 @@ void spgemm_cutlass_dispatch_layouts(
                 tensor_b_stride,
                 tensor_c,
                 tensor_e,
+                alpha,
+                beta,
                 tensor_d);
             return;
         }
@@ -335,6 +391,8 @@ void spgemm_cutlass_dispatch_layouts(
                 tensor_b_stride,
                 tensor_c,
                 tensor_e,
+                alpha,
+                beta,
                 tensor_d);
             return;
         }
@@ -358,6 +416,8 @@ void spgemm_cutlass_dispatch_layouts(
                 tensor_b_stride,
                 tensor_c,
                 tensor_e,
+                alpha,
+                beta,
                 tensor_d);
             return;
         }
@@ -384,7 +444,8 @@ template <
     bool EnableColumnMajorColumnMajorLayouts>
 void spgemm_cutlass_dispatch_layouts_tensor_c(
     const Tensor& tensor_a, const Tensor& tensor_b, const Tensor& tensor_c,
-    const Tensor& tensor_e, Tensor& tensor_d) {
+    const Tensor& tensor_e, const Scalar& alpha, const Scalar& beta,
+    Tensor& tensor_d) {
     if (tensor_c.numel() > 0) {
         spgemm_cutlass_dispatch_layouts<
             ElementInputA,
@@ -403,6 +464,8 @@ void spgemm_cutlass_dispatch_layouts_tensor_c(
             tensor_b,
             tensor_c,
             tensor_e,
+            alpha,
+            beta,
             tensor_d);
     } else {
         spgemm_cutlass_dispatch_layouts<
@@ -422,6 +485,8 @@ void spgemm_cutlass_dispatch_layouts_tensor_c(
             tensor_b,
             tensor_c,
             tensor_e,
+            alpha,
+            beta,
             tensor_d);
     }
 }
@@ -429,7 +494,7 @@ void spgemm_cutlass_dispatch_layouts_tensor_c(
 
 // Perform multiply-add operation, using corresponding CUTLASS
 // sparse GEMM kernel, to given arguments:
-//     result = input + mat1 * mat2
+//     result = alpha * mat1 * mat2 + beta * input
 // The "mat2" tensor is a dense tensor, while the "mat1" tensor is a
 // sparse semi-structured matrix.  The "input" tensor is optional; if
 // provided, it should be a vector, with the number of elements equal
@@ -456,8 +521,8 @@ void spgemm_cutlass_dispatch_layouts_tensor_c(
 // aten._sparse_semi_structured_addmm operators.
 Tensor sparse_semi_structured_mad_op(
       const Tensor& mat1, const Tensor& mat1_meta, const Tensor& mat2,
-      const c10::optional<Tensor>& input_opt,
-      const c10::optional<c10::ScalarType> out_dtype_opt) {
+      const c10::optional<Tensor>& input_opt, const Scalar& alpha,
+      const Scalar& beta, const c10::optional<c10::ScalarType> out_dtype_opt) {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
     AT_ERROR("sparse_semi_structured_mad_op: CUTLASS not supported");
     return Tensor{};
@@ -587,6 +652,8 @@ Tensor sparse_semi_structured_mad_op(
                       tensor_b,
                       tensor_c,
                       tensor_e,
+                      alpha,
+                      beta,
                       tensor_d);
                 } else if (out_dtype == at::kChar) {
                   using ElementOutput = int8_t;
@@ -606,6 +673,8 @@ Tensor sparse_semi_structured_mad_op(
                       tensor_b,
                       tensor_c,
                       tensor_e,
+                      alpha,
+                      beta,
                       tensor_d);
                 }
             })
@@ -639,6 +708,8 @@ Tensor sparse_semi_structured_mad_op(
                     tensor_b,
                     tensor_c,
                     tensor_e,
+                    alpha,
+                    beta,
                     tensor_d);
             })
             AT_DISPATCH_CASE(
@@ -671,6 +742,8 @@ Tensor sparse_semi_structured_mad_op(
                     tensor_b,
                     tensor_c,
                     tensor_e,
+                    alpha,
+                    beta,
                     tensor_d);
             })
             AT_DISPATCH_CASE(
@@ -703,6 +776,8 @@ Tensor sparse_semi_structured_mad_op(
                     tensor_b,
                     tensor_c,
                     tensor_e,
+                    alpha,
+                    beta,
                     tensor_d);
             }));
 
@@ -715,16 +790,17 @@ Tensor _sparse_semi_structured_mm(
       const Tensor& mat1, const Tensor& mat1_meta, const Tensor& mat2,
       const c10::optional<c10::ScalarType> out_dtype_opt) {
     return sparse_semi_structured_mad_op(mat1, mat1_meta, mat2,
-                                         c10::optional<Tensor>(),
+                                         c10::optional<Tensor>(), 1, 0,
                                          out_dtype_opt);
 }
 
 // Implementation of aten._sparse_semi_structured_addmm operator.
 Tensor _sparse_semi_structured_addmm(
       const Tensor& input, const Tensor& mat1, const Tensor& mat1_meta,
-      const Tensor& mat2, const c10::optional<c10::ScalarType> out_dtype_opt) {
-    return sparse_semi_structured_mad_op(mat1, mat1_meta, mat2, input,
-                                         out_dtype_opt);
+      const Tensor& mat2, const Scalar& alpha, const Scalar& beta,
+      const c10::optional<c10::ScalarType> out_dtype_opt) {
+    return sparse_semi_structured_mad_op(mat1, mat1_meta, mat2, input, alpha,
+                                         beta, out_dtype_opt);
 }
 
 } // namespace at::native

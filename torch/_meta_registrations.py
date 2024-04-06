@@ -428,6 +428,9 @@ def meta_sparse_structured_addmm(
     mat1: Tensor,
     mat1_meta: Tensor,
     mat2: Tensor,
+    *,
+    alpha=1,
+    beta=1,
     out_dtype: Optional[torch.dtype] = None,
 ):
     assert (
