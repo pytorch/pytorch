@@ -786,7 +786,11 @@ class InstructionTranslatorBase(
                     # in the same block, but the NOPs are not covered by an
                     # exception table entry. In this case, assume that we
                     # are still in the same block.
-                    if self.block_stack and inst.opname != "NOP":
+                    # In 3.12+, JUMP_BACKWARD might also not be covered by
+                    # an exception table entry, so we also assume that we
+                    # are still in the same block. It is probably safe to do
+                    # this in 3.11, even though we haven't encountered this case before.
+                    if self.block_stack and inst.opname not in ("NOP", "JUMP_BACKWARD"):
                         # If we really escape from a block and the current
                         # instruction is not in another block, then there
                         # should be no other nested blocks that we are in.
@@ -1877,17 +1881,8 @@ class InstructionTranslatorBase(
         self.append_prefix_inst(inst)
 
     # 3.12 opcodes
-    def BINARY_SLICE(self, inst):
-        # BUILD_SLICE
-        items = self.popn(2)
-        self.push(SliceVariable(items))
-        self.BINARY_SUBSCR(inst)
-
-    def STORE_SLICE(self, inst):
-        # BUILD SLICE
-        items = self.popn(2)
-        self.push(SliceVariable(items))
-        self.STORE_SUBSCR(inst)
+    # BINARY/STORE_SLICE opcodes are broken down into
+    # BUILD_SLICE 2 and BINARY/STORE_SUBSCR
 
     def END_FOR(self, inst):
         self.popn(2)
