@@ -209,6 +209,11 @@ class GraphLowering(torch.fx.Interpreter):
                 "cuda", CUDACombinedScheduling, WrapperCodeGen, CppWrapperCuda
             )
 
+        if get_scheduling_for_device("xpu") is None:
+            from .codegen.triton import TritonScheduling
+
+            register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -1286,6 +1291,25 @@ class GraphLowering(torch.fx.Interpreter):
                 ]
             else:
                 real_inputs = [materialize(x) for x in V.real_inputs]
+
+            if self.mutated_inputs:
+                from .compile_fx import clone_preserve_strides
+
+                mutated_input_idxs = [
+                    idx
+                    for idx, name in enumerate(self.graph_inputs)
+                    if name in self.mutated_inputs
+                    and isinstance(real_inputs[idx], torch.Tensor)
+                ]
+                for idx in mutated_input_idxs:
+                    # clone mutated Tensor inputs to avoid mutating them in
+                    # the first pass of the CPP wrapper-based compilation, as
+                    # this will lead to a side effect on the example inputs:
+                    # e.g. if torch.compile(f)(x) if called on input-mutating
+                    # f, the inputs x will be mutated twice in the process:
+                    # once here, and again when running the compiled model;
+                    # this will also lead to a numerically incorrect output
+                    real_inputs[idx] = clone_preserve_strides(real_inputs[idx])
 
             with torch.utils._python_dispatch._disable_current_modes():
                 assert self.example_inputs is not None
