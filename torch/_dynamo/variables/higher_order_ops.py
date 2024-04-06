@@ -12,6 +12,7 @@ import torch.fx
 import torch.nn
 import torch.onnx.operators
 from torch._dynamo.utils import deepcopy_to_fake_tensor, get_fake_value, get_real_value
+from torch._dynamo.variables import ConstantVariable
 from torch._dynamo.variables.base import VariableTracker
 from torch._dynamo.variables.builtin import BuiltinVariable
 from torch._dynamo.variables.functions import UserFunctionVariable
@@ -136,7 +137,7 @@ def validate_args_and_maybe_create_graph_inputs(
     set_subgraph_inputs,
     description,
 ):
-    from . import AutogradFunctionContextVariable, ConstantVariable, EnumVariable
+    from . import AutogradFunctionContextVariable, EnumVariable
     from .builder import wrap_fx_proxy_cls
 
     assert tracer.parent is not None
@@ -512,6 +513,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
             return OutDtypeHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ == "wrap":
             return WrapHigherOrderVariable(value, source, **kwargs)
+        elif value.__name__ == "templated_attention":
+            return TemplatedAttentionHigherOrderVariable(value, source, **kwargs)
         elif value.__name__ in (
             "wrap_activation_checkpoint",
             "tag_activation_checkpoint",
@@ -540,7 +543,6 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         from . import (
-            ConstantVariable,
             ListVariable,
             NestedUserFunctionVariable,
             TensorVariable,
@@ -1298,6 +1300,106 @@ class TraceWrappedHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
         kwargs = dict(kwargs)
         fn = kwargs.pop("fn")
         return fn.call_function(tx, args, kwargs)
+
+
+class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
+    @staticmethod
+    def normalize_to_args(args, kwargs):
+        # input signature is (query, key, value, score_mod, *other_buffers)
+        # Flatten args and kwargs into lists
+        flat_args = pytree.tree_flatten(args)[0]
+        flat_kwargs = pytree.tree_flatten(kwargs)[0]
+
+        # Combine the flattened lists
+        all_args = flat_args + flat_kwargs
+        return all_args
+
+    def create_wrapped_node(
+        self, tx, query: "VariableTracker", score_function: "VariableTracker"
+    ):
+        from torch._dynamo.symbolic_convert import InstructionTranslator
+        from .builder import SourcelessBuilder
+
+        tx: InstructionTranslator = tx
+
+        scores_require_grad: bool = query.requires_grad
+        score = query.call_method(
+            tx,
+            "new_empty",
+            (SourcelessBuilder.create(tx, []),),
+            {"requires_grad": SourcelessBuilder.create(tx, scores_require_grad)},
+        )
+
+        def create_scalar():
+            return query.call_method(
+                tx, "new_empty", (SourcelessBuilder.create(tx, []),), {}
+            )
+
+        bhmn = [create_scalar() for _ in range(4)]
+        new_args = [score, *bhmn]
+        (
+            (body_output, body_treespec),
+            body_graph,
+            body_lifted_freevars,
+        ) = speculate_subgraph(
+            tx,
+            score_function,
+            new_args,
+            {},  # expect only args no kwargs for now
+            description="templated_attention",
+            source_target=self.value,
+            set_subgraph_inputs="flatten_manual",
+        )
+
+        body_name = add_subgraph(
+            tx,
+            "templated_attention",
+            torch.fx.GraphModule(tx.output.nn_modules, body_graph),
+        )
+
+        body_node = make_attr(tx, body_name)
+
+        # It is possible that the score-mod function captures some free variables that are not
+        # passed in as arguments. In this case, we need to lift them, which is handled by speculate_subgraph.
+        # We then need to create proxies for this + the inputs.
+
+        lifted_args = tuple(arg for arg in body_lifted_freevars.keys())
+
+        proxy_args = (body_node,) + lifted_args
+        example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_output.as_proxy(),
+        )
+
+        return proxy_args, {}, example_value
+
+    def call_function(
+        self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
+    ) -> "VariableTracker":
+        from .builder import wrap_fx_proxy
+
+        query, key, value, score_mod, *other_buffers = self.normalize_to_args(
+            args, kwargs
+        )
+
+        p_args, p_kwargs, example_value = self.create_wrapped_node(tx, query, score_mod)
+        proxied_args = [query, key, value, *other_buffers]
+
+        # Store the invocation as a call
+        # Norm_kwargs contains the score_function and we dont want to proxy this because
+        # Proxying user defined functions is not supported.
+        inp_args, _ = proxy_args_kwargs(proxied_args, {})
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                self.value,
+                args=inp_args + p_args,
+                kwargs=p_kwargs,
+            ),
+            example_value=example_value,
+        )
 
 
 class AutogradFunctionApplyVariable(VariableTracker):
