@@ -677,7 +677,7 @@ class VariableBuilder:
             # TODO: this doing it manually is bad
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, torch.optim.Optimizer):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.ID_MATCH)
             self.source = OptimizerSource(self.source)
             return OptimizerVariable(value, source=self.source)
         elif WorldMetaClassVariable.is_group_member_type(value):
