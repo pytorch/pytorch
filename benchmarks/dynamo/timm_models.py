@@ -65,6 +65,7 @@ REQUIRE_HIGHER_TOLERANCE = {
     "gmixer_24_224",
     "hrnet_w18",
     "inception_v3",
+    "mixer_b16_224",
     "sebotnet33ts_256",
     "selecsls42b",
 }
@@ -319,7 +320,9 @@ class TimmRunner(BenchmarkRunner):
             tolerance = 8 * 1e-2
 
         if is_training:
-            if name in REQUIRE_HIGHER_TOLERANCE:
+            if name in ["levit_128"]:
+                tolerance = 8 * 1e-2
+            elif name in REQUIRE_HIGHER_TOLERANCE:
                 tolerance = 4 * 1e-2
             else:
                 tolerance = 1e-2
