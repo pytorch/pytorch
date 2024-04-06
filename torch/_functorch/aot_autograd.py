@@ -915,13 +915,7 @@ def aot_module_simplified(
         # args may contain lists of tensors from dynamo we should free
         flat_args = []
         flat_args.extend(params_flat)
-        for arg in runtime_args:
-            if isinstance(arg, list):
-                flat_args.extend(arg)
-                arg.clear()
-            else:
-                flat_args.append(arg)
-
+        flat_args.extend(runtime_args)
         return compiled_fn(flat_args)
 
     # Just for convenience

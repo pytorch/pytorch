@@ -169,6 +169,19 @@ def aot_dispatch_base(
             fakified_out = None
             return out
 
+        # TODO: move this away
+        # args is a list because compiled_fw is boxed_call
+        # args may contain lists of tensors from dynamo we should free
+        flat_args = []
+        for arg in args:
+            if isinstance(arg, list):
+                flat_args.extend(arg)
+                arg.clear()
+            else:
+                flat_args.append(arg)
+        args.clear()
+        args = flat_args
+
         if fw_metadata.is_rng_op_functionalized:
             # Add the seed and offset to args
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
