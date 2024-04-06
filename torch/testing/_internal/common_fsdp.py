@@ -1327,12 +1327,11 @@ class FSDPTest(MultiProcessTestCase):
 
 def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
     def fully_shard_with_compiled_compute(*args, **kwargs):
-        # compile ``module._call_impl``
-        # to showcase how to include user-registered hooks
         if compile_compute_on_module is None or isinstance(
             args[0], compile_compute_on_module
         ):
             torch.distributed._composable.fsdp.fully_shard(*args, **kwargs)  # type: ignore[operator]
+            # including user-registered hooks
             args[0].compile()
 
     class FullyShardMode(Enum):
@@ -1349,9 +1348,16 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
                     warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
                     continue
 
+                # barrier to ensure thread reading the same value
+                original_skip_fsdp_hooks = torch._dynamo.config.skip_fsdp_hooks
+                original_compile_threads = torch._inductor.config.compile_threads
+                torch.distributed.barrier()
+
                 if mode == FullyShardMode.EAGER:
                     fully_shard_patch = original_fully_shard
-                else:
+                elif mode == FullyShardMode.COMPILED_COMPUTE:
+                    torch._dynamo.config.skip_fsdp_hooks = True
+                    torch._inductor.config.compile_threads = 1
                     fully_shard_patch = fully_shard_with_compiled_compute
 
                 # fully_shard is imported as a global
@@ -1361,6 +1367,8 @@ def test_compiled_fsdp(compile_compute_on_module: Optional[type] = None):
                 # other threads use patched func before this thread restores
                 torch.distributed.barrier()
                 func.__globals__[original_fully_shard.__name__] = original_fully_shard
+                torch._dynamo.config.skip_fsdp_hooks = original_skip_fsdp_hooks
+                torch._inductor.config.compile_threads = original_compile_threads
 
         return wrapper
 
