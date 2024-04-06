@@ -998,6 +998,25 @@ PyObject* THPModule_allowBF16ReductionCuBLAS(
   Py_RETURN_FALSE;
 }
 
+PyObject* THPModule_setAllowFP16ReductionCPU(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      PyBool_Check(arg),
+      "set_allow_fp16_reduction_cpu expects a bool, "
+      "but got ",
+      THPUtils_typename(arg));
+  at::globalContext().setAllowFP16ReductionCPU(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPModule_allowFP16ReductionCPU(PyObject* _unused, PyObject* noargs) {
+  if (at::globalContext().allowFP16ReductionCPU()) {
+    Py_RETURN_TRUE;
+  }
+  Py_RETURN_FALSE;
+}
+
 PyObject* THPModule_setFlushDenormal(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   TORCH_CHECK(
@@ -1371,6 +1390,14 @@ static PyMethodDef TorchMethods[] = { // NOLINT
      nullptr},
     {"_set_cublas_allow_bf16_reduced_precision_reduction",
      THPModule_setAllowBF16ReductionCuBLAS,
+     METH_O,
+     nullptr},
+    {"_get_cpu_allow_fp16_reduced_precision_reduction",
+     THPModule_allowFP16ReductionCPU,
+     METH_NOARGS,
+     nullptr},
+    {"_set_cpu_allow_fp16_reduced_precision_reduction",
+     THPModule_setAllowFP16ReductionCPU,
      METH_O,
      nullptr},
     {"_vmapmode_increment_nesting",

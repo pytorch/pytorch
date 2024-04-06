@@ -49,6 +49,7 @@ class InputKind(Enum):
     BUFFER = auto()
     CONSTANT_TENSOR = auto()
     CUSTOM_OBJ = auto()
+    TOKEN = auto()
 
 
 @dataclasses.dataclass
@@ -76,6 +77,7 @@ class OutputKind(Enum):
     GRADIENT_TO_PARAMETER = auto()
     GRADIENT_TO_USER_INPUT = auto()
     USER_INPUT_MUTATION = auto()
+    TOKEN = auto()
 
 
 @dataclasses.dataclass
@@ -101,23 +103,25 @@ def _sig_to_specs(
     loss_output: Optional[str],
     inputs: List[ArgumentSpec],
     outputs: List[ArgumentSpec],
+    input_tokens: List[str],
+    output_tokens: List[str],
 ) -> Tuple[List[InputSpec], List[OutputSpec]]:
-    def to_input_spec(i: ArgumentSpec) -> InputSpec:
-        if not isinstance(i, TensorArgument):
-            return InputSpec(kind=InputKind.USER_INPUT, arg=i, target=None)
-        name = i.name
+    def to_input_spec(inp: ArgumentSpec) -> InputSpec:
+        if not isinstance(inp, TensorArgument):
+            return InputSpec(kind=InputKind.USER_INPUT, arg=inp, target=None)
+        name = inp.name
         if name in user_inputs:
-            return InputSpec(kind=InputKind.USER_INPUT, arg=i, target=None)
+            return InputSpec(kind=InputKind.USER_INPUT, arg=inp, target=None)
         elif name in inputs_to_parameters:
             return InputSpec(
                 kind=InputKind.PARAMETER,
-                arg=i,
+                arg=inp,
                 target=inputs_to_parameters[name],
             )
         elif name in inputs_to_buffers:
             return InputSpec(
                 kind=InputKind.BUFFER,
-                arg=i,
+                arg=inp,
                 target=inputs_to_buffers[name],
                 # Mark as True for now; we will fix this up to distinguish
                 # persistent from non-persistent later in tracing.
@@ -125,6 +129,8 @@ def _sig_to_specs(
                 # TODO(suo): this is horrible.
                 persistent=True,
             )
+        elif name in input_tokens:
+            return InputSpec(kind=InputKind.TOKEN, arg=inp, target=None)
         else:
             raise AssertionError(f"Unknown tensor input kind: {name}")
 
@@ -132,7 +138,7 @@ def _sig_to_specs(
         if not isinstance(o, TensorArgument):
             return OutputSpec(kind=OutputKind.USER_OUTPUT, arg=o, target=None)
         name = o.name
-        if idx < len(buffer_mutations) + len(user_input_mutations):
+        if idx < len(buffer_mutations) + len(user_input_mutations) + len(output_tokens):
             if name in buffer_mutations:
                 return OutputSpec(
                     kind=OutputKind.BUFFER_MUTATION,
@@ -145,6 +151,8 @@ def _sig_to_specs(
                     arg=o,
                     target=user_input_mutations[name],
                 )
+            elif name in output_tokens:
+                return OutputSpec(kind=OutputKind.TOKEN, arg=o, target=None)
             else:
                 raise AssertionError(f"Unknown tensor mutation kind: {name}")
         else:
@@ -169,7 +177,7 @@ def _sig_to_specs(
             else:
                 raise AssertionError(f"Unknown tensor output kind: {name}")
 
-    input_specs = [to_input_spec(i) for i in inputs]
+    input_specs = [to_input_spec(inp) for inp in inputs]
     output_specs = [to_output_spec(idx, o) for idx, o in enumerate(outputs)]
     return input_specs, output_specs
 
@@ -442,6 +450,24 @@ class ExportGraphSignature:
     @property
     def assertion_dep_token(self) -> Optional[Mapping[int, str]]:
         return None
+
+    @property
+    def input_tokens(self) -> List[str]:
+        input_tokens = []
+        for s in self.input_specs:
+            if s.kind == InputKind.TOKEN:
+                assert isinstance(s.arg, TensorArgument)
+                input_tokens.append(s.arg.name)
+        return input_tokens
+
+    @property
+    def output_tokens(self) -> List[str]:
+        output_tokens = []
+        for s in self.output_specs:
+            if s.kind == OutputKind.TOKEN:
+                assert isinstance(s.arg, TensorArgument)
+                output_tokens.append(s.arg.name)
+        return output_tokens
 
     def __post_init__(self) -> None:
         assertion_dep_token = self.assertion_dep_token

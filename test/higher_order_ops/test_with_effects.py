@@ -70,7 +70,6 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(len(gs.input_tokens), 1)
         self.assertEqual(len(gs.output_tokens), 1)
 
-    @unittest.expectedFailure  # Will enable this once we enable tokens in export
     def test_torchbind_custom_op(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -86,11 +85,13 @@ def forward(self, arg0_1, arg1_1):
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
-def forward(self, arg0_1):
+def forward(self, arg0_1, arg1_1):
     _tensor_constant0 = self._tensor_constant0
-    takes_foo = torch.ops._TorchScriptTesting.takes_foo.default(_tensor_constant0, arg0_1);  _tensor_constant0 = None
-    add = torch.ops.aten.add.Tensor(arg0_1, takes_foo);  arg0_1 = takes_foo = None
-    return (add,)""",  # noqa: B950
+    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo.default, _tensor_constant0, arg1_1);  arg0_1 = _tensor_constant0 = None
+    getitem = with_effects[0]
+    getitem_1 = with_effects[1];  with_effects = None
+    add = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  arg1_1 = getitem_1 = None
+    return (getitem, add)""",  # noqa: B950
         )
         self.assertEqual(len(gs.input_tokens), 1)
         self.assertEqual(len(gs.output_tokens), 1)

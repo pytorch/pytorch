@@ -412,7 +412,6 @@ extern "C" {{
     else:
         device = dispatch_key.lower()
         return f"""
-#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #include <torch/csrc/inductor/aoti_torch/utils.h>
 #include <torch/csrc/inductor/aoti_torch/generated/c_shim_{device}.h>
 

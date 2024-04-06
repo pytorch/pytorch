@@ -108,7 +108,7 @@ def _remove_set_grad_and_inline(node: torch.fx.Node):
     sub_graph = sub_gm.graph
     nodes_map(
         sub_graph.nodes,
-        lambda n: graph.erase_node(n) if _is_set_grad_enabled_node(n) else n,
+        lambda n: sub_graph.erase_node(n) if _is_set_grad_enabled_node(n) else n,
     )
     node_inline_(node)
 

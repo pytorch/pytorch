@@ -3,7 +3,6 @@ from collections import OrderedDict
 
 import torch
 from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
-from torch.distributed.tensor.parallel._utils import _create_1d_device_mesh
 from torch.distributed.tensor.parallel.api import (
     parallelize_module,
 )
@@ -34,45 +33,6 @@ class TensorParallelAPITests(DTensorTestBase):
     def world_size(self):
         gpu_num = torch.cuda.device_count()
         return gpu_num if gpu_num % 2 == 0 and gpu_num > 4 else 4
-
-    @with_comms
-    def test_create_1d_device_mesh(self):
-        dim_one_size = 2
-        mesh_shape = (
-            torch.arange(self.world_size)
-            .reshape(
-                self.world_size // dim_one_size,
-                dim_one_size,
-            )
-            .to(torch.int)
-        )
-        mesh = DeviceMesh(self.device_type, mesh_shape)
-        # When 1D dim is 1.
-        one_dimention_mesh_shape = mesh_shape[self.rank // dim_one_size, :]
-        pg = mesh.get_group(mesh_dim=1)
-        new_mesh = _create_1d_device_mesh(mesh, 1)
-        expected_mesh = one_dimention_mesh_shape
-
-        self.assertEqual(new_mesh.mesh, expected_mesh)
-        self.assertEqual(new_mesh.device_type, self.device_type)
-        self.assertEqual(new_mesh.get_group(), pg)
-        # When 1D dim is 0.
-        one_dimention_mesh_shape = mesh_shape[:, self.rank % dim_one_size]
-        pg = mesh.get_group(mesh_dim=0)
-        new_mesh = _create_1d_device_mesh(mesh, 0)
-        expected_mesh = one_dimention_mesh_shape
-        self.assertEqual(new_mesh.mesh, expected_mesh)
-        self.assertEqual(new_mesh.device_type, self.device_type)
-        self.assertEqual(new_mesh.get_group(), pg)
-
-    @with_comms
-    def test_create_1d_device_mesh_error(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-        with self.assertRaisesRegex(
-            AssertionError,
-            "Expect tp_mesh_dim within range \\[-1, 1\\), but found 3.",
-        ):
-            _create_1d_device_mesh(mesh, 3)
 
     def _compare_params(
         self,

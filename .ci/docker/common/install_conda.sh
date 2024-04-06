@@ -57,8 +57,21 @@ fi
   # Uncomment the below when resolved to track the latest conda update
   # as_jenkins conda update -y -n base conda
 
+  if [[ $(uname -m) == "aarch64" ]]; then
+    export SYSROOT_DEP="sysroot_linux-aarch64=2.17"
+  else
+    export SYSROOT_DEP="sysroot_linux-64=2.17"
+  fi
+
   # Install correct Python version
-  as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y python="$ANACONDA_PYTHON_VERSION"
+  # Also ensure sysroot is using a modern GLIBC to match system compilers
+  as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
+             python="$ANACONDA_PYTHON_VERSION" \
+             ${SYSROOT_DEP}
+
+  # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
+  # which is provided in libstdcxx 12 and up.
+  conda_install libstdcxx-ng=12.3.0 -c conda-forge
 
   # Install PyTorch conda deps, as per https://github.com/pytorch/pytorch README
   if [[ $(uname -m) == "aarch64" ]]; then
@@ -108,15 +121,6 @@ fi
 
     # We are currently building docs with python 3.8 (min support version)
     pip_install -r /opt/conda/requirements-docs.txt
-  fi
-
-  # HACK HACK HACK
-  # gcc-9 for ubuntu-18.04 from http://ppa.launchpad.net/ubuntu-toolchain-r/test/ubuntu
-  # Pulls llibstdc++6 13.1.0-8ubuntu1~18.04 which is too new for conda
-  # So remove libstdc++6.so.3.29 installed by https://anaconda.org/anaconda/libstdcxx-ng/files?version=11.2.0
-  # Same is true for gcc-12 from Ubuntu-22.04
-  if grep -e [12][82].04.[623] /etc/issue >/dev/null; then
-    rm /opt/conda/envs/py_$ANACONDA_PYTHON_VERSION/lib/libstdc++.so.6
   fi
 
   popd

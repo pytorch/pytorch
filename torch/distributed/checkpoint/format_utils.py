@@ -5,9 +5,8 @@ from typing import cast, Dict, List, Optional, Union
 
 import torch
 import torch.distributed as dist
-import torch.distributed.checkpoint as dcp
 from torch.distributed._shard._utils import narrow_tensor_by_index
-from torch.distributed.checkpoint import FileSystemReader
+from torch.distributed.checkpoint import FileSystemReader, FileSystemWriter
 from torch.distributed.checkpoint._nested_dict import flatten_state_dict
 from torch.distributed.checkpoint._traverse import set_element
 from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner
@@ -21,6 +20,7 @@ from torch.distributed.checkpoint.metadata import (
 from torch.distributed.checkpoint.planner import LoadItemType, LoadPlan, LoadPlanner
 from torch.distributed.checkpoint.planner_helpers import _create_chunk_list
 from torch.distributed.checkpoint.state_dict_loader import _load_state_dict
+from torch.distributed.checkpoint.state_dict_saver import _save_state_dict
 from torch.distributed.checkpoint.storage import StorageReader
 from torch.futures import Future
 
@@ -240,11 +240,10 @@ def dcp_to_torch_save(
         To avoid OOM, it's recommended to only run this function on a single rank.
     """
     sd: STATE_DICT_TYPE = {}
-    storage_reader = FileSystemReader(dcp_checkpoint_dir)
 
     _load_state_dict(
         sd,
-        storage_reader=storage_reader,
+        storage_reader=FileSystemReader(dcp_checkpoint_dir),
         planner=_EmptyStateDictLoadPlanner(),
         no_dist=True,
     )
@@ -267,7 +266,11 @@ def torch_save_to_dcp(
     """
 
     state_dict = torch.load(torch_save_path)
-    dcp.save(state_dict, checkpoint_id=dcp_checkpoint_dir, no_dist=True)
+    # we don't need stateful behavior here because the expectation is anything loaded by
+    # torch.load would not contain stateful objects.
+    _save_state_dict(
+        state_dict, storage_writer=FileSystemWriter(dcp_checkpoint_dir), no_dist=True
+    )
 
 
 if __name__ == "__main__":

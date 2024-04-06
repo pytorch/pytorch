@@ -2,7 +2,7 @@
 import sympy
 
 from torch._inductor.codegen.cpp import cexpr
-from torch._inductor.codegen.triton import texpr, TritonPrinter
+from torch._inductor.codegen.triton import texpr
 from torch._inductor.codegen.wrapper import pexpr
 
 from torch._inductor.sizevars import SizeVarAllocator
@@ -212,7 +212,8 @@ class ExprPrinterTests(TorchTestCase):
             else:
                 self.assertExpectedInline(pexpr(expr), """math.floor((1/2)*s1)""")
                 self.assertExpectedInline(
-                    texpr(expr), """tl.math.floor((1/2)*s1).to(tl.int64)"""
+                    texpr(expr),
+                    """libdevice.floor((1/2)*s1).to(tl.int64)""",
                 )
                 self.assertExpectedInline(cexpr(expr), """std::floor((1.0/2.0)*s1)""")
 
@@ -234,7 +235,7 @@ class ExprPrinterTests(TorchTestCase):
         self.assertExpectedInline(pexpr(expr), """round((1/2)*x)""")
         self.assertExpectedInline(cexpr(expr), """std::lrint((1.0/2.0)*x)""")
         self.assertExpectedInline(
-            texpr(expr), """tl.math.llrint((1/2)*x).to(tl.int64)"""
+            texpr(expr), """libdevice.llrint((1/2)*x).to(tl.int64)"""
         )
 
     @parametrize("ndigits", [-1, 0, 1])
@@ -247,7 +248,7 @@ class ExprPrinterTests(TorchTestCase):
         )
         self.assertEqual(
             texpr(expr),
-            f"tl.math.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e{-ndigits}",
+            f"libdevice.nearbyint(1e{ndigits} * ((1/2)*x)) * 1e{-ndigits}",
         )
 
         expr = RoundDecimal(sympy.Symbol("x", integer=True), ndigits)
@@ -295,17 +296,16 @@ class ExprPrinterTests(TorchTestCase):
             (sympy.Min, "min"),
             (sympy.Max, "max"),
         )
-        extra_arg = TritonPrinter._propagate_nan_arg()
         for f, s in cases:
             x = sympy.Symbol("x", integer=True)
             expr = f(-2, x)
-            self.assertEqual(texpr(expr), f"tl.math.{s}(-2, x{extra_arg})")
+            self.assertEqual(texpr(expr), f"tl.{s}imum(-2, x)")
             self.assertEqual(cexpr(expr), f"std::{s}(-2L, x)")
 
             expr = f(x, 2 * x, 3 * x)
             self.assertEqual(
                 texpr(expr),
-                f"tl.math.{s}(x, tl.math.{s}(2*x, 3*x{extra_arg}){extra_arg})",
+                f"tl.{s}imum(x, tl.{s}imum(2*x, 3*x))",
             )
             self.assertEqual(cexpr(expr), f"std::{s}({{x, 2L*x, 3L*x}})")
 

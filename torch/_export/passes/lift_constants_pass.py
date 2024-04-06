@@ -174,6 +174,9 @@ def lift_constants_pass(
             with gm.graph.inserting_before(first_user_input):
                 # Insert the constant node before the first user input
                 const_placeholder_node = gm.graph.placeholder(constant_name)
+                # match target name with its node name in case there is name collision
+                # and suffix is added to node name in fx
+                const_placeholder_node.target = const_placeholder_node.name
 
                 for k, v in node.meta.items():
                     const_placeholder_node.meta[k] = v

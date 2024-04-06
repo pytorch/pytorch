@@ -195,7 +195,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         import torch
         from .builder import SourcelessBuilder
 
-        if name in banned_attrs or not hasattr(torch.Tensor, name):
+        if name in banned_attrs:
             unimplemented(
                 f"Accessing {name} on a tensor subclass with a __torch_function__ override is not supported"
             )
@@ -206,7 +206,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
                 " subclass with a __torch_function__ override is not supported"
             )
 
-        if tx.output.torch_function_enabled:
+        if tx.output.torch_function_enabled and hasattr(torch.Tensor, name):
             if self.source:
                 install_guard(
                     AttrSource(AttrSource(self.source, "__class__"), name).make_guard(

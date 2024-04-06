@@ -205,7 +205,8 @@ class TensorVariable(VariableTracker):
                 from .builder import SourcelessBuilder
 
                 return SourcelessBuilder()(tx, example_value)
-        if not self.source:
+
+        if not (self.source and self.source.subguards_allowed()):
             raise NotImplementedError()
 
         # For local source, we associate the real value. We use this real value
@@ -291,6 +292,13 @@ class TensorVariable(VariableTracker):
     def method_attr_data(self, tx):
         return self.call_method(tx, "detach", [], {})
 
+    def method_attr__version(self, tx):
+        from ..tensor_version_op import _tensor_version
+
+        return variables.TorchInGraphFunctionVariable(_tensor_version).call_function(
+            tx, [self], {}
+        )
+
     def var_getattr(self, tx, name):
         from . import UserDefinedClassVariable
 
@@ -309,7 +317,8 @@ class TensorVariable(VariableTracker):
         # <tensor> is later changed to another type
         if (
             result is not None
-            and self.source is not None
+            and self.source
+            and self.source.subguards_allowed()
             and not (
                 name not in ("grad", "requires_grad") and result.is_python_constant()
             )
