@@ -552,7 +552,9 @@ class TestSparseSemiStructured(TestCase):
             if not use_input:
                 output1 = torch._sparse_semi_structured_mm(mat1_sparse, mat1_meta, mat2, out_dtype=dtype_out)
             else:
-                output1 = torch._sparse_semi_structured_addmm(input, mat1_sparse, mat1_meta, mat2, alpha=alpha, beta=beta, out_dtype=dtype_out)
+                output1 = torch._sparse_semi_structured_addmm(
+                    input, mat1_sparse, mat1_meta, mat2, alpha=alpha, beta=beta, out_dtype=dtype_out
+                )
             torch.testing.assert_close(output1.to(dtype_dense), output0, rtol=rtol, atol=atol)
 
         if dtype == torch.float32:
