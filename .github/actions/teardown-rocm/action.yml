@@ -19,5 +19,6 @@ runs:
       if: always()
     - name: Chown workspace back to pytorchci (Fallout of PR 122922)
       if: always()
+      shell: bash
       run: |
         sudo chown -R "${USER}" "${GITHUB_WORKSPACE}"
