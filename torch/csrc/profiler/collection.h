@@ -106,6 +106,7 @@ struct TorchOpBasicFields {
   uint64_t forward_tid_{0};
   at::RecordScope scope_{};
   bool is_async_{false};
+  uint64_t record_function_id_{0};
   int64_t debug_handle_{0};
   std::string name_;
 
