@@ -74,7 +74,6 @@ sys.path.remove(str(REPO_ROOT))
 RERUN_DISABLED_TESTS = os.getenv("PYTORCH_TEST_RERUN_DISABLED_TESTS", "0") == "1"
 DISTRIBUTED_TEST_PREFIX = "distributed"
 INDUCTOR_TEST_PREFIX = "inductor"
-DYNAMO_TEST_PREFIX = "dynamo"
 
 
 # Note [ROCm parallel CI testing]
@@ -326,7 +325,6 @@ JIT_EXECUTOR_TESTS = [
 ]
 
 INDUCTOR_TESTS = [test for test in TESTS if test.startswith(INDUCTOR_TEST_PREFIX)]
-DYNAMO_TESTS = [test for test in TESTS if test.startswith(DYNAMO_TEST_PREFIX)]
 DISTRIBUTED_TESTS = [test for test in TESTS if test.startswith(DISTRIBUTED_TEST_PREFIX)]
 TORCH_EXPORT_TESTS = [test for test in TESTS if test.startswith("export")]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
@@ -1362,7 +1360,6 @@ def get_selected_tests(options) -> List[str]:
     # these tests failing in Python 3.12 temporarily disabling
     if sys.version_info >= (3, 12):
         options.exclude.extend(INDUCTOR_TESTS)
-        options.exclude.extend(DYNAMO_TESTS)
         options.exclude.extend(
             [
                 "functorch/test_dims",
