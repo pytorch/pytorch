@@ -231,6 +231,8 @@ class CachingAutotuner(KernelInterface):
                 and self.size_hints is not None
                 # Disable for AMDGPU as Triton is not ready to return n_regs for a compiled_binary.
                 and torch.version.hip is None
+                # Disable for Intel GPU as Triton is not ready to return n_regs for a compiled_binary.
+                and self.device_type != "xpu"
                 and device_prop.major >= 8
             ):
                 for triton_config, compiled_binary in zip(
@@ -972,8 +974,7 @@ def cached_autotune(
             with open(cache_filename) as fd:
                 best_config = json.loads(fd.read())
         elif remote_cache is not None and remote_cache_key is not None:
-            cache_outs = remote_cache.get([remote_cache_key])
-            best_config = cache_outs.get(remote_cache_key, None)
+            best_config = remote_cache.get(remote_cache_key)
 
         best_config = load_cached_autotuning(best_config, configs_hash, configs)
         if best_config:
