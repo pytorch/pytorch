@@ -3,12 +3,15 @@
 import torch
 import functools
 from torch.testing import make_tensor
+import unittest
 from functorch.experimental.control_flow import map
 from torch.testing._internal.opinfo.core import (
     OpInfo,
     SampleInput,
 )
-from torch.testing._internal.common_dtype import all_types_and
+from torch.testing._internal.common_dtype import all_types_and, custom_types
+from torch.testing._internal.opinfo.core import DecorateInfo
+from torch.nn.attention._templated_attention import _templated_attention
 
 def sample_inputs_map(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
@@ -105,6 +108,23 @@ def sample_inputs_auto_functionalize(opinfo, device, dtype, requires_grad, **kwa
 def simple_auto_functionalize(x, z):
     return torch.ops.testlib.mutating_custom_op(x, z)
 
+
+def sample_inputs_templated_attention(opinfo, device, dtype, reuires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=reuires_grad
+    )
+
+    def score_mod(score, b, h, m, n):
+        return score + h
+
+    yield SampleInput(
+        make_arg(2, 2, 64, 8, low=0.1, high=2),
+        make_arg(2, 2, 64, 8, low=0.1, high=2),
+        make_arg(2, 2, 64, 8, low=0.1, high=2),
+        score_mod,
+    )
+
+
 hop_db = [
     OpInfo(
         name="map",
@@ -167,5 +187,23 @@ hop_db = [
         check_batched_forward_grad=False,
         check_inplace_batched_forward_grad=False,
         supports_autograd=False,
-    )
+    ),
+    OpInfo(
+        name="templated_attention",
+        variant_test_name="simple",
+        op=_templated_attention,
+        sample_inputs_func=sample_inputs_templated_attention,
+        dtypes=custom_types(torch.float16, torch.float32),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+        )
+    ),
 ]
