@@ -15910,6 +15910,8 @@ op_db: List[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
+                        # NYI: The operator 'aten::rsub.Tensor' is not currently implemented for the MPS device
+                        DecorateInfo(unittest.expectedFailure, 'TestConsistency', 'test_output_grad_match', device_type='mps'),
                     ),
                     assert_autodiffed=True,
                     autodiff_nonfusible_nodes=['aten::rsub'],),
