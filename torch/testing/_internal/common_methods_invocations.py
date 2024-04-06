@@ -15911,7 +15911,7 @@ op_db: List[OpInfo] = [
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
                         # NYI: The operator 'aten::rsub.Tensor' is not currently implemented for the MPS device
-                        DecorateInfo(unittest.expectedFailure, 'TestConsistency', 'test_output_grad_match', device_type='mps'),
+                        DecorateInfo(unittest.expectedFailure, 'TestConsistency', 'test_output_grad_match'),
                     ),
                     assert_autodiffed=True,
                     autodiff_nonfusible_nodes=['aten::rsub'],),
@@ -16727,11 +16727,6 @@ op_db: List[OpInfo] = [
     *(OpInfo('index_reduce',
              variant_test_name=reduction_type,
              dtypes=all_types_and(torch.float16, torch.bfloat16),
-             backward_dtypesIfCUDA=dict(prod=floating_types_and(torch.float16),
-                                        mean=custom_types(),
-                                        amin=custom_types(),
-                                        amax=custom_types(),
-                                        )[reduction_type],
              skips=(
                  DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=3e-3)}),
                               'TestInductorOpInfo', 'test_comprehensive'),
