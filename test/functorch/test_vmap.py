@@ -3761,7 +3761,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail('sparse.mm', 'reduce'),
         xfail('special.chebyshev_polynomial_u'),
         xfail('_segment_reduce', 'offsets'),
-        xfail('index_reduce', ''),
         xfail('index_reduce', 'prod'),
         xfail('index_reduce', 'mean'),
         xfail('index_reduce', 'amax'),

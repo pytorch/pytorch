@@ -227,6 +227,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     ("normal", "number_mean"): {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
+    "to_sparse": {
+        f32,
+        f64,
+    },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCPU
     "view_as_complex": {f16},
 }
 
@@ -238,6 +242,11 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
+    "to_sparse": {
+        f16,
+        f32,
+        f64,
+    },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCUDA
 }
 
 

@@ -786,7 +786,6 @@ class TestOperators(TestCase):
         # It looks like you're either (1) calling .item() on a Tensor or
         # (2) attempting to use a Tensor in some data-dependent control flow or
         # (3) encountering this error in PyTorch internals.
-        xfail("index_reduce"),
         xfail("index_reduce", "prod"),
         decorate("linalg.householder_product", decorator=runOnRocm),  # works on ROCm
         xfail("nanquantile", device_type='cpu'),  # vmap not implemented for at::equal.
@@ -969,7 +968,6 @@ class TestOperators(TestCase):
         xfail('sparse.sampled_addmm', ''),
         xfail('sparse.mm', 'reduce'),
         xfail('as_strided_scatter', ''),  # calls as_strided
-        xfail('index_reduce', ''),  # .item() call
         xfail('index_reduce', 'prod'),  # .item() call
         # ---------------------------------------------------------------------
     })
@@ -1234,7 +1232,6 @@ class TestOperators(TestCase):
         xfail('cdouble', ''),
         xfail('cfloat', ''),
         xfail('chalf', ''),
-        xfail('index_reduce', ''),
         xfail('index_reduce', 'prod'),  # aten::index_reduce hit the vmap fallback which is currently disabled
         xfail('index_reduce', 'mean'),  # aten::index_reduce hit the vmap fallback which is currently disabled
         xfail('index_reduce', 'amax'),  # aten::index_reduce hit the vmap fallback which is currently disabled
@@ -1421,7 +1418,6 @@ class TestOperators(TestCase):
         xfail('sparse.sampled_addmm', ''),  # Sparse tensors have no strides
         xfail('_segment_reduce', 'offsets'),  # NYI: forward-AD for _segment_reduce
         xfail('sparse.mm', 'reduce'),  # Sparse tensors have no strides
-        xfail('index_reduce', ''),  # NYI: forward-AD for index_reduce
         xfail('index_reduce', 'prod'),  # NYI: forward-AD for index_reduce
         xfail('index_reduce', 'mean'),  # NYI: forward-AD for index_reduce
         xfail('index_reduce', 'amax'),  # NYI: forward-AD for index_reduce
@@ -1529,7 +1525,6 @@ class TestOperators(TestCase):
         xfail('double'),  # required rank 4 tensor to use channels_last format
         xfail('float'),  # required rank 4 tensor to use channels_last format
         xfail('half'),  # required rank 4 tensor to use channels_last format
-        xfail('index_reduce'),  # Forward AD not implemented and no decomposition
         xfail('index_reduce', 'prod'),  # NYI: forward AD for index_reduce
         xfail('index_reduce', 'mean'),  # NYI: forward AD for index_reduce
         xfail('index_reduce', 'amax'),  # NYI: forward AD for index_reduce
