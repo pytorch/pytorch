@@ -337,25 +337,3 @@ def _replace_by_prefix(
 
 def _data_ptr_allocated(tensor: torch.Tensor) -> bool:
     return tensor.untyped_storage().data_ptr() > 0
-
-
-def record_event(stream):
-    event = None
-    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-        event = stream.record_event()
-    return event
-
-
-def wait_stream(cur_stream, other_stream):
-    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-        cur_stream.wait_stream(other_stream)
-
-
-def wait_event(stream, event):
-    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-        stream.wait_event(event)
-
-
-def wait_work(work):
-    if not torch.distributed._functional_collectives.is_torchdynamo_compiling():
-        work.wait()

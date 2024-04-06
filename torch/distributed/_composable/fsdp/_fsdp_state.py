@@ -12,7 +12,6 @@ from torch.distributed._composable_state import (
     _insert_module_state,
     _State,
 )
-from torch.distributed.utils import wait_stream, wait_event
 from torch.distributed.utils import _to_kwargs
 from torch.utils._pytree import tree_flatten, tree_map
 from torch.utils.hooks import RemovableHandle

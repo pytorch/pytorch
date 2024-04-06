@@ -5,7 +5,6 @@ import torch
 import torch.distributed as dist
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
-from torch.distributed.utils import record_event, wait_work, wait_stream, wait_event
 from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,

@@ -8,7 +8,6 @@ import torch.nn as nn
 
 from torch.autograd.graph import Node
 from torch.distributed.fsdp._common_utils import _named_parameters_with_duplicates
-from torch.distributed.utils import wait_event
 from torch.utils._pytree import tree_flatten, tree_unflatten
 from torch.utils.hooks import RemovableHandle
 from ._fsdp_api import MixedPrecisionPolicy
