@@ -378,7 +378,7 @@ class CompiledOptimizerParityTests(TestCase):
                     def closure():
                         loss = model_compiled(input).sum()
                         loss.backward()
-                        if optim_cls is SparseAdam:
+                        if optim_info.only_supports_sparse_grads:
                             for param in model_compiled.parameters():
                                 param.grad = param.grad.to_sparse()
                         return loss
@@ -388,7 +388,7 @@ class CompiledOptimizerParityTests(TestCase):
                 def closure_eager():
                     loss = model_eager(input).sum()
                     loss.backward()
-                    if optim_cls is SparseAdam:
+                    if optim_info.only_supports_sparse_grads:
                         for param in model_eager.parameters():
                             param.grad = param.grad.to_sparse()
 
