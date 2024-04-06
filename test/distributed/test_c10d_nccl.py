@@ -4176,10 +4176,11 @@ class NCCLTraceTest(NCCLTraceTestBase):
         self.assertEqual(ver, "1.4")
         pg_config = t['pg_config']
         self.assertEqual(len(pg_config), 1)
-        self.assertEqual(len(pg_config[0]), self.world_size)
+        self.assertEqual(len(pg_config['0']), self.world_size)
         t = t['entries']
         self.assertEqual(len(t), 2)
         last = t[-1]
+        self.assertEqual(last['process_group_name'], '0')
         self.assertEqual(last['state'], 'completed')
         s = last['time_discovered_started_ns']
         f = last['time_discovered_completed_ns']
