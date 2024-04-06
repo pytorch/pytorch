@@ -1392,16 +1392,16 @@ class TestNNParametrization(NNTestCase):
     def test_new_spectral_norm_value(self):
         # a test that the spectral norm (= top singular value)
         # is in fact properly calculated, using example of a simple diagonal matrix.
-        m = nn.Linear(2, 2)
-        with torch.no_grad():
-            # set weight to diagonal matrix with values 2., 1.
-            # so spectral norm is 2
-            m.weight = nn.Parameter(torch.diag(torch.tensor([2.0, 1.0])))
-            torch.nn.utils.parametrizations.spectral_norm(m)
-            # weights should be rescaled by spectral norm, so should now be
-            # diag(1., 0.5)
-            expected = torch.diag(torch.tensor([1.0, 0.5]))
-            self.assertEqual(m.weight.data, expected)
+        for dtype in (torch.float, torch.cfloat):
+            m = nn.Linear(2, 2, dtype=dtype)
+            with torch.no_grad():
+                # set weight to be diagonal
+                x = torch.diagonal(m.weight)
+                m.weight = nn.Parameter(torch.diag(x))
+                torch.nn.utils.parametrizations.spectral_norm(m)
+                # weights should be rescaled by spectral norm, (i.e., largest diagonal element in norm)
+                expected = torch.diag(x / x.abs().max())
+                self.assertEqual(m.weight.data, expected)
 
     @skipIfNoLapack
     def test_orthogonal_parametrization(self):

@@ -148,6 +148,7 @@ def _iterate_state_dict(
             else:
                 # TODO: support DTensor
                 companion_obj.copy_(ret, non_blocking=True)
+                ret = companion_obj
     else:
         ret = {} if isinstance(ret, dict) else None
 

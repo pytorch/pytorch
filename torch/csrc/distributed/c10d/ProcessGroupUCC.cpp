@@ -1,5 +1,6 @@
 #ifdef USE_C10D_UCC
 
+#include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
 #include <torch/csrc/distributed/c10d/UCCTracing.hpp>
 #include <torch/csrc/distributed/c10d/UCCUtils.hpp>
@@ -528,6 +529,13 @@ void Comm::progress_loop() {
 #ifdef USE_CUDA
     if ((!device_set) && (cuda_device_index != TORCH_UCC_DEVICE_NOT_SET)) {
       c10::cuda::set_device(cuda_device_index);
+      CUcontext pctx = nullptr;
+      at::globalContext().getNVRTC().cuCtxGetCurrent(&pctx);
+      if (C10_UNLIKELY(!pctx)) {
+        at::globalContext().getNVRTC().cuDevicePrimaryCtxRetain(
+            &pctx, cuda_device_index);
+        at::globalContext().getNVRTC().cuCtxSetCurrent(pctx);
+      }
       device_set = true;
     }
 #endif

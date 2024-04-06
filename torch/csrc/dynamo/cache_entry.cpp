@@ -1,4 +1,5 @@
 #include <torch/csrc/dynamo/cache_entry.h>
+#include <torch/csrc/dynamo/guards.h>
 
 #include <torch/csrc/dynamo/debug_macros.h>
 #include <torch/csrc/dynamo/extra_state.h>
@@ -6,6 +7,10 @@
 CacheEntry::CacheEntry(const py::handle& guarded_code) {
   this->check_fn = guarded_code.attr("check_fn");
   this->code = guarded_code.attr("code");
+  // TODO - clean this up when enable_cpp_guard_manager is True by default
+  if (py::hasattr(this->check_fn, "root")) {
+    this->root_mgr = convert_to_root_guard_manager(this->check_fn.attr("root"));
+  }
 }
 
 CacheEntry::~CacheEntry() {

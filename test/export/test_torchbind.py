@@ -4,6 +4,7 @@ import unittest
 import torch
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export
+from torch.export._trace import _export
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -32,10 +33,17 @@ class TestExportTorchbind(TestCase):
             lib_file_path = find_library_location("libtorchbind_test.so")
             torch.ops.load_library(str(lib_file_path))
 
-    def _test_export_same_as_eager(self, f, args, kwargs=None, strict=True):
+    def _test_export_same_as_eager(
+        self, f, args, kwargs=None, strict=True, pre_dispatch=False
+    ):
         kwargs = kwargs or {}
         with enable_torchbind_tracing():
-            exported_program = export(f, args, kwargs, strict=strict)
+            if pre_dispatch:
+                exported_program = _export(
+                    f, args, kwargs, strict=strict, pre_dispatch=True
+                )
+            else:
+                exported_program = export(f, args, kwargs, strict=strict)
         reversed_kwargs = {key: kwargs[key] for key in reversed(kwargs)}
         self.assertEqual(exported_program.module()(*args, **kwargs), f(*args, **kwargs))
         self.assertEqual(
@@ -55,6 +63,9 @@ class TestExportTorchbind(TestCase):
         self._test_export_same_as_eager(
             MyModule(), (torch.ones(2, 3), None), strict=False
         )
+        self._test_export_same_as_eager(
+            MyModule(), (torch.ones(2, 3), None), strict=False, pre_dispatch=True
+        )
 
     def test_attribute(self):
         class MyModule(torch.nn.Module):
@@ -66,6 +77,9 @@ class TestExportTorchbind(TestCase):
                 return x + self.attr.add_tensor(x)
 
         self._test_export_same_as_eager(MyModule(), (torch.ones(2, 3),), strict=False)
+        self._test_export_same_as_eager(
+            MyModule(), (torch.ones(2, 3),), strict=False, pre_dispatch=True
+        )
 
     def test_attribute_as_custom_op_argument(self):
         class MyModule(torch.nn.Module):
@@ -77,6 +91,9 @@ class TestExportTorchbind(TestCase):
                 return x + torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
 
         self._test_export_same_as_eager(MyModule(), (torch.ones(2, 3),), strict=False)
+        self._test_export_same_as_eager(
+            MyModule(), (torch.ones(2, 3),), strict=False, pre_dispatch=True
+        )
 
     def test_input(self):
         class MyModule(torch.nn.Module):
@@ -89,6 +106,9 @@ class TestExportTorchbind(TestCase):
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
         self._test_export_same_as_eager(
             MyModule(), (torch.ones(2, 3), cc), strict=False
+        )
+        self._test_export_same_as_eager(
+            MyModule(), (torch.ones(2, 3), cc), strict=False, pre_dispatch=True
         )
 
     def test_input_as_custom_op_argument(self):
@@ -103,6 +123,9 @@ class TestExportTorchbind(TestCase):
         self._test_export_same_as_eager(
             MyModule(), (torch.ones(2, 3), cc), strict=False
         )
+        self._test_export_same_as_eager(
+            MyModule(), (torch.ones(2, 3), cc), strict=False, pre_dispatch=True
+        )
 
     def test_unlift_custom_obj(self):
         class MyModule(torch.nn.Module):
@@ -111,7 +134,9 @@ class TestExportTorchbind(TestCase):
                 self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
 
             def forward(self, x):
-                return x + torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
+                a = torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, a)
+                return x + b
 
         m = MyModule()
         input = torch.ones(2, 3)
@@ -120,6 +145,61 @@ class TestExportTorchbind(TestCase):
 
         unlifted = ep.module()
         self.assertEqual(m(input), unlifted(input))
+
+        with enable_torchbind_tracing():
+            ep2 = torch.export.export(unlifted, (input,), strict=False)
+
+        self.assertEqual(m(input), ep2.module()(input))
+
+    def test_custom_obj_list_out(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_list_return(self.attr, x)
+                y = a[0] + a[1] + a[2]
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, y)
+                return x + b
+
+        m = MyModule()
+        input = torch.ones(2, 3)
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, (input,), strict=False)
+
+        unlifted = ep.module()
+        self.assertEqual(m(input), unlifted(input))
+
+        with enable_torchbind_tracing():
+            ep2 = torch.export.export(unlifted, (input,), strict=False)
+
+        self.assertEqual(m(input), ep2.module()(input))
+
+    def test_custom_obj_tuple_out(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tuple_return(self.attr, x)
+                y = a[0] + a[1]
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, y)
+                return x + b
+
+        m = MyModule()
+        input = torch.ones(2, 3)
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, (input,), strict=False)
+
+        unlifted = ep.module()
+        self.assertEqual(m(input), unlifted(input))
+
+        with enable_torchbind_tracing():
+            ep2 = torch.export.export(unlifted, (input,), strict=False)
+
+        self.assertEqual(m(input), ep2.module()(input))
 
 
 if __name__ == "__main__":

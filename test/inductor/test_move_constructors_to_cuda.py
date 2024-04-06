@@ -4,7 +4,7 @@ import functools
 import unittest
 
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
+from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_MULTIGPU

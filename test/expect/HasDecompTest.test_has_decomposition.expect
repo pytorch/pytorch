@@ -606,6 +606,7 @@ aten::_values
 aten::_values_copy
 aten::_values_copy.out
 aten::_weight_int4pack_mm
+aten::_weight_int8pack_mm
 aten::_weight_norm_interface_backward
 aten::_weight_norm_interface_backward.out
 aten::adaptive_avg_pool2d.out

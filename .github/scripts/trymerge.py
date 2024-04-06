@@ -1398,7 +1398,10 @@ def find_matching_merge_rule(
         )
         required_checks = list(
             filter(
-                lambda x: "EasyCLA" in x or not skip_mandatory_checks, mandatory_checks
+                lambda x: ("EasyCLA" in x)
+                or ("Facebook CLA Check" in x)
+                or not skip_mandatory_checks,
+                mandatory_checks,
             )
         )
         pending_checks, failed_checks, _ = categorize_checks(

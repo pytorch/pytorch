@@ -2,6 +2,7 @@
 #ifdef USE_CUDA
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
+#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
 #include <torch/csrc/utils/pybind.h>
 
@@ -40,5 +41,24 @@ void initAOTIRunnerBindings(PyObject* module) {
           "get_constant_names_to_dtypes",
           &AOTIModelContainerRunnerCuda::getConstantNamesToDtypes);
 #endif
+
+  m.def(
+      "unsafe_alloc_void_ptr_from_tensors",
+      [](std::vector<at::Tensor>& tensors) {
+        std::vector<AtenTensorHandle> handles =
+            torch::aot_inductor::unsafe_alloc_new_handles_from_tensors(tensors);
+        std::vector<void*> result(
+            reinterpret_cast<void**>(handles.data()),
+            reinterpret_cast<void**>(handles.data()) + handles.size());
+        return result;
+      });
+
+  m.def(
+      "alloc_tensors_by_stealing_from_void_ptr",
+      [](std::vector<void*>& raw_handles) {
+        return torch::aot_inductor::alloc_tensors_by_stealing_from_handles(
+            reinterpret_cast<AtenTensorHandle*>(raw_handles.data()),
+            raw_handles.size());
+      });
 }
 } // namespace torch::inductor

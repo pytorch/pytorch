@@ -7,6 +7,7 @@ import torch.utils._pytree as pytree
 from torch._export.utils import _check_input_constraints_for_graph
 from torch.export.unflatten import _assign_attr, _AttrKind
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
+from ._remove_effect_tokens_pass import _remove_effect_tokens
 
 from .exported_program import (
     ExportedProgram,
@@ -273,6 +274,7 @@ def _create_stateful_graph_module(
 
 
 def _unlift_exported_program_lifted_states(ep: ExportedProgram) -> torch.nn.Module:
+    ep = _remove_effect_tokens(ep)
     new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)
 

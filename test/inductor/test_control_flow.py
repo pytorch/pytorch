@@ -12,8 +12,18 @@ from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 from torch.testing._internal.triton_utils import requires_cuda
 
 
-class CondTests(TestCase):
-    class SimpleCondModel(torch.nn.Module):
+def prepend_predicates(inputs, num_predicates=1):
+    result = []
+    device = inputs[0].device
+    # iterate over the cartesian product of predicate values
+    for p_values in itertools.product(*([[False, True]] * num_predicates)):
+        predicates = [torch.tensor(v, device=device) for v in p_values]
+        result.append((*predicates, *inputs))
+    return result
+
+
+class CondModels:
+    class Simple(torch.nn.Module):
         def forward(self, p, a, b):
             def true_fn(x, y):
                 return x + y
@@ -23,7 +33,7 @@ class CondTests(TestCase):
 
             return torch.cond(p, true_fn, false_fn, [a, b])
 
-    class NestedCondModel(torch.nn.Module):
+    class Nested(torch.nn.Module):
         def forward(self, p0, p1, p2, a, b, c):
             def true_fn(x0, y0, z0):
                 def true_true_fn(x1, y1, z1):
@@ -61,6 +71,86 @@ class CondTests(TestCase):
 
             return torch.cond(p0, true_fn, false_fn, [a, b, c])
 
+    class Parameters(torch.nn.Module):
+        class InnerModel1(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.layer = torch.nn.Linear(20, 30, device=device)
+
+            def forward(self, x):
+                return self.layer(x + 1) * 3.14
+
+        class InnerModel2(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.layer1 = torch.nn.Linear(20, 10, device=device)
+                self.layer2 = torch.nn.Linear(10, 30, device=device)
+
+            def forward(self, x):
+                return self.layer2(self.layer1(x - 2)) * 3.14
+
+        def __init__(self, device):
+            super().__init__()
+            self.true_fn = self.InnerModel1(device)
+            self.false_fn = self.InnerModel2(device)
+
+        def forward(self, p, a):
+            return torch.cond(p, self.true_fn, self.false_fn, [a])
+
+    class ReinterpretView(torch.nn.Module):
+        def forward(self, p, a, b):
+            def true_fn(x, y):
+                z1 = x + y
+                z2 = x - y
+                return z1[2:], z2[:, 4:]
+
+            def false_fn(x, y):
+                z1 = x - y
+                z2 = x + y
+                return z1[2:], z2[:, 4:]
+
+            return torch.cond(p, true_fn, false_fn, [a[:-1], b[:-1]])
+
+    class MultipleOutputs(torch.nn.Module):
+        def forward(self, p, a, b, c):
+            def true_fn(x, y, z):
+                return x * y, z / 2.71, (y - x).sum(dim=1)
+
+            def false_fn(x, y, z):
+                return y / x, z * 3.14, (x + y).mean(dim=1)
+
+            return torch.cond(p, true_fn, false_fn, [a, b, c])
+
+    class OuterCode(torch.nn.Module):
+        def forward(self, p, a, b):
+            c = a * b + 3.14
+            d = a / b - 2.71
+
+            def true_fn(x, y):
+                return x + y
+
+            def false_fn(x, y):
+                return x - y
+
+            e = torch.cond(p, true_fn, false_fn, [c, d])
+
+            return e * e / 1.41
+
+    class OuterBuffers(torch.nn.Module):
+        def forward(self, p, a, b, c):
+            d = a * 2
+            e = b / 2
+
+            def true_fn(x):
+                return x + d
+
+            def false_fn(x):
+                return x - e
+
+            return torch.cond(p, true_fn, false_fn, [c])
+
+
+class CondTests(TestCase):
     def _run_test(
         self,
         model,
@@ -87,11 +177,9 @@ class CondTests(TestCase):
                     torch._dynamo.mark_dynamic(inp, 0)
 
         for inputs in input_sets:
-            # iterate over the cartesian product of predicate values
-            for p_values in itertools.product(*([[False, True]] * num_predicates)):
-                predicates = [torch.tensor(v, device=device) for v in p_values]
-                result = model(*predicates, *inputs)
-                result_compiled = compiled_model(*predicates, *inputs)
+            for inputs_with_predicates in prepend_predicates(inputs, num_predicates):
+                result = model(*inputs_with_predicates)
+                result_compiled = compiled_model(*inputs_with_predicates)
                 self.assertEqual(result, result_compiled)
 
         self.assertEqual(cnt.frame_count, 1, "only one compilation expected")
@@ -102,7 +190,7 @@ class CondTests(TestCase):
     def test_simple_control_flow(self, device, dynamic):
         # cond control flow without nesting
         self._run_test(
-            model=self.SimpleCondModel(),
+            model=CondModels.Simple(),
             inputs=(
                 torch.randn(10, 20),
                 torch.randn(10, 20),
@@ -117,7 +205,7 @@ class CondTests(TestCase):
     def test_nested_control_flow(self, device, dynamic):
         # cond control flow with nesting
         self._run_test(
-            model=self.NestedCondModel(),
+            model=CondModels.Nested(),
             inputs=(
                 torch.randn(10, 20),
                 torch.randn(10, 20),
@@ -133,23 +221,8 @@ class CondTests(TestCase):
     @parametrize("dynamic", [False, True])
     def test_outer_code_before_after(self, device, dynamic):
         # some code before and after the conditional
-        class Model(torch.nn.Module):
-            def forward(self, p, a, b):
-                c = a * b + 3.14
-                d = a / b - 2.71
-
-                def true_fn(x, y):
-                    return x + y
-
-                def false_fn(x, y):
-                    return x - y
-
-                e = torch.cond(p, true_fn, false_fn, [c, d])
-
-                return e * e / 1.41
-
         self._run_test(
-            model=Model(),
+            model=CondModels.OuterCode(),
             inputs=(
                 torch.randn(10, 20),
                 torch.randn(10, 20),
@@ -163,18 +236,8 @@ class CondTests(TestCase):
     @parametrize("dynamic", [False, True])
     def test_multiple_outputs(self, device, dynamic):
         # multiple outputs with different shapes
-        class Model(torch.nn.Module):
-            def forward(self, p, a, b, c):
-                def true_fn(x, y, z):
-                    return x * y, z / 2.71, (y - x).sum(dim=1)
-
-                def false_fn(x, y, z):
-                    return y / x, z * 3.14, (x + y).mean(dim=1)
-
-                return torch.cond(p, true_fn, false_fn, [a, b, c])
-
         self._run_test(
-            model=Model(),
+            model=CondModels.MultipleOutputs(),
             inputs=(
                 torch.randn(10, 20),
                 torch.randn(10, 20),
@@ -215,21 +278,8 @@ class CondTests(TestCase):
     @requires_cuda
     def test_use_buffers_from_outer_scope(self):
         # subgraphs input shapes include symbolic expressions
-        class Model(torch.nn.Module):
-            def forward(self, p, a, b, c):
-                d = a * 2
-                e = b / 2
-
-                def true_fn(x):
-                    return x + d
-
-                def false_fn(x):
-                    return x - e
-
-                return torch.cond(p, true_fn, false_fn, [c])
-
         self._run_test(
-            model=Model(),
+            model=CondModels.OuterBuffers(),
             inputs=(
                 torch.randn(10, 20),
                 torch.randn(10, 20),
@@ -242,22 +292,8 @@ class CondTests(TestCase):
     @requires_cuda
     def test_reintepret_view_inputs_outputs(self):
         # ReinterpretView in inputs and outputs of the subgraphs
-        class Model(torch.nn.Module):
-            def forward(self, p, a, b):
-                def true_fn(x, y):
-                    z1 = x + y
-                    z2 = x - y
-                    return z1[2:], z2[:, 4:]
-
-                def false_fn(x, y):
-                    z1 = x - y
-                    z2 = x + y
-                    return z1[2:], z2[:, 4:]
-
-                return torch.cond(p, true_fn, false_fn, [a[:-1], b[:-1]])
-
         self._run_test(
-            model=Model(),
+            model=CondModels.ReinterpretView(),
             inputs=(
                 torch.randn(10, 20),
                 torch.randn(10, 20),
@@ -271,34 +307,8 @@ class CondTests(TestCase):
     @parametrize("dynamic", [False, True])
     def test_subgraphs_with_parameters(self, device, dynamic):
         # nested Modules with parameters
-        class InnerModel1(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.layer = torch.nn.Linear(20, 30, device=device)
-
-            def forward(self, x):
-                return self.layer(x + 1) * 3.14
-
-        class InnerModel2(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.layer1 = torch.nn.Linear(20, 10, device=device)
-                self.layer2 = torch.nn.Linear(10, 30, device=device)
-
-            def forward(self, x):
-                return self.layer2(self.layer1(x - 2)) * 3.14
-
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.true_fn = InnerModel1()
-                self.false_fn = InnerModel2()
-
-            def forward(self, p, a):
-                return torch.cond(p, self.true_fn, self.false_fn, [a])
-
         self._run_test(
-            model=Model(),
+            model=CondModels.Parameters(device),
             inputs=(torch.randn(10, 20),),
             device=device,
             dynamic=dynamic,
@@ -392,7 +402,7 @@ class CondTests(TestCase):
             }
         ):
             self._run_test(
-                model=self.NestedCondModel(),
+                model=CondModels.Nested(),
                 inputs=(
                     torch.randn(10, 20),
                     torch.randn(10, 20),

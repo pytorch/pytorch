@@ -33,7 +33,6 @@ import torch.utils.checkpoint
 from torch import _guards
 from torch._subclasses import fake_tensor
 from torch._utils_internal import log_export_usage
-from torch.export import Constraint
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.experimental.symbolic_shapes import (
@@ -356,18 +355,32 @@ class _TorchDynamoContext:
         fn = innermost_fn(fn)
 
         # add context containing GraphModule to any GraphModule forward functions
-        if isinstance(fn, torch.fx.GraphModule):
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        if isinstance(fn, _LazyGraphModule) or (
+            isinstance(getattr(fn, "__self__", None), _LazyGraphModule)
+            and fn.__name__ == "_lazy_forward"
+        ):
             # Since dynamo will run the forward method for the GraphModule shortly
             # anyways, it does not hurt to do the real recompilation here if
             # this is a _LazyGraphModule. This makes it easier for dynamo to
             # optimize a _LazyGraphModule.
-            from torch.fx._lazy_graph_module import _LazyGraphModule
 
-            _LazyGraphModule.force_recompile(fn)
+            lazy_gm = fn if isinstance(fn, _LazyGraphModule) else fn.__self__
+
+            _LazyGraphModule.force_recompile(lazy_gm)
 
             # Assume that the underlying node metadata of `fn`,
             # a GraphModule instance, accurately represents
             # all instances of type(fn).
+            code_context.get_context(lazy_gm.forward.__code__)[
+                "orig_graphmodule"
+            ] = weakref.ref(lazy_gm)
+
+            if not isinstance(fn, _LazyGraphModule):
+                # replace fn with the real forward method
+                fn = lazy_gm.forward
+        elif isinstance(fn, GraphModule):
             code_context.get_context(fn.forward.__code__)[
                 "orig_graphmodule"
             ] = weakref.ref(fn)
@@ -1093,7 +1106,6 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "symbolic",
-    constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
@@ -1121,15 +1133,6 @@ def export(
         Required if aten_graph or tracing_mode is specified. Default is None.
 
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
-
-        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
-         An optional list of constraints on the dynamic arguments
-         that specify their possible range of shapes. By default, shapes of
-         input torch.Tensors are assumed to be static. If an input torch.Tensor
-         is expected to have dynamic shapes, please use :func:`dynamic_dim`
-         to define :class:`Constraint` objects that specify the dynamics and the possible
-         range of shapes. See :func:`dynamic_dim` docstring for examples on
-         how to use it.
 
         dynamic_shapes:
          An optional argument where the type should either be:
@@ -1171,18 +1174,7 @@ def export(
     _assume_static_by_default = assume_static_by_default
 
     def inner(*args, **kwargs):
-        nonlocal constraints
-        if constraints is not None:
-            if _log_export_usage:
-                warnings.warn(
-                    "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-                    "and will not be supported in the future. "
-                    "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-        else:
-            constraints = _process_dynamic_shapes(_f, args, kwargs, dynamic_shapes)
+        constraints = _process_dynamic_shapes(_f, args, kwargs, dynamic_shapes)
         f = _f
         assume_static_by_default = _assume_static_by_default
         check_if_dynamo_supported()
@@ -1507,10 +1499,6 @@ class TorchPatcher:
             sparse_adam,
         }
 
-        excluded_single_tensor = {
-            radam,  # https://github.com/pytorch/pytorch/issues/118230
-        }
-
         for opt_mod in optimizer_modules:
             opt_name = opt_mod.__name__.split(".")[-1]
             fused_fn_name = f"_fused_{opt_name}"
@@ -1519,16 +1507,6 @@ class TorchPatcher:
             if hasattr(opt_mod, fused_fn_name):
                 setattr(
                     opt_mod, fused_fn_name, disable(getattr(opt_mod, fused_fn_name))
-                )
-
-            if (
-                hasattr(opt_mod, single_tensor_fn_name)
-                and opt_mod in excluded_single_tensor
-            ):
-                setattr(
-                    opt_mod,
-                    single_tensor_fn_name,
-                    disable(getattr(opt_mod, single_tensor_fn_name)),
                 )
 
         optimizer_classes = [

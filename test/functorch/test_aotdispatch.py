@@ -668,6 +668,24 @@ def forward(self, primals_1, primals_2, primals_3):
     add_1 = torch.ops.aten.add.Tensor(add, mul_1);  add = None
     return [mul, mul_1, add_1]""")
 
+    def test_input_mutation_return(self):
+        def f(a, b):
+            return torch.sin(a, out=b)
+
+        inp = [
+            torch.randn(3, 3),
+            torch.ones(3, 3)
+        ]
+
+        fw_graph = self.verify_aot_autograd(
+            f, inp, test_mutation=True, only_keep_inference_mutations=True
+        )
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, arg0_1, arg1_1):
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+    copy_ = torch.ops.aten.copy_.default(arg1_1, sin);  arg1_1 = sin = None
+    return (copy_,)""")
+
     def test_input_mutation_metadata(self):
         def f(a, b):
             a.transpose_(1, 0)
@@ -3022,9 +3040,6 @@ def forward(self, arg0_1, arg1_1):
         gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_2 = torch._C._set_grad_enabled(False)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
@@ -3078,9 +3093,6 @@ def forward(self, arg0_1):
         gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_2 = torch._C._set_grad_enabled(False)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None

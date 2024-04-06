@@ -594,6 +594,16 @@ AOTITorchError aoti_torch_assign_tensors(
   });
 }
 
+AOTITorchError aoti_torch_assign_tensors_out(
+    AtenTensorHandle src,
+    AtenTensorHandle* ret_dst) {
+  AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+    at::Tensor* src_tensor_ptr = tensor_handle_to_tensor_pointer(src);
+    at::Tensor dst_tensor = *src_tensor_ptr;
+    *ret_dst = new_tensor_handle(std::move(dst_tensor));
+  });
+}
+
 AOTITorchError aoti_torch_clone(AtenTensorHandle self, AtenTensorHandle* ret) {
   AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
     at::Tensor* self_tensor = tensor_handle_to_tensor_pointer(self);

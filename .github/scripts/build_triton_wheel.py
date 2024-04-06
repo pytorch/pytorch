@@ -99,7 +99,14 @@ def build_triton(
             triton_repo = "https://github.com/openai/triton"
             triton_pkg_name = "pytorch-triton"
         check_call(["git", "clone", triton_repo], cwd=tmpdir)
-        check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
+        if release:
+            ver, rev, patch = version.split(".")
+            check_call(
+                ["git", "checkout", f"release/{ver}.{rev}.x"], cwd=triton_basedir
+            )
+        else:
+            check_call(["git", "checkout", commit_hash], cwd=triton_basedir)
+
         if build_conda:
             with open(triton_basedir / "meta.yaml", "w") as meta:
                 print(

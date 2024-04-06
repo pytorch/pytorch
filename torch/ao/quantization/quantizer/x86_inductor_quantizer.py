@@ -985,6 +985,7 @@ class X86InductorQuantizer(Quantizer):
             torch.nn.ReLU,
             torch.nn.LeakyReLU,
             torch.nn.Tanh,
+            torch.nn.GELU,
         ]
         fused_partitions: List[tuple] = []
         for postop in postop_list:

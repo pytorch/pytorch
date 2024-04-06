@@ -49,8 +49,6 @@ def load(
     storage_reader: Optional[StorageReader] = None,
     planner: Optional[LoadPlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
-    coordinator_rank: int = 0,
-    no_dist: Optional[bool] = None,
 ) -> None:
     """
     Load a distributed ``state_dict`` in SPMD style.
@@ -75,9 +73,13 @@ def load(
         pos-processing and non-tensor data properly propagates.
 
     .. note:
-        This function can be used for local inference and load a checkpoint
-        produced by ``save_state_dict`` without having a process group initialized
-        by passing ``no_dist=True`` and by using Tensors instead of ShardedTensors.
+        If no process group is initialized, this function can assumesbe the intent
+        is to load a checkpoint into the local process. This can be useful in the
+        case of local inference, and when using regular Tensors (as opposed to DTensor
+         or ShardedTensor)
+
+    .. note:
+        Rank 0 is assumed to be the coordinator rank.
 
     Args:
         state_dict (Dict[str, Any]): The state_dict to save.
@@ -97,10 +99,6 @@ def load(
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
             (Default: ``None``)
-        coordinator_rank (int): Rank to use to coordinate the checkpoint.
-            rank0 is used by default. (Default: ``0``)
-        no_dist (Optional[bool]): If ``True``, distributed checkpoint will not save
-            in SPMD style. (Default: ``False`` when torch.distributed is available and initialized)
 
     Returns:
         None.
@@ -131,13 +129,11 @@ def load(
         rank has an individual GPU, via ``torch.cuda.set_device()``.
     """
 
-    if no_dist is None:
-        no_dist = not (dist.is_available() and dist.is_initialized())
-        if no_dist:
-            warnings.warn(
-                "Loading with `no_dist` set to True because torch.distributed"
-                " is unavailable or uninitialized."
-            )
+    no_dist = not (dist.is_available() and dist.is_initialized())
+    if no_dist:
+        warnings.warn(
+            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process."
+        )
 
     with _profile():
         storage_reader = cast(
@@ -164,12 +160,11 @@ def load(
             )
 
         _load_state_dict(
-            statetful_sd,
-            storage_reader,
-            process_group,
-            coordinator_rank,
-            no_dist,
-            planner,
+            state_dict=statetful_sd,
+            storage_reader=storage_reader,
+            process_group=process_group,
+            no_dist=no_dist,
+            planner=planner,
         )
         for key in keys:
             if key not in state_dict:

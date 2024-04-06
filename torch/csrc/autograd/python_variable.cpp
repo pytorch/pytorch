@@ -2242,11 +2242,51 @@ int THPVariableMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
   ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPVariable_subclass_dealloc;
   ((PyTypeObject*)cls)->tp_traverse =
       (traverseproc)THPVariable_subclass_traverse;
+
+  // Don't do anything for the base Tensor class
+  if (!THPVariableClass) {
+    return 0;
+  }
+
+  // If the user provided a torch_dispatch implementation, disable
+  // torch_function.
+  py::object torch_dispatch_impl = py::reinterpret_steal<py::object>(
+      PyObject_GetAttrString(cls, "__torch_dispatch__"));
+  py::object torch_dispatch_default = py::reinterpret_steal<py::object>(
+      PyObject_GetAttrString(THPVariableClass, "__torch_dispatch__"));
+  if (torch_dispatch_impl.ptr() != torch_dispatch_default.ptr()) {
+    py::object torch_function_impl = py::reinterpret_steal<py::object>(
+        PyObject_GetAttrString(cls, "__torch_function__"));
+    // This will only fail if the user subclasses _TensorBase directly.
+    // Ignore the error here to let the class __init__ code fail with a nice
+    // error message.
+    if (!torch_function_impl) {
+      PyErr_Clear();
+      return 0;
+    }
+    py::object torch_function_default_bound = py::reinterpret_steal<py::object>(
+        PyObject_GetAttrString(THPVariableClass, "__torch_function__"));
+
+    // Since our __torch_function__ is a classmethod, we need to "unbound" the
+    // method to get the raw function
+    py::object torch_function_default = py::reinterpret_steal<py::object>(
+        PyObject_GetAttrString(torch_function_default_bound.ptr(), "__func__"));
+
+    // User-defined __torch_function__ might not be a classmethod
+    if (PyObject_HasAttrString(torch_function_impl.ptr(), "__func__")) {
+      torch_function_impl = py::reinterpret_steal<py::object>(
+          PyObject_GetAttrString(torch_function_impl.ptr(), "__func__"));
+    }
+    if (torch_function_impl.ptr() == torch_function_default.ptr()) {
+      PyObject_SetAttrString(
+          cls, "__torch_function__", torch::disabled_torch_function_impl());
+    }
+  }
+
   return 0;
 }
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 extern PyMethodDef variable_methods[];
@@ -2268,8 +2308,7 @@ void initTensorImplConversion(PyObject* module) {
     return t->getIntrusivePtr().get();
   });
 }
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
 
 bool THPVariable_initModule(PyObject* module) {
   THPVariableMetaType.tp_base = &PyType_Type;

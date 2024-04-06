@@ -1,6 +1,7 @@
 import functools
 import itertools
 import logging
+import operator
 import os
 import warnings
 from collections import defaultdict
@@ -1256,9 +1257,19 @@ def diagonal(input, offset: int = 0, dim1: int = 0, dim2: int = 1):
 
     offset_negative = V.graph.sizevars.evaluate_expr(sympy.Lt(offset, 0))
     if offset_negative:
-        diag_size = max(min(original_shape[dim1] + offset, original_shape[dim2]), 0)
+        diag_size = V.graph.sizevars.evaluate_max(
+            V.graph.sizevars.evaluate_min(
+                original_shape[dim1] + offset, original_shape[dim2]
+            ),
+            0,  # type: ignore[arg-type]
+        )
     else:
-        diag_size = max(min(original_shape[dim1], original_shape[dim2] - offset), 0)
+        diag_size = V.graph.sizevars.evaluate_max(
+            V.graph.sizevars.evaluate_min(
+                original_shape[dim1], original_shape[dim2] - offset
+            ),
+            0,  # type: ignore[arg-type]
+        )
 
     base_idx = (0, 0)
     if offset_negative:
@@ -2247,7 +2258,6 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 make_fallback(aten.index_reduce)  # @pearu
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d)  # @isuruf
-make_fallback(aten.avg_pool3d)  # @isuruf
 make_fallback(aten.fractional_max_pool3d)  # @isuruf
 make_fallback(aten.max_pool3d_with_indices)  # @isuruf (can this one be implemented?)
 make_fallback(aten.cummax)  # @isuruf
@@ -3889,29 +3899,31 @@ def range_mask(i: sympy.Expr, high: sympy.Expr, low: sympy.Expr):
     )
 
 
-def constant_boundary_condition_2d(x, fill_value, padding=None, pad_fill_value=1.0):
-    *_, h, w = x.get_size()
+def constant_boundary_condition(
+    x, fill_value, padding=None, pad_fill_value=1.0, dim=None
+):
+    h = x.get_size()[-dim:]
     x_loader = x.make_loader()
-    padding_h = padding[0] if padding else 0
-    padding_w = padding[1] if padding else 0
+    padding_h = padding or [0] * dim
 
     def load(index):
-        *prefix, ih, iw = index
+        prefix = index[:-dim]
+        ih = index[-dim:]
 
-        mask = ops.and_(
-            range_mask(ih, h + padding_h, -padding_h),
-            range_mask(iw, w + padding_w, -padding_w),
+        mask = functools.reduce(
+            ops.and_,
+            [range_mask(ih[i], h[i] + padding_h[i], -padding_h[i]) for i in range(dim)],
         )
         return (
             ops.masked(
                 mask,
-                lambda: constant_boundary_condition_2d(x, pad_fill_value)(
-                    [*prefix, ih, iw]
+                lambda: constant_boundary_condition(x, pad_fill_value, dim=dim)(
+                    [*prefix, *ih]
                 ),
                 fill_value,
             )
             if padding
-            else ops.masked(mask, lambda: x_loader([*prefix, ih, iw]), fill_value)
+            else ops.masked(mask, lambda: x_loader([*prefix, *ih]), fill_value)
         )
 
     return load
@@ -3974,7 +3986,7 @@ def max_pool2d_with_indices(
     w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
 
     if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
-        x_loader = constant_boundary_condition_2d(x, float("-inf"))
+        x_loader = constant_boundary_condition(x, float("-inf"), dim=2)
     else:
         x_loader = x.make_loader()
 
@@ -4599,6 +4611,9 @@ def upsample_nearest2d_backward(
 fallback_avg_pool2d = fallback_handler(
     aten.avg_pool2d.default, add_to_fallback_set=False
 )
+fallback_avg_pool3d = fallback_handler(
+    aten.avg_pool3d.default, add_to_fallback_set=False
+)
 
 
 @register_lowering(aten.avg_pool2d, type_promotion_kind=None)
@@ -4611,40 +4626,96 @@ def avg_pool2d(
     count_include_pad=True,
     divisor_override=None,
 ):
+    return _avg_poolnd(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        ceil_mode,
+        count_include_pad,
+        divisor_override,
+        dim=2,
+    )
+
+
+@register_lowering(aten.avg_pool3d, type_promotion_kind=None)
+def avg_pool3d(
+    x,
+    kernel_size,
+    stride=(),
+    padding=0,
+    ceil_mode=False,
+    count_include_pad=True,
+    divisor_override=None,
+):
+    return _avg_poolnd(
+        x,
+        kernel_size,
+        stride,
+        padding,
+        ceil_mode,
+        count_include_pad,
+        divisor_override,
+        dim=3,
+    )
+
+
+def _avg_poolnd(
+    x,
+    kernel_size,
+    stride,
+    padding,
+    ceil_mode,
+    count_include_pad,
+    divisor_override,
+    dim,
+):
     if not stride:
         stride = kernel_size
     if not padding:
-        padding = [0, 0]
-    kernel_size = pad_listlike(kernel_size, 2)
-    stride = pad_listlike(stride, 2)
-    padding = pad_listlike(padding, 2)
+        padding = [0] * dim
+    kernel_size = pad_listlike(kernel_size, dim)
+    stride = pad_listlike(stride, dim)
+    padding = pad_listlike(padding, dim)
 
     assert isinstance(x, TensorBox)
-    assert len(kernel_size) == 2
-    assert len(stride) == 2
-    assert len(padding) == 2
-    assert len(x.get_size()) in (3, 4)
+    assert len(kernel_size) == dim
+    assert len(stride) == dim
+    assert len(padding) == dim
+    assert len(x.get_size()) in (dim + 1, dim + 2)
 
     x.realize_hint()
-    *batch, h, w = x.get_size()
+    batch = x.get_size()[:-dim]
+    h = x.get_size()[-dim:]
 
-    h_out, ceil_mode1 = pooling_size(h, 0, kernel_size, stride, padding, ceil_mode)
-    w_out, ceil_mode2 = pooling_size(w, 1, kernel_size, stride, padding, ceil_mode)
+    h_out, ceil_modes = zip(
+        *[
+            pooling_size(h[i], i, kernel_size, stride, padding, ceil_mode)
+            for i in range(dim)
+        ]
+    )
 
-    if padding[0] or padding[1] or ceil_mode1 or ceil_mode2:
-        x_loader = constant_boundary_condition_2d(x, 0.0)
+    if any(padding) or any(ceil_modes):
+        x_loader = constant_boundary_condition(x, 0.0, dim=dim)
         had_padding = True
     else:
         x_loader = x.make_loader()
         had_padding = False
 
-    new_size = list(batch) + [h_out, w_out]
+    new_size = list(batch) + list(h_out)
     dtype = x.get_dtype()
 
-    window_size = kernel_size[0] * kernel_size[1]
+    window_size = functools.reduce(operator.mul, kernel_size)
     if window_size > 25:
         # Kernel size too big. Results in hard-to-optimize Triton code. Use fallback.
-        return fallback_avg_pool2d(
+        if dim == 2:
+            fallback = fallback_avg_pool2d
+        elif dim == 3:
+            fallback = fallback_avg_pool3d
+        else:
+            raise ValueError(f"Unknown dim: {dim}")
+
+        return fallback(
             x,
             kernel_size,
             stride,
@@ -4655,12 +4726,12 @@ def avg_pool2d(
         )
 
     def fn_sum(idx, loader):
-        *prefix, bh, bw = idx
+        prefix = idx[:-dim]
+        b = idx[-dim:]
         total = None
-        for ih, iw in itertools.product(range(kernel_size[0]), range(kernel_size[1])):
-            ih = bh * stride[0] + ih - padding[0]
-            iw = bw * stride[1] + iw - padding[1]
-            val = loader([*prefix, ih, iw])
+        for ih in itertools.product(*[range(kernel_size[i]) for i in range(dim)]):
+            inp = [b[i] * stride[i] + ih[i] - padding[i] for i in range(dim)]
+            val = loader([*prefix, *inp])
             if total is None:
                 total = val
             else:
@@ -4671,19 +4742,28 @@ def avg_pool2d(
         if divisor_override:
             scale = 1 / divisor_override
         else:
-            scale = 1.0 / (kernel_size[0] * kernel_size[1])
+            scale = 1.0 / window_size
 
         def fn(idx):
             return ops.mul(fn_sum(idx, x_loader), ops.constant(scale, dtype))
 
     else:
-        ones_loader = constant_boundary_condition_2d(
-            ones_like(x), 0.0, padding if count_include_pad else None
-        )
 
         def fn(idx):
-            # TODO(jansel): optimize to do `int(x<h)` rather than `x<h?1:0`
-            return ops.truediv(fn_sum(idx, x_loader), fn_sum(idx, ones_loader))
+            prefix = idx[:-dim]
+            bh = idx[-dim:]
+
+            divide_factors = []
+            for i in range(dim):
+                hstart = bh[i] * stride[i] - padding[i]
+                hend = sympy.Min(hstart + kernel_size[i], h[i] + padding[i])
+                if not count_include_pad:
+                    hstart = sympy.Max(hstart, 0)
+                    hend = sympy.Min(hend, h[i])
+                factor = ops.index_expr(hend - hstart, torch.int32)
+                divide_factors.append(factor)
+            divide_factor = functools.reduce(ops.mul, divide_factors)
+            return ops.div(fn_sum(idx, x_loader), divide_factor)
 
     rv = Pointwise.create(
         device=x.get_device(),

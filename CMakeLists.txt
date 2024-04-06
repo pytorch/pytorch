@@ -736,13 +736,28 @@ if(MSVC)
   append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
 endif()
 
-# CAVEAT: do NOT check USE_ROCM here, because USE_ROCM is always True until
-#         include(cmake/Dependencies.cmake)
+# Note for ROCM platform:
+# 1. USE_ROCM is always ON until include(cmake/Dependencies.cmake)
+# 2. USE_CUDA will become OFF during re-configuration
+# Truth Table:
+# CUDA 1st pass: USE_CUDA=True;USE_ROCM=True, FLASH evaluates to ON by default
+# CUDA 2nd pass: USE_CUDA=True;USE_ROCM=False, FLASH evaluates to ON by default
+# ROCM 1st pass: USE_CUDA=True;USE_ROCM=True, FLASH evaluates to ON by default
+# ROCM 2nd pass: USE_CUDA=False;USE_ROCM=True, FLASH evaluates to ON by default
+# CPU 1st pass: USE_CUDA=False(Cmd Option);USE_ROCM=True, FLASH evaluates to OFF by default
+# CPU 2nd pass: USE_CUDA=False(Cmd Option);USE_ROCM=False, FLASH evaluates to OFF by default
+# Thus we cannot tell ROCM 2nd pass and CPU 1st pass
+#
+# The only solution is to include(cmake/Dependencies.cmake), and defer the
+# aotriton build decision later.
+
+include(cmake/Dependencies.cmake)
+
 cmake_dependent_option(
   USE_FLASH_ATTENTION
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform" ON
-  "USE_CUDA AND NOT MSVC" OFF)
+  "USE_CUDA OR USE_ROCM;NOT MSVC" OFF)
 
 # We are currenlty not using alibi attention for Flash
 # So we disable this feature by default
@@ -757,8 +772,6 @@ cmake_dependent_option(
   "Enable memory-efficient attention for scaled dot product attention.\
   Will be disabled if not supported by the platform" ON
   "USE_CUDA" OFF)
-
-include(cmake/Dependencies.cmake)
 
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
