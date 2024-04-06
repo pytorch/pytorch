@@ -1127,6 +1127,14 @@ class GLOBAL_STATE : public LeafGuard {
     return _guard->check();
   }
 
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    if (!_guard->check()) {
+      return GuardDebugInfo(
+          false, "GLOBAL_STATE changed: " + _guard->reason(), 0);
+    }
+    return GuardDebugInfo(true, 1);
+  }
+
  private:
   std::unique_ptr<GlobalStateGuard> _guard;
 };
@@ -2902,6 +2910,7 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GLOBAL_STATE, LeafGuard, std::shared_ptr<GLOBAL_STATE>>(
       py_m, "GLOBAL_STATE")
       .def(py::init<py::list>())
+      .def("check_verbose", &GLOBAL_STATE::check_verbose)
       .def("__call__", &GLOBAL_STATE::check);
   py::class_<DATA_PTR_MATCH, LeafGuard, std::shared_ptr<DATA_PTR_MATCH>>(
       py_m, "DATA_PTR_MATCH")
