@@ -1061,6 +1061,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
                 ),
                 "TestOptimRenewed",
@@ -1084,6 +1091,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_with_cuda_params",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1854,13 +1868,22 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
                 ),
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
             ),
             DecorateInfo(
-                skipIfTorchDynamo("See #116028"),
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
+                ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
@@ -1887,6 +1910,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_with_cuda_params",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1938,13 +1968,22 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
+                "TestOptimRenewed",
+                "test_foreach_matches_forloop",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
                     "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
                 ),
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
             ),
             DecorateInfo(
-                skipIfTorchDynamo("See #116028"),
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
+                ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
@@ -1961,6 +2000,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "See https://github.com/pytorch/pytorch/issues/115679"
+                ),
+                "TestOptimRenewed",
+                "test_state_dict_with_cuda_params",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
