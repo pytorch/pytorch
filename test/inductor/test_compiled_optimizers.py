@@ -40,6 +40,8 @@ from torch.testing._internal.common_optimizers import (
     optim_db,
     optims,
 )
+
+from torch.testing._internal.common_utils import parametrize
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA, has_triton
 from torch.testing._internal.triton_utils import requires_cuda
 
@@ -337,80 +339,83 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 class CompiledOptimizerParityTests(TestCase):
     @skipCUDAIf(not has_triton(), "torch.compile with cuda requires triton")
     @optims(optim_db, dtypes=[torch.float32])
-    def test_correctness(self, device, dtype, optim_info):
+    @parametrize("use_closure", [True, False])
+    def test_correctness(self, device, dtype, optim_info, use_closure):
         optim_cls = optim_info.optim_cls
         all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
             device, dtype, optim_info, skip=("differentiable",)
         )
-        closure_options = (True,) if optim_info.step_requires_closure else (False, True)
-        for use_closure in closure_options:
-            for optim_input in all_optim_inputs:
-                kwargs = optim_input.kwargs
 
-                torch._dynamo.reset()
-                torch._inductor.metrics.reset()
-                input = torch.ones([10, 10], device=device)
-                model_eager = torch.nn.Sequential(
-                    *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
-                )
-                model_eager(input).sum().backward()
-                model_compiled = deepcopy(model_eager)
-                model_compiled(input).sum().backward()
+        if optim_info.step_requires_closure and not use_closure:
+            return
 
-                if optim_cls is SparseAdam:
-                    for param in model_eager.parameters():
-                        param.grad = param.grad.to_sparse()
-                    for param in model_compiled.parameters():
-                        param.grad = param.grad.to_sparse()
+        for optim_input in all_optim_inputs:
+            kwargs = optim_input.kwargs
 
-                opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
-                opt_eager = optim_cls(model_eager.parameters(), **kwargs)
+            torch._dynamo.reset()
+            torch._inductor.metrics.reset()
+            input = torch.ones([10, 10], device=device)
+            model_eager = torch.nn.Sequential(
+                *[torch.nn.Linear(10, 10, device=device) for _ in range(2)]
+            )
+            model_eager(input).sum().backward()
+            model_compiled = deepcopy(model_eager)
+            model_compiled(input).sum().backward()
 
-                if use_closure:
+            if optim_cls is SparseAdam:
+                for param in model_eager.parameters():
+                    param.grad = param.grad.to_sparse()
+                for param in model_compiled.parameters():
+                    param.grad = param.grad.to_sparse()
 
-                    @torch.compile()
-                    def fn():
-                        def closure():
-                            loss = model_compiled(input).sum()
-                            loss.backward()
-                            if optim_cls is SparseAdam:
-                                for param in model_compiled.parameters():
-                                    param.grad = param.grad.to_sparse()
-                            return loss
+            opt_compiled = optim_cls(model_compiled.parameters(), **kwargs)
+            opt_eager = optim_cls(model_eager.parameters(), **kwargs)
 
-                        opt_compiled.step(closure)
+            if use_closure:
 
-                    def closure_eager():
-                        loss = model_eager(input).sum()
+                @torch.compile()
+                def fn():
+                    def closure():
+                        loss = model_compiled(input).sum()
                         loss.backward()
                         if optim_cls is SparseAdam:
-                            for param in model_eager.parameters():
+                            for param in model_compiled.parameters():
                                 param.grad = param.grad.to_sparse()
-
                         return loss
 
-                    opt_eager.step(closure_eager)
-                    opt_eager.step(closure_eager)
-                else:
+                    opt_compiled.step(closure)
 
-                    @torch.compile()
-                    def fn():
-                        opt_compiled.step()
+                def closure_eager():
+                    loss = model_eager(input).sum()
+                    loss.backward()
+                    if optim_cls is SparseAdam:
+                        for param in model_eager.parameters():
+                            param.grad = param.grad.to_sparse()
 
-                    opt_eager.step()
-                    opt_eager.step()
+                    return loss
 
-                fn()
-                fn()
+                opt_eager.step(closure_eager)
+                opt_eager.step(closure_eager)
+            else:
 
-                check_optim(
-                    self,
-                    optim_cls,
-                    model_eager.parameters(),
-                    model_compiled.parameters(),
-                    opt_eager.state,
-                    opt_compiled.state,
-                )
+                @torch.compile()
+                def fn():
+                    opt_compiled.step()
+
+                opt_eager.step()
+                opt_eager.step()
+
+            fn()
+            fn()
+
+            check_optim(
+                self,
+                optim_cls,
+                model_eager.parameters(),
+                model_compiled.parameters(),
+                opt_eager.state,
+                opt_compiled.state,
+            )
 
 
 class CompiledOptimizerTests(TestCase):
