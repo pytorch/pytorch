@@ -436,6 +436,7 @@ skip_grad_layout_contract = False
 # XXX: Just for testing. Will remove before landing.
 pad_fixed_layout = os.environ.get("TORCHINDUCTOR_PAD_FIXED_LAYOUT") == "1"
 pad_channels_last = False
+bw_outputs_user_visible = True
 
 # Record the stacktrace when creating a FixedLayout. Used to figure out
 # if we are too conservative to make a layout fixed rather than flexible

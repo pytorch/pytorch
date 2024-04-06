@@ -1368,6 +1368,18 @@ def compile_fx(
     @dynamo_utils.dynamo_timed
     # @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+        user_visible_outputs = set()
+
+        if config.bw_outputs_user_visible:
+            *_, model_outputs_node = model.graph.nodes
+            assert model_outputs_node.op == "output"
+            model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
+            user_visible_outputs = {
+                n.name
+                for n in model_outputs
+                if isinstance(n, torch.fx.Node)
+            }
+            # print(f"BWD User visiable: {user_visible_outputs}") # TODO
         fixed = count_tangents(model)
         return inner_compile(
             model,
@@ -1377,6 +1389,7 @@ def compile_fx(
             is_backward=True,
             graph_id=graph_id,
             boxed_forward_device_index=forward_device,
+            user_visible_outputs=user_visible_outputs,
         )
 
     # TODO: can add logging before/after the call to create_aot_dispatcher_function
