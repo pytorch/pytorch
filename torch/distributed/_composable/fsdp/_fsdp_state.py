@@ -176,7 +176,9 @@ class FSDPState(_State):
             if all_gather_state := self._comm_ctx.all_gather_state:
                 # Free the last all-gather result if needed; refer to
                 # [Note: Overlapping all-gather copy-in and all-gather]
-                self._comm_ctx.all_gather_copy_in_stream.wait_event(all_gather_state.event)
+                self._comm_ctx.all_gather_copy_in_stream.wait_event(
+                    all_gather_state.event
+                )
                 self._comm_ctx.all_gather_stream.wait_event(all_gather_state.event)
                 self._comm_ctx.all_gather_state = None  # free the all-gather result
             self._state_ctx.iter_forward_root = None
