@@ -267,6 +267,8 @@ struct AddGenericMetadata : public MetadataBase {
       addMetadata("Fwd thread id", std::to_string(op_event.forward_tid_));
       addMetadata("Sequence number", std::to_string(op_event.sequence_number_));
     }
+    addMetadata(
+        "Record function id", std::to_string(op_event.record_function_id_));
   }
 
   void operator()(ExtraFields<EventType::Backend>& backend_event) {

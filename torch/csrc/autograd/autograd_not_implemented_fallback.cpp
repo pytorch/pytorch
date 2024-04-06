@@ -378,7 +378,9 @@ static void autogradNotImplementedFallbackImpl(
   _foreach_tensor(
       [&](size_t idx_tensor, size_t idx_ret, const at::Tensor& t) {
         if (at::impl::tensor_has_dispatch(t) ||
-            at::impl::dispatch_mode_enabled())
+            at::impl::dispatch_mode_enabled() ||
+            // NJT offsets are expected to be reused; skip use_count() check
+            op_name == "aten::_nested_get_offsets")
           return;
         if (!is_inplace_output[idx_ret])
           TORCH_INTERNAL_ASSERT(

@@ -139,6 +139,7 @@ namespace profiler {
 namespace {
 struct RecordFunctionFast {
   PyObject_HEAD PyObject* name;
+  PyObject* inputValues;
   std::unique_ptr<at::RecordFunction> guard;
 };
 
@@ -149,6 +150,7 @@ PyObject* RecordFunctionFast_new(
   RecordFunctionFast* self = (RecordFunctionFast*)subtype->tp_alloc(subtype, 0);
   if (self != nullptr) {
     self->name = nullptr;
+    self->inputValues = nullptr;
     self->guard.reset();
   }
   return (PyObject*)self;
@@ -160,15 +162,17 @@ int RecordFunctionFast_init(
     PyObject* kwargs) {
   auto self = (RecordFunctionFast*)selfGeneric;
   // NOLINTNEXTLINE(*-c-arrays*)
-  constexpr const char* kwlist[] = {"name", nullptr};
+  constexpr const char* kwlist[] = {"name", "inputValues", nullptr};
   PyObject* name = nullptr;
+  PyObject* inputValues = nullptr;
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "O",
+          "O|O",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
-          &name)) {
+          &name,
+          &inputValues)) {
     return -1;
   }
   if (name) {
@@ -178,12 +182,20 @@ int RecordFunctionFast_init(
     Py_INCREF(name);
     self->name = name;
   }
+  if (inputValues) {
+    TORCH_CHECK(
+        PyList_Check(inputValues) || PyTuple_Check(inputValues),
+        "InputValues must be a list or tuple");
+    Py_INCREF(inputValues);
+    self->inputValues = inputValues;
+  }
   return 0;
 }
 
 void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
   auto self = (RecordFunctionFast*)selfGeneric;
   Py_CLEAR(self->name);
+  Py_CLEAR(self->inputValues);
   if (self->guard) {
     self->guard.reset();
   }
@@ -199,7 +211,20 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
         "Trying to enter a new record_function_fast context but the guard is unexpectedly already set");
     self->guard =
         std::make_unique<at::RecordFunction>(at::RecordScope::FUNCTION);
-    self->guard->before(THPUtils_unpackString(self->name));
+    if (self->inputValues) {
+      std::vector<at::IValue> ivalues;
+      THPObjectPtr input_fast(
+          PySequence_Fast(self->inputValues, "input must be a sequence"));
+      PyObject** input_items = PySequence_Fast_ITEMS(input_fast.get());
+      for (int i = 0; i < PySequence_Fast_GET_SIZE(input_fast.get()); i++) {
+        PyObject* item = input_items[i];
+        auto match = torch::jit::tryToInferType(item);
+        ivalues.push_back(torch::jit::toIValue(item, match.type()));
+      }
+      self->guard->before(THPUtils_unpackString(self->name), &ivalues);
+    } else {
+      self->guard->before(THPUtils_unpackString(self->name));
+    }
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS

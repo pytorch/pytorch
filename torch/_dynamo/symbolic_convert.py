@@ -786,7 +786,11 @@ class InstructionTranslatorBase(
                     # in the same block, but the NOPs are not covered by an
                     # exception table entry. In this case, assume that we
                     # are still in the same block.
-                    if self.block_stack and inst.opname != "NOP":
+                    # In 3.12+, JUMP_BACKWARD might also not be covered by
+                    # an exception table entry, so we also assume that we
+                    # are still in the same block. It is probably safe to do
+                    # this in 3.11, even though we haven't encountered this case before.
+                    if self.block_stack and inst.opname not in ("NOP", "JUMP_BACKWARD"):
                         # If we really escape from a block and the current
                         # instruction is not in another block, then there
                         # should be no other nested blocks that we are in.
@@ -1183,23 +1187,33 @@ class InstructionTranslatorBase(
 
     def FOR_ITER(self, inst):
         it = self.pop().realize()
-        if isinstance(it, (variables.ListIteratorVariable, variables.IteratorVariable)):
-            try:
-                val, next_iter = it.next_variables(self)
-                self.push(next_iter)
-                self.push(val)
-            except StopIteration:
-                # leave iterator upon exhaustion in 3.12
-                if sys.version_info >= (3, 12):
-                    # CPython 3.12 actually jumps to the instruction after the END_FOR
-                    # and performs the action of END_FOR as part of FOR_ITER. We jump
-                    # to the END_FOR and run it, so we need to make sure 2 values are
-                    # on the stack for it to pop.
-                    self.push(it)
-                    self.push(ConstantVariable.create(None))
-                self.jump(inst)
+        try:
+            val = it.next_variable(self)
+            self.push(it)
+            self.push(val)
+        except (StopIteration, exc.UserStopIteration):
+            # leave iterator upon exhaustion in 3.12
+            if sys.version_info >= (3, 12):
+                # CPython 3.12 actually jumps to the instruction after the END_FOR
+                # and performs the action of END_FOR as part of FOR_ITER. We jump
+                # to the END_FOR and run it, so we need to make sure 2 values are
+                # on the stack for it to pop.
+                self.push(it)
+                self.push(ConstantVariable.create(None))
+            self.jump(inst)
+
+    def RAISE_VARARGS(self, inst):
+        if inst.arg == 0:
+            unimplemented("re-raise")
+        elif inst.arg == 1:
+            val = self.pop()
+            if (
+                isinstance(val, BuiltinVariable) and val.fn is StopIteration
+            ) or isinstance(val, variables.StopIterationVariable):
+                raise exc.UserStopIteration()
+            unimplemented(f"raise {exc}")
         else:
-            unimplemented(f"FOR_ITER {typestr(it)}")
+            unimplemented("raise ... from ...")
 
     def COMPARE_OP(self, inst):
         self.push(compare_op_handlers[inst.argval](self, self.popn(2), {}))
@@ -1867,17 +1881,8 @@ class InstructionTranslatorBase(
         self.append_prefix_inst(inst)
 
     # 3.12 opcodes
-    def BINARY_SLICE(self, inst):
-        # BUILD_SLICE
-        items = self.popn(2)
-        self.push(SliceVariable(items))
-        self.BINARY_SUBSCR(inst)
-
-    def STORE_SLICE(self, inst):
-        # BUILD SLICE
-        items = self.popn(2)
-        self.push(SliceVariable(items))
-        self.STORE_SUBSCR(inst)
+    # BINARY/STORE_SLICE opcodes are broken down into
+    # BUILD_SLICE 2 and BINARY/STORE_SUBSCR
 
     def END_FOR(self, inst):
         self.popn(2)
@@ -2642,20 +2647,16 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             if isinstance(tos, ConstantVariable) and tos.value is None:
                 self.pop()
                 return
-            if isinstance(
-                tos, (variables.ListIteratorVariable, variables.IteratorVariable)
-            ):
-                try:
-                    val, next_iter = tos.next_variables(self)
-                    self.push(val)
-                    # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
-                    self.YIELD_VALUE(inst)
-                    self.pop()
-                    self.push(next_iter)
-                except StopIteration:
-                    return
-            else:
-                unimplemented(f"YIELD_FROM {typestr(tos)}")
+            try:
+                val = tos.next_variable(self)
+                self.push(val)
+                # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
+                self.YIELD_VALUE(inst)
+                self.pop()
+                self.push(tos)
+            except (StopIteration, exc.UserStopIteration):
+                # TODO(jansel): do we need a self.pop() here?
+                return
 
     def SEND(self, inst):
         assert len(self.stack) >= 2
