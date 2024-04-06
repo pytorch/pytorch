@@ -6,6 +6,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._C._dynamo import guards
+from torch._dynamo.convert_frame import GlobalStateGuard
 from torch.testing._internal.common_utils import set_default_dtype
 
 RootGuardManager = guards.RootGuardManager
@@ -126,6 +127,13 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard({"a": 1}))
         self.assertFalse(guard({}))
         self.assertFalse(guard(5))
+
+    def test_global_state_reason(self):
+        with torch.enable_grad():
+            guards = GlobalStateGuard()
+        with torch.no_grad():
+            self.assertIs(guards.check(), False)
+            self.assertEqual(guards.reason(), "grad_mode ")
 
     def test_equals_guard(self):
         foo = 4
