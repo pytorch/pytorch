@@ -417,11 +417,6 @@ class FSDPParamGroup:
     def _register_post_backward_hook(
         self, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
-        # NOTE: we ignore the `RegisterPostBackwardFunction` function in compile, instead we rely on _root_post_backward_final_callback
-        # to call the param_group.post_backward(), and rely on Inductor comm reordering to optimally decide
-        # when to issue prefetch and reshard.
-        if torch.distributed._functional_collectives.is_torchdynamo_compiling():
-            return args, kwargs
         if not torch.is_grad_enabled():
             return args, kwargs
         args_list, args_spec = tree_flatten(args)
