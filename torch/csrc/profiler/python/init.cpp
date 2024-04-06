@@ -150,6 +150,7 @@ PyObject* RecordFunctionFast_new(
   RecordFunctionFast* self = (RecordFunctionFast*)subtype->tp_alloc(subtype, 0);
   if (self != nullptr) {
     self->name = nullptr;
+    self->inputValues = nullptr;
     self->guard.reset();
   }
   return (PyObject*)self;
@@ -182,10 +183,12 @@ int RecordFunctionFast_init(
     self->name = name;
   }
   if (inputValues) {
-    TORCH_CHECK(PyList_Check(inputValues), "inputValues must be a list");
+    TORCH_CHECK(
+        PyList_Check(inputValues) || PyTuple_Check(inputValues),
+        "InputValues must be a list or tuple");
     Py_INCREF(inputValues);
+    self->inputValues = inputValues;
   }
-  self->inputValues = inputValues;
   return 0;
 }
 
@@ -210,8 +213,11 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
         std::make_unique<at::RecordFunction>(at::RecordScope::FUNCTION);
     if (self->inputValues) {
       std::vector<at::IValue> ivalues;
-      for (int i = 0; i < PyList_Size(self->inputValues); i++) {
-        PyObject* item = PyList_GetItem(self->inputValues, i);
+      THPObjectPtr input_fast(
+          PySequence_Fast(self->inputValues, "input must be a sequence"));
+      PyObject** input_items = PySequence_Fast_ITEMS(input_fast.get());
+      for (int i = 0; i < PySequence_Fast_GET_SIZE(input_fast.get()); i++) {
+        PyObject* item = input_items[i];
         auto match = torch::jit::tryToInferType(item);
         ivalues.push_back(torch::jit::toIValue(item, match.type()));
       }
