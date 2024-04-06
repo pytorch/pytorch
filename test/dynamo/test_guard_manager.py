@@ -67,14 +67,41 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard(None))
         with set_default_dtype(torch.double):
             self.assertFalse(guard(None))
+            self.assertExpectedInline(
+                str(guard.check_verbose(None)),
+                """\
+GuardDebugInfo(
+result=0,
+verbose_code_parts=['GLOBAL_STATE changed: default_dtype '],
+num_guards_executed=0)
+""",
+            )
         self.assertTrue(guard(None))
+        self.assertTrue(guard.check_verbose(None).result)
         _orig = torch.are_deterministic_algorithms_enabled()
         try:
             torch.use_deterministic_algorithms(not _orig)
             self.assertFalse(guard(None))
+            self.assertExpectedInline(
+                str(guard.check_verbose(None)),
+                """\
+GuardDebugInfo(
+result=0,
+verbose_code_parts=['GLOBAL_STATE changed: deterministic_algorithms '],
+num_guards_executed=0)
+""",
+            )
         finally:
             torch.use_deterministic_algorithms(_orig)
         self.assertTrue(guard(None))
+        self.assertTrue(guard.check_verbose(None).result)
+
+    def test_global_state_reason(self):
+        with torch.enable_grad():
+            guards = GlobalStateGuard()
+        with torch.no_grad():
+            self.assertIs(guards.check(), False)
+            self.assertEqual(guards.reason(), "grad_mode ")
 
     def test_python_lambda_leaf_guard(self):
         const_guard = guards.LAMBDA_GUARD(
@@ -127,13 +154,6 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard({"a": 1}))
         self.assertFalse(guard({}))
         self.assertFalse(guard(5))
-
-    def test_global_state_reason(self):
-        with torch.enable_grad():
-            guards = GlobalStateGuard()
-        with torch.no_grad():
-            self.assertIs(guards.check(), False)
-            self.assertEqual(guards.reason(), "grad_mode ")
 
     def test_equals_guard(self):
         foo = 4
