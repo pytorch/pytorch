@@ -3260,7 +3260,6 @@ SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
-# FSDP hooks
 FSDP_HOOKS = {
     "_forward_pre_hooks": "torch.distributed._composable.fsdp._fsdp_state#_pre_forward",
     "_forward_hooks": "torch.distributed._composable.fsdp._fsdp_state#_post_forward",
