@@ -530,13 +530,8 @@ Tensor sparse_semi_structured_mad_op(
     // No need to check that all tensors are on CUDA device, as this
     // is provided by dispatch.
 
-    // Introduce alias names for arguments, according to the CUTLASS
-    // naming conventions.
-    const auto& tensor_a = mat1;
-    const auto& tensor_e = mat1_meta;
-    const auto& tensor_b = mat2;
-    const auto& tensor_c = input_opt.value_or(Tensor{});
-    const auto out_dtype = out_dtype_opt.value_or(tensor_b.scalar_type());
+    const auto& input = input_opt.value_or(Tensor{});
+    const auto out_dtype = out_dtype_opt.value_or(mat2.scalar_type());
 
     // For now, only CC 8.x devices are supported.
     const auto dprops = at::cuda::getCurrentDeviceProperties();
@@ -546,64 +541,70 @@ Tensor sparse_semi_structured_mad_op(
                 "compute capability 8.x");
 
     // Validate datatypes of input tensors.
-    TORCH_CHECK(tensor_b.dtype() == at::kChar ||
-                tensor_b.dtype() == at::kHalf ||
-                tensor_b.dtype() == at::kBFloat16 ||
-                tensor_b.dtype() == at::kFloat,
+    TORCH_CHECK(mat2.dtype() == at::kChar ||
+                mat2.dtype() == at::kHalf ||
+                mat2.dtype() == at::kBFloat16 ||
+                mat2.dtype() == at::kFloat,
                 "sparse_semi_structured_mad_op: The mat2 datatype ",
-                tensor_b.dtype(), " is not supported");
-    TORCH_CHECK(tensor_a.dtype() == tensor_b.dtype(),
+                mat2.dtype(), " is not supported");
+    TORCH_CHECK(mat1.dtype() == mat2.dtype(),
                 "sparse_semi_structured_mad_op: Expected mat1 datatype ",
-                tensor_b.dtype(), ", but got ", tensor_a.dtype());
-    if (tensor_c.numel() != 0) {
-        TORCH_CHECK(tensor_c.dtype() == out_dtype,
+                mat2.dtype(), ", but got ", mat1.dtype());
+    if (input.numel() != 0) {
+        TORCH_CHECK(input.dtype() == out_dtype,
                     "sparse_semi_structured_mad_op: Expected input datatype ",
-                    out_dtype, ", but got ", tensor_c.dtype());
+                    out_dtype, ", but got ", input.dtype());
     }
 
     // Validate layouts of input tensors.
-    TORCH_CHECK(tensor_a.layout() == Layout::Strided,
+    TORCH_CHECK(mat1.layout() == Layout::Strided,
                 "sparse_semi_structured_mad_op: Expected mat1 argument to be "
-                "strided, but got layout ", tensor_a.layout());
-    TORCH_CHECK(tensor_a.dim() == 2,
+                "strided, but got layout ", mat1.layout());
+    TORCH_CHECK(mat1.dim() == 2,
                 "sparse_semi_structured_mad_op: Expected mat1 argument to be "
-                "2D tensor, got ", tensor_a.dim(), " dims");
-    const auto strides_a = tensor_a.strides();
+                "2D tensor, got ", mat1.dim(), " dims");
+    const auto strides_a = mat1.strides();
     TORCH_CHECK(strides_a[0] == 1 || strides_a[1] == 1,
                 "sparse_semi_structured_mad_op: Invalid strides for mat1 "
                 "argument: row stride = ", strides_a[0], ", column stride = ",
                 strides_a[1]);
-    TORCH_CHECK(tensor_b.layout() == Layout::Strided,
+    TORCH_CHECK(mat2.layout() == Layout::Strided,
                 "sparse_semi_structured_mad_op: Expected mat2 argument to be "
-                "strided, but got layout ", tensor_b.layout());
-    TORCH_CHECK(tensor_b.dim() == 2,
+                "strided, but got layout ", mat2.layout());
+    TORCH_CHECK(mat2.dim() == 2,
                 "sparse_semi_structured_mad_op: Expected mat2 argument to be "
-                "2D tensor, got ", tensor_b.dim(), " dims");
-    const auto strides_b = tensor_b.strides();
+                "2D tensor, got ", mat2.dim(), " dims");
+    const auto strides_b = mat2.strides();
     TORCH_CHECK(strides_b[0] == 1 || strides_b[1] == 1,
                 "sparse_semi_structured_mad_op: Invalid strides for mat2 "
                 "argument: row stride = ", strides_b[0], ", column stride = ",
                 strides_b[1]);
-    if (tensor_c.numel() != 0) {
-        TORCH_CHECK(tensor_c.layout() == Layout::Strided,
+    if (input.numel() != 0) {
+        TORCH_CHECK(input.layout() == Layout::Strided,
                     "sparse_semi_structured_mad_op: Expected input argument to "
-                    "be strided, but got layout ", tensor_c.layout());
-        TORCH_CHECK(tensor_c.dim() == 1,
+                    "be strided, but got layout ", input.layout());
+        TORCH_CHECK(input.dim() == 1,
                     "sparse_semi_structured_mad_op: Expected input argument to "
-                    "be 1D tensor, got ", tensor_c.dim(), " dims");
+                    "be 1D tensor, got ", input.dim(), " dims");
     }
 
     // Validate sizes of input tensors.
-    TORCH_CHECK(tensor_a.size(1) == tensor_b.size(0) / 2,
+    TORCH_CHECK(mat1.size(1) == mat2.size(0) / 2,
                 "sparse_semi_structured_mad_op: Expected mat1 argument to "
-                "have ", tensor_b.size(0) / 2, " columns, but got ",
-                tensor_a.size(1));
-    if (tensor_c.numel() != 0) {
-        TORCH_CHECK(tensor_c.size(0) == tensor_a.size(0),
+                "have ", mat2.size(0) / 2, " columns, but got ", mat1.size(1));
+    if (input.numel() != 0) {
+        TORCH_CHECK(input.size(0) == mat1.size(0),
                     "sparse_semi_structured_mad_op: Expected input argument to "
-                    "have ", tensor_a.size(0), " elements, but got ",
-                    tensor_c.size(0));
+                    "have ", mat1.size(0), " elements, but got ",
+                    input.size(0));
     }
+
+    // Introduce alias names for arguments, according to the CUTLASS
+    // naming conventions.
+    const auto& tensor_a = mat1;
+    const auto& tensor_b = mat2;
+    const auto& tensor_c = input;
+    const auto& tensor_e = mat1_meta;
 
     // Create output tensor.
     Tensor tensor_d =
