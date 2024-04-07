@@ -167,11 +167,10 @@ def get_device_op_overrides(device: str):
 
     if not device_op_overrides_dict.keys():
         from .cuda import device_op_overrides  # noqa: F401
+        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
     if device in device_op_overrides_dict.keys():
         return device_op_overrides_dict[device]
-
-    return DeviceOpOverrides()
 
 
 @functools.lru_cache(None)
@@ -593,21 +592,28 @@ class OpOverrides:
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
+            if impl is None:
+                continue
+
             if isinstance(impl, str):
                 nof_args = 2 if "{y}" in impl else 1
                 # extend the following dictionary with factory
                 # functions for a specific number of arguments as
                 # needed:
                 factory = {1: pointwise_factory_1, 2: pointwise_factory_2}[nof_args]
-                setattr(cls, funcname, staticmethod(factory(impl)))
+                impl = factory(impl)
+
+            setattr(cls, funcname, staticmethod(impl))
 
 
 @dataclasses.dataclass
 class OverridesData:
     name: str
-    cpp: str
-    triton: Optional[str] = None  # None when not impl in libdevice/triton
-    cppvec: Optional[str] = None  # None when not impl in aten/.../vec
+    cpp: Union[str, Callable[..., str]]
+    # None when not impl in libdevice/triton
+    triton: Union[Optional[str], Callable[..., str]] = None
+    # None when not impl in aten/.../vec
+    cppvec: Union[Optional[str], Callable[..., str]] = None
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -656,6 +662,13 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
         cpp="calc_erfcx({x})",
         triton="libdevice.erfcx({x})",
         name="special_erfcx",
+    ),
+    fma=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        cpp=lambda x, y, z: f"std::fma({x}, {y}, {z})",
+        cppvec=lambda x, y, z: f"fmadd({x}, {y}, {z})",
+        triton=lambda x, y, z: f"libdevice.fma({x}, {y}, {z})",
+        name="fma",
     ),
     # erfinv, exp2, expit, gammaln
     igamma=OverridesData(
@@ -1693,9 +1706,19 @@ class KernelTemplate:
     """
 
     @staticmethod
+    def indent_except_first(source: str, num_indents: int, indents_spacing=4):
+        lines = source.splitlines(True)
+        if len(lines) > 1:
+            lines[1:] = [
+                (" " * indents_spacing * num_indents) + line for line in lines[1:]
+            ]
+        return "".join(lines)
+
+    @staticmethod
     def _template_from_string(source):
         env = jinja2_env()
         if env is not None:
+            env.filters["indent_except_first"] = KernelTemplate.indent_except_first
             return env.from_string(source)
         return None
 
