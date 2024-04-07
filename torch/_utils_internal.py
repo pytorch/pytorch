@@ -62,6 +62,18 @@ def throw_abstract_impl_not_imported_error(opname, module, context):
         )
 
 
+# Meta only, act as nop otherwise.
+def compiletime_sl_profile_meta(phase_name):
+    def compiletime_sl_profile_inner(function):
+        @functools.wraps(function)
+        def wrapper_function(*args, **kwargs):
+            return function(*args, **kwargs)
+
+        return wrapper_function
+
+    return compiletime_sl_profile_inner
+
+
 # Meta only, see
 # https://www.internalfb.com/intern/wiki/ML_Workflow_Observability/User_Guides/Adding_instrumentation_to_your_code/
 #
@@ -93,6 +105,15 @@ def set_pytorch_distributed_envs_from_justknobs():
 
 def log_export_usage(**kwargs):
     pass
+
+
+def log_torchscript_usage(api: str):
+    _ = api
+    return
+
+
+def export_api_rollout_check() -> bool:
+    return False
 
 
 def justknobs_check(name: str) -> bool:
