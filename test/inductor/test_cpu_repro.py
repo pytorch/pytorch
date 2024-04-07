@@ -4,7 +4,8 @@ import copy
 import itertools
 import math
 import platform
-import sys, os
+import sys
+import os
 import unittest
 from typing import Callable
 from unittest.mock import patch
@@ -1572,6 +1573,8 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.simdlen": None}):
             isa = codecache.pick_vec_isa()
+            print("---------isa----------", isa)
+            print("cpu_capability: ", torch._C._get_cpu_capability())
             if vec_avx512 in codecache.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx512)
             else:
