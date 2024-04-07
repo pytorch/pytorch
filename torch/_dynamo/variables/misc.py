@@ -18,8 +18,7 @@ from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GetItemSource, ODictGetItemSource, TypeSource
 from ..utils import (
-    check_constant_args,
-    check_unspec_python_args,
+    check_unspec_or_constant_args,
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
@@ -30,6 +29,11 @@ from .user_defined import UserDefinedObjectVariable
 
 
 class SuperVariable(VariableTracker):
+    _nonvar_fields = {
+        "specialized",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, typevar, objvar=None, specialized=False, **kwargs):
         super().__init__(**kwargs)
         # typevar is the fist argument to super(). In the case where no argument
@@ -240,6 +244,11 @@ class ComptimeVariable(VariableTracker):
 
 
 class ClosureVariable(UnknownVariable):
+    _nonvar_fields = {
+        "name",
+        *UnknownVariable._nonvar_fields,
+    }
+
     def __init__(self, name, **kwargs):
         super().__init__(**kwargs)
         self.name = name
@@ -250,6 +259,11 @@ class ClosureVariable(UnknownVariable):
 
 # closure variable created by an inlined function
 class InlinedClosureVariable(UnknownVariable):
+    _nonvar_fields = {
+        "name",
+        *UnknownVariable._nonvar_fields,
+    }
+
     def __init__(self, name, **kwargs):
         super().__init__(**kwargs)
         self.name = name
@@ -310,6 +324,11 @@ def produce_trampoline_autograd_apply(fn_cls):
 class AutogradFunctionVariable(VariableTracker):
     """represents a torch.autograd.Function subclass"""
 
+    _nonvar_fields = {
+        "fn_cls",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, fn_cls, **kwargs):
         super().__init__(**kwargs)
         self.fn_cls = fn_cls
@@ -325,9 +344,8 @@ class AutogradFunctionVariable(VariableTracker):
             if isinstance(node, variables.NNModuleVariable):
                 if node.is_training(tx):
                     requires_grad = True
-            return node
 
-        VariableTracker.apply(visit, (args, kwargs))
+        VariableTracker.visit(visit, (args, kwargs))
 
         if (
             requires_grad
@@ -436,6 +454,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     _nonvar_fields = {
         "proxy",
         "inference",
+        "saved_tensors",
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
@@ -524,6 +543,11 @@ class LambdaVariable(VariableTracker):
 
 
 class GetAttrVariable(VariableTracker):
+    _nonvar_fields = {
+        "name",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, obj, name, **kwargs):
         super().__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
@@ -560,6 +584,29 @@ class GetAttrVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         return self.obj.call_method(tx, self.name, args, kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if (
+            name == "__getitem__"
+            and self.name == "__dict__"
+            and len(args) == 1
+            and not kwargs
+            and args[0].is_python_constant()
+        ):
+            obj = self.obj
+            key = args[0].as_python_constant()
+            # redirect to var_getattr on the original obj
+            if isinstance(obj, variables.UserDefinedObjectVariable):
+                obj._check_for_getattribute()
+                if key in obj.value.__dict__:
+                    return obj.var_getattr(tx, key)
+        return super().call_method(tx, name, args, kwargs)
 
 
 class MethodWrapperVariable(VariableTracker):
@@ -609,6 +656,12 @@ class GetSetDescriptorVariable(VariableTracker):
 
 
 class PythonModuleVariable(VariableTracker):
+    _nonvar_fields = {
+        "value",
+        "is_torch",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, value: types.ModuleType, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -722,11 +775,8 @@ class NumpyVariable(VariableTracker):
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
 
-            constant_args = check_constant_args(args, kwargs)
-            unspec_python_args = check_unspec_python_args(args, kwargs)
-
             if self.can_constant_fold_through(func) and (
-                constant_args or unspec_python_args
+                check_unspec_or_constant_args(args, kwargs)
             ):
                 # constant fold
                 return variables.ConstantVariable.create(
@@ -884,3 +934,14 @@ class DebuggingVariable(VariableTracker):
                 return False
 
         return True
+
+
+class StopIterationVariable(VariableTracker):
+    def __init__(self, args, **kwargs):
+        super().__init__(**kwargs)
+        self.args = args
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("builtins", "StopIteration")
+        codegen.foreach(self.args)
+        codegen.call_function(len(self.args), True)

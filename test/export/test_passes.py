@@ -7,8 +7,8 @@ with test_functionalization_with_native_python_assertion)
 import math
 import operator
 import unittest
-from typing import List, Set
 from re import escape
+from typing import List, Set
 
 import torch
 from functorch.experimental.control_flow import cond
@@ -17,22 +17,44 @@ from torch._export.pass_base import _ExportPassBaseDeprecatedDoNotUse
 from torch._export.passes.functionalize_side_effectful_ops_pass import (
     _FunctionalizeSideEffectfulOpsPass,
 )
+from torch._export.passes.replace_set_grad_with_hop_pass import (
+    _is_set_grad_enabled_node,
+    _is_set_grad_enabled_sub_mod,
+)
 from torch._export.passes.replace_view_ops_with_view_copy_ops_pass import (
     get_view_copy_of_view_op,
     is_view_op,
     ReplaceViewOpsWithViewCopyOpsPass,
 )
+from torch._export.utils import (
+    node_inline_,
+    nodes_count,
+    nodes_filter,
+    nodes_map,
+    sequential_split,
+)
+from torch._higher_order_ops.auto_functionalize import auto_functionalized
+from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export
+from torch.export._remove_auto_functionalized_pass import (
+    unsafe_remove_auto_functionalized_pass,
+)
+from torch.export._remove_effect_tokens_pass import _remove_effect_tokens
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
+from torch.library import impl, _scoped_library
 from torch.testing import FileCheck
-from torch.testing._internal.common_utils import run_tests, TestCase, skipIfTorchDynamo, IS_WINDOWS
-from torch.utils import _pytree as pytree
-from torch._export.utils import sequential_split, nodes_filter, nodes_map, node_inline_, nodes_count
-from torch._export.passes.replace_set_grad_with_hop_pass import (
-    _is_set_grad_enabled_node, _is_set_grad_enabled_sub_mod
+from torch.testing._internal.common_utils import (
+    find_library_location,
+    run_tests,
+    TestCase,
+    skipIfTorchDynamo,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
 )
-
+from torch.utils import _pytree as pytree
 
 def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> int:
     count = 0
@@ -177,6 +199,18 @@ class TestPasses(TestCase):
         super().setUp()
         self.SEQUENTIAL_SPLIT_INLINE_TESTS = _sequential_split_inline_tests()
         self.SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
+
+        if IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library(
+                "//caffe2/test/cpp/jit:test_custom_class_registrations"
+            )
+        elif IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        else:
+            lib_file_path = find_library_location('libtorchbind_test.so')
+            if IS_WINDOWS:
+                lib_file_path = find_library_location('torchbind_test.dll')
+            torch.ops.load_library(str(lib_file_path))
 
     def tearDown(self):
         self.SEQUENTIAL_SPLIT_INLINE_TESTS.clear()
@@ -338,6 +372,34 @@ class TestPasses(TestCase):
             if torch.Tag.core in op_overload.tags and is_view_op(op_overload._schema):
                 self.assertIsNotNone(get_view_copy_of_view_op(op_overload._schema))
 
+    def test_custom_obj_tuple_out(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tuple_return(self.attr, x)
+                y = a[0] + a[1]
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, y)
+                return b
+
+        m = MyModule()
+        inputs = (torch.ones(2, 3),)
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, inputs, strict=False)
+
+        inp = torch.randn(2, 3)
+        orig_res = m(inp)
+        ep_res = ep.module()(inp)
+
+        without_token_ep = _remove_effect_tokens(ep)
+        without_token_ep.verifier().check(without_token_ep)
+        without_token_res = without_token_ep.module()(inp)
+
+        self.assertTrue(torch.allclose(orig_res, ep_res))
+        self.assertTrue(torch.allclose(orig_res, without_token_res))
+
     def test_runtime_assert_inline_constraints_for_item(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -478,8 +540,8 @@ class TestPasses(TestCase):
         mod, args = self.SET_GRAD_ENABLED_TESTS["op"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     submod_4 = self.submod_2
@@ -490,8 +552,8 @@ def forward(self, arg_0):
         mod, args = self.SET_GRAD_ENABLED_TESTS["op_under_no_grad"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     submod_4 = self.submod_2
@@ -503,8 +565,8 @@ def forward(self, arg_0):
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     submod_3 = self.submod_1
@@ -515,8 +577,8 @@ def forward(self, arg_0):
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_under_no_grad"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     sum_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
     add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
@@ -527,8 +589,8 @@ def forward(self, arg_0):
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     cos = torch.ops.aten.cos.default(add);  add = None
@@ -544,8 +606,8 @@ def forward(self, arg_0):
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep_no_grad"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     wrap_with_set_grad_enabled = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
     sum_1 = wrap_with_set_grad_enabled[0]
@@ -574,8 +636,8 @@ def forward(self, arg_0):
         self.assertEqual(gm(*args), new_gm(*args))
         self.assertExpectedInline(new_gm.code.strip("\n"), """\
 def forward(self, arg_0, arg_1):
-    arg0_1, arg1_1, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
-    submod_1 = self.submod_1(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    x1, x2, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+    submod_1 = self.submod_1(x1, x2);  x1 = x2 = None
     getitem = submod_1[0]
     getitem_1 = submod_1[1];  submod_1 = None
     submod_2 = self.submod_2(getitem, getitem_1);  getitem = getitem_1 = None
@@ -590,10 +652,10 @@ def forward(self, arg_0, arg_1):
     return pytree.tree_unflatten((getitem_4, getitem_5, getitem_6, getitem_7), self._out_spec)
     """)
         self.assertExpectedInline(new_gm.submod_1.code.strip("\n"), """\
-def forward(self, arg0_1, arg1_1):
+def forward(self, x1, x2):
     _set_grad_enabled = torch._C._set_grad_enabled(True)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-    add_1 = torch.ops.aten.add.Tensor(arg1_1, 1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(x1, 1);  x1 = None
+    add_1 = torch.ops.aten.add.Tensor(x2, 1);  x2 = None
     return (add, add_1)
     """)
         self.assertExpectedInline(new_gm.submod_2.code.strip("\n"), """\
@@ -619,6 +681,97 @@ def forward(self, sin, cos):
             after_inline_str = new_gm.print_readable(print_output=False)
             self.assertEqual(before_str, after_inline_str)
             self.assertEqual(gm(*args), new_gm(*args))
+
+    def test_remove_auto_functionalized_pass(self) -> None:
+        with _scoped_library("DO_NOT_USE_TEST_ONLY", "DEF") as lib:
+
+            lib.define("custom_mutator(Tensor x, Tensor(a!) y) -> Tensor")
+
+            @impl(lib, "custom_mutator", "Meta")
+            def custom_mutator_meta(
+                x: torch.Tensor,
+                y: torch.Tensor,
+            ) -> torch.Tensor:
+                return torch.empty_like(x)
+
+
+            @impl(lib, "custom_mutator", "CompositeExplicitAutograd")
+            def custom_mutator(
+                x: torch.Tensor,
+                y: torch.Tensor,
+            ) -> torch.Tensor:
+                return x + y.add_(1)
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("state", torch.zeros(1))
+
+                def forward(self, x):
+                    return torch.ops.DO_NOT_USE_TEST_ONLY.custom_mutator(x, self.state)
+
+            mod = M()
+            x = torch.randn([3, 3])
+            ep = export(mod, (x,))
+            inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
+            nodes = inplace_ep.graph.nodes
+            for node in nodes:
+                if node.op == "call_function":
+                    self.assertFalse(node.target is auto_functionalized)
+                    self.assertFalse(node.target is operator.getitem)
+
+            for spec in inplace_ep.graph_signature.output_specs:
+                self.assertFalse("getitem" in spec.arg.name)
+
+    def test_remove_auto_functionalized_pass_tuple(self) -> None:
+        with _scoped_library("DO_NOT_USE_TEST_ONLY", "DEF") as lib:
+
+            lib.define("custom_mutator_tuple(Tensor x, Tensor(a!) y) -> (Tensor, Tensor)")
+
+            @impl(lib, "custom_mutator_tuple", "Meta")
+            def custom_mutator_tuple_meta(
+                x: torch.Tensor,
+                y: torch.Tensor,
+            ):
+                return (torch.empty_like(x), torch.empty_like(x))
+
+
+            @impl(lib, "custom_mutator_tuple", "CompositeExplicitAutograd")
+            def custom_mutator_tuple(
+                x: torch.Tensor,
+                y: torch.Tensor,
+            ):
+                return (x, x + y.add_(1))
+
+            class M(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.register_buffer("state", torch.zeros(1))
+
+                def forward(self, x):
+                    return torch.ops.DO_NOT_USE_TEST_ONLY.custom_mutator_tuple(
+                        x, self.state
+                    )
+
+            mod = M()
+            x = torch.randn([3, 3])
+            ep = export(mod, (x,))
+            inplace_ep = unsafe_remove_auto_functionalized_pass(ep)
+
+            nodes = inplace_ep.graph.nodes
+            getitems = 0
+            for node in nodes:
+                if node.op == "call_function":
+                    self.assertFalse(node.target is auto_functionalized)
+                    if node.target is operator.getitem:
+                        getitems += 1
+            self.assertEqual(getitems, 2)  # tuple return of len 2
+
+            out_specs = inplace_ep.graph_signature.output_specs
+            self.assertEqual(out_specs[0].arg.name, "b_state")  # state
+            self.assertEqual(out_specs[1].arg.name, "getitem")  # tuple return 1
+            self.assertEqual(out_specs[2].arg.name, "getitem_1")  # tuple return 2
+
 
 if __name__ == '__main__':
     run_tests()

@@ -27,7 +27,7 @@ import torch
 import torch._logging
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
-from torch._utils_internal import signpost_event
+from torch._utils_internal import compiletime_sl_profile_meta, signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -158,6 +158,7 @@ def preserve_global_state(fn):
         torch_rng_state = torch.random.get_rng_state()
         if torch.cuda.is_available():
             cuda_rng_state = torch.cuda.get_rng_state()
+        allow_tf32 = torch._C._get_cublas_allow_tf32()
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src
         torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
         cleanup = setup_compile_debug()
@@ -174,10 +175,11 @@ def preserve_global_state(fn):
             torch.random.set_rng_state(torch_rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+            torch._C._set_cublas_allow_tf32(allow_tf32)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
             assert (
                 guards.check()
-            ), "Global state changed while dynamo tracing, please report a bug"
+            ), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
@@ -441,6 +443,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
+@compiletime_sl_profile_meta(phase_name="_compile")
 @_use_lazy_graph_module(config.use_lazy_graph_module)
 @maybe_cprofile
 def _compile(
@@ -467,6 +470,9 @@ def _compile(
         ValidationException,
     )
 
+    # Time spent compiling this frame before restarting or failing analysis
+    dynamo_time_before_restart: float = 0.0
+    restart_reasons: set[str] = set()
     output: Optional[OutputGraph] = None
     tracer: Optional[InstructionTranslator] = None
     # This is shared across restarts
@@ -529,6 +535,9 @@ def _compile(
         transform: Callable[[List[Instruction], Dict[str, Any]], Any],
     ) -> Optional[GuardedCode]:
         nonlocal output
+        nonlocal dynamo_time_before_restart
+        nonlocal restart_reasons
+        last_attempt_start_time = start_time = time.time()
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
             try:
@@ -539,6 +548,10 @@ def _compile(
                     "Restarting analysis due to %s",
                     LazyString(format_traceback_short, e.__traceback__),
                 )
+                # If restart reason is None just log the type of the exception
+                restart_reasons.add(e.restart_reason or str(type(e)))
+                # We now have a new "last attempt", reset the clock
+                last_attempt_start_time = time.time()
                 if attempt > 100:
                     unimplemented("100+ RestartAnalysis() calls")
             except exc.SkipFrame as e:
@@ -582,7 +595,7 @@ def _compile(
 
         orig_code_map[out_code] = code
         output_codes.add(out_code)
-
+        dynamo_time_before_restart = last_attempt_start_time - start_time
         assert output is not None
 
         # Tests for new code objects.
@@ -746,6 +759,10 @@ def _compile(
                 code_gen_time = None
                 non_compliant_ops = set({})
                 compliant_custom_ops = set({})
+                restart_reasons = set()
+                # If compilation failed, the entire time is wasted
+                dynamo_time_before_restart = time.time() - start_time
+
             metrics = CompilationMetrics(
                 frame_key,
                 code.co_name,
@@ -769,6 +786,8 @@ def _compile(
                 fail_user_frame_lineno,
                 non_compliant_ops,
                 compliant_custom_ops,
+                restart_reasons,
+                dynamo_time_before_restart,
             )
             record_compilation_metrics(metrics)
             torch._dynamo.callback_handler.run_end_callbacks()

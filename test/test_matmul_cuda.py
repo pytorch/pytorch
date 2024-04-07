@@ -469,14 +469,14 @@ class TestMixedDtypesLinearCuda(TestCase):
 
 
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-@unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
+@unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
-class TestMixedDtypesNewLinearCuda(TestCase):
+class TestMixedDtypesOpsCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
-    def test_mixed_dtypes_new_linear(self, dtype: torch.dtype, device: str = "cuda"):
+    def test_mixed_dtypes_ops_cutlass(self, dtype: torch.dtype, device: str = "cuda"):
         version = _get_torch_cuda_version()
         if version < (11, 8):
-            self.skipTest("_mixed_dtypes_new_linear only compiled for CUDA 11.8+")
+            self.skipTest("mixed dtypes operators compile only for CUDA 11.8+")
 
         def run_test(
             batch_shape,
@@ -486,50 +486,45 @@ class TestMixedDtypesNewLinearCuda(TestCase):
             dtype,
             dtypeq,
             use_scale,
-            use_bias,
-            activation,
+            use_input,
             device,
             rtol,
             atol,
         ):
             val_lo, val_hi = -1, 1
             valq_lo, valq_hi = (0, 2) if dtypeq == torch.uint8 else (-2, 2)
-            input = make_tensor(
+            mat1 = make_tensor(
                 *batch_shape, m, k, low=val_lo, high=val_hi, dtype=dtype, device=device
             )
-            weight = make_tensor(
+            mat2 = make_tensor(
                 n, k, low=valq_lo, high=valq_hi, dtype=dtypeq, device=device
-            )
-            scale = (
+            ).t()  # Mixed dtypes ops work with column-major mat2 only.
+            mat2_scale = (
                 make_tensor(
-                    (n,), low=val_lo, high=val_hi, dtype=input.dtype, device=device
+                    (n,), low=val_lo, high=val_hi, dtype=mat1.dtype, device=device
                 )
-                if use_scale
-                else None
+                if use_mat2_scale
+                else torch.empty((0,), device=device)
             )
-            bias = (
+            input = (
                 make_tensor(
-                    (n,), low=val_lo, high=val_hi, dtype=input.dtype, device=device
+                    (n,), low=val_lo, high=val_hi, dtype=mat1.dtype, device=device
                 )
-                if use_bias
-                else None
+                if use_input
+                else torch.empty((0,), device=device)
             )
 
-            input_ref = input.reshape(-1, input.shape[-1])
-            weight_ref = weight.to(input.dtype)
-            if use_scale:
-                weight_ref *= scale.view(n, 1).expand(n, k)
+            mat1_ref = mat1.reshape(-1, mat1.shape[-1])
+            mat2_ref = mat2.to(mat1.dtype)
+            if use_mat2_scale:
+                mat2_ref *= mat2_scale
 
-            output_ref = torch.nn.functional.linear(input_ref, weight_ref, bias).reshape(*input.shape[:-1], n)
-            if activation == "relu":
-                relu = torch.nn.ReLU()
-                output_ref = relu(output_ref)
-            elif activation == "silu":
-                silu = torch.nn.SiLU()
-                output_ref = silu(output_ref)
-
-            output = torch.ops.aten._mixed_dtypes_new_linear(input, weight, scale=scale, bias=bias, activation=activation)
-
+            if not use_input:
+                output_ref = torch.mm(mat1_ref, mat2_ref).reshape(*mat1.shape[:-1], n)
+                output = torch._mixed_dtypes_mm(mat1, mat2, mat2_scale)
+            else:
+                output_ref = torch.addmm(input, mat1_ref, mat2_ref).reshape(*mat1.shape[:-1], n).reshape(*mat1.shape[:-1], n)
+                output = torch._mixed_dtypes_addmm(input, mat1, mat2, mat2_scale)
             torch.testing.assert_close(output, output_ref, rtol=rtol, atol=atol)
 
         dtypeqs = [torch.int8, torch.uint8]
@@ -544,12 +539,11 @@ class TestMixedDtypesNewLinearCuda(TestCase):
             [16, 64, 128],
             [16, 128, 128],
         ]
-        activations = [None, "relu", "silu"]
         rtol, atol = 1e-3, 1e-3
         if dtype == torch.bfloat16:
             rtol, atol = 1e-2, 1e-3
-        for dtypeq, batch_shape, (m, n, k), use_scale, use_bias, activation in product(
-                dtypeqs, batch_shapes, shapes, (False, True), (False, True), activations
+        for dtypeq, batch_shape, (m, n, k), use_mat2_scale, use_input in product(
+                dtypeqs, batch_shapes, shapes, (False, True), (False, True)
         ):
             run_test(
                 batch_shape,
@@ -558,9 +552,8 @@ class TestMixedDtypesNewLinearCuda(TestCase):
                 k,
                 dtype,
                 dtypeq,
-                use_scale,
-                use_bias,
-                activation,
+                use_mat2_scale,
+                use_input,
                 device,
                 rtol,
                 atol,
@@ -570,7 +563,7 @@ class TestMixedDtypesNewLinearCuda(TestCase):
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
 instantiate_device_type_tests(TestFP8MatmulCuda, globals(), except_for="cpu")
 instantiate_device_type_tests(TestMixedDtypesLinearCuda, globals(), except_for="cpu")
-instantiate_device_type_tests(TestMixedDtypesNewLinearCuda, globals(), except_for="cpu")
+instantiate_device_type_tests(TestMixedDtypesOpsCuda, globals(), except_for="cpu")
 
 if __name__ == '__main__':
     TestCase._default_dtype_check_enabled = True

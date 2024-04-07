@@ -16,7 +16,6 @@ from typing import (
     Optional,
     Set,
     Tuple,
-    TYPE_CHECKING,
     Union,
 )
 
@@ -32,18 +31,14 @@ from torch.utils._sympy.value_ranges import ValueRanges
 from .. import config, metrics
 from ..utils import (
     DeferredLineBase,
-    do_bench,
     free_symbol_startswith,
     IndentedBuffer,
     sympy_dot,
-    sympy_index_symbol,
     sympy_subs,
     unique,
 )
 from ..virtualized import ops, OpsHandler, OpsValue, ReductionType, StoreMode, V
 
-if TYPE_CHECKING:
-    from ..ir import TensorBox
 
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 
@@ -81,8 +76,9 @@ class SizeArg:
 
 @dataclasses.dataclass
 class DeviceCodegen:
-    scheduling: type
+    scheduling: Any
     wrapper_codegen: type
+    cpp_wrapper_codegen: type = type(None)
 
 
 KernelArgType = Union[WorkspaceArg, TensorArg, SizeArg]
@@ -129,19 +125,30 @@ device_op_overrides_dict: Dict[str, DeviceOpOverrides] = {}
 # This backend can be used as a reference:
 # https://github.com/intel/intel-extension-for-pytorch/blob/5dcc9d57e5422cf295e1a1ee97896d6b6a554a85/intel_extension_for_pytorch/_inductor/__init__.py#L9
 def register_backend_for_device(
-    device: str, device_scheduling: type, device_wrapper_codegen: type
+    device: str,
+    device_scheduling: type,
+    device_wrapper_codegen: type,
+    device_cpp_wrapper_codegen: type = type(None),
 ):
-    device_codegens[device] = DeviceCodegen(device_scheduling, device_wrapper_codegen)
+    device_codegens[device] = DeviceCodegen(
+        device_scheduling, device_wrapper_codegen, device_cpp_wrapper_codegen
+    )
 
 
 def get_scheduling_for_device(device: str):
     return device_codegens[device].scheduling if device in device_codegens else None
 
 
-def get_wrapper_codegen_for_device(device: str):
-    return (
-        device_codegens[device].wrapper_codegen if device in device_codegens else None
-    )
+def get_wrapper_codegen_for_device(device: str, cpp_wrapper: bool = False):
+    if device in device_codegens:
+        wrapper_codegen_obj: DeviceCodegen = device_codegens[device]
+        return (
+            wrapper_codegen_obj.cpp_wrapper_codegen
+            if cpp_wrapper
+            else wrapper_codegen_obj.wrapper_codegen
+        )
+    else:
+        return None
 
 
 def index_prevent_reordering(index: List[sympy.Expr], index_vars, sizes):
@@ -160,11 +167,10 @@ def get_device_op_overrides(device: str):
 
     if not device_op_overrides_dict.keys():
         from .cuda import device_op_overrides  # noqa: F401
+        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
     if device in device_op_overrides_dict.keys():
         return device_op_overrides_dict[device]
-
-    return DeviceOpOverrides()
 
 
 @functools.lru_cache(None)
@@ -414,6 +420,9 @@ class PythonPrinter(ExprPrinter):
     def _helper_sqrt(self, expr):
         return f"math.sqrt({self._print(expr)})"
 
+    def _print_OpaqueUnaryFn_sqrt(self, expr):
+        return self._helper_sqrt(expr.args[0])
+
     def _print_Pow(self, expr):
         # Pow() confuses triton
         base, exp = expr.args
@@ -456,39 +465,39 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) >= 2
         return f"min({', '.join(map(self._print, expr.args))})"
 
-    def _print_cos(self, expr):
+    def _print_OpaqueUnaryFn_cos(self, expr):
         assert len(expr.args) == 1
         return f"math.cos({self._print(expr.args[0])})"
 
-    def _print_cosh(self, expr):
+    def _print_OpaqueUnaryFn_cosh(self, expr):
         assert len(expr.args) == 1
         return f"math.cosh({self._print(expr.args[0])})"
 
-    def _print_acos(self, expr):
+    def _print_OpaqueUnaryFn_acos(self, expr):
         assert len(expr.args) == 1
         return f"math.acos({self._print(expr.args[0])})"
 
-    def _print_sin(self, expr):
+    def _print_OpaqueUnaryFn_sin(self, expr):
         assert len(expr.args) == 1
         return f"math.sin({self._print(expr.args[0])})"
 
-    def _print_sinh(self, expr):
+    def _print_OpaqueUnaryFn_sinh(self, expr):
         assert len(expr.args) == 1
         return f"math.sinh({self._print(expr.args[0])})"
 
-    def _print_asin(self, expr):
+    def _print_OpaqueUnaryFn_asin(self, expr):
         assert len(expr.args) == 1
         return f"math.asin({self._print(expr.args[0])})"
 
-    def _print_tan(self, expr):
+    def _print_OpaqueUnaryFn_tan(self, expr):
         assert len(expr.args) == 1
         return f"math.tan({self._print(expr.args[0])})"
 
-    def _print_tanh(self, expr):
+    def _print_OpaqueUnaryFn_tanh(self, expr):
         assert len(expr.args) == 1
         return f"math.tanh({self._print(expr.args[0])})"
 
-    def _print_atan(self, expr):
+    def _print_OpaqueUnaryFn_atan(self, expr):
         assert len(expr.args) == 1
         return f"math.atan({self._print(expr.args[0])})"
 
@@ -583,21 +592,28 @@ class OpOverrides:
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
+            if impl is None:
+                continue
+
             if isinstance(impl, str):
                 nof_args = 2 if "{y}" in impl else 1
                 # extend the following dictionary with factory
                 # functions for a specific number of arguments as
                 # needed:
                 factory = {1: pointwise_factory_1, 2: pointwise_factory_2}[nof_args]
-                setattr(cls, funcname, staticmethod(factory(impl)))
+                impl = factory(impl)
+
+            setattr(cls, funcname, staticmethod(impl))
 
 
 @dataclasses.dataclass
 class OverridesData:
     name: str
-    cpp: str
-    triton: Optional[str] = None  # None when not impl in libdevice/triton
-    cppvec: Optional[str] = None  # None when not impl in aten/.../vec
+    cpp: Union[str, Callable[..., str]]
+    # None when not impl in libdevice/triton
+    triton: Union[Optional[str], Callable[..., str]] = None
+    # None when not impl in aten/.../vec
+    cppvec: Union[Optional[str], Callable[..., str]] = None
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -646,6 +662,13 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
         cpp="calc_erfcx({x})",
         triton="libdevice.erfcx({x})",
         name="special_erfcx",
+    ),
+    fma=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        cpp=lambda x, y, z: f"std::fma({x}, {y}, {z})",
+        cppvec=lambda x, y, z: f"fmadd({x}, {y}, {z})",
+        triton=lambda x, y, z: f"libdevice.fma({x}, {y}, {z})",
+        name="fma",
     ),
     # erfinv, exp2, expit, gammaln
     igamma=OverridesData(
@@ -1240,11 +1263,11 @@ class CSE:
 
 
 class IndirectAssertLine(DeferredLineBase):
-    def __init__(self, line, assert_fn, var, mask, size_map):
+    def __init__(self, line, indirect_assert, var, mask, size_map):
+        super().__init__(line)
         self.var = var
         self.mask = mask
-        self.line = line
-        self.assert_fn = assert_fn
+        self.indirect_assert = indirect_assert
         self.size_map = size_map
 
     def __call__(self):
@@ -1254,31 +1277,26 @@ class IndirectAssertLine(DeferredLineBase):
         assert_min = (self.var.bounds.lower >= 0) != sympy.true
         assert_max = (self.var.bounds.upper < size) != sympy.true
 
-        # FooBar interview question
+        lower = None
+        upper = None
         if not (assert_min or assert_max):
             return None
         elif assert_min and assert_max:
-            # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less error-prone to use and/or/not, which is suported by triton
-            cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
-            cond_print = f"0 <= {self.var} < {size_str}"
+            lower = "0"
+            upper = size_str
         elif assert_min:
-            cond = f"0 <= {self.var}"
-            cond_print = cond
+            lower = "0"
         else:
             assert assert_max
-            cond = f"{self.var} < {size_str}"
-            cond_print = cond
+            upper = size_str
 
-        if self.mask:
-            cond = f"({cond}) | ~{self.mask}"
         return self.line.format(
-            assert_fn=self.assert_fn, cond=cond, cond_print=cond_print
+            assert_line=self.indirect_assert(self.var, lower, upper, self.mask)
         )
 
     def _new_line(self, line):
         return IndirectAssertLine(
-            line, self.assert_fn, self.var, self.mask, self.size_map
+            line, self.indirect_assert, self.var, self.mask, self.size_map
         )
 
 
@@ -1403,7 +1421,6 @@ class Kernel(CodeGen):
             [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
         ],
         values: Tuple[CSEVariable, ...],
-        inits: Tuple[int, ...],
     ) -> Tuple[CSEVariable, ...]:
         raise NotImplementedError()
 
@@ -1423,6 +1440,25 @@ class Kernel(CodeGen):
     @property
     def assert_function(self) -> str:
         raise NotImplementedError()
+
+    def indirect_assert(self, var, lower, upper, mask=None):
+        if lower and upper:
+            # The conditions need to be in parens because of Python's operator precedence.
+            # It'd be less error-prone to use and/or/not, which is suported by triton
+            cond = f"({lower} <= {var}) & ({var} < {upper})"
+            cond_print = f"{lower} <= {var} < {upper}"
+        elif lower:
+            cond = f"{lower} <= {var}"
+            cond_print = cond
+        else:
+            assert upper
+            cond = f"{var} < {upper}"
+            cond_print = cond
+
+        if mask:
+            cond = f"({cond}) | ~{mask}"
+
+        return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
     def index_to_str(self, index: sympy.Expr) -> str:
         raise NotImplementedError()
@@ -1479,7 +1515,7 @@ class Kernel(CodeGen):
                     stm = ops.add(var, self.rename_indexing(size))
                     # Mixed negative and non-negative
                     if var.bounds.upper >= 0:  # type: ignore[operator]
-                        lt = ops.lt(var, "0")
+                        lt = ops.lt(var, 0)
                         stm = ops.where(lt, stm, var)
                     new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
 
@@ -1498,13 +1534,10 @@ class Kernel(CodeGen):
                     if existing_size is not None:
                         size = sympy.Min(size, existing_size)
                     else:
-                        line = (
-                            '{assert_fn}({cond}, "index out of bounds: {cond_print}")'
-                        )
                         self.compute.writeline(
                             IndirectAssertLine(
-                                line,
-                                self.assert_function,
+                                "{assert_line}",
+                                self.indirect_assert,
                                 var,
                                 mask,
                                 self.indirect_max_sizes,
@@ -1512,7 +1545,7 @@ class Kernel(CodeGen):
                         )
 
                     self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-                return sympy_index_symbol(str(var))
+                return parent_handler.indirect_indexing(var, size, check)
 
             @staticmethod
             def load(name: str, index: sympy.Expr) -> CSEVariable:
@@ -1570,9 +1603,8 @@ class Kernel(CodeGen):
                     Tuple[CSEVariable, ...],
                 ],
                 values: Tuple[CSEVariable, ...],
-                inits: Tuple[int, ...],
             ) -> Tuple[CSEVariable, ...]:
-                return self.scan(dtypes, combine_fn, values, inits)
+                return self.scan(dtypes, combine_fn, values)
 
             @staticmethod
             def bucketize(
@@ -1650,14 +1682,8 @@ class Kernel(CodeGen):
 class OptimizationContext:
     key: ClassVar[str] = "opt_ctx"
 
-    # Load value as mask
-    is_load_as_mask: bool = False
-
     dtype: Optional[torch.dtype] = None
     ops_name: str = ""
-
-    # Load uint8/int8 value as float32
-    is_load_int8_as_float: bool = False
 
 
 @functools.lru_cache(None)
@@ -1672,45 +1698,6 @@ def jinja2_env():
         return None
 
 
-PrimitiveInfoType = Union[int, float, bool, str, List[Union[int, str, float, bool]]]
-
-
-class ChoiceCaller:
-    """
-    Represents a possible choice used in autotune_process.py.
-    During autotuning, self.benchmark() is first called to get benchmark result,
-    and if this choice is selected, self.output_node() is called to get the output_node.
-
-    Children classes: TritonTemplateCaller, CUDATemplateCaller.
-    """
-
-    def __init__(self, name, input_nodes, layout):
-        super().__init__()
-        self.name = name
-        self.layout = layout
-        self.input_nodes = input_nodes
-
-    def benchmark(self, *args, out) -> float:
-        algo = self.to_callable()
-        return do_bench(lambda: algo(*args, out=out))
-
-    def call_name(self) -> str:
-        raise NotImplementedError()
-
-    def to_callable(self):
-        raise NotImplementedError()
-
-    def hash_key(self) -> str:
-        raise NotImplementedError()
-
-    def output_node(self) -> "TensorBox":
-        raise NotImplementedError()
-
-    def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
-        """Information returned here is logged to the autotune log file when that is enabled."""
-        return {}
-
-
 class KernelTemplate:
     """
     Base class for defining kernel templates.
@@ -1719,9 +1706,19 @@ class KernelTemplate:
     """
 
     @staticmethod
+    def indent_except_first(source: str, num_indents: int, indents_spacing=4):
+        lines = source.splitlines(True)
+        if len(lines) > 1:
+            lines[1:] = [
+                (" " * indents_spacing * num_indents) + line for line in lines[1:]
+            ]
+        return "".join(lines)
+
+    @staticmethod
     def _template_from_string(source):
         env = jinja2_env()
         if env is not None:
+            env.filters["indent_except_first"] = KernelTemplate.indent_except_first
             return env.from_string(source)
         return None
 
@@ -1752,7 +1749,7 @@ class KernelTemplate:
         except NotImplementedError:
             pass
 
-    def generate(self, **kwargs) -> ChoiceCaller:
+    def generate(self, **kwargs) -> "torch._inductor.ir.ChoiceCaller":
         """
         Generates a ChoiceCaller instance from the given arguments.
         """

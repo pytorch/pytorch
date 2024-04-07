@@ -17,7 +17,6 @@ from filter_test_configs import (
     remove_disabled_jobs,
     set_periodic_modes,
     SUPPORTED_PERIODICAL_MODES,
-    VALID_TEST_CONFIG_LABELS,
 )
 
 
@@ -273,13 +272,13 @@ class TestConfigFilter(TestCase):
         testcases = [
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}]}',
-                "expected": '{"include": [{"config": "default", "runner": "linux"}]}',
-                "description": "No match, keep the same test matrix",
+                "expected": '{"include": []}',
+                "description": "Request test-config/cfg but the test matrix doesn't have it",
             },
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "plain-cfg"}]}',
-                "expected": '{"include": [{"config": "default", "runner": "linux"}, {"config": "plain-cfg"}]}',
-                "description": "No match because there is no prefix or suffix, keep the same test matrix",
+                "expected": '{"include": []}',
+                "description": "A valid test config label needs to start with test-config/",
             },
             {
                 "test_matrix": '{include: [{config: "default", runner: "linux"}, {config: "cfg", shard: 1}]}',
@@ -294,9 +293,8 @@ class TestConfigFilter(TestCase):
             )
             self.assertEqual(case["expected"], json.dumps(filtered_test_matrix))
 
-    def test_filter_with_valid_label(self) -> None:
+    def test_filter_with_test_config_label(self) -> None:
         mocked_labels = {f"{PREFIX}cfg", "ciflow/trunk"}
-        VALID_TEST_CONFIG_LABELS.add(f"{PREFIX}cfg")
 
         testcases = [
             {
