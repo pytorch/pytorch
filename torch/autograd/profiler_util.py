@@ -271,7 +271,8 @@ class EventList(list):
         ]
 
     def export_stacks(self, path: str, metric: str):
-        # Support passing more meaningful names for privateuse1 users
+        # Add support for passing "self_{self._use_device}_time_total" to metirc,
+        # mapping a more meaningful string to "self_privateuse1_time_total".
         metric = (
             metric.replace(self._use_device, "privateuse1")
             if self._use_device
@@ -886,7 +887,7 @@ def _build_table(
     )
 
     if sort_by is not None:
-        # Support sorting by more meaningful names for privateuse1 users
+        # Add support for sorting by more meaningful strings for privateuse1.
         sort_by = sort_by.replace(use_device, "privateuse1") if use_device else sort_by
         events = EventList(
             sorted(events, key=lambda evt: getattr(evt, sort_by), reverse=True),
