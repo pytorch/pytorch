@@ -176,6 +176,5 @@ TEST(CachingHostAllocatorTest, testReuse) {
 
 int main(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
-  at::manual_seed(42);
   return RUN_ALL_TESTS();
 }

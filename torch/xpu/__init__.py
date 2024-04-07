@@ -398,6 +398,11 @@ def empty_cache() -> None:
         torch._C._xpu_emptyCache()
 
 
+def _host_allocator():
+    _lazy_init()
+    return torch._C._xpu_xpuHostAllocator()
+
+
 def _get_generator(device: torch.device) -> torch._C.Generator:
     r"""Return the XPU Generator object for the given device.
 
