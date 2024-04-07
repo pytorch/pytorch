@@ -117,6 +117,38 @@ struct VecConvert<int32_t, 1, uint8_t, 1> {
   }
 };
 
+template <>
+struct VecConvert<unsigned char, 1, float, 1> {
+  static inline VectorizedN<unsigned char, 1> apply(
+      const VectorizedN<float, 1>& src) {
+    return convert_float_to_int8<unsigned char>(src[0]);
+  }
+};
+
+template <>
+struct VecConvert<float, 1, unsigned char, 1> {
+  static inline VectorizedN<float, 1> apply(
+      const VectorizedN<unsigned char, 1>& src) {
+    return convert_int8_to_float<unsigned char>(src[0]);
+  }
+};
+
+template <>
+struct VecConvert<signed char, 1, float, 1> {
+  static inline VectorizedN<signed char, 1> apply(
+      const VectorizedN<float, 1>& src) {
+    return convert_float_to_int8<signed char>(src[0]);
+  }
+};
+
+template <>
+struct VecConvert<float, 1, signed char, 1> {
+  static inline VectorizedN<float, 1> apply(
+      const VectorizedN<signed char, 1>& src) {
+    return convert_int8_to_float<signed char>(src[0]);
+  }
+};
+
 template <typename dst_t>
 struct VecConvert<
     dst_t,
