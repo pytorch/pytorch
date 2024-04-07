@@ -76,7 +76,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 group["capturable"] = True
 
             for p in group["params"]:
-                mark_static_address(p, guard=False)
+                mark_static_address(p)
 
         self.grad_to_source = grad_to_source or {}
         self.tensor_to_source = tensor_to_source or {}
@@ -173,34 +173,54 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # to be done first because the variable builder relies on the static
         # address annotation.
         def mark_static(x):
-            mark_static_address(x, guard=False)
+            mark_static_address(x)
 
         tree_map_only(torch.Tensor, mark_static, self.value.state)
 
         # Recursively realize the variable trackers for optim.state and
         # optim.param_groups, which recursively install the necessary guards.
-
-        # NB: Its necessary to install the guards for optim.state first.
-        # optim.state is a dict with parameters as keys. Therefore, we just put
-        # ID_MATCH on parameters, instead of TENSOR_MATCH. When we install the
-        # guards for param_groups later, VariableTrackerCache just ensures that
-        # we directly return the cached tensor variable tracker without
-        # inserting the TENSOR_MATCH guard.
-        state_vt = LazyVariableTracker.realize_all(
-            VariableBuilder(tx, AttrSource(self.source, "state"))(self.value.state)
-        )
-
         param_groups_vt = LazyVariableTracker.realize_all(
             VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
                 self.value.param_groups
             )
         )
 
+        state_vt = VariableBuilder(tx, AttrSource(self.source, "state"))(
+            self.value.state
+        )
+
+        # We need to realize the top level state dict to populate
+        # the guard locals
+        state_vt.realize()
+
         # Populate self.grad_to_source and self.tensor_to_source so that we can
         # manually update_list_args
         for g_ind, (group, group_vt) in enumerate(
             zip(self.value.param_groups, param_groups_vt.items)
         ):
+            # we assume here that all params within a param group
+            # are initialized similarly
+            if len(group["params"]) > 0:
+                for param in group["params"]:
+                    if param.grad is not None:
+                        key_index = None
+                        for i, k in enumerate(self.value.state.keys()):
+                            if k is param:
+                                key_index = i
+                                break
+                        if key_index:
+                            state_source = AttrSource(self.source, "state")
+                            LazyVariableTracker.realize_all(
+                                VariableBuilder(
+                                    tx,
+                                    GetItemSource(
+                                        state_source,
+                                        ConstDictKeySource(state_source, key_index),
+                                    ),
+                                )(self.value.state[param])
+                            )
+                            break
+
             group_source = group_vt.source
             params_vt = group_vt.getitem_const(ConstantVariable.create("params"))
             for p_ind, (p, p_vt) in enumerate(
@@ -212,6 +232,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                     param_source,
                     "grad",
                 )
+
                 if p.grad is not None:
                     self.grad_to_source[p.grad] = grad_source
                 else:
@@ -244,14 +265,14 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         if tensor_value in self.tensor_to_source:
             # mark these tensors as static for cudagraphs
-            mark_static_address(tensor_value, guard=False)
+            mark_static_address(tensor_value)
             builder = VariableBuilder(tx, self.tensor_to_source[tensor_value])
             self.static_tensor_names.add(tx.output.module_key_name(builder.name))
         elif tensor_value in self.grad_to_source:
             builder = VariableBuilder(tx, self.grad_to_source[tensor_value])
         else:
             # mark these tensors as static for cudagraphs
-            mark_static_address(tensor_value, guard=False)
+            mark_static_address(tensor_value)
 
             global_name = tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, tensor_value)
             builder = VariableBuilder(tx, GlobalWeakRefSource(global_name))
