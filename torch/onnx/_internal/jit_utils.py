@@ -7,7 +7,7 @@ from __future__ import annotations
 import dataclasses
 import re
 import typing
-from typing import Any, Dict, Iterable, Optional, Sequence, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple, Union
 
 import torch
 from torch import _C
@@ -42,6 +42,7 @@ class GraphContext:
     original_node: _C.Node
     params_dict: Dict[str, "_C.IValue"]
     env: Dict[_C.Value, _C.Value]
+    new_nodes: List[_C.Node]
 
     # Relay methods from _C.Graph for compatibility with symbolic functions that expect
     # a _C.Graph
@@ -253,6 +254,7 @@ def _add_op(
         n_outputs=outputs,
         shape_inference=GLOBALS.onnx_shape_inference,
     )
+    graph_context.new_nodes.append(node)
 
     if outputs == 1:
         return node.output()

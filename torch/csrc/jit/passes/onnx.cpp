@@ -436,13 +436,22 @@ void NodeToONNX(
 
     // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
     // Python. Check #87343 for details.
+    py::list new_nodes = py::list();
     py::object raw_output = onnx.attr("_run_symbolic_function")(
         g->shared_from_this(),
         new_block,
         n,
         py_inputs,
         env,
+        new_nodes,
         operator_export_type);
+
+    // Find new nodes that have been created by _run_symbolic_function and
+    // propagate metadata
+    for (py::handle py_node : new_nodes) {
+      Node* node = py_node.cast<Node*>();
+      node->copyMetadata(n);
+    }
 
     // TODO: Assert it's an ATen identifier???
     // (Sometimes it's not...)
@@ -557,12 +566,14 @@ void NodeToONNX(
       // Call symbolic function
       // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
       // Python. Check #87343 for details.
+      py::list new_nodes = py::list();
       py::object raw_output = onnx.attr("_run_symbolic_function")(
           new_block->owningGraph()->shared_from_this(),
           new_block,
           n,
           py_symbolic_args,
           env,
+          new_nodes,
           operator_export_type);
 
       processSymbolicOutput(op->kind().toUnqualString(), n, raw_output);
