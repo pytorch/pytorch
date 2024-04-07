@@ -17,6 +17,7 @@ import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
 from torch._logging import LazyString, trace_structured
+from torch._prims_common import make_channels_last_strides_for
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
@@ -1128,14 +1129,11 @@ class GraphLowering(torch.fx.Interpreter):
                                 result, ir.get_stride_order(n.meta["val"].stride())
                             )
                         if user.target in need_fixed_channels_last_layout:
-                            channels_last_stride_order = [0] + list(
-                                reversed(range(1, len(result.get_size()) - 1))
-                            )
-                            channels_last_stride_order = [
-                                len(channels_last_stride_order)
-                            ] + channels_last_stride_order
                             result = ir.ExternKernel.require_stride_order(
-                                result, channels_last_stride_order
+                                result,
+                                ir.get_stride_order(
+                                    make_channels_last_strides_for(result.get_size())
+                                ),
                             )
                     if user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):
