@@ -13,9 +13,6 @@
 namespace at::cuda {
 namespace {
 
-using Block = HostBlock<CUDAStream>;
-using Comparator = ComparatorSize<Block>;
-
 // Note: cudaEventCreate when concurrently invoked from multiple threads can be
 // very expensive (at least on certain device/driver combinations). Thus, we a)
 // serialize event creation at a per-device level, and b) pool the events to
@@ -69,8 +66,12 @@ class EventPool {
   std::vector<PerDevicePool> pools_;
 };
 
+using Block = HostBlock<CUDAStream>;
+using Comparator = ComparatorSize<Block>;
 using AllocatorImplInterface =
     CachingHostAllocatorImplInterface<CUDAStream, EventPool::Event, Block, Comparator>;
+
+} // anonymous namespace
 
 struct CUDAHostAllocatorImpl : public AllocatorImplInterface {
 
@@ -220,8 +221,6 @@ private:
     registerPages(*ptr, roundSize);
   }
 };
-
-} // anonymous namespace
 
 void raw_local_deleter(void* ptr);
 
