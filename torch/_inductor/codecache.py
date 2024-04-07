@@ -1186,6 +1186,17 @@ invalid_vec_isa = InvalidVecISA()
 supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 
 
+def get_simdlen_from_cpu_capability(capability: str):
+    simdlen_cpu_capability = {
+        "DEFAULT": 0,
+        "NO AVX": 0,
+        "AVX2": 256,
+        "AVX512": 512,
+    }
+    assert capability in simdlen_cpu_capability.keys()
+    return simdlen_cpu_capability[capability]
+
+
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
 # might have too much redundant content that is useless for ISA check. Hence,
 # we only cache some key isa information.
@@ -1216,6 +1227,17 @@ def pick_vec_isa() -> VecISA:
     _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
     if not _valid_vec_isa_list:
         return invalid_vec_isa
+
+    # Set simdlen according to _get_cpu_capability to allow using
+    # the environment ATEN_CPU_CAPABILITY to control CPU vec ISA
+    if (
+        config.cpp.simdlen is None
+        and not isinstance(_valid_vec_isa_list[0], VecNEON)
+        and not isinstance(_valid_vec_isa_list[0], VecZVECTOR)
+    ):
+        config.cpp.simdlen = get_simdlen_from_cpu_capability(
+            torch._C._get_cpu_capability()
+        )
 
     # If the simdlen is None, it indicates determin the vectorization length automatically
     if config.cpp.simdlen is None:

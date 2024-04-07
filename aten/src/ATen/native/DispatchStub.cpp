@@ -70,7 +70,7 @@ static CPUCapability compute_cpu_capability() {
 }
 
 CPUCapability get_cpu_capability() {
-  static CPUCapability capability = compute_cpu_capability();
+  CPUCapability capability = compute_cpu_capability();
   return capability;
 }
 
