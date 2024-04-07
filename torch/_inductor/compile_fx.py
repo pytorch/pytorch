@@ -33,6 +33,7 @@ from torch._dynamo import (
 from torch._dynamo.utils import (
     counters,
     detect_fake_mode,
+    flatten_graph_inputs,
     lazy_format_graph_code,
     optimus_scuba_log,
 )
@@ -45,7 +46,7 @@ from torch._inductor.utils import BoxedBool, count_tangents
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._utils_internal import signpost_event
+from torch._utils_internal import compiletime_sl_profile_meta, signpost_event
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -101,7 +102,9 @@ def index_expanded_dims(t: torch.Tensor, expanded_dims: List[int]) -> torch.Tens
 def complex_memory_overlap(t: torch.Tensor) -> bool:
     # if torch._debug_has_internal_overlap thinks this tensor potentially has
     # memory overlap internally, let's dig deeper to find out whether it's true.
-    t = index_expanded_dims(t, get_expanded_dims(t))
+    #
+    # Call squeeze() so that dimension with size 1 does not cause false positive.
+    t = index_expanded_dims(t, get_expanded_dims(t)).squeeze()
     if torch._debug_has_internal_overlap(t) != 0:
         strides = t.stride()
         sizes = t.shape
@@ -1336,6 +1339,7 @@ def compile_fx(
             graph, joint_inputs, **kwargs, compiler="inductor"
         )
 
+    @compiletime_sl_profile_meta(phase_name="bw_compiler")
     @dynamo_utils.dynamo_timed
     @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
@@ -1448,32 +1452,6 @@ def make_graph_return_tuple(
     @functools.wraps(compiled_fn)
     def wrapper(*args, **kwargs):
         return pytree.tree_unflatten(compiled_fn(*args, **kwargs), spec)
-
-    return wrapper
-
-
-def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
-    """
-    Mutate inputs so that they are flat and wrap gm such that it
-    accepts those inputs.  This is only needed for graphs not created
-    by torchdynamo that take bumpy inputs.
-    """
-    inputs, spec = pytree.tree_flatten(inputs)
-
-    class GmWrapper(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.gm = gm
-
-        def forward(self, *args):
-            args: List[Any] = list(args)
-            return self.gm(*pytree.tree_unflatten(args, spec))
-
-    compiled_fn = compile_gm(GmWrapper(), inputs)
-
-    def wrapper(*args):
-        # note this doesn't check the spec, assuming it is the same
-        return compiled_fn(*pytree.arg_tree_leaves(*args))
 
     return wrapper
 

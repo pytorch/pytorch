@@ -14,7 +14,13 @@ import torch.nn.functional as F
 from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
 from torch._higher_order_ops.out_dtype import out_dtype
-from torch._prims_common import IntLike, NumberType, TensorLike, TensorSequenceType
+from torch._prims_common import (
+    IntLike,
+    NumberType,
+    suggest_memory_format,
+    TensorLike,
+    TensorSequenceType,
+)
 from torch._prims_common.wrappers import (
     _maybe_convert_to_dtype,
     _maybe_resize_out,
@@ -4824,6 +4830,15 @@ def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
 def take(self, index):
     flattened = self.reshape(-1)
     return flattened[index]
+
+
+@register_decomposition(aten.resize_as)
+def resize_as(self, other, memory_format=None):
+    if memory_format is None:
+        memory_format = torch.contiguous_format
+    if memory_format == torch.preserve_format:
+        memory_format = suggest_memory_format(other)
+    return aten.resize(self, other.shape, memory_format=memory_format)
 
 
 register_inplace(aten.addbmm_, aten.addbmm)
