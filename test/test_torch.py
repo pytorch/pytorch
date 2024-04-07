@@ -29,6 +29,8 @@ from itertools import product, combinations, permutations, chain
 from functools import partial
 from torch import multiprocessing as mp
 from torch.testing import make_tensor
+from torch.testing._internal.common_optimizers import (
+    optim_db, optims)
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
@@ -5921,36 +5923,33 @@ else:
             )
 
     @onlyNativeDeviceTypes
-    def test_grad_scaling_autocast(self, device):
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls in [torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD]],
+        dtypes=[torch.float32]
+    )
+    def test_grad_scaling_autocast(self, device, dtype, optim_info):
         device = torch.device(device)
-        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor)
-
-    @onlyNativeDeviceTypes
-    def test_grad_scaling_autocast_foreach(self, device):
-        device = torch.device(device)
-        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
-
-    @onlyCUDA
-    def test_grad_scaling_autocast_fused(self, device):
-        device = torch.device(device)
-        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
+        optimizer_ctor = optim_info.optim_cls
+        self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor)
+        self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
+        if device.type == "cuda":
             self._grad_scaling_autocast_test(device=device.type, optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
 
     # Make sure that the parameters become nonsense when scaled gradients are finite
     # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
 
     @onlyNativeDeviceTypes
-    def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device):
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls in [torch.optim.AdamW, torch.optim.Adam, torch.optim.SGD]],
+        dtypes=[torch.float32]
+    )
+    def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self, device, dtype, optim_info):
         device = torch.device(device)
-        for optimizer_ctor, optimizer_kwargs in product(
-            (torch.optim.Adam, torch.optim.AdamW),
-            (
+        optimizer_ctor = optim_info.optim_cls
+        for optimizer_kwargs in (
                 {"foreach": False, "fused": False},
                 {"foreach": True, "fused": False},
                 {"foreach": False, "fused": True},
-            ),
         ):
             if device.type != "cuda":
                 optimizer_kwargs['fused'] = False
