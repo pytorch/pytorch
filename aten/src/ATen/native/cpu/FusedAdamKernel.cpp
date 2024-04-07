@@ -22,7 +22,7 @@ typename std::enable_if<
   scalar_t* grad_ptr,
   scalar_t* max_exp_avg_sq_ptr,
   opmath_t lr,
-  opmath_t step_size,
+  opmath_t bias_correction1,
   opmath_t bias_correction2,
   opmath_t exp_avg_grad_coefficient,
   opmath_t exp_avg_sq_grad_coefficient,
@@ -35,6 +35,7 @@ typename std::enable_if<
   const float* grad_scale_ptr,
   int64_t size
 ){
+  opmath_t step_size = lr / bias_correction1;
   using lpVec = at::vec::Vectorized<scalar_t>;
   using fVec = at::vec::Vectorized<opmath_t>;
   lpVec grad_vec_to_store;
@@ -157,7 +158,7 @@ typename std::enable_if<
   scalar_t* grad_ptr,
   scalar_t* max_exp_avg_sq_ptr,
   opmath_t lr,
-  opmath_t step_size,
+  opmath_t bias_correction1,
   opmath_t bias_correction2,
   opmath_t exp_avg_grad_coefficient,
   opmath_t exp_avg_sq_grad_coefficient,
@@ -170,6 +171,7 @@ typename std::enable_if<
   const float* grad_scale_ptr,
   int64_t size
 ){
+  opmath_t step_size = lr / bias_correction1;
   using Vec = at::vec::Vectorized<scalar_t>;
   Vec grad_vec_to_store;
   int64_t d = 0;
@@ -272,7 +274,6 @@ void adam_fused_step_impl(
 
   // need to use double here to align with non-fused adam
   double bias_correction1 = 1 - std::pow(beta1, step);
-  opmath_t step_size =  lr / bias_correction1;
   opmath_t bias_correction2 = 1 - std::pow(beta2, step);
   opmath_t exp_avg_grad_coefficient = 1 - beta1;
   opmath_t exp_avg_sq_grad_coefficient = 1 - beta2;
@@ -297,7 +298,7 @@ void adam_fused_step_impl(
           grad_ptr,
           max_exp_avg_sq_ptr,
           lr,
-          step_size,
+          bias_correction1,
           bias_correction2,
           exp_avg_grad_coefficient,
           exp_avg_sq_grad_coefficient,
