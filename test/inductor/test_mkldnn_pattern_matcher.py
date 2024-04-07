@@ -25,7 +25,13 @@ from torch.testing._internal.common_quantization import (
     skipIfNoONEDNN,
     skipIfNoONEDNNBF16,
 )
-from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm, TEST_MKL
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+    skipIfRocm,
+    TEST_MKL,
+)
 from torch.testing._internal.inductor_utils import _check_has_dynamic_shape, HAS_CPU
 
 
@@ -216,6 +222,7 @@ class TestPatternMatcherBase(TestCase):
                 torch.testing.assert_close(actual, expected, atol=atol, rtol=rtol)
 
 
+@instantiate_parametrized_tests
 class TestPatternMatcher(TestPatternMatcherBase):
     def test_conv2d_unary_cpu(self):
         class M(torch.nn.Module):
@@ -2249,36 +2256,38 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfRocm
-    @config.patch({"coordinate_descent_tuning": True})
-    def test_woq_int8(self):
+    @parametrize("coordinate_descent_tuning", [True, False])
+    def test_woq_int8(self, coordinate_descent_tuning: bool):
         class M(torch.nn.Module):
             def forward(self, x, weight, scales):
                 return torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
 
         mod = M().eval()
-        x_shape = (1, 1, 256)
-        w_shape = (12, 256)
-        s_shape = 12
-        x_strides = [
-            (256, 256, 1),  # woq_mm_int8_pattern1
-            (256, 32, 1),  # woq_mm_int8_pattern2
-        ]
-        for x_stride in x_strides:
-            x = torch.randn(x_shape, dtype=torch.bfloat16).as_strided(x_shape, x_stride)
-            w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
-            s = torch.randn(s_shape, dtype=torch.bfloat16)
+        with config.patch({"coordinate_descent_tuning": coordinate_descent_tuning}):
+            x_shape = (1, 1, 256)
+            w_shape = (12, 256)
+            s_shape = 12
+            x_strides = [(256, 256, 1)]  # woq_mm_int8_patter 1, 2
+            if coordinate_descent_tuning:
+                x_strides.append((256, 32, 1))  # woq_mm_int8_pattern 3
+            for x_stride in x_strides:
+                x = torch.randn(x_shape, dtype=torch.bfloat16).as_strided(
+                    x_shape, x_stride
+                )
+                w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
+                s = torch.randn(s_shape, dtype=torch.bfloat16)
 
-            def matcher_check_fn():
-                self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
+                def matcher_check_fn():
+                    self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
 
-            self._test_common(
-                mod,
-                (x, w, s),
-                matcher_check_fn=matcher_check_fn,
-                check_quantization=False,
-                atol=0.001,
-                rtol=0.07,
-            )
+                self._test_common(
+                    mod,
+                    (x, w, s),
+                    matcher_check_fn=matcher_check_fn,
+                    check_quantization=False,
+                    atol=0.001,
+                    rtol=0.07,
+                )
 
     @skipIfNoDynamoSupport
     @skipIfRocm
@@ -2286,7 +2295,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
     def test_woq_dequant_promotion_int8_mixed_bf16(self):
         r"""
         Test with int8_mixed_bf16 woq.
-        This testcase test if dequant node before mul is promoted correctly:
+        This testcase tests if dequant node before mul is promoted correctly:
                   X
                 /   \
          Linear(X)   Linear(X)

@@ -1152,6 +1152,32 @@ def _register_woq_lowering(pattern, computation_woq, computation_reshape):
 
 def _register_woq_mm_int8_pattern1():
     # F.linear(x, weight.to(dtype=x.dtype)) * scales
+    # With torch._inductor.config.coordinate_descent_tuning = False
+    _woq_pattern = CallFunction(
+        aten.mul.Tensor,
+        CallFunction(
+            aten.reshape.default,
+            CallFunction(
+                aten.mm.default,
+                CallFunction(aten.reshape.default, KeywordArg("x"), Arg()),
+                CallFunction(
+                    aten.permute.default,
+                    CallFunction(
+                        prims.convert_element_type.default, KeywordArg("weight"), Arg()
+                    ),
+                    Arg(),
+                ),
+            ),
+            Arg(),
+        ),
+        KeywordArg("scales"),
+    )
+    _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
+
+
+def _register_woq_mm_int8_pattern2():
+    # F.linear(x, weight.to(dtype=x.dtype)) * scales
+    # With torch._inductor.config.coordinate_descent_tuning = True for GPT-Fast
     # case of dispatching to mm or mv
     _woq_pattern = CallFunction(
         aten.mul.Tensor,
@@ -1203,8 +1229,9 @@ def _register_woq_mm_int8_pattern1():
     _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
 
 
-def _register_woq_mm_int8_pattern2():
+def _register_woq_mm_int8_pattern3():
     # F.linear(x, weight.to(dtype=x.dtype)) * scales
+    # With torch._inductor.config.coordinate_descent_tuning = True for GPT-Fast
     # case of dispatching to bmm
     _woq_pattern = CallFunction(
         aten.mul.Tensor,
@@ -1265,6 +1292,7 @@ def _register_quantization_lowerings():
 def _register_woq_lowerings():
     _register_woq_mm_int8_pattern1()
     _register_woq_mm_int8_pattern2()
+    _register_woq_mm_int8_pattern3()
 
 
 def _is_valid_general_dequant_promotion_pattern(
