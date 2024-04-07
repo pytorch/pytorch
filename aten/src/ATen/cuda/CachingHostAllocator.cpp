@@ -71,8 +71,6 @@ using Comparator = ComparatorSize<Block>;
 using AllocatorImplInterface =
     CachingHostAllocatorImplInterface<CUDAStream, EventPool::Event, Block, Comparator>;
 
-} // anonymous namespace
-
 struct CUDAHostAllocatorImpl : public AllocatorImplInterface {
 
 private:
@@ -221,6 +219,8 @@ private:
     registerPages(*ptr, roundSize);
   }
 };
+
+} // anonymous namespace
 
 void raw_local_deleter(void* ptr);
 

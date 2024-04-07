@@ -15,7 +15,7 @@ namespace at {
  * base struct or interface that can be inherited and extended by each backend.
  */
 template <typename S>
-struct TORCH_API HostBlock {
+struct HostBlock {
   // constructor for search key
   HostBlock(size_t size) : size_(size) {}
 
@@ -34,7 +34,7 @@ struct TORCH_API HostBlock {
  * using the block size.
  */
 template <typename B>
-struct TORCH_API ComparatorSize {
+struct ComparatorSize {
   bool operator()(const B* a, const B* b) const {
     if (a->size_ != b->size_) {
       return a->size_ < b->size_;
@@ -92,7 +92,7 @@ template <
     typename E,
     typename B,
     typename C = ComparatorSize<B>>
-struct TORCH_API CachingHostAllocatorImplInterface {
+struct CachingHostAllocatorImplInterface {
   virtual ~CachingHostAllocatorImplInterface() = default;
 
  public:
@@ -323,7 +323,7 @@ struct TORCH_API CachingHostAllocatorImplInterface {
 };
 
 template <typename T>
-struct TORCH_API HostAllocatorInterface : public at::Allocator {
+struct HostAllocatorInterface : public at::Allocator {
   HostAllocatorInterface() :impl_(std::make_unique<T>()) {}
 
   at::DataPtr allocate(size_t size) override {
