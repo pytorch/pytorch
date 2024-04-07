@@ -21,4 +21,4 @@ runs:
       if: always()
       shell: bash
       run: |
-        sudo chown -R "${USER}" "${GITHUB_WORKSPACE}"
+        chown -R "${USER}" "${GITHUB_WORKSPACE}"
