@@ -1821,36 +1821,18 @@ def is_pointwise_with_channels_last_inputs(x):
     if isinstance(x, TensorBox):
         return is_pointwise_with_channels_last_inputs(x.data)
     if isinstance(x, StorageBox) and isinstance(x.data, Pointwise):
-        all_reads = x.data.get_reads()
+        reads = x.data.get_reads()
+        reads_bufs = []
+        for r in reads:
+            if r.name in V.graph.name_to_buffer.keys():
+                reads_bufs.append(V.graph.name_to_buffer[r.name])
+            elif r.name in V.graph.graph_inputs_original.keys():
+                reads_bufs.append(V.graph.graph_inputs_original[r.name])
 
-        def is_channel_last_index(read):
-            if len(read.size) == 4:
-                expected_channel_last_index = (
-                    read.var_names[0] * read.size[1] * read.size[2] * read.size[3]
-                    + read.var_names[1]
-                    + read.var_names[2] * read.size[1] * read.size[3]
-                    + read.var_names[3] * read.size[1]
-                )
-                return expected_channel_last_index == read.index
-            elif len(read.size) == 5:
-                expected_channel_last_index = (
-                    read.var_names[0]
-                    * read.size[1]
-                    * read.size[2]
-                    * read.size[3]
-                    * read.size[4]
-                    + read.var_names[1]
-                    + read.var_names[2] * read.size[1] * read.size[3] * read.size[4]
-                    + read.var_names[3] * read.size[1] * read.size[4]
-                    + read.var_names[4] * read.size[1]
-                )
-                return expected_channel_last_index == read.index
-            else:
-                return False
-
-        return len(all_reads) >= 1 and all(
-            type(read) is dependencies.MemoryDep and is_channel_last_index(read)
-            for read in all_reads
+        return len(reads) >= 1 and all(
+            isinstance(buf.layout, FixedLayout)
+            and buf.layout.is_channels_last_contiguous()
+            for buf in reads_bufs
         )
     return False
 
@@ -3725,11 +3707,9 @@ class ConcatKernel(NopKernel):
 
         output_stride = FlexibleLayout.contiguous_strides(new_size)
         # If any of the inputs is in CL format, use CL format for the output
-        any_input_is_storage_and_layout = False
         for i in range(len(inputs)):
             x = inputs[i]
             if is_storage_and_layout(x):
-                any_input_is_storage_and_layout = True
                 layout = x.get_layout()
                 if (
                     isinstance(layout, FixedLayout)
@@ -3738,6 +3718,7 @@ class ConcatKernel(NopKernel):
                     # use CL stride for the output
                     output_stride = make_channels_last_strides_for(new_size)
                     break
+        any_input_is_storage_and_layout = any(is_storage_and_layout(x) for x in inputs)
         if any_input_is_storage_and_layout is False:
             if all(
                 is_pointwise_with_channels_last_inputs(input) for input in inputs
