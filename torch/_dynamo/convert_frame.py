@@ -27,7 +27,7 @@ import torch
 import torch._logging
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
-from torch._utils_internal import signpost_event
+from torch._utils_internal import compiletime_sl_profile_meta, signpost_event
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     GuardOnDataDependentSymNode,
@@ -441,6 +441,7 @@ def register_bytecode_hook(hook: BytecodeHook) -> RemovableHandle:
     return handle
 
 
+@compiletime_sl_profile_meta(phase_name="_compile")
 @_use_lazy_graph_module(config.use_lazy_graph_module)
 @maybe_cprofile
 def _compile(
