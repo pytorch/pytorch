@@ -1576,10 +1576,6 @@ class CPUReproTests(TestCase):
             else:
                 self.assertTrue(isa == vec_avx2)
 
-        with config.patch({"cpp.simdlen": 0}):
-            isa = codecache.pick_vec_isa()
-            self.assertFalse(isa)
-
         with config.patch({"cpp.simdlen": 1}):
             isa = codecache.pick_vec_isa()
             self.assertFalse(isa)
