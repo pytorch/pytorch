@@ -3,9 +3,9 @@ import contextlib
 import copy
 import itertools
 import math
+import os
 import platform
 import sys
-import os
 import unittest
 from typing import Callable
 from unittest.mock import patch
@@ -1573,12 +1573,18 @@ class CPUReproTests(TestCase):
 
         with config.patch({"cpp.simdlen": None}):
             isa = codecache.pick_vec_isa()
-            print("---------isa----------", isa)
-            print("cpu_capability: ", torch._C._get_cpu_capability())
             if vec_avx512 in codecache.valid_vec_isa_list():
-                self.assertTrue(isa == vec_avx512)
+                if torch._C._get_cpu_capability() == "AVX512":
+                    self.assertTrue(isa == vec_avx512)
+                elif torch._C._get_cpu_capability() == "AVX2":
+                    self.assertTrue(isa == vec_avx2)
+                elif torch._C._get_cpu_capability() == "NO AVX":
+                    self.assertTrue(isa == invalid_vec)
             else:
-                self.assertTrue(isa == vec_avx2)
+                if torch._C._get_cpu_capability() == "AVX2":
+                    self.assertTrue(isa == vec_avx2)
+                elif torch._C._get_cpu_capability() == "NO AVX":
+                    self.assertTrue(isa == invalid_vec)
 
         with config.patch({"cpp.simdlen": 0}):
             isa = codecache.pick_vec_isa()
