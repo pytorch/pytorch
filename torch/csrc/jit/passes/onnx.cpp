@@ -284,10 +284,10 @@ void NodeToONNX(
     for (const auto i : c10::irange(num_old_outputs)) {
       auto old = old_outputs[i];
       if (outputs[i]) {
+        py::object py_output = py::cast(outputs[i]);
         bool exist_in_env = false;
-        for (const auto& it : env) {
-          Value* v = it.second.cast<Value*>();
-          if (v == outputs[i]) {
+        for (auto it : env) {
+          if (it.second.equal(py_output)) {
             exist_in_env = true;
             break;
           }
