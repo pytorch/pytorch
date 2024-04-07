@@ -52,6 +52,13 @@ from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
 from .dicts import DefaultDictVariable
 
 
+def is_standard_setattr(val):
+    return val in (
+        object.__setattr__,
+        torch.nn.Module.__setattr__,
+    )
+
+
 class UserDefinedVariable(VariableTracker):
     pass
 
@@ -443,6 +450,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return super().const_getattr(tx, name)
 
 
+class NO_SUCH_SUBOBJ:
+    pass
+
+
 class UserDefinedObjectVariable(UserDefinedVariable):
     """
     Mostly objects of defined type.  Catch-all for something where we only know the type.
@@ -540,6 +551,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
+            if is_standard_setattr(method):
+                return self.method_setattr_standard(tx, *args, **kwargs)
+
             # [NOTE] OrderedDict, dict subtypes must always have source
             # We cannot instantiate such subtypes in-graph due to builtin __new__
             if method is collections.OrderedDict.keys:
@@ -602,6 +616,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return ConstantVariable(len(self.value))
 
         return super().call_method(tx, name, args, kwargs)
+
+    def method_setattr_standard(self, tx, name, value):
+        try:
+            name = name.as_python_constant()
+        except NotImplementedError:
+            unimplemented(f"non-const setattr name: {name}")
+        if not tx.output.side_effects.is_attribute_mutation(self):
+            unimplemented(f"setattr({self}, {name}, ...)")
+
+        tx.output.side_effects.store_attr(self, name, value)
+        return variables.ConstantVariable(None)
+
+    def needs_slow_setattr(self):
+        return not is_standard_setattr(
+            inspect.getattr_static(self.value, "__setattr__", None)
+        )
 
     def unpack_var_sequence(self, tx):
         if (
@@ -745,8 +775,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._check_for_getattribute()
         getattr_fn = self._check_for_getattr()
 
-        class NO_SUCH_SUBOBJ:
-            pass
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return tx.output.side_effects.load_attr(self, name)
 
         try:
             subobj = self._getattr_static(name)
