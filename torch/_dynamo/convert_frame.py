@@ -158,6 +158,7 @@ def preserve_global_state(fn):
         torch_rng_state = torch.random.get_rng_state()
         if torch.cuda.is_available():
             cuda_rng_state = torch.cuda.get_rng_state()
+        allow_tf32 = torch._C._get_cublas_allow_tf32()
         prior_fwd_from_src = torch.fx.graph_module._forward_from_src
         torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
         cleanup = setup_compile_debug()
@@ -174,10 +175,11 @@ def preserve_global_state(fn):
             torch.random.set_rng_state(torch_rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+            torch._C._set_cublas_allow_tf32(allow_tf32)
             torch.fx.graph_module._forward_from_src = prior_fwd_from_src
             assert (
                 guards.check()
-            ), "Global state changed while dynamo tracing, please report a bug"
+            ), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
