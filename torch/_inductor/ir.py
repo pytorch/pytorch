@@ -3979,7 +3979,7 @@ class ExternKernel(InputsKernel):
         x_unwrap_view = x.unwrap_view()
         # NOTE: Don't use extract_read_writes here as it fails when
         # make_loader() inlines the computation
-        reads = x_unwrap_view.get_read_writes().reads
+        reads = x_unwrap_view.get_reads()
         reads_bufs = []
         for r in reads:
             if r.name in V.graph.name_to_buffer.keys():
