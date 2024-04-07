@@ -17,7 +17,7 @@ from torch._subclasses.fake_tensor import is_fake
 
 from .. import config
 
-from .functional_utils import _check_if_mutation_can_be_in_graph
+from .functional_utils import _check_if_mutation_can_be_in_graph, has_same_metadata
 from .utils import strict_zip
 
 zip = strict_zip
@@ -57,10 +57,9 @@ OutputType = Enum(
 # Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
 # after applying all the ViewMeta operations.
 class FunctionalTensorMetadataEq:
-    def __init__(self, tensor: torch.Tensor, offset: int = 0) -> None:
+    def __init__(self, tensor: torch.Tensor) -> None:
         assert torch._is_functional_tensor(tensor)
         self.tensor = tensor
-        self.offset = offset
 
     def __eq__(self, other: object) -> bool:
         # If other is None, then it probably means that we weren't able to recreate
@@ -73,11 +72,7 @@ class FunctionalTensorMetadataEq:
         if not isinstance(other, FunctionalTensorMetadataEq):
             return NotImplemented
 
-        return (
-            self.tensor.shape == other.tensor.shape
-            and self.tensor.stride() == other.tensor.stride()
-            and self.tensor.storage_offset() == other.tensor.storage_offset()
-        )
+        return has_same_metadata(self.tensor, other.tensor)
 
 
 # This class stores info about every user output.

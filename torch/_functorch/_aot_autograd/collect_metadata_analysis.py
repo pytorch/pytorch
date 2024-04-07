@@ -360,19 +360,6 @@ def run_functionalized_fw_and_collect_metadata(
                 ]
             )
 
-            # Compute the offset of the ViewMeta sequence of the output.
-            # Consider that the output 'O' aliases one of the inputs 'I':
-            #
-            #   - 'O' will have all ViewMeta instances (in the same order) that 'I' has,
-            #     since creating a view from a functional tensor will ensure that
-            #
-            #   - 'O' might have more ViewMeta instances than just those in the beggining
-            #
-            # That's why we need to find out where this specific offset that divides the
-            # ViewMeta sequence into (i) input ViewMeta sequence and (ii) output ViewMeta
-            # sequence lies.
-            base_functional_offset = 0
-
             # See Note [Accessing .grad_fn on FunctionalTensor]
             # In-place operations on views will trigger a lazy rebase of the autograd graph;
             # this runs during access to the .grad_fn. The rebase logic will invoke view ops
@@ -390,6 +377,59 @@ def run_functionalized_fw_and_collect_metadata(
                 is_result_of_custom_autograd_fn = True
             if isinstance(grad_fn, torch.autograd.function.BackwardCFunction):
                 is_result_of_custom_autograd_fn = True
+            # Whether we should save this output's FunctionalTensor or not.
+            #
+            # This will be used at runtime for reconstructing output views from
+            # their respective base tensors.
+            #
+            # The FunctionalTensor will be saved iff:
+            #
+            #   1. The output is an alias of some kind. Specifically, if the
+            #      output_type is either of:
+            #      (i) alias_of_input;
+            #      (ii) alias_of_intermediate;
+            #      (iii) alias_of_intermediate_save_as_output; or
+            #      (iv) alias_of_intermediate_base_is_user_output.
+            #
+            #   2. The base tensor of the output has not gone through a metadata
+            #      mutation. With this, we explicitly not support in-place view
+            #      operations.
+            should_save_functional_tensor = False
+
+            # Check if the base tensor has gone through a metadata mutation, and
+            # change should_save_functional_tensor appropriately.
+            def check_should_save_functional_tensor(f_arg, arg=None):
+                nonlocal should_save_functional_tensor
+
+                if not (
+                    isinstance(o, FunctionalTensor)
+                    and isinstance(f_arg, FunctionalTensor)
+                ):
+                    # Bail if we are not dealing with FunctionalTensor.
+                    return
+
+                if arg is None:
+                    # We may not have a concrete tensor corresponding to f_arg at the time
+                    # of its creation. In this case, we conservatively check for storage and
+                    # metadata mutations.
+                    #
+                    # This applies to alias of intermediates and outputs. For inputs, we do
+                    # have the concrete tensor at the time of f_arg creation: the one we
+                    # applied to_fun function (see above).
+                    storage_changed = torch._functionalize_was_storage_changed(
+                        f_arg.elem
+                    )
+                    metadata_mutated = torch._functionalize_has_metadata_mutation(
+                        f_arg.elem
+                    )
+                    should_save_functional_tensor = (
+                        not storage_changed and not metadata_mutated
+                    )
+                else:
+                    metadata_mutated = has_metadata_mutation(
+                        f_arg, arg, check_only_storage_mutation=False
+                    )
+                    should_save_functional_tensor = not metadata_mutated
 
             if not isinstance(o, Tensor):
                 output_type = OutputType.non_alias
@@ -437,20 +477,9 @@ alias each other from a multi-output view call"
                     output_type = OutputType.is_input
                 else:
                     output_type = OutputType.alias_of_input
-
-                    # If the tensors are instances of FunctionalTensor, then record how many ViewMeta
-                    # instances the input has. That will be the base offset.
-                    f_arg = flat_f_args[base_idx]
-                    if isinstance(o, FunctionalTensor) and isinstance(
-                        f_arg, FunctionalTensor
-                    ):
-                        base_functional_offset = torch._functionalize_view_metas_size(
-                            f_arg.elem
-                        )
-                        assert torch._functionalize_is_alias_of(o.elem, f_arg.elem), (
-                            "Output not a real alias of input, even though they do alias the "
-                            "same tensor."
-                        )
+                    check_should_save_functional_tensor(
+                        flat_f_args[base_idx], flat_args[base_idx]
+                    )
 
             # We only need to handle the intermediate base case when both
             # the intermediate base and the output require gradients.
@@ -493,6 +522,7 @@ from a multi-output view call"
                 else:
                     # First, check if o's ._base is an existing output
                     maybe_existing_out_idx = out_tensor_ids.get(id(o._base), None)
+                    base_tensor_list = flat_f_outs
                     if maybe_existing_out_idx is not None:
                         # Special case where the output is an alias of a graph intermediate, but that intermediate
                         # is itself also a user output.
@@ -507,6 +537,7 @@ from a multi-output view call"
                                 id(o._base), None
                             )
                         )
+                        base_tensor_list = intermediate_bases
                         if maybe_existing_base_output_idx is not None:
                             output_type = OutputType.alias_of_intermediate
                             base_idx = maybe_existing_base_output_idx
@@ -523,6 +554,9 @@ from a multi-output view call"
                                 id(o._base)
                             ] = new_out_idx
                             intermediate_bases.append(o._base)
+                    # We know the output is an alias of an intermediate.
+                    # Check whether we can save the output FunctionalTensor.
+                    check_should_save_functional_tensor(base_tensor_list[base_idx])
             elif (
                 # See https://github.com/pytorch/pytorch/issues/100348 for this case.
                 # This protects against the specific case where a user fn returns (output, output.detach())
@@ -530,13 +564,13 @@ from a multi-output view call"
                 and len(outs_with_identical_metadata_that_require_grad) > 0
                 and not o.requires_grad
             ):
-                assert len(outs_with_identical_metadata_that_require_grad) > 0
                 # In theory we could use any of these tensors to regenerate the aliased outputs from,
                 # since they all alias each other and have identical metatadata
                 out_alias = outs_with_identical_metadata_that_require_grad[0]
                 existing_out_idx = out_tensor_ids[id(out_alias)]
                 output_type = OutputType.alias_of_intermediate_base_is_user_output
                 base_idx = existing_out_idx
+                check_should_save_functional_tensor(flat_f_outs[base_idx])
             else:
                 output_type = OutputType.non_alias
                 base_idx = None
@@ -554,8 +588,8 @@ from a multi-output view call"
                 dynamic_dims=dynamic_dims,
                 requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,
                 functional_tensor=(
-                    FunctionalTensorMetadataEq(o.elem, offset=base_functional_offset)
-                    if isinstance(o, FunctionalTensor)
+                    FunctionalTensorMetadataEq(o.elem)
+                    if should_save_functional_tensor
                     else None
                 ),
             )

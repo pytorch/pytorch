@@ -664,55 +664,13 @@ static PyObject* THPVariable__functionalize_sync(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPVariable__functionalize_view_metas_size(
-    PyObject* self,
-    PyObject* args,
-    PyObject* kwargs) {
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser(
-      {"_functionalize_view_metas_size(Tensor tensor)"},
-      /*traceable=*/true);
-
-  ParsedArgs<1> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  auto tensor = r.tensor(0);
-  TORCH_INTERNAL_ASSERT(
-      at::functionalization::impl::isFunctionalTensor(tensor));
-  auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
-  return py::cast(impl->view_metas_size()).release().ptr();
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPVariable__functionalize_is_alias_of(
-    PyObject* self,
-    PyObject* args,
-    PyObject* kwargs) {
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser(
-      {"_functionalize_is_alias_of(Tensor tensor, Tensor base)"},
-      /*traceable=*/true);
-
-  ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  auto base = r.tensor(0);
-  TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(base));
-  auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(base);
-  if (impl->is_functional_alias_of(r.tensor(1))) {
-    Py_RETURN_TRUE;
-  } else {
-    Py_RETURN_FALSE;
-  }
-  return py::cast(impl->view_metas_size()).release().ptr();
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject* THPVariable__functionalize_apply_view_metas(
     PyObject* self,
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"_functionalize_apply_view_metas(Tensor tensor, Tensor base, *, int64_t start=0, int64_t? end=None)"},
+      {"_functionalize_apply_view_metas(Tensor tensor, Tensor base)"},
       /*traceable=*/true);
 
   ParsedArgs<4> parsed_args;
@@ -721,28 +679,7 @@ static PyObject* THPVariable__functionalize_apply_view_metas(
   TORCH_INTERNAL_ASSERT(
       at::functionalization::impl::isFunctionalTensor(tensor));
   auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
-  auto start = r.toInt64(2);
-  auto end = r.toInt64Optional(3);
-  return wrap(impl->apply_view_metas(r.tensor(1), start, end));
-  END_HANDLE_TH_ERRORS
-}
-
-static PyObject* THPVariable__functionalize_base(
-    PyObject* self,
-    PyObject* args,
-    PyObject* kwargs) {
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser(
-      {"THPVariable__functionalize_base(Tensor tensor)"},
-      /*traceable=*/true);
-
-  ParsedArgs<1> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  auto tensor = r.tensor(0);
-  TORCH_INTERNAL_ASSERT(
-      at::functionalization::impl::isFunctionalTensor(tensor));
-  auto impl = at::functionalization::impl::unsafeGetFunctionalWrapper(tensor);
-  return wrap(impl->base());
+  return wrap(impl->apply_view_metas(r.tensor(1)));
   END_HANDLE_TH_ERRORS
 }
 
@@ -861,18 +798,6 @@ static PyMethodDef torch_functions_manual[] = {
      nullptr},
     {"_functionalize_apply_view_metas",
      castPyCFunctionWithKeywords(THPVariable__functionalize_apply_view_metas),
-     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
-     nullptr},
-    {"_functionalize_view_metas_size",
-     castPyCFunctionWithKeywords(THPVariable__functionalize_view_metas_size),
-     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
-     nullptr},
-    {"_functionalize_is_alias_of",
-     castPyCFunctionWithKeywords(THPVariable__functionalize_is_alias_of),
-     METH_VARARGS | METH_KEYWORDS | METH_STATIC,
-     nullptr},
-    {"_functionalize_base",
-     castPyCFunctionWithKeywords(THPVariable__functionalize_base),
      METH_VARARGS | METH_KEYWORDS | METH_STATIC,
      nullptr},
     {"_enable_functionalization",
