@@ -3,6 +3,11 @@ ARG UBUNTU_VERSION
 FROM ubuntu:${UBUNTU_VERSION}
 
 ARG UBUNTU_VERSION
+ARG HTTP_PROXY
+
+ENV ftp_proxy="${HTTP_PROXY}"
+ENV http_proxy="${HTTP_PROXY}"
+ENV https_proxy="${HTTP_PROXY}"
 
 ENV DEBIAN_FRONTEND noninteractive
 
@@ -103,9 +108,9 @@ RUN if [ -n "${NINJA_VERSION}" ]; then bash ./install_ninja.sh; fi
 RUN rm install_ninja.sh
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
-COPY ./common/install_cache.sh install_cache.sh
-ENV PATH /opt/cache/bin:$PATH
-RUN bash ./install_cache.sh && rm install_cache.sh
+# COPY ./common/install_cache.sh install_cache.sh
+# ENV PATH /opt/cache/bin:$PATH
+# RUN bash ./install_cache.sh && rm install_cache.sh
 
 # Include BUILD_ENVIRONMENT environment variable in image
 ARG BUILD_ENVIRONMENT

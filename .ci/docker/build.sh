@@ -361,6 +361,7 @@ fi
 
 # Build image
 DOCKER_BUILDKIT=1 docker build \
+       --build-arg "HTTP_PROXY=${http_proxy}" \
        --no-cache \
        --progress=plain \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
