@@ -10,7 +10,7 @@
 
 constexpr int64_t N = 100;
 
-TEST(CachingHostAllocatorTest, pinned_alias_slice) {
+TEST(CachingHostAllocatorTest, testPinnedAliasSlice) {
   if (!at::xpu::is_available()) {
     return;
   }
@@ -18,6 +18,7 @@ TEST(CachingHostAllocatorTest, pinned_alias_slice) {
   // Check a standard pinned tensor can be correctly recorded.
   auto pinned_tensor =
       at::empty({N}, at::TensorOptions().dtype(at::kByte).pinned_memory(true));
+  // TODO: Uncomment this line when op `pin_memory` is supported on XPU.
   // ASSERT_TRUE(pinned_tensor.is_pinned());
   ASSERT_TRUE(at::xpu::CachingHostAllocator_recordEvent(
       pinned_tensor.data_ptr(),
@@ -66,7 +67,7 @@ TEST(CachingHostAllocatorTest, pinned_alias_slice) {
       slice_tensor.storage().data_ptr().get());
 }
 
-TEST(CachingHostAllocatorTest, check_raw_allocation) {
+TEST(CachingHostAllocatorTest, testRawAllocation) {
   if (!at::xpu::is_available()) {
     return;
   }
@@ -110,7 +111,7 @@ TEST(CachingHostAllocatorTest, check_raw_allocation) {
       at::xpu::getCurrentXPUStream()));
 }
 
-TEST(CachingHostAllocatorTest, check_unknown_tensor) {
+TEST(CachingHostAllocatorTest, testUnknownTensor) {
   if (!at::xpu::is_available()) {
     return;
   }
@@ -124,7 +125,7 @@ TEST(CachingHostAllocatorTest, check_unknown_tensor) {
       at::xpu::getCurrentXPUStream()));
 }
 
-TEST(CachingHostAllocatorTest, check_empty_cache) {
+TEST(CachingHostAllocatorTest, testEmptyCache) {
   if (!at::xpu::is_available()) {
     return;
   }
@@ -151,7 +152,7 @@ TEST(CachingHostAllocatorTest, check_empty_cache) {
       ptr, ctx, at::xpu::getCurrentXPUStream()));
 }
 
-TEST(CachingHostAllocatorTest, check_reuse) {
+TEST(CachingHostAllocatorTest, testReuse) {
   if (!at::xpu::is_available()) {
     return;
   }

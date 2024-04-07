@@ -1,7 +1,6 @@
 #include <ATen/xpu/CachingHostAllocator.h>
 
 namespace at::xpu {
-
 namespace {
 
 constexpr size_t kHostAlignment = 512;
@@ -34,7 +33,7 @@ struct XPUHostAllocatorImpl : public AllocatorImplInterface {
   }
 };
 
-} // namespace
+} // anonymous namespace
 
 void raw_local_deleter(void* ptr);
 
@@ -60,10 +59,6 @@ static inline XPUHostAllocator& getXPUHostAllocator() {
   return host_allocator;
 }
 
-at::Allocator* getCachingHostAllocator() {
-  return &host_allocator;
-}
-
 bool CachingHostAllocator_recordEvent(
     void* ptr,
     void* ctx,
@@ -73,6 +68,10 @@ bool CachingHostAllocator_recordEvent(
 
 void CachingHostAllocator_emptyCache() {
   getXPUHostAllocator().empty_cache();
+}
+
+at::Allocator* getCachingHostAllocator() {
+  return &host_allocator;
 }
 
 } // namespace at::xpu
