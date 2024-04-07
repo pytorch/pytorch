@@ -243,6 +243,10 @@ class ConstDictVariable(VariableTracker):
             tx.output.side_effects.mutation(self)
             self.items[Hashable(args[0])] = args[1]
             return ConstantVariable.create(None)
+        elif name == "__delitem__" and arg_hashable and self.mutable_local:
+            tx.output.side_effects.mutation(self)
+            self.items.__delitem__(Hashable(args[0]))
+            return ConstantVariable.create(None)
         elif name in ("pop", "get") and len(args) in (1, 2) and args[0] not in self:
             # missing item, return the default value
             if len(args) == 1:
