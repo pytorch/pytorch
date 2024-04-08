@@ -1,3 +1,4 @@
+#include <type_traits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 
@@ -9,6 +10,8 @@
 #include <ATen/native/cpu/utils.h>
 #include <c10/util/irange.h>
 #include <c10/util/Unroll.h>
+
+#include <iostream>
 
 #if (defined(_WIN32) || defined(_WIN64))
 #define RESTRICT __restrict
@@ -336,7 +339,7 @@ inline void tinygemm_kernel(
   c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
 
-#else
+#endif
 
 inline float convert_int4_to_float(uint8_t a, bool is_even) {
   static constexpr float lut[16] = {
@@ -350,13 +353,50 @@ inline float convert_int4_to_float(uint8_t a, bool is_even) {
   return lut[index];
 }
 
-// non-vectorized version
 template <int BLOCK_M, int BLOCK_N>
-inline void tinygemm_kernel(
-    const BFloat16* RESTRICT A,
+inline
+void tinygemm_kernel(
+    const Half* RESTRICT A,
     const uint8_t* RESTRICT B,
-    const BFloat16* RESTRICT ScaleAndZeros,
-    BFloat16* RESTRICT C,
+    const Half* RESTRICT ScaleAndZeros,
+    Half* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K,
+    int BLOCK_K) {
+
+  // std::cout << "Vous est ici!" << std::endl;
+
+  for (const auto m : c10::irange(BLOCK_M)) {
+    for (const auto n : c10::irange(BLOCK_N)) {
+      float c_val = 0;
+      for (const auto k : c10::irange(K)) {
+        int kb = k / BLOCK_K;
+        const auto scale = static_cast<float>(ScaleAndZeros[kb * ldc * 2 + n * 2]);
+        const auto zero = static_cast<float>(ScaleAndZeros[kb * ldc * 2 + n * 2 + 1]);
+        const auto a_val = static_cast<float>(A[m * lda + k]);
+        uint8_t b_pack = B[k * ldb + n / 2];
+        // range [-8, 7]: B_val = (bf16(B_int4_val) * scale) + zero
+        float b_val = convert_int4_to_float(b_pack, n % 2 == 0);
+        b_val = b_val * scale + zero;
+
+        c_val += a_val * b_val;
+      }
+      C[m * ldc + n] = c_val;
+    }
+  }
+}
+
+
+// non-vectorized version
+template <int BLOCK_M, int BLOCK_N, typename T>
+inline
+std::enable_if_t<std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>, void> tinygemm_kernel(
+    const T* RESTRICT A,
+    const uint8_t* RESTRICT B,
+    const T* RESTRICT ScaleAndZeros,
+    T* RESTRICT C,
     int lda,
     int ldb,
     int ldc,
@@ -383,7 +423,6 @@ inline void tinygemm_kernel(
   }
 }
 
-#endif
 
 #define LAUNCH_TINYGEMM_KERNEL(MB_SIZE, NB_SIZE)                 \
   tinygemm_kernel<MB_SIZE, NB_SIZE>(                             \
@@ -533,10 +572,10 @@ void int4pack_mm_kernel(
     const Tensor& qScaleAndZeros,
     int N, int K) {
 
-  const auto* A_data = A.data_ptr<BFloat16>();
+  const auto* A_data = A.data_ptr<Half>();
   const auto* B_data = reinterpret_cast<uint8_t*>(B.data_ptr());
-  auto* C_data = C.data_ptr<BFloat16>();
-  const auto* S_data = qScaleAndZeros.data_ptr<BFloat16>();
+  auto* C_data = C.data_ptr<Half>();
+  const auto* S_data = qScaleAndZeros.data_ptr<Half>();
 
   int M = A.size(0);
 
