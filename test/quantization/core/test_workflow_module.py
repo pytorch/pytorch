@@ -357,6 +357,31 @@ class TestObserver(QuantizationTestCase):
             result = torch.softmax(input + dequant_mask, dim=1)
             self.assertEqual(result, ref_result)
 
+    def test_histogram_observer_handle_OOM_due_to_close_min_max_value(self):
+        obser = HistogramObserver.with_args(reduce_range=False)()
+        # close min and max value in the 1st forward() pass of observer tends
+        # to cause OOM in the following pass.
+        # This is due to the allocation of histogram tensor during _combine_histograms().
+        # With sanity check on the size of histogram tensor, we expect the histogram observer
+        # can still work by resetting the histogram
+        x1 = torch.tensor([0, 1e-9])
+        obser(x1)
+
+        x2 = torch.tensor([2.0, 3.0])
+        obser(x2)
+
+    def test_histogram_observer_handle_OOM_due_to_large_upsample_rate(self):
+        # a large upsample rate leads to OOM due to the allocation of histogram tensor
+        # during _combine_histograms(). With sanity check on the size of histogram tensor,
+        # we expect the histogram observer can still work by resetting the histogram
+        obser = HistogramObserver.with_args(upsample_rate=(8000**2), reduce_range=False)()
+
+        x1 = torch.tensor([0, 1.0])
+        obser(x1)
+
+        x2 = torch.tensor([2, 2 + 1e-9])
+        obser(x2)
+
     def test_histogram_observer_save_load_state_dict(self):
         """
         Smoke test on saving/loading state_dict
