@@ -243,7 +243,7 @@ class _DDPSink(Function):
         ctx.set_materialize_grads(False)
         ctx.ddp_weakref = ddp_weakref
         ret = inputs
-        if ddp_weakref().ddp_sink_clone:
+        if ddp_weakref()._ddp_sink_clone:
             ret = tuple(
                 inp.clone() if isinstance(inp, torch.Tensor) else inp for inp in inputs
             )
@@ -904,7 +904,7 @@ class DistributedDataParallel(Module, Joinable):
             self._register_accum_grad_hook()
 
         # Whether or not DDPSink performs a clone.
-        self.ddp_sink_clone = True
+        self._ddp_sink_clone = True
 
     def _register_accum_grad_hook(self):
         import torch.distributed._functional_collectives as fcol
@@ -2204,10 +2204,7 @@ class DistributedDataParallel(Module, Joinable):
                 "Communication hook: return annotation should be torch.futures.Future[torch.Tensor].",
             )
 
-        if hook.__name__ in [
-            "bf16_compress_hook",
-            "bf16_compress_wrapper_hook",
-        ] and (
+        if hook.__name__ in ["bf16_compress_hook", "bf16_compress_wrapper_hook",] and (
             (torch.version.cuda is None and torch.version.hip is None)
             or (
                 torch.version.cuda is not None
@@ -2378,4 +2375,4 @@ class DistributedDataParallel(Module, Joinable):
         a result, this can be set to False if you are not modifying the
         loss in place.
         """
-        self.ddp_sink_clone = val
+        self._ddp_sink_clone = val
