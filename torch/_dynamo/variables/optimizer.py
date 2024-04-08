@@ -72,6 +72,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
 
         for group in self.value.param_groups:
+            if "capturable" in group:
+                group["capturable"] = True
+
             for p in group["params"]:
                 mark_static_address(p)
 
@@ -128,31 +131,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         if name in ("_init_group", "step"):
             return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
-        if name == "param_groups":
-            self._set_capturable(tx)
-
         return super().var_getattr(tx, name)
-
-    def _set_capturable(self, tx):
-        from . import LazyVariableTracker
-        from .builder import VariableBuilder
-
-        # Set capturable to True
-        for group in self.value.param_groups:
-            if "capturable" in group:
-                group["capturable"] = True
-
-        param_groups_vt = LazyVariableTracker.realize_all(
-            VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
-                self.value.param_groups
-            )
-        )
-        for param_group_vt in param_groups_vt.items:
-            key = ConstDictVariable._HashableTracker(
-                ConstantVariable.create("capturable")
-            )
-            if key in param_group_vt.items:
-                param_group_vt.items[key] = ConstantVariable.create(True)
 
     def get_python_args(self, *args, **kwargs):
         """Get python values equivalent to the variable tracker args"""
