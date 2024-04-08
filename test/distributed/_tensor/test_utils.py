@@ -14,6 +14,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    skip_if_lt_x_gpu,
     with_comms,
 )
 
@@ -117,6 +118,18 @@ class UtilTest(DTensorTestBase):
                     dtensor.to_local(),
                     global_tensor[dim0_start:dim0_end, dim1_start:dim1_end],
                 )
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_FSDP1_TP_2D_offsets_sizes(self):
+
+
+
+
+    # @with_comms
+    # @skip_if_lt_x_gpu(4)
+    # def test_FSDP2_TP_2D_offsets_sizes(self):
+
 
 
 if __name__ == "__main__":
