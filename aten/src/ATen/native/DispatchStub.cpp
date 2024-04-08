@@ -44,11 +44,11 @@ static CPUCapability compute_cpu_capability() {
 
 #if !defined(__powerpc__) && !defined(__s390x__)
   if (cpuinfo_initialize()) {
-    std::cout << "cpuinfo_has_x86_avx512vl: " << cpuinfo_has_x86_avx512vl <<"\n";
-    std::cout << "cpuinfo_has_x86_avx512bw: " << cpuinfo_has_x86_avx512bw <<"\n";
-    std::cout << "cpuinfo_has_x86_avx512dq: " << cpuinfo_has_x86_avx512dq <<"\n";
-    std::cout << "cpuinfo_has_x86_fma3: " << cpuinfo_has_x86_fma3 <<"\n";
-    std::cout << "cpuinfo_has_x86_avx2: " << cpuinfo_has_x86_avx2 <<"\n";
+    std::cout << "cpuinfo_has_x86_avx512vl: " << cpuinfo_has_x86_avx512vl() <<"\n";
+    std::cout << "cpuinfo_has_x86_avx512bw: " << cpuinfo_has_x86_avx512bw() <<"\n";
+    std::cout << "cpuinfo_has_x86_avx512dq: " << cpuinfo_has_x86_avx512dq() <<"\n";
+    std::cout << "cpuinfo_has_x86_fma3: " << cpuinfo_has_x86_fma3() <<"\n";
+    std::cout << "cpuinfo_has_x86_avx2: " << cpuinfo_has_x86_avx2() <<"\n";
 #if defined(HAVE_AVX512_CPU_DEFINITION)
     // GCC supports some AVX512 intrinsics such as _mm512_set_epi16 only in
     // versions 9 & beyond. So, we want to ensure that only releases built with
