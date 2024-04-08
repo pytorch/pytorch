@@ -35,8 +35,8 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import parametrize, instantiate_parametrized_tests
-from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
 from torch.testing._internal.optests import _test_aot_autograd_forwards_backwards_helper, aot_autograd_check
+from torch.testing._internal.hop_db import hop_db
 from torch._higher_order_ops.out_dtype import out_dtype
 from functorch import (
     grad, vjp, vmap, jacrev,
@@ -49,6 +49,7 @@ from functorch.compile import (
     nop, default_partition, default_decompositions,
     memory_efficient_fusion, get_aot_compilation_context, make_boxed_compiler
 )
+from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
 
 from torch.testing._internal.common_device_type import ops
@@ -3069,6 +3070,106 @@ def forward(self, arg0_1):
 
     @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported")
+    def test_aot_export_predispatch_map_1(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                def true_fn(x, r):
+                    y = x.sin()
+                    y.add_(5)
+                    return y.cos() + r.sum()
+
+                def false_fn(x, r):
+                    z = x.cos()
+
+                    def f(x, y):
+                        a = x.cos()
+                        a.add_(5)
+                        return a + y
+
+                    return z + control_flow.map(f, z, r).sum() + control_flow.map(f, z, r).sum()
+
+                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x, y])
+                return (a + 3, a + 4)
+        inps = [torch.randn(2, 2), torch.ones(2)]
+        gm, _ = aot_export_module(M(), inps, trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1, arg1_1]);  true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
+    getitem = conditional[0];  conditional = None
+    add = torch.ops.aten.add.Tensor(getitem, 3)
+    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    return (add, add_1)""")  # noqa: B950
+        self.assertExpectedInline(str(gm.true_graph_0.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(sin, 5);  sin = None
+    cos = torch.ops.aten.cos.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
+    add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add_1,)""")
+        self.assertExpectedInline(str(gm.false_graph_0.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    select = torch.ops.aten.select.int(cos, 0, 0)
+    body_graph_0 = self.body_graph_0
+    map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
+    getitem = map_impl[0];  map_impl = None
+    sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
+    select_1 = torch.ops.aten.select.int(cos, 0, 0)
+    body_graph_1 = self.body_graph_1
+    map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
+    getitem_1 = map_impl_1[0];  map_impl_1 = None
+    sum_2 = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
+    add_1 = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
+    return (add_1,)""")
+        self.assertExpectedInline(str(gm.false_graph_0.body_graph_0.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(cos, 5);  cos = None
+    add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
+    return (add_1,)""")
+
+    def test_aot_export_predispatch_map_2(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                z = x.cos()
+
+                def f(x, y):
+                    a = x.cos()
+                    a.add_(5)
+                    return a + y
+
+                return (z + control_flow.map(f, z, y).sum(),)
+
+        inps = [torch.randn(2, 2), torch.ones(2)]
+        gm, _ = aot_export_module(M(), inps, trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    body_graph_0 = self.body_graph_0
+    map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = arg1_1 = None
+    getitem = map_impl[0];  map_impl = None
+    sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""")  # noqa: B950
+        self.assertExpectedInline(str(gm.body_graph_0.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(cos, 5);  cos = None
+    add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
+    return [add_1]""")
+
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported")
     def test_aot_export_predispatch_with_cond(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -3189,6 +3290,8 @@ def forward(self, arg0_1):
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
         # 9 outputs: 3 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
+        for node in fx_g.graph.nodes:
+            node.meta.pop("stack_trace", None)
         self.assertExpectedInline(fx_g.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
@@ -3246,6 +3349,8 @@ class <lambda>(torch.nn.Module):
         # Also check the inference graph
         # Main important thing here is that there are 5 total outputs: 3 total mutated buffers (from batchnorm), 2 user outputs.
         fx_g_inference, signature_inference = aot_export_module(mod, [inp], trace_joint=False)
+        for node in fx_g_inference.graph.nodes:
+            node.meta.pop("stack_trace", None)
         self.assertExpectedInline(fx_g_inference.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
@@ -4606,12 +4711,12 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info,
 
 
 class TestEagerFusionOpInfo(AOTTestCase):
-    @ops(op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', aot_autograd_failures)
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 
-    @ops(op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
              aot_autograd_failures | symbolic_aot_autograd_failures)
