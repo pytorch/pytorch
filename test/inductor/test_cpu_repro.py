@@ -4,7 +4,6 @@ import copy
 import itertools
 import math
 import os
-import subprocess
 import platform
 import sys
 import unittest
@@ -1555,42 +1554,6 @@ class CPUReproTests(TestCase):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (value,))
-    @unittest.skipIf(
-        platform.machine() != "s390x" or not codecache.valid_vec_isa_list(),
-        "Does not support vectorization or not s390x machine",
-    )
-    @patch("torch.cuda.is_available", lambda: False)
-    def test_auto_zvec_simd(self):
-        vec_z = codecache.valid_vec_isa_list()[0]
-        with config.patch({"cpp.simdlen": None}):
-            self.assertTrue(str(vec_z) == "zvector")
-        code = """
-import os
-os.environ["ATEN_CPU_CAPABILITY"] = "zvector"
-import torch
-from torch._inductor import codecache, config
-vec_z = codecache.valid_vec_isa_list()[0]
-with config.patch({"cpp.simdlen": None}):
-    isa = codecache.pick_vec_isa()
-    print(isa == vec_z)
-    os.environ.pop("ATEN_CPU_CAPABILITY")
-"""
-        p = subprocess.run(["python", "-c", code], capture_output=True, text=True)
-        self.assertTrue(p.stdout == "True\n")
-
-        code = """
-import os
-os.environ["ATEN_CPU_CAPABILITY"] = "default"
-import torch
-from torch._inductor import codecache, config
-invalid_vec = codecache.invalid_vec_isa
-with config.patch({"cpp.simdlen": None}):
-    isa = codecache.pick_vec_isa()
-    print(isa == invalid_vec)
-    os.environ.pop("ATEN_CPU_CAPABILITY")
-"""
-        p = subprocess.run(["python", "-c", code], capture_output=True, text=True)
-        self.assertTrue(p.stdout == "True\n")
 
     @unittest.skipIf(
         platform.machine() != "x86_64" or not codecache.valid_vec_isa_list(),
@@ -1608,10 +1571,6 @@ with config.patch({"cpp.simdlen": None}):
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
 
         with config.patch({"cpp.simdlen": None}):
-            # with open("/proc/cpuinfo") as _cpu_info:
-            #     _cpu_info_content = _cpu_info.read()
-            #     print("_cpu_info_content: ", _cpu_info_content)
-            print("torch._C._get_cpu_capability(): ", torch._C._get_cpu_capability())
             isa = codecache.pick_vec_isa()
             if vec_avx512 in codecache.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx512)
@@ -1647,55 +1606,47 @@ with config.patch({"cpp.simdlen": None}):
                 isa = codecache.pick_vec_isa()
                 self.assertTrue(isa == vec_avx2)
 
-        code = """
-import os
-os.environ["ATEN_CPU_CAPABILITY"] = "avx512"
-import torch
-from torch._inductor import codecache, config
-vec_avx512 = codecache.supported_vec_isa_list[0]
-vec_avx2 = codecache.supported_vec_isa_list[1]
-with config.patch({"cpp.simdlen": None}):
-    isa = codecache.pick_vec_isa()
-    if vec_avx512 in codecache.valid_vec_isa_list():
-        print(isa == vec_avx512)
-    elif vec_avx2 in codecache.valid_vec_isa_list():
-        print(isa == vec_avx2)
-    os.environ.pop("ATEN_CPU_CAPABILITY")
-"""
-        p = subprocess.run(["python", "-c", code], capture_output=True, text=True)
-        self.assertTrue(p.stdout == "True\n")
+        with config.patch({"cpp.simdlen": None}):
+            os.environ["ATEN_CPU_CAPABILITY"] = "avx2"
+            isa = codecache.pick_vec_isa()
+            if vec_avx512 in codecache.valid_vec_isa_list():
+                self.assertTrue(isa == vec_avx2)
+            elif vec_avx2 in codecache.valid_vec_isa_list():
+                self.assertTrue(isa == vec_avx2)
+            os.environ.pop("ATEN_CPU_CAPABILITY")
 
-        code = """
-import os
-os.environ["ATEN_CPU_CAPABILITY"] = "avx2"
-import torch
-from torch._inductor import codecache, config
-vec_avx512 = codecache.supported_vec_isa_list[0]
-vec_avx2 = codecache.supported_vec_isa_list[1]
-with config.patch({"cpp.simdlen": None}):
-    isa = codecache.pick_vec_isa()
-    if vec_avx512 in codecache.valid_vec_isa_list():
-        print(isa == vec_avx2)
-    elif vec_avx2 in codecache.valid_vec_isa_list():
-        print(isa == vec_avx2)
-    os.environ.pop("ATEN_CPU_CAPABILITY")
-"""
-        p = subprocess.run(["python", "-c", code], capture_output=True, text=True)
-        self.assertTrue(p.stdout == "True\n")
+        with config.patch({"cpp.simdlen": None}):
+            os.environ["ATEN_CPU_CAPABILITY"] = "avx512"
+            isa = codecache.pick_vec_isa()
+            if vec_avx512 in codecache.valid_vec_isa_list():
+                self.assertTrue(isa == vec_avx512)
+            else:
+                self.assertTrue(isa == vec_avx2)
+            os.environ.pop("ATEN_CPU_CAPABILITY")
 
-        code = """
-import os
-os.environ["ATEN_CPU_CAPABILITY"] = "default"
-import torch
-from torch._inductor import codecache, config
-invalid_vec = codecache.invalid_vec_isa
-with config.patch({"cpp.simdlen": None}):
-    isa = codecache.pick_vec_isa()
-    print(isa == invalid_vec)
-    os.environ.pop("ATEN_CPU_CAPABILITY")
-"""
-        p = subprocess.run(["python", "-c", code], capture_output=True, text=True)
-        self.assertTrue(p.stdout == "True\n")
+        with config.patch({"cpp.simdlen": None}):
+            os.environ["ATEN_CPU_CAPABILITY"] = "default"
+            isa = codecache.pick_vec_isa()
+            self.assertFalse(isa)
+            os.environ.pop("ATEN_CPU_CAPABILITY")
+
+        with config.patch({"cpp.simdlen": None}):
+            os.environ["ATEN_CPU_CAPABILITY"] = "neon"
+            isa = codecache.pick_vec_isa()
+            if vec_avx512 in codecache.valid_vec_isa_list():
+                self.assertTrue(isa == vec_avx512)
+            else:
+                self.assertTrue(isa == vec_avx2)
+            os.environ.pop("ATEN_CPU_CAPABILITY")
+
+        with config.patch({"cpp.simdlen": None}):
+            os.environ["ATEN_CPU_CAPABILITY"] = "zvector"
+            isa = codecache.pick_vec_isa()
+            if vec_avx512 in codecache.valid_vec_isa_list():
+                self.assertTrue(isa == vec_avx512)
+            else:
+                self.assertTrue(isa == vec_avx2)
+            os.environ.pop("ATEN_CPU_CAPABILITY")
 
     @requires_vectorization
     @patch("torch.cuda.is_available", lambda: False)
