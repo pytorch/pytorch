@@ -56,6 +56,7 @@ from .utils import (
     ceildiv,
     decode_device,
     is_dynamic,
+    is_gpu,
     is_pointwise_use,
     pad_listlike,
     parallel_num_threads,
@@ -436,7 +437,7 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                if i.get_device().type == "cuda":
+                if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
             if not device:
@@ -515,7 +516,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
 
                 outputs[output_ind] = output
 
-                if device.type == "cuda" and use_foreach and realize_outputs:
+                if is_gpu(device.type) and use_foreach and realize_outputs:
                     buffer_list.append(output.realize())
 
             if buffer_list:
@@ -1141,7 +1142,10 @@ def quantized_decomposed_dequantize_per_channel(
 
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
-    if all(input.get_dtype() in [torch.int8, torch.uint8] for input in inputs):
+    cpu_device = inputs[0].get_device().type == "cpu"
+    if cpu_device and all(
+        input.get_dtype() in [torch.int8, torch.uint8] for input in inputs
+    ):
         # TODO <leslie> Remove this fallback when we support vectorization
         # code gen with uint8 data type directly.
         for input in inputs:
@@ -1206,7 +1210,7 @@ def cat(inputs, dim=0):
 
     # TODO: We observed negative performance impact of pointwise_cat optimization on CPU so disabled it.
     #             We will revisit this later after enabling vectorization on index_expr.
-    if inputs[0].get_device().type == "cpu" or fusable_reduction:
+    if cpu_device or fusable_reduction:
         return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
     def op_count(x):
@@ -1321,12 +1325,12 @@ def select(x, dim, idx):
 @register_lowering(aten.split, type_promotion_kind=None)
 def split(x, sizes, dim=0, clamp=True):
     dim = _validate_dim(x, dim, 0)
-    x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
     if isinstance(sizes, sympy.Expr):
         # TODO: We don't have to guard on sizes per se, but the number
         # of splits must stay constant
         sizes = V.graph.sizevars.evaluate_static_shape(sizes)
     if isinstance(sizes, (int, sympy.Integer)):
+        x_size = V.graph.sizevars.evaluate_static_shape(x.get_size()[dim])
         sizes = [sizes] * ((x_size + sizes - 1) // sizes)
     result = []
     start = 0
@@ -2274,12 +2278,6 @@ make_fallback(aten.searchsorted)  # bucketized is implemented (see eager impl)
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
 make_fallback(aten._cdist_backward)
-# See resize_storage_bytes
-make_fallback(aten.resize)
-make_fallback(aten.resize_)
-make_fallback(aten.resize_as)
-make_fallback(aten.resize_as_)
-
 
 # 2) Medium
 make_fallback(aten.max_unpool2d)
@@ -2349,6 +2347,9 @@ make_fallback(aten.mode)
 make_fallback(aten.median)
 make_fallback(aten.nanmedian)
 make_fallback(aten.randperm)
+# see: https://github.com/pytorch/pytorch/pull/121354
+make_fallback(aten.resize_)
+make_fallback(aten.resize_as_)
 
 # Linalg
 make_fallback(aten._linalg_det)
@@ -2405,7 +2406,6 @@ make_fallback(aten._to_sparse)
 
 # Needs dimname support
 make_fallback(aten.zeros.names)
-
 
 # 6) Pattern-matched
 make_fallback(
@@ -3334,7 +3334,7 @@ def scatter_fallback(
         reduce not in {None, reduce_ty}
         or (
             isinstance(src, TensorBox)
-            and src.get_device().type == torch.device("cuda").type
+            and is_gpu(src.get_device().type)
             and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
         )
         or (
@@ -3982,13 +3982,8 @@ def max_pool2d_with_indices_backward(
     is_channels_last = (x_stride is not None and x_stride[1] == 1) or (
         gO_stride is not None and gO_stride[1] == 1
     )
-    autotune = (
-        config.coordinate_descent_tuning
-        or config.max_autotune
-        or config.max_autotune_pointwise
-    )
-    if any(d != 1 for d in dilation) or (is_channels_last and not autotune):
-        # don't codegen channels-last when autotune is not enabled, it's very slow
+    if any(d != 1 for d in dilation):
+        # dilation NYI
         return fallback_max_pool2d_with_indices_backward(
             grad_output, x, kernel_size, stride, padding, dilation, ceil_mode, indices
         )
@@ -4084,12 +4079,16 @@ def max_pool2d_with_indices_backward(
         assert gradient is not None
         return gradient
 
-    return Pointwise.create(
+    out = Pointwise.create(
         device=grad_output.get_device(),
         dtype=grad_output.get_dtype(),
         inner_fn=fn,
         ranges=new_size,
     )
+    if is_channels_last:
+        return ir.ExternKernel.require_channels_last(out)
+    else:
+        return out
 
 
 def pad_adaptive_loader(x, pad_val=0.0):
@@ -5171,7 +5170,10 @@ def mutate_to(changed, val, unsafe_alias=False):
         assert isinstance(val, ir.StorageBox)
 
     if isinstance(changed_data, ir.StorageBox) and not (
-        changed_data.is_input_buffer() or isinstance(changed_data.data, ir.NopKernel)
+        changed_data.is_input_buffer()
+        # In AOTI, module parameters and buffers are not lifted as graph inputs
+        or changed_data.is_module_buffer()
+        or isinstance(changed_data.data, ir.NopKernel)
     ):
         # Fast path, just swing the data pointer
         val.realize()
@@ -5362,7 +5364,7 @@ def cumsum(x, axis=None, dtype=None):
         return (ops.add(a, b),)
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn, inits=(0,))
+    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn)
     if result is None:
         return fallback_cumsum(x, dim=axis, dtype=dtype)
     return result
@@ -5386,7 +5388,7 @@ def cumprod(x, axis=None, dtype=None):
         return (ops.mul(a, b),)
 
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
-    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn, inits=(1,))
+    (result,) = ir.Scan.create(**kwargs, combine_fn=combine_fn)
     if result is None:
         return fallback_cumprod(x, dim=axis, dtype=dtype)
     return result
@@ -5408,9 +5410,7 @@ def logcumsumexp(x, dim):
         return clone(x)
 
     kwargs = _make_scan_inner(x, axis=dim, dtype=dtype)
-    (result,) = ir.Scan.create(
-        **kwargs, combine_fn=log_add_exp_helper, inits=(float("-inf"),)
-    )
+    (result,) = ir.Scan.create(**kwargs, combine_fn=log_add_exp_helper)
     if result is None:
         return fallback_logcumsumexp(x, dim=dim)
     return result
@@ -5440,9 +5440,7 @@ def cummax(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(
-        **kwargs, combine_fn=combine_fn, inits=(min_value, 0)
-    )
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)
     if values is None:
         return fallback_cummax(x, dim=axis)
     return values, indices
@@ -5472,9 +5470,7 @@ def cummin(x, axis=None):
     kwargs = _make_scan_inner(x, axis=axis, dtype=dtype)
     kwargs["dtypes"] = (dtype, torch.int64)
     kwargs["inner_fns"] = (x.make_loader(), lambda _: "rindex")
-    values, indices = ir.Scan.create(
-        **kwargs, combine_fn=combine_fn, inits=(max_value, 0)
-    )
+    values, indices = ir.Scan.create(**kwargs, combine_fn=combine_fn)
     if values is None:
         return fallback_cummin(x, dim=axis)
     return values, indices
@@ -5639,6 +5635,7 @@ register_pointwise_numeric(aten.erfc)
 register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
+register_pointwise_numeric(aten.log2)
 register_pointwise_numeric(aten.nextafter)
 
 from .codegen.common import pointwise_overrides_data
@@ -5862,6 +5859,71 @@ def create_nn_parameter(self, placeholder):
     return TensorBox.create(ir.BindNNParameter(self, placeholder))
 
 
+@register_lowering(torch.ops.aten.resize)
+def resize(x, size, *, memory_format=None):
+    assert isinstance(x, TensorBox)
+    assert isinstance(size, (list, tuple))
+
+    if memory_format is None:
+        memory_format = torch.contiguous_format
+    if memory_format == torch.preserve_format:
+        raise RuntimeError(f"unsupported memory format: {memory_format}")
+
+    if memory_format == torch.channels_last:
+        assert len(size) == 4
+    if memory_format == torch.channels_last_3d:
+        assert len(size) == 5
+
+    old_numel = x.get_numel()
+    dtype = x.get_dtype()
+    device = x.get_device()
+
+    if isinstance(x.data, ir.BaseView):
+        x.data = x.data.unwrap_view()
+
+    if (
+        torch.are_deterministic_algorithms_enabled()
+        and torch.utils.deterministic.fill_uninitialized_memory  # type: ignore[attr-defined]
+    ):
+        if is_float_dtype(dtype):
+            uninitalized_val = float("nan")
+        elif is_integer_dtype(dtype):
+            uninitalized_val = torch.iinfo(dtype).max
+        else:
+            uninitalized_val = True
+    else:
+        # using zero as that is what empty does
+        uninitalized_val = 0.0
+
+    if V.graph.sizevars.statically_known_equals(old_numel, 0):  # type: ignore[arg-type]
+        return full(size, uninitalized_val, dtype=dtype, device=device)
+
+    x_flat = as_strided(
+        x,
+        [
+            old_numel,
+        ],
+        [
+            1,
+        ],
+    )
+    flat_loader = x_flat.make_loader()
+    out_stride = ir.FlexibleLayout.stride_ordered_for_memory_format(size, memory_format)
+    out_indexer = ir.FixedLayout(device, dtype, size, out_stride).make_indexer()
+
+    def inner_fn(idx):
+        flat_index = out_indexer(idx)
+        flat_index_expr = ops.index_expr(flat_index, torch.int64)
+        limit = ops.index_expr(old_numel, torch.int64)
+        mask = ops.lt(flat_index_expr, limit)
+        return ops.masked(mask, lambda: flat_loader([flat_index]), uninitalized_val)
+
+    out = Pointwise.create(
+        device=device, dtype=dtype, inner_fn=inner_fn, ranges=list(size)
+    )
+    return out
+
+
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
 
 make_fallback(auto_functionalized)
@@ -5926,15 +5988,126 @@ def cond(pred, true_fn, false_fn, operands):
 
 
 @register_lowering(torch.ops.higher_order.while_loop)
-def while_loop(cond_fn, body_fn, operands):
-    if any(map(is_triton, operands)):
+def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
+    if any(map(is_triton, carried_inputs + additional_inputs)):
         msg = "control flow operator: torch.while_loop."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    result = ir.WhileLoop.create(cond_fn, body_fn, operands)
+    result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
     return list(map(TensorBox.create, result))
+
+
+@register_lowering(torch.ops.higher_order.templated_attention)
+def templated_attention(*args, **kwargs):
+    from torch._prims_common import make_contiguous_strides_for
+    from .ir import (
+        ComputedBuffer,
+        FixedLayout,
+        FlexibleLayout,
+        InputBuffer,
+        StorageBox,
+        TensorBox,
+    )
+
+    query, key, value, subgraph = args
+
+    def create_placeholder(name: str, dtype: torch.dtype) -> InputBuffer:
+        return TensorBox.create(
+            InputBuffer(
+                name,
+                FixedLayout(
+                    query.get_device(),
+                    dtype,
+                    [
+                        1,
+                    ],
+                    [
+                        1,
+                    ],
+                ),
+            )
+        )
+
+    scalar_inps = ["score", "b", "h", "m", "n"]
+    env = {}
+    cnt = 0
+    placeholder_inps = [
+        create_placeholder(name, dtype)
+        for name, dtype in [
+            ("score", query.get_dtype()),
+            ("b", torch.int64),
+            ("h", torch.int64),
+            ("m", torch.int64),
+            ("n", torch.int64),
+        ]
+    ]
+    for node in subgraph.graph_module.graph.nodes:
+        # There are two classes of placeholder inpts that we need
+        # to handle differently. For the first n_scalar_inps inputs
+        # we expect that these placeholders were generated by the make_fx call
+        # in the templated Attention HOP. So we need to create a new placeholder
+        # TensorBox for each of these inputs. For the rest of the inputs we
+        # expect that these are lifted inputs that fill up the '*other_buffers'
+        # tuple and already have corresponding TensorBoxes passed in as args.
+        if node.op == "placeholder":
+            is_lifted_input = cnt >= len(scalar_inps)
+            env[node] = args[cnt - 1] if is_lifted_input else placeholder_inps[cnt]
+            cnt += 1
+        elif node.op == "call_function":
+            # For call_function we use the defulat lowerings and pass in the
+            # already created TensorBoxes as args
+            from torch.utils._pytree import tree_map
+
+            env[node] = lowerings[node.target](
+                *tree_map(lambda x: env[x] if x in env else x, node.args)
+            )
+        elif node.op == "output":
+            # For the output node we need to create a ComputedBuffer
+            # which represents the actual score modification
+
+            output_buffer = env[node.args[0]]
+            assert isinstance(output_buffer.data, StorageBox), (
+                "The output node for the templated attention subgraph must be a StorageBox, but got: ",
+                type(output_buffer),
+            )
+            # Create the ComputedBuffere directly that will be inlined into the modfication block
+            subgraph_buffer = ComputedBuffer(
+                name=None,
+                layout=FlexibleLayout(
+                    device=output_buffer.data.get_device(),
+                    dtype=output_buffer.data.get_dtype(),
+                    size=output_buffer.data.get_size(),
+                ),
+                data=output_buffer.data.data,  # type: ignore[arg-type]
+            )
+            from .kernel.templated_attention import sdpa_template
+
+            layout = FixedLayout(
+                output_buffer.get_device(),
+                query.get_dtype(),
+                query.get_size(),
+                make_contiguous_strides_for(query.get_size()),
+            )
+            choices: List[Any] = []
+            from .select_algorithm import autotune_select_algorithm
+
+            sdpa_template.maybe_append_choice(
+                choices=choices,
+                input_nodes=(query, key, value),
+                layout=layout,
+                subgraphs=subgraph_buffer,
+                num_stages=2,
+                num_warps=4,
+                BLOCK_M=64,
+                BLOCK_N=128,
+                BLOCK_DMODEL=query.get_size()[-1],
+            )
+            return autotune_select_algorithm(
+                "sdpa", choices, [query, key, value], layout
+            )
+    raise ValueError("TemplatedAttention was passed a subgraph with no output node!")
 
 
 try:
