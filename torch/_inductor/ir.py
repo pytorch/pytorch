@@ -2570,7 +2570,10 @@ class Layout(IRNode):
 
     def is_contiguous_or_transposed_after_perm(self, perm_dims):
         perm_len = len(perm_dims)
-        if perm_len != len(self.size) and perm_dims[-2:] not in [[perm_len-1, perm_len-2], [perm_len-2, perm_len-1]]:
+        if perm_len != len(self.size) and perm_dims[-2:] not in [
+            [perm_len - 1, perm_len - 2],
+            [perm_len - 2, perm_len - 1],
+        ]:
             # When the lengths of perm_dim and buffer size don't match,
             # it is not easy to determine the size and stride after perm.
             # But if at least one of the last two dims is permuted to non-last two dim,
