@@ -788,6 +788,18 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if id(method.__code__) in self._nn_module_method_ids():
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
 
+            if name == "__setattr__" and isinstance(args[1], variables.DeletedVariable):
+                # This is special handling for __delattr__.  delattr on a nn
+                # module can delete either a regular attribute or a parameter,
+                # buffer or a submodule. In case its a regular attribute, we can
+                # fallback to UserDefinedObjectVariable handling of setattr. But
+                # for others, we need to track the mutations in the respective
+                # members as well. This is required in case when we delete a
+                # parameter, and then follow up with reading all the parameters.
+                return variables.UserFunctionVariable(
+                    torch.nn.Module.__delattr__
+                ).call_function(tx, [self, args[0]], {})
+
         return super().call_method(tx, name, args, kwargs)
 
 
