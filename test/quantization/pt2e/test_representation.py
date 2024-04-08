@@ -1,7 +1,5 @@
 # Owner(s): ["oncall: quantization"]
 import copy
-import sys
-import unittest
 from typing import Any, Dict, Tuple
 
 import torch
@@ -22,9 +20,6 @@ from torch.testing._internal.common_quantization import (
 
 
 @skipIfNoQNNPACK
-@unittest.skipIf(
-    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-)
 class TestPT2ERepresentation(QuantizationTestCase):
     def _test_representation(
         self,
