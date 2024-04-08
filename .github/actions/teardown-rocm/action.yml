@@ -2,11 +2,23 @@ name: Teardown ROCm host
 
 description: Tear down ROCm host for CI
 
+inputs:
+  docker-image:
+    required: true
+    type: string
+    description: Docker image to run in
+  gha-user:
+    required: true
+    type: string
+    description: user that executes Github Actions on bare metal
+
 runs:
   using: composite
   steps:
     - name: Teardown ROCm
       if: always()
+      env:
+        DOCKER_IMAGE: ${{ inputs.docker-image }}
       shell: bash
       run: |
         # ignore expansion of "docker ps -q" since it could be empty
@@ -20,5 +32,18 @@ runs:
     - name: Chown workspace back to pytorchci (Fallout of PR 122922)
       if: always()
       shell: bash
+      env:
+        DOCKER_IMAGE: ${{ inputs.docker-image }}
+        GHA_USER: ${{ inputs.gha-user }}
       run: |
-        chown -R "${USER}" "${GITHUB_WORKSPACE}"
+        container_name=$(docker run \
+            --tty \
+            --detach \
+            --name="RESTORE_WORKSPACE_OWNERSHIP" \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+        )
+        # restore workspace permissions to GHA user; fallout of PR #122922 whereby cancelled jobs fail to reset permissions 
+        docker exec -t "${container_name}" sh -c "sudo chown -R ${GHA_USER} ."
