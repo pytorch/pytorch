@@ -1696,6 +1696,9 @@ class CppWrapperCpu(WrapperCodeGen):
                 # to the conditional output (outer_output), as RAIIAtenTensorHandle's copy
                 # constructor is deleted.
                 src = f"std::move({src})"
+                # in case the outer_output carried a value
+                # before (e.g., in the while_loop codegen)
+                self.writeline(f"{outer_output}.reset();")
             self.writeline(f"{outer_output} = {src}{self.ending}")
 
     def codegen_conditional(self, conditional):
@@ -1737,6 +1740,78 @@ class CppWrapperCpu(WrapperCodeGen):
         self.writeline("} else {")
         self.writeline(EnterSubgraphLine(self, conditional.false_subgraph.graph))
         self.codegen_subgraph(conditional.false_subgraph, outer_inputs, outer_outputs)
+        self.writeline(ExitSubgraphLine(self))
+        self.writeline("}")
+
+    def codegen_while_loop(self, while_loop):
+        name = while_loop.get_name()
+        outer_carried_inputs = [
+            buf.codegen_reference() for buf in while_loop.carried_inputs
+        ]
+        outer_additional_inputs = [
+            buf.codegen_reference() for buf in while_loop.additional_inputs
+        ]
+        cond_result_name = f"{name}_cond_result"
+
+        if config.abi_compatible:
+            self.writeline(f"RAIIAtenTensorHandle {cond_result_name};")
+
+            cond_outer_inputs = []
+            for inp, out in zip(outer_carried_inputs, while_loop.outputs):
+                # in ABI-compatible mode, the carried inputs are codegened
+                # as buffers outside the while loop and set to the initial
+                # values. at the end of each while_loop iteration, they
+                # will be assined the carried values.
+                out_name = out.get_name()
+                self.writeline(f"AtenTensorHandle {out_name}_handle;")
+                self.writeline(
+                    f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_assign_tensors_out({inp}, &{out_name}_handle));"
+                )
+                self.writeline(f"RAIIAtenTensorHandle {out_name}({out_name}_handle);")
+                cond_outer_inputs.append(out_name)
+
+            # additional inputs will be assinged within the while_loop
+            # iteration directly from the corresponding outer graph buffers
+            cond_outer_inputs.extend(outer_additional_inputs)
+        else:
+            self.writeline(f"at::Tensor {cond_result_name};")
+            self.writeline(f"at::Tensor {name}[{len(outer_carried_inputs)}];")
+            for i, inp in enumerate(outer_carried_inputs):
+                # set the initial state before the loop
+                self.writeline(f"{name}[{i}] = {inp};")
+
+            cond_outer_inputs = [
+                *[f"{name}[{i}]" for i in range(len(outer_carried_inputs))],
+                *outer_additional_inputs,
+            ]
+
+        cond_outer_outputs = [cond_result_name]
+        body_outer_inputs = list(cond_outer_inputs)
+        body_outer_outputs = body_outer_inputs[: len(outer_carried_inputs)]
+
+        self.writeline("while (1) {")
+        self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))
+        self.codegen_subgraph(
+            while_loop.cond_subgraph, cond_outer_inputs, cond_outer_outputs
+        )
+
+        if config.abi_compatible:
+            cond_result = f"{cond_result_name}_scalar"
+            self.writeline(f"bool {cond_result};")
+            # in ABI-compatible mode, we need to use the ABI shim function
+            # to extract a C++ bool from the unrelying scalar bool Tensor
+            self.writeline(
+                f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_item_bool({cond_result_name}, &{cond_result}));"
+            )
+        else:
+            cond_result = f"{cond_result_name}.item<bool>()"
+        self.writeline(f"if (!{cond_result}) break;")
+
+        self.writeline(ExitSubgraphLine(self))
+        self.writeline(EnterSubgraphLine(self, while_loop.body_subgraph.graph))
+        self.codegen_subgraph(
+            while_loop.body_subgraph, body_outer_inputs, body_outer_outputs
+        )
         self.writeline(ExitSubgraphLine(self))
         self.writeline("}")
 
