@@ -3,7 +3,6 @@ from typing import List, NamedTuple, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
 from torch.distributed.distributed_c10d import ReduceOp
-from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from ._fsdp_common import (
     _get_dim0_padded_size,
     _raise_assert_with_print,
