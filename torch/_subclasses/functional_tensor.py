@@ -1,6 +1,7 @@
 import contextlib
+import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, Optional, Tuple
+from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -119,6 +120,7 @@ class FunctionalTensor(torch.Tensor):
             False,  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
         )
+        torch._C._set_throw_on_mutable_data_ptr(out)
         out.elem = elem
         return out
 
@@ -307,7 +309,16 @@ class FunctionalTensorMode(TorchDispatchMode):
                 alias_info = len(
                     [i for i in func._schema.arguments if i.alias_info is not None]
                 )
-                return alias_info != 0 or func._schema.is_mutable
+                should_decompose = alias_info != 0 or func._schema.is_mutable
+                if not should_decompose:
+                    if func.namespace not in ["aten", "prim"]:
+                        warnings.warn(
+                            f"At pre-dispatch tracing, we will assume that any "
+                            f"custom op that is marked with CompositeImplicitAutograd "
+                            f"and functional are safe to not decompose. We found {func}"
+                            f" to be one such op."
+                        )
+                return should_decompose
             return True
 
         if (
@@ -347,10 +358,9 @@ class FunctionalTensorMode(TorchDispatchMode):
         ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
             func.name(), torch._C.DispatchKey.Functionalize
         ):
-            if self.pre_dispatch:
-                raise NotImplementedError(
-                    "Auto functionalization is not supported on pre-dispatch tracing"
-                )
+            # it doesn't matter what mode we use here because
+            # the implementation of do_auto_functionalize doesn't
+            # interact with FunctionalTensorMode at all
             return do_auto_functionalize(func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
@@ -501,7 +511,9 @@ class BaseFunctionalizeAPI(ABC):
         pass
 
     @abstractmethod
-    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def unwrap_tensors(
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         pass
 
     @abstractmethod
@@ -543,7 +555,9 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
                 torch.Tensor, FunctionalTensor.to_functional, args
             )
 
-    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def unwrap_tensors(
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         return torch.utils._pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.from_functional, args
         )
@@ -583,7 +597,9 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
 
         return _wrap_all_tensors_to_functional(args, level=0)
 
-    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def unwrap_tensors(
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )
@@ -620,7 +636,9 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
         return _wrap_all_tensors_to_functional(args, level=self.interpreter.level())
 
-    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def unwrap_tensors(
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )

@@ -1,6 +1,7 @@
 import copy
 import dataclasses
 import functools
+import re
 import types
 import warnings
 from collections import namedtuple
@@ -49,6 +50,7 @@ from .graph_signature import (  # noqa: F401
     OutputSpec,
     SymIntArgument,
     TensorArgument,
+    TokenArgument,
 )
 
 
@@ -108,6 +110,35 @@ def _fx_collection_equivalence_fn(
         return spec1_context == spec2_context
 
     return spec1_type is spec2_type and spec1_context == spec2_context
+
+
+def _rename_without_collisions(
+    name_map: Dict[str, str],
+    orig_name: str,
+    name: str,
+    is_placeholder: bool = False,
+):
+    """
+    Renames nodes to avoid name collisions, with suffixing.
+    name_map: map from original name to new name
+    orig_name: mapping key
+    name: candidate name (potentially suffixed, e.g. mul_2)
+    is_placeholder: if the node is a placeholder, avoid detecting suffix
+    """
+    if name in name_map.values():
+        # non-placeholder nodes may be suffixed with the count
+        # instead of adding another suffix, we will try to increment it
+        match = re.match(r"(.*)_(\d+)", name)
+        if match and not is_placeholder:
+            name, n = match.group(1), int(match.group(2))
+        else:
+            n = 0
+        while (dup_name := f"{name}_{n + 1}") in name_map.values():
+            n += 1
+        name_map[orig_name] = dup_name
+    else:
+        name_map[orig_name] = name
+    return name_map[orig_name]
 
 
 class ExportedProgram:
@@ -476,9 +507,15 @@ class ExportedProgram:
         for name in buffers_to_remove:
             delattr(self.graph_module, name)
         # TODO(zhxhchen17) Return the new graph_signature directly.
-        gm, graph_signature = aot_export_module(
-            self.graph_module, fake_args, decompositions=decomp_table, trace_joint=False
-        )
+        from torch.export._trace import _ignore_backend_decomps
+
+        with _ignore_backend_decomps():
+            gm, graph_signature = aot_export_module(
+                self.graph_module,
+                fake_args,
+                decompositions=decomp_table,
+                trace_joint=False,
+            )
 
         # Update the signatures with the new placeholder names in case they
         # changed when calling aot_export
@@ -493,6 +530,18 @@ class ExportedProgram:
 
         new_placeholders = _get_placeholders(gm)
         new_outputs = list(gm.graph.nodes)[-1].args[0]
+
+        # rename the placeholders
+        assert len(new_placeholders) == len(old_placeholders)
+        for old_ph, new_ph in zip(old_placeholders, new_placeholders):
+            new_ph.name = new_ph.target = old_ph.name
+
+        # handle name collisions with newly decomposed graph nodes
+        name_map = {ph.name: ph.name for ph in new_placeholders}
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                continue
+            node.name = _rename_without_collisions(name_map, node.name, node.name)
 
         # To match the output target with correct input for input mutations
         # need to find the old to new placeholder map
@@ -574,7 +623,12 @@ class ExportedProgram:
 
     def _transform_do_not_use(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
-        res = pm(self.graph_module)
+        # Since we abstractly run the passes, we need to disable backend decomp here
+        # again.
+        from torch.export._trace import _ignore_backend_decomps
+
+        with _ignore_backend_decomps():
+            res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 

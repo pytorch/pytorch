@@ -548,7 +548,9 @@ class build_ext(setuptools.command.build_ext.build_ext):
         omp_lib_name = (
             "libomp.dylib" if os.uname().machine == "arm64" else "libiomp5.dylib"
         )
-        if os.path.join("@rpath", omp_lib_name) not in libs:
+        omp_rpath_lib_path = os.path.join("@rpath", omp_lib_name)
+        omp_loader_lib_path = os.path.join("@loader_path", omp_lib_name)
+        if omp_rpath_lib_path not in libs:
             return
 
         # Copy libomp/libiomp5 from rpath locations
@@ -558,6 +560,20 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             target_lib = os.path.join(self.build_lib, "torch", "lib", omp_lib_name)
             self.copy_file(source_lib, target_lib)
+            # Change OMP library load path to loader_path and delete old rpath
+            # This should prevent delocate from attempting to package another instance
+            # of OpenMP library in torch wheel
+            subprocess.check_call(
+                [
+                    "install_name_tool",
+                    "-change",
+                    omp_rpath_lib_path,
+                    omp_loader_lib_path,
+                    "-delete_rpath",
+                    rpath,
+                    libtorch_cpu_path,
+                ]
+            )
             break
 
         # Copy omp.h from OpenMP_C_FLAGS and copy it into include folder
@@ -1191,6 +1207,7 @@ def main():
         "include/ATen/native/nested/*.h",
         "include/ATen/native/quantized/*.h",
         "include/ATen/native/quantized/cpu/*.h",
+        "include/ATen/native/transformers/*.h",
         "include/ATen/native/sparse/*.h",
         "include/ATen/native/utils/*.h",
         "include/ATen/quantized/*.h",
@@ -1273,6 +1290,7 @@ def main():
         "include/torch/csrc/profiler/orchestration/*.h",
         "include/torch/csrc/profiler/stubs/*.h",
         "include/torch/csrc/profiler/unwind/*.h",
+        "include/torch/csrc/profiler/python/*.h",
         "include/torch/csrc/utils/*.h",
         "include/torch/csrc/tensor/*.h",
         "include/torch/csrc/lazy/backend/*.h",

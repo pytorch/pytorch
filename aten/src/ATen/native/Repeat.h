@@ -14,7 +14,7 @@ namespace at::native {
 
 template <
     typename index_t,
-    void compute(index_t*, int64_t*, index_t*, int64_t, int64_t)>
+    void compute(const index_t*, const int64_t*, index_t*, int64_t, int64_t)>
 static inline Tensor repeat_interleave_common(
     const Tensor& repeats,
     c10::optional<int64_t> output_size) {
@@ -38,8 +38,8 @@ static inline Tensor repeat_interleave_common(
   }
 
   Tensor result = at::empty({total}, repeats.options());
-  index_t* repeat_ptr = repeats_.data_ptr<index_t>();
-  int64_t* cumsum_ptr = cumsum.data_ptr<int64_t>();
+  const index_t* repeat_ptr = repeats_.const_data_ptr<index_t>();
+  const int64_t* cumsum_ptr = cumsum.const_data_ptr<int64_t>();
   index_t* result_ptr = result.data_ptr<index_t>();
   compute(repeat_ptr, cumsum_ptr, result_ptr, repeats.size(0), total);
   return result;

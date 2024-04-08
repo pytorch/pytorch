@@ -221,7 +221,7 @@ class NLLLoss2d(NLLLoss):
                  reduce=None, reduction: str = 'mean') -> None:
         warnings.warn("NLLLoss2d has been deprecated. "
                       "Please use NLLLoss instead as a drop-in replacement and see "
-                      "https://pytorch.org/docs/master/nn.html#torch.nn.NLLLoss for more details.")
+                      "https://pytorch.org/docs/main/nn.html#torch.nn.NLLLoss for more details.")
         super().__init__(weight, size_average, ignore_index, reduce, reduction)
 
 
@@ -1512,6 +1512,10 @@ class TripletMarginLoss(_Loss):
     def __init__(self, margin: float = 1.0, p: float = 2., eps: float = 1e-6, swap: bool = False, size_average=None,
                  reduce=None, reduction: str = 'mean'):
         super().__init__(size_average, reduce, reduction)
+        if margin <= 0:
+            raise ValueError(
+                f"TripletMarginLoss: expected margin to be greater than 0, got {margin} instead"
+            )
         self.margin = margin
         self.p = p
         self.eps = eps
@@ -1627,6 +1631,10 @@ class TripletMarginWithDistanceLoss(_Loss):
     def __init__(self, *, distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
                  margin: float = 1.0, swap: bool = False, reduction: str = 'mean'):
         super().__init__(size_average=None, reduce=None, reduction=reduction)
+        if margin <= 0:
+            raise ValueError(
+                f"TripletMarginWithDistanceLoss: expected margin to be greater than 0, got {margin} instead"
+            )
         self.distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = \
             distance_function if distance_function is not None else PairwiseDistance()
         self.margin = margin
