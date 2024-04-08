@@ -11,6 +11,7 @@ import inspect
 import itertools
 import random
 import unittest
+import warnings
 import weakref
 from abc import ABC
 from collections import namedtuple
@@ -4485,9 +4486,8 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 raise NotImplementedError("Empty Instances does not support __len__!")
 
             def set(self, name: str, value: Any) -> None:
-                # TODO(jansel): support catch_warnings
-                # with warnings.catch_warnings(record=True):
-                data_len = len(value)
+                with warnings.catch_warnings(record=True):
+                    data_len = len(value)
                 if len(self._fields):
                     assert (
                         len(self) == data_len
@@ -4499,8 +4499,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
             @staticmethod
             def cat(instance_lists: List["Instances"]) -> "Instances":
-                # TODO(jansel): support all isinstance generator
-                # assert all(isinstance(i, Instances) for i in instance_lists)
+                assert all(isinstance(i, Instances) for i in instance_lists)
                 assert len(instance_lists) > 0
                 if len(instance_lists) == 1:
                     return instance_lists[0]
@@ -4529,7 +4528,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 return ret
 
         instances = [
-            Instances((16, 16), a=[torch.randn(16, 16)], b=[torch.randn(16, 16)])
+            Instances((16, 16), a=torch.randn(16, 16), b=torch.randn(16, 16))
             for _ in range(3)
         ]
 

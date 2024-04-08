@@ -10,6 +10,8 @@ import random
 import sys
 import threading
 import types
+import warnings
+
 from typing import Dict, Generic, List
 
 from ..bytecode_transformation import create_call_function
@@ -303,6 +305,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.functions.FunctoolsPartialVariable(
                 fn, args=rest_args, keywords=kwargs
             )
+        elif self.value is warnings.catch_warnings and not args:
+            return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
         elif (
             issubclass(type(self.value), type)
             and hasattr(
