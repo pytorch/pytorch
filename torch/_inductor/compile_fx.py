@@ -1,5 +1,6 @@
 import contextlib
 import functools
+import itertools
 import logging
 import os
 import sys
@@ -46,7 +47,7 @@ from torch._inductor.utils import BoxedBool, count_tangents
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._utils_internal import signpost_event
+from torch._utils_internal import compiletime_sl_profile_meta, signpost_event
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -157,7 +158,7 @@ def _unlift_graph(mod, gm, graph_signature):
             attr_kind=_AttrKind.BUFFER,
         )
 
-    placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
     lifted_inputs = []
 
     # In AOTI, module parameters and buffers are not lifted as graph inputs.
@@ -203,7 +204,14 @@ def _unlift_graph(mod, gm, graph_signature):
 
 
 def _get_subgraph_names(gm):
-    for node in gm.graph.nodes:
+    for node in sorted(
+        itertools.chain(
+            gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.cond),
+            gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.while_loop
+            ),
+        )
+    ):
         if node.target == torch.ops.higher_order.cond:
             true_subgraph_name = node.args[1].name
             false_subgraph_name = node.args[2].name
@@ -304,15 +312,14 @@ def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
         aten.bmm.default,
         aten.baddbmm.default,
     }
-    for node in gm.graph.nodes:
-        if (
-            node.op == "call_function"
-            and node.target in tf32_ops
-            and isinstance(node.meta.get("val", None), torch.Tensor)
-            and node.meta["val"].dtype == torch.float32
-            and node.meta["val"].device.type == "cuda"
-        ):
-            return True
+    for target in tf32_ops:
+        for node in gm.graph.find_nodes(op="call_function", target=target):
+            if (
+                isinstance(node.meta.get("val", None), torch.Tensor)
+                and node.meta["val"].dtype == torch.float32
+                and node.meta["val"].device.type == "cuda"
+            ):
+                return True
     return False
 
 
@@ -1339,6 +1346,7 @@ def compile_fx(
             graph, joint_inputs, **kwargs, compiler="inductor"
         )
 
+    @compiletime_sl_profile_meta(phase_name="bw_compiler")
     @dynamo_utils.dynamo_timed
     @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
