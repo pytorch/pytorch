@@ -1014,8 +1014,6 @@ exclude_patterns = [
     'test/_nvfuser/test_dynamo.py',
     'test/_nvfuser/test_python_frontend.py',
     'test/_nvfuser/test_torchscript.py',
-    'test/custom_operator/model.py',
-    'test/custom_operator/test_custom_ops.py',
     'test/delete.py',
     'test/distributed/_shard/sharded_optim/test_sharded_optim.py',
     'test/distributed/_shard/sharded_tensor/ops/test_binary_cmp.py',
