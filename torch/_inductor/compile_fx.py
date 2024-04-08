@@ -1138,7 +1138,7 @@ def fw_compiler_freezing(
 @_use_lazy_graph_module(dynamo_config.use_lazy_graph_module)
 def compile_fx(
     model_: torch.fx.GraphModule,
-    example_inputs_: List[torch.Tensor],
+    example_inputs_: List[Union[torch.Tensor, List[torch.Tensor]]],
     inner_compile: Callable[..., Any] = compile_fx_inner,
     config_patches: Optional[Dict[str, Any]] = None,
     decompositions: Optional[Dict[OpOverload, Callable[..., Any]]] = None,

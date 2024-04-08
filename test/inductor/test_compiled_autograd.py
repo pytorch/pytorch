@@ -986,7 +986,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved, m) {
 
         self.check_output_and_recompiles(fn, 2)
 
-    def test_unreachable(self):
+    def test_autograd_cpp_node_saved_dynamic(self):
         cpp_source = """
 struct CustomOpAutogradFunction : public torch::autograd::Function<CustomOpAutogradFunction> {
   static constexpr bool is_traceable = true;

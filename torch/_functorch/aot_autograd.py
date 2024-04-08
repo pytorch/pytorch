@@ -3,7 +3,7 @@
 import itertools
 from contextlib import nullcontext
 from functools import partial, wraps
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import torch
@@ -910,12 +910,25 @@ def aot_module_simplified(
     # the boxed calling convention, but aot_module_simplified somehow
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
-    def forward(*runtime_args):
-        # args is a list because compiled_fw is boxed_call
-        # args may contain lists of tensors from dynamo we should free
+    def forward(*runtime_args: Tuple[Union[torch.Tensor, List[torch.Tensor]]]):
+        # When executing dynamo compiled graphs, this function is called by OptimizedModule.
+        # This function receives the inputs to the graph as a tuple of tensors,
+        # which cannot be freed until the end of this scope.
+        #
+        # When we have list inputs to the graph, this function is called the flatten_graph_inputs
+        # wrapper, which boxes the inputs so that they can be freed before the end of this scope.
+        #
+        # This is the earliest point we can have this unpacking logic without changing
+        # the calling convention used by nn.Module.forward.
+
         flat_args = []
         flat_args.extend(params_flat)
-        flat_args.extend(runtime_args)
+        if len(runtime_args) == 1 and isinstance(runtime_args[0], list):
+            # from flatten_graph_inputs
+            flat_args.extend(runtime_args[0])
+            runtime_args[0].clear()  # this clear is always safe since this list was created by flatten_graph_inputs
+        else:
+            flat_args.extend(runtime_args)
         return compiled_fn(flat_args)
 
     # Just for convenience
