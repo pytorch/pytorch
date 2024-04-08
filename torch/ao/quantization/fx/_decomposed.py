@@ -97,7 +97,7 @@ def quantize_per_tensor_tensor(
     return quantize_per_tensor(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype)
 
 @quantize_per_tensor_tensor.register_fake
-def _(
+def quantize_per_tensor_tensor_meta(
         input: torch.Tensor,
         scale: torch.Tensor,
         zero_point: torch.Tensor,
@@ -140,7 +140,7 @@ def _(
         quant_max: torch.Tensor,
         dtype: torch.dtype
 ) -> torch.Tensor:
-    return quantize_per_tensor_tensor(input, scale, zero_point, quant_min, quant_max, dtype)
+    return quantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype)
 
 # Note: quant_min/quant_max/dtype are not used in the operator, but for now it's kept in
 # the signature as metadata for the input Tensor, this might be useful for pattern
