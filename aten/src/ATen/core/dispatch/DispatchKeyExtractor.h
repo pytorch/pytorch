@@ -109,35 +109,10 @@ namespace detail {
   }
 }
 
-/**
- * This is used to register callback of specific key to PyTorch for
- * computing DispatchKeySet additionally, currently only AutocastFunctionality
- * is allowed to register.
- *
- * DispatchKeySet get_ds_by_autocast(c10::DispatchKeySet ks) {
- *   ...
- *   return ks;
- * }
- *
- * Usage: REGISTER_DISPATCHKEYSET_FUNC(DispatchKey::AutocastFunctionality,
- * get_ds_by_autocast
- *
- */
-
 using DispatchKeySetFuncType = std::function<DispatchKeySet(DispatchKeySet)>;
 
 TORCH_API ska::flat_hash_map<DispatchKey, DispatchKeySetFuncType>&
 getDKFuncMaps();
-
-class TORCH_API DSFuncRegistry {
- public:
-  explicit DSFuncRegistry(
-      DispatchKey key,
-      const DispatchKeySetFuncType func);
-};
-
-#define REGISTER_DISPATCHKEYSET_FUNC(dispatchkey, function) \
-  static auto temp##function = DSFuncRegistry(dispatchkey, function);
 
 /**
  * An instance of DispatchKeyExtractor knows how to get a dispatch key given

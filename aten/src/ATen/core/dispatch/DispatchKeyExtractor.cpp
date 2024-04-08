@@ -3,41 +3,22 @@
 
 #include <sstream>
 
+#ifndef BUILD_LITE_INTERPRETER
+namespace at::autocast {
+extern DispatchKeySet get_ks_by_autocast(c10::DispatchKeySet ks);
+}
+#endif
+
 namespace c10 {
 
-static std::mutex g_dk_mutex;
-
-ska::flat_hash_map<DispatchKey, DispatchKeySetFuncType>&
-getDKFuncMaps() {
+ska::flat_hash_map<DispatchKey, DispatchKeySetFuncType>& getDKFuncMaps() {
   static ska::flat_hash_map<DispatchKey, DispatchKeySetFuncType> dk_func_maps;
+#ifndef BUILD_LITE_INTERPRETER
+  dk_func_maps.emplace(
+      DispatchKey::AutocastFunctionality, at::autocast::get_ks_by_autocast);
+#endif
+
   return dk_func_maps;
-}
-
-static void checkIsInWhitelist(DispatchKey key) {
-  static std::set<DispatchKey> whitelist = {DispatchKey::AutocastFunctionality};
-
-  TORCH_CHECK(
-      whitelist.find(key) != whitelist.end(),
-      "The DispatchKey key: ",
-      key,
-      " is not been allowed to register callback!");
-}
-
-DSFuncRegistry::DSFuncRegistry(
-    DispatchKey key,
-    const DispatchKeySetFuncType func) {
-  std::lock_guard<std::mutex> lock(g_dk_mutex);
-
-  checkIsInWhitelist(key);
-  auto& maps = getDKFuncMaps();
-  auto found = maps.find(key);
-  TORCH_CHECK(
-      found == maps.end(),
-      "The DispatchKey key: ",
-      key,
-      " can only been registered once!");
-
-  maps.emplace(key, std::move(func));
 }
 
 void DispatchKeyExtractor::setOperatorHasFallthroughForKey(DispatchKey k, bool has_fallthrough) {

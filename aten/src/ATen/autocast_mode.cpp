@@ -1,7 +1,6 @@
 #include <ATen/autocast_mode.h>
 
 #include <ATen/CachedTensorUtils.h>
-#include <ATen/core/dispatch/DispatchKeyExtractor.h>
 #include <c10/util/flat_hash_map.h>
 #include <mutex>
 
@@ -586,12 +585,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU2(index_copy, dimname, promote)
 
 }
-
-// Register callback of AutocastFunctionality to PyTorch to additional
-// compute DispatchKeySet when needed.
-REGISTER_DISPATCHKEYSET_FUNC(
-    DispatchKey::AutocastFunctionality,
-    get_ks_by_autocast);
 
 } // namespace
 } // namespace at::autocast
