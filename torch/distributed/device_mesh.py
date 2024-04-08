@@ -74,8 +74,10 @@ else:
             # swap the current dim to the last dim then reshape to flatten out other
             # dims, so we can just extract the list of ranks which contains cur_rank.
             cur_rank = device_mesh.get_rank()
-            pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
-                -1, device_mesh.mesh.size(mesh_dim)
+            pg_ranks_by_dim = (
+                device_mesh.mesh.swapdims(-1, mesh_dim)
+                .reshape(-1, device_mesh.mesh.size(mesh_dim))
+                .to(torch.int32)
             )
 
             for mesh_1d in pg_ranks_by_dim:
@@ -89,7 +91,11 @@ else:
                     res_sub_mesh = sub_mesh
 
             res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
+            # Update the hash of the submesh to take the parent mesh into consideration
+            # so the same mesh with or without the parent mesh is considered different.
+            res_sub_mesh._hash = hash((res_sub_mesh._hash, device_mesh._hash))
             # Assign the current DeviceMesh as the parent of the child DeviceMesh.
+            # We need to update the mappings after the child mesh hash update.
             self.child_to_parent_mapping[res_sub_mesh] = device_mesh
             return res_sub_mesh
 
@@ -209,11 +215,25 @@ else:
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, dtype=torch.int)
             )
-            self.mesh_dim_names = mesh_dim_names
+            self.mesh_dim_names = tuple(mesh_dim_names) if mesh_dim_names else None
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-            self._hash = hash((self._flatten_mesh_list, self.mesh.shape, id(self)))
+            hash_obj = (
+                (
+                    self._flatten_mesh_list,
+                    self.mesh.shape,
+                    self.device_type,
+                    self.mesh_dim_names,
+                )
+                if self.mesh_dim_names
+                else (
+                    self._flatten_mesh_list,
+                    self.mesh.shape,
+                    self.device_type,
+                )
+            )
+            self._hash = hash(hash_obj)
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
@@ -339,12 +359,7 @@ else:
         def __eq__(self, other: object) -> bool:
             if not isinstance(other, DeviceMesh):
                 return False
-            if id(self.mesh) == id(other.mesh):
-                return True
-            return (
-                self.mesh.shape == other.mesh.shape
-                and self._flatten_mesh_list == other._flatten_mesh_list
-            )
+            return self._hash == other._hash
 
         def __getitem__(self, mesh_dim_name: str) -> "DeviceMesh":
             """
