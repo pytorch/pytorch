@@ -495,6 +495,20 @@ class GuardBuilder(GuardBuilderBase):
             base_example_value = self.get(base_source_name)
             base_guard_manager = self.get_guard_manager_from_source(source.base)
 
+        # TODO(anijain2305) - We special case for sys.modules in builder.py with
+        # PythonSysModulesVariable. We specialize because otherwise using a
+        # ConstDictVariable tracker installs guards on all the keys, resulting
+        # in a large number of guards. Even with LazyVariable trackers, we still
+        # install guards on all the keys because of how HashableTracker is
+        # currently implemented. Therefore to fix this issue, we will need to
+        # improve key guard installation for ConstDictVariable tracker and
+        # then remove specialization for sys.modules in builder.py.
+        # Set example_value to None to prevent installation fo DictGuardManager.
+        if example_value is sys.modules:
+            example_value = None
+        if base_example_value is sys.modules:
+            base_example_value = None
+
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
             # RootGuardManager accepts a dict but still its not a
@@ -579,6 +593,19 @@ class GuardBuilder(GuardBuilderBase):
                     source=source_name,
                     example_value=example_value,
                 )
+            elif isinstance(base_example_value, list):
+                return base_guard_manager.list_getitem_manager(
+                    key=source.index,
+                    source=source_name,
+                    example_value=example_value,
+                )
+            elif isinstance(base_example_value, tuple):
+                return base_guard_manager.tuple_getitem_manager(
+                    key=source.index,
+                    source=source_name,
+                    example_value=example_value,
+                )
+
             index = source.index
             if source.index_is_slice:
                 index = source.unpack_slice()
@@ -1348,7 +1375,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module() or match_on_id_for_tensor(guard):
-            self.DATA_PTR_MATCH(guard)
+            self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
                 value = value()
