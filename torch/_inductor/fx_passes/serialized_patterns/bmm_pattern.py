@@ -3,8 +3,7 @@
 # noqa: F401, E501
 # This is an auto-generated file. Please do not modify it by hand.
 # To re-generate, run:
-# cd ~/pytorch && python
-# torchgen/fuse_attention_patterns/gen_attention_patterns.py
+# cd ~/pytorch && python torchgen/fuse/gen_patterns.py
 
 import torch
 import torch._inductor

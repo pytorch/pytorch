@@ -5,7 +5,6 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
-#include <iostream>
 #include <utility>
 
 #include <ATen/Operators.h>
@@ -202,7 +201,7 @@ std::tuple<Tensor, optional<int64_t>> squeeze_batch_rule(const Tensor& self, opt
   int64_t new_batch_idx = 0;
   int64_t original_idx = 0;
 
-  for (auto it : shape) {
+  for (const auto& it : shape) {
     // Keep only dimensions != 1 and the batch dimension (irrespective of size).
     if (it != 1 || original_idx == bdim) {
       squeezed_sizes.push_back(it);
@@ -292,7 +291,7 @@ std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, option
     return std::make_tuple(at::roll_symint(self_, shifts, new_dims), 0);
   }
   // We will do something like: t.reshape(a, -1).roll(1, dims=[1, ]).reshape(old_shape)
-  auto old_shape = self_.sizes();
+  auto old_shape = self_.sym_sizes();
   new_dims.push_back(1);
   auto logical_rank = rankWithoutBatchDim(self, bdim);
   if (logical_rank == 0) {
@@ -302,7 +301,7 @@ std::tuple<Tensor, optional<int64_t>> roll_batch_rule(const Tensor& self, option
   auto output = at::roll_symint(self_.flatten(1), shifts, new_dims);
   // NOTE: For scalar tensor, we don't need to unsqueeze as reshape
   // with `old_shape` takes care of it.
-  output = output.reshape(old_shape);
+  output = output.reshape_symint(old_shape);
   return std::make_tuple(output, 0);
 }
 
@@ -452,7 +451,7 @@ std::tuple<Tensor, optional<int64_t>> expand_batch_rule(
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto self_sizes = self_.sym_sizes();
-  auto batch_size = self_sizes[0];
+  const auto& batch_size = self_sizes[0];
 
   c10::SmallVector<c10::SymInt> size_(size.size() + 1);
   size_[0] = batch_size;

@@ -978,7 +978,7 @@ class TestPatternMatcher(TestCase):
                 self.assertEqual(
                     pattern_pp,
                     PatternPrettyPrinter.run(search_fn_pattern),
-                    msg=f"Found mismatched pattern {search_fn.__name__}. Run gen_attention_patterns.py",
+                    msg=f"Found mismatched pattern {search_fn.__name__}. Run torchgen/fuse/gen_patterns.py",
                 )
 
                 # Since we've already checked that the serialized patterns match
