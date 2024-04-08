@@ -2638,6 +2638,20 @@ class CPUReproTests(TestCase):
                         if simdlen != 1:
                             check_metrics_vec_kernel_count(2)
 
+    @torch._dynamo.config.patch(specialize_int=False)
+    def test_slice_scatter_issue122291(self):
+        @torch.compile(fullgraph=True)
+        def fn(t, t_src, dim, start, end, step):
+            return t.slice_scatter(t_src, dim, start, end, step)
+
+        shape = ((16, 16), (16, 2), 1, 4, 10, 1)
+        input_tensor = torch.zeros(shape[0], requires_grad=False, device="cpu")
+        src_tensor = torch.ones(shape[1], requires_grad=False, device="cpu")
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed, r".*shape error in scatter op"
+        ):
+            fn(input_tensor, src_tensor, shape[2], shape[3], shape[4], shape[5])
+
     def test_horizontal_fusion(self):
         def fn(a, b, c, idx):
             _a = torch.index_select(a, dim=0, index=idx)
@@ -2766,6 +2780,18 @@ class CPUReproTests(TestCase):
         a = torch.tensor([])
         with self.assertRaises(RuntimeError):
             torch.compile(fn)(a)
+
+    @torch.no_grad()
+    @torch._inductor.config.patch(freezing=True)
+    def test_issue122380(self):
+        def func(x):
+            t1 = torch.unbind(x)
+            t2 = torch.stack(t1, dim=1)
+            t3 = torch.tanh(t2)
+            return t3
+
+        x = torch.randn(2, 3, 4)
+        self.assertEqual(torch.compile(func)(x), func(x))
 
     def test_ir_node_str(self):
         @torch.compile
@@ -3513,8 +3539,7 @@ class CPUReproTests(TestCase):
         x = torch.randint(0, 100, (819,), dtype=torch.int64)
         metrics.reset()
         self.common(fn, (x,))
-        # TODO: support vectorized int64 masked load
-        assert metrics.generated_cpp_vec_kernel_count == 0
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
     @config.patch({"cpp.dynamic_threads": True})
     def test_reduction_with_dynamic_threads(self):

@@ -3625,7 +3625,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertTrue(nt.is_contiguous())
 
         # construct from (values, offsets, lengths)
-        lengths = torch.tensor([2, 1, 1, 2])
+        lengths = torch.tensor([2, 1, 1, 2], device=device)
         nt = torch.nested.nested_tensor_from_jagged(values, offsets=offsets, lengths=lengths)
         self.assertTrue(isinstance(nt, NestedTensor))
         self.assertTrue(nt._is_view() and nt._base is values)
@@ -3638,7 +3638,7 @@ class TestNestedTensorSubclass(TestCase):
 
         # construct from (values, lengths)
         values = torch.randn(14, 5, device=device, dtype=dtype)
-        lengths = torch.tensor([2, 3, 4, 5])
+        lengths = torch.tensor([2, 3, 4, 5], device=device)
         nt = torch.nested.nested_tensor_from_jagged(values, lengths=lengths)
         self.assertTrue(isinstance(nt, NestedTensor))
         self.assertTrue(nt._is_view() and nt._base is values)
@@ -3647,7 +3647,7 @@ class TestNestedTensorSubclass(TestCase):
         self.assertEqual(nt.size(-1), values.size(-1))
         # for now, if only lengths is specified, convert to offsets to integrate best with the
         # existing kernels
-        expected_offsets = torch.tensor([0, 2, 5, 9, 14])
+        expected_offsets = torch.tensor([0, 2, 5, 9, 14], device=device)
         expected_nt = torch.nested.nested_tensor_from_jagged(values, offsets=expected_offsets)
         for n1, n2 in zip(nt.unbind(), expected_nt.unbind()):
             self.assertEqual(n1, n2)
@@ -3712,7 +3712,7 @@ class TestNestedTensorSubclass(TestCase):
 
     @dtypes(torch.double, torch.half)
     @onlyCUDA
-    def test_device_dtype_transfer_maintains_offsets(self, device, dtype):
+    def test_device_dtype_transfer_updates_offsets(self, device, dtype):
         for tensor_list in self._get_example_tensor_lists():
             orig_device = torch.device("cpu")
             orig_dtype = torch.float32
@@ -3725,8 +3725,8 @@ class TestNestedTensorSubclass(TestCase):
             self.assertEqual(torch.int64, nt.offsets().dtype)
             nt = nt.to(device=device).to(dtype=dtype)
 
-            # offsets should still be int64 on the original device
-            self.assertEqual(orig_device, nt.offsets().device)
+            # offsets should still be int64 on the new device
+            self.assertEqual(nt.values().device, nt.offsets().device)
             self.assertEqual(torch.int64, nt.offsets().dtype)
 
     def test_unbind(self, device):
