@@ -495,6 +495,20 @@ class GuardBuilder(GuardBuilderBase):
             base_example_value = self.get(base_source_name)
             base_guard_manager = self.get_guard_manager_from_source(source.base)
 
+        # TODO(anijain2305) - We special case for sys.modules in builder.py with
+        # PythonSysModulesVariable. We specialize because otherwise using a
+        # ConstDictVariable tracker installs guards on all the keys, resulting
+        # in a large number of guards. Even with LazyVariable trackers, we still
+        # install guards on all the keys because of how HashableTracker is
+        # currently implemented. Therefore to fix this issue, we will need to
+        # improve key guard installation for ConstDictVariable tracker and
+        # then remove specialization for sys.modules in builder.py.
+        # Set example_value to None to prevent installation fo DictGuardManager.
+        if example_value is sys.modules:
+            example_value = None
+        if base_example_value is sys.modules:
+            base_example_value = None
+
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
             # RootGuardManager accepts a dict but still its not a
@@ -1089,19 +1103,17 @@ class GuardBuilder(GuardBuilderBase):
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
-        if guard.is_local():
-            return self.ID_MATCH(guard)
+        return self.ID_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard):
         """matches a closure by __code__ id."""
-        if guard.is_local():
-            val = self.get(guard.name)
-            # Strictly only want user-defined functions
-            if type(val) == types.FunctionType and hasattr(val, "__code__"):
-                self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)
-                self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)
-            else:
-                self.FUNCTION_MATCH(guard)
+        val = self.get(guard.name)
+        # Strictly only want user-defined functions
+        if type(val) == types.FunctionType and hasattr(val, "__code__"):
+            self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)
+            self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)
+        else:
+            self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
