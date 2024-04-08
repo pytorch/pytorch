@@ -653,7 +653,7 @@ class CppWrapperCpu(WrapperCodeGen):
             declare_kernel.update(
                 V.graph.const_module.wrapper_code.src_to_kernel.values()
             )
-        for kernel in declare_kernel:
+        for kernel in sorted(declare_kernel):
             self.prefix.writeline(f"    CUfunction {kernel}{{nullptr}};")
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")

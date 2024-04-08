@@ -7,7 +7,6 @@ import collections
 import itertools
 import os
 import re
-import sys
 import typing
 
 import torch._custom_ops as custom_ops
@@ -27,9 +26,6 @@ import numpy as np
 
 def requires_compile(fun):
     fun = unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")(fun)
-    fun = unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )(fun)
     return fun
 
 
@@ -1553,9 +1549,6 @@ def forward(self, x_1):
         )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     def test_data_dependent_compile(self):
         import torch._dynamo.testing
         from torch._dynamo.utils import counters
@@ -2219,9 +2212,6 @@ class TestCustomOpAPI(TestCase):
             self.assertGreater(after, prev)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     def test_fake(self):
         @torch.library.custom_op("_torch_testing::add", mutates_args=())
         def add(x: Tensor, y: float) -> Tensor:
@@ -2278,9 +2268,6 @@ Please use `add.register_fake` to add an fake impl.""",
 
     @skipIfTorchDynamo("recursive dynamo")
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     def test_compile(self):
         called_impl = False
         called_abstract = False
@@ -2405,6 +2392,29 @@ Please use `add.register_fake` to add an fake impl.""",
         x = x.cuda()
         y = f(x)
         self.assertEqual(y, x.sin())
+
+    def test_overloading(self):
+        called_f = 0
+        called_f1 = 0
+
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            nonlocal called_f
+            called_f += 1
+            return x.clone()
+
+        x = torch.randn(2, 3)
+        torch.ops._torch_testing.f(x)
+        self.assertEqual(called_f, 1)
+
+        @torch.library.custom_op("_torch_testing::f.overload", mutates_args=())
+        def f1(x: Tensor, y: Tensor) -> Tensor:
+            nonlocal called_f1
+            called_f1 += 1
+            return x.clone()
+
+        torch.ops._torch_testing.f(x, x)
+        self.assertEqual(called_f1, 1)
 
     def test_disallows_output_aliasing(self):
         @torch.library.custom_op("_torch_testing::f", mutates_args=())
