@@ -51,12 +51,12 @@ if BACKEND in _allowed_backends:
                 super().setUp()
                 self._spawn_processes()
                 torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
-
         has_init_method = "NoInitFile" if os.environ.get("INIT_METHOD", "env://") == "env://" else ""
-        TestDistBackendWithSpawn.__name__ = f"{TestDistBackendWithSpawn.__name__}{BACKEND.upper()}{has_init_method}"
-        TestDistBackendWithSpawn.__qualname__ = TestDistBackendWithSpawn.__name__
-        globals()[TestDistBackendWithSpawn.__name__] = TestDistBackendWithSpawn
-        return TestDistBackendWithSpawn
+        name = f"TestDistBackendWithSpawn{BACKEND.upper()}{has_init_method}"
+        empty_class = type(name, (TestDistBackendWithSpawn,), {})
+
+        globals()[name] = empty_class
+        return empty_class
     make_test_classes()
 else:
     print(f"Invalid backend {BACKEND}. Tests will not be run!")
