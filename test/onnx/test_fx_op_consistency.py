@@ -1873,7 +1873,7 @@ def _run_test_output_match(
                     == pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM
                 ):
                     try:
-                        model = torch.export.export(model, inputs)
+                        model = torch.export.export(model, inputs).run_decompositions()
                     except AssertionError as e:
                         # NOTE: avoid fake_mode detection bug in torch.export.export
                         pytest.xfail(

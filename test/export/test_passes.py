@@ -414,7 +414,7 @@ class TestPasses(TestCase):
         mod = M()
         ep = export(mod, (x,))
 
-        with self.assertRaisesRegex(RuntimeError, r"_local_scalar_dense is outside of inline constraint \[2, 5\]."):
+        with self.assertRaisesRegex(RuntimeError, r"item is outside of inline constraint \[2, 5\]."):
             ep.module()(torch.tensor([6]))
 
         new_inp = torch.tensor([5])
@@ -507,7 +507,7 @@ class TestPasses(TestCase):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            r"_local_scalar_dense is outside of inline constraint \[4, 7\]",
+            r"item is outside of inline constraint \[4, 7\]",
         ) as cm:
             gm(torch.tensor([20]))
 

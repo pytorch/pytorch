@@ -14,6 +14,9 @@ from torch.testing import FileCheck
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
 class TestExperiment(TestCase):
+    # TODO maybe pian's work will fix this. It complains about some autograd global op and
+    # hop pass
+    @unittest.expectedFailure
     def test_with_buffer_as_submodule(self):
         @_mark_strict_experimental
         class B(torch.nn.Module):

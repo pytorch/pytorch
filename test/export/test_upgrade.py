@@ -125,7 +125,7 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
         fn = Foo()
 
         inputs = (torch.ones([2, 3]) * 4, 2.)
-        ep = export(fn, inputs)
+        ep = export(fn, inputs).run_decompositions()
         compiler_opset_version = {"aten": 4}
         model_opset_version = {"aten": 3}
         upgrader = GraphModuleOpUpgrader(compiler_opset_version, model_opset_version, TEST_UPGRADERS)
@@ -134,7 +134,7 @@ def div__Scalar_mode_0_3(self: torch.Tensor, other: Any,  *, rounding_mode: Opti
         self.assertEqual(count, 1)
 
         # upgrade: replace op (div.Scalar_mode -> div__Scalar_mode_0_3) then retrace
-        upgraded_ep = upgrader.upgrade(ep)
+        upgraded_ep = upgrader.upgrade(ep).run_decompositions()
         upgraded_ep.graph_module.print_readable()
 
         # no old version of op (div__Scalar_mode_0_3) anymore.
