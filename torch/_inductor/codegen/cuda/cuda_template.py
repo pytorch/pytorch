@@ -158,9 +158,12 @@ class CUDATemplate(KernelTemplate):
                 #define PT_EXPORT
                 #endif
                 #endif
-                using bfloat16 = nv_bfloat16;
             """
         )
+        if torch.version.cuda:
+            res.splice("using bfloat16 = nv_bfloat16;")
+        elif torch.version.rocm:
+            res.splice("using bfloat16 = hip_bfloat16")
         return res
 
     def render(self, **kwargs) -> str:
@@ -240,3 +243,59 @@ class CUTLASSTemplate(CUDATemplate):
             return ptr
         else:
             return f"({self._DTYPE_TO_CUTLASS.get(node.get_dtype())}*)({ptr})"
+
+
+class CKTemplate(CUDATemplate):
+    """
+    Base class for generating CK templates, has common, i.e. non-gemm-specific, code generation logic
+    """
+
+    _TORCH_DTYPE_TO_CK = {
+        torch.float32: "float",
+        torch.float64: "double",
+        torch.float16: "ck::half_t",
+        torch.bfloat16: "ck::bhalf_t",
+        torch.int32: "int",
+        torch.int8: "int8_t",
+        torch.uint8: "uint8_t",
+        # TBD: f8
+        torch.bool: "bool",
+    }
+
+
+    def header(self) -> IndentedBuffer:
+        res = super().header()
+        res.splice(
+            """
+                // 'ere be headers
+                // #include <initializer_list>
+                // #include <numeric>
+
+                #include "ck/ck.hpp"
+                #include "ck/utility/data_type.hpp"
+                #include "ck/library/utility/check_err.hpp"
+                #include "ck/library/utility/device_memory.hpp"
+                #include "ck/library/utility/fill.hpp"
+                #include "ck/library/utility/host_tensor.hpp"
+                #include "ck/library/utility/host_tensor_generator.hpp"
+                #include "ck/library/utility/literals.hpp"
+            """
+        )
+        return res
+
+    def globals(self) -> IndentedBuffer:
+        res = super().globals()
+        res.splice(
+            """
+                // 'ere be globals
+                template <ck::index_t... Is>
+                using S = ck::Sequence<Is...>;
+            """
+        )
+        return res
+
+    def torch_type_to_ck(self, node: IRNode, ptr: str) -> str:
+        if node is None:
+            return ptr
+        else:
+            return f"({self._TORCH_DTYPE_TO_CK.get(node.get_dtype())}*)({ptr})"
