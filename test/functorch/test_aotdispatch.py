@@ -2745,6 +2745,45 @@ def forward(self, tangents_1):
         with self.assertRaisesRegex(Exception, "Can't call metadata"):
             make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
 
+    def test_output_aliases_input_view_meta_replay(self):
+        @torch.compile
+        def f(a):
+            return a.view(-1)
+
+        inp = torch.ones(2, 2, requires_grad=True)
+        out = f(inp)
+
+        self.assertIsNotNone(out.grad_fn)
+        self.assertExpectedInline(str(out.grad_fn.__class__), """<class 'ViewBackward0'>""")
+
+    def test_output_aliases_intermediate_view_meta_replay(self):
+        @torch.compile
+        def f(a):
+            b = a.clone()
+            return b.view(-1), b.view(-1)
+
+        inp = torch.ones(2, 2, requires_grad=True)
+        out1, out2 = f(inp)
+
+        self.assertIsNotNone(out1.grad_fn)
+        self.assertExpectedInline(str(out1.grad_fn.__class__), """<class 'ViewBackward0'>""")
+
+        self.assertIsNotNone(out2.grad_fn)
+        self.assertExpectedInline(str(out2.grad_fn.__class__), """<class 'ViewBackward0'>""")
+
+    def test_output_aliases_output_view_meta_replay(self):
+        @torch.compile
+        def f(a):
+            b = a.add(10)
+            return b, b.view(-1)
+
+        inp = torch.ones(2, 2, requires_grad=True)
+        out1, out2 = f(inp)
+
+        self.assertEqual(out1.untyped_storage(), out2.untyped_storage())
+        self.assertIsNotNone(out2.grad_fn)
+        self.assertExpectedInline(str(out2.grad_fn.__class__), """<class 'ViewBackward0'>""")
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
