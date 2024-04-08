@@ -1047,22 +1047,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
                 ),
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
-                ),
+                skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
@@ -1079,13 +1070,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1156,22 +1140,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115607"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
                 ),
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115607 and #116028"
-                ),
+                skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
@@ -1235,6 +1210,16 @@ optim_db: List[OptimizerInfo] = [
         ),
         optim_error_inputs_func=optim_error_inputs_func_adam,
         supported_impls=("foreach", "differentiable", "fused"),
+        decorators=(
+            # Expected floating point error between fused and compiled forloop
+            DecorateInfo(
+                toleranceOverride({torch.float64: tol(atol=4.5e-7, rtol=2.2e-6)}),
+                "TestOptimRenewed",
+                "test_fused_matches_forloop",
+                active_if=lambda kwargs: TEST_WITH_TORCHDYNAMO
+                and kwargs["dtype"] == torch.float64,
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1266,13 +1251,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Fixing #115607 should fix this test. fused is correct, but forloop is not."
-                ),
-                "TestOptimRenewed",
-                "test_fused_matches_forloop",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1342,16 +1320,7 @@ optim_db: List[OptimizerInfo] = [
                 "test_complex",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115607"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115607 and #116028"
-                ),
+                skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
@@ -1389,12 +1358,6 @@ optim_db: List[OptimizerInfo] = [
                 "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
-                skipIfTorchDynamo("cpu fails due to #115607"),
-                "TestOptimRenewed",
-                "test_can_load_older_state_dict",
-                device_type="cpu",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo(
                     "capturable path no longer called after hitting cache limit, see #121178"
                 ),
@@ -1429,6 +1392,16 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamw,
         optim_error_inputs_func=optim_error_inputs_func_adamw,
         supported_impls=("foreach", "differentiable", "fused"),
+        decorators=(
+            # Expected error between compiled forloop and fused optimizers
+            DecorateInfo(
+                toleranceOverride({torch.float64: tol(atol=4.5e-7, rtol=2.2e-6)}),
+                "TestOptimRenewed",
+                "test_fused_matches_forloop",
+                active_if=lambda kwargs: TEST_WITH_TORCHDYNAMO
+                and kwargs["dtype"] == torch.float64,
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1455,13 +1428,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Fixing #115607 should fix this test. fused is correct, but forloop is not."
-                ),
-                "TestOptimRenewed",
-                "test_fused_matches_forloop",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1518,13 +1484,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_tensor_lr",
                 active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See discrepancy in https://github.com/pytorch/pytorch/issues/115607"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1766,13 +1725,6 @@ optim_db: List[OptimizerInfo] = [
                 "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115607"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-            DecorateInfo(
                 toleranceOverride(
                     {
                         # previously atol=1e-7, rtol=1e-7
@@ -1788,14 +1740,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/115607"
-                ),
-                "TestOptimRenewed",
-                "test_can_load_older_state_dict",
-                device_type="cpu",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1833,22 +1777,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
                 ),
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
-                ),
+                skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
@@ -1875,13 +1810,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1926,22 +1854,13 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
                 ),
                 "TestOptimRenewed",
                 "test_peak_memory_foreach",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
-                ),
+                skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
@@ -1958,13 +1877,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
