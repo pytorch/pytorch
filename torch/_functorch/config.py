@@ -64,6 +64,11 @@ ban_recompute_reductions = True
 # cost of some performance
 aggressive_recomputation = False
 
+# If FakeTensor.data_ptr() should error.
+# This option is independent of AOTAutograd and torch.compile, but our policy
+# is to turn it off during torch.compile.
+fake_tensor_allow_unsafe_data_ptr_access = True
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
