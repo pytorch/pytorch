@@ -1140,7 +1140,7 @@ class VecNEON(VecISA):
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
-        return "neon"  # Unused
+        return "asimd" 
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
@@ -1200,7 +1200,7 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2()]
+supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
