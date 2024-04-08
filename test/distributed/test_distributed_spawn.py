@@ -51,7 +51,9 @@ if BACKEND in _allowed_backends:
                 super().setUp()
                 self._spawn_processes()
                 torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
-        TestDistBackendWithSpawn.__name__ = f"{TestDistBackendWithSpawn.__name__}{BACKEND.upper()}"
+
+        has_init_method = "NoInitFile" if os.environ.get("INIT_METHOD", "env://") == "env://" else ""
+        TestDistBackendWithSpawn.__name__ = f"{TestDistBackendWithSpawn.__name__}{BACKEND.upper()}{has_init_method}"
         TestDistBackendWithSpawn.__qualname__ = TestDistBackendWithSpawn.__name__
         globals()[TestDistBackendWithSpawn.__name__] = TestDistBackendWithSpawn
         return TestDistBackendWithSpawn
