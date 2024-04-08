@@ -138,7 +138,14 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     raise NotImplementedError(
                         "Accuracy minification is supported for inductor only"
                     )
-                if backend_aot_accuracy_fails(gm, real_inputs, compiler_fn):
+                failed = not same_two_models(
+                    gm,
+                    inner_compiled_fn,
+                    real_inputs,
+                    only_fwd=True,
+                )
+
+                if failed:
                     log.warning(
                         "Accuracy failed for the AOT Autograd graph %s", graph_name
                     )
@@ -276,9 +283,8 @@ def save_graph_repro(
     fd.write(
         f"    with torch.no_grad():\n"
         f"        run_repro(mod, load_args, accuracy={accuracy!r}, command={command!r}, "
-        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r}\n"
-        f")\n"
-        f"        # To run it separately, do "
+        f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
+        f"        # To run it separately, do \n"
         f"        # mod, args = run_repro(mod, load_args, accuracy={accuracy!r}, command='get_args', "
         f"save_dir={save_dir!r}, tracing_mode={tracing_mode!r}, check_str={check_str!r})\n"
         f"        # mod(*args)"
@@ -939,6 +945,6 @@ divergences--you just might not end up with a useful repro in the end.""",
         "analyze": repro_analyze,
         "minifier-query": repro_minifier_query,
         "run": repro_run,
-        "get_repro": repro_get_args,
+        "get_args": repro_get_args,
     }
     return COMMAND_FNS[options.command](options, mod, load_args)
