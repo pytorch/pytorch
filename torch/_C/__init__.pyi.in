@@ -2,6 +2,7 @@
 # mypy: disable-error-code="type-arg"
 
 import builtins
+import numpy
 from enum import Enum, IntEnum
 from pathlib import Path
 from typing import (
