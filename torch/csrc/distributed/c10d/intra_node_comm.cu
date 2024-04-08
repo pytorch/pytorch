@@ -139,11 +139,20 @@ static __global__ void oneShotAllReduceKernel(
     size_t N_aligned,
     P2pState** p2pStates,
     at::BFloat16** buffers,
-    size_t rank) {
+    size_t rank,
+    bool fuseInputCopy) {
   const size_t numelPerThread = kBytesPerThread / sizeof(at::BFloat16);
   const size_t offset =
       (blockDim.x * blockIdx.x + threadIdx.x) * numelPerThread;
   const size_t stride = blockDim.x * gridDim.x * numelPerThread;
+
+  if (fuseInputCopy) {
+    for (size_t i = offset; i < N_aligned; i += stride) {
+      bf16x8 val;
+      streamLoad128(val, &input[i]);
+      streamStore128(&buffers[rank][i], val);
+    }
+  }
 
   // Wait for all other ranks to enter the kernel
   if (threadIdx.x < kWorldSize) {
@@ -495,20 +504,29 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
     at::cuda::CUDAStream& stream) {
   checkInput(input, rank_);
 
-  size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
-  size_t N_aligned = alignUp(input.numel(), numelPerWarp);
+  const size_t numelPerWarp = kBytesPerThread / input.element_size() * kWarpSize;
+  const size_t N_aligned = alignUp(input.numel(), numelPerWarp);
+  const bool isAligned = (N_aligned == static_cast<size_t>(input.numel()));
   TORCH_CHECK(N_aligned <= bufferSize_ / input.element_size());
 
   dim3 blocks, threads;
   getLaunchConfig(N_aligned, input.element_size(), blocks, threads);
 
   at::cuda::OptionalCUDAGuard guard(input.get_device());
-  AT_CUDA_CHECK(cudaMemcpyAsync(
-      buffers_[rank_],
-      input.data_ptr(),
-      input.numel() * input.element_size(),
-      cudaMemcpyDeviceToDevice,
-      stream));
+
+  // When the input data is small, copying inside the kernel is faster. Because
+  // in such cases, the launch overhead of cudaMemcpyAsync outweighs its
+  // efficiency. Here we consider the input data to be small if the copy loop
+  // can finish in a single iteration.
+  const bool fuseInputCopy = isAligned && blocks.x < kMaxAllReduceBlocks;
+  if (!fuseInputCopy) {
+    AT_CUDA_CHECK(cudaMemcpyAsync(
+        buffers_[rank_],
+        input.data_ptr(),
+        input.numel() * input.element_size(),
+        cudaMemcpyDeviceToDevice,
+        stream));
+  }
 
 #define X(kWorldSize, kAligned)                            \
   if (worldSize_ == kWorldSize) {                          \
@@ -519,7 +537,8 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
             N_aligned,                                     \
             reinterpret_cast<P2pState**>(p2pStatesDev_),   \
             reinterpret_cast<at::BFloat16**>(buffersDev_), \
-            rank_);                                        \
+            rank_,                                         \
+            fuseInputCopy);                                \
     C10_CUDA_KERNEL_LAUNCH_CHECK();                        \
   }
 
@@ -532,7 +551,7 @@ at::Tensor IntraNodeComm::oneShotAllReduce(
   X(7, kAligned);                          \
   X(8, kAligned);
 
-  if (N_aligned == static_cast<size_t>(input.numel())) {
+  if (isAligned) {
     DISPATCH_ALL_WORLD_SIZES(true);
   } else {
     DISPATCH_ALL_WORLD_SIZES(false);
@@ -699,6 +718,71 @@ at::Tensor IntraNodeComm::allReduce(
 
 int64_t getIntraNodeCommUsageCounter() {
   return usageCounter;
+}
+
+static __global__ void barrierKernel(
+    P2pState** p2pStates,
+    uint64_t mask,
+    size_t rank,
+    size_t worldSize) {
+  if (threadIdx.x < worldSize && (mask & (1ULL << threadIdx.x))) {
+    auto targetRank = threadIdx.x;
+    releaseSignal(&p2pStates[targetRank]->signals0[0][rank]);
+    acquireSignal(&p2pStates[rank]->signals0[0][targetRank]);
+  }
+}
+
+void IntraNodeComm::barrier(c10::optional<std::vector<int64_t>> ranks) {
+  if (!ranks.has_value()) {
+    ranks = std::vector<int64_t>(worldSize_);
+    std::iota(ranks->begin(), ranks->end(), 0);
+  }
+  uint64_t mask = 0;
+  for (const auto& r : ranks.value()) {
+    TORCH_CHECK(r >= 0 && r < static_cast<int64_t>(worldSize_));
+    mask |= (1ULL << r);
+  }
+  barrierKernel<<<1, kWarpSize, 0, at::cuda::getCurrentCUDAStream()>>>(
+      reinterpret_cast<P2pState**>(p2pStatesDev_), mask, rank_, worldSize_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void IntraNodeComm::put(const at::Tensor& tensor, int64_t offset) {
+  TORCH_CHECK(
+      tensor.is_non_overlapping_and_dense(),
+      "IntraNodeComm::put(): tensor must be non-overlapping and dense");
+  size_t sz = tensor.numel() * tensor.element_size();
+  TORCH_CHECK(
+      offset + sz <= bufferSize_,
+      "IntraNodeComm::put(): offset + tensor size exceeded "
+      "p2p buffer size");
+  // This results in "Memcpy PtoP" which does not use SMs for copying
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      static_cast<char*>(buffers_[rank_]) + offset,
+      static_cast<char*>(tensor.data_ptr()),
+      sz,
+      cudaMemcpyDeviceToDevice,
+      at::cuda::getCurrentCUDAStream()));
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+}
+
+void IntraNodeComm::get(size_t rank, at::Tensor tensor, int64_t offset) {
+  TORCH_CHECK(
+      tensor.is_non_overlapping_and_dense(),
+      "IntraNodeComm::get(): tensor must be non-overlapping and dense");
+  size_t sz = tensor.numel() * tensor.element_size();
+  TORCH_CHECK(
+      offset + sz <= bufferSize_,
+      "IntraNodeComm::get(): offset + tensor size exceeded "
+      "p2p buffer size");
+  // This results in "Memcpy PtoP" which does not use SMs for copying
+  AT_CUDA_CHECK(cudaMemcpyAsync(
+      static_cast<char*>(tensor.data_ptr()),
+      static_cast<char*>(buffers_[rank]) + offset,
+      sz,
+      cudaMemcpyDeviceToDevice,
+      at::cuda::getCurrentCUDAStream()));
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
 } // namespace intra_node_comm

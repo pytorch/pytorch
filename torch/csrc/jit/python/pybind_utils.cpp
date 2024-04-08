@@ -641,7 +641,7 @@ py::object toPyObject(IValue ivalue) {
       return std::move(t);
     }
   } else if (ivalue.isDevice()) {
-    return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
+    return py::cast(std::move(ivalue).toDevice());
   } else if (ivalue.isStream()) {
     return py::cast(std::move(ivalue).toStream());
   } else if (ivalue.isGenericDict()) {

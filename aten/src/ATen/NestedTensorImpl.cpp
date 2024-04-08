@@ -101,7 +101,7 @@ inline std::vector<int64_t> construct_opt_sizes(const at::Tensor& sizes) {
 }
 
 // assume contiguous, we can construct stride from size
-inline at::Tensor construct_nested_strides(const at::Tensor& sizes) {
+at::Tensor construct_nested_strides(const at::Tensor& sizes) {
   // empty `sizes` means empty nested tensor, so return empty strides
   if (sizes.dim() == 0) {
     return sizes;
@@ -139,7 +139,7 @@ inline at::Tensor construct_nested_strides(const at::Tensor& sizes) {
    *
    * @return A tensor of offsets
   */
-inline at::Tensor construct_offsets(const at::Tensor& sizes) {
+at::Tensor construct_offsets(const at::Tensor& sizes) {
   // empty `sizes` means empty nested tensor, so return empty strides
   if (sizes.dim() == 0) {
     return at::empty({0}, sizes.options().dtype(kLong));

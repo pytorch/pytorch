@@ -3,7 +3,7 @@ import torch
 from torch._export.db.case import export_case, SupportLevel
 from torch.export import Dim
 
-x = torch.ones(3, 2)
+x = torch.randn(3, 2)
 dim0_x = Dim("dim0_x")
 
 @export_case(
