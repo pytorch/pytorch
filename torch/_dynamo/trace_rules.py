@@ -3260,10 +3260,27 @@ SKIP_DIRS.extend(filter(None, (_module_dir(m) for m in BUILTIN_SKIPLIST)))
 
 SKIP_DIRS_RE = re.compile(r"match nothing^")
 
-FSDP_HOOKS = {
-    "_forward_pre_hooks": "torch.distributed._composable.fsdp._fsdp_state#_pre_forward",
-    "_forward_hooks": "torch.distributed._composable.fsdp._fsdp_state#_post_forward",
-}
+
+class ModuleHookNames(enum.Enum):
+    FORWARD_PRE_HOOKS = "_forward_pre_hooks"
+    FORWARD_HOOKS = "_forward_hooks"
+
+
+FSDP_HOOKS: Dict[ModuleHookNames, str] = {}
+if torch.distributed.is_available():
+    FSDP_HOOKS |= {
+        ModuleHookNames.FORWARD_PRE_HOOKS: "torch.distributed._composable.fsdp._fsdp_state.FSDPState#_pre_forward",
+        ModuleHookNames.FORWARD_HOOKS: "torch.distributed._composable.fsdp._fsdp_state.FSDPState#_post_forward",
+    }
+
+
+@functools.lru_cache(None)
+def get_fsdp_hooks_map():
+    d: Dict[ModuleHookNames, Any] = dict()
+    for k, v in FSDP_HOOKS.items():
+        d[k] = load_object(v)
+    return d
+
 
 is_fbcode = importlib.import_module("torch._inductor.config").is_fbcode()
 # Skip fbcode paths(including torch.package paths) containing
@@ -3547,22 +3564,32 @@ def skip_module_hook_by_config(module):
         return
     if not isinstance(module, torch.nn.Module):
         return
-    for hook_type, func_name in FSDP_HOOKS.items():
-        _skip_module_hook_by_config(
-            module, hook_type, func_name, config.skip_fsdp_hooks
+    for hook_name in ModuleHookNames:
+        hooks = getattr(module, hook_name.value)
+        # avoid importlib.import_module if not skipping
+        matching_hook = (
+            None
+            if not config.skip_fsdp_hooks
+            else get_fsdp_hooks_map().get(hook_name, None)
         )
+        _skip_module_hook_by_config(hooks, matching_hook, config.skip_fsdp_hooks)
 
 
-def _skip_module_hook_by_config(
-    module: torch.nn.Module, hook_type: str, func_name: str, skip_hooks: bool
-):
+def _skip_module_hook_by_config(hooks, matching_hook, skip):
+    if not hooks or matching_hook is None:
+        return
     from .decorators import disable
     from .eval_frame import innermost_fn
 
-    hooks = getattr(module, hook_type)
     for hook_id, hook in hooks.items():
-        if func_name == "#".join([hook.__module__, hook.__name__]):
-            if skip_hooks:
+        hook = innermost_fn(hook)
+        # "__self__" is for bound method
+        if hook is matching_hook or (
+            hasattr(hook, "__self__")
+            and hasattr(hook, "__func__")
+            and hook.__func__ is matching_hook
+        ):
+            if skip:
                 hooks[hook_id] = disable(hook)
             else:
-                hooks[hook_id] = innermost_fn(hook)
+                hooks[hook_id] = hook
