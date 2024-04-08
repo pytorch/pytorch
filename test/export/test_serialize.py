@@ -393,11 +393,10 @@ class TestDeserialize(TestCase):
                 node1.op not in ("get_attr", "placeholder", "output")
             ):
                 # Check "nn_module_stack" metadata
-                # TODO nn_module_stack is not roundtrippable.
-                # self.assertEqual(
-                #     node1.meta.get("nn_module_stack", None),
-                #     node2.meta.get("nn_module_stack", None),
-                # )
+                self.assertEqual(
+                    node1.meta.get("nn_module_stack", None),
+                    node2.meta.get("nn_module_stack", None),
+                )
                 # Check "source_fn_stack" metadata
                 self.assertEqual(
                     node1.meta.get("source_fn_stack", None),
