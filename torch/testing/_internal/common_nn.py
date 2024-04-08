@@ -3148,7 +3148,7 @@ classification_criterion_no_batch = [
         lambda: torch.sigmoid(torch.randn(9, dtype=torch.double)),
         lambda: torch.randn(9, dtype=torch.double).gt(0).to(torch.double)
     ),
-    ('BCEWithLogitsLoss', lambda: torch.randn(9, dtype=torch.double), lambda: torch.randn(9, dtype=torch.double)),
+    ('BCEWithLogitsLoss', lambda: torch.randn(9, dtype=torch.double), lambda: torch.rand(9, dtype=torch.double)),
     ('HingeEmbeddingLoss', lambda: torch.randn(9, dtype=torch.double), lambda: torch.tensor([-1, 1, 1] * 3)),
     ('MultiLabelMarginLoss', lambda: torch.randn(4, dtype=torch.double), lambda: torch.tensor([3, 0, -1, 1])),
     ('SoftMarginLoss', lambda: torch.randn(9, dtype=torch.double), lambda: torch.tensor([-1, 1, 1] * 3)),
