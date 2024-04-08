@@ -152,18 +152,18 @@ class TestExportTorchbind(TestCase):
             ep.module().code.strip(),
             """\
 def forward(self, arg_0, arg_1):
-    arg0_1, arg1_1, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
-    attr_1 = self.attr
-    call_torchbind = torch.ops.higher_order.call_torchbind(attr_1, 'add_tensor', arg0_1);  attr_1 = None
-    add = torch.ops.aten.add.Tensor(arg0_1, call_torchbind);  arg0_1 = call_torchbind = None
+    x, arg1_1, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+    attr = self.attr
+    call_torchbind = torch.ops.higher_order.call_torchbind(attr, 'add_tensor', x);  attr = None
+    add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
         )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
-def forward(self, attr, arg0_1, arg1_1):
-    call_torchbind = torch.ops.higher_order.call_torchbind(attr, 'add_tensor', arg0_1);  attr = None
-    add = torch.ops.aten.add.Tensor(arg0_1, call_torchbind);  arg0_1 = call_torchbind = None
+def forward(self, obj_attr, x, arg1_1):
+    call_torchbind = torch.ops.higher_order.call_torchbind(obj_attr, 'add_tensor', x);  obj_attr = None
+    add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return (add,)""",
         )
 
@@ -184,18 +184,18 @@ def forward(self, attr, arg0_1, arg1_1):
             ep.module().code.strip(),
             """\
 def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    attr_1 = self.attr
-    call_torchbind = torch.ops.higher_order.call_torchbind(attr_1, 'add_tensor', arg0_1);  attr_1 = None
-    add = torch.ops.aten.add.Tensor(arg0_1, call_torchbind);  arg0_1 = call_torchbind = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    attr = self.attr
+    call_torchbind = torch.ops.higher_order.call_torchbind(attr, 'add_tensor', x);  attr = None
+    add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
         )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
-def forward(self, attr, arg0_1):
-    call_torchbind = torch.ops.higher_order.call_torchbind(attr, 'add_tensor', arg0_1);  attr = None
-    add = torch.ops.aten.add.Tensor(arg0_1, call_torchbind);  arg0_1 = call_torchbind = None
+def forward(self, obj_attr, x):
+    call_torchbind = torch.ops.higher_order.call_torchbind(obj_attr, 'add_tensor', x);  obj_attr = None
+    add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return (add,)""",
         )
 
@@ -216,20 +216,20 @@ def forward(self, attr, arg0_1):
             ep.module().code.strip(),
             """\
 def forward(self, arg_0):
-    arg1_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    attr_1 = self.attr
-    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr_1, arg1_1);  attr_1 = None
-    add = torch.ops.aten.add.Tensor(arg1_1, takes_foo_default);  arg1_1 = takes_foo_default = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    attr = self.attr
+    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, x);  attr = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
         )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
-def forward(self, arg0_1, attr, arg1_1):
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo.default, attr, arg1_1);  arg0_1 = attr = None
+def forward(self, token, obj_attr, x):
+    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, x);  token = obj_attr = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    add = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  arg1_1 = getitem_1 = None
+    add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
     return (getitem, add)""",  # noqa: B950
         )
 
@@ -250,17 +250,17 @@ def forward(self, arg0_1, attr, arg1_1):
             ep.module().code.strip(),
             """\
 def forward(self, arg_0, arg_1):
-    arg0_1, arg1_1, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
-    call_torchbind = torch.ops.higher_order.call_torchbind(arg1_1, 'add_tensor', arg0_1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(arg0_1, call_torchbind);  arg0_1 = call_torchbind = None
+    x, cc, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+    call_torchbind = torch.ops.higher_order.call_torchbind(cc, 'add_tensor', x);  cc = None
+    add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
         )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
-def forward(self, arg0_1, arg1_1):
-    call_torchbind = torch.ops.higher_order.call_torchbind(arg1_1, 'add_tensor', arg0_1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(arg0_1, call_torchbind);  arg0_1 = call_torchbind = None
+def forward(self, x, cc):
+    call_torchbind = torch.ops.higher_order.call_torchbind(cc, 'add_tensor', x);  cc = None
+    add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return (add,)""",
         )
 
@@ -281,19 +281,19 @@ def forward(self, arg0_1, arg1_1):
             ep.module().code.strip(),
             """\
 def forward(self, arg_0, arg_1):
-    arg1_1, arg2_1, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
-    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(arg2_1, arg1_1);  arg2_1 = None
-    add = torch.ops.aten.add.Tensor(arg1_1, takes_foo_default);  arg1_1 = takes_foo_default = None
+    x, cc, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(cc, x);  cc = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
         )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo.default, arg2_1, arg1_1);  arg0_1 = arg2_1 = None
+def forward(self, token, x, cc):
+    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, cc, x);  token = cc = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    add = torch.ops.aten.add.Tensor(arg1_1, getitem_1);  arg1_1 = getitem_1 = None
+    add = torch.ops.aten.add.Tensor(x, getitem_1);  x = getitem_1 = None
     return (getitem, add)""",  # noqa: B950
         )
 
@@ -317,24 +317,24 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             ep.module().code.strip(),
             """\
 def forward(self, arg_0):
-    arg1_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    attr_1 = self.attr
-    takes_foo_default_1 = torch.ops._TorchScriptTesting.takes_foo.default(attr_1, arg1_1)
-    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr_1, takes_foo_default_1);  attr_1 = takes_foo_default_1 = None
-    add = torch.ops.aten.add.Tensor(arg1_1, takes_foo_default);  arg1_1 = takes_foo_default = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    attr = self.attr
+    takes_foo_default_1 = torch.ops._TorchScriptTesting.takes_foo.default(attr, x)
+    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, takes_foo_default_1);  attr = takes_foo_default_1 = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
     return pytree.tree_unflatten((add,), self._out_spec)""",  # noqa: B950
         )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
-def forward(self, arg0_1, attr, arg1_1):
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo.default, attr, arg1_1);  arg0_1 = None
+def forward(self, token, obj_attr, x):
+    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, x);  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, attr, getitem_1);  getitem = attr = getitem_1 = None
+    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, getitem_1);  getitem = obj_attr = getitem_1 = None
     getitem_2 = with_effects_1[0]
     getitem_3 = with_effects_1[1];  with_effects_1 = None
-    add = torch.ops.aten.add.Tensor(arg1_1, getitem_3);  arg1_1 = getitem_3 = None
+    add = torch.ops.aten.add.Tensor(x, getitem_3);  x = getitem_3 = None
     return (getitem_2, add)""",  # noqa: B950
         )
 
@@ -359,23 +359,23 @@ def forward(self, arg0_1, attr, arg1_1):
             ep.module().code.strip(),
             """\
 def forward(self, arg_0):
-    arg1_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    attr_1 = self.attr
-    takes_foo_list_return_default = torch.ops._TorchScriptTesting.takes_foo_list_return.default(attr_1, arg1_1)
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    attr = self.attr
+    takes_foo_list_return_default = torch.ops._TorchScriptTesting.takes_foo_list_return.default(attr, x)
     getitem_2 = takes_foo_list_return_default[0]
     getitem_3 = takes_foo_list_return_default[1]
     getitem_4 = takes_foo_list_return_default[2];  takes_foo_list_return_default = None
     add = torch.ops.aten.add.Tensor(getitem_2, getitem_3);  getitem_2 = getitem_3 = None
     add_1 = torch.ops.aten.add.Tensor(add, getitem_4);  add = getitem_4 = None
-    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr_1, add_1);  attr_1 = add_1 = None
-    add_2 = torch.ops.aten.add.Tensor(arg1_1, takes_foo_default);  arg1_1 = takes_foo_default = None
+    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, add_1);  attr = add_1 = None
+    add_2 = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
     return pytree.tree_unflatten((add_2,), self._out_spec)""",
         )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
-def forward(self, arg0_1, attr, arg1_1):
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo_list_return.default, attr, arg1_1);  arg0_1 = None
+def forward(self, token, obj_attr, x):
+    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_list_return.default, obj_attr, x);  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
     getitem_2 = getitem_1[0]
@@ -383,10 +383,10 @@ def forward(self, arg0_1, attr, arg1_1):
     getitem_4 = getitem_1[2];  getitem_1 = None
     add = torch.ops.aten.add.Tensor(getitem_2, getitem_3);  getitem_2 = getitem_3 = None
     add_1 = torch.ops.aten.add.Tensor(add, getitem_4);  add = getitem_4 = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, attr, add_1);  getitem = attr = add_1 = None
+    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, add_1);  getitem = obj_attr = add_1 = None
     getitem_5 = with_effects_1[0]
     getitem_6 = with_effects_1[1];  with_effects_1 = None
-    add_2 = torch.ops.aten.add.Tensor(arg1_1, getitem_6);  arg1_1 = getitem_6 = None
+    add_2 = torch.ops.aten.add.Tensor(x, getitem_6);  x = getitem_6 = None
     return (getitem_5, add_2)""",  # noqa: B950
         )
 
@@ -411,29 +411,29 @@ def forward(self, arg0_1, attr, arg1_1):
             ep.module().code.strip(),
             """\
 def forward(self, arg_0):
-    arg1_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    attr_1 = self.attr
-    takes_foo_tuple_return_default = torch.ops._TorchScriptTesting.takes_foo_tuple_return.default(attr_1, arg1_1)
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    attr = self.attr
+    takes_foo_tuple_return_default = torch.ops._TorchScriptTesting.takes_foo_tuple_return.default(attr, x)
     getitem_1 = takes_foo_tuple_return_default[0]
     getitem_2 = takes_foo_tuple_return_default[1];  takes_foo_tuple_return_default = None
     add = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
-    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr_1, add);  attr_1 = add = None
-    add_1 = torch.ops.aten.add.Tensor(arg1_1, takes_foo_default);  arg1_1 = takes_foo_default = None
+    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, add);  attr = add = None
+    add_1 = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
     return pytree.tree_unflatten((add_1,), self._out_spec)""",
         )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
-def forward(self, arg0_1, attr, arg1_1):
-    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, attr, arg1_1);  arg0_1 = None
+def forward(self, token, obj_attr, x):
+    with_effects = torch._higher_order_ops.effects.with_effects(token, torch.ops._TorchScriptTesting.takes_foo_tuple_return.default, obj_attr, x);  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1]
     getitem_2 = with_effects[2];  with_effects = None
     add = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
-    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, attr, add);  getitem = attr = add = None
+    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.takes_foo.default, obj_attr, add);  getitem = obj_attr = add = None
     getitem_3 = with_effects_1[0]
     getitem_4 = with_effects_1[1];  with_effects_1 = None
-    add_1 = torch.ops.aten.add.Tensor(arg1_1, getitem_4);  arg1_1 = getitem_4 = None
+    add_1 = torch.ops.aten.add.Tensor(x, getitem_4);  x = getitem_4 = None
     return (getitem_3, add_1)""",  # noqa: B950
         )
 
