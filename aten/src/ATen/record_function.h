@@ -310,6 +310,22 @@ struct TORCH_API RecordFunction {
         current_sequence_nr);
   }
 
+  template <typename F>
+  void before(
+      F fn,
+      const std::vector<IValue>* args,
+      const std::unordered_map<std::string, IValue>* kwargs,
+      int64_t current_sequence_nr = -1) {
+    if (!isActive()) {
+      return;
+    }
+    kwinputs_ = *kwargs;
+    before(
+        std::move(fn),
+        args,
+        current_sequence_nr);
+    }
+
   // Destructor calls end callbacks
   virtual ~RecordFunction();
 
@@ -468,6 +484,7 @@ struct TORCH_API RecordFunction {
 
   int64_t sequence_nr_ = -1;
   c10::ArrayRef<const IValue> inputs_;
+  std::unordered_map<std::string, IValue> kwinputs_;
   std::vector<c10::IValue> outputs_;
 
   // For backward functions - thread id of the forward function
