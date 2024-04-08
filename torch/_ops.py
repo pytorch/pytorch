@@ -84,6 +84,10 @@ class OperatorBase:
         # HigherOrderOperator
         self.functorch_table = {}
 
+        # non_fallthrough_keys are used to provide fallthrough implementation
+        # for higher ordero op and torch bind op.
+        self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
+
     def __call__(self, *args, **kwargs):
         raise NotImplementedError()
 
@@ -96,7 +100,13 @@ class OperatorBase:
                 return True
         return False
 
+    def fallthrough(self, dispatch_key):
+        self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
+
     def py_impl(self, k):
+        if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
+            self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
+
         def inner(fn):
             if inspect.isclass(k) and issubclass(k, TorchDispatchMode):
                 assert k not in self.python_key_mode_table
@@ -279,7 +289,6 @@ class HigherOrderOperator(OperatorBase):
         if self.__class__ is HigherOrderOperator:
             self_name_space = "." + self.namespace if self.namespace else ""
             self.__module__ = self.__module__ + self_name_space
-        self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
         for dispatch_key in _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
             self.fallthrough(dispatch_key)
@@ -292,17 +301,9 @@ class HigherOrderOperator(OperatorBase):
         # it to next key. This is only safe to do when PreDispatch key stack has no
         # active modes.
 
-    def py_impl(self, k):
-        if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
-            self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
-        return super().py_impl(k)
-
     @property
     def namespace(self):
         return self._ns
-
-    def fallthrough(self, dispatch_key):
-        self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
     def dispatch(self, dispatch_key, *args, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
