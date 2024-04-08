@@ -136,7 +136,9 @@ def make_test_case(
         tests.setUp()
         try:
             with torch._C._PreserveDispatchKeyGuard():
-                torch._C._dispatch_tls_set_dispatch_key_included(torch._C.DispatchKey.Dense, True)
+                torch._C._dispatch_tls_set_dispatch_key_included(
+                    torch._C.DispatchKey.Dense, True
+                )
 
                 _, code = test_torchinductor.run_and_get_cpp_code(
                     func, *func_inputs if func_inputs else []
