@@ -167,7 +167,7 @@ namespace dropout_hack {
 namespace {
 
 template<bool inplace>
-using Ctype = typename std::conditional<inplace, Tensor&, Tensor>::type;
+using Ctype = std::conditional_t<inplace, Tensor&, Tensor>;
 
 static Tensor make_feature_noise(const Tensor& input) {
   auto input_sizes = input.sizes();

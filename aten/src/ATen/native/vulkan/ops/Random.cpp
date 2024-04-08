@@ -16,7 +16,7 @@ Tensor& uniform_(
     Tensor& self,
     const double from,
     const double to,
-    const std::optional<at::Generator>& /* not implemented */) {
+    const c10::optional<at::Generator> /* not implemented */) {
   TORCH_CHECK(
       self.is_vulkan(),
       "Vulkan: In-place operator is only supported on Vulkan tensors.");
@@ -75,7 +75,7 @@ Tensor& normal_(
     Tensor& self,
     const double mean,
     const double std,
-    const std::optional<at::Generator>& /* not implemented */) {
+    const c10::optional<at::Generator> /* not implemented */) {
   TORCH_CHECK(
       self.is_vulkan(),
       "Vulkan: In-place operator is only supported on Vulkan tensors.");

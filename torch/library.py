@@ -110,24 +110,48 @@ class Library:
         _defs.add(qualname)
         return result
 
-    def _impl_t_c(self, op_name, fn, dispatch_key=''):
-        impl_fn_name = "impl_t_c"
+    def _impl_by_aoti(self, op_name, fallback_fn, dispatch_key=''):
+        r'''Registers the function implementation for an operator defined in the library through aot inductor.
+
+        This API enables developers to register a function implementation for a specific operator,
+        which the AOT inductor attempts to optimize by generating a specialized kernel. If the AOT inductor
+        fails to generate the required kernel, a fallback function is invoked. By default, if not explicitly set,
+        the fallback function will revert the operator execution to the CPU.
+
+        Args:
+            op_name: operator name (along with the overload) or OpOverload object.
+            fallback_fn: A user-defined function that serves as a backup if the AOT inductor fails to produce a kernel.
+                         This ensures that the operation can still be executed, albeit potentially less efficiently.
+                         By default, this fallback moves the operation to be performed on the CPU.
+            dispatch_key: dispatch key that the input function should be registered for. By default, it uses
+                          the dispatch key that the library was created with.
+
+        Example::
+            >>> my_lib = Library("aten", "IMPL")
+            >>> def div_cpu(self, other):
+            >>>     return self * (1 / other)
+            >>> my_lib._impl_by_aoti("div.Tensor", div_cpu, "CPU")
+        '''
+        impl_fn_name = "impl_by_aoti"
 
         assert isinstance(op_name, str)
         assert self.m is not None
         assert hasattr(self.m, impl_fn_name)
         impl_fn = getattr(self.m, impl_fn_name)
         assert callable(impl_fn)
+        assert op_name.find("::") > 0, (f"Invalid format: ${op_name}. Please ensure the operation to be registered "
+                                        "follows the pattern: ${{name_space}}::${{op_name}}.${{overload_name}}.")
+        op_name_with_overload = op_name.split("::")[-1]
 
-        key = self.ns + "/" + op_name.split("::")[-1] + "/" + dispatch_key
+        key = self.ns + "/" + op_name_with_overload + "/" + dispatch_key
         if key in _impls:
             # TODO: in future, add more info about where the existing function is registered (this info is
             # today already returned by the C++ warning when impl is called but we error out before that)
             raise RuntimeError("This is not allowed since there's already a kernel registered from python overriding {}"
                                "'s behavior for {} dispatch key and {} namespace.".
-                               format(op_name.split("::")[-1], dispatch_key, self.ns))
+                               format(op_name_with_overload, dispatch_key, self.ns))
 
-        impl_fn(op_name, dispatch_key, fn)
+        impl_fn(self.ns, op_name, dispatch_key, fallback_fn)
 
         _impls.add(key)
         self._op_impls.add(key)
