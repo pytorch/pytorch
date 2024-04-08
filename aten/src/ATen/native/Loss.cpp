@@ -358,6 +358,10 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
   const Tensor& weight = *weight_maybe_owned;
   c10::MaybeOwned<Tensor> pos_weight_maybe_owned = at::borrow_from_optional_tensor(pos_weight_opt);
   const Tensor& pos_weight = *pos_weight_maybe_owned;
+  TORCH_CHECK(
+          (target >= 0).logical_and_(target <= 1).all().item().toBool(),
+          "all elements of target should be between 0 and 1"
+  );
 
   Tensor loss;
   if (pos_weight.defined()) {

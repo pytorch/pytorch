@@ -4593,6 +4593,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with self.assertRaisesRegex(RuntimeError, 'between 0 and 1'):
             loss_too_positive = bceloss(output_too_positive, target)
 
+    def test_bce_loss_and_bce_with_logits_target_range(self):
+        for bceloss in [nn.BCEWithLogitsLoss(), nn.BCELoss()]:
+            target = torch.rand(25, 25)
+            # Outputs from 0-1 are valid for both losses
+            output_valid = torch.rand(25, 25)
+            target_too_negative = output_valid - 1.1
+            target_too_positive = output_valid + 1.1
+
+            loss_valid = bceloss(output_valid, target)
+            with self.assertRaisesRegex(RuntimeError, 'between 0 and 1'):
+                loss_too_negative = bceloss(output_valid, target_too_negative)
+            with self.assertRaisesRegex(RuntimeError, 'between 0 and 1'):
+                loss_too_positive = bceloss(output_valid, target_too_positive)
+
     def test_bce_loss_size_mismatch(self):
         bceloss = nn.BCELoss()
         a = torch.rand(25)
