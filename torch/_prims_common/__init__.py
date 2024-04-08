@@ -1344,6 +1344,7 @@ class RETURN_TYPE(Enum):
     NEW = (0,)
     VIEW = (1,)
     INPLACE = (2,)
+    NONE = (3,)
 
 
 # TODO: when NumberType contains the sym types, can simplify this

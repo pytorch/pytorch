@@ -69,6 +69,13 @@ aggressive_recomputation = False
 # is to turn it off during torch.compile.
 fake_tensor_allow_unsafe_data_ptr_access = True
 
+# Unlifts effect tokens from the inputs/outputs in the traced graph and instead
+# inserts make_token/sink_token calls in the graph to create tokens and then
+# sink them at the end. Note that this means the graph is no longer functional
+# which may lead to silent errors unless the backend knows how to handle the
+# tokens.
+unlift_effect_tokens = False
+
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
