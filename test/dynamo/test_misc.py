@@ -6453,6 +6453,11 @@ def fn():
         finally:
             builtins.isinstance = builtin_isinstance
 
+        # check recompilation because builtins is now unpatched
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(res, x + 1))
+
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
         def fn(x, y):
