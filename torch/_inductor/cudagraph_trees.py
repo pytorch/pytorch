@@ -1791,7 +1791,7 @@ class CUDAGraphTreeManager:
     def set_to_running_backward(self):
         self.running_forwards_with_pending_backwards = False
 
-    def _get_cuda_graph_recorded_tensor_checker(self):
+    def _get_cuda_graph_recorded_tensor_checker(self) -> Callable[[Tensor], bool]:
         return (
             self.current_node._is_cuda_graph_recorded_tensor
             if isinstance(self.current_node, CUDAGraphNode)
@@ -1813,7 +1813,7 @@ class CUDAGraphTreeManager:
         else:
             self.non_cudagraph_managed_mutation_hint[node_id][function_id] = False
 
-    def _get_node_id(self):
+    def _get_node_id(self) -> Optional[int]:
         if self.current_node is None:
             return None
         elif isinstance(self.current_node, CUDAGraphNode):
@@ -1872,7 +1872,7 @@ class CUDAGraphTreeManager:
         # A: No. But this should happen rarely according to our assumption. In the rare case that
         #    it happens, there would not be any correctness issues and the performance is the same
         #    as the eager (or inductor optimized) function.
-
+        #
         node_id = self._get_node_id()
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
             self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
