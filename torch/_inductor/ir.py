@@ -69,6 +69,7 @@ from .utils import (
     do_bench,
     get_kernel_metadata,
     is_dynamic,
+    is_gpu,
     pad_listlike,
     sympy_dot,
     sympy_index_symbol,
@@ -247,7 +248,7 @@ def get_device_type(x):
 
 
 def is_triton(x):
-    return get_device_type(x) == "cuda"
+    return is_gpu(get_device_type(x))
 
 
 def is_cpu(x):
@@ -684,7 +685,7 @@ class Reduction(Loops):
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
         should_split = (
-            is_triton(device)
+            get_device_type(device) == "cuda"
             and reduction_type
             not in {
                 "argmax",
@@ -1659,7 +1660,7 @@ class Scan(Loops):
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
-        if device.type != "cuda":
+        if not is_gpu(device.type):
             # TODO: CPU support
             return [None] * len(dtypes)
 
@@ -3748,7 +3749,7 @@ class ConcatKernel(NopKernel):
 
             if (
                 input_unwrapped.is_input_buffer()
-                and inputs[i].get_device().type == "cuda"
+                and is_gpu(inputs[i].get_device().type)
                 and not is_dynamic(input_buffer)
             ):
                 buffer_names.append(input_buffer.get_name())
@@ -4170,10 +4171,14 @@ class ExternKernel(InputsKernel):
         else:
             raise AssertionError(f"{arg_name} not in self.kwarg_properties")
 
-    def codegen_kwargs(self):
+    def codegen_kwargs(self, skip_out=False):
         if V.graph.cpp_wrapper:
             kwargs = []
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                if skip_out and arg_name == "out":
+                    # ExternKernelOut has its own logic for inserting the out parameter
+                    continue
+
                 v = self.get_kwargs_value(arg_name)
                 if isinstance(v, sympy.Expr):
                     kwargs.append(v)
@@ -4274,12 +4279,12 @@ class ExternKernel(InputsKernel):
 class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
-        args = [*self.codegen_args(), *self.codegen_kwargs()]
+        args = [*self.codegen_args(), *self.codegen_kwargs(skip_out=True)]
         wrapper.generate_extern_kernel_out(
-            self.output_view,
-            self.codegen_reference(),
-            args,
             self.get_kernel_name(),
+            self.codegen_reference(),
+            self.output_view.codegen_reference() if self.output_view else None,
+            args,
         )
 
     def __init__(
@@ -4324,7 +4329,13 @@ class RandomSeeds(ExternKernelOut):
             inputs=[],
             constant_args=[limits.min, limits.max, [count]],
             python_kernel_name="aten.randint.low_out",
-            cpp_kernel_name="at::randint_out",
+            # FIXME: Ideally we should only use at::_ops::randint_low_out::call here,
+            # but the signature is different from is at::randint_out. Again,
+            # we can simplify the code when only keeping an ABI-compatible version.
+            cpp_kernel_name="at::_ops::randint_low_out::call"
+            if config.abi_compatible
+            else "at::randint_out",
+            op_overload=aten.randint.low_out,
         )
 
 
@@ -5161,7 +5172,7 @@ class FallbackKernel(ExternKernelAlloc):
             if len(devices) == 1:
                 return devices[0]
             for device in devices:
-                if device.type == "cuda":
+                if is_gpu(device.type):
                     return device
             return devices[0]
         return None
