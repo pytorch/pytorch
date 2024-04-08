@@ -478,19 +478,7 @@ class TestMixedDtypesOpsCuda(TestCase):
         if version < (11, 8):
             self.skipTest("mixed dtypes operators compile only for CUDA 11.8+")
 
-        def run_test(
-            batch_shape,
-            m,
-            n,
-            k,
-            dtype,
-            dtypeq,
-            use_scale,
-            use_input,
-            device,
-            rtol,
-            atol,
-        ):
+        def run_test(batch_shape, m, n, k, dtype, dtypeq, use_scale, use_input, device, rtol, atol):
             val_lo, val_hi = -1, 1
             valq_lo, valq_hi = (0, 2) if dtypeq == torch.uint8 else (-2, 2)
             mat1 = make_tensor(
@@ -523,8 +511,14 @@ class TestMixedDtypesOpsCuda(TestCase):
                 output_ref = torch.mm(mat1_ref, mat2_ref).reshape(*mat1.shape[:-1], n)
                 output = torch._mixed_dtypes_mm(mat1, mat2, mat2_scale)
             else:
-                output_ref = torch.addmm(input, mat1_ref, mat2_ref).reshape(*mat1.shape[:-1], n).reshape(*mat1.shape[:-1], n)
-                output = torch._mixed_dtypes_addmm(input, mat1, mat2, mat2_scale)
+                alpha, beta = 1.3, -0.7
+                output_ref = (
+                    torch.addmm(input, mat1_ref, mat2_ref, alpha=alpha, beta=beta)
+                    .reshape(*mat1.shape[:-1], n)
+                )
+                output = torch._mixed_dtypes_addmm(
+                    input, mat1, mat2, mat2_scale, alpha=alpha, beta=beta
+                )
             torch.testing.assert_close(output, output_ref, rtol=rtol, atol=atol)
 
         dtypeqs = [torch.int8, torch.uint8]
@@ -545,19 +539,7 @@ class TestMixedDtypesOpsCuda(TestCase):
         for dtypeq, batch_shape, (m, n, k), use_mat2_scale, use_input in product(
                 dtypeqs, batch_shapes, shapes, (False, True), (False, True)
         ):
-            run_test(
-                batch_shape,
-                m,
-                n,
-                k,
-                dtype,
-                dtypeq,
-                use_mat2_scale,
-                use_input,
-                device,
-                rtol,
-                atol,
-            )
+            run_test(batch_shape, m, n, k, dtype, dtypeq, use_mat2_scale, use_input, device, rtol, atol)
 
 
 instantiate_device_type_tests(TestMatmulCuda, globals(), except_for="cpu")
