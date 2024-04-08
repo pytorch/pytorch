@@ -6,7 +6,7 @@
 #include <torch/csrc/distributed/c10d/Utils.hpp>
 
 #include <iostream>
-#include <random>
+#include <utility>
 
 #include <fcntl.h>
 #include <pthread.h>
@@ -22,8 +22,7 @@
 
 #include <cuda_runtime.h>
 
-namespace c10d {
-namespace intra_node_comm {
+namespace c10d::intra_node_comm {
 
 static std::vector<std::string> ENABLE_INTRA_NODE_COMM = {
     "ENABLE_INTRA_NODE_COMM"};
@@ -57,7 +56,7 @@ static std::ostream& operator<<(std::ostream& os, const NvlMesh& nvlMesh) {
     for (size_t j = 0; j < kMaxDevices; ++j) {
       oss << nvlMesh[i][j] << " ";
     }
-    oss << std::endl;
+    oss << '\n';
   }
   os << oss.str();
   return os;
@@ -77,7 +76,7 @@ static bool isSame(NvlMesh lhs, NvlMesh rhs) {
 /**
  * Query the nvlink connection among devices.
  */
-static NvlMesh getNvlMesh(std::vector<std::string> rankToBusId) {
+static NvlMesh getNvlMesh(const std::vector<std::string>& rankToBusId) {
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
   using namespace c10::cuda;
 
@@ -88,12 +87,12 @@ static NvlMesh getNvlMesh(std::vector<std::string> rankToBusId) {
   }
 
   const auto worldSize = rankToBusId.size();
-  std::vector<nvmlDevice_t> devices(worldSize, 0);
+  std::vector<nvmlDevice_t> devices(worldSize, nullptr);
   std::unordered_map<std::string, size_t> busIdToRank;
   std::vector<size_t> switchLinkCount(worldSize, 0);
 
   for (size_t r = 0; r < worldSize; ++r) {
-    busIdToRank.emplace(std::make_pair(rankToBusId[r], r));
+    busIdToRank.emplace(rankToBusId[r], r);
     TORCH_CHECK(
         driverApi->nvmlDeviceGetHandleByPciBusId_v2_(
             rankToBusId[r].c_str(), &devices[r]) == NVML_SUCCESS);
@@ -209,7 +208,7 @@ IntraNodeComm::IntraNodeComm(
     size_t rank,
     size_t worldSize,
     c10::optional<size_t> bufferSize)
-    : store_(store),
+    : store_(std::move(store)),
       rank_(rank),
       worldSize_(worldSize),
       bufferSize_(bufferSize.has_value() ? *bufferSize : kDefaultBufferSize) {
@@ -248,12 +247,12 @@ bool IntraNodeComm::isEnabled() {
  */
 template <typename T>
 std::vector<T> storeAllGather(
-    c10::intrusive_ptr<c10d::Store> store,
+    const c10::intrusive_ptr<c10d::Store>& store,
     const std::string& prefix,
     size_t rank,
     size_t worldSize,
     T val) {
-  static_assert(std::is_trivially_copyable<T>::value);
+  static_assert(std::is_trivially_copyable_v<T>);
 
   std::vector<std::string> peerKeys;
   for (size_t r = 0; r < worldSize; ++r) {
@@ -278,7 +277,7 @@ std::vector<T> storeAllGather(
     store->wait({peerKeys[r]});
     auto payload = store->get(peerKeys[r]);
     TORCH_CHECK(payload.size() == sizeof(T));
-    T peerVal;
+    T peerVal{};
     std::memcpy(&peerVal, payload.data(), sizeof(T));
     peerVals.push_back(peerVal);
   }
@@ -429,5 +428,4 @@ bool IntraNodeComm::rendezvous() {
   return false;
 }
 
-} // namespace intra_node_comm
-} // namespace c10d
+} // namespace c10d::intra_node_comm

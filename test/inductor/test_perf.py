@@ -7,10 +7,26 @@ import functorch
 
 import torch
 import torch._inductor.config as config
+import torch.autograd
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
+
+########################
+# Explanation of Tests #
+########################
+# These tests are all testing *memory accesses* of TorchInductor.
+# They are intended to be deterministic performance tests.
+# The expect tests are all measuring the number of memory bytes read/written by
+# the code that Inductor has generated
+#
+# If the test is failing because the number became smaller, feel free to lower it.
+# On the other hand, if the test is failing because the number became larger,
+# that means that your change is leading to *more* memory accesses on this test.
+#
+# That may still be aceeptable, but be aware that you are likely lowering
+# performance for that setting.
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
@@ -254,6 +270,19 @@ class NumBytesMetricTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
     @patch.object(config, "split_cat_fx_passes", False)
+    @patch.object(
+        config,
+        "pre_grad_fusion_options",
+        {
+            "batch_linear": {},
+            "batch_linear_lhs": {},
+            "batch_layernorm": {},
+            "batch_tanh": {},
+            "batch_relu": {},
+            "batch_sigmoid": {},
+        },
+    )
+    @patch.object(config, "post_grad_fusion_options", {})
     def test_cat_pointwise_many_complex_inputs(self):
         def f(*inputs):
             input = [torch.nn.functional.gelu(val) for val in inputs]
@@ -263,6 +292,19 @@ class NumBytesMetricTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """6400""")
 
     @patch.object(config, "split_cat_fx_passes", False)
+    @patch.object(
+        config,
+        "pre_grad_fusion_options",
+        {
+            "batch_linear": {},
+            "batch_linear_lhs": {},
+            "batch_layernorm": {},
+            "batch_tanh": {},
+            "batch_relu": {},
+            "batch_sigmoid": {},
+        },
+    )
+    @patch.object(config, "post_grad_fusion_options", {})
     def test_cat_pointwise_many_simple_inputs(self):
         def f(*inputs):
             input = [torch.nn.functional.relu(val) for val in inputs]
@@ -663,6 +705,45 @@ class MinCutPartitioningTests(TestCase):
 
         inp = (T(10, grad=True), T(10, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """70""")
+
+    def test_partitioning_with_view(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x.sin()
+                x = x.cos()
+                x = x.view(10, 10)
+                ctx.save_for_backward(x, y)
+                x = x.cos()
+                return x
+
+            @staticmethod
+            def backward(ctx, gradOut):
+                x, y = ctx.saved_tensors
+                return torch.mm(gradOut, x).view(100) * y
+
+        def f(a):
+            return Foo.apply(a)
+
+        inp = (T(100, grad=True),)
+        # We do not want to recompute the x.cos().view() chain, as it's
+        # materialized in backwards
+        self.assertExpectedInline(count_numel_train(f, *inp), """900""")
+
+    @patch.object(config, "pattern_matcher", False)
+    def test_partitioning_long_chain_add(self):
+        def f(x):
+            orig = x
+            for _ in range(2):
+                x = x * x
+                x = torch.mm(x, x)
+                x = x * 2
+                x = orig + x
+                orig = x
+            return x
+
+        inp = (T(10, 10, grad=True),)
+        self.assertExpectedInline(count_numel_train(f, *inp), """3900""")
 
 
 def unfusible(x):

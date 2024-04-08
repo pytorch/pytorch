@@ -109,16 +109,17 @@ bool HandleIValue(
 AOTIPythonKernelHolder::AOTIPythonKernelHolder(
     py::object func,
     c10::DispatchKey dispatch_key,
+    c10::string_view ns,
     c10::string_view op_name,
     bool is_symbolic)
     : python_kernel_holder_(func, dispatch_key),
       dispatch_key_(dispatch_key),
+      ns_(std::string(ns)),
       op_name_(std::string(op_name)),
       is_symbolic_(is_symbolic),
       device_opt_(c10::nullopt) {
   device_opt_ = c10::Device(c10::dispatchKeyToDeviceType(dispatch_key_), 0);
   (void)is_symbolic_; // Suppress unused variable warning
-  canonicalizeOpName();
   initAOTIKernelCache();
 }
 
@@ -289,16 +290,6 @@ void AOTIPythonKernelHolder::initAOTIKernelCache() {
     }
   } catch (nlohmann::detail::parse_error& e) {
     TORCH_CHECK(false, e.what());
-  }
-}
-
-void AOTIPythonKernelHolder::canonicalizeOpName() {
-  // Canonicalize the op_name as a valid directory name
-  std::replace(op_name_.begin(), op_name_.end(), '.', '_');
-  const std::string to_remove = "aten::";
-  size_t start_pos = op_name_.find(to_remove);
-  if (start_pos != std::string::npos) {
-    op_name_.replace(start_pos, to_remove.length(), "");
   }
 }
 
