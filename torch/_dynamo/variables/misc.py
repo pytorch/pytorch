@@ -25,7 +25,7 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import is_standard_setattr, UserDefinedObjectVariable
 
 
 class SuperVariable(VariableTracker):
@@ -170,8 +170,12 @@ class SuperVariable(VariableTracker):
             return super(variables.CustomizedDictVariable, self.objvar).call_method(
                 tx, "__setitem__", args, kwargs
             )
-        else:
-            unimplemented(f"non-function or method super: {inner_fn}")
+        elif is_standard_setattr(inner_fn) and isinstance(
+            self.objvar, UserDefinedObjectVariable
+        ):
+            return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+
+        unimplemented(f"non-function or method super: {inner_fn}")
 
 
 class UnknownVariable(VariableTracker):
@@ -503,6 +507,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if name == "__setattr__":
+            return super().call_method(tx, name, args, kwargs)
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
         if self.saved_tensors is None:
@@ -604,8 +610,12 @@ class GetAttrVariable(VariableTracker):
             # redirect to var_getattr on the original obj
             if isinstance(obj, variables.UserDefinedObjectVariable):
                 obj._check_for_getattribute()
-                if key in obj.value.__dict__:
+                if (
+                    key in obj.value.__dict__
+                    or tx.output.side_effects.has_pending_mutation_of_attr(obj, key)
+                ):
                     return obj.var_getattr(tx, key)
+
         return super().call_method(tx, name, args, kwargs)
 
 
