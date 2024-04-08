@@ -195,7 +195,7 @@ class IndexExprDep(typing.NamedTuple):
 @dataclasses.dataclass
 class ReadWrites:
     reads: Set[Dep]
-    writes_with_mode: Dict[Optional[str], Set[Dep]]
+    writes_grouped_by_mode: Dict[Optional[str], Set[Dep]]
     index_exprs: Set[IndexExprDep]
     range_vars: Optional[List[sympy.Expr]] = None
     var_ranges: Optional[VarRanges] = None
@@ -208,7 +208,7 @@ class ReadWrites:
             {dep.rename(renames) for dep in self.reads},
             {
                 mode: {dep.rename(renames) for dep in deps}
-                for mode, deps in self.writes_with_mode.items()
+                for mode, deps in self.writes_grouped_by_mode.items()
             },
             self.index_exprs,
             self.range_vars,
@@ -220,7 +220,7 @@ class ReadWrites:
         assert isinstance(dep, (WeakDep, StarDep, AccumulateDep))
         return ReadWrites(
             set.union(self.reads, {dep}),
-            self.writes_with_mode,
+            self.writes_grouped_by_mode,
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
@@ -229,28 +229,30 @@ class ReadWrites:
 
     @property
     def writes(self):
-        if len(self.writes_with_mode) == 1 and (
-            mode := next(iter(self.writes_with_mode.keys()))
+        if len(self.writes_grouped_by_mode) == 1 and (
+            mode := next(iter(self.writes_grouped_by_mode.keys()))
         ):
-            (writes,) = self.writes_with_mode.values()
+            (writes,) = self.writes_grouped_by_mode.values()
             return {AccumulateDep(write, mode) for write in writes}
         else:
-            return set.union(*list(self.writes_with_mode.values()))
+            return set.union(*list(self.writes_grouped_by_mode.values()))
 
     def merge(self, other: "ReadWrites"):
         return ReadWrites.merge_list([self, other])
 
     @staticmethod
     def merge_list(read_writes: List["ReadWrites"]):
-        all_modes = set.union(*[set(rw.writes_with_mode.keys()) for rw in read_writes])
-        all_writes_with_mode = {
+        all_modes = set.union(
+            *[set(rw.writes_grouped_by_mode.keys()) for rw in read_writes]
+        )
+        all_writes_grouped_by_mode = {
             mode: set.union(
-                *[set(rw.writes_with_mode.get(mode, set())) for rw in read_writes]
+                *[set(rw.writes_grouped_by_mode.get(mode, set())) for rw in read_writes]
             )
             for mode in all_modes
         }
         all_writes = set.union(
-            *[set(writes) for writes in all_writes_with_mode.values()]
+            *[set(writes) for writes in all_writes_grouped_by_mode.values()]
         )
         all_reads = set.union(*[rw.reads for rw in read_writes]) - all_writes
         all_index_exprs = set.union(*[rw.index_exprs for rw in read_writes])
@@ -260,13 +262,13 @@ class ReadWrites:
             op_counts.update(rw.op_counts)
 
         return ReadWrites(
-            all_reads, all_writes_with_mode, all_index_exprs, op_counts=op_counts
+            all_reads, all_writes_grouped_by_mode, all_index_exprs, op_counts=op_counts
         )
 
     def remove_reads(self, rem_reads):
         return ReadWrites(
             self.reads - rem_reads,
-            self.writes_with_mode,
+            self.writes_grouped_by_mode,
             self.index_exprs,
             self.range_vars,
             self.var_ranges,
@@ -274,14 +276,16 @@ class ReadWrites:
         )
 
     def reads_and_writes(self):
-        return itertools.chain(self.reads, set.union(*self.writes_with_mode.values()))
+        return itertools.chain(
+            self.reads, set.union(*self.writes_grouped_by_mode.values())
+        )
 
 
 class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
     def __init__(self, var_ranges: VarRanges, normalize: bool):
         super().__init__()
         self._reads: Set[Dep] = set()
-        self._writes_with_mode: Dict[
+        self._writes_grouped_by_mode: Dict[
             Union[str], Set[MemoryDep]
         ] = collections.defaultdict(set)
         self._index_exprs: Set[IndexExprDep] = set()
@@ -342,7 +346,9 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
         return self.load(name, sympy.Integer(index))
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
-        self._writes_with_mode[mode].add(MemoryDep(name, *self.canonicalize(index)))
+        self._writes_grouped_by_mode[mode].add(
+            MemoryDep(name, *self.canonicalize(index))
+        )
         if mode is not None:
             self._reads.add(MemoryDep(name, *self.canonicalize(index)))
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
@@ -440,7 +446,7 @@ def extract_read_writes(
     inner = rw.parent_handler.parent_handler
     return ReadWrites(
         set(inner._reads),
-        inner._writes_with_mode,
+        inner._writes_grouped_by_mode,
         inner._index_exprs,
         range_vars,
         var_ranges,
