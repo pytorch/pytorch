@@ -236,8 +236,8 @@ def _mark_sharding(
                     )
                 placement_strategies[node] = PlacementStrategy(
                     output_specs=_get_output_spec_from_output_sharding(output_sharding),
-                    input_specs=output_sharding.schema_suggestions[0].args_spec
-                    if output_sharding.schema_suggestions is not None
+                    input_specs=output_sharding.redistribute_schema.args_spec
+                    if output_sharding.redistribute_schema is not None
                     else _get_input_node_specs(node, placement_strategies),
                 )
                 node.meta["sharding"] = placement_strategies[node]
@@ -345,7 +345,7 @@ def _generate_default_output_sharding(
         output_spec=pytree.tree_map_only(
             FakeTensor, create_output_spec, node.meta["val"]
         ),
-        schema_suggestions=[new_op_schema],
+        redistribute_schema=new_op_schema,
         failed_reason=f"{node.op} does not have sharding strategy registered",
         needs_redistribute=True,
     )

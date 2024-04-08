@@ -309,6 +309,14 @@ class NNModuleVariable(VariableTracker):
                     # End of fn, this bubbles up and restarts tracing.
                     self.convert_to_unspecialized(tx)
 
+                # NB: torch.nn.utils.parametrize changes the class type of the
+                # parametrized module such that its __module__ points to the
+                # "torch.nn.utils.parametrize". These modules should be treated
+                # as unspecialized since parametrizations can do arbitrary computation.
+                if mod.__module__ == "torch.nn.utils.parametrize":
+                    # End of fn, this bubbles up and restarts tracing.
+                    self.convert_to_unspecialized(tx)
+
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(

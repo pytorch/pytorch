@@ -2,6 +2,7 @@
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
+import torch._dynamo
 import unittest
 import warnings
 import operator
@@ -17,7 +18,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_int, GuardOnDataDependentSymNode
 )
 from torch.testing._internal.custom_op_db import custom_op_db
-from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
+from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.common_device_type import ops
 import torch.testing._internal.optests as optests
 from torch._C import _disabled_torch_function_impl
@@ -2012,18 +2013,34 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False, o
             self.skipTest("Dynamic output shape operation in trace")
 
 
+def skipIfNameMatches(pattern):
+    """
+    Decorator to skip a test if its name matches the given pattern.
+    """
+    def decorator(test_func):
+        def wrapper(*args, **kwargs):
+            if re.match(pattern, test_func.__name__):
+                raise unittest.SkipTest(f"Test '{test_func.__name__}' skipped because its name matches the pattern '{pattern}'")
+            return test_func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+# Auto functionalize shouldn't work with make_fx directly
+filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
+
+@unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
-    @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures)
     def test_make_fx_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "real")
 
-    @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive', make_fx_failures.union(fake_tensor_failures))
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "fake")
 
-    @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):
