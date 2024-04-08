@@ -178,6 +178,7 @@ def export(
         dynamic_shapes,
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
+        pre_dispatch=True,
     )
 
 
