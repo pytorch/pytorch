@@ -2671,7 +2671,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         tos = self.stack[-1]
         if isinstance(tos, ListIteratorVariable):
             # This will might always be exhausted, because we don't exactly
-            # follow Python call stack when it comes to yied.  Instead we
+            # follow Python call stack when it comes to yield.  Instead we
             # eagerly collect all the generated items during
             # GET_YIELD_FROM_ITER.
             if tos.is_exhausted():
