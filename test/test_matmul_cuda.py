@@ -314,20 +314,31 @@ def mm_float8(
         a, a_scale, b, b_scale, output_dtype, output_scale
     )
 
-""" Converts a tensor to a saturated fp8 tensor.
-
-Note:
-    The default behavior in PyTorch for casting to `e4m3_type`
-    and `e5m2_type` is to not saturate. In this context, we should
-    saturate. A common case where we want to saturate is when the history
-    of a tensor has a maximum value of `amax1`, and the current amax value
-    is `amax2`, where `amax1 < amax2`.
-"""
 def to_fp8_saturated(
     x: torch.Tensor,
     x_scale: torch.tensor,
     fp8_dtype: torch.dtype
 ):
+    """
+    Converts a tensor to a saturated fp8 tensor.
+
+    Args:
+        a: Input Tensor.
+        b: Input Tensor.
+        a_scale: scale associated with `a`.
+        b_scale: scale associated with `b`.
+        output_dtype: dtype of result.
+        output_scale: the output tensor's scale, precomputed.
+
+    Returns:
+        (torch.Tensor, torch.Tensor): (result of the matrix multiplication, associated amax)
+    Note:
+        The default behavior in PyTorch for casting to `e4m3_type`
+        and `e5m2_type` is to not saturate. In this context, we should
+        saturate. A common case where we want to saturate is when the history
+        of a tensor has a maximum value of `amax1`, and the current amax value
+        is `amax2`, where `amax1 < amax2`.
+    """
     x_scaled = x * x_scale
 
     if fp8_dtype == e4m3_type:
