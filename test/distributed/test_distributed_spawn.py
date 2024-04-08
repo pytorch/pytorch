@@ -45,12 +45,17 @@ if (
 BACKEND = os.environ["BACKEND"]
 
 if BACKEND in _allowed_backends:
-    class TestDistBackendWithSpawn(TestDistBackend, DistributedTest._DistTestBase):
-
-        def setUp(self):
-            super().setUp()
-            self._spawn_processes()
-            torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
+    def make_test_classes():
+        class TestDistBackendWithSpawn(TestDistBackend, DistributedTest._DistTestBase):
+            def setUp(self):
+                super().setUp()
+                self._spawn_processes()
+                torch.backends.cudnn.flags(enabled=True, allow_tf32=False).__enter__()
+        TestDistBackendWithSpawn.__name__ = f"{TestDistBackendWithSpawn.__name__}{BACKEND.upper()}"
+        TestDistBackendWithSpawn.__qualname__ = TestDistBackendWithSpawn.__name__
+        globals()[TestDistBackendWithSpawn.__name__] = TestDistBackendWithSpawn
+        return TestDistBackendWithSpawn
+    make_test_classes()
 else:
     print(f"Invalid backend {BACKEND}. Tests will not be run!")
 
