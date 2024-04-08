@@ -77,6 +77,8 @@ also be interested in reading our `development wiki <https://github.com/pytorch/
 .. py:module:: torch.onnx.symbolic_opset16
 .. py:module:: torch.onnx.symbolic_opset17
 .. py:module:: torch.onnx.symbolic_opset18
+.. py:module:: torch.onnx.symbolic_opset19
+.. py:module:: torch.onnx.symbolic_opset20
 .. py:module:: torch.onnx.symbolic_opset7
 .. py:module:: torch.onnx.symbolic_opset8
 .. py:module:: torch.onnx.symbolic_opset9

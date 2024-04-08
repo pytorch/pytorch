@@ -79,9 +79,9 @@ __device__ __forceinline__ void load_store(
 struct DevArrayPack {
   static constexpr size_t max_arrays = 8;
   // The buffer size is selected to ensure that the combined argument size of
-  // multi_tensor_apply_dev_array_pack_kernel does not exceed
-  // max_kernel_arg_size for all template specializations. This is enforced at
-  // compile time with a static assertion.
+  // multi_tensor_apply_kernel does not exceed max_kernel_arg_size for all
+  // template specializations. This is enforced at compile time with a static
+  // assertion.
   static constexpr size_t small_buffer_size = 3360;
 
   char small_buffer[small_buffer_size];
@@ -91,8 +91,14 @@ struct DevArrayPack {
   char* buffer_ptr = nullptr;
 
   template <typename T>
-  __device__ __forceinline__ void get_array(T*& out, int idx) {
-    if (buffer_ptr == nullptr) {
+  C10_HOST_DEVICE __forceinline__ void get_array(T*& out, int idx) {
+// The small buffer optimization is disabled for hipcc
+#if defined(USE_ROCM)
+    constexpr bool use_small_buffer = false;
+#else
+    bool use_small_buffer = (buffer_ptr == nullptr);
+#endif
+    if (use_small_buffer) {
       out = reinterpret_cast<T*>(small_buffer + offsets[idx]);
     } else {
       out = reinterpret_cast<T*>(buffer_ptr + offsets[idx]);
@@ -155,6 +161,9 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
   TORCH_CHECK(ptrs.size() <= DevArrayPack::max_arrays);
   DevArrayPack pack{};
 
+// hipcc generates very inefficient code for the small buffer optimization.
+// Disabling the small buffer optimization for hipcc for now.
+#if !defined(USE_ROCM)
   // Use the small buffer in DevArrayPack to pack the vectors
   if (total_bytes < DevArrayPack::small_buffer_size) {
     pack.buffer_ptr = nullptr;
@@ -164,6 +173,7 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
     }
     return std::make_tuple(pack, c10::optional<at::Tensor>(c10::nullopt));
   }
+#endif
 
   const bool is_capturing = at::cuda::currentStreamCaptureStatusMayInitCtx() !=
       at::cuda::CaptureStatus::None;
@@ -189,20 +199,21 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
     // This is achieved by dynamically allocating a buffer, managing the
     // lifetime of the buffer with a CUDA User Object, and transferring the
     // ownership of the CUDA User Object to the capturing graph.
-    auto graph_owned_buf =
-        c10::cuda::CUDACachingAllocator::raw_alloc(total_bytes);
-
+    void* graph_owned_buf = nullptr;
     {
-      // Copy the data from the host staging buffer to the graph-owned device
-      // buffer. The copy won't be captured in the graph.
 #if !defined(USE_ROCM) || ROCM_VERSION >= 50300
       c10::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
 #endif
-      C10_CUDA_CHECK(cudaMemcpy(
+      // See cudaMallocMaybeCapturing
+      C10_CUDA_CHECK(cudaMalloc(&graph_owned_buf, total_bytes));
+      // Copy the data from the host staging buffer to the graph-owned device
+      // buffer. The copy won't be captured in the graph.
+      at::cuda::memcpy_and_sync(
           graph_owned_buf,
           buf_tensor.data_ptr(),
           total_bytes,
-          cudaMemcpyHostToDevice));
+          cudaMemcpyHostToDevice,
+          0);
     }
 
     // Manage the ownership of buf with a cuda user object
@@ -210,7 +221,7 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
     C10_CUDA_CHECK(cudaUserObjectCreate(
         &user_object,
         graph_owned_buf,
-        [](void* buf) { c10::cuda::CUDACachingAllocator::raw_delete(buf); },
+        [](void* buf) { cudaFree(buf); },
         1, // refcount
         cudaUserObjectNoDestructorSync));
 
@@ -255,9 +266,9 @@ struct TensorListMetadata {
   }
 
   // Convert a DevArrayPack to TensorListMetadata
-  __device__ __forceinline__ static TensorListMetadata<n> from_dev_array_pack(
-      DevArrayPack& pack) {
-    TensorListMetadata<n> tl{};
+  C10_HOST_DEVICE __forceinline__ static TensorListMetadata<n>
+  from_dev_array_pack(DevArrayPack& pack) {
+    TensorListMetadata<n> tl;
 #pragma unroll n
     for (auto d = 0; d < n; ++d) {
       pack.get_array(tl.addresses[d], d);
@@ -318,8 +329,6 @@ struct FusedOptimizerTensorListMetadata {
   int start_tensor_this_launch;
 };
 
-// TODO(yifu): remove this once TensorListScalarListMetadata and
-// FusedOptimizerTensorListMetadata adopt DevArrayPack.
 template <typename T, typename U, typename... ArgTypes>
 C10_LAUNCH_BOUNDS_1(kBlockSize)
 __global__ void multi_tensor_apply_kernel(
@@ -494,17 +503,15 @@ void multi_tensor_apply(
   }
 
   auto device = tensor_lists[0][0].device();
-  auto [dev_array_pack, buf_tensor] =
-      TensorListMetadata<depth>::make_dev_array_pack(
-          addresses, numel_for_tensor, block_to_tensor, block_to_chunk, device);
+  auto [pack, buf_tensor] = TensorListMetadata<depth>::make_dev_array_pack(
+      addresses, numel_for_tensor, block_to_tensor, block_to_chunk, device);
 
   if (block_to_tensor.size() > 0) {
     multi_tensor_apply_kernel<TensorListMetadata<depth>>
         <<<block_to_tensor.size(),
            kBlockSize,
            0,
-           at::cuda::getCurrentCUDAStream()>>>(
-            dev_array_pack, callable, args...);
+           at::cuda::getCurrentCUDAStream()>>>(pack, callable, args...);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }

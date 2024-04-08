@@ -631,7 +631,7 @@ class TestForeach(TestCase):
         scaler = torch.tensor([max_value]).sqrt().to(device=device, dtype=dtype)
         inputs = ([
             t * scaler for t in next(iter(op.sample_inputs(device, dtype, requries_grad=True, num_input_tensors=[N], low=1))).input
-        ],)
+        ][:-1],)
         # make sure that the min. of squared L2 norm value per tensor is greater than the max value of `dtype`.
         self.assertTrue(scaler * scaler * N > max_value)
         fn, ref_fn, *_ = self._get_funcs(op)
@@ -849,20 +849,6 @@ class TestForeach(TestCase):
                     for t, s in zip(ref_input, rhs_tensors):
                         copy_(t, s, non_blocking)
                     self.assertEqual(ref_input, sample.input)
-
-    @onlyCUDA
-    @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
-    def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
-        # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
-        foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
-        for sample in op.sample_inputs(device, dtype, noncontiguous=False):
-            for src_dtype in floating_types_and(torch.half, torch.bfloat16):
-                if src_dtype == dtype:
-                    continue
-                self_tensors = [t.clone() for t in sample.input]
-                src_tensors = [t.to(src_dtype) for t in self_tensors]
-                out = foreach_copy_((self_tensors, src_tensors), is_cuda=True, expect_fastpath=True)
-                self.assertEqual(out, [torch.empty_like(t).copy_(s) for t, s in zip(self_tensors, src_tensors)])
 
     # Test reverse-mode & forward-mode AD if supported.
     @onlyCUDA

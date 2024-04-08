@@ -91,9 +91,10 @@ def parallelize_module(  # type: ignore[return]
             sub_module = module.get_submodule(module_path)
             parent_module = module
             if "." in module_path:
-                parent_module_path = ".".join(module_path.split(".")[:-1])
+                path_splits = module_path.split(".")
+                parent_module_path = ".".join(path_splits[:-1])
                 parent_module = module.get_submodule(parent_module_path)
-                module_path = module_path.split(".")[-1]
+                module_path = path_splits[-1]
             parent_module.register_module(  # type: ignore[call-arg] # pyre-ignore[20]
                 module_path,
                 parallelize_module(  # type: ignore[arg-type]

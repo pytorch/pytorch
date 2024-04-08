@@ -315,7 +315,9 @@ def _restore_state_dict(
 
 
 def _get_module_hierarchy(mod: torch.nn.Module) -> Dict[str, str]:
-    return {name: type(m).__name__ for name, m in mod.named_modules()}
+    return {
+        name: type(m).__name__ for name, m in mod.named_modules(remove_duplicate=False)
+    }
 
 
 def _make_module_call_graph(
@@ -926,7 +928,6 @@ def _export(
             ),
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
-            from_export=True,
         )
 
     gm_torch_level = _export_to_torch_ir(
@@ -1123,7 +1124,6 @@ def _export(
         ),
         example_inputs=(args, kwargs),
         constants=constants,
-        from_export=True,
     )
     log.debug("Exported program from AOTAutograd:\n%s", exported_program)
 

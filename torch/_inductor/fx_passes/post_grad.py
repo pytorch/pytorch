@@ -1,4 +1,3 @@
-import copy
 import functools
 import itertools
 import logging
@@ -13,7 +12,7 @@ import torch._inductor as inductor
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
-from torch._dynamo.utils import counters, optimus_scuba_log
+from torch._dynamo.utils import optimus_scuba_log
 
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 
@@ -85,10 +84,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
-        inductor_before_change = copy.deepcopy(counters["inductor"])
+        optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
         group_batch_fusion_passes(gm.graph, pre_grad=False)
-        if counters["inductor"] != inductor_before_change:
-            optimus_scuba_log["group_batch_fusion_post_grad"] = upload_graph(gm.graph)
         remove_noop_ops(gm.graph)
         for patterns in pass_patterns:
             patterns.apply(gm.graph)  # type: ignore[arg-type]
@@ -118,6 +115,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     decompose_auto_functionalized(gm.graph)
 
     gm.recompile()
+    optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
     gm.graph.lint()
 
 
@@ -423,7 +421,7 @@ def cat_tuned_op(match, inputs, dim, *, op, shape_of):
         dst = ir.SliceView.create(kernel_tensor, dim, offsets_start[i], offsets_end[i])
         src = op(*inputs[i], layout=dst.get_layout()).data.data
         assert isinstance(src, (ir.ExternKernelOut, ir.TemplateBuffer))
-        src.layout = ir.AliasedLayout(dst)
+        src.layout = ir.NonOwningLayout(dst)
         kernel.inputs.append(src)
 
     kernel.name = V.graph.register_buffer(kernel)
@@ -638,7 +636,11 @@ def remove_noop_ops(graph: torch.fx.Graph):
 
     output_node = next(iter(reversed(graph.nodes)))
     assert output_node.op == "output"
-    for out in output_node.args[0]:
+    outputs = output_node.args[0]
+    if not isinstance(outputs, (list, tuple)):
+        # nested subgraphs can have singleton outputs
+        outputs = (outputs,)
+    for out in outputs:
         if isinstance(out, torch.fx.Node):
             output_storages.add(get_node_storage(out))
 
