@@ -117,9 +117,12 @@ def _iterate_state_dict(
             not isinstance(companion_obj, dict)
             or set(companion_obj.keys()) != set(iter_object.keys())
         ):
-            raise CompanionMismatch(
-                f"{set(companion_obj.keys())=} {set(iter_object.keys())=}"
+            msg = (
+                ""
+                if not isinstance(companion_obj, dict)
+                else f"{set(companion_obj.keys())=} {set(iter_object.keys())=}"
             )
+            raise CompanionMismatch(msg)
 
         ret = {
             key: _iterate_state_dict(
@@ -314,10 +317,12 @@ def _copy_state_dict(
     state_dict: Dict[str, Any],
     copy_state_dict: Dict[str, Any],
     non_blocking: bool = False,
-):
+) -> Dict[str, Any]:
     """
     Copies all tensors in a given state dict into a different state_dict with the
-    same structure.
+    same structure. Additionally, a copied state dict with the same value references
+    is returned. Editing the keys on this state dict will not affect the
+    passed in copy_state_dict (but the value references are the same).
 
     .. warning::
         It is expected by this function that state_dict and copy_state_dict share
