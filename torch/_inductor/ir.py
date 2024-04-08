@@ -1838,68 +1838,20 @@ def is_pointwise_contiguous_or_transposed_after_perm(x):
         and isinstance(x.data, StorageBox)
         and isinstance(x.data.data, Pointwise)
     ):
-        all_reads = x.data.data.get_reads()
-        assert len(x.data.data.inner_fn_args()) == 1
-        fn_args = x.data.data.inner_fn_args()[0]
+        reads = x.data.data.get_reads()
+        reads_bufs = []
+        for r in reads:
+            if r.name in V.graph.name_to_buffer.keys():
+                reads_bufs.append(V.graph.name_to_buffer[r.name])
+            elif r.name in V.graph.graph_inputs_original.keys():
+                reads_bufs.append(V.graph.graph_inputs_original[r.name])
 
-        def is_contiguous_or_transposed_after_perm(read):
-            # check if index is a part of read_index
-            def is_in_read_index(index):
-                if len(read.index.args) > 0:
-                    return index in read.index.args
-                else:
-                    return index == read.index
-
-            perm_dims = x.dims
-            # Unsqueeze var_names and sizes of read
-            # if their number does not equal to perm_dims length
-            unsqueezed_read_var_names = read.var_names
-            unsqueezed_read_sizes = read.size
-            if len(perm_dims) != len(unsqueezed_read_sizes):
-                # pad 0 for var_name and 1 for size
-                for i in range(len(perm_dims)):
-                    if fn_args[i] == 0:
-                        unsqueezed_read_var_names = (
-                            unsqueezed_read_var_names[:i]
-                            + (0,)
-                            + unsqueezed_read_var_names[i:]
-                        )
-                        unsqueezed_read_sizes = (
-                            unsqueezed_read_sizes[:i] + (1,) + unsqueezed_read_sizes[i:]
-                        )
-                assert len(perm_dims) == len(unsqueezed_read_sizes)
-
-            # var_names and sizes after permution
-            new_read_var_names = [unsqueezed_read_var_names[i] for i in perm_dims]
-            new_read_sizes = [unsqueezed_read_sizes[i] for i in perm_dims]
-
-            # expect to be contiguous or transposed for last two dims,
-            # or size = 1 for one of them and contiguous for another dim:
-            # - d0 + d1 * s0
-            # - d1 + d0 * s1
-            # - d0 with s1 == 1
-            # - d1 with s0 == 1
-            if (
-                is_in_read_index(new_read_var_names[-1])
-                and (
-                    new_read_sizes[-2] == 1
-                    or is_in_read_index(new_read_var_names[-2] * new_read_sizes[-1])
-                )
-            ) or (
-                is_in_read_index(new_read_var_names[-2])
-                and (
-                    new_read_sizes[-1] == 1
-                    or is_in_read_index(new_read_var_names[-1] * new_read_sizes[-2])
-                )
-            ):
-                return True
-            return False
-
-        return len(all_reads) >= 1 and all(
-            type(read) is dependencies.MemoryDep
-            and is_contiguous_or_transposed_after_perm(read)
-            for read in all_reads
+        return len(reads) >= 1 and all(
+            isinstance(buf.layout, FixedLayout)
+            and buf.layout.is_contiguous_or_transposed_after_perm(x.dims)
+            for buf in reads_bufs
         )
+
     return False
 
 
@@ -2549,6 +2501,13 @@ def is_contiguous_strides_for_shape(stride, shape):
     )
 
 
+def is_transposed_strides_for_shape(stride, shape):
+    assert len(stride) > 1 and len(stride) == len(shape)
+    stride[-1], stride[-2] = stride[-2], stride[-1]
+    shape[-1], shape[-2] = shape[-2], shape[-1]
+    return is_contiguous_strides_for_shape(stride, shape)
+
+
 @dataclasses.dataclass
 class Layout(IRNode):
     def __init__(
@@ -2607,6 +2566,15 @@ class Layout(IRNode):
             if size != 1 and left != right:
                 return False
         return True
+
+    def is_contiguous_or_transposed_after_perm(self, perm_dims):
+        perm_size, perm_stride = self.size, self.stride
+        if len(self.size) != 1 and len(perm_dims) == len(self.size):
+            perm_size = [self.size[i] for i in perm_dims]
+            perm_stride = [self.stride[i] for i in perm_dims]
+        return is_contiguous_strides_for_shape(
+            perm_stride, perm_size
+        ) or is_transposed_strides_for_shape(perm_stride, perm_size)
 
     def is_stride_ordered(self, order):
         assert len(self.stride) == len(order)
