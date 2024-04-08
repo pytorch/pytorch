@@ -119,7 +119,7 @@ def _iterate_state_dict(
         ):
             msg = (
                 ""
-                if not isinstance(companion_obj, dict)
+                if isinstance(companion_obj, dict)
                 else f"{set(companion_obj.keys())=} {set(iter_object.keys())=}"
             )
             raise CompanionMismatch(msg)
