@@ -401,7 +401,7 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abcType = CUDA_R_16BF;
   } else {
-    AT_ERROR("at::cuda::blas::gemm_internal_cublaslt: not implemented for ", typeid(Dtype).name());
+    AT_ERROR("at::cuda::blas::bgemm_internal_cublaslt: not implemented for ", typeid(Dtype).name());
   }
 
   globalContext().alertCuBLASConfigNotDeterministic();
@@ -505,7 +505,7 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
       " scaleType ",
       scaleType);
 #else
-  AT_ERROR("at::cuda::blas::gemm_internal_cublaslt: not implemented for ", typeid(Dtype).name());
+  AT_ERROR("at::cuda::blas::bgemm_internal_cublaslt: not implemented for ", typeid(Dtype).name());
 #endif
 }
 
@@ -839,11 +839,8 @@ void bgemm<at::BFloat16>(CUDABLAS_BGEMM_ARGTYPES(at::BFloat16)) {
 
 template <typename Dtype>
 inline void gemm_internal_cublaslt(CUDABLAS_GEMM_ARGTYPES(Dtype)) {
-#if (!defined(USE_ROCM) && !defined(_MSC_VER)) || (defined(USE_ROCM) && ROCM_VERSION >= 50700)
+  // forward to bgemm implementation but set strides and batches to 0
   bgemm_internal_cublaslt(transa, transb, m, n, k, alpha, a, lda, 0, b, ldb, 0, beta, c, ldc, 0, 0);
-#else
-  AT_ERROR("at::cuda::blas::gemm_internal_cublaslt: not implemented for ", typeid(Dtype).name());
-#endif
 }
 
 template <typename Dtype>
