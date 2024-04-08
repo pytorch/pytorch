@@ -11,7 +11,11 @@
 #include <ATen/Dispatch.h>
 #include <torch/library.h>
 #include <torch/types.h>
+
+#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#else
 #include <cuda_runtime.h>
+#endif
 
 namespace at::native {
 
