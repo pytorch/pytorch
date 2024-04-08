@@ -30,6 +30,8 @@ from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run
     get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX, IS_ARM64
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
     _create_scaling_case, _get_torch_cuda_version
+from torch.testing._internal.common_optimizers import (
+    optim_db, optims)
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 from torch.utils.viz._cycles import observe_tensor_cycles
 
@@ -2634,7 +2636,11 @@ exit(2)
         for foreach, fused in ((False, False), (True, False), (False, True)):
             self._test_graph_grad_scaling(foreach, fused)
 
-    def _test_graph_grad_scaling(self, foreach, fused):
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls == torch.optim.SGD],
+        dtypes=[torch.float32]
+    )
+    def _test_graph_grad_scaling(self, foreach, fused, optim_info):
         torch.cuda.empty_cache()
 
         scaler = torch.cuda.amp.GradScaler(init_scale=4.)
@@ -2642,7 +2648,7 @@ exit(2)
         s = torch.cuda.Stream()
 
         weight = torch.ones((100,), device="cuda", requires_grad=True)
-        opt = torch.optim.SGD([weight], lr=0.1, foreach=foreach, fused=fused)
+        opt = optim_info.optim_cls([weight], lr=0.1, foreach=foreach, fused=fused)
         static_input = torch.ones_like(weight)
         static_grad = torch.ones_like(weight)
 
