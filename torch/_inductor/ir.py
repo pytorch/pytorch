@@ -7365,6 +7365,15 @@ class WhileLoop(ExternKernel):
             for i, output in enumerate(body_outputs)
         ]
 
+        for inp, out in zip(carried_inputs, outputs):
+            if inp.get_name() in V.graph.graph_inputs:
+                # if a carried input of the while_loop is a graph input,
+                # it can be returned as is when the number of iterations
+                # is zero. due to this, we can't (generally) reuse the
+                # output buffers corresponding to the graph inputs, as
+                # the inputs may end up being mutated.
+                V.graph.never_reuse_buffers.add(out.get_name())
+
         while_loop.outputs = outputs
         return outputs
 
