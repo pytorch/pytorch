@@ -1148,12 +1148,12 @@ TORCH_PYTHON_API py::object invokeOperatorFromPython(
     c10::optional<c10::DispatchKey> dk = c10::nullopt);
 
 TORCH_PYTHON_API py::tuple _maybe_handle_torch_function(
-  const std::string& ns,
-  const std::string& method_name,
-  const std::string& overload_name,
-  bool is_overload,
-  py::args args,
-  const py::kwargs& kwargs);
+    const std::string& ns,
+    const std::string& method_name,
+    const std::string& overload_name,
+    bool is_overload,
+    py::args args,
+    const py::kwargs& kwargs);
 
 TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
