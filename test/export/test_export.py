@@ -4,6 +4,7 @@ import copy
 import dataclasses
 import io
 import re
+import logging
 import unittest
 import warnings
 from contextlib import contextmanager
@@ -4206,6 +4207,29 @@ def forward(self, q, k, v):
             """\
 def forward(self, x):
     add = torch.ops.aten.add.Tensor(x, x);  x = None
+    mul = torch.ops.aten.mul.Tensor(add, add)
+    add_1 = torch.ops.aten.add.Tensor(mul, mul);  mul = None
+    return (add, add_1)""",
+        )
+
+    def test_logging_logger(self):
+        logger = logging.getLogger(__name__)
+        class M(torch.nn.Module):
+            def forward(self, x):
+                logger.log("start")
+                x1 = x + x
+                logger.debug(x1)
+                x2 = x1 * x1
+                logger.info(1, 2, 3)
+                x3 = x2 + x2
+                return (x1, x3)
+
+        gm = export(M(), (torch.randn(3, 3),)).graph_module
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1):
+    add = torch.ops.aten.add.Tensor(arg0_1, arg0_1);  arg0_1 = None
     mul = torch.ops.aten.mul.Tensor(add, add)
     add_1 = torch.ops.aten.add.Tensor(mul, mul);  mul = None
     return (add, add_1)""",
