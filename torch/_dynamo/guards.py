@@ -579,13 +579,13 @@ class GuardBuilder(GuardBuilderBase):
                     source=source_name,
                     example_value=example_value,
                 )
-            elif isinstance(base_example_value, list):
+            elif isinstance(base_example_value, list) and not source.index_is_slice:
                 return base_guard_manager.list_getitem_manager(
                     key=source.index,
                     source=source_name,
                     example_value=example_value,
                 )
-            elif isinstance(base_example_value, tuple):
+            elif isinstance(base_example_value, tuple) and not source.index_is_slice:
                 return base_guard_manager.tuple_getitem_manager(
                     key=source.index,
                     source=source_name,
@@ -1363,7 +1363,7 @@ class GuardBuilder(GuardBuilderBase):
 
     def TENSOR_MATCH(self, guard: Guard, value=None):
         if guard.is_nn_module() or match_on_id_for_tensor(guard):
-            self.DATA_PTR_MATCH(guard)
+            self.ID_MATCH(guard)
         else:
             if isinstance(value, TensorWeakRef):
                 value = value()
