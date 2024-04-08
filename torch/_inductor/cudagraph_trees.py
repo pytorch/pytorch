@@ -561,6 +561,7 @@ class CUDAWarmupNode:
         stack_traces: Optional[StackTraces],
         stream: torch.cuda.Stream,
         already_warm: bool,
+        id: int,
     ):
         self.wrapped_function = wrapped_function
         self.parent = parent
@@ -573,6 +574,7 @@ class CUDAWarmupNode:
         self.stack_traces = stack_traces
         self.stream = stream
         self.already_warm = already_warm
+        self.id = id
 
     def run(self, new_inputs):
         assert not self.has_run, "Wrapped function should never be run twice"
@@ -1730,7 +1732,8 @@ class CUDAGraphTreeManager:
 
         # mapping from graph_id to (function id to mutation type hint). See more details in
         # [Note: Optimistic Mutation Check]
-        self.non_cudagraph_managed_mutation = defaultdict({})
+        self.non_cudagraph_managed_mutation_hint = defaultdict(dict)
+        self.warmup_node_counter = itertools.count(1)
 
         # whether we the current node is in a state of warmup, recording, execution. If
         # there is no current node the state will be ExecutionState.None.
@@ -1795,16 +1798,30 @@ class CUDAGraphTreeManager:
             else lambda _: False
         )
 
-    def _update_mutation_type_hint(self, function_id: FunctionID, inputs: List[Tensor]):
+    def new_warmup_node_id(self) -> int:
+        return next(self.warmup_node_counter)
+
+    def _update_non_cudagraph_managed_mutation(self, function_id: FunctionID, inputs: List[Tensor]):
+        node_id = self._get_node_id()
         if has_mutation_str := check_for_mutation(
             self.ids_to_funcs[function_id],
             inputs,
             self._get_cuda_graph_recorded_tensor_checker(),
         ):
             perf_hint_log.warning(has_mutation_str)
-            self.mutation_type_hint[self.current_node.id][function_id] = True
+            self.non_cudagraph_managed_mutation_hint[node_id][function_id] = True
         else:
-            self.mutation_type_hint[self.current_node.id][function_id] = False
+            self.non_cudagraph_managed_mutation_hint[node_id][function_id] = False
+
+    def _get_node_id(self):
+        if self.current_node is None:
+            return None
+        elif isinstance(self.current_node, CUDAGraphNode):
+            return self.current_node.id
+        elif isinstance(self.current_node, CUDAWarmupNode):
+            return -1 * self.current_node.id
+        else:
+            raise RuntimeError(f"Unknown node type {type(self.current_node)}")
 
     def _run(self, new_inputs: List[Tensor], function_id: FunctionID):
         # we will try to end the current execution lazily, since
@@ -1833,15 +1850,15 @@ class CUDAGraphTreeManager:
         #   to type d due to `check_invariants` for all children nodes.
         #
         # Instead, we design optimistic mutation check. The assumption is that, given a function
-        # and a node, the input mutation types usually remain the same across inputs. The detailed
+        # and a node, the input mutation types usually remain the same across inputs. So, if we have
+        # ever detect a function on a node with type d, we will never detect it as type c. The detailed
         # design is:
         # - [Slow Path] On the first invocation of a function on a node, we run `check_for_mutation`
         #   once and cache the input mutation type as `non_cudagraph_managed_mutation[node_id][func_id]`.
         # - [Fast Path] On the subsequent invocations of a function on a node, we skip
         #   `check_for_mutation`. For `non_cudagraph_managed_mutation[node_id][func_id]` as true, we
         #   directly call eager function. Otherwise, we `check_variants` and call cudagraph function.
-        # - [Slow Path] Before `record_function`, we run `check_for_mutation` once if the node has
-        #   changed.
+        # - [Slow Path] Before `record_function`, we run `check_for_mutation` again.
         #
         # Q1: Would there be overhead for type a,b,c,d?
         # A: No. We only check input mutation types for the first invocation of a function on a node.
@@ -1855,15 +1872,16 @@ class CUDAGraphTreeManager:
         # A: No. But this should happen rarely according to our assumption. In the rare case that
         #    it happens, there would not be any correctness issues and the performance is the same
         #    as the eager (or inductor optimized) function.
-        #
-        if function_id not in self.mutation_type_hint[self.current_node.id]:
-            self._update_mutation_type_hint(function_id, new_inputs)
+
+        node_id = self._get_node_id()
+        if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
+            self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
 
         # Early exit if the function mutates inputs which are neither parameters/buffers nor
         # cudagraph recorded tensors. This check should happen after `try_end_curr_recording`
         # and `try_end_curr_warmup` which may change self.current_node.
         wrapped_function = self.ids_to_funcs[function_id]
-        if self.mutation_type_hint[self.current_node.id][function_id]:
+        if self.non_cudagraph_managed_mutation_hint[node_id][function_id]:
             return wrapped_function.model(new_inputs)
 
         # warming up a function and subsequentally recording may use different memory addresses
@@ -1918,11 +1936,9 @@ class CUDAGraphTreeManager:
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
 
-        # Runtime check again if self.current_node has changed
-        if function_id not in self.mutation_type_hint[self.current_node.id]:
-            self._update_mutation_type_hint(function_id, new_inputs)
-
-        if self.mutation_type_hint[self.current_node.id][function_id]:
+        # Runtime check again since current node and cudagraph managed tensors may have changed
+        self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
+        if self.non_cudagraph_managed_mutation_hint[self._get_node_id()][function_id]:
             return wrapped_function.model(new_inputs)
 
         # now, we are in a recording state !
@@ -2004,6 +2020,7 @@ class CUDAGraphTreeManager:
             self.ids_to_stack_traces[function_id],
             self.stream,
             already_warm,
+            self.new_warmup_node_id(),
         )
         self.current_node = node
         self.path_state = ExecutionState.WARMUP
