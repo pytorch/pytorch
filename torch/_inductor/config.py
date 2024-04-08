@@ -495,16 +495,18 @@ class cpp:
 
     # Do not generate loops when the condition doesn't hold, like:
     # for(long i0=4096; i0<4096; i0+=1)
-    no_redundant_loops = True
+    no_redundant_loops = (
+        os.environ.get("TORCHINDUCTOR_CPP_NO_REDUNDANT_LOOPS", "1") == "1"
+    )
 
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
     # For single-threaded workload, turning it on would incur a slight
     # performance degradation.
-    dynamic_threads = False
+    dynamic_threads = os.environ.get("TORCHINDUCTOR_CPP_DYNAMIC_THREADS", "0") == "1"
 
     simdlen: Optional[int] = None
-    min_chunk_size = 4096
+    min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "4096"))
     cxx = (
         None,  # download gcc12 from conda-forge if conda is installed
         # "g++-12",
@@ -515,10 +517,12 @@ class cpp:
         # "g++.par",
     )
     # Allow kernel performance profiling via PyTorch profiler
-    enable_kernel_profile = False
+    enable_kernel_profile = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"
+    )
 
     # enable weight prepacking to get a better performance; may lead to large memory footprint
-    weight_prepack = True
+    weight_prepack = os.environ.get("TORCHINDUCTOR_CPP_WEIGHT_PREPACK", "1") == "1"
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
@@ -534,17 +538,26 @@ class cpp:
     descriptive_names = "original_aten"
 
     # how many nodes to allow into a single horizontal fusion
-    max_horizontal_fusion_size = 16
+    max_horizontal_fusion_size = int(
+        os.environ.get("TORCHINDUCTOR_CPP_MAX_HORIZONTAL_FUSION_SIZE", "16")
+    )
 
     # Make scatter_reduce fallback when reduce is sum to avoid performance regression
     # using atomic_add.
-    fallback_scatter_reduce_sum = True
+    fallback_scatter_reduce_sum = (
+        os.environ.get("TORCHINDUCTOR_CPP_FALLBACK_SCATTER_REDUCE_SUM", "1") == "1"
+    )
 
     # Use funsafe-math-optimizations when compiling
-    enable_unsafe_math_opt_flag = False
+    enable_unsafe_math_opt_flag = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_UNSAFE_MATH_OPT_FLAG", "0") == "1"
+    )
 
     # Use ffp-contract when compiling
-    enable_floating_point_contract_flag = False
+    enable_floating_point_contract_flag = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "0")
+        == "1"
+    )
 
 
 # config specific to codegen/triton.py
