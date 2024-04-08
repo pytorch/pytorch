@@ -143,6 +143,18 @@ def closure_adder(val):
     return inner
 
 
+class UserDefineSetAttr:
+    setup = False
+
+    def __setattr__(self, key, value):
+        assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
+        super().__setattr__(f"pfx_{key}", value)
+
+    def __getattr__(self, key):
+        assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
+        return self.__dict__[f"pfx_{key}"]
+
+
 class MiscTests(torch._dynamo.test_case.TestCase):
     def test_get_cache_entry(self):
         def f(x):
@@ -487,6 +499,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         cleanup_op("mylib::foo")
         del lib
+
+    def test_user_defined_setattr1(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.y = obj.x + 1
+
+        obj = UserDefineSetAttr()
+        with patch.object(UserDefineSetAttr, "setup", True):
+            obj.x = torch.randn(8)
+        fn(obj)
+        with patch.object(UserDefineSetAttr, "setup", True):
+            self.assertEqual(obj.y, obj.x + 1)
+        self.assertEqual(obj.__dict__.keys(), {"pfx_x", "pfx_y"})
+
+    def test_user_defined_setattr2(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            obj = UserDefineSetAttr()
+            obj.x = x
+            obj.y = obj.x + 1
+            return obj
+
+        x = torch.randn(8)
+        obj = fn(x)
+        with patch.object(UserDefineSetAttr, "setup", True):
+            self.assertIs(obj.x, x)
+            self.assertEqual(obj.y, x + 1)
+        self.assertEqual(obj.__dict__.keys(), {"pfx_x", "pfx_y"})
 
     def test_closure_recompiles(self):
         cnt = CompileCounter()
@@ -8236,6 +8276,8 @@ def ___make_guard_fn():
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
 
+    # See https://github.com/pytorch/pytorch/issues/119689
+    @unittest.expectedFailure
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
         @torch.compile(backend="aot_eager")
@@ -9836,6 +9878,7 @@ fn
 
         self._test_compile_model_free(model_inp_ctr, lambda mod: mod.fc_ref)
 
+    @unittest.skipIf(sys.version_info >= (3, 12), "leaks in 3.12+")
     def test_parameter_free(self):
         def model_inp_ctr():
             param = torch.nn.Parameter(torch.randn(100, 100))
@@ -9852,6 +9895,30 @@ fn
             return Mod(), (torch.randn(100, 100), param)
 
         self._test_compile_model_free(model_inp_ctr, lambda mod: mod.param)
+
+    def test_conditional_list_comp_in_context(self):
+        def fn(inp):
+            try:
+                return [torch.sin(x) for x in inp if x is not None]
+            except Exception:
+                pass
+
+        inp = [torch.randn(3, 3) for _ in range(3)] + [None]
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(inp)
+
+    def test_312_binary_slice_with_graph_break(self):
+        l1 = torch.nn.Linear(5, 5)
+        l2 = torch.nn.Linear(5, 5)
+
+        def fn(x):
+            # causes a graph break with items in the stack
+            n = torch.nn.Sequential(l1, l2)
+            out = n[1:](x)
+            return out
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(5, 5))
 
     def test_raises_importerror1(self):
         @torch.compile(backend="eager")
@@ -9879,35 +9946,25 @@ fn
             fn(x)
 
     def test_dynamo_cache_move_to_front(self):
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super(Mod, self).__init__()
-                self.fc = torch.nn.Linear(3, 3)
+        def fn(x, const):
+            return x + const
 
-            def forward(self, out):
-                return self.fc(out)
+        # dynamic=False forces Dynamo to recompile
+        opt_fn = torch.compile(fn, backend="eager", dynamic=False)
 
-        def fn(x, mod):
-            return mod(x)
-
-        opt_fn = torch.compile(fn, backend="eager")
-
-        m1 = Mod()
-        m2 = Mod()
-        m3 = Mod()
         inp = torch.randn(3, 3)
 
         # NOTE: assumes that each cache entry is guarded
         # on unique Mod instance
-        opt_fn(inp, m1)
-        opt_fn(inp, m2)
-        opt_fn(inp, m3)
+        opt_fn(inp, 1)
+        opt_fn(inp, 2)
+        opt_fn(inp, 3)
 
         c1 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c1), 3)
 
         # move cache entry to front
-        opt_fn(inp, m2)
+        opt_fn(inp, 2)
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertIs(c1[1], c2[0])
 
@@ -10029,6 +10086,27 @@ fn
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected.stride(), actual.stride())
         self.assertEqual(expected.storage_offset(), actual.storage_offset())
+
+    @torch._dynamo.config.patch(guard_nn_modules=True)
+    def test_hasattr_nn_module_guard(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                if hasattr(self, "a"):
+                    return self.a(x)
+                else:
+                    return x
+
+        m = M()
+        x = torch.randn(3, 3)
+        ref = m(x)
+
+        opt_m = torch.compile(backend="eager")(m)
+        res = opt_m(x)
+        self.assertEqual(ref, res)
 
 
 class TestTracer(JitTestCase):
