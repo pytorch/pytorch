@@ -4930,9 +4930,6 @@ class GraphModule(torch.nn.Module):
     def test_linearize_jvp_fn(self):
         counters.clear()
 
-        if check_dynamic_shape_capture():
-            self.skipTest("test fails with dynamic shapes")
-
         def wrapper_fn(x):
             output, jvp_fn = torch.func.linearize(torch.sin, x)
             return output, jvp_fn(x)
