@@ -161,8 +161,8 @@ class CppWrapperCuda(CppWrapperCpu):
         self.prefix.writeline("\n")
         if not V.graph.aot_mode:
             for kernel in chain(
-                self.src_to_kernel.values(),
-                [entry[0] for entry in self.user_defined_kernel_cache.values()],
+                sorted(self.src_to_kernel.values()),
+                sorted([entry[0] for entry in self.user_defined_kernel_cache.values()]),
             ):
                 self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
             self.prefix.writeline("\n")
