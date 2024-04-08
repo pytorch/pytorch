@@ -1585,6 +1585,8 @@ class GraphModuleDeserializer:
             )
 
         fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
+        if fx_node.op not in ["placeholder", "output"] and "nn_module_stack" not in fx_node.meta:
+            fx_node.meta["nn_module_stack"] = {}  # serialization throws away empty dicts
 
     def deserialize_input_spec(self, i: InputSpec) -> ep.InputSpec:
         if i.type == "user_input":
