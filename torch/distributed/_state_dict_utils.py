@@ -117,7 +117,9 @@ def _iterate_state_dict(
             not isinstance(companion_obj, dict)
             or set(companion_obj.keys()) != set(iter_object.keys())
         ):
-            raise CompanionMismatch()
+            raise CompanionMismatch(
+                f"{set(companion_obj.keys())=} {set(iter_object.keys())=}"
+            )
 
         ret = {
             key: _iterate_state_dict(
@@ -333,7 +335,7 @@ def _copy_state_dict(
         non_blocking: (bool): Whether copy ops should be performed asynchronously
     """
 
-    _iterate_state_dict(
+    return _iterate_state_dict(
         state_dict,
         _identity_func,
         _identity_func,
