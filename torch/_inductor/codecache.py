@@ -1219,8 +1219,8 @@ def pick_vec_isa() -> VecISA:
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
-    # If the simdlen is 0, it indicates determin the vectorization length automatically
-    if config.cpp.simdlen == 0:
+    # If the simdlen is None, it indicates determin the vectorization length automatically
+    if config.cpp.simdlen is None:
         assert _valid_vec_isa_list
         return _valid_vec_isa_list[0]
 

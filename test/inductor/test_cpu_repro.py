@@ -838,7 +838,7 @@ class CPUReproTests(TestCase):
             return torch.ops.aten.mean.dim(x, [-1, -2], True)
 
         x = torch.randn((1, 8, 8, 8))
-        with config.patch({"cpp.simdlen": 0}):
+        with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
@@ -886,7 +886,7 @@ class CPUReproTests(TestCase):
         numerical_testsuit = [4.4, 4.5, 4.6, 5.5]
         for numerical_number in numerical_testsuit:
             x = torch.ones(17) * numerical_number
-            with config.patch({"cpp.simdlen": 0}):
+            with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x,))
@@ -931,7 +931,7 @@ class CPUReproTests(TestCase):
                 x = x.to(dtype)
             zero_point = 100
             scale = 0.01
-            with config.patch({"cpp.simdlen": 0}):
+            with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(
@@ -997,7 +997,7 @@ class CPUReproTests(TestCase):
             if use_tensor_overload:
                 zero_point = torch.tensor(zero_point, dtype=torch.int64)
                 scale = torch.tensor(scale)
-            with config.patch({"cpp.simdlen": 0}):
+            with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(
@@ -1055,7 +1055,7 @@ class CPUReproTests(TestCase):
             if use_tensor_overload:
                 zero_point = torch.tensor(zero_point, dtype=torch.int64)
                 scale = torch.tensor(scale)
-            with config.patch({"cpp.simdlen": 0}):
+            with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x, scale, zero_point, quant_min, quant_max, dtype))
@@ -1134,7 +1134,7 @@ class CPUReproTests(TestCase):
             scale2 = 0.02
             output_zero_point = 3
             output_scale = 0.03
-            with config.patch({"cpp.simdlen": 0}):
+            with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(
@@ -1192,7 +1192,7 @@ class CPUReproTests(TestCase):
             if use_tensor_overload:
                 zero_point = torch.tensor(zero_point, dtype=torch.int64)
                 scale = torch.tensor(scale)
-            with config.patch({"cpp.simdlen": 0}):
+            with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x, scale, zero_point, quant_min, quant_max, dtype))
@@ -1229,7 +1229,7 @@ class CPUReproTests(TestCase):
         scales = torch.ones((3,))
         zero_points = torch.zeros((3,))
         axis = 1
-        with config.patch({"cpp.simdlen": 0}):
+        with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x, scales, zero_points, axis, quant_min, quant_max, dtype))
@@ -1278,7 +1278,7 @@ class CPUReproTests(TestCase):
             0,
             255,
         )
-        with config.patch({"cpp.simdlen": 0}):
+        with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
             self.common(m, (x,))
@@ -1335,7 +1335,7 @@ class CPUReproTests(TestCase):
             memory_format=torch.channels_last
         )
 
-        with config.patch({"cpp.simdlen": 0}):
+        with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
             self.common(
@@ -1377,7 +1377,7 @@ class CPUReproTests(TestCase):
         quant_min = 0 if dtype == torch.uint8 else -128
         quant_max = 255 if dtype == torch.uint8 else 127
 
-        with config.patch({"cpp.simdlen": 0}):
+        with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
             x = torch.randn(64, 58, 28, 28)
@@ -1446,7 +1446,7 @@ class CPUReproTests(TestCase):
                     scale_list[i] = torch.tensor(scale_list[i])
             zero_point, zero_point2, zero_point3 = zero_point_list
             scale, scale2, scale3 = scale_list
-            with config.patch({"cpp.simdlen": 0}):
+            with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(
@@ -1549,7 +1549,7 @@ class CPUReproTests(TestCase):
             return torch.softmax(x, -1)
 
         value = torch.randn((2, 10))
-        with config.patch({"cpp.simdlen": 0}):
+        with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (value,))
@@ -1569,12 +1569,16 @@ class CPUReproTests(TestCase):
         self.assertTrue(vec_avx512.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
 
-        with config.patch({"cpp.simdlen": 0}):
+        with config.patch({"cpp.simdlen": None}):
             isa = codecache.pick_vec_isa()
             if vec_avx512 in codecache.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx512)
             else:
                 self.assertTrue(isa == vec_avx2)
+
+        with config.patch({"cpp.simdlen": 0}):
+            isa = codecache.pick_vec_isa()
+            self.assertFalse(isa)
 
         with config.patch({"cpp.simdlen": 1}):
             isa = codecache.pick_vec_isa()
@@ -1612,7 +1616,7 @@ class CPUReproTests(TestCase):
         for dtype in vec_dtypes:
             value = torch.randn((2, 17), dtype=dtype)
             mask = torch.randint(0, 1, size=(2, 17), dtype=torch.uint8)
-            with config.patch({"cpp.simdlen": 0}):
+            with config.patch({"cpp.simdlen": None}):
                 for cpp_wrapper_flag in [True, False]:
                     with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
                         torch._dynamo.reset()
@@ -1877,7 +1881,7 @@ class CPUReproTests(TestCase):
 
             tol = 1e-2 if dtype == torch.bfloat16 else 1e-4
 
-            with config.patch({"cpp.simdlen": 0}):
+            with config.patch({"cpp.simdlen": None}):
                 for cpp_wrapper_flag in [True, False]:
                     with config.patch({"cpp_wrapper": cpp_wrapper_flag}):
                         torch._dynamo.reset()
@@ -1895,7 +1899,7 @@ class CPUReproTests(TestCase):
         x[0, 0] = torch.nan
         x[1, -1] = torch.nan
 
-        bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()] + [0]
+        bit_widths = [isa._bit_width for isa in codecache.valid_vec_isa_list()] + [None]
         for item in bit_widths:
             with config.patch({"cpp.simdlen": item}):
                 torch._dynamo.reset()
@@ -2000,7 +2004,7 @@ class CPUReproTests(TestCase):
         for dtype in vec_dtypes:
             x = torch.randn((2, 9), dtype=dtype)
 
-            with config.patch({"cpp.simdlen": 0}):
+            with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x,))
@@ -2065,7 +2069,7 @@ class CPUReproTests(TestCase):
 
             for torch_compile_debug in [True, False]:
                 with config.patch(
-                    {"trace.enabled": torch_compile_debug, "cpp.simdlen": 0}
+                    {"trace.enabled": torch_compile_debug, "cpp.simdlen": None}
                 ):
                     torch._dynamo.reset()
                     metrics.reset()
@@ -2350,7 +2354,7 @@ class CPUReproTests(TestCase):
             def func(x):
                 return maxpool(x)
 
-            with patch.object(config.cpp, "simdlen", 0):
+            with patch.object(config.cpp, "simdlen", None):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(func, (input,))
@@ -2367,7 +2371,7 @@ class CPUReproTests(TestCase):
             y = x1 + x2
             return maxpool(y)
 
-        with patch.object(config.cpp, "simdlen", 0):
+        with patch.object(config.cpp, "simdlen", None):
             torch._dynamo.reset()
             metrics.reset()
             self.common(func, (x1, x2))
@@ -2395,7 +2399,7 @@ class CPUReproTests(TestCase):
             x[0, 0] = torch.nan
             x[1, -1] = torch.nan
 
-            with config.patch({"cpp.simdlen": 0}):
+            with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x,))
@@ -2410,7 +2414,7 @@ class CPUReproTests(TestCase):
         for dtype in vec_dtypes:
             x = torch.randn((10, 10), dtype=dtype)
 
-            with config.patch({"cpp.simdlen": 0}):
+            with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x,))
@@ -2423,7 +2427,7 @@ class CPUReproTests(TestCase):
 
         x = torch.randn(4, 12, 1023, 1022)
 
-        with config.patch({"cpp.simdlen": 0}):
+        with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
             self.common(fn, (x,))
@@ -2522,13 +2526,13 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x1, x2))
                 assert metrics.generated_cpp_vec_kernel_count == 0
 
-            with config.patch({"cpp.simdlen": 0}):
+            with config.patch({"cpp.simdlen": None}):
                 torch._dynamo.reset()
                 metrics.reset()
                 self.common(fn, (x1, x2))
                 check_metrics_vec_kernel_count(1)
 
-        with config.patch({"cpp.simdlen": 0}):
+        with config.patch({"cpp.simdlen": None}):
             torch._dynamo.reset()
             metrics.reset()
             x1 = torch.randn(10, 20).permute(1, 0)
@@ -2579,7 +2583,7 @@ class CPUReproTests(TestCase):
             x = x.view(batchsize, -1, height, width)
             return x.contiguous(memory_format=torch.channels_last)
 
-        for simdlen in (0, 256, 1):
+        for simdlen in (None, 256, 1):
             with config.patch({"cpp.simdlen": simdlen}):
                 torch._dynamo.reset()
                 metrics.reset()
@@ -2614,7 +2618,7 @@ class CPUReproTests(TestCase):
                 return self.fc(y)
 
         x = torch.randn(128, 196, 256)
-        for simdlen in (0, 256, 1):
+        for simdlen in (None, 256, 1):
             with config.patch({"cpp.simdlen": simdlen}):
                 for eval_mode in [True, False]:
                     torch._dynamo.reset()
@@ -2629,7 +2633,7 @@ class CPUReproTests(TestCase):
         def fn(a):
             return a.t().contiguous()
 
-        for simdlen in (0, 256, 1):
+        for simdlen in (None, 256, 1):
             with config.patch({"cpp.simdlen": simdlen}):
                 for dtype in (torch.float, torch.bfloat16):
                     for shape in (
