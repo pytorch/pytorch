@@ -7,7 +7,7 @@ from typing import Optional, Tuple
 import unittest
 from test_jit import JitTestCase
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, serialTest
 from torch.testing import FileCheck
 from jit.test_models import MnistNet
 
@@ -800,6 +800,7 @@ class TestJitTraceAutocast(JitTestCase):
         for i in range(self.models.__len__()):
             test_nchw_autocast_jit_trace_model(self.models[i], self.inputs[i])
 
+    @serialTest()
     def test_nhwc_autocast_jit_trace_model(self):
         def test_nhwc_autocast_jit_trace_model(model, x):
             model = model.to(memory_format=torch.channels_last)
