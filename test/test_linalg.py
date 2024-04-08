@@ -4427,33 +4427,48 @@ class TestLinalg(TestCase):
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
+    @setBlasBackendsToDefaultFinally
     def test_matmul_small_brute_force_1d_Nd(self, device, dtype):
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        for backend in ["cublas", "cublaslt"]:
+            if torch.device(device).type == 'cuda':
+                torch.backends.cuda.preferred_blas_library(backend)
 
-        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
-            x = make_arg(size_x, noncontiguous=nctg_x)
-            y = make_arg(size_y, noncontiguous=nctg_y)
-            self.check_single_matmul(x, y)
+            make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+            for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
+                x = make_arg(size_x, noncontiguous=nctg_x)
+                y = make_arg(size_y, noncontiguous=nctg_y)
+                self.check_single_matmul(x, y)
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
+    @setBlasBackendsToDefaultFinally
     def test_matmul_small_brute_force_2d_Nd(self, device, dtype):
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        for backend in ["cublas", "cublaslt"]:
+            if torch.device(device).type == 'cuda':
+                torch.backends.cuda.preferred_blas_library(backend)
 
-        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(2), (True, False), (True, False)):
-            x = make_arg(size_x, noncontiguous=nctg_x)
-            y = make_arg(size_y, noncontiguous=nctg_y)
-            self.check_single_matmul(x, y)
+            make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+            for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(2), (True, False), (True, False)):
+                x = make_arg(size_x, noncontiguous=nctg_x)
+                y = make_arg(size_y, noncontiguous=nctg_y)
+                self.check_single_matmul(x, y)
 
     @dtypesIfCUDA(torch.float, torch.complex64)  # Integer matmul just supported on CPU
     @dtypes(torch.int64, torch.float, torch.complex64)
+    @setBlasBackendsToDefaultFinally
     def test_matmul_small_brute_force_3d_Nd(self, device, dtype):
-        make_arg = partial(make_tensor, device=device, dtype=dtype)
+        for backend in ["cublas", "cublaslt"]:
+            if torch.device(device).type == 'cuda':
+                torch.backends.cuda.preferred_blas_library(backend)
 
-        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(3), (True, False), (True, False)):
-            x = make_arg(size_x, noncontiguous=nctg_x)
-            y = make_arg(size_y, noncontiguous=nctg_y)
-            self.check_single_matmul(x, y)
+            make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+            for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(3), (True, False), (True, False)):
+                x = make_arg(size_x, noncontiguous=nctg_x)
+                y = make_arg(size_y, noncontiguous=nctg_y)
+                self.check_single_matmul(x, y)
 
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
