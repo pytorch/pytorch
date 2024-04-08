@@ -9,6 +9,7 @@
 #endif
 #include <cstdlib>
 #include <cstring>
+#include <iostream>
 
 namespace at::native {
 
@@ -43,6 +44,11 @@ static CPUCapability compute_cpu_capability() {
 
 #if !defined(__powerpc__) && !defined(__s390x__)
   if (cpuinfo_initialize()) {
+    std::cout << "cpuinfo_has_x86_avx512vl: " << cpuinfo_has_x86_avx512vl <<"\n";
+    std::cout << "cpuinfo_has_x86_avx512bw: " << cpuinfo_has_x86_avx512bw <<"\n";
+    std::cout << "cpuinfo_has_x86_avx512dq: " << cpuinfo_has_x86_avx512dq <<"\n";
+    std::cout << "cpuinfo_has_x86_fma3: " << cpuinfo_has_x86_fma3 <<"\n";
+    std::cout << "cpuinfo_has_x86_avx2: " << cpuinfo_has_x86_avx2 <<"\n";
 #if defined(HAVE_AVX512_CPU_DEFINITION)
     // GCC supports some AVX512 intrinsics such as _mm512_set_epi16 only in
     // versions 9 & beyond. So, we want to ensure that only releases built with
@@ -50,11 +56,14 @@ static CPUCapability compute_cpu_capability() {
     // if it's supported on the hardware PyTorch is running on.
     if (cpuinfo_has_x86_avx512vl() && cpuinfo_has_x86_avx512bw() &&  \
         cpuinfo_has_x86_avx512dq() && cpuinfo_has_x86_fma3()) {
+      std::cout << "return AVX512\n";
       return CPUCapability::AVX512;
     }
+    std::cout << "HAVE_AVX512_CPU_DEFINITION\n";
 #endif
 #ifdef HAVE_AVX2_CPU_DEFINITION
     if (cpuinfo_has_x86_avx2() && cpuinfo_has_x86_fma3()) {
+      std::cout << "return AVX2\n";
       return CPUCapability::AVX2;
     }
 #endif
@@ -70,7 +79,7 @@ static CPUCapability compute_cpu_capability() {
 }
 
 CPUCapability get_cpu_capability() {
-  CPUCapability capability = compute_cpu_capability();
+  static CPUCapability capability = compute_cpu_capability();
   return capability;
 }
 

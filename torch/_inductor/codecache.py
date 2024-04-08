@@ -1187,9 +1187,12 @@ supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 
 
 def get_simdlen_from_cpu_capability(capability: str):
+    # VSX is not supported in inductor
     simdlen_cpu_capability = {
         "DEFAULT": 0,
         "NO AVX": 0,
+        "VSX": 0,
+        "Z VECTOR": 256,
         "AVX2": 256,
         "AVX512": 512,
     }
@@ -1233,7 +1236,6 @@ def pick_vec_isa() -> VecISA:
     if (
         config.cpp.simdlen is None
         and not isinstance(_valid_vec_isa_list[0], VecNEON)
-        and not isinstance(_valid_vec_isa_list[0], VecZVECTOR)
     ):
         config.cpp.simdlen = get_simdlen_from_cpu_capability(
             torch._C._get_cpu_capability()
