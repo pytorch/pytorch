@@ -343,6 +343,8 @@ class _RecordLoadStoreInner(V.MockHandler):  # type: ignore[name-defined]
 
     def store(self, name: str, index: sympy.Expr, value: str, mode=None) -> str:
         self._writes_with_mode[mode].add(MemoryDep(name, *self.canonicalize(index)))
+        if mode is not None:
+            self._reads.add(MemoryDep(name, *self.canonicalize(index)))
         return f"store({name}, {sympy_str(index)}, {value}, {mode})"
 
     def store_reduction(self, name: str, index, value) -> str:
