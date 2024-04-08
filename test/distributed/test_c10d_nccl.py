@@ -4698,9 +4698,13 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
         self.assertEqual(self.processes[0].exitcode, -6)
         self.assertEqual(self.processes[1].exitcode, 1)
 
+    @property
+    def world_size(self):
+        return 3
+
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(3)
     @skip_if_rocm
     def test_nccl_errors_dump(self):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
