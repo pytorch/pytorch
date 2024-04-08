@@ -130,6 +130,10 @@ def _do_paste_mask(masks, boxes, img_h: int, img_w: int, skip_empty: bool = True
         return img_masks[:, 0], ()
 
 
+def global_fn(x):
+    return torch.sin(x)
+
+
 def cat(tensors, dim=0):
     # from detectron2 wrappers.py
     assert isinstance(tensors, (list, tuple))
@@ -4563,6 +4567,25 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         except Exception as e:
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
+
+    def test_global_fn_mutation(self):
+        def foo(x, y):
+            return global_fn(x) + y
+
+        x = torch.ones(1)
+        y = torch.ones(1)
+
+        opt = torch.compile(foo, fullgraph=True, backend="eager")
+        self.assertEqual(opt(x, y), foo(x, y))
+
+        # Change global_fn
+        global global_fn
+
+        def new_fn(x):
+            return torch.cos(x)
+
+        global_fn = new_fn
+        self.assertEqual(opt(x, y), foo(x, y))
 
 
 if __name__ == "__main__":
