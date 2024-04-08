@@ -1572,19 +1572,15 @@ class CPUReproTests(TestCase):
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
 
         with config.patch({"cpp.simdlen": None}):
+            with open("/proc/cpuinfo") as _cpu_info:
+                _cpu_info_content = _cpu_info.read()
+                print("_cpu_info_content: ", _cpu_info_content)
+            print("torch._C._get_cpu_capability(): ", torch._C._get_cpu_capability())
             isa = codecache.pick_vec_isa()
             if vec_avx512 in codecache.valid_vec_isa_list():
-                if torch._C._get_cpu_capability() == "AVX512":
-                    self.assertTrue(isa == vec_avx512)
-                elif torch._C._get_cpu_capability() == "AVX2":
-                    self.assertTrue(isa == vec_avx2)
-                elif torch._C._get_cpu_capability() == "NO AVX":
-                    self.assertTrue(isa == invalid_vec)
+                self.assertTrue(isa == vec_avx512)
             else:
-                if torch._C._get_cpu_capability() == "AVX2":
-                    self.assertTrue(isa == vec_avx2)
-                elif torch._C._get_cpu_capability() == "NO AVX":
-                    self.assertTrue(isa == invalid_vec)
+                self.assertTrue(isa == vec_avx2)
 
         with config.patch({"cpp.simdlen": 0}):
             isa = codecache.pick_vec_isa()
