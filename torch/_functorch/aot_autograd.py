@@ -399,6 +399,22 @@ AOT_COUNTER = itertools.count()
 # So the signature of the graph input would look something like
 # (*tokens, *params_buffers, *user_inputs), and the signature of the graph
 # output would look something like (*tokens, *outputs).
+#
+# However, Inductor does not want the concept of tokens in the final generated
+# code's input and output. Since changing the graph signature inside of inductor
+# is difficult, after generating the forward graph, we will run a pass to
+# remove the tokens from the inputgenerate the following graph for Inductor, where
+# the tokens are created and sunk within the graph, rather than as inputs and
+# outputs:
+#
+# def gm(self, reader):
+#    token0 = torch.ops.prims._make_token()
+#    token1, frame = with_token(ordered_effect_op, (reader,), token0)
+#    frame = frame * 2
+#    token2, frame2 = with_token(ordered_effect_op, (reader,), token1)
+#    frame2 = frame2 * 2
+#    sink_token = torch.ops.prims._sink_tokens([token2])
+#    return frame, frame2
 
 #
 #

@@ -14,6 +14,7 @@ from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import make_fx
 
+from .. import config
 from .functional_utils import (
     assert_functional_graph,
     propagate_input_mutation_stacktraces,
@@ -26,6 +27,7 @@ from .traced_function_transforms import (
     fn_input_mutations_to_outputs,
     fn_prepped_for_autograd,
 )
+from .utils import unlift_tokens
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
@@ -101,6 +103,14 @@ def aot_dispatch_base_graph(
 
     copy_count2 = assert_functional_graph(fw_module.graph)
     propagate_input_mutation_stacktraces(fw_module.graph)
+
+    # See Note [Side-Effectful Tokens in AOTAutograd]
+    num_tokens = len(fw_metadata.tokens)
+    if num_tokens != 0 and config.unlift_effect_tokens:
+        unlift_tokens(fw_module, fw_metadata)
+        updated_flat_args_subclasses_desugared = updated_flat_args_subclasses_desugared[
+            num_tokens:
+        ]
 
     assert copy_count == copy_count2
 

@@ -9,6 +9,7 @@ from functorch.compile import min_cut_rematerialization_partition
 
 import torch
 from torch import _guards
+from torch._functorch import config as functorch_config
 from torch._functorch.compilers import ts_compile
 from .common import aot_autograd
 from .registry import register_debug_backend as register_backend
@@ -76,25 +77,31 @@ register_backend(
     name="aot_eager_default_partitioner", compiler_fn=aot_eager_default_partitioner
 )
 
+
 # Uses TorchInductor AOT Autograd decomps and partitioner to isolate aot vs
 # inductor problems.
 # aot_eager_decomp_partition just replaces the inductor compiler with nop to help
 # isolate inductor vs aot_eager errors
-aot_eager_decomp_partition = aot_autograd(
-    # these are taken from memory_efficient_fusion()
-    fw_compiler=boxed_nop,
-    bw_compiler=boxed_nop,
-    # NB: lambda here is to delay import of inductor
-    decompositions=lambda: import_module(
-        "torch._inductor.compile_fx"
-    ).select_decomp_table(),
-    partition_fn=functools.partial(
-        min_cut_rematerialization_partition, compiler="inductor"
-    ),
-)
+def aot_eager_decomp_partition(gm, fake_tensor_inputs):
+    with functorch_config.patch(unlift_effect_tokens=True):
+        return aot_autograd(
+            # these are taken from memory_efficient_fusion()
+            fw_compiler=boxed_nop,
+            bw_compiler=boxed_nop,
+            # NB: lambda here is to delay import of inductor
+            decompositions=lambda: import_module(
+                "torch._inductor.compile_fx"
+            ).select_decomp_table(),
+            partition_fn=functools.partial(
+                min_cut_rematerialization_partition, compiler="inductor"
+            ),
+        )(gm, fake_tensor_inputs)
+
+
 register_backend(
     name="aot_eager_decomp_partition", compiler_fn=aot_eager_decomp_partition
 )
+
 
 # AOT Autograd with torchscript backend. Default partitioner.
 # aot_ts uses torchscript backend. We can use this with both nnc and nvfuser
