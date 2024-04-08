@@ -2025,6 +2025,7 @@ exit(2)
                 torch.zeros(2 ** 40, device="cuda")
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    @serialTest()
     def test_repeat_graph_capture_cublas_workspace_memory(self):
         (x, y, z) = 1024, 512, 64
         a = torch.rand((x, y), device='cuda')
@@ -2611,6 +2612,7 @@ exit(2)
     # DropoutState's long-lived internal buffer. Calling code perceives this (correct) behavior
     # as a memory leak unless we skip the leak check.
     @skipCUDAMemoryLeakCheckIf(True)
+    @serialTest()
     def test_graph_cudnn_dropout(self):
         # Tests the interaction of cuda graph capture with DropoutState's syncs in ATen/native/cudnn/RNN.cpp.
         # In particular, if user runs a sequence of captured and noncaptured cudnn rnns, DropoutState should
