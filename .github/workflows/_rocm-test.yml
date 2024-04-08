@@ -56,12 +56,6 @@ jobs:
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     runs-on: ${{ matrix.runner }}
     steps:
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          no-sudo: true
-
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
 
@@ -88,6 +82,25 @@ jobs:
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+
+      - name: Clean workspace
+        shell: bash
+        env:
+          DOCKER_IMAGE: ${{ inputs.docker-image }}
+        run: |
+          echo "${GITHUB_WORKSPACE}"
+          docker run --rm \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}" \
+            sudo rm -rf /var/lib/jenkins/workspace/*
+
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
 
       - name: Start monitoring script
         id: monitor-script
