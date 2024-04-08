@@ -798,7 +798,7 @@ class SchedulerNode(BaseSchedulerNode):
         if len(self.read_writes.writes) == 1 and isinstance(
             read_dep, dependencies.MemoryDep
         ):
-            (write_dep,) = next(iter(self.read_writes.writes_with_mode.values()))
+            (write_dep,) = next(iter(self.read_writes.writes_grouped_by_mode.values()))
             assert isinstance(write_dep, dependencies.MemoryDep), f"{type(write_dep)=}"
             return read_dep.index == write_dep.index and read_dep.size == write_dep.size
         return False
@@ -1508,10 +1508,10 @@ class Scheduler:
                 alt_name = rename(alt_name)
                 # this node must run after the prior writer
                 add_user(alt_name, node)
-                if len(node.read_writes.writes_with_mode) == 1 and next(
-                    iter(node.read_writes.writes_with_mode.keys())
+                if len(node.read_writes.writes_grouped_by_mode) == 1 and next(
+                    iter(node.read_writes.writes_grouped_by_mode.keys())
                 ):
-                    mode = next(iter(node.read_writes.writes_with_mode.keys()))
+                    mode = next(iter(node.read_writes.writes_grouped_by_mode.keys()))
                     node.add_mutation_dep(AccumulateDep(StarDep(alt_name), mode))
                 else:
                     node.add_mutation_dep(StarDep(alt_name))
@@ -1671,6 +1671,8 @@ class Scheduler:
         for node in self.nodes:
             ancestors = set()
             for dep in node.unmet_dependencies:
+                if dep.name == node.get_name():
+                    continue
                 ancestors.add(dep.name)
                 ancestors |= name_to_ancestors[dep.name]
             name_to_ancestors[node.get_name()] = ancestors
