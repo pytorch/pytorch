@@ -86,13 +86,13 @@ KERNEL_COUNT_OVERRIDES = {
 KERNEL_COUNTS = {
     Adam: KernelCounts(multitensor=2, singletensor=8),
     AdamW: KernelCounts(multitensor=2, singletensor=8),
-    NAdam: KernelCounts(multitensor=2, singletensor=8),
+    NAdam: KernelCounts(multitensor=2, singletensor=11),
     Rprop: KernelCounts(multitensor=2, singletensor=8),
     RMSprop: KernelCounts(multitensor=2, singletensor=8),
     Adadelta: KernelCounts(multitensor=2, singletensor=8),
     Adagrad: KernelCounts(multitensor=5, singletensor=8),
     SGD: KernelCounts(multitensor=1, singletensor=8),
-    ASGD: KernelCounts(multitensor=2, singletensor=8),
+    ASGD: KernelCounts(multitensor=2, singletensor=11),
     RAdam: KernelCounts(multitensor=2, singletensor=8),
     Adamax: KernelCounts(multitensor=2, singletensor=8),
 }
@@ -308,6 +308,13 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
             # Adagrad doesn't reinitialize state on each step
             if optim_cls is Adagrad:
                 opt_compiled.param_groups[0]["lr"] = 0.02
+            elif optim_cls is Adam:  # ensure we are guarding on the data_ptr of states
+                state_tensor = opt_compiled.state[
+                    opt_compiled.param_groups[0]["params"][0]
+                ]["exp_avg"]
+                opt_compiled.state[opt_compiled.param_groups[0]["params"][0]][
+                    "exp_avg"
+                ] = torch.zeros_like(state_tensor)
             else:
                 opt_compiled.state.clear()
 
@@ -429,7 +436,7 @@ class CompiledOptimizerTests(TestCase):
     test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
     test_asgd_recompile_default = make_recompile_test(ASGD, kernel_count=2, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
-        ASGD, kernel_count=8, lr=0.01, foreach=False
+        ASGD, kernel_count=11, lr=0.01, foreach=False
     )
     test_asgd_recompile_foreach = make_recompile_test(
         ASGD, kernel_count=2, lr=0.01, foreach=True
@@ -598,6 +605,19 @@ class CompiledOptimizerTests(TestCase):
         loop(optimizer_c, closure_c)
 
         self.assertEqual(param, param_c)
+
+    def test_get_value_on_static_address(self):
+        from torch._dynamo.decorators import mark_static_address
+        from torch.optim.optimizer import _get_value
+
+        compiled = torch.compile(_get_value)
+
+        x = torch.ones(2, 2)
+        mark_static_address(x)
+
+        ret_val = compiled(x)
+
+        self.assertEqual(ret_val, x)
 
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
