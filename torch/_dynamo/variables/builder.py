@@ -54,10 +54,13 @@ from ..source import (
     ConstDictKeySource,
     ConvertIntSource,
     GetItemSource,
+    GradSource,
     is_constant_source,
     is_from_defaults,
+    is_from_optimizer_source,
     LocalSource,
     NumpyTensorSource,
+    OptimizerSource,
     RandomValueSource,
     Source,
     TupleIteratorGetItemSource,
@@ -630,8 +633,19 @@ class VariableBuilder:
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, _StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
+            stream_proxy = self.tx.output.create_proxy(
+                "call_function",
+                torch.cuda.Stream,
+                (),
+                {
+                    "stream_id": value.stream_id,
+                    "device_index": value.device_index,
+                    "device_type": value.device_type,
+                },
+            )
+            stream_proxy.node.meta["example_value"] = value
             return StreamVariable(
-                None,
+                stream_proxy,
                 value,
                 value.device,
                 source=self.source,
@@ -663,7 +677,8 @@ class VariableBuilder:
             # TODO: this doing it manually is bad
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, torch.optim.Optimizer):
-            self.install_guards(GuardBuilder.TYPE_MATCH)
+            self.install_guards(GuardBuilder.ID_MATCH)
+            self.source = OptimizerSource(self.source)
             return OptimizerVariable(value, source=self.source)
         elif WorldMetaClassVariable.is_group_member_type(value):
             return WorldMetaClassVariable(value, source=self.source)
@@ -1088,9 +1103,14 @@ class VariableBuilder:
             **options,
         )
 
+        guard_type = GuardBuilder.TENSOR_MATCH
+
+        if isinstance(source, GradSource) and is_from_optimizer_source(source):
+            guard_type = GuardBuilder.NOT_NONE_MATCH
+
         self.install_guards(
             functools.partial(
-                GuardBuilder.TENSOR_MATCH,
+                guard_type,
                 value=value
                 if isinstance(source, NumpyTensorSource)
                 else TensorWeakRef(value),
@@ -1329,7 +1349,9 @@ def _dataclasses_fields_lambda(obj):
     return TupleVariable(items)
 
 
-def wrap_fx_proxy(tx, proxy, example_value=None, subclass_type=None, **options):
+def wrap_fx_proxy(
+    tx, proxy, example_value=None, subclass_type=None, **options
+) -> VariableTracker:
     kwargs = {
         "tx": tx,
         "proxy": proxy,
@@ -1502,15 +1524,31 @@ def wrap_fx_proxy_cls(
                     ConstantVariable.create(None, **options),
                 )
             else:
+                proxy_i = proxy.tracer.create_proxy(
+                    kind="call_function",
+                    target=operator.getitem,
+                    args=(proxy, i),
+                    kwargs={},
+                )
+
+                if "source" in options:
+                    source = options["source"]
+                    options_i = options.copy()
+                    options_i["source"] = GetItemSource(
+                        base=source, index=i, index_is_slice=False
+                    )
+                else:
+                    # use the same options object as parent
+                    options_i = options
+
+                # WARNING: this assumes the same target_cls as this tuple/list call
                 unpacked.append(
                     wrap_fx_proxy_cls(
-                        target_cls,
-                        tx,
-                        proxy.tracer.create_proxy(
-                            "call_function", operator.getitem, (proxy, i), {}
-                        ),
+                        target_cls=target_cls,
+                        tx=tx,
+                        proxy=proxy_i,
                         example_value=val,
-                        **options,
+                        **options_i,
                     )
                 )
         if isinstance(example_value, torch.Size):
