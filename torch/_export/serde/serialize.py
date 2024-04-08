@@ -1479,6 +1479,9 @@ class GraphModuleDeserializer:
             if input_.type in ("as_tensor", "as_sym_int", "as_custom_obj"):
                 node_name = input_.value.name
                 placeholder_node = self.graph.placeholder(node_name)
+                # FX might declare a name illegal (e.g. some nn.Modules use "input" as forward() arguments)
+                # we will overwrite it
+                placeholder_node.name = node_name
                 self.sync_fx_node(node_name, placeholder_node)
             elif input_.type in (
                 "as_int",
@@ -1582,6 +1585,8 @@ class GraphModuleDeserializer:
             )
 
         fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
+        if fx_node.op not in ["placeholder", "output"] and "nn_module_stack" not in fx_node.meta:
+            fx_node.meta["nn_module_stack"] = {}  # serialization throws away empty dicts
 
     def deserialize_input_spec(self, i: InputSpec) -> ep.InputSpec:
         if i.type == "user_input":
