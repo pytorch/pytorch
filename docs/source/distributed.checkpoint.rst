@@ -124,3 +124,8 @@ The following classes can also be utilized for online loading and resharding of 
 
 .. autoclass:: torch.distributed.checkpoint.format_utils.DynamicMetaLoadPlanner
    :members:
+
+The following experimental interfaces are provided for improved observability in production environments:
+
+.. py:module:: torch.distributed.checkpoint.logger
+.. py:module:: torch.distributed.checkpoint.logging_handlers
