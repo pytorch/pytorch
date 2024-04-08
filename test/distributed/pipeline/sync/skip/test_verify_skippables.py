@@ -151,7 +151,12 @@ def test_double_stash_pop_but_isolated():
     ns2 = Namespace()
 
     verify_skippables(
-        nn.Sequential(Layer1().isolate(ns1), Layer2().isolate(ns1), Layer3().isolate(ns2), Layer4().isolate(ns2),)
+        nn.Sequential(
+            Layer1().isolate(ns1),
+            Layer2().isolate(ns1),
+            Layer3().isolate(ns2),
+            Layer4().isolate(ns2),
+        )
     )
 
 
