@@ -341,32 +341,34 @@ void initDispatchBindings(PyObject* module) {
           py::arg("dispatch") = "",
           py::arg("debug") = "impl_t_t")
       .def(
-          "impl_t_c",
+          "impl_by_aoti",
           [](const py::object& self,
-             const char* name,
+             const char* ns,
+             const char* op_name,
              c10::DispatchKey dispatch,
-             py::object func) {
+             py::object fall_back_func) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
             lib.impl(
-                name,
+                op_name,
                 torch::dispatch(
                     dispatch,
                     CppFunction::makeFromBoxedFunctor(
                         std::make_unique<
                             torch::inductor::AOTIPythonKernelHolder>(
-                            func, dispatch, name))),
+                            fall_back_func, dispatch, ns, op_name))),
                 register_or_verify());
-            python_registrations_[lib._resolve(name)].insert_or_assign(
+            python_registrations_[lib._resolve(op_name)].insert_or_assign(
                 dispatch,
                 std::make_shared<c10::SafePyObject>(
-                    func.release().ptr(), getPyInterpreter()));
+                    fall_back_func.release().ptr(), getPyInterpreter()));
             END_HANDLE_TH_ERRORS_PYBIND
           },
           "",
-          py::arg("name"),
+          py::arg("ns"),
+          py::arg("op_name"),
           py::arg("dispatch"),
-          py::arg("func"))
+          py::arg("fall_back_func"))
       .def(
           "impl",
           [](const py::object& self,
@@ -858,6 +860,20 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_non_sym_sizes", [](const at::Tensor& a) {
     return a.sizes(); // NB: NOT sym_size
+  });
+
+  m.def("_set_throw_on_mutable_data_ptr", [](const at::Tensor& t) {
+    if (!t.unsafeGetTensorImpl()->has_storage()) {
+      // If the Tensor doesn't have a storage, then accessing .data_ptr()
+      // will already raise an error.
+      return;
+    }
+    // Otherwise, set (on the StorageImpl) that accessing (mutable) data_ptr
+    // will throw.
+    t.unsafeGetTensorImpl()
+        ->storage()
+        .unsafeGetStorageImpl()
+        ->set_throw_on_mutable_data_ptr();
   });
 
   using c10::impl::TorchDispatchModeKey;
