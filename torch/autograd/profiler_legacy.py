@@ -251,7 +251,7 @@ def _parse_legacy_records(thread_records):
                     ],
                     scope=start.scope(),
                     cpu_memory_usage=cpu_memory_usage,
-                    cuda_memory_usage=cuda_memory_usage,
+                    device_memory_usage=cuda_memory_usage,
                     is_async=is_async,
                     is_remote=is_remote_event,
                     sequence_nr=start.sequence_nr(),
@@ -287,7 +287,7 @@ def _parse_legacy_records(thread_records):
                         end_us=0,
                         stack=[],
                         cpu_memory_usage=record.cpu_memory_usage(),
-                        cuda_memory_usage=record.cuda_memory_usage(),
+                        device_memory_usage=record.cuda_memory_usage(),
                         is_legacy=True,
                     )
                     functions.append(fe)
