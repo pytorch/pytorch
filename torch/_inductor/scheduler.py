@@ -39,12 +39,14 @@ from .sizevars import SimplifyIndexing
 from .utils import (
     cache_on_self,
     cmp,
+    device_need_guard,
     free_symbol_has,
     get_device_tflops,
     get_dtype_size,
     get_gpu_dram_gbps,
     green_text,
     is_collective,
+    is_gpu,
     is_wait,
     red_text,
     sympy_product,
@@ -581,7 +583,7 @@ class BaseSchedulerNode:
             layout = self.node.get_layout()
             dtype = self.node.get_dtype()
 
-        if "cuda" != layout.device.type:
+        if not is_gpu(layout.device.type):
             # default to no reordering based on runtime
             return 0
 
@@ -1686,7 +1688,9 @@ class Scheduler:
         for i in range(10):
             old_len = len(self.nodes)
             fusion_log.debug(
-                "===== attempting fusion (%d/10): %d nodes =====", i + 1, old_len
+                "===== attempting fusion (%d/10): %d nodes =====",
+                i + 1,
+                old_len,
             )
             self.fuse_nodes_once()
             new_len = len(self.nodes)
@@ -1974,6 +1978,9 @@ class Scheduler:
             for node_grouping in group_grouping.values():
                 check_all_pairs(node_grouping)
 
+        possible_fusions = self.get_possible_fusions_with_highest_priority(
+            possible_fusions
+        )
         possible_fusions.sort(key=self.score_fusion_key, reverse=True)
         fusion_log.debug("found %d possible fusions", len(possible_fusions))
         return possible_fusions
@@ -2229,6 +2236,36 @@ class Scheduler:
         }
         return sum(dep.numbytes_hint() for dep in common_memory_deps)
 
+    def get_possible_fusions_with_highest_priority(self, possible_fusions):
+        # Group the possible fusions based on their priority from the backend.
+        # Only return the group of possible fusions with highest priority.
+        if len(possible_fusions) == 0:
+            return possible_fusions
+        possible_fusions_group_by_priority: Dict[
+            int, List[Tuple["BaseSchedulerNode", "BaseSchedulerNode"]]
+        ] = {}
+
+        for node1, node2 in possible_fusions:
+            assert node1.get_device() == node2.get_device()
+            device = node1.get_device()
+            fusion_pair_priority = int(
+                self.get_backend(device).get_fusion_pair_priority(node1, node2)
+            )
+            if fusion_pair_priority not in possible_fusions_group_by_priority:
+                possible_fusions_group_by_priority[fusion_pair_priority] = [
+                    (node1, node2),
+                ]
+            else:
+                possible_fusions_group_by_priority[fusion_pair_priority].append(
+                    (node1, node2)
+                )
+        # Sorted by fusion_pair_priority and return the possible fusions with highest priority
+        possible_fusions_with_highest_priority = sorted(
+            possible_fusions_group_by_priority.items(), key=lambda item: item[0]
+        )[0][1]
+        assert len(possible_fusions_with_highest_priority) > 0
+        return possible_fusions_with_highest_priority
+
     def score_fusion_key(self, nodes):
         """
         Shim for list.sort(key=...)
@@ -2343,7 +2380,7 @@ class Scheduler:
 
     def create_backend(self, device: torch.device):
         assert (
-            device.type != "cuda" or device.index is not None
+            not is_gpu(device.type) or device.index is not None
         ), f"{device} should have been normalized in lowering"
         V.graph.add_device_info(device)
 
@@ -2351,13 +2388,15 @@ class Scheduler:
         if device_scheduling is None:
             raise RuntimeError(f"Unsupported device type: {device.type}")
 
-        if device.type == "cuda" and not has_triton():
-            device_props = torch.cuda.get_device_properties(device)
-            if device_props.major < 7:
+        if not has_triton():
+            if (
+                device.type == "cuda"
+                and (device_props := torch.cuda.get_device_properties(device)).major < 7
+            ):
                 raise RuntimeError(
                     f"Found {device_props.name} which is too old to be supported by the triton GPU compiler, which is used as the backend. Triton only supports devices of CUDA Capability >= 7.0, but your device is of CUDA capability {device_props.major}.{device_props.minor}"  # noqa: B950
                 )
-            else:
+            elif is_gpu(device.type):
                 raise RuntimeError(
                     "Cannot find a working triton installation. More information on installing Triton can be found at https://github.com/openai/triton"  # noqa: B950
                 )
@@ -2410,13 +2449,14 @@ class Scheduler:
                 ):
                     self.flush()
                 if device != self.current_device:
-                    if device.type == "cuda":
-                        if self.current_device and self.current_device.type == "cuda":
-                            V.graph.wrapper_code.codegen_device_guard_exit()
+                    if self.current_device and device_need_guard(
+                        self.current_device.type
+                    ):
+                        V.graph.wrapper_code.codegen_device_guard_exit()
+                    if device_need_guard(device.type):
                         assert device.index is not None, "device should have an index"
                         V.graph.wrapper_code.codegen_device_guard_enter(device.index)
-                    elif self.current_device and self.current_device.type == "cuda":
-                        V.graph.wrapper_code.codegen_device_guard_exit()
+
                     self.current_device = device
 
             self.buffer_names_to_free.update(node.last_usage)
@@ -2429,7 +2469,7 @@ class Scheduler:
             elif node.is_foreach():
                 self.get_backend(device).codegen_foreach(node)  # type: ignore[possibly-undefined]
             elif isinstance(node, (FusedSchedulerNode, SchedulerNode)):
-                self.get_backend(device).codegen_nodes(node.get_nodes())  # type: ignore[possibly-undefined]
+                self.get_backend(device).codegen_node(node)  # type: ignore[possibly-undefined]
             else:
                 assert isinstance(node, NopKernelSchedulerNode)
                 node.allocate()
@@ -2447,7 +2487,7 @@ class Scheduler:
                 if self.get_backend(device).ready_to_flush():
                     self.flush()
 
-        if self.current_device and self.current_device.type == "cuda":
+        if self.current_device and device_need_guard(self.current_device.type):
             # exit the outermost CUDA device guard. this is
             # important for nested indentation codegen-ing.
             V.graph.wrapper_code.codegen_device_guard_exit()
@@ -2507,7 +2547,7 @@ class BaseScheduling:
         """
         raise NotImplementedError()
 
-    def codegen_nodes(self, nodes: List[SchedulerNode]):
+    def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]):
         """
         Generate a kernel given a list of pre-fused nodes.
         """
@@ -2538,3 +2578,10 @@ class BaseScheduling:
         in milliseconds on randomly generated inputs.
         """
         raise NotImplementedError()
+
+    def get_fusion_pair_priority(self, node1, node2) -> int:
+        """
+        Return an unsigned integer which represents the priority of this fusion pair.
+        The smaller is with higher priority.
+        """
+        return 0
