@@ -82,7 +82,7 @@ register_backend(
 # inductor problems.
 # aot_eager_decomp_partition just replaces the inductor compiler with nop to help
 # isolate inductor vs aot_eager errors
-@register_backend(name="aot_eager_decomp_partiton")
+@register_backend(name="aot_eager_decomp_partition")
 def aot_eager_decomp_partition(gm, fake_tensor_inputs):
     with functorch_config.patch(unlift_effect_tokens=True):
         aot_eager_decomp_partition = aot_autograd(
