@@ -1296,7 +1296,7 @@ def gen_register_replacement(
         )
         if not m or not hasattr(m, unique_name):
             log.warning(
-                "Precompiled pattern %r not found. Run gen_attention_patterns.py.",
+                "Precompiled pattern %r not found. Run torchen/fuse/gen_patterns.py.",
                 unique_name,
             )
         pat = getattr(m, unique_name)
