@@ -19388,8 +19388,7 @@ op_db: List[OpInfo] = [
     ),
     OpInfo(
         "nn.functional.nll_loss",
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         sample_inputs_func=sample_inputs_nll_loss,
         supports_forward_ad=True,
