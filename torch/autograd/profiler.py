@@ -1,4 +1,6 @@
 from collections import defaultdict
+from dataclasses import dataclass
+from time import perf_counter_ns
 from typing import Any, Dict, List, Optional
 from warnings import warn
 
@@ -85,6 +87,18 @@ def _run_on_profiler_start():
 
 def _run_on_profiler_stop():
     _set_is_profiler_enabled(False)
+
+
+@dataclass
+class _ProfilerStats:
+    "Profiler timing and stats used by developers to catch issues/regressions"
+    profiling_window_duration_sec: float = 0
+    number_of_events: int = 0
+    profiler_prepare_call_duration_us: int = 0
+    profiler_enable_call_duration_us: int = 0
+    profiler_disable_call_duration_us: int = 0
+    parse_kineto_call_duration_us: int = 0
+    function_events_build_tree_call_duration_us: int = 0
 
 
 class profile:
@@ -210,6 +224,9 @@ class profile:
             experimental_config = _ExperimentalConfig()
         self.experimental_config = experimental_config
         self.kineto_results: Optional[_ProfilerResult] = None
+        self.profiling_start_time_ns = 0
+        self.profiling_end_time_ns = 0
+        self._stats = _ProfilerStats()
 
         if not self.use_cpu:
             assert (
@@ -281,21 +298,38 @@ class profile:
 
     def _prepare_trace(self):
         self.entered = True
+        t0 = perf_counter_ns()
         _prepare_profiler(self.config(), self.kineto_activities)
+        t1 = perf_counter_ns()
+        self._stats.profiler_prepare_call_duration_us = int((t1 - t0) / 1000)
 
     def _start_trace(self):
         self.entered = True
         _run_on_profiler_start()
+        t0 = perf_counter_ns()
         _enable_profiler(self.config(), self.kineto_activities)
+        t1 = perf_counter_ns()
+        self._stats.profiler_enable_call_duration_us = int((t1 - t0) / 1000)
+        self.profiling_start_time_ns = t1
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
         if self.use_cuda:
             torch.cuda.synchronize()
+
+        t0 = perf_counter_ns()
         self.kineto_results = _disable_profiler()
+        t1 = perf_counter_ns()
+        self._stats.profiler_disable_call_duration_us = int((t1 - t0) / 1000)
+        self.profiling_end_time_ns = t0
+
         _run_on_profiler_stop()
+        t0 = perf_counter_ns()
         parsed_results = self._parse_kineto_results(self.kineto_results)
+        t1 = perf_counter_ns()
+        self._stats.parse_kineto_call_duration_us = int((t1 - t0) / 1000)
+
         self.function_events = EventList(
             parsed_results,
             use_cuda=self.use_cuda,
@@ -303,7 +337,15 @@ class profile:
             profile_memory=self.profile_memory,
             with_flops=self.with_flops,
         )
+        t0 = perf_counter_ns()
         self.function_events._build_tree()
+        t1 = perf_counter_ns()
+        self._stats.function_events_build_tree_call_duration_us = int((t1 - t0) / 1000)
+
+        self._stats.number_of_events = len(self.function_events)
+        self._stats.profiling_window_duration_sec = (
+            (self.profiling_end_time_ns - self.profiling_start_time_ns) * 1.0 / 1e9
+        )
         return False
 
     def __repr__(self):

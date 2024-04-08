@@ -3,6 +3,7 @@
 import sys
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -81,7 +82,7 @@ class TestMemoryPlanning(TestCase):
 
     @skipIfRocm(msg="test_aot_inductor doesn't work on ROCm")
     def test_abi_compatible(self):
-        from torch._inductor.aot_inductor_utils import AOTIRunnerUtil
+        from test_aot_inductor import AOTIRunnerUtil
 
         f, args = self._generate(device="cuda")
         dim0_x = Dim("dim0_x", min=1, max=2048)
@@ -116,4 +117,5 @@ class TestMemoryPlanning(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if HAS_CUDA:
+        run_tests()
