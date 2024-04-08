@@ -1846,11 +1846,16 @@ class CUDAGraphTreeManager:
         # Q1: Would there be overhead for type a,b,c,d?
         # A: No. We only check input mutation types for the first invocation of a function on a node.
         #
-        # Q2: If a function happens to type d during the first invocation on a node, could it still
+        # Q2: If a function happens to be type c during the first invocation on a node, could we detect
+        #     it as type d in the future?
+        # A:  Yes. This is done by `check_invariants` and guarantees the correctness.
+        #
+        # Q3: If a function happens to type d during the first invocation on a node, could it still
         #     be recognized as type c in the future?
         # A: No. But this should happen rarely according to our assumption. In the rare case that
         #    it happens, there would not be any correctness issues and the performance is the same
         #    as the eager (or inductor optimized) function.
+        #
         if function_id not in self.mutation_type_hint[self.current_node.id]:
             self._update_mutation_type_hint(function_id, new_inputs)
 
