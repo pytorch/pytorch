@@ -489,7 +489,7 @@ struct GlobalStateGuard {
     _default_dtype = at::get_default_dtype();
   }
 
-  inline bool check() {
+  inline bool check() const {
     auto& ctx = at::globalContext();
     return (_grad_mode == at::GradMode::is_enabled() &&
             _torch_function == torch::torch_function_enabled() &&
@@ -501,6 +501,31 @@ struct GlobalStateGuard {
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
             _num_threads == at::get_num_threads()) &&
         _default_dtype == at::get_default_dtype();
+  }
+
+  inline std::string reason() const {
+    std::ostringstream os;
+    auto& ctx = at::globalContext();
+    if (_grad_mode != at::GradMode::is_enabled())
+      os << "grad_mode ";
+    if (_torch_function != torch::torch_function_enabled())
+      os << "torch_function ";
+    if (_deterministic_algorithms != ctx.deterministicAlgorithms())
+      os << "deterministic_algorithms ";
+    if (_deterministic_algorithms_warn_only !=
+        ctx.deterministicAlgorithmsWarnOnly())
+      os << "deterministic_algorithms_warn_only ";
+    if (_allow_tf32 != ctx.allowTF32CuBLAS())
+      os << "allow_tf32 ";
+    if (_allow_fp16_reduce != ctx.allowFP16ReductionCuBLAS())
+      os << "allow_fp16_reduce ";
+    if (_allow_bf16_reduce != ctx.allowBF16ReductionCuBLAS())
+      os << "allow_bf16_reduce ";
+    if (_num_threads != at::get_num_threads())
+      os << "num_threads ";
+    if (_default_dtype != at::get_default_dtype())
+      os << "default_dtype ";
+    return os.str();
   }
 
   bool _grad_mode;
@@ -534,12 +559,23 @@ PyObject* GlobalStateGuard_check(
   }
 }
 
+PyObject* GlobalStateGuard_reason(
+    GlobalStateGuard* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  return PyUnicode_FromString(self->reason().c_str());
+}
+
 // NOLINTNEXTLINE(*array*)
 static PyMethodDef GlobalStateGuard_methods[] = {
     {"check",
      (PyCFunction)(void*)GlobalStateGuard_check,
      METH_NOARGS,
      "Return true if global state was the same as at creation time"},
+    {"reason",
+     (PyCFunction)(void*)GlobalStateGuard_reason,
+     METH_NOARGS,
+     "Return string reason for guard check failing"},
     {nullptr}};
 static PyTypeObject GlobalStateGuardType = {PyVarObject_HEAD_INIT(nullptr, 0)};
 
@@ -1089,6 +1125,14 @@ class GLOBAL_STATE : public LeafGuard {
   bool check_nopybind(PyObject* value) override { // borrowed ref
     // Ignore value arg, this is just to satisfy the interface.
     return _guard->check();
+  }
+
+  GuardDebugInfo check_verbose_nopybind(PyObject* value) override {
+    if (!_guard->check()) {
+      return GuardDebugInfo(
+          false, "GLOBAL_STATE changed: " + _guard->reason(), 0);
+    }
+    return GuardDebugInfo(true, 1);
   }
 
  private:
@@ -2968,6 +3012,7 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GLOBAL_STATE, LeafGuard, std::shared_ptr<GLOBAL_STATE>>(
       py_m, "GLOBAL_STATE")
       .def(py::init<py::list>())
+      .def("check_verbose", &GLOBAL_STATE::check_verbose)
       .def("__call__", &GLOBAL_STATE::check);
   py::class_<DATA_PTR_MATCH, LeafGuard, std::shared_ptr<DATA_PTR_MATCH>>(
       py_m, "DATA_PTR_MATCH")

@@ -494,7 +494,7 @@ void spgemm_cutlass_dispatch_layouts_tensor_c(
 
 // Perform multiply-add operation, using corresponding CUTLASS
 // sparse GEMM kernel, to given arguments:
-//     result = alpha * mat1 * mat2 + beta * input
+//     result = alpha * mat1 @ mat2 + beta * input
 // The "mat2" tensor is a dense tensor, while the "mat1" tensor is a
 // sparse semi-structured matrix.  The "input" tensor is optional; if
 // provided, it should be a vector, with the number of elements equal
