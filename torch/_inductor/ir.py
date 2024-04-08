@@ -1818,7 +1818,7 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=No
 
 
 def is_pointwise_with_channels_last_inputs(x):
-    if isinstance(x, TensorBox) or isinstance(x, StorageBox):
+    if isinstance(x, (TensorBox, StorageBox)):
         return is_pointwise_with_channels_last_inputs(x.data)
     if isinstance(x, Pointwise):
         all_reads = x.get_reads()
