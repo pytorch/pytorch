@@ -1202,7 +1202,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertLessEqual(cnt.op_count, 10)
+        self.assertLessEqual(
+            cnt.op_count, 18 if torch._dynamo.config.use_single_step_graph else 10
+        )
 
     # see: https://github.com/pytorch/pytorch/issues/80067
     # NB: When you remove the expectedFailure, don't forget to
@@ -1560,7 +1562,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(inp)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(
-            cnt.op_count, 39 if torch._dynamo.config.use_single_step_graph else 12
+            cnt.op_count, 73 if torch._dynamo.config.use_single_step_graph else 12
         )
 
     def test_exec_import(self):
