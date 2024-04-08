@@ -89,7 +89,6 @@ if config.abi_compatible:
         "test_qlinear_cpu",
         "test_qlinear_dequant_promotion_cpu",
         "test_qlinear_relu_cpu",
-        "test_randint_cpu",
         "test_randn_with_dtype_and_device_cpu",
         "test_scatter5_cpu",
         "test_scatter6_cpu",
@@ -103,7 +102,6 @@ if config.abi_compatible:
             f"{test_name}_dynamic_shapes"
         ] = test_torchinductor.TestFailure(("cpp_wrapper",), is_skip=False)
     skip_list = [
-        "test_linear1_cpu",  # segfault from double free
         "test_multihead_attention_cpu",
     ]
     for test_name in skip_list:
@@ -137,16 +135,19 @@ def make_test_case(
         tests.setUpClass()
         tests.setUp()
         try:
-            _, code = test_torchinductor.run_and_get_cpp_code(
-                func, *func_inputs if func_inputs else []
-            )
-            self.assertEqual("CppWrapperCodeCache" in code, True)
-            self.assertTrue(
-                all(
-                    code.count(string) == code_string_count[string]
-                    for string in code_string_count
+            with torch._C._PreserveDispatchKeyGuard():
+                torch._C._dispatch_tls_set_dispatch_key_included(torch._C.DispatchKey.Dense, True)
+
+                _, code = test_torchinductor.run_and_get_cpp_code(
+                    func, *func_inputs if func_inputs else []
                 )
-            )
+                self.assertEqual("CppWrapperCodeCache" in code, True)
+                self.assertTrue(
+                    all(
+                        code.count(string) == code_string_count[string]
+                        for string in code_string_count
+                    )
+                )
         finally:
             tests.tearDown()
             tests.tearDownClass()
@@ -219,6 +220,7 @@ if RUN_CPU:
         BaseTest("test_index_put1"),
         BaseTest("test_index_put_deterministic_fallback"),
         BaseTest("test_adding_tensor_offsets"),
+        BaseTest("test_inductor_layout_optimization_input_mutations"),
         BaseTest("test_int_div", "", test_cpu_repro.CPUReproTests()),
         BaseTest("test_linear1"),
         BaseTest("test_linear2"),
