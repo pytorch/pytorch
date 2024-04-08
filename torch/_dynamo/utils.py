@@ -777,19 +777,28 @@ def clone_input(x, *, dtype=None):
         # Handle sparse storage (no stride).
         if x.layout is torch.sparse_coo:
             return torch.sparse_coo_tensor(
-                torch_clone(x._indices()), torch_clone(x._values()), x.shape)
+                torch_clone(x._indices()), torch_clone(x._values()), x.shape
+            )
         elif x.layout is torch.sparse_csr:
             return torch.sparse_csr_tensor(
-                torch_clone(x.crow_indices()), torch_clone(x.col_indices()), torch_clone(x.values()), x.shape)
+                torch_clone(x.crow_indices()), torch_clone(x.col_indices()),
+                torch_clone(x.values()), x.shape
+            )
         elif x.layout is torch.sparse_csc:
             return torch.sparse_csc_tensor(
-                torch_clone(x.ccol_indices()), torch_clone(x.row_indices()), torch_clone(x.values()), x.shape)
+                torch_clone(x.ccol_indices()), torch_clone(x.row_indices()),
+                torch_clone(x.values()), x.shape
+            )
         elif x.layout is torch.sparse_bsr:
             return torch.sparse_bsr_tensor(
-                torch_clone(x.crow_indices()), torch_clone(x.col_indices()), torch_clone(x.values()), x.shape)
+                torch_clone(x.crow_indices()), torch_clone(x.col_indices()),
+                torch_clone(x.values()), x.shape
+            )
         elif x.layout is torch.sparse_bsc:
             return torch.sparse_bsc_tensor(
-                torch_clone(x.ccol_indices()), torch_clone(x.row_indices()), torch_clone(x.values()), x.shape)
+                torch_clone(x.ccol_indices()), torch_clone(x.row_indices()),
+                torch_clone(x.values()), x.shape
+            )
 
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
