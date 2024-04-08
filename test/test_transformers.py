@@ -3426,9 +3426,6 @@ class TestAttnBias(NNTestCase):
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
     @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     @skipIfTorchDynamo("This function already calls torch.compile.")
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: List[Tuple[int]]):
         cnts = CompileCounterWithBackend("aot_eager")
