@@ -730,6 +730,8 @@ void initDispatchBindings(PyObject* module) {
 
   py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
       m, "_AutoDispatchBelowAutograd");
+  py_context_manager<at::AutoDispatchBelowADInplaceOrView>(
+      m, "_AutoDispatchBelowADInplaceOrView");
 
   // Prints out the name of every operator that has a kernel registered to the
   // Dispatcher under [dispatch_key]. If no arguments are specified, it'll print
