@@ -278,3 +278,6 @@ jobs:
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
         if: always()
+        with:
+          docker-image: ${{ inputs.docker-image }}
+          gha-user: ${USER}
