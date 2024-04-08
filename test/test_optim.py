@@ -5,6 +5,7 @@ import tempfile
 from typing import Any, Dict, Tuple
 import unittest
 from copy import deepcopy
+from unittest.mock import patch
 
 import torch
 from torch.optim import Optimizer, SGD
@@ -17,7 +18,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_optimizers import (
     optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS)
+    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS, TEST_WITH_ROCM)
 from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase
 
 
@@ -553,7 +554,15 @@ class TestOptimRenewed(TestCase):
                 # RMSprop uses avg and grads
                 nintermediates = 2
 
-            self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)
+            expected_max_mem = st_max_mem + intermediate_size * nintermediates
+            # hipcc currently can't generate efficient code for the small buffer optimization
+            # code path (see Note [small buffer optimization] for details), thus we always
+            # dynamically allocate the tensor metadata for ROCM. Adjusting the expected max
+            # memory usage to account for this.
+            if TEST_WITH_ROCM:
+                expected_max_mem *= 1.02
+
+            self.assertLessEqual(mt_max_mem, expected_max_mem)
 
 
     @onlyCUDA
@@ -573,6 +582,28 @@ class TestOptimRenewed(TestCase):
             params[0].grad = torch.zeros_like(params[0])
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
+
+
+    @onlyCUDA
+    @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float32])
+    def test_fused_does_not_step_if_foundinf(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+        num_params = 5
+        for optim_input in optim_inputs:
+            for no_grad_scale in (False, True):
+                params = [torch.ones((1,), device=device, dtype=dtype) for _ in range(num_params)]
+                params_c = [param.clone().detach() for param in params]
+                for p in params:
+                    p.grad = torch.ones_like(p)
+                optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
+                optimizer.grad_scale = None if no_grad_scale else torch.ones((1,), dtype=dtype, device=device)
+                optimizer.found_inf = torch.ones((), dtype=dtype, device=device)
+                optimizer.step()
+                for p in params:
+                    if "step" in optimizer.state[p]:
+                        self.assertEqual(torch.zeros((), dtype=dtype, device=device), optimizer.state[p]["step"])
+                self.assertEqual(params, params_c)
 
 
     @onlyCUDA
@@ -1290,6 +1321,31 @@ class TestOptimRenewed(TestCase):
             res1 = optim_inf.step(closure)
             res2 = optim_neg_inf.step(closure)
             self.assertEqual(type(res1), type(res2))
+
+
+    @onlyCUDA
+    @optims([o for o in optim_db if "foreach" in o.supported_impls], dtypes=[torch.float32])
+    def test_defaults_changed_to_foreach(self, device, dtype, optim_info):
+        # Test that the default implementations for optimizers are changed to foreach
+        optim_cls = optim_info.optim_cls
+        model = torch.nn.Linear(5, 5)
+        model.to(dtype=dtype, device=device)
+        inpt = torch.rand(2, 5, dtype=dtype, device=device)
+
+        import inspect
+        module = inspect.getmodule(optim_cls)
+
+        for optim_input in optim_info.optim_inputs_func(device=device):
+            optim = optim_cls(model.parameters(), **optim_input.kwargs)
+            optim.zero_grad()
+            output = model(inpt)
+            loss = output.sum()
+            loss.backward()
+            with patch.object(
+                module, f"_multi_tensor_{optim_cls.__name__.lower()}"
+            ) as mocked_foreach_impl:
+                optim.step()
+                self.assertTrue(mocked_foreach_impl.called)
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)

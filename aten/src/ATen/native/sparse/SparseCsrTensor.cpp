@@ -800,8 +800,8 @@ Tensor empty_like_sparse_csr(
     self.layout(), " but you requested ", options.layout(), ")");
   if (options.layout() == kSparseCsr) {
     auto result = at::native::_sparse_csr_tensor_unsafe(
-        self.crow_indices().clone(),
-        self.col_indices().clone(),
+        self.crow_indices().to(options.device(), self.crow_indices().dtype(), false, true),
+        self.col_indices().to(options.device(), self.col_indices().dtype(), false, true),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
         optTypeMetaToScalarType(options.dtype()),
@@ -810,8 +810,8 @@ Tensor empty_like_sparse_csr(
     return result;
   } else if (options.layout() == kSparseCsc) {
     auto result = at::native::_sparse_csc_tensor_unsafe(
-        self.ccol_indices().clone(),
-        self.row_indices().clone(),
+        self.ccol_indices().to(options.device(), self.ccol_indices().dtype(), false, true),
+        self.row_indices().to(options.device(), self.row_indices().dtype(), false, true),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
         optTypeMetaToScalarType(options.dtype()),
@@ -820,8 +820,8 @@ Tensor empty_like_sparse_csr(
     return result;
   } else if (options.layout() == kSparseBsr) {
     auto result = at::native::_sparse_bsr_tensor_unsafe(
-        self.crow_indices().clone(),
-        self.col_indices().clone(),
+        self.crow_indices().to(options.device(), self.crow_indices().dtype(), false, true),
+        self.col_indices().to(options.device(), self.col_indices().dtype(), false, true),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
         optTypeMetaToScalarType(options.dtype()),
@@ -831,8 +831,8 @@ Tensor empty_like_sparse_csr(
     return result;
   } else if (options.layout() == kSparseBsc) {
     auto result = at::native::_sparse_bsc_tensor_unsafe(
-        self.ccol_indices().clone(),
-        self.row_indices().clone(),
+        self.ccol_indices().to(options.device(), self.ccol_indices().dtype(), false, true),
+        self.row_indices().to(options.device(), self.row_indices().dtype(), false, true),
         at::empty(self.values().sizes(), options.layout(kStrided)),
         self.sizes(),
         optTypeMetaToScalarType(options.dtype()),

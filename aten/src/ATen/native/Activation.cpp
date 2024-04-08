@@ -89,8 +89,8 @@ TORCH_META_FUNC(threshold)(const Tensor& self, const Scalar& threshold, const Sc
   build(TensorIteratorConfig()
     .set_check_mem_overlap(false)  // threshold is idempotent, so overlap is okay
     .add_output(result)
-    .add_input(self)
-    .add_input(self) // other
+    .add_const_input(self)
+    .add_const_input(self) // other
     .allow_cpu_scalars(true)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
@@ -393,7 +393,7 @@ TORCH_IMPL_FUNC(gelu_out_cpu) (
 auto approximate_type = get_gelutype_enum(approximate);
 #if AT_MKLDNN_ENABLED()
   if (use_mkldnn(self) && (approximate_type == GeluType::None)) {
-    const ideep::tensor& x = itensor_from_tensor(self);
+    const ideep::tensor& x = itensor_from_tensor(self, /*from_const_data_ptr*/true);
     ideep::tensor y = itensor_from_tensor(result);
     ideep::eltwise_forward::compute(
       x, y, ideep::algorithm::eltwise_gelu_erf, ideep::prop_kind::forward_training, /*alpha*/ 0.0);
@@ -579,7 +579,7 @@ inline void _rrelu_with_noise_train(
   opmath_t upper = upper_.to<opmath_t>();
   Tensor tmp_tensor = output.contiguous();
   scalar_t* output_data = tmp_tensor.data_ptr<scalar_t>();
-  scalar_t* input_data = input.data_ptr<scalar_t>();
+  const scalar_t* input_data = input.const_data_ptr<scalar_t>();
   scalar_t* noise_data = noise.data_ptr<scalar_t>();
   auto gen  = at::get_generator_or_default<CPUGeneratorImpl>(generator, detail::getDefaultCPUGenerator());
   std::lock_guard<std::mutex> lock(gen->mutex_);
@@ -717,8 +717,8 @@ Tensor _prelu_kernel(const Tensor& self, const Tensor& weight) {
   auto result = at::empty_like(self);
   auto iter = TensorIteratorConfig()
     .add_output(result)
-    .add_input(self)
-    .add_input(weight)
+    .add_const_input(self)
+    .add_const_input(weight)
     .build();
   prelu_stub(iter.device_type(), iter);
   return result;
