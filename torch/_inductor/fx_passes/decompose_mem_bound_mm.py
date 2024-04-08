@@ -69,38 +69,6 @@ def should_decompose_mm(mat1, mat2) -> bool:
     )
 
 
-def should_decompose_mmt(mat1, mat2) -> bool:
-    if is_node_meta_valid(mat1) and is_node_meta_valid(mat2):
-        mat1 = mat1.meta["val"]
-        mat2 = mat2.meta["val"]
-    else:
-        return False
-    return (
-        should_decompose_common(mat1, mat2)
-        and len(mat1.shape) == 2
-        and len(mat2.shape) == 2
-        and mat1.shape[0] >= MIN_FIRST_DIMENSION_DECOMPOSITION
-        and mat1.shape[1] < MAX_OTHER_DIMENSION_DECOMPOSITION
-        and mat2.shape[1] < MAX_OTHER_DIMENSION_DECOMPOSITION
-    )
-
-
-def should_decompose_mm_largek(mat1, mat2) -> bool:
-    if is_node_meta_valid(mat1) and is_node_meta_valid(mat2):
-        mat1 = mat1.meta["val"]
-        mat2 = mat2.meta["val"]
-    else:
-        return False
-    return (
-        should_decompose_common(mat1, mat2)
-        and len(mat1.shape) == 2
-        and len(mat2.shape) == 2
-        and mat1.shape[1] >= MIN_FIRST_DIMENSION_DECOMPOSITION
-        and mat1.shape[0] < MAX_OTHER_DIMENSION_DECOMPOSITION
-        and mat2.shape[1] < MAX_OTHER_DIMENSION_DECOMPOSITION
-    )
-
-
 def is_node_meta_valid(node: torch.fx.Node):
     return "val" in node.meta
 
