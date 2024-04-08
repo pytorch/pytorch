@@ -26,7 +26,7 @@ from .dicts import (
     DefaultDictVariable,
     SetVariable,
 )
-from .distributed import BackwardHookVariable, DistributedVariable
+from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
@@ -131,6 +131,7 @@ __all__ = [
     "NumpyNdarrayVariable",
     "NumpyVariable",
     "OptimizerVariable",
+    "PlacementVariable",
     "PythonModuleVariable",
     "RangeVariable",
     "RemovableHandleVariable",
