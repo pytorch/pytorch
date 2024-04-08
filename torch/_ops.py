@@ -795,15 +795,6 @@ class TorchBindOpOverload(OpOverload):
 
         register_side_effect_op(self)
 
-        def wrapper(mode, *args, **kwargs):
-            return _mannually_invoke_dispatch_mode_in_python(
-                mode, self, *args, **kwargs
-            )
-
-        self.py_impl(torch._subclasses.functional_tensor.FunctionalTensorMode)(wrapper)
-        self.py_impl(torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode)(wrapper)
-        self.py_impl(torch._subclasses.fake_tensor.FakeTensorMode)(wrapper)
-
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
         _TORCH_BIND_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
@@ -815,28 +806,52 @@ class TorchBindOpOverload(OpOverload):
         for key in _TORCH_BIND_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
             self.non_fallthrough_keys = self.non_fallthrough_keys.remove(key)
 
+    # Note: we automaticallly add implementations for modes that useful for tracing.
+    # We only add implementation when we must dispatch in python by checking the inputs.
+    # We cannot do it before seeing the inputs ecause some torch bind ops
+    # (e.g. profiler record function) might be registered globally
+    # with a single default implementation in cpp. We might accidently trace them
+    # into graph.
+    def _maybe_py_impl_default_dispatch_mode(self):
+        def wrapper(mode, *args, **kwargs):
+            return _mannually_invoke_dispatch_mode_in_python(
+                mode, self, *args, **kwargs
+            )
+
+        for mode in (
+            torch._subclasses.functional_tensor.FunctionalTensorMode,
+            torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode,
+            torch._subclasses.fake_tensor.FakeTensorMode,
+        ):
+            if mode not in self.python_key_mode_table:
+                self.py_impl(mode)(wrapper)
+
     # use `self_` to avoid naming collide with arguments that
     # are named "self". This way, they can be called by kwargs.
     def __call__(self_, *args, **kwargs):  # noqa: B902
         # The path when any inputs are FakeScriptObject, we need to
         # skip c++ dispatcher and dispatch in python through _get_dispatch of python_dispatcher.
         if _must_dispatch_in_python(args, kwargs):
-            dispatch_key_set = _compute_keyset(args, kwargs, self_.non_fallthrough_keys)
-            highest_dispatch_key = dispatch_key_set.highestPriorityTypeId()
-            handler = (
-                self_._get_dispatch(highest_dispatch_key)
-                if highest_dispatch_key not in self_._dispatch_cache
-                else self_._dispatch_cache[highest_dispatch_key]
-            )
-            if isinstance(handler, DispatchKey):
-                raise RuntimeError(
-                    f"Cannot handle FakeScriptObject with python dispatcher with dispatch key {handler}."
-                    f"Please implement it by annotating a python callable with py_impl({handler})."
-                )
-            assert isinstance(handler, Callable)
-            return handler(*args, **kwargs)
-        # The normal path when we're not tracing, which goes through C++ Dispatcher
+            self_._maybe_py_impl_default_dispatch_mode()
+            return self_.dispatch_in_python(args, kwargs)
+
         return self_._op(*args, **kwargs)
+
+    def dispatch_in_python(self, args, kwargs):
+        dispatch_key_set = _compute_keyset(args, kwargs, self.non_fallthrough_keys)
+        dispatch_key = dispatch_key_set.highestPriorityTypeId()
+        handler = (
+            self._get_dispatch(dispatch_key)
+            if dispatch_key not in self._dispatch_cache
+            else self._dispatch_cache[dispatch_key]
+        )
+        if isinstance(handler, DispatchKey):
+            raise RuntimeError(
+                f"Cannot handle FakeScriptObject with python dispatcher with dispatch key {handler}."
+                f"Please implement it by annotating a python callable with py_impl({handler})."
+            )
+        assert isinstance(handler, Callable)  # type: ignore[arg-type]
+        return handler(*args, **kwargs)
 
 
 def _must_dispatch_in_python(args, kwargs):
@@ -978,7 +993,7 @@ def _call_overload_packet_from_python(op: OpOverloadPacket, args, kwargs):
     # Re-use the torch function handling logic in cpp
     torch_function_called, ret = torch._C._maybe_call_torch_function_for_op_packet(
         op, *args, **kwargs
-    )
+    )  # type: ignore[attr-defined]
 
     if torch_function_called:
         return ret
