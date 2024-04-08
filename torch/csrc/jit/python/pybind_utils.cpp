@@ -776,13 +776,12 @@ py::object invokeOperatorFromPython(
 }
 
 py::tuple _maybe_handle_torch_function(
-  const std::string& ns,
-  const std::string& method_name,
-  const std::string& overload_name,
-  bool is_overload,
-  py::args args,
-  const py::kwargs& kwargs) {
-
+    const std::string& ns,
+    const std::string& method_name,
+    const std::string& overload_name,
+    bool is_overload,
+    py::args args,
+    const py::kwargs& kwargs) {
   std::vector<PyObject*> overloaded_args;
   size_t total_arg_num = args.size() + kwargs.size();
   for (const auto i : c10::irange(args.size())) {
@@ -821,14 +820,16 @@ py::tuple _maybe_handle_torch_function(
     }
     std::string module_name("torch.ops");
     module_name.append(ns);
-    return py::make_tuple(true, pybind11::reinterpret_steal<py::object>(
-        handle_torch_function_no_python_arg_parser(
-            overloaded_args,
-            args.ptr(),
-            kwargs.ptr(),
-            method_name.c_str(),
-            self_func.ptr(),
-            module_name.c_str())));
+    return py::make_tuple(
+        true,
+        pybind11::reinterpret_steal<py::object>(
+            handle_torch_function_no_python_arg_parser(
+                overloaded_args,
+                args.ptr(),
+                kwargs.ptr(),
+                method_name.c_str(),
+                self_func.ptr(),
+                module_name.c_str())));
   }
   return py::make_tuple(false, py::none());
 }
@@ -840,13 +841,15 @@ py::object _get_operation_for_overload_or_packet(
     const py::kwargs& kwargs,
     bool is_overload,
     c10::optional<c10::DispatchKey> dk) {
-
-    std::string ns = symbol.ns().toUnqualString();
-    std::string method_name = symbol.toUnqualString();
-    std::string overload_name = operations[0]->schema().overload_name();
-    auto res = _maybe_handle_torch_function(ns, method_name, overload_name, is_overload, args, kwargs);
-    auto torch_function_called = py::cast<bool>(res[0]);
-    return torch_function_called ? res[1] : invokeOperatorFromPython(operations, args, kwargs, dk);
+  std::string ns = symbol.ns().toUnqualString();
+  std::string method_name = symbol.toUnqualString();
+  std::string overload_name = operations[0]->schema().overload_name();
+  auto res = _maybe_handle_torch_function(
+      ns, method_name, overload_name, is_overload, args, kwargs);
+  auto torch_function_called = py::cast<bool>(res[0]);
+  return torch_function_called
+      ? res[1]
+      : invokeOperatorFromPython(operations, args, kwargs, dk);
 }
 
 } // namespace torch::jit
