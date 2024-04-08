@@ -190,6 +190,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res = torch.compile(f, backend="aot_eager")(*inputs)
         self.assertTrue(torch.allclose(res, f(*inputs)))
 
+    @unittest.skipIf(IS_WINDOWS, "triton")
     def test_compile_inductor(self):
         def f(x):
             torch.ops.aten._print("moo")
