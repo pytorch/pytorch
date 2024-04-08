@@ -430,6 +430,12 @@ class OutputGraph:
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
 
+        ci = torch._C._functorch.peek_interpreter_stack()
+        if ci is not None:
+            self.guards.add(
+                GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
+            )
+
     def synthetic_graph_input(self, fn, args):
         """
         call fn(*args) before the graph runs and turn the result into a fake input.
@@ -726,7 +732,7 @@ class OutputGraph:
                 tracer = self.root_tracer
 
             if get_static_address_type(target) == "guarded":
-                install_guard(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
+                install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             elif not is_constant_source(source):
                 install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
@@ -872,6 +878,12 @@ class OutputGraph:
         self.cleanup_graph()
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
+
+        # realize any unrealized tensor VTs in case they
+        # need to be added to self.nn_modules as attributes
+        for value in stack_values:
+            value.realize()
+
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
         # This prevents a strong ref cycle where Dynamo created code holds on to references
@@ -1173,13 +1185,7 @@ class OutputGraph:
 
     @property
     def placeholders(self) -> List[fx.Node]:
-        r = []
-        for node in self.graph.nodes:
-            if node.op == "placeholder":
-                r.append(node)
-                continue
-            break
-        return r
+        return self.graph.find_nodes(op="placeholder")
 
     @property
     def graphargs(self) -> List[GraphArg]:
