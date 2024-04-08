@@ -1659,9 +1659,8 @@ class TestCompositeCompliance(TestCase):
             for kw, arg in kwargs.items():
                 check_cow_input(arg, kwargs_copy[kw], kw)
 
-            # Call backward op if it is supported
-            # NOTE: This part of the test is based on 
-            #       `composite_compliance.check_backward_formula`
+            # Call backward op if it is supported. This part of the test is
+            # based on `composite_compliance.check_backward_formula`
             if op.supports_autograd and len(leaf_tensors) > 0 and not op.skip_cow_input_backward:
                 if sample.output_process_fn_grad is not None:
                     results_raw = sample.output_process_fn_grad(results_raw)
@@ -1679,8 +1678,12 @@ class TestCompositeCompliance(TestCase):
                     output_grads_copy.append(output_grad.clone().detach())
                     output_grads.append(torch._lazy_clone(output_grad))
 
-                input_grads = torch.autograd.grad(results, leaf_tensors, output_grads,
-                     allow_unused=True, retain_graph=True)
+                input_grads = torch.autograd.grad(
+                    results,
+                    leaf_tensors,
+                    output_grads,
+                    allow_unused=True,
+                    retain_graph=True)
 
                 # Check that COW inputs remain COW after the backward op is executed
                 for idx, arg in enumerate(args):
