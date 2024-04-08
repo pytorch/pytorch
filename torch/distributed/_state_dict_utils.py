@@ -338,6 +338,9 @@ def _copy_state_dict(
             The state dict we are copying into. This state_dict must have exactly
              the same structure as the source `state_dict`.
         non_blocking: (bool): Whether copy ops should be performed asynchronously
+
+    Returns:
+        State Dict copy
     """
 
     return _iterate_state_dict(
