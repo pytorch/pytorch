@@ -82,10 +82,9 @@ register_backend(
 # inductor problems.
 # aot_eager_decomp_partition just replaces the inductor compiler with nop to help
 # isolate inductor vs aot_eager errors
-@register_backend(name="aot_eager_decomp_partition")
 def aot_eager_decomp_partition(gm, fake_tensor_inputs):
     with functorch_config.patch(unlift_effect_tokens=True):
-        aot_eager_decomp_partition = aot_autograd(
+        return aot_autograd(
             # these are taken from memory_efficient_fusion()
             fw_compiler=boxed_nop,
             bw_compiler=boxed_nop,
@@ -97,6 +96,11 @@ def aot_eager_decomp_partition(gm, fake_tensor_inputs):
                 min_cut_rematerialization_partition, compiler="inductor"
             ),
         )(gm, fake_tensor_inputs)
+
+
+register_backend(
+    name="aot_eager_decomp_partition", compiler_fn=aot_eager_decomp_partition
+)
 
 
 # AOT Autograd with torchscript backend. Default partitioner.
