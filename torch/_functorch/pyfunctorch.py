@@ -85,6 +85,30 @@ def temporarily_pop_interpreter_stack():
     finally:
         push_dynamic_layer_stack(saved)
 
+@contextlib.contextmanager
+def temporarily_clear_interpreter_stack():
+    stack = []
+    try:
+        while torch._C._functorch.peek_interpreter_stack() is not None:
+            stack.append(pop_dynamic_layer_stack())
+        yield list(stack)
+    finally:
+        while stack:
+            push_dynamic_layer_stack(stack.pop())
+
+@contextlib.contextmanager
+def temporarily_restore_interpreter_stack(stack):
+    pushed = []
+    try:
+        for s in reversed(stack):
+            push_dynamic_layer_stack(s)
+            pushed.append(s)
+        yield
+    finally:
+        for s in reversed(pushed):
+            # TODO: would be nice to assert that the layers are the same, but
+            # Python object identity is not preserved
+            pop_dynamic_layer_stack()
 
 class VmapInterpreter(FuncTorchInterpreter):
     def __init__(self, cdata: CInterpreter):
