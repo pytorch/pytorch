@@ -1,5 +1,4 @@
 # Owner(s): ["module: c10d"]
-import sys
 import threading
 import unittest
 from typing import List
@@ -9,7 +8,6 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._C import FileCheck
-from torch._inductor.aot_inductor_utils import AOTIRunnerUtil
 from torch._inductor.utils import fresh_inductor_cache, run_and_get_triton_code
 from torch.distributed._functional_collectives import (
     all_gather_into_tensor_coalesced,
@@ -33,6 +31,24 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._triton import has_triton
+
+
+def load_test_module(name):
+    import sys
+    from importlib.machinery import SourceFileLoader
+    from pathlib import Path
+    from unittest import mock
+
+    testdir = Path(__file__).absolute().parent.parent
+    with mock.patch("sys.path", [*sys.path, str(testdir)]):
+        return SourceFileLoader(
+            name, str(testdir / f"{name.replace('.', '/')}.py")
+        ).load_module()
+
+
+AOTIRunnerUtil = load_test_module("inductor.test_aot_inductor_utils").AOTIRunnerUtil
+
+import sys
 
 if not dist.is_available():
     print("distributed package not available, skipping tests", file=sys.stderr)
