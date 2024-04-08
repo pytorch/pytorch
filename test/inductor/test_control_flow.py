@@ -527,7 +527,9 @@ class WhileLoopModels:
             return f * g / 1.41
 
     # TODO(aakhundov): add while_loop test with outer buffers
-    # once dynamo / export allows while_loop closure capture
+    # with dynamic=True once dynamo / export allows while_loop
+    # closure capture with mark_dynamic:
+    # https://github.com/pytorch/pytorch/issues/123596
     class OuterBuffers(torch.nn.Module):
         def forward(self, c, a, b):
             d = a * 2
@@ -629,6 +631,7 @@ class WhileLoopTests(TestCase):
             dynamic=dynamic,
         )
 
+    @skipIfRocm
     @requires_cuda
     @parametrize("device", ["cpu", "cuda"])
     @parametrize("dynamic", [False, True])
@@ -637,6 +640,23 @@ class WhileLoopTests(TestCase):
         self._run_test(
             model=WhileLoopModels.Parameters(device),
             inputs=(torch.randn(10, 20),),
+            device=device,
+            dynamic=dynamic,
+        )
+
+    @requires_cuda
+    @parametrize("device", ["cpu", "cuda"])
+    # dynamic=True doesn't work now due to
+    # https://github.com/pytorch/pytorch/issues/123596
+    @parametrize("dynamic", [False])
+    def test_while_loop_with_outer_buffers(self, device, dynamic):
+        # while_loop control flow with outer code
+        self._run_test(
+            model=WhileLoopModels.OuterBuffers(),
+            inputs=(
+                torch.randn(10, 20),
+                torch.randn(10, 20),
+            ),
             device=device,
             dynamic=dynamic,
         )
