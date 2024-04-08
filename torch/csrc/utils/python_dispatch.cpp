@@ -730,6 +730,8 @@ void initDispatchBindings(PyObject* module) {
 
   py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
       m, "_AutoDispatchBelowAutograd");
+  py_context_manager<at::AutoDispatchBelowADInplaceOrView>(
+      m, "_AutoDispatchBelowADInplaceOrView");
 
   // Prints out the name of every operator that has a kernel registered to the
   // Dispatcher under [dispatch_key]. If no arguments are specified, it'll print
@@ -836,6 +838,33 @@ void initDispatchBindings(PyObject* module) {
 
   m.def("_non_sym_sizes", [](const at::Tensor& a) {
     return a.sizes(); // NB: NOT sym_size
+  });
+
+  m.def("_set_throw_on_mutable_data_ptr", [](const at::Tensor& t) {
+    if (!t.unsafeGetTensorImpl()->has_storage()) {
+      // If the Tensor doesn't have a storage, then accessing .data_ptr()
+      // will already raise an error.
+      return;
+    }
+    // Otherwise, set (on the StorageImpl) that accessing (mutable) data_ptr
+    // will throw.
+    t.unsafeGetTensorImpl()
+        ->storage()
+        .unsafeGetStorageImpl()
+        ->set_throw_on_mutable_data_ptr();
+  });
+
+  // Invariant: you must ONLY call this with FakeTensors.
+  m.def("_set_warn_deprecated_on_mutable_data_ptr", [](const at::Tensor& t) {
+    if (!t.unsafeGetTensorImpl()->has_storage()) {
+      // If the Tensor doesn't have a storage, then accessing .data_ptr()
+      // will already raise an error.
+      return;
+    }
+    t.unsafeGetTensorImpl()
+        ->storage()
+        .unsafeGetStorageImpl()
+        ->set_warn_deprecated_on_mutable_data_ptr();
   });
 
   using c10::impl::TorchDispatchModeKey;

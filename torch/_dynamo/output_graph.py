@@ -30,7 +30,6 @@ from torch.fx.experimental.symbolic_shapes import free_symbols, is_symbolic, Sha
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._sympy.interp import sympy_interp
 from torch.utils._sympy.reference import PythonReferenceAnalysis
-from torch.utils.weak import WeakTensorKeyDictionary
 
 from . import config, logging as torchdynamo_logging, variables
 from .backends.registry import CompiledFn, CompilerFn
@@ -250,7 +249,8 @@ class OutputGraph:
         self.export = export
         self.export_constraints = export_constraints
         self.frame_state = frame_state
-        self.tensor_weakref_to_sizes_strides = WeakTensorKeyDictionary()
+        # Map from graph input's `Source` to sizes / strides metadata
+        self.input_source_to_sizes_strides: Dict[Source, Dict[str, Any]] = {}
         self.cleanup_hooks: List[Callable[[], Any]] = []
         # compile_id is an id number for the current torch.compile
         self.compile_id: int = next(_compile_id_counter)
@@ -292,11 +292,14 @@ class OutputGraph:
 
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=shape_env,
-            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
-            allow_non_fake_inputs=True if self.export else False,
-        )
+        import torch._functorch.config as _config
+
+        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=shape_env,
+                # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
+                allow_non_fake_inputs=True if self.export else False,
+            )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.init_ambient_guards()
 
@@ -426,6 +429,12 @@ class OutputGraph:
         self.guards.add(
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
+
+        ci = torch._C._functorch.peek_interpreter_stack()
+        if ci is not None:
+            self.guards.add(
+                GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
+            )
 
     def synthetic_graph_input(self, fn, args):
         """
@@ -722,11 +731,10 @@ class OutputGraph:
                 # are registered as get_attr nodes in the root graph.
                 tracer = self.root_tracer
 
-            if not is_constant_source(source):
-                install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
-
             if get_static_address_type(target) == "guarded":
-                install_guard(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
+                install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            elif not is_constant_source(source):
+                install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
                 assert self.param_name_to_source is not None
@@ -742,10 +750,19 @@ class OutputGraph:
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
 
-            install_guard(source.make_guard(GuardBuilder.NN_MODULE))
+            if source:
+                install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
-            def wrap_name(module_key):
-                return NNModuleVariable(type(target), module_key, target, **options)
+                def wrap_name(module_key):
+                    return NNModuleVariable(type(target), module_key, target, **options)
+
+            else:
+                # This is Dynamo created graph module, e.g., graph module coming
+                # from higher order ops. NNModuleVariable tracker can't be
+                # sourceless, so let's return a unspecializedNNModule variable
+                # tracker.
+                def wrap_name(module_key):
+                    return variables.UnspecializedNNModuleVariable(target, **options)
 
         elif isinstance(target, (torch.SymInt, torch.SymFloat)):
             # HACKY CODE REGION BEGIN
@@ -861,6 +878,12 @@ class OutputGraph:
         self.cleanup_graph()
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
+
+        # realize any unrealized tensor VTs in case they
+        # need to be added to self.nn_modules as attributes
+        for value in stack_values:
+            value.realize()
+
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
         # This prevents a strong ref cycle where Dynamo created code holds on to references
@@ -938,6 +961,10 @@ class OutputGraph:
                 self.compile_and_call_fx_graph(tx, list(reversed(stack_values)), root)
                 + [create_instruction("UNPACK_SEQUENCE", arg=len(stack_values))]
             )
+            # restore all the live local vars
+            self.add_output_instructions(
+                [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
+            )
         else:
             graph_output_var = self.new_var("graph_out")
             pass1 = PyCodegen(tx, root, graph_output_var)
@@ -952,6 +979,7 @@ class OutputGraph:
             )
             self.codegen_suffix(tx, stack_values, pass2)
 
+            stored_graph_output_var = False
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
                 output.extend(
@@ -960,15 +988,21 @@ class OutputGraph:
 
                 if len(pass2.graph_outputs) != 0:
                     output.append(pass2.create_store(graph_output_var))
+                    stored_graph_output_var = True
                 else:
                     output.append(create_instruction("POP_TOP"))
             append_prefix_insts()
             self.add_output_instructions(output + pass2.get_instructions())
 
-        # restore all the live local vars
-        self.add_output_instructions(
-            [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
-        )
+            # restore all the live local vars
+            self.add_output_instructions(
+                [PyCodegen(tx).create_store(var) for var in reversed(restore_vars)]
+            )
+
+            if stored_graph_output_var:
+                self.add_output_instructions(
+                    [PyCodegen(tx).create_delete(graph_output_var)]
+                )
 
     def codegen_suffix(self, tx, stack_values, cg):
         if self.backward_state:
@@ -986,6 +1020,7 @@ class OutputGraph:
             for arg in args:
                 cg(arg)
             cg.extend_output(create_call_function(len(args), True))
+            cg.extend_output([create_instruction("POP_TOP")])
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
         self.side_effects.codegen_update_mutated(cg)
@@ -1124,10 +1159,13 @@ class OutputGraph:
         self.call_cleanup_hooks()
         old_fake_mode = self.tracing_context.fake_mode
         if not self.export:
-            # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
-            backend_fake_mode = torch._subclasses.FakeTensorMode(
-                shape_env=old_fake_mode.shape_env,
-            )
+            import torch._functorch.config as _config
+
+            with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+                backend_fake_mode = torch._subclasses.FakeTensorMode(
+                    shape_env=old_fake_mode.shape_env,
+                )
             # TODO(voz): Ostensibily, this should be scoped and
             # restore back to old_fake_mode, but doing so currently violates
             # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
@@ -1147,13 +1185,7 @@ class OutputGraph:
 
     @property
     def placeholders(self) -> List[fx.Node]:
-        r = []
-        for node in self.graph.nodes:
-            if node.op == "placeholder":
-                r.append(node)
-                continue
-            break
-        return r
+        return self.graph.find_nodes(op="placeholder")
 
     @property
     def graphargs(self) -> List[GraphArg]:

@@ -2420,6 +2420,20 @@ class CPUReproTests(TestCase):
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 0
 
+    def test_outer_loop_fusion(self):
+        def fn(x):
+            max = torch.amax(x, dim=-1, keepdim=True)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            assert len(metrics.cpp_outer_loop_fused_inner_counts) == 1
+            assert metrics.cpp_outer_loop_fused_inner_counts[0] == 2
+
     def test_argmin(self):
         def fn(x):
             return torch.argmin(x, -1)
@@ -2780,6 +2794,18 @@ class CPUReproTests(TestCase):
         a = torch.tensor([])
         with self.assertRaises(RuntimeError):
             torch.compile(fn)(a)
+
+    @torch.no_grad()
+    @torch._inductor.config.patch(freezing=True)
+    def test_issue122380(self):
+        def func(x):
+            t1 = torch.unbind(x)
+            t2 = torch.stack(t1, dim=1)
+            t3 = torch.tanh(t2)
+            return t3
+
+        x = torch.randn(2, 3, 4)
+        self.assertEqual(torch.compile(func)(x), func(x))
 
     def test_ir_node_str(self):
         @torch.compile
@@ -3527,8 +3553,7 @@ class CPUReproTests(TestCase):
         x = torch.randint(0, 100, (819,), dtype=torch.int64)
         metrics.reset()
         self.common(fn, (x,))
-        # TODO: support vectorized int64 masked load
-        assert metrics.generated_cpp_vec_kernel_count == 0
+        assert metrics.generated_cpp_vec_kernel_count == 1
 
     @config.patch({"cpp.dynamic_threads": True})
     def test_reduction_with_dynamic_threads(self):
