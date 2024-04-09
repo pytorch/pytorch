@@ -147,6 +147,26 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         opt_fn(torch.randn(4))
         self.assertEqual(cnts.frame_count, 2)
 
+    def test_disable_if_config_true(self):
+        @torch._dynamo.disable_if_config_true("dummy_attr")
+        def fn(x):
+            return x.cos().sin()
+
+        torch._dynamo.config._config["dummy_attr"] = True
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn(torch.randn(4))
+        self.assertEqual(cnts.frame_count, 0)
+
+        torch._dynamo.reset()
+
+        torch._dynamo.config._config["dummy_attr"] = False
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        opt_fn(torch.randn(4))
+        self.assertEqual(cnts.frame_count, 1)
+        del torch._dynamo.config._config["dummy_attr"]
+
     @patch.object(torch._dynamo.config, "suppress_errors", True)
     def test_nested_disable_decorator(self):
         cnts = torch._dynamo.testing.CompileCounter()

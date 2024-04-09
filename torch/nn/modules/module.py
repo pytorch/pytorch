@@ -2574,6 +2574,6 @@ class Module:
 
         See :func:`torch.compile` for details on the arguments for this function.
         """
-        from torch._dynamo import trace_rules
-        trace_rules.skip_module_hook_by_config(self)
+        # from torch._dynamo import trace_rules
+        # trace_rules.skip_module_hook_by_config(self)
         self._compiled_call_impl = torch.compile(self._call_impl, *args, **kwargs)
