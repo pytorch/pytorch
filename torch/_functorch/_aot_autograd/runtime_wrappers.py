@@ -69,17 +69,19 @@ def create_runtime_wrapper(
     keep_input_mutations: bool,
     disable_amp: bool,
 ):
-    num_tokens = len(runtime_metadata.tokens)
-
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
 
     def runtime_wrapper(args: List[Any]):
-        # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-        if num_tokens > 0:
+        num_tokens = len(runtime_metadata.tokens)
+        if config.unlift_effect_tokens:
+            assert num_tokens == 0
+        elif num_tokens > 0:
+            # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
+            # NOTE: this keeps an extra reference to the old args until the end of this function
             old_args = args
-            args = [*[torch.empty(0)] * num_tokens, *args]  # only for flattened
-            old_args.clear()
+            args = [[None] * num_tokens, *args]
+            old_args.clear()  # only for flattened
 
         if trace_joint:
             args_ = list(args)
