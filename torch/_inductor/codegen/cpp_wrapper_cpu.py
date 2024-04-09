@@ -928,6 +928,9 @@ class CppWrapperCpu(WrapperCodeGen):
 
         output2idx: Dict[str, int] = {}
         for idx, output in enumerate(output_refs):
+            if output == self.none_str:
+                continue
+
             is_constant_buffer = output in cst_names
             output_buffer = V.graph.graph_outputs[idx]
             if isinstance(output_buffer, ir.BaseView):
@@ -1133,8 +1136,38 @@ class CppWrapperCpu(WrapperCodeGen):
         # ArrayRefTensor and at::Tensor is still fragile.
         self.allow_stack_allocation = False
 
+        # HACK: val_to_arg_str jams multiple arguments together using a comma. If that
+        # ever breaks, it needs to be reworked to be able to return multiple arguments,
+        # and the split-on-comma code here needs to be removed.
+        def is_number(s: str):
+            try:
+                int(s)
+                return True
+            except ValueError:
+                pass
+
+            try:
+                float(s)
+                return True
+            except ValueError:
+                return False
+
+        wrapped_args = []
+        for x in args:
+            pieces = x.split(", ")
+            for piece in pieces:
+                # We only really *need* convert_arrayref_tensor_to_tensor for
+                # ArrayRefTensors. The code flowing into here uses `0` for nullptr,
+                # which convert_arrayref_tensor_to_tensor would blindly coerce to int,
+                # so just avoid wrapping integers.
+                if not is_number(piece):
+                    piece = f"convert_arrayref_tensor_to_tensor({piece})"
+                wrapped_args.append(piece)
+
         shim_fn = self.get_c_shim_func_name(kernel)
-        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));")
+        self.writeline(
+            f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(wrapped_args)}));"
+        )
 
     def generate_c_shim_extern_kernel_alloc(self, extern_kernel, args):
         # registered output buffer name
@@ -2070,9 +2103,9 @@ RAIIAtenTensorHandle {output_arg}(
                     else:
                         # For datatypes with auxiliary info, we need to hoist out the extra arguments.
                         # NOTE: This only works if there is one additional argument, though it can easily be generalized.
-                        array_ptr, len_ = arg_str.rsplit(", ")
-                        self.writeline(f"auto {var_name} = {array_ptr};")
-                        return f"&{var_name}, {len_}"
+                        main_value, aux = arg_str.rsplit(", ")
+                        self.writeline(f"auto {var_name} = {main_value};")
+                        return f"&{var_name}, {aux}"
                 else:
                     self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
                     return f"&{var_name}"
