@@ -648,9 +648,6 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
             assert isinstance(compiled_fn, torch.fx.GraphModule)
             return compiled_fn, fw_metadata
 
-        if not hasattr(compiled_fn, "_boxed_call"):
-            compiled_fn = make_boxed_func(compiled_fn)
-
         return compiled_fn
 
 
@@ -925,7 +922,7 @@ def aot_module_simplified(
     # the boxed calling convention, but aot_module_simplified somehow
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
-    def forward(*runtime_args):
+    def forward(*runtime_args: Tuple[Any]):
         full_args = []
         full_args.extend(params_flat)
         full_args.extend(runtime_args)
