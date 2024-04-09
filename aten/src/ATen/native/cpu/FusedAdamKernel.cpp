@@ -334,7 +334,7 @@ void adam_fused_step_impl(
   */
   constexpr size_t cacche_line_size = 64;
   size_t num_tasks = param.numel();
-  size_t n_task_cache_line_aligned;
+  size_t n_task_cache_line_aligned = num_tasks;
   size_t size_type = sizeof(scalar_t);
   size_t num_threads = get_num_threads();
   int64_t chunk_size = divup(num_tasks, num_threads);
