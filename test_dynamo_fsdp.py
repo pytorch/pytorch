@@ -148,6 +148,8 @@ sys.excepthook = handle_exception
 
 # NOTE: copied from TorchTrain
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper as ptd_checkpoint_wrapper
+from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import CheckpointImpl
+from torch.utils.checkpoint import checkpoint
 
 class ACConfigClass:
     mode: str = "selective"
@@ -228,10 +230,10 @@ def init():
     # simple_mlp + unbalanced -> works
     # nested_fully_shard + balanced -> works
     # nested_fully_shard + unbalanced -> works
-    test_case = "simple_mlp"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
+    test_case = "nested_fully_shard"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
     balanced = False
     mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
-    activation_checkpoint = False
+    activation_checkpoint = True
     if balanced:
         hidden_dim = 1234
     else:
