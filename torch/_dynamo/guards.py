@@ -1719,6 +1719,11 @@ class CheckFunctionManager:
         # Break retain cycle. See test_release_input_memory
         w_builder = weakref.ref(builder, cleanup_builder)
 
+        # Delay the duplicate input guards because the sort_key does not give
+        # correct sequence. This is not needed for CPP guards because tree
+        # structure takes care of the order.
+        duplicate_input_guards = set()
+
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
                 not config.guard_nn_modules
@@ -1731,7 +1736,21 @@ class CheckFunctionManager:
             ):
                 continue
 
+            # Delay the duplicate input guards
+            if not config.enable_cpp_guard_manager:
+                if isinstance(guard.create_fn, functools.partial):
+                    fn = guard.create_fn.func
+                    if fn is GuardBuilder.DUPLICATE_INPUT:
+                        duplicate_input_guards.add(guard)
+                        continue
+
             guard.create(builder)
+
+        # Build duplicate input guards
+        if not config.enable_cpp_guard_manager:
+            for guard in duplicate_input_guards:
+                guard.create(builder)
+
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
