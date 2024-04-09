@@ -225,8 +225,8 @@ def _get_module_name_filter(module_name: str):
     return module_name_filter
 
 
-def _get_module_type_filter(tp: Callable):
-    """Get the module_type_filter function for a given module type, the filter accepts
+def _get_module_type_filter(tp: str):
+    """Get the module_type_filter function for a given module class name, the filter accepts
     a node and checks if the node comes from a module that has certain module type
 
     For example:
@@ -240,18 +240,24 @@ def _get_module_type_filter(tp: Callable):
 
     def module_type_filter(n: Node) -> bool:
         # example: {
-        #     'L__self___sub': ("L['self'].sub", <class '....Sub'>),
-        #     'L__self___sub_linear': ("L['self'].sub.linear", <class 'torch.nn.modules.linear.Linear'>)
+        #     'L__self___sub': ("L['self'].sub", '....Sub'),
+        #     'L__self___sub_linear': ("L['self'].sub.linear", 'torch.nn.modules.linear.Linear')
         # }
         nn_module_stack = n.meta.get("nn_module_stack", {})
-        types = [t for _, t in nn_module_stack.values()]
+        types = []
+        for _, t in nn_module_stack.values():
+            # export() returns str, but older APIs (e.g. capture_pre_autograd_graph)
+            # return type. We need to handle both cases.
+            if isinstance(t, type):
+                t = t.__module__ + "." + t.__qualname__
+            types.append(t)
         return tp in types
 
     return module_type_filter
 
 
 def _get_not_module_type_or_name_filter(
-    tp_list: List[Callable], module_name_list: List[str]
+    tp_list: List[str], module_name_list: List[str]
 ) -> Callable[[Node], bool]:
     module_type_filters = [_get_module_type_filter(tp) for tp in tp_list]
     module_name_list_filters = [_get_module_name_filter(m) for m in module_name_list]
@@ -297,7 +303,7 @@ class XNNPACKQuantizer(Quantizer):
         self.operator_type_config: Dict[
             torch._ops.OpOverloadPacket, Optional[QuantizationConfig]
         ] = {}
-        self.module_type_config: Dict[Callable, Optional[QuantizationConfig]] = {}
+        self.module_type_config: Dict[str, Optional[QuantizationConfig]] = {}
         self.module_name_config: Dict[str, Optional[QuantizationConfig]] = {}
 
     @classmethod
@@ -346,7 +352,8 @@ class XNNPACKQuantizer(Quantizer):
         quantizer.set_module_name(Sub) or quantizer.set_module_name(nn.Linear), it will quantize all supported operator/operator
         patterns in the submodule with this module type with the given `quantization_config`
         """
-        self.module_type_config[module_type] = quantization_config
+        module_key = module_type.__module__ + "." + module_type.__qualname__
+        self.module_type_config[module_key] = quantization_config
         return self
 
     def set_module_name(
