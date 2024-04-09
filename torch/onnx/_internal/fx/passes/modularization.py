@@ -54,9 +54,9 @@ class _ModuleMeta:
         _raw_meta: The raw meta '(module_name, node.meta["nn_module_stack"][module_name])'.
     """
 
-    _module_class: Final[Optional[Union[type, str]]]
-    _module_name: Final[str]
-    _raw_meta: Final[Tuple[Any, Any]]
+    _module_class: Final[Optional[Union[type, str]]]  # type: ignore[misc]
+    _module_name: Final[str]  # type: ignore[misc]
+    _raw_meta: Final[Tuple[Any, Any]]  # type: ignore[misc]
 
     @_beartype.beartype
     def __init__(
@@ -210,7 +210,7 @@ class _ModuleStackMeta:
             }
     """
 
-    _module_stack: Final[List[_ModuleMeta]]
+    _module_stack: Final[List[_ModuleMeta]]  # type: ignore[misc]
 
     @_beartype.beartype
     def __init__(
