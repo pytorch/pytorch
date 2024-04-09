@@ -89,11 +89,13 @@ jobs:
           DOCKER_IMAGE: ${{ inputs.docker-image }}
         run: |
           echo "${GITHUB_WORKSPACE}"
-          export ORIG_U="$(id -u)"
-          export ORIG_G="$(id -g)"
+          ORIG_U="$(id -u)"
+          ORIG_G="$(id -g)"
+          export ORIG_U
+          export ORIG_G
           docker run --rm \
-            -e ORIG_U
-            -e ORIG_G
+            -e ORIG_U \
+            -e ORIG_G \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
