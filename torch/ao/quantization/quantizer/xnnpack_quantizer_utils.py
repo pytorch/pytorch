@@ -347,7 +347,7 @@ def _do_annotate_conv_relu(
         # TODO: refactor with is_conv_node and is_conv_transpose_node
         if is_conv_transpose:
             conv_ops = [
-                torch.ops.aten.conv_transpose1d,
+                torch.ops.aten.conv_transpose1d.default,
                 torch.ops.aten.conv_transpose2d.input,
             ]
         else:
