@@ -1732,7 +1732,9 @@ class CUDAGraphTreeManager:
 
         # mapping from graph_id to (function id to mutation type hint). See more details in
         # [Note: Optimistic Mutation Check]
-        self.non_cudagraph_managed_mutation_hint = defaultdict(dict)
+        self.non_cudagraph_managed_mutation_hint: Dict[
+            Optional[GraphID], Dict[FunctionID, bool]
+        ] = defaultdict(dict)
         self.warmup_node_counter = itertools.count(1)
 
         # whether we the current node is in a state of warmup, recording, execution. If
@@ -1801,7 +1803,9 @@ class CUDAGraphTreeManager:
     def new_warmup_node_id(self) -> int:
         return next(self.warmup_node_counter)
 
-    def _update_non_cudagraph_managed_mutation(self, function_id: FunctionID, inputs: List[Tensor]):
+    def _update_non_cudagraph_managed_mutation(
+        self, function_id: FunctionID, inputs: List[Tensor]
+    ):
         node_id = self._get_node_id()
         if has_mutation_str := check_for_mutation(
             self.ids_to_funcs[function_id],
@@ -1813,13 +1817,13 @@ class CUDAGraphTreeManager:
         else:
             self.non_cudagraph_managed_mutation_hint[node_id][function_id] = False
 
-    def _get_node_id(self) -> Optional[int]:
+    def _get_node_id(self) -> Optional[GraphID]:
         if self.current_node is None:
             return None
         elif isinstance(self.current_node, CUDAGraphNode):
             return self.current_node.id
         elif isinstance(self.current_node, CUDAWarmupNode):
-            return -1 * self.current_node.id
+            return GraphID(-1 * self.current_node.id)
         else:
             raise RuntimeError(f"Unknown node type {type(self.current_node)}")
 
