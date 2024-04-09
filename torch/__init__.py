@@ -2014,8 +2014,8 @@ else:
 
 def get_device_module(device):
     """
-	Returns the module associated with a given device
-	"""
+    Returns the module associated with a given device
+    """
     if(device.type == "mtia"):
         return torch.mtia
     elif(device.type == "cuda"):

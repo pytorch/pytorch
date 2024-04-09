@@ -3,19 +3,19 @@
 import os
 import shutil
 import sys
-from typing import Union
-import tempfile
 import unittest
 
-import torch.testing._internal.common_utils as common
-from torch.testing._internal.common_utils import IS_ARM64, TEST_CUDA
 import torch
+
+import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
+from torch.testing._internal.common_utils import IS_ARM64, TEST_CUDA
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
 TEST_CUDA = TEST_CUDA and CUDA_HOME is not None
 TEST_ROCM = TEST_CUDA and torch.version.hip is not None and ROCM_HOME is not None
+
 
 def remove_build_path():
     if sys.platform == "win32":
@@ -25,12 +25,14 @@ def remove_build_path():
     if os.path.exists(default_build_root):
         shutil.rmtree(default_build_root, ignore_errors=True)
 
+
 @unittest.skipIf(IS_ARM64, "Does not work on arm")
 @torch.testing._internal.common_utils.markDynamoStrictTest
-class TestCppExtensionOpenRgistration(common.TestCase):
-    """Tests Stream and Event with C++ extensions.
-    """
+class TestCppExtensionStreamAndEvent(common.TestCase):
+    """Tests Stream and Event with C++ extensions."""
+
     module = None
+
     def setUp(self):
         super().setUp()
         # cpp extensions use relative paths. Those paths are relative to
