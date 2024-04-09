@@ -3653,6 +3653,23 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
+            def forward(self, x, y):
+                with torch.enable_grad():
+                    x = x - y
+                return x + y
+
+        model = Model()
+        with torch.no_grad():
+            exported_program = torch.export._trace._export(
+                model,
+                (torch.tensor(10), torch.tensor(12)),
+                {},
+                dynamic_shapes=None,
+                pre_dispatch=True,
+                strict=False
+            )
+
+        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.register_buffer("pred", torch.tensor(False))
@@ -3671,14 +3688,15 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
                 )
 
         model = Model()
-        exported_program = torch.export._trace._export(
-            model,
-            (torch.tensor(10), torch.tensor(12)),
-            {},
-            dynamic_shapes=None,
-            pre_dispatch=True,
-            strict=False
-        )
+        with torch.no_grad():
+            exported_program = torch.export._trace._export(
+                model,
+                (torch.tensor(10), torch.tensor(12)),
+                {},
+                dynamic_shapes=None,
+                pre_dispatch=True,
+                strict=False
+            )
 
         self.assertExpectedInline(str(exported_program.graph_module.code.strip()), """\
 def forward(self, b_pred, b_t, x, y):
@@ -3689,13 +3707,18 @@ def forward(self, b_pred, b_t, x, y):
     return (getitem,)""")  # noqa: B950
 
         self.assertExpectedInline(str(exported_program.graph_module.true_graph_0.code.strip()), """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(True)
+def forward(self, arg1_1, arg0_1, arg2_1):
+    submod_3 = self.submod_1
+    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_3, arg1_1, arg0_1, arg2_1);  submod_3 = arg1_1 = arg0_1 = arg2_1 = None
+    return (add_1,)""")
+
+        self.assertExpectedInline(str(exported_program.graph_module.true_graph_0.submod_1.code.strip()), """\
+def forward(self, arg1_1, arg0_1, arg2_1):
     sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
     add = torch.ops.aten.add.Tensor(sub, arg0_1);  sub = arg0_1 = None
     add_1 = torch.ops.aten.add.Tensor(add, arg2_1);  add = arg2_1 = None
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
-    return (add_1,)""")
+    return add_1""")
+
 
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
