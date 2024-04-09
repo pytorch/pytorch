@@ -2570,25 +2570,29 @@ class Layout(IRNode):
 
     def is_contiguous_or_transposed_after_perm(self, perm_dims):
         perm_len = len(perm_dims)
-        if perm_len != len(self.size) and perm_dims[-2:] not in [
-            [perm_len - 1, perm_len - 2],
-            [perm_len - 2, perm_len - 1],
+        assert perm_len >= 2
+        last_dim, second_to_last_dim = perm_len - 1, perm_len - 2
+        if perm_dims[-2:] in [
+            [last_dim, second_to_last_dim],
+            [second_to_last_dim, last_dim],
         ]:
-            # When the lengths of perm_dim and buffer size don't match,
-            # it is not easy to determine the size and stride after perm.
-            # But if at least one of the last two dims is permuted to non-last two dim,
-            # we can determine that the buffer shouldn't be contiguous/transposed before perm
+            # last two dims are still last two after perm
+            return is_contiguous_strides_for_shape(
+                self.stride, self.size
+            ) or is_transposed_strides_for_shape(self.stride, self.size)
+        elif perm_len == len(self.size):
+            # determine new sizes and strides after permution
+            perm_size = [self.size[i] for i in perm_dims]
+            perm_stride = [self.stride[i] for i in perm_dims]
+            return is_contiguous_strides_for_shape(
+                perm_stride, perm_size
+            ) or is_transposed_strides_for_shape(perm_stride, perm_size)
+        else:
+            # In this case, it is not easy to determine the size and stride after perm.
+            # We can only determine that the buffer shouldn't be contiguous/transposed before perm
             return not is_contiguous_strides_for_shape(
                 self.stride, self.size
             ) and not is_transposed_strides_for_shape(self.stride, self.size)
-        # new sizes and strides after permution
-        perm_size, perm_stride = self.size, self.stride
-        if perm_len == len(self.size):
-            perm_size = [self.size[i] for i in perm_dims]
-            perm_stride = [self.stride[i] for i in perm_dims]
-        return is_contiguous_strides_for_shape(
-            perm_stride, perm_size
-        ) or is_transposed_strides_for_shape(perm_stride, perm_size)
 
     def is_stride_ordered(self, order):
         assert len(self.stride) == len(order)
