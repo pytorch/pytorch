@@ -506,6 +506,7 @@ aten::_sparse_addmm.out
 aten::_sparse_broadcast_to
 aten::_sparse_broadcast_to_copy
 aten::_sparse_broadcast_to_copy.out
+aten::_sparse_compressed_tensor_with_dims
 aten::_sparse_coo_tensor_with_dims
 aten::_sparse_coo_tensor_with_dims.out
 aten::_sparse_coo_tensor_with_dims_and_tensors
@@ -1115,8 +1116,6 @@ aten::replication_pad3d_backward.grad_input
 aten::resize
 aten::resize.out
 aten::resize_
-aten::resize_as
-aten::resize_as.out
 aten::resize_as_
 aten::resize_as_sparse
 aten::resize_as_sparse.out
