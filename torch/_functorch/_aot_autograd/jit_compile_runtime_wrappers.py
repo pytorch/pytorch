@@ -161,7 +161,7 @@ def aot_dispatch_base(
 
     # Create a wrapper to set up the rng functionalize bits
     @wraps(compiled_fw)
-    def rng_functionalization_wrapper(args):
+    def rng_functionalization_wrapper(args: List[Any]):
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         nonlocal fakified_out
         if fakified_out is not None:
