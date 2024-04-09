@@ -2369,8 +2369,6 @@ exclude_patterns = [
     'torch/testing/_internal/test_module/__init__.py',
     'torch/testing/_internal/test_module/future_div.py',
     'torch/testing/_internal/test_module/no_future_div.py',
-    'torch/torch_version.py',
-    'torch/types.py',
     'torch/utils/__init__.py',
     'torch/utils/_contextlib.py',
     'torch/utils/_cpp_extension_versioner.py',
