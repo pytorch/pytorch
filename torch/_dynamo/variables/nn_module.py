@@ -680,8 +680,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     @functools.lru_cache(None)
     def _nn_module_method_ids():
         # Allow __setattr__ to fall through to base class handler
-        # supported = {torch.nn.Module.__setattr__}
-        supported = {}
+        supported = {torch.nn.Module.__setattr__}
         return {
             id(x.__code__)
             for x in torch.nn.Module.__dict__.values()
