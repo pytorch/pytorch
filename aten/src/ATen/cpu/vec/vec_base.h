@@ -36,6 +36,12 @@
 #include <c10/util/irange.h>
 #include <c10/util/Load.h>
 
+#if defined(__GNUC__)
+#define __FORCE_INLINE __attribute__((always_inline)) inline
+#elif defined(_MSC_VER)
+#define __FORCE_INLINE __forceinline
+#endif
+
 // These macros helped us unify vec_base.h
 #ifdef CPU_CAPABILITY_AVX512
 #if defined(__GNUC__)
@@ -840,8 +846,8 @@ inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
 
 template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
 inline Vectorized<T> operator~(const Vectorized<T>& a) {
-  Vectorized<T> ones;  // All bits are 1
-  memset((T*) ones, 0xFF, VECTOR_WIDTH);
+  using int_t = int_same_size_t<T>;
+  Vectorized<T> ones(c10::bit_cast<T>((int_t)(~(int_t)0)));  // All bits are 1
   return a ^ ones;
 }
 
@@ -1111,3 +1117,8 @@ inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) 
 }
 
 }} // namespace at::vec::CPU_CAPABILITY
+
+// additional headers for more operations that depend on vec_base
+#include <ATen/cpu/vec/vec_n.h>
+#include <ATen/cpu/vec/vec_mask.h>
+#include <ATen/cpu/vec/vec_convert.h>

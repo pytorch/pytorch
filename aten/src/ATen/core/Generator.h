@@ -107,6 +107,10 @@ struct TORCH_API Generator {
 
   at::Tensor get_state() const;
 
+  void graphsafe_set_state(const Generator& new_state);
+
+  Generator graphsafe_get_state() const;
+
   std::mutex& mutex() {
     return impl_->mutex_;
   }
