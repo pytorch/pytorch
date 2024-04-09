@@ -83,10 +83,6 @@ def distribute_rmsnorm(module, device_mesh):
 
 
 class TestTPFSDPIntegration(FSDPTest):
-    @property
-    def world_size(self):
-        return 4
-
     def _get_params_and_sharding_info(
         self,
         model: SimpleModel,
