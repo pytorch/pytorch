@@ -1,5 +1,5 @@
 #include <c10/util/Float8_e4m3fn.h>
-#include <iostream>
+#include <ostream>
 #include <type_traits>
 
 namespace c10 {

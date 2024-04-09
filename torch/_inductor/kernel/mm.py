@@ -95,7 +95,9 @@ mm_template = TritonTemplate(
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out")
 
 
-aten_addmm = ExternKernelChoice(torch.addmm, "at::addmm_out")
+aten_addmm = ExternKernelChoice(
+    torch.addmm, "at::addmm_out", op_overload=aten.addmm.default
+)
 
 aten__int_mm = ExternKernelChoice(torch._int_mm, "at::_int_mm")
 
@@ -125,7 +127,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     # options to tune from
     choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
 
-    if m * n != 0 and use_triton_template(layout):
+    if use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
@@ -134,7 +136,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 **mm_options(config, m, n, k, layout),
             )
 
-    if m * n != 0 and use_cutlass_template(layout):
+    if use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
@@ -164,9 +166,19 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
     choices = (
         [aten__int_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
     )
-    if m * n != 0 and use_triton_template(layout, enable_int32=True):
-        # TODO: Re-enable eager mode implementation once cuBLAS is fixed
+
+    # TODO: Re-enable eager mode implementation once cuBLAS is fixed
+    if m * n != 0 and (
+        use_cutlass_template(layout, m, n, k)
+        or use_triton_template(layout, enable_int32=True)
+    ):
         choices = []
+
+    if m * n != 0 and use_cutlass_template(layout, m, n, k):
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
+        )
+    if m * n != 0 and use_triton_template(layout, enable_int32=True):
         for config in int8_mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
@@ -179,8 +191,6 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
-    ordered_kwargs_for_cpp_kernel = ("beta", "alpha")
-
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     if m * n == 0 or not use_max_autotune():
         choices = (
@@ -188,7 +198,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 aten_addmm.bind(
                     (inp, mat1, mat2),
                     layout,
-                    ordered_kwargs_for_cpp_kernel,
                     alpha=alpha,
                     beta=beta,
                 )
@@ -203,7 +212,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             aten_addmm.bind(
                 (inp_expanded, mat1, mat2),
                 layout,
-                ordered_kwargs_for_cpp_kernel,
                 alpha=alpha,
                 beta=beta,
             )
@@ -237,7 +245,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
             )
 
-    if use_cutlass_template(layout):
+    if use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
@@ -268,23 +276,37 @@ def _is_sm7x_or_older_gpu(index: Optional[int]) -> bool:
 
 def tuned_mixed_mm(mat1, mat2, mat2_dtype):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=None)
-    choices = [aten_fallback_mixed_mm.bind((mat1, mat2), layout)]
-    if (
+
+    fallback = aten_fallback_mixed_mm.bind((mat1, mat2), layout)
+
+    choices = [fallback]
+
+    # can't use triton kernel unless one of these is true or if running on v100 (numerical issues)
+    skip_triton = (
         mat1.layout.dtype != torch.float32 and not mat2.layout.is_contiguous()
-    ) or _is_sm7x_or_older_gpu(layout.device.index):
-        # can't use triton kernel unless one of these is true or if running on v100 (numerical issues)
-        return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
+    ) or _is_sm7x_or_older_gpu(layout.device.index)
+
     if inductor_config.force_mixed_mm:
         choices = []
-    b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
-    has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
-    for config in mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
-        mm_template.maybe_append_choice(
-            choices,
-            input_nodes=(mat1, mat2),
-            layout=layout,
-            **mm_options(config, m, n, k, layout, b_prologue_cast_type),
+    if not skip_triton:
+        b_prologue_cast_type = f"tl.{mat2_dtype}".replace("torch.", "")
+        has_int8_tensor = _is_int8_mat(mat1) or _is_int8_mat(mat2)
+        for config in mm_configs(m, n, k, has_int8_tensor=has_int8_tensor):
+            mm_template.maybe_append_choice(
+                choices,
+                input_nodes=(mat1, mat2),
+                layout=layout,
+                **mm_options(config, m, n, k, layout, b_prologue_cast_type),
+            )
+
+    if m * n != 0 and use_cutlass_template(layout, m, n, k):
+        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+            choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
+
+    if skip_triton and not choices:
+        choices = [fallback]
+
     return autotune_select_algorithm("mixed_mm", choices, [mat1, mat2], layout)
 
 

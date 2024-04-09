@@ -1,15 +1,11 @@
 #pragma once
 
-#include <mutex>
-#include <deque>
-#include <atomic>
-#include <typeinfo>
-#include <utility>
-#include <cstddef>
 #include <cstdint>
+#include <deque>
+#include <mutex>
+#include <utility>
 
 #include <c10/util/Exception.h>
-#include <c10/util/C++17.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/core/Device.h>
 #include <c10/core/DispatchKeySet.h>
@@ -110,6 +106,10 @@ struct TORCH_API Generator {
   void set_state(const at::Tensor& new_state);
 
   at::Tensor get_state() const;
+
+  void graphsafe_set_state(const Generator& new_state);
+
+  Generator graphsafe_get_state() const;
 
   std::mutex& mutex() {
     return impl_->mutex_;
