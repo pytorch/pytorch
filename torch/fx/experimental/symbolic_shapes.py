@@ -283,12 +283,12 @@ def _iterate_exprs(val: Union[SymInt, torch.Tensor]) -> Iterable[sympy.Basic]:
     elif isinstance(val, (tuple, list)):
         for s in val:
             yield from _iterate_exprs(s)
+    elif is_sparse_any(val):
+        yield from _iterate_exprs(val.size())
     elif isinstance(val, torch.Tensor):
         yield from _iterate_exprs(val.size())
         yield from _iterate_exprs(val.stride())
         yield from _iterate_exprs(val.storage_offset())
-    elif is_sparse_any(val):
-        yield from _iterate_exprs(val.size())
     elif val is None:
         pass
     else:
@@ -3615,7 +3615,16 @@ class ShapeEnv:
             # variables have to have their value range bounds adjusted as
             # well)
             s = sympy.Symbol(f"shape_{idx}", positive=True, integer=True)
-            offset = lower - 1
+
+            # Note:
+            #   Offset might be a fraction(e.g. aten.split.Tensor), but shapes are always integers.
+            #   Sympy might give unexepected results when comparing an integer with a non-integer
+            #   Therefore, we cast offset to int here.
+            #   For example:
+            #       shape_0 = sympy.Symbol("shape_0", positive=True, integer=True)
+            #       expr = sympy.Eq(shape_0 - 1/3, 4)
+            #       expr.xreplace({}) # False
+            offset = int(lower - 1)
             new_shape_env[k] = s + offset
             new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
 

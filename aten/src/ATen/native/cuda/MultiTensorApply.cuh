@@ -606,6 +606,11 @@ void multi_tensor_apply_for_fused_optimizer(
 
   if (block_to_tensor.size() > 0) {
     if (pack.buffer_ptr != nullptr) {
+      // When not using small buffer, construct the metadata outside the
+      // kernel. This gives slightly better performance at the cost of an extra
+      // template specialization. We don't do this for the tensor list version
+      // of MTA due to binary size and build time concerns. However, since we
+      // have much fewer fused optimizer kernels, the tradeoff is worthwhile.
       auto tensorListMeta =
           FusedOptimizerTensorListMetadata<depth>::from_dev_array_pack(pack);
       multi_tensor_apply_kernel<FusedOptimizerTensorListMetadata<depth>>
