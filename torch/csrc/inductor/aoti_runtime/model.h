@@ -1,7 +1,12 @@
 #pragma once
 
+#include <dlfcn.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <unistd.h>
 #include <optional>
 #include <regex>
+#include <stdexcept>
 #include <unordered_map>
 
 // WARNING: Be careful when adding new includes here. This header will be used
@@ -268,7 +273,43 @@ class AOTInductorModelBase {
           cudaMemcpyHostToDevice));
     }
     return internal_ptr;
-#else // !USE_CUDA
+#elif USE_MMAP_SELF
+    // get pointer to constant which is packed in model during compile time.
+    AOTI_RUNTIME_CHECK(!skip_copy, "pure cpu mode doesn't support skip copy");
+    if (!self_mmap) {
+      Dl_info dl_info;
+      // get pointer to constant which are appended to the binary
+      AOTI_RUNTIME_CHECK(
+          dladdr(__func__, &dl_info), "Can't find shared library name");
+      int fd = open(dl_info.dli_fname, O_RDONLY);
+      AOTI_RUNTIME_CHECK(fd >= 0, "Shared library file cannot be opened");
+      auto fsize = lseek(fd, 0, SEEK_END);
+      auto weights_size =
+          reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[0];
+      auto magic_number =
+          reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[1];
+      auto weights_offset = fsize - weights_size;
+      AOTI_RUNTIME_CHECK(
+          (weights_offset & 0x3fff) == 0,
+          "weights_offset must be aligned to 16K boundary");
+      auto ptr = mmap(
+          NULL,
+          weights_size,
+          PROT_READ | PROT_WRITE,
+          MAP_PRIVATE,
+          fd,
+          weights_offset);
+      close(fd);
+      AOTI_RUNTIME_CHECK(ptr != MAP_FAILED, "mmap() failed");
+      self_mmap = static_cast<uint8_t*>(ptr);
+      AOTI_RUNTIME_CHECK(
+          reinterpret_cast<uint64_t*>(
+              self_mmap + weights_size - sizeof(uint64_t))[0] == magic_number,
+          "Weigths data seems corrupt");
+    }
+    return self_mmap + bytes_read;
+
+#else // !USE_CUDA&& !USE_MMAP_SELF
     // get pointer to constant which is packed in model during compile time.
     AOTI_RUNTIME_CHECK(!skip_copy, "pure cpu mode doesn't support skip copy");
     return const_cast<uint8_t*>(_binary_constants_bin_start) + bytes_read;
@@ -457,6 +498,9 @@ class AOTInductorModelBase {
   // Holds the blob storage for constants' at::Tensor for CUDA.
   CUDAPtr constant_blob_;
 #endif // USE_CUDA
+#ifdef USE_MMAP_SELF
+  uint8_t* self_mmap = NULL;
+#endif
 
   // A directory with CUDA binary files, e.g. compiled kernels, etc.
   const std::optional<std::string> cubin_dir_;
