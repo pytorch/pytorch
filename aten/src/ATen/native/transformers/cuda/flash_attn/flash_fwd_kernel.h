@@ -1,23 +1,23 @@
 /******************************************************************************
- * Copyright (c) 2023, Tri Dao.
+ * Copyright (c) 2024, Tri Dao.
  ******************************************************************************/
 
 #pragma once
 
-#include <cmath>
 #include <cute/algorithm/copy.hpp>
-#include <cute/algorithm/gemm.hpp>
 
 #include <cutlass/cutlass.h>
 #include <cutlass/array.h>
 #include <cutlass/numeric_types.h>
-#include <cutlass/numeric_conversion.h>
+
 
 #include <ATen/native/transformers/cuda/flash_attn/block_info.h>
 #include <ATen/native/transformers/cuda/flash_attn/kernel_traits.h>
 #include <ATen/native/transformers/cuda/flash_attn/utils.h>
 #include <ATen/native/transformers/cuda/flash_attn/softmax.h>
-#include <ATen/native/transformers/cuda/flash_attn/philox.cuh>
+#include <ATen/native/transformers/cuda/flash_attn/mask.h>
+#include <ATen/native/transformers/cuda/flash_attn/dropout.h>
+#include <ATen/native/transformers/cuda/flash_attn/rotary.h>
 
 namespace pytorch_flash {
 
@@ -25,57 +25,7 @@ using namespace cute;
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template<bool Is_first, bool Check_inf=false, typename Tensor0, typename Tensor1, typename Tensor2>
-inline __device__ void softmax_rescale_o(Tensor0 &scores, Tensor1 &scores_max, Tensor1 &scores_sum,
-                                         Tensor2 &acc_o, float softmax_scale_log2) {
-    if (Is_first) {
-        pytorch_flash::template reduce_max</*zero_init=*/true>(scores, scores_max);
-        pytorch_flash::scale_apply_exp2(scores, scores_max, softmax_scale_log2);
-        pytorch_flash::reduce_sum(scores, scores_sum);
-    } else {
-        Tensor scores_max_prev = make_fragment_like(scores_max);
-        cute::copy(scores_max, scores_max_prev);
-        pytorch_flash::template reduce_max</*zero_init=*/false>(scores, scores_max);
-        // Reshape acc_o from (MMA=4, MMA_M, MMA_K) to (nrow=(2, MMA_M), ncol=(2, MMA_K))
-        Tensor acc_o_rowcol = make_tensor(acc_o.data(), pytorch_flash::convert_layout_acc_rowcol(acc_o.layout()));
-        #pragma unroll
-        for (int mi = 0; mi < size(scores_max); ++mi) {
-            float scores_max_cur = !Check_inf
-                ? scores_max(mi)
-                : (scores_max(mi) == -INFINITY ? 0.0f : scores_max(mi));
-            float scores_scale = exp2f((scores_max_prev(mi) - scores_max_cur) * softmax_scale_log2);
-            scores_sum(mi) *= scores_scale;
-            #pragma unroll
-            for (int ni = 0; ni < size<1>(acc_o_rowcol); ++ni) { acc_o_rowcol(mi, ni) *= scores_scale; }
-        }
-        pytorch_flash::scale_apply_exp2(scores, scores_max, softmax_scale_log2);
-        Tensor scores_sum_cur = make_fragment_like(scores_sum);
-        pytorch_flash::reduce_sum(scores, scores_sum_cur);
-        #pragma unroll
-        for (int mi = 0; mi < size(scores_sum); ++mi) { scores_sum(mi) += scores_sum_cur(mi); }
-    }
-};
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-template<typename Engine0, typename Layout0, typename Engine1, typename Layout1, typename TiledCopy>
-inline __device__ void write_softmax_to_gmem(
-    Tensor<Engine0, Layout0> const &tOrP, Tensor<Engine1, Layout1> &tPgP, TiledCopy gmem_tiled_copy_P
-) {
-    // Reshape tOrP from (8, MMA_M, MMA_N) to (8, MMA_M * MMA_N)
-    Layout l = tOrP.layout();
-    Tensor tPrP = make_tensor(tOrP.data(), make_layout(get<0>(l), make_layout(get<1>(l), get<2>(l))));
-    CUTE_STATIC_ASSERT_V(size<2>(tPgP) == _1{});
-    CUTE_STATIC_ASSERT_V(size<1>(tPrP) == size<1>(tPgP));
-    #pragma unroll
-    for (int mi = 0; mi < size<1>(tPrP); ++mi) {
-        cute::copy(gmem_tiled_copy_P, tPrP(_, mi), tPgP(_, mi, 0));
-    }
-};
-
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_local, bool Is_even_MN, bool Is_even_K, bool Return_softmax, typename Params>
+template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K, bool Return_softmax, typename Params>
 inline __device__ void compute_attn_1rowblock(const Params &params, const int bidb, const int bidh, const int m_block) {
 
     using Element = typename Kernel_traits::Element;
@@ -92,7 +42,19 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
     constexpr int kBlockN = Kernel_traits::kBlockN;
     constexpr int kHeadDim = Kernel_traits::kHeadDim;
     constexpr int kNWarps = Kernel_traits::kNWarps;
-    constexpr int MMA_M = kBlockM / decltype(size<0>(typename Kernel_traits::TiledMma::TiledShape_MNK{}))::value;
+
+    auto seed_offset = at::cuda::philox::unpack(params.philox_args);
+    pytorch_flash::Dropout dropout(std::get<0>(seed_offset), std::get<1>(seed_offset), params.p_dropout_in_uint8_t,
+                           bidb, bidh, tidx, params.h);
+
+    // Save seed and offset for backward. If we don't have this here, the 0-th thread block might
+    // exit early and no one saves the rng state.
+    if (Is_dropout && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && tidx == 0) {
+        if (params.philox_args.captured_) {
+            *params.seed = std::get<0>(seed_offset);
+            *params.extragraph_offset = std::get<1>(seed_offset);
+        }
+    }
 
     const BlockInfo</*Varlen=*/!Is_even_MN> binfo(params, bidb);
     if (m_block * kBlockM >= binfo.actual_seqlen_q) return;
@@ -109,15 +71,6 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
     // We exit early and write 0 to gO and gLSE. This also covers the case where actual_seqlen_k == 0.
     // Otherwise we might read OOB elements from gK and gV.
     if ((Is_causal || Is_local || !Is_even_MN) && n_block_max <= n_block_min) {
-        // Save seed and offset for backward. If we don't have this here, the 0-th thread block might
-        // exit early and no one saves the rng state.
-        if (Is_dropout && blockIdx.x == 0 && blockIdx.y == 0 && blockIdx.z == 0 && tidx == 0) {
-            auto seeds = at::cuda::philox::unpack(params.philox_args);
-            if (params.philox_args.captured_) {
-                *params.seed = std::get<0>(seeds);
-                *params.extragraph_offset = std::get<1>(seeds);
-            }
-        }
         const index_t row_offset_o = binfo.q_offset(params.o_batch_stride, params.o_row_stride, bidb)
             + m_block * kBlockM * params.o_row_stride + bidh * params.o_head_stride;
         const index_t row_offset_lse = (bidb * params.h + bidh) * params.seqlen_q + m_block * kBlockM;
@@ -192,8 +145,6 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
 
     typename Kernel_traits::GmemTiledCopyQKV gmem_tiled_copy_QKV;
     auto gmem_thr_copy_QKV = gmem_tiled_copy_QKV.get_thread_slice(tidx);
-    typename Kernel_traits::GmemTiledCopyP gmem_tiled_copy_P;
-    auto gmem_thr_copy_P = gmem_tiled_copy_P.get_thread_slice(tidx);
 
     Tensor tQgQ = gmem_thr_copy_QKV.partition_S(gQ);
     Tensor tQsQ = gmem_thr_copy_QKV.partition_D(sQ);
@@ -201,13 +152,14 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
     Tensor tKsK = gmem_thr_copy_QKV.partition_D(sK);
     Tensor tVgV = gmem_thr_copy_QKV.partition_S(gV);  // (VCPY, VCPY_N, VCPY_K)
     Tensor tVsV = gmem_thr_copy_QKV.partition_D(sV);
-    Tensor tPgP = gmem_thr_copy_P.partition_D(gP);
 
     typename Kernel_traits::TiledMma tiled_mma;
     auto thr_mma = tiled_mma.get_thread_slice(tidx);
     Tensor tSrQ  = thr_mma.partition_fragment_A(sQ);                           // (MMA,MMA_M,MMA_K)
     Tensor tSrK  = thr_mma.partition_fragment_B(sK);                           // (MMA,MMA_N,MMA_K)
     Tensor tOrVt  = thr_mma.partition_fragment_B(sVtNoSwizzle);                // (MMA, MMA_K,MMA_N)
+
+    Tensor tSgS  = thr_mma.partition_C(gP);
 
     Tensor acc_o = partition_fragment_C(tiled_mma, Shape<Int<kBlockM>, Int<kHeadDim>>{});  // MMA, MMA_M, MMA_K
 
@@ -228,10 +180,6 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
     auto smem_tiled_copy_V = make_tiled_copy_B(typename Kernel_traits::SmemCopyAtomTransposed{}, tiled_mma);
     auto smem_thr_copy_V = smem_tiled_copy_V.get_thread_slice(tidx);
     Tensor tOsVt = smem_thr_copy_V.partition_S(sVt);
-
-    // TODO: this might need to change if we change the mma instruction in SM70
-    Tensor scores_max = make_tensor<ElementAccum>(Shape<Int<2 * size<1>(acc_o)>>{});
-    Tensor scores_sum = make_fragment_like(scores_max);
 
     //
     // PREDICATES
@@ -275,16 +223,11 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
 
     // Prologue
 
-    Tensor tQrQ = make_fragment_like(tQgQ);
     // We don't need to clear the sQ smem tiles since we'll only write out the valid outputs
     pytorch_flash::copy<Is_even_MN, Is_even_K>(gmem_tiled_copy_QKV, tQgQ, tQsQ, tQcQ, tQpQ,
                                        binfo.actual_seqlen_q - m_block * kBlockM);
     if (Kernel_traits::Is_Q_in_regs) { cute::cp_async_fence(); }
 
-    // // Copy rmem to smem
-    // // copy(tQrQ, tQsQ);
-    // pytorch_flash::cp_async_wait<0>();
-    // __syncthreads();
     // // if (cute::thread(1, 0)) { print(tQsQ); }
     // // Tensor sQNoSwizzle = make_tensor(make_smem_ptr(reinterpret_cast<Element *>(smem_)), typename Kernel_traits::SmemLayoutQNoSwizzle{});
     // // if (cute::thread0()) { print(sQNoSwizzle); }
@@ -314,16 +257,12 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
         cute::copy(smem_tiled_copy_Q, tSsQ, tSrQ_copy_view);
     }
 
-    auto seeds = at::cuda::philox::unpack(params.philox_args);
-    if (params.philox_args.captured_) {
-        *params.seed = std::get<0>(seeds);
-        *params.extragraph_offset = std::get<1>(seeds);
-    }
-
-    unsigned long long seed = std::get<0>(seeds);
-    unsigned long long offset = std::get<1>(seeds) + (bidb * params.h + bidh) * 32 + tidx % 32;
-
     clear(acc_o);
+
+    pytorch_flash::Softmax<2 * size<1>(acc_o)> softmax;
+
+    const float alibi_slope = !Has_alibi || params.alibi_slopes_ptr == nullptr ? 0.0f : reinterpret_cast<float *>(params.alibi_slopes_ptr)[bidb * params.alibi_slopes_batch_stride + bidh] / params.scale_softmax;
+    pytorch_flash::Mask<Is_causal, Is_local, Has_alibi> mask(binfo.actual_seqlen_k, binfo.actual_seqlen_q, params.window_size_left, params.window_size_right, alibi_slope);
 
     // For performance reason, we separate out two kinds of iterations:
     // those that need masking on S, and those that don't.
@@ -361,37 +300,9 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
         );
         // if (cute::thread0()) { print(acc_s); }
 
-        // Reshape acc_s from (MMA=4, MMA_M, MMA_N) to (nrow=(2, MMA_M), ncol=(2, MMA_N))
-        Tensor scores = make_tensor(acc_s.data(), pytorch_flash::convert_layout_acc_rowcol(acc_s.layout()));
-        // if (cute::thread0()) { print_tensor(scores); }
-        // We don't put the masking before the matmul S = Q K^T because we don't clear sK
-        // for rows outside actual_seqlen_k. So those rows could have Inf / NaN, and the matmul
-        // can produce Inf / NaN.
-        if (!Is_causal && !Is_local) {
-            if (!Is_even_MN) { pytorch_flash::apply_mask(scores, binfo.actual_seqlen_k - n_block * kBlockN); }
-        } else {
-            // Tensor caccS = make_identity_tensor(Shape<Int<kBlockM>, Int<kBlockN>>{});    // (BLK_M,BLK_N) -> (blk_m,blk_n)
-            // Tensor taccScS = thr_mma.partition_C(caccS);                           // (MMA,MMA_M,MMA_N)
-            // static_assert(decltype(size<0>(taccScS))::value == 4);
-            // // Convert to ((2, 2), MMA_M, MMA_N) then take only the row indices.
-            // Tensor idx_row = logical_divide(taccScS, Shape<_2>{})(make_coord(0, _), _, 0);
-            // Tensor idx_rowcol = make_tensor(taccScS.data(), pytorch_flash::convert_layout_acc_rowcol(taccScS.layout()));
-            // pytorch_flash::apply_mask_causal_w_idx(scores, idx_rowcol, n_block * kBlockN, binfo.actual_seqlen_k,
-            //                               m_block * kBlockM);
-            // Idk why it's get<1> and not get<0> of the stride.
-            // if (cute::thread0()) { print(idx_row.layout()); print(stride<1>(idx_row)); printf("stride = %d \n", get<1>(stride<1>(idx_row))); }
-            // I can't get the stride from idx_row
-            pytorch_flash::apply_mask_local</*HasWSLeft=*/Is_local>(
-                scores, n_block * kBlockN, binfo.actual_seqlen_k,
-                // m_block * kBlockM + get<0>(idx_row(0)),
-                m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4,
-                binfo.actual_seqlen_q, kNWarps * 16,
-                params.window_size_left, params.window_size_right
-                // m_block * kBlockM + (tidx / 32) * 16, kNWarps * 16
-                // m_block * kBlockM + (tidx / 32) * (kBlockM / kNWarps), 16
-            );
-            // if (cute::thread0()) { print_tensor(scores); }
-        }
+        mask.template apply_mask<Is_causal, Is_even_MN>(
+            acc_s, n_block * kBlockN, m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4, kNWarps * 16
+        );
 
         pytorch_flash::cp_async_wait<0>();
         __syncthreads();
@@ -406,33 +317,31 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
 
         // TODO: when we have key_padding_mask we'll need to Check_inf
         masking_step == 0
-            ? softmax_rescale_o</*Is_first=*/true,  /*Check_inf=*/Is_causal || Is_local>(scores, scores_max, scores_sum, acc_o, params.scale_softmax_log2)
-            : softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_causal || Is_local>(scores, scores_max, scores_sum, acc_o, params.scale_softmax_log2);
+            ? softmax.template softmax_rescale_o</*Is_first=*/true,  /*Check_inf=*/Is_causal || Is_local>(acc_s, acc_o, params.scale_softmax_log2)
+            : softmax.template softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_causal || Is_local>(acc_s, acc_o, params.scale_softmax_log2);
 
-        // Convert scores from fp32 to fp16/bf16
-        Tensor rP = pytorch_flash::convert_type<Element>(scores);
-        // Reshape rP from (nrow=(2, MMA_M), ncol=(2, MMA_N)) to ((2, 2, 2), MMA_M, MMA_N / 2)
-        // if using m16n8k16 or ((2, 2, 1), MMA_M, MMA_N) if using m16n8k8.
-        Tensor tOrP = make_tensor(rP.data(), pytorch_flash::convert_layout_rowcol_Aregs<Kernel_traits::TiledMma>(rP.layout()));
+        // Convert acc_s from fp32 to fp16/bf16
+        Tensor rP = pytorch_flash::convert_type<Element>(acc_s);
         int block_row_idx = m_block * (kBlockM / 16) + tidx / 32;
         int block_col_idx = n_block * (kBlockN / 32);
         if (Return_softmax) {
-            Tensor tOrP_copy = make_fragment_like(tOrP);
-            cute::copy(tOrP, tOrP_copy);
-            pytorch_flash::apply_dropout</*encode_dropout_in_sign_bit=*/true>(
-                tOrP_copy, params.p_dropout_in_uint8_t, seed, offset,
-                block_row_idx, block_col_idx, kNWarps
+            Tensor rP_drop = make_fragment_like(rP);
+            cute::copy(rP, rP_drop);
+            dropout.template apply_dropout</*encode_dropout_in_sign_bit=*/true>(
+                rP_drop, block_row_idx, block_col_idx, kNWarps
             );
-            pytorch_flash::write_softmax_to_gmem(tOrP_copy, tPgP, gmem_tiled_copy_P);
-            tPgP.data() = tPgP.data() + (-kBlockN);
+            cute::copy(rP_drop, tSgS);
+            tSgS.data() = tSgS.data() + (-kBlockN);
         }
         if (Is_dropout) {
-            pytorch_flash::apply_dropout(tOrP, params.p_dropout_in_uint8_t, seed, offset,
-                                 block_row_idx, block_col_idx, kNWarps);
+            dropout.apply_dropout(rP, block_row_idx, block_col_idx, kNWarps);
         }
-        // if (cute::thread0()) { print(tOrP); }
 
-        pytorch_flash::gemm_A_in_regs(acc_o, tOrP, tOrVt, tOsVt, tiled_mma, smem_tiled_copy_V, smem_thr_copy_V);
+        // Reshape rP from (MMA=4, MMA_M, MMA_N) to ((4, 2), MMA_M, MMA_N / 2)
+        // if using m16n8k16 or (4, MMA_M, MMA_N) if using m16n8k8.
+        Tensor tOrP = make_tensor(rP.data(), pytorch_flash::convert_layout_acc_Aregs<Kernel_traits::TiledMma>(rP.layout()));
+        // if (cute::thread0()) { print(tOrP); }
+        pytorch_flash::gemm_rs(acc_o, tOrP, tOrVt, tOsVt, tiled_mma, smem_tiled_copy_V, smem_thr_copy_V);
         // if (cute::thread0()) { print(scores); }
 
         // This check is at the end of the loop since we always have at least 1 iteration
@@ -469,58 +378,37 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
             cute::cp_async_fence();
         }
 
-        // Reshape acc_s from (MMA=4, MMA_M, MMA_N) to (nrow=(2, MMA_M), ncol=(2, MMA_N))
-        Tensor scores = make_tensor(acc_s.data(), pytorch_flash::convert_layout_acc_rowcol(acc_s.layout()));
-        if (Is_local && n_block * kBlockN < (m_block + 1) * kBlockM + binfo.actual_seqlen_k - binfo.actual_seqlen_q + params.window_size_right) {
-            pytorch_flash::apply_mask_local(
-                scores, n_block * kBlockN, binfo.actual_seqlen_k,
-                m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4,
-                binfo.actual_seqlen_q, kNWarps * 16,
-                params.window_size_left, params.window_size_right
-            );
-        }
-        softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_local>(scores, scores_max, scores_sum, acc_o, params.scale_softmax_log2);
+        mask.template apply_mask</*Causal_mask=*/false>(
+            acc_s, n_block * kBlockN, m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4, kNWarps * 16
+        );
 
-        Tensor rP = pytorch_flash::convert_type<Element>(scores);
-        // Reshape rP from (nrow=(2, MMA_M), ncol=(2, MMA_N)) to ((2, 2, 2), MMA_M, MMA_N / 2)
-        // if using m16n8k16 or ((2, 2, 1), MMA_M, MMA_N) if using m16n8k8.
-        Tensor tOrP = make_tensor(rP.data(), pytorch_flash::convert_layout_rowcol_Aregs<Kernel_traits::TiledMma>(rP.layout()));
+        softmax.template softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_local>(acc_s, acc_o, params.scale_softmax_log2);
+
+        Tensor rP = pytorch_flash::convert_type<Element>(acc_s);
         int block_row_idx = m_block * (kBlockM / 16) + tidx / 32;
         int block_col_idx = n_block * (kBlockN / 32);
         if (Return_softmax) {
-            Tensor tOrP_copy = make_fragment_like(tOrP);
-            cute::copy(tOrP, tOrP_copy);
-            pytorch_flash::apply_dropout</*encode_dropout_in_sign_bit=*/true>(
-                tOrP_copy, params.p_dropout_in_uint8_t, seed, offset,
-                block_row_idx, block_col_idx, kNWarps
+            Tensor rP_drop = make_fragment_like(rP);
+            cute::copy(rP, rP_drop);
+            dropout.template apply_dropout</*encode_dropout_in_sign_bit=*/true>(
+                rP_drop, block_row_idx, block_col_idx, kNWarps
             );
-            pytorch_flash::write_softmax_to_gmem(tOrP_copy, tPgP, gmem_tiled_copy_P);
-            tPgP.data() = tPgP.data() + (-kBlockN);
+            cute::copy(rP_drop, tSgS);
+            tSgS.data() = tSgS.data() + (-kBlockN);
         }
         if (Is_dropout) {
-            pytorch_flash::apply_dropout(tOrP, params.p_dropout_in_uint8_t, seed, offset,
-                                 block_row_idx, block_col_idx, kNWarps);
+            dropout.apply_dropout(rP, block_row_idx, block_col_idx, kNWarps);
         }
 
-        pytorch_flash::gemm_A_in_regs(acc_o, tOrP, tOrVt, tOsVt, tiled_mma, smem_tiled_copy_V, smem_thr_copy_V);
+        // Reshape rP from (MMA=4, MMA_M, MMA_N) to ((4, 2), MMA_M, MMA_N / 2)
+        // if using m16n8k16 or (4, MMA_M, MMA_N) if using m16n8k8.
+        Tensor tOrP = make_tensor(rP.data(), pytorch_flash::convert_layout_acc_Aregs<Kernel_traits::TiledMma>(rP.layout()));
+        pytorch_flash::gemm_rs(acc_o, tOrP, tOrVt, tOsVt, tiled_mma, smem_tiled_copy_V, smem_thr_copy_V);
     }
 
     // Epilogue
 
-    // Reshape acc_o from (MMA=4, MMA_M, MMA_K) to (nrow=(2, MMA_M), ncol=(2, MMA_K))
-    Tensor acc_o_rowcol = make_tensor(acc_o.data(), pytorch_flash::convert_layout_acc_rowcol(acc_o.layout()));
-    Tensor lse = make_fragment_like(scores_sum);
-    #pragma unroll
-    for (int mi = 0; mi < size<0>(acc_o_rowcol); ++mi) {
-        float sum = scores_sum(mi);
-        float inv_sum = (sum == 0.f || sum != sum) ? 1.f : 1.f / sum;
-        lse(mi) = (sum == 0.f || sum != sum) ? INFINITY : scores_max(mi) * params.scale_softmax + __logf(sum);
-        float scale = !Is_dropout ? inv_sum : inv_sum * params.rp_dropout;
-        #pragma unroll
-        for (int ni = 0; ni < size<1>(acc_o_rowcol); ++ni) { acc_o_rowcol(mi, ni) *= scale; }
-    }
-
-    // if (cute::thread0()) { print(acc_o_rowcol); }
+    Tensor lse = softmax.template normalize_softmax_lse<Is_dropout>(acc_o, params.scale_softmax, params.rp_dropout);
 
     // Convert acc_o from fp32 to fp16/bf16
     Tensor rO = pytorch_flash::convert_type<Element>(acc_o);
@@ -586,7 +474,7 @@ inline __device__ void compute_attn_1rowblock(const Params &params, const int bi
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template<typename Kernel_traits, bool Is_causal, bool Is_local, bool Is_even_MN, bool Is_even_K, bool Split, bool Append_KV, typename Params>
+template<typename Kernel_traits, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K, bool Split, bool Append_KV, typename Params>
 inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, const int bidb, const int bidh, const int m_block, const int n_split_idx, const int num_n_splits) {
 
     using Element = typename Kernel_traits::Element;
@@ -674,10 +562,17 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         + m_block * kBlockM * params.q_row_stride + bidh * params.q_head_stride;
     // We move K and V to the last block.
     const int bidb_cache = params.cache_batch_idx == nullptr ? bidb : params.cache_batch_idx[bidb];
-    const index_t row_offset_k = binfo.k_offset(params.k_batch_stride, params.k_row_stride, bidb_cache)
-        + (n_block_max - 1) * kBlockN * params.k_row_stride + (bidh / params.h_h_k_ratio) * params.k_head_stride;
-    const index_t row_offset_v = binfo.k_offset(params.v_batch_stride, params.v_row_stride, bidb_cache)
-        + (n_block_max - 1) * kBlockN * params.v_row_stride + (bidh / params.h_h_k_ratio) * params.v_head_stride;
+    const int *block_table = params.block_table == nullptr ? nullptr : params.block_table + bidb * params.block_table_batch_stride;
+    const int block_table_idx = block_table == nullptr ? 0 : (n_block_max - 1) * kBlockN / params.page_block_size;
+    const int block_table_offset = block_table == nullptr ? 0 : (n_block_max - 1) * kBlockN - block_table_idx * params.page_block_size;
+    const index_t row_offset_k = block_table == nullptr
+        ? binfo.k_offset(params.k_batch_stride, params.k_row_stride, bidb_cache)
+          + (n_block_max - 1) * kBlockN * params.k_row_stride + (bidh / params.h_h_k_ratio) * params.k_head_stride
+        : block_table[block_table_idx] * params.k_batch_stride + block_table_offset * params.k_row_stride + (bidh / params.h_h_k_ratio) * params.k_head_stride;
+    const index_t row_offset_v = block_table == nullptr
+        ? binfo.k_offset(params.v_batch_stride, params.v_row_stride, bidb_cache)
+          + (n_block_max - 1) * kBlockN * params.v_row_stride + (bidh / params.h_h_k_ratio) * params.v_head_stride
+        : block_table[block_table_idx] * params.v_batch_stride + block_table_offset * params.v_row_stride + (bidh / params.h_h_k_ratio) * params.v_head_stride;
 
     Tensor gQ = make_tensor(make_gmem_ptr(reinterpret_cast<Element *>(params.q_ptr) + row_offset_q),
                             Shape<Int<kBlockM>, Int<kHeadDim>>{},
@@ -731,11 +626,6 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
     auto smem_thr_copy_V = smem_tiled_copy_V.get_thread_slice(tidx);
     Tensor tOsVt = smem_thr_copy_V.partition_S(sVt);
 
-    // TODO: this might need to change if we change the mma instruction in SM70
-    Tensor scores_max = make_tensor<ElementAccum>(Shape<Int<2 * size<1>(acc_o)>>{});
-    Tensor scores_sum = make_fragment_like(scores_max);
-
-    //
     // PREDICATES
     //
 
@@ -815,11 +705,12 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         Tensor tVgVnew = gmem_thr_copy_QKV.partition_S(gVnew);  // (VCPY, VCPY_N, VCPY_K)
 
         const int n_block_copy_min = std::max(n_block_min, binfo.seqlen_k_cache / kBlockN);
+        auto tKgK_data = tKgK.data();
+        auto tVgV_data = tVgV.data();
         for (int n_block = n_block_max - 1; n_block >= n_block_copy_min; n_block--) {
             pytorch_flash::copy_w_min_idx<Is_even_K>(
                 tVgVnew, tVgV, tKVcKV, tKVpKV, binfo.actual_seqlen_k - n_block * kBlockN, binfo.seqlen_k_cache - n_block * kBlockN
             );
-            tVgV.data() = tVgV.data() + (-int(kBlockN * params.v_row_stride));
             tVgVnew.data() = tVgVnew.data() + (-int(kBlockN * params.vnew_row_stride));
             if (params.rotary_dim == 0) {
                 pytorch_flash::copy_w_min_idx<Is_even_K>(
@@ -845,19 +736,30 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
                 }
             }
-            tKgK.data() = tKgK.data() + (-int(kBlockN * params.k_row_stride));
             tKgKnew.data() = tKgKnew.data() + (-int(kBlockN * params.knew_row_stride));
+            if (block_table == nullptr) {
+                tVgV.data() = tVgV.data() + (-int(kBlockN * params.v_row_stride));
+                tKgK.data() = tKgK.data() + (-int(kBlockN * params.k_row_stride));
+            } else {
+                if (n_block > n_block_copy_min) {
+                    const int block_table_idx_cur = n_block * kBlockN / params.page_block_size;
+                    const int block_table_offset_cur = n_block * kBlockN - block_table_idx_cur * params.page_block_size;
+                    const int block_table_idx_next = (n_block - 1) * kBlockN / params.page_block_size;
+                    const int block_table_offset_next = (n_block - 1) * kBlockN - block_table_idx_next * params.page_block_size;
+                    const int table_diff = block_table[block_table_idx_next] - block_table[block_table_idx_cur];
+                    const int offset_diff = block_table_offset_next - block_table_offset_cur;
+                    tVgV.data() = tVgV.data() + table_diff * params.v_batch_stride + offset_diff * params.v_row_stride;
+                    tKgK.data() = tKgK.data() + table_diff * params.k_batch_stride + offset_diff * params.k_row_stride;
+                }
+            }
         }
         // Need this before we can read in K again, so that we'll see the updated K values.
         __syncthreads();
-        if (n_block_max > n_block_copy_min) {
-            tKgK.data() = tKgK.data() + (n_block_max - n_block_copy_min) * kBlockN * params.k_row_stride;
-            tVgV.data() = tVgV.data() + (n_block_max - n_block_copy_min) * kBlockN * params.v_row_stride;
-        }
+        tKgK.data() = tKgK_data;
+        tVgV.data() = tVgV_data;
     }
 
     // Read Q from gmem to smem, optionally apply rotary embedding.
-    Tensor tQrQ = make_fragment_like(tQgQ);
     if (!Append_KV || params.rotary_dim == 0) {
         // We don't need to clear the sQ smem tiles since we'll only write out the valid outputs
         pytorch_flash::copy<Is_even_MN, Is_even_K>(gmem_tiled_copy_QKV, tQgQ, tQsQ, tQcQ, tQpQ,
@@ -908,6 +810,11 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
     clear(acc_o);
 
+    pytorch_flash::Softmax<2 * size<1>(acc_o)> softmax;
+
+    const float alibi_slope = !Has_alibi ? 0.0f : reinterpret_cast<float *>(params.alibi_slopes_ptr)[bidb * params.alibi_slopes_batch_stride + bidh] / params.scale_softmax;
+    pytorch_flash::Mask<Is_causal, Is_local, Has_alibi> mask(binfo.actual_seqlen_k, binfo.actual_seqlen_q, params.window_size_left, params.window_size_right, alibi_slope);
+
     // For performance reason, we separate out two kinds of iterations:
     // those that need masking on S, and those that don't.
     // We need masking on S for the very last block when K and V has length not multiple of kBlockN.
@@ -928,7 +835,15 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
         // Advance gV
         if (masking_step > 0) {
-            tVgV.data() = tVgV.data() + (-int(kBlockN * params.v_row_stride));
+            if (block_table == nullptr) {
+                tVgV.data() = tVgV.data() + (-int(kBlockN * params.v_row_stride));
+            } else {
+                const int block_table_idx_cur = (n_block + 1) * kBlockN / params.page_block_size;
+                const int block_table_offset_cur = (n_block + 1) * kBlockN - block_table_idx_cur * params.page_block_size;
+                const int block_table_idx_next = n_block * kBlockN / params.page_block_size;
+                const int block_table_offset_next = n_block * kBlockN - block_table_idx_next * params.page_block_size;
+                tVgV.data() = tVgV.data() + (block_table[block_table_idx_next] - block_table[block_table_idx_cur]) * params.v_batch_stride + (block_table_offset_next - block_table_offset_cur) * params.v_row_stride;
+            }
             pytorch_flash::copy</*Is_even_MN=*/true, Is_even_K>(gmem_tiled_copy_QKV, tVgV, tVsV, tKVcKV, tKVpKV);
         } else {
             // Clear the smem tiles to account for predicated off loads
@@ -944,21 +859,9 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         );
         // if (cute::thread0()) { print(acc_s); }
 
-        // Reshape acc_s from (MMA=4, MMA_M, MMA_N) to (nrow=(2, MMA_M), ncol=(2, MMA_N))
-        Tensor scores = make_tensor(acc_s.data(), pytorch_flash::convert_layout_acc_rowcol(acc_s.layout()));
-        // if (cute::thread0()) { print(scores); }
-        // We don't put the masking before the matmul S = Q K^T because we don't clear sK
-        // for rows outside actual_seqlen_k. So those rows could have Inf / NaN, and the matmul
-        // can produce Inf / NaN.
-        if (!Is_causal && !Is_local) {
-            if (!Is_even_MN) { pytorch_flash::apply_mask(scores, binfo.actual_seqlen_k - n_block * kBlockN); }
-        } else {
-            pytorch_flash::apply_mask_local(scores, n_block * kBlockN, binfo.actual_seqlen_k,
-                                    m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4,
-                                    binfo.actual_seqlen_q, kNWarps * 16,
-                                    params.window_size_left, params.window_size_right
-                                    );
-        }
+        mask.template apply_mask<Is_causal, Is_even_MN>(
+            acc_s, n_block * kBlockN, m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4, kNWarps * 16
+        );
 
         pytorch_flash::cp_async_wait<0>();
         __syncthreads();
@@ -967,7 +870,15 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
         if (n_block > n_block_min) {
             // Advance gK
-            tKgK.data() = tKgK.data() + (-int(kBlockN * params.k_row_stride));
+            if (block_table == nullptr) {
+                tKgK.data() = tKgK.data() + (-int(kBlockN * params.k_row_stride));
+            } else {
+                const int block_table_idx_cur = n_block * kBlockN / params.page_block_size;
+                const int block_table_offset_cur = n_block * kBlockN - block_table_idx_cur * params.page_block_size;
+                const int block_table_idx_next = (n_block - 1) * kBlockN / params.page_block_size;
+                const int block_table_offset_next =(n_block - 1) * kBlockN - block_table_idx_next * params.page_block_size;
+                tKgK.data() = tKgK.data() + (block_table[block_table_idx_next] - block_table[block_table_idx_cur]) * params.k_batch_stride + (block_table_offset_next - block_table_offset_cur) * params.k_row_stride;
+            }
             pytorch_flash::copy</*Is_even_MN=*/true, Is_even_K>(gmem_tiled_copy_QKV, tKgK, tKsK, tKVcKV, tKVpKV);
             // This cp_async_fence needs to be in the if block, otherwise the synchronization
             // isn't right and we get race conditions.
@@ -976,18 +887,17 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
         // We have key_padding_mask so we'll need to Check_inf
         masking_step == 0
-            ? softmax_rescale_o</*Is_first=*/true,  /*Check_inf=*/Is_causal || Is_local || !Is_even_MN>(scores, scores_max, scores_sum, acc_o, params.scale_softmax_log2)
-            : softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_causal || Is_local || !Is_even_MN>(scores, scores_max, scores_sum, acc_o, params.scale_softmax_log2);
+            ? softmax.template softmax_rescale_o</*Is_first=*/true,  /*Check_inf=*/Is_causal || Is_local || !Is_even_MN>(acc_s, acc_o, params.scale_softmax_log2)
+            : softmax.template softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_causal || Is_local || !Is_even_MN>(acc_s, acc_o, params.scale_softmax_log2);
         // if (cute::thread0()) { print(scores_max); print(scores_sum); print(scores); }
 
-        // Convert scores from fp32 to fp16/bf16
-        Tensor rP = pytorch_flash::convert_type<Element>(scores);
-        // Reshape rP from (nrow=(2, MMA_M), ncol=(2, MMA_N)) to ((2, 2, 2), MMA_M, MMA_N / 2)
-        // if using m16n8k16 or ((2, 2, 1), MMA_M, MMA_N) if using m16n8k8.
-        Tensor tOrP = make_tensor(rP.data(), pytorch_flash::convert_layout_rowcol_Aregs<Kernel_traits::TiledMma>(rP.layout()));
+        // Convert acc_s from fp32 to fp16/bf16
+        Tensor rP = pytorch_flash::convert_type<Element>(acc_s);
+        // Reshape rP from (MMA=4, MMA_M, MMA_N) to ((4, 2), MMA_M, MMA_N / 2)
+        // if using m16n8k16 or (4, MMA_M, MMA_N) if using m16n8k8.
+        Tensor tOrP = make_tensor(rP.data(), pytorch_flash::convert_layout_acc_Aregs<Kernel_traits::TiledMma>(rP.layout()));
 
-        pytorch_flash::gemm_A_in_regs(acc_o, tOrP, tOrVt, tOsVt, tiled_mma, smem_tiled_copy_V, smem_thr_copy_V);
-        // if (cute::thread0()) { print(scores); }
+        pytorch_flash::gemm_rs(acc_o, tOrP, tOrVt, tOsVt, tiled_mma, smem_tiled_copy_V, smem_thr_copy_V);
 
         // This check is at the end of the loop since we always have at least 1 iteration
         if (n_masking_steps > 1 && n_block <= n_block_min) {
@@ -1003,7 +913,15 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         pytorch_flash::cp_async_wait<0>();
         __syncthreads();
         // Advance gV
-        tVgV.data() = tVgV.data() + (-int(kBlockN * params.v_row_stride));
+        if (block_table == nullptr) {
+            tVgV.data() = tVgV.data() + (-int(kBlockN * params.v_row_stride));
+        } else {
+            const int block_table_idx_cur = (n_block + 1) * kBlockN / params.page_block_size;
+            const int block_table_offset_cur = (n_block + 1) * kBlockN - block_table_idx_cur * params.page_block_size;
+            const int block_table_idx_next = n_block * kBlockN / params.page_block_size;
+            const int block_table_offset_next = n_block * kBlockN - block_table_idx_next * params.page_block_size;
+            tVgV.data() = tVgV.data() + (block_table[block_table_idx_next] - block_table[block_table_idx_cur]) * params.v_batch_stride + (block_table_offset_next - block_table_offset_cur) * params.v_row_stride;
+        }
         pytorch_flash::copy</*Is_even_MN=*/true, Is_even_K>(gmem_tiled_copy_QKV, tVgV, tVsV, tKVcKV, tKVpKV);
         cute::cp_async_fence();
 
@@ -1016,50 +934,38 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
         __syncthreads();
         if (n_block > n_block_min) {
             // Advance gK
-            tKgK.data() = tKgK.data() + (-int(kBlockN * params.k_row_stride));
+            if (block_table == nullptr) {
+                tKgK.data() = tKgK.data() + (-int(kBlockN * params.k_row_stride));
+            } else {
+                const int block_table_idx_cur = n_block * kBlockN / params.page_block_size;
+                const int block_table_offset_cur = n_block * kBlockN - block_table_idx_cur * params.page_block_size;
+                const int block_table_idx_next = (n_block - 1) * kBlockN / params.page_block_size;
+                const int block_table_offset_next = (n_block - 1) * kBlockN - block_table_idx_next * params.page_block_size;
+                tKgK.data() = tKgK.data() + (block_table[block_table_idx_next] - block_table[block_table_idx_cur]) * params.k_batch_stride + (block_table_offset_next - block_table_offset_cur) * params.k_row_stride;
+            }
             pytorch_flash::copy</*Is_even_MN=*/true, Is_even_K>(gmem_tiled_copy_QKV, tKgK, tKsK, tKVcKV, tKVpKV);
             // This cp_async_fence needs to be in the if block, otherwise the synchronization
             // isn't right and we get race conditions.
             cute::cp_async_fence();
         }
 
-        // Reshape acc_s from (MMA=4, MMA_M, MMA_N) to (nrow=(2, MMA_M), ncol=(2, MMA_N))
-        Tensor scores = make_tensor(acc_s.data(), pytorch_flash::convert_layout_acc_rowcol(acc_s.layout()));
-        if (Is_local && n_block * kBlockN < (m_block + 1) * kBlockM + binfo.actual_seqlen_k - binfo.actual_seqlen_q + params.window_size_right) {
-            pytorch_flash::apply_mask_local(
-                scores, n_block * kBlockN, binfo.actual_seqlen_k,
-                m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4,
-                binfo.actual_seqlen_q, kNWarps * 16,
-                params.window_size_left, params.window_size_right
-            );
-        }
-        softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_local>(scores, scores_max, scores_sum, acc_o, params.scale_softmax_log2);
+        mask.template apply_mask</*Causal_mask=*/false>(
+            acc_s, n_block * kBlockN, m_block * kBlockM + (tidx / 32) * 16 + (tidx % 32) / 4, kNWarps * 16
+        );
+        softmax.template softmax_rescale_o</*Is_first=*/false, /*Check_inf=*/Is_local>(acc_s, acc_o, params.scale_softmax_log2);
 
-        Tensor rP = pytorch_flash::convert_type<Element>(scores);
-        // Reshape rP from (nrow=(2, MMA_M), ncol=(2, MMA_N)) to ((2, 2, 2), MMA_M, MMA_N / 2)
-        // if using m16n8k16 or ((2, 2, 1), MMA_M, MMA_N) if using m16n8k8.
-        Tensor tOrP = make_tensor(rP.data(), pytorch_flash::convert_layout_rowcol_Aregs<Kernel_traits::TiledMma>(rP.layout()));
+        Tensor rP = pytorch_flash::convert_type<Element>(acc_s);
+        // Reshape rP from (MMA=4, MMA_M, MMA_N) to ((4, 2), MMA_M, MMA_N / 2)
+        // if using m16n8k16 or (4, MMA_M, MMA_N) if using m16n8k8.
+        Tensor tOrP = make_tensor(rP.data(), pytorch_flash::convert_layout_acc_Aregs<Kernel_traits::TiledMma>(rP.layout()));
 
-        pytorch_flash::gemm_A_in_regs(acc_o, tOrP, tOrVt, tOsVt, tiled_mma, smem_tiled_copy_V, smem_thr_copy_V);
+        pytorch_flash::gemm_rs(acc_o, tOrP, tOrVt, tOsVt, tiled_mma, smem_tiled_copy_V, smem_thr_copy_V);
     }
 
     // Epilogue
 
-    // Reshape acc_o from (MMA=4, MMA_M, MMA_K) to (nrow=(2, MMA_M), ncol=(2, MMA_K))
-    Tensor acc_o_rowcol = make_tensor(acc_o.data(), pytorch_flash::convert_layout_acc_rowcol(acc_o.layout()));
-    // if (cute::thread0()) { print(acc_o_rowcol); }
-    Tensor lse = make_fragment_like(scores_sum);
-    #pragma unroll
-    for (int mi = 0; mi < size<0>(acc_o_rowcol); ++mi) {
-        float sum = scores_sum(mi);
-        float inv_sum = (sum == 0.f || sum != sum) ? 1.f : 1.f / sum;
-        lse(mi) = (sum == 0.f || sum != sum) ? (Split ? -INFINITY : INFINITY) : scores_max(mi) * params.scale_softmax + __logf(sum);
-        float scale = inv_sum;
-        #pragma unroll
-        for (int ni = 0; ni < size<1>(acc_o_rowcol); ++ni) { acc_o_rowcol(mi, ni) *= scale; }
-    }
+    Tensor lse = softmax.template normalize_softmax_lse</*Is_dropout=*/false, Split>(acc_o, params.scale_softmax);
     // if (cute::thread0()) { print(lse); }
-    // if (cute::thread0()) { print(acc_o_rowcol); }
 
     Tensor sOaccum = make_tensor(make_smem_ptr(reinterpret_cast<ElementO *>(smem_)), typename Kernel_traits::SmemLayoutO{}); // (SMEM_M,SMEM_N)
     // Partition sO to match the accumulator partitioning
@@ -1136,7 +1042,7 @@ inline __device__ void compute_attn_1rowblock_splitkv(const Params &params, cons
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_local, bool Is_even_MN, bool Is_even_K, bool Return_softmax, typename Params>
+template<typename Kernel_traits, bool Is_dropout, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K, bool Return_softmax, typename Params>
 inline __device__ void compute_attn(const Params &params) {
     const int m_block = blockIdx.x;
     // The block index for the batch.
@@ -1152,12 +1058,12 @@ inline __device__ void compute_attn(const Params &params) {
     // the attention matrix. This way, as long as we have the batch, head, and the location of
     // the 16 x 32 block within the attention matrix, we can generate the exact same dropout pattern.
 
-    pytorch_flash::compute_attn_1rowblock<Kernel_traits, Is_dropout, Is_causal, Is_local, Is_even_MN, Is_even_K, Return_softmax>(params, bidb, bidh, m_block);
+    pytorch_flash::compute_attn_1rowblock<Kernel_traits, Is_dropout, Is_causal, Is_local, Has_alibi, Is_even_MN, Is_even_K, Return_softmax>(params, bidb, bidh, m_block);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-template<typename Kernel_traits, bool Is_causal, bool Is_local, bool Is_even_MN, bool Is_even_K, bool Split, bool Append_KV, typename Params>
+template<typename Kernel_traits, bool Is_causal, bool Is_local, bool Has_alibi, bool Is_even_MN, bool Is_even_K, bool Split, bool Append_KV, typename Params>
 inline __device__ void compute_attn_splitkv(const Params &params) {
     const int m_block = blockIdx.x;
     // The block index for the batch.
@@ -1166,7 +1072,7 @@ inline __device__ void compute_attn_splitkv(const Params &params) {
     const int bidh = Split ? blockIdx.z - bidb * params.h : blockIdx.z;
     const int n_split_idx = Split ? blockIdx.y : 0;
     const int num_n_splits = Split ? gridDim.y : 1;
-    pytorch_flash::compute_attn_1rowblock_splitkv<Kernel_traits, Is_causal, Is_local, Is_even_MN, Is_even_K, Split, Append_KV>(params, bidb, bidh, m_block, n_split_idx, num_n_splits);
+    pytorch_flash::compute_attn_1rowblock_splitkv<Kernel_traits, Is_causal, Is_local, Has_alibi, Is_even_MN, Is_even_K, Split, Append_KV>(params, bidb, bidh, m_block, n_split_idx, num_n_splits);
 }
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -1331,6 +1237,4 @@ inline __device__ void combine_attn_seqk_parallel(const Params &params) {
     }
 }
 
-////////////////////////////////////////////////////////////////////////////////////////////////////
-
-} // namespace flash
+} // namespace pytorch_flash

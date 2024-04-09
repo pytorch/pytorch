@@ -141,7 +141,7 @@ def tp_convolution(
         local_tensor_args = cast(Tuple[object, ...], local_tensor_args_list)
         local_results = op_call(*local_tensor_args, **local_tensor_kwargs)
 
-        # step3 remove extra ouputs from the results
+        # step3 remove extra outputs from the results
         padding_w = padding[1]
         w = local_results.size(3)
         if rank == 0:

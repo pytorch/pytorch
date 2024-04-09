@@ -94,7 +94,7 @@ FunctionalStorageImpl::FunctionalStorageImpl(const Tensor& base)
       get_nbytes(base),
       DataPtr{nullptr, base.device()},
       GetAllocator(kMeta),
-      /*resizeable=*/true
+      /*resizable=*/true
     ),
     base_(base)
   {

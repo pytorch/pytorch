@@ -38,14 +38,14 @@ def shard_fn(name, module, device_mesh):
 
 
 # prepare input
-def input_fn(inputs, device_mesh):
+def input_fn(mod, inputs, device_mesh):
     # split the input tensor to be sharded input
     dist_inp = distribute_tensor(inputs[0], device_mesh, [Shard(0)])
     return dist_inp
 
 
 # prepare output to be local torch.Tensor
-def output_fn(outputs, device_mesh):
+def output_fn(mod, outputs, device_mesh):
     assert isinstance(outputs, DTensor)
     return outputs.redistribute(placements=[Replicate()] * device_mesh.ndim).to_local()
 
@@ -59,6 +59,9 @@ class TestDTensorOptimizer(DTensorTestBase):
         dist_model,
         dist_optim,
         inputs,
+        *,
+        rtol: float = 1.3e-6,
+        atol: float = 1e-5,
     ):
         for iter_idx in range(2):
             # run forward/backward/optim for original model
@@ -78,7 +81,8 @@ class TestDTensorOptimizer(DTensorTestBase):
             # check that the optimizer update parameters with same numerics
             for p1, p2 in zip(model.parameters(), dist_model.parameters()):
                 p2 = p2.full_tensor()
-                self.assertEqual(p1, p2)
+                # Default 'rtol' and 'atol' for attr:`~torch.float32` are ``1.3e-6`` and ``1e-5``
+                self.assertEqual(p1, p2, atol=atol, rtol=rtol)
 
     @with_comms
     def test_adam_1d_sharding(self):
@@ -426,6 +430,96 @@ class TestDTensorOptimizer(DTensorTestBase):
             # on different ranks
             inp = torch.ones(8, 10, device=self.device_type)
             self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+    @with_comms
+    def test_adamax_1d_sharding(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        adamax_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "betas": (0.6, 0.66)},
+            {"lr": 0.1, "betas": (0.6, 0.66), "eps": 1e-6},
+            {"lr": 0.1, "betas": (0.6, 0.66), "eps": 1e-6, "weight_decay": 0.05},
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "foreach": True,
+            },
+            {
+                "lr": 0.1,
+                "betas": (0.6, 0.66),
+                "eps": 1e-6,
+                "weight_decay": 0.05,
+                "foreach": True,
+                "maximize": True,
+            },
+        ]
+
+        for config in adamax_configs:
+            mod = MLPModule(self.device_type)
+            opt = torch.optim.Adamax(mod.parameters(), **config)
+
+            dist_mod = distribute_module(
+                deepcopy(mod), mesh, shard_fn, input_fn, output_fn
+            )
+            dist_opt = torch.optim.Adamax(dist_mod.parameters(), **config)
+
+            # use ones to make sure the single machine model have the same input
+            # on different ranks
+            inp = torch.ones(8, 10, device=self.device_type)
+            self._assert_optimizer(mesh, mod, opt, dist_mod, dist_opt, inp)
+
+    @with_comms
+    def test_asgd_1d_sharding(self):
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        asgd_configs = [
+            {"lr": 0.1},
+            {"lr": 0.1, "lambd": 0.001},
+            {"lr": 0.1, "lambd": 0.001, "alpha": 0.85},
+            {"lr": 0.1, "lambd": 0.001, "alpha": 0.85, "t0": 1e5},
+            {"lr": 0.1, "lambd": 0.001, "alpha": 0.85, "t0": 1e5, "weight_decay": 0.05},
+            {
+                "lr": 0.1,
+                "lambd": 0.001,
+                "alpha": 0.85,
+                "t0": 1e5,
+                "weight_decay": 0.05,
+                "foreach": True,
+            },
+            {
+                "lr": 0.1,
+                "lambd": 0.001,
+                "alpha": 0.85,
+                "t0": 1e5,
+                "weight_decay": 0.05,
+                "foreach": True,
+                "maximize": True,
+            },
+        ]
+
+        for config in asgd_configs:
+            mod = MLPModule(self.device_type)
+            opt = torch.optim.ASGD(mod.parameters(), **config)
+
+            dist_mod = distribute_module(
+                deepcopy(mod), mesh, shard_fn, input_fn, output_fn
+            )
+            dist_opt = torch.optim.ASGD(dist_mod.parameters(), **config)
+
+            # use ones to make sure the single machine model have the same input
+            # on different ranks
+            inp = torch.ones(8, 10, device=self.device_type)
+
+            # TODO: We want to keep a unit test for ASGD optimizer for the time being, but we need to look into why
+            # when using ASGD we need higher atol and rtol when comparing model parameters.
+            # Default 'rtol' and 'atol' for attr:`~torch.float32` are ``1.3e-6`` and ``1e-5``
+            # Pointer here: https://github.com/pytorch/pytorch/blob/main/torch/testing/_comparison.py#L65
+            self._assert_optimizer(
+                mesh, mod, opt, dist_mod, dist_opt, inp, atol=1.3e-5, rtol=1e-4
+            )
 
 
 if __name__ == "__main__":

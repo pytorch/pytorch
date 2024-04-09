@@ -1,6 +1,5 @@
 # This file is to cache other dependencies not specified elsewhere in:
 #   requirement.txt
-#   requirements-flake8.txt
 #   docs/requirements.txt
 #   docs/cpp/requirements.txt
 #   functorch/docs/requirements.txt

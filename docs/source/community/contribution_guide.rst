@@ -303,7 +303,7 @@ Frequently Asked Questions
    tasks or pull requests with your environment details is helpful and
    appreciated.
 -  **CI tests failed, what does it mean?** Maybe your PR is based
-   off a broken main bracnh? You can try to rebase your change on top
+   off a broken main branch? You can try to rebase your change on top
    of the latest main branch. You can also see the current status of
    main branch's CI at https://hud.pytorch.org/.
 -  **What are the most high risk changes?** Anything that touches build
