@@ -1,10 +1,8 @@
-#include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <torch/custom_class.h> // @manual=//caffe2:torch-cpp-cpu
-#include <c10/core/Stream.h>
 #include <c10/core/Device.h>
+#include <c10/core/Stream.h>
+#include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/Logging.h>
-#include <caffe2/torch/csrc/utils/device_lazy_init.h>
-#include <ATen/detail/MTIAHooksInterface.h
+#include <ATen/detail/MTIAHooksInterface.h>
 namespace torch::mtia {
 
 constexpr c10::DeviceType kMTIADeviceType = c10::DeviceType::MTIA;
@@ -29,17 +27,12 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return c10::Device(
         kMTIADeviceType, static_cast<c10::DeviceIndex>(device_ordinal));
   }
-  c10::optional<c10::Device> uncheckedGetDevice() const noexcept {
-    int64_t device_ordinal = 0;
-    return c10::Device(
-        kMTIADeviceType, static_cast<c10::DeviceIndex>(device_ordinal));
-  }
 
   void setDevice(c10::Device d) const override {
     c10::Device current_device = getDevice();
   }
   void uncheckedSetDevice(c10::Device d) const noexcept override {
-    auto current_device = uncheckedGetDevice();
+    (void) d;
   }
   c10::Stream getStream(c10::Device d) const noexcept override {
     return c10::Stream::unpack3(
@@ -72,10 +65,6 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     (void)device_index;
   }
 
-  void createEvent(fbia_streaming::FBAEventId* event, const c10::EventFlag flag)
-      const {
-  }
-
   void record(
       void** event,
       const c10::Stream& stream,
@@ -95,7 +84,6 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
     if (*event == nullptr) {
       int64_t mtia_event{1};
-      createEvent(&mtia_event, flag);
       *event = reinterpret_cast<void*>(mtia_event);
     }
     setDevice(orig_device);
@@ -130,12 +118,9 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   }
 };
 
-
 struct MTIAHooks : public at::MTIAHooksInterface {
   explicit MTIAHooks(at::MTIAHooksArgs) {}
-  void initMTIA() const override {
-
-  }
+  void initMTIA() const override {}
 
   bool hasMTIA() const override {
     return true;
@@ -149,19 +134,17 @@ struct MTIAHooks : public at::MTIAHooksInterface {
     (void)device_index;
   }
 
-  std::string showConfig() const override {
-    return ""
-  }
+  std::string showConfig() const override{return "None config";}
 
-  c10::DeviceIndex exchangeDevice(c10::DeviceIndex device) const override{
+  c10::DeviceIndex exchangeDevice(c10::DeviceIndex device) const override {
     return device;
   }
 
-  c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device) const override{
+  c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device) const override {
     return device;
   }
 
-  c10::Stream getDefaultStream(c10::DeviceIndex device) const override{
+  c10::Stream getDefaultStream(c10::DeviceIndex device) const override {
     return c10::Stream::unpack3(
         static_cast<c10::StreamId>(1), device, c10::DeviceType::MTIA);
   }
@@ -171,15 +154,15 @@ struct MTIAHooks : public at::MTIAHooksInterface {
         static_cast<c10::StreamId>(1), device, c10::DeviceType::MTIA);
   }
 
-  void setCurrentStream(const c10::Stream& stream) const override{
+  void setCurrentStream(const c10::Stream& stream) const override {
     (void)stream;
   }
 
-  c10::DeviceIndex getCurrentDevice() const override{
+  c10::DeviceIndex getCurrentDevice() const override {
     return c10::DeviceIndex(0);
   }
 
-  void setCurrentDevice(c10::DeviceIndex device) const override{
+  void setCurrentDevice(c10::DeviceIndex device) const override {
     (void)device;
   }
 };

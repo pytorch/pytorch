@@ -3,10 +3,10 @@
 import os
 import shutil
 import sys
+import tempfile
 import unittest
 
 import torch
-
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_utils import IS_ARM64, TEST_CUDA
@@ -39,7 +39,6 @@ class TestCppExtensionStreamAndEvent(common.TestCase):
         # this file, so we'll change the working directory temporarily
         self.old_working_dir = os.getcwd()
         os.chdir(os.path.dirname(os.path.abspath(__file__)))
-        assert self.module is not None
 
     def tearDown(self):
         super().tearDown()
@@ -47,16 +46,26 @@ class TestCppExtensionStreamAndEvent(common.TestCase):
         os.chdir(self.old_working_dir)
 
     @classmethod
-    def setUpClass(cls):
+    def tearDownClass(cls):
         remove_build_path()
 
+    @classmethod
+    def setUpClass(cls):
+        remove_build_path()
+        build_dir = tempfile.mkdtemp()
+        src = "{}/cpp_extensions/mtia_extension.cpp".format(
+            os.path.abspath(os.path.dirname(__file__))
+        )
         # Load the fake device guard impl.
         cls.module = torch.utils.cpp_extension.load(
-            name="custom_device_extension",
-            sources=[
-                "cpp_extensions/mtia_extension.cpp",
+            name="mtia_extension",
+            sources=[src],
+            build_directory=build_dir,
+            extra_include_paths=[
+                "cpp_extensions",
+                "path / with spaces in it",
+                "path with quote'",
             ],
-            extra_include_paths=["cpp_extensions"],
             extra_cflags=["-g"],
             verbose=True,
         )
