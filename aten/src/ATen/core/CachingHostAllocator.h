@@ -311,20 +311,25 @@ struct CachingHostAllocatorImplInterface {
     }
   }
 
-  /* runtime-related functions */
+  /* These following functions are runtime-related. */
+
+  // Allocate page-locked memory on the host.
   virtual void allocate_host_memory(size_t size, void** ptr) {
     TORCH_CHECK_NOT_IMPLEMENTED(
         false, "Not implemented for allocate_host_memory");
   }
 
+  // Free block and release the pointer contained in block.
   virtual void free_block(B* block) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for free_block");
   }
 
+  // Record an event on stream and store event into events.
   virtual void record_stream(c10::optional<std::vector<E>>& events, S stream) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for record_stream");
   }
 
+  // Query event if it is completed.
   virtual bool query_event(E& event) {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for query_event");
   }

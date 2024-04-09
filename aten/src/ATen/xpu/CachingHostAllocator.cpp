@@ -10,6 +10,7 @@ using AllocatorImplInterface =
     CachingHostAllocatorImplInterface<XPUStream, XPUEvent>;
 
 struct XPUHostAllocatorImpl : public AllocatorImplInterface {
+  /* These following functions are runtime-related. */
   void allocate_host_memory(size_t size, void** ptr) override {
     *ptr = sycl::aligned_alloc_host(
         kHostAlignment, size, c10::xpu::get_device_context());
