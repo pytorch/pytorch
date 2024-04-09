@@ -330,22 +330,14 @@ struct FusedOptimizerTensorListMetadata {
 };
 
 template <typename T, typename U, typename... ArgTypes>
-__device__ void multi_tensor_apply_dev(
+C10_LAUNCH_BOUNDS_1(kBlockSize)
+__global__ void multi_tensor_apply_kernel(
     T tensorListMeta,
     U callable,
     ArgTypes... args) {
   // Hand the chunk information to the user-supplied functor to process however
   // it likes.
   callable(kChunkSize, tensorListMeta, args...);
-}
-
-template <typename T, typename U, typename... ArgTypes>
-C10_LAUNCH_BOUNDS_1(kBlockSize)
-__global__ void multi_tensor_apply_kernel(
-    T tensorListMeta,
-    U callable,
-    ArgTypes... args) {
-  multi_tensor_apply_dev(tensorListMeta, callable, args...);
 }
 
 template <typename T, typename U, typename... ArgTypes>
@@ -358,7 +350,9 @@ __global__ void multi_tensor_apply_kernel(
       sizeof(DevArrayPack) + sizeof(U) + (0 + ... + sizeof(ArgTypes)) <
       max_kernel_arg_size);
   auto tensorListMeta = T::from_dev_array_pack(pack);
-  multi_tensor_apply_dev(tensorListMeta, callable, args...);
+  // Hand the chunk information to the user-supplied functor to process however
+  // it likes.
+  callable(kChunkSize, tensorListMeta, args...);
 }
 
 } // namespace
