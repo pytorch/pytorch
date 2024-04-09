@@ -92,7 +92,7 @@ def print_cprofile_summary(prof, sortby='tottime', topk=15):
 
 def run_autograd_prof(code, globs):
     def run_prof(use_cuda=False):
-        with profiler.profile(use_device="cuda" if use_cuda else None) as prof:
+        with profiler.profile(use_cuda=use_cuda) as prof:
             exec(code, globs, None)
         return prof
 

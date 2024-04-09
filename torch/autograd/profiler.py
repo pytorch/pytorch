@@ -112,8 +112,12 @@ class profile:
     Args:
         enabled (bool, optional): Setting this to False makes this context manager a no-op.
 
+        use_cuda (bool, optional): Enables timing of CUDA events as well
+            using the cudaEvent API. (will be deprecated)
+
         use_device (str, optional): Enables timing of device events.
             Adds approximately 4us of overhead to each tensor operation when use cuda.
+            The valid devices options are 'cuda', 'xpu' and 'privateuseone'.
 
         record_shapes (bool, optional): If shapes recording is set, information
             about input dimensions will be collected. This allows one to see which
@@ -191,6 +195,7 @@ class profile:
         self,
         enabled=True,
         *,
+        use_cuda=False,
         use_device=None,
         record_shapes=False,
         with_flops=False,
@@ -205,8 +210,13 @@ class profile:
         self.enabled: bool = enabled
         if not self.enabled:
             return
+        self.use_cuda = use_cuda
+        if self.use_cuda:
+            warn(
+                "The attribute `use_cuda` will be deprecated soon, please use ``use_device = 'cuda'`` instead."
+            )
         self.use_device: Optional[str] = (
-            None if use_device == "privateuseone" else use_device
+            "privateuseone" if use_device is None else use_device
         )
         self.function_events: Optional[EventList] = None
         self.entered = False
@@ -231,16 +241,18 @@ class profile:
                 use_kineto
             ), "Device-only events supported only with Kineto (use_kineto=True)"
 
-        if self.use_device and self.use_device not in [
-                "cuda", "xpu", _get_privateuse1_backend_name()]:
-            warn(f"{self.use_device} doesn't support profile.")
+        VAID_DEVICE_OPTIONS = ["cuda", "xpu", _get_privateuse1_backend_name()]
+        if self.use_device not in VAID_DEVICE_OPTIONS:
+            warn(f"The {self.use_device} is not a valid device option.")
             self.use_device = None
 
-        if self.use_device == "cuda" and not torch.cuda.is_available():
+        if (
+            self.use_cuda or self.use_device == "cuda"
+        ) and not torch.cuda.is_available():
             warn("CUDA is not available, disabling CUDA profiling")
             self.use_device = None
 
-        if self.use_device == "xpu" and not torch.xpu.is_available(): # type: ignore[attr-defined]
+        if self.use_device == "xpu" and not torch.xpu.is_available():  # type: ignore[attr-defined]
             warn("XPU is not available, disabling XPU profiling")
             self.use_device = None
 
@@ -251,15 +263,16 @@ class profile:
             self.kineto_activities.add(ProfilerActivity.MTIA)
 
         self.profiler_kind = ProfilerState.KINETO
-        if self.use_device == "cuda":
+        if self.use_cuda or self.use_device == "cuda":
             if not use_kineto or ProfilerActivity.CUDA not in _supported_activities():
                 assert self.use_cpu, "Legacy CUDA profiling requires use_cpu=True"
                 self.profiler_kind = ProfilerState.KINETO_GPU_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.CUDA)
         elif self.use_device == "xpu":
-            assert use_kineto and ProfilerActivity.XPU in _supported_activities(), \
-                "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
+            assert (
+                use_kineto and ProfilerActivity.XPU in _supported_activities()
+            ), "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
             self.kineto_activities.add(ProfilerActivity.XPU)
         elif self.use_device:
             if (
@@ -317,7 +330,7 @@ class profile:
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
-        if self.use_device == "cuda":
+        if self.use_cuda or self.use_device == "cuda":
             torch.cuda.synchronize()
         elif self.use_device == "xpu":
             torch.xpu.synchronize()  # type: ignore[attr-defined]
@@ -451,7 +464,8 @@ class profile:
         def _device_memory_usage(mem_record):
             return (
                 mem_record.nbytes()
-                if mem_record.device_type() in [DeviceType.CUDA, DeviceType.PrivateUse1, DeviceType.HIP]
+                if mem_record.device_type()
+                in [DeviceType.CUDA, DeviceType.PrivateUse1, DeviceType.HIP]
                 else 0
             )
 
