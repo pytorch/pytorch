@@ -23,7 +23,7 @@ from torch.testing._internal.common_optimizers import (
     optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS, TEST_WITH_ROCM, onlyNativeDeviceTypes)
-from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase, skipIfTorchDynamo
 from torch.testing._internal.common_cuda import _create_scaling_case
 
 FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
@@ -1564,6 +1564,7 @@ class TestOptimRenewed(TestCase):
             self.assertEqual(type(res1), type(res2))
 
     @onlyCPU
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/123238")
     def test_grad_scaling_autocast_fused_optimizers(self):
         # This ut is from test_cuda.py test_grad_scaling_autocast_fused_optimizers
         # but only test Adam/AdamW on CPU
