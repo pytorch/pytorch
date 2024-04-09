@@ -70,7 +70,7 @@ def initialize_lazy_module(tx, mod, args, kwargs):
 def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
     fully_qualified_name = source.name()
     try:
-        tx.nn_module_stack[module_key] = (fully_qualified_name, type(mod))
+        tx.nn_module_stack[module_key] = (fully_qualified_name, mod.__class__)
         yield
     finally:
         del tx.nn_module_stack[module_key]
@@ -242,7 +242,9 @@ class NNModuleVariable(VariableTracker):
                 # Support possibly common cases of class members
                 return VariableBuilder(tx, NNModuleSource(source))(subobj)
             else:
-                unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
+                unimplemented(
+                    f"class property {name} - {typestr(base)} {typestr(subobj)}"
+                )
 
         return variables.GetAttrVariable(self, name, source=source)
 
@@ -306,6 +308,14 @@ class NNModuleVariable(VariableTracker):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
+                    # End of fn, this bubbles up and restarts tracing.
+                    self.convert_to_unspecialized(tx)
+
+                # NB: torch.nn.utils.parametrize changes the class type of the
+                # parametrized module such that its __module__ points to the
+                # "torch.nn.utils.parametrize". These modules should be treated
+                # as unspecialized since parametrizations can do arbitrary computation.
+                if mod.__module__ == "torch.nn.utils.parametrize":
                     # End of fn, this bubbles up and restarts tracing.
                     self.convert_to_unspecialized(tx)
 
@@ -669,10 +679,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _nn_module_method_ids():
+        # Allow __setattr__ to fall through to base class handler
+        supported = {torch.nn.Module.__setattr__}
         return {
             id(x.__code__)
             for x in torch.nn.Module.__dict__.values()
-            if hasattr(x, "__code__")
+            if hasattr(x, "__code__") and x not in supported
         }
 
     def unpack_var_sequence(self, tx):
