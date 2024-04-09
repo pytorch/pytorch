@@ -74,14 +74,12 @@ def create_runtime_wrapper(
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
 
-    def runtime_wrapper(*args):
+    def runtime_wrapper(args: List[Any]):
         # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
         if num_tokens > 0:
             old_args = args
-            args = (*[torch.empty(0)] * num_tokens, *args)
-            for arg in old_args:
-                if isinstance(arg, list):
-                    arg.clear()
+            args = [*[torch.empty(0)] * num_tokens, *args]
+            old_args.clear()
 
         if trace_joint:
             args_ = list(args)
@@ -94,6 +92,7 @@ def create_runtime_wrapper(
                     compiled_fn,
                     args_,
                     disable_amp=disable_amp,
+                    steal_args=True, # only for flattened
                 )
         else:
             # When we have an inference graph, we run with torch.no_grad.
@@ -106,12 +105,14 @@ def create_runtime_wrapper(
                         compiled_fn,
                         args,
                         disable_amp=disable_amp,
+                        steal_args=True, # only for flattened
                     )
             else:
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn,
                     args,
                     disable_amp=disable_amp,
+                    steal_args=True, # only for flattened
                 )
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
@@ -575,11 +576,8 @@ fw_metadata={str(fw_metadata)}
         wrapped_flat_fn, deduped_flat_args, aot_config, fw_metadata=updated_fw_metadata
     )
 
-    if not hasattr(compiled_fn, "_boxed_call"):
-        compiled_fn = make_boxed_func(compiled_fn)
-
     @wraps(compiled_fn)
-    def wrapped_compiled_fn(args):
+    def wrapped_compiled_fn(args: List[Any]):
         deduped_args = remove_dupe_args(args)
         args.clear()
         return compiled_fn(deduped_args)
