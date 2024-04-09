@@ -17,6 +17,8 @@ from torch.utils._python_dispatch import (
     transform_subclass,
 )
 
+aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
+
 
 def to_fun(t):
     if isinstance(t, Tensor):
@@ -195,7 +197,7 @@ def gen_alias_from_base(
     aliased_base_tensor,
     target_meta_tensor,
     target_requires_grad,
-    target_functional_tensor=None,
+    target_functional_tensor: Optional[FunctionalTensorMetadataEq] = None,
 ):
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
@@ -219,12 +221,7 @@ def gen_alias_from_base(
             out = torch._functionalize_apply_view_metas(
                 functional_tensor, aliased_base_tensor
             )
-            assert out.shape == target_meta_tensor.shape, (
-                "incorrect out shape after application of ViewMeta sequence: "
-                f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
-            )
-            return patch_requires_grad(out)
-        except RuntimeError:
+        except RuntimeError as e:
             # NYI for dynamic shapes.
             #
             # On functionalization, the ViewMeta lambdas will have symbolic shapes.
@@ -232,7 +229,19 @@ def gen_alias_from_base(
             #
             # In order for this to work, we should have a way to replace those
             # symbolic shapes with concrete numbers.
-            pass
+            aot_joint_log.warn(
+                "could not reconstruct view by re-applying a ViewMeta sequence. "
+                f"This error is possibly caused by dynamic shapes. Error message: {e}"
+            )
+        else:
+            # If re-applying the ViewMeta sequence succeeded, there should be no more
+            # problems going forward. We just check we got to the target shape and
+            # patch requires_grad flag.
+            assert out.shape == target_meta_tensor.shape, (
+                "incorrect out shape after application of ViewMeta sequence: "
+                f"{tuple(out.shape)} (actual) vs {tuple(target_meta_tensor.shape)} (expected)"
+            )
+            return patch_requires_grad(out)
 
     # Try to do view-replay if possible.
     # fall back to .as_strided() if we can't.
