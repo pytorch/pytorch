@@ -3516,15 +3516,16 @@ class CppKernelProxy(CppKernel):
                     tiling_indices[0], factor=tiling_factors[0]
                 )
                 main_loop.set_kernel(vec_kernel)
-                tail_loop.set_kernel(scalar_kernel)
                 main_loop.simd_vec = True
-                tail_loop.simd_omp = True
-                # We chop the loop into two cubes by the nelements - main loop and tail loop.
-                # Regarding the main loop, it is straightforward that it could be vectorized with
-                # nelements. But for the tail loop, it still could be vectorized. For example,
-                # if the nelements is 8(256bits), then the tail loop still could be vectorized
-                # as 4(128bits).
-                tail_loop.simd_nelements = tiling_factors[0] // 2
+                if tail_loop is not None:
+                    tail_loop.set_kernel(scalar_kernel)
+                    tail_loop.simd_omp = True
+                    # We chop the loop into two cubes by the nelements - main loop and tail loop.
+                    # Regarding the main loop, it is straightforward that it could be vectorized with
+                    # nelements. But for the tail loop, it still could be vectorized. For example,
+                    # if the nelements is 8(256bits), then the tail loop still could be vectorized
+                    # as 4(128bits).
+                    tail_loop.simd_nelements = tiling_factors[0] // 2
             elif len(tiling_indices) == 2:
                 assert (
                     tiling_indices[1] == len(self.itervars) - 1
@@ -3540,7 +3541,8 @@ class CppKernelProxy(CppKernel):
                 outer_main_loop, outer_tail_loop = self.loop_nest.split_with_tiling(
                     tiling_indices[0], factor=tiling_factors[0]
                 )
-                outer_tail_loop.set_kernel(scalar_kernel)
+                if outer_tail_loop is not None:
+                    outer_tail_loop.set_kernel(scalar_kernel)
                 (
                     inner_main_loop,
                     inner_tail_loop,
@@ -3548,7 +3550,8 @@ class CppKernelProxy(CppKernel):
                     tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                 )
                 inner_main_loop.set_kernel(tile2d_kernel)
-                inner_tail_loop.set_kernel(vec_kernel)
+                if inner_tail_loop is not None:
+                    inner_tail_loop.set_kernel(vec_kernel)
 
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
@@ -4082,7 +4085,6 @@ class LoopLevel:
 
         def do_split_with_tiling():
             sympy_factor = sympy.Integer(factor)
-
             offset = FloorDiv(self.size, sympy_factor) * sympy_factor
             main_loop = LoopLevel(self.var, offset)
             main_loop.steps = sympy_factor
@@ -4093,16 +4095,19 @@ class LoopLevel:
             if main_loop.inner:
                 for loop in main_loop.inner:
                     loop.parent = main_loop
-
-            tail_loop = LoopLevel(self.var, self.size)
-            tail_loop.offset = offset
-            tail_loop.parallel = self.parallel
-            tail_loop.collapsed = False
-            tail_loop.is_reduction = self.is_reduction
-            tail_loop.inner = clone_inner()
-            if tail_loop.inner:
-                for loop in tail_loop.inner:
-                    loop.parent = tail_loop
+            if config.cpp.no_redundant_loops and self.size == offset:
+                main_loop.collapsed = True
+                tail_loop = None
+            else:
+                tail_loop = LoopLevel(self.var, self.size)
+                tail_loop.offset = offset
+                tail_loop.parallel = self.parallel
+                tail_loop.collapsed = False
+                tail_loop.is_reduction = self.is_reduction
+                tail_loop.inner = clone_inner()
+                if tail_loop.inner:
+                    for loop in tail_loop.inner:
+                        loop.parent = tail_loop
 
             return main_loop, tail_loop
 
@@ -4110,9 +4115,12 @@ class LoopLevel:
             main_loop, tail_loop = do_split_with_tiling()
             parent = self.parent
             if parent:
-                parent.inner = [main_loop, tail_loop]
                 main_loop.parent = parent
-                tail_loop.parent = parent
+                if tail_loop is not None:
+                    parent.inner = [main_loop, tail_loop]
+                    tail_loop.parent = parent
+                else:
+                    parent.inner = [main_loop]
             return main_loop, tail_loop
         else:
             assert len(self.inner) == 1
@@ -4263,7 +4271,7 @@ class LoopNestWithSplit:
         """
         loops = self.get_loops_at(depth)
         assert len(loops) == 1
-        split_loops = loops[0].split_with_tiling(0, factor)
+        main_loop, tail_loop = loops[0].split_with_tiling(0, factor)
         if depth == 0:
-            self.root = split_loops
-        return split_loops
+            self.root = [main_loop] if tail_loop is None else [main_loop, tail_loop]
+        return main_loop, tail_loop
