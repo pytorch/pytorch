@@ -123,7 +123,9 @@ def validate_ir(node_or_nodes):
     def _check_tensorbox(nodes):
         # Could expand this to check deeper properties
         # (e.g. TensorBox points to View or StorageBox)
-        if isinstance(nodes, (list, tuple)):
+        if nodes is None:
+            pass
+        elif isinstance(nodes, (list, tuple)):
             for node in nodes:
                 _check_tensorbox(node)
         elif isinstance(nodes, dict):
@@ -139,6 +141,7 @@ def validate_ir(node_or_nodes):
                     TensorBox,
                     sympy.logic.boolalg.Boolean,
                     Expr,
+                    EffectfulKernel,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -5377,16 +5380,26 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        device = cls.find_device(tensor_args, example_output)
-        assert device, "Not sure where to find device info"
+        if example_output is None:
+            packed = cls(
+                NoneLayout(None),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+            )
 
-        packed = cls(
-            MultiOutputLayout(device),
-            kernel,
-            tensor_args,
-            non_tensor_args,
-            unflatten_args,
-        )
+        else:
+            device = cls.find_device(tensor_args, example_output)
+            assert device, "Not sure where to find device info"
+
+            packed = cls(
+                MultiOutputLayout(device),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+            )
 
         def generate_output(output, indices):
             if isinstance(output, (list, tuple)):
@@ -7341,6 +7354,47 @@ class WhileLoop(ExternKernel):
 
     def codegen(self, wrapper):
         wrapper.codegen_while_loop(self)
+
+
+class EffectfulKernel(FallbackKernel):
+    def __init__(
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+    ):
+        super().__init__(
+            NoneLayout(layout.device),
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+        )
+
+        from torch._higher_order_ops.effects import get_effect_key
+
+        effect_type = get_effect_key(kernel, (*nontensor_args, *tensor_args), kwargs)
+        assert effect_type is not None
+        self.effect_type = effect_type
+        self.prev_effect_buffer = V.graph.effectful_ops.get(effect_type, None)
+        V.graph.effectful_ops[effect_type] = self
+
+    def get_read_writes(self):
+        read_writes = super().get_read_writes()
+
+        if self.prev_effect_buffer is not None:
+            read_writes.reads.add(
+                dependencies.StarDep(self.prev_effect_buffer.get_name())
+            )
+
+        return read_writes
+
+    def has_side_effects(self):
+        return True
 
 
 class InterpreterShim(torch.fx.Interpreter):
