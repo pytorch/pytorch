@@ -19666,10 +19666,17 @@ op_db: List[OpInfo] = [
     OpInfo(
         "nn.functional.channel_shuffle",
         sample_inputs_func=sample_inputs_channel_shuffle,
-        dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
+        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        backward_dtypes=integral_types_and(torch.bool),
         supports_out=False,
-        supports_forward_ad=True,
-        supports_fwgrad_bwgrad=True,
+        supports_autograd=False,
+        skips=(
+            # Skip due to NotImplementedError for MPS device.
+            DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
+            # vmap: calling random operator not supported
+            DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+        ),
     ),
     OpInfo(
         "nn.functional.kl_div",
