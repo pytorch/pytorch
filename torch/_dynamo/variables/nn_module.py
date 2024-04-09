@@ -793,7 +793,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if id(method.__code__) in self._nn_module_method_ids():
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
 
-            if name == "__setattr__":
+            # "_parameters" in self.value.__dict__ checks that module is initialized
+            if name == "__setattr__" and "_parameters" in self.value.__dict__:
                 # Record if mutations happens on parameters/buffers/modules. The
                 # mutations on these are not tracked by base class
                 # UserDefinedObject vt. This will be used later to graph break
