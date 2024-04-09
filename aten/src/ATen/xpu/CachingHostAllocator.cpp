@@ -6,10 +6,9 @@ namespace {
 constexpr size_t kHostAlignment = 512;
 
 using Block = HostBlock<XPUStream>;
-using AllocatorImplInterface =
-    CachingHostAllocatorImplInterface<XPUStream, XPUEvent>;
 
-struct XPUHostAllocatorImpl : public AllocatorImplInterface {
+struct XPUCachingHostAllocatorImpl
+    : public CachingHostAllocatorImpl<XPUStream, XPUEvent> {
   /* These following functions are runtime-related. */
   void allocate_host_memory(size_t size, void** ptr) override {
     *ptr = sycl::aligned_alloc_host(
@@ -37,8 +36,8 @@ struct XPUHostAllocatorImpl : public AllocatorImplInterface {
 
 void raw_local_deleter(void* ptr);
 
-struct XPUHostAllocator final
-    : public HostAllocatorInterface<XPUHostAllocatorImpl> {
+struct XPUCachingHostAllocator final
+    : public CachingHostAllocatorInterface<XPUCachingHostAllocatorImpl> {
   at::DataPtr allocate(size_t size) override {
     auto ptr_and_ctx = impl_->allocate(size);
     return {
@@ -49,29 +48,29 @@ struct XPUHostAllocator final
   }
 };
 
-static XPUHostAllocator host_allocator;
+static XPUCachingHostAllocator caching_host_allocator;
 
 void raw_local_deleter(void* ptr) {
-  host_allocator.free(ptr);
+  caching_host_allocator.free(ptr);
 }
 
-static inline XPUHostAllocator& getXPUHostAllocator() {
-  return host_allocator;
+static inline XPUCachingHostAllocator& getXPUCachingHostAllocator() {
+  return caching_host_allocator;
 }
 
 bool CachingHostAllocator_recordEvent(
     void* ptr,
     void* ctx,
     c10::xpu::XPUStream stream) {
-  return getXPUHostAllocator().record_event(ptr, ctx, stream);
+  return getXPUCachingHostAllocator().record_event(ptr, ctx, stream);
 }
 
 void CachingHostAllocator_emptyCache() {
-  getXPUHostAllocator().empty_cache();
+  getXPUCachingHostAllocator().empty_cache();
 }
 
 at::Allocator* getCachingHostAllocator() {
-  return &host_allocator;
+  return &caching_host_allocator;
 }
 
 } // namespace at::xpu
