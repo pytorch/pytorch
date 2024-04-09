@@ -3,8 +3,8 @@
 import copy
 import dataclasses
 import io
-import re
 import logging
+import re
 import unittest
 import warnings
 from contextlib import contextmanager
@@ -4326,6 +4326,7 @@ def forward(self, x):
 
     def test_logging_logger(self):
         logger = logging.getLogger(__name__)
+
         class M(torch.nn.Module):
             def forward(self, x):
                 logger.log("start")
