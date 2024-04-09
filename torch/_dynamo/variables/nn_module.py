@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 
 import torch.nn
 
-from .. import skipfiles, variables
+from .. import trace_rules, variables
 from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
@@ -24,6 +24,7 @@ from ..utils import (
     get_custom_getattr,
     get_fake_value,
     is_lazy_module,
+    is_namedtuple,
     is_safe_constant,
     istensor,
     istype,
@@ -45,37 +46,43 @@ def initialize_lazy_module(tx, mod, args, kwargs):
     useful now that 'allowed' modules graph-break on hooks, calling this first ensures there is no hook
     by the time we trace __call__ and thus no graph-break for lazy allowed modules.
     """
-    assert len(kwargs) == 0
-
     if hasattr(mod, "_initialize_hook"):
 
         def convert_to_fake(x):
-            if isinstance(x, torch.fx.Proxy):
+            if is_namedtuple(x):
+                return type(x)(*(convert_to_fake(elem) for elem in x))
+            elif isinstance(x, dict):
+                return {k: convert_to_fake(v) for k, v in x.items()}
+            elif isinstance(x, (list, tuple, set)):
+                return type(x)(convert_to_fake(elem) for elem in x)
+            elif isinstance(x, torch.fx.Proxy):
                 return get_fake_value(x.node, tx)
             else:
                 return x
 
-        input = [
-            type(arg)([convert_to_fake(x) for x in arg])
-            if isinstance(arg, (list, tuple))
-            else convert_to_fake(arg)
-            for arg in proxy_args_kwargs(args, {})[0]
-        ]
-        mod._infer_parameters(mod, input)
+        proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
+        fake_args = [convert_to_fake(arg) for arg in proxy_args]
+        fake_kwargs = {k: convert_to_fake(v) for k, v in proxy_kwargs.items()}
+        mod._infer_parameters(mod, fake_args, fake_kwargs)
 
 
 @contextmanager
 def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
     fully_qualified_name = source.name()
     try:
-        tx.nn_module_stack[module_key] = (fully_qualified_name, type(mod))
+        tx.nn_module_stack[module_key] = (fully_qualified_name, mod.__class__)
         yield
     finally:
         del tx.nn_module_stack[module_key]
 
 
 class NNModuleVariable(VariableTracker):
-    _nonvar_fields = {"module_type", "module_key", *VariableTracker._nonvar_fields}
+    _nonvar_fields = {
+        "module_type",
+        "module_key",
+        "module",
+        *VariableTracker._nonvar_fields,
+    }
 
     def __init__(
         self, module_type: type, module_key: str, module: torch.nn.Module, **kwargs
@@ -235,7 +242,9 @@ class NNModuleVariable(VariableTracker):
                 # Support possibly common cases of class members
                 return VariableBuilder(tx, NNModuleSource(source))(subobj)
             else:
-                unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
+                unimplemented(
+                    f"class property {name} - {typestr(base)} {typestr(subobj)}"
+                )
 
         return variables.GetAttrVariable(self, name, source=source)
 
@@ -299,6 +308,14 @@ class NNModuleVariable(VariableTracker):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
+                    # End of fn, this bubbles up and restarts tracing.
+                    self.convert_to_unspecialized(tx)
+
+                # NB: torch.nn.utils.parametrize changes the class type of the
+                # parametrized module such that its __module__ points to the
+                # "torch.nn.utils.parametrize". These modules should be treated
+                # as unspecialized since parametrizations can do arbitrary computation.
+                if mod.__module__ == "torch.nn.utils.parametrize":
                     # End of fn, this bubbles up and restarts tracing.
                     self.convert_to_unspecialized(tx)
 
@@ -387,7 +404,7 @@ class NNModuleVariable(VariableTracker):
             with record_nn_module_stack(self.module_key, self.source, tx, module):
                 return generic_call_method_helper(name)
 
-        if name == "_check_input_dim" and skipfiles.is_torch_inline_allowed(
+        if name == "_check_input_dim" and trace_rules.is_torch_inline_allowed(
             inspect.getfile(module.__class__._check_input_dim)
         ):
             return ConstantVariable.create(True)
@@ -416,7 +433,7 @@ class NNModuleVariable(VariableTracker):
             if not all(
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())
             ):
-                raise unimplemented(f"non-const NNModule method {name}")
+                unimplemented(f"non-const NNModule method {name}")
 
         def get_kwargs(*names):
             assert_all_args_kwargs_const()
@@ -662,10 +679,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _nn_module_method_ids():
+        # Allow __setattr__ to fall through to base class handler
+        supported = {torch.nn.Module.__setattr__}
         return {
             id(x.__code__)
             for x in torch.nn.Module.__dict__.values()
-            if hasattr(x, "__code__")
+            if hasattr(x, "__code__") and x not in supported
         }
 
     def unpack_var_sequence(self, tx):

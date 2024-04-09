@@ -23,6 +23,9 @@ struct TORCH_API Method : public torch::IMethod {
 
   // the module that contains this method.
   Module owner() const;
+  // the raw objectptr that owns this method, for when the method is owned by a
+  // torchbind object.
+  ObjectPtr raw_owner() const;
   void run(Stack& stack);
   void run(Stack&& stack) {
     run(stack);

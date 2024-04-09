@@ -326,9 +326,8 @@ try:
 
         def call_function(self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]) -> Any:
             if target != torch._assert:
-                # Actually runs the node target function (which is already
-                # lifted) with its arguments.
-                return super().call_function(target, args, kwargs)
+                # Lift and runs the node target function
+                return super().call_function(z3op(target, self.validator), args, kwargs)  # type: ignore[arg-type]
             # Adds the Z3 expression corresponding to the first argument
             # as a validator input.
             assert len(args) == 1, f"expected 1 argument on assertion. Got: {len(args)} "
@@ -699,7 +698,7 @@ def bisect(shape_env):
         shape_env.graph.lint()
         return check_shapeenv_fails(shape_env, events[number].tracked_fakes)
 
-    last_exception = check_shapeenv_fails(shape_env, shape_env.snapshot_tracked_fakes())
+    last_exception = check_shapeenv_fails(shape_env, shape_env._snapshot_tracked_fakes())
 
     if not last_exception:
         # We don't actually fail due to a produce_guards call.

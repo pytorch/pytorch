@@ -1630,6 +1630,29 @@ class TestLinalg(TestCase):
                 result_n = np.linalg.norm(x_n, ord=ord)
                 self.assertEqual(result, result_n, msg=msg)
 
+    @dtypes(torch.float, torch.double, torch.cfloat, torch.cdouble)
+    def test_vector_norm_reduce_over_1D_vector(self, device, dtype):
+        input_sizes_and_dims = [
+            ((6, 1), -1),
+            ((3, 1, 2, 1), (1, 3)),
+            ((1,), None),
+        ]
+        orders = [float('inf'), -float('inf'), 0, 1, -1, 2, -2]
+        keepdims = [True, False]
+
+        for input_size_and_dim, ord, keepdim in product(input_sizes_and_dims, orders, keepdims):
+            input_size = input_size_and_dim[0]
+            dim = input_size_and_dim[1]
+            if type(dim) is tuple and ord == 0:
+                # skip because np.linalg.norm raises 'ValueError: Invalid norm order for matrices.'
+                continue
+            input = make_tensor(input_size, dtype=dtype, device=device, low=-9, high=9)
+            result = torch.linalg.vector_norm(input, ord, dim, keepdim)
+            result_numpy = np.linalg.norm(input.cpu().numpy(), ord, dim, keepdim)
+
+            msg = f'input.size()={input.size()}, ord={ord}, dim={dim}, keepdim={keepdim}, dtype={dtype}'
+            self.assertEqual(result, result_numpy, msg=msg)
+
     @skipCUDAIfNoMagmaAndNoCusolver
     @skipCPUIfNoLapack
     @dtypes(torch.float, torch.double)
@@ -5183,7 +5206,11 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @dtypes(torch.double)
     def test_lobpcg_ortho(self, device, dtype):
+        if torch.version.hip:
+            torch.backends.cuda.preferred_linalg_library('magma')
         self._test_lobpcg_method(device, dtype, 'ortho')
+        if torch.version.hip:
+            torch.backends.cuda.preferred_linalg_library('default')
 
     def _test_lobpcg_method(self, device, dtype, method):
         from torch.testing._internal.common_utils import random_symmetric_pd_matrix, random_sparse_pd_matrix
@@ -5785,9 +5812,10 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         version = _get_torch_cuda_version()
         SM80OrLater = torch.cuda.is_available() and torch.cuda.get_device_capability() >= (8, 0)
         SM70 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 0)
+        SM75 = torch.cuda.is_available() and torch.cuda.get_device_capability() == (7, 5)
         if version >= (11, 7):
             if not use_transpose_a and use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and SM70):
+                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
                     _test(17, k, n, use_transpose_a, use_transpose_b, version > (11, 7))
                 else:
                     with self.assertRaisesRegex(RuntimeError,
@@ -5805,7 +5833,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                     _test(17, k, n, use_transpose_a, use_transpose_b)
 
             if not use_transpose_a and not use_transpose_b:
-                if SM80OrLater or (version >= (12, 3) and SM70):
+                if SM80OrLater or (version >= (12, 3) and (SM70 or SM75)):
                     _test(17, k, n, use_transpose_a, use_transpose_b)
                 else:
                     with self.assertRaisesRegex(RuntimeError,
@@ -5860,6 +5888,49 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                                r"Expected result.size\(0\) to be 17 but got 16",
                                lambda: torch._int_mm(genf_int(17, 8), genf_int(8, 32), out=genf_int(16, 31).int()))
 
+    @onlyCPU
+    @parametrize("m", [0, 8, 17])
+    @parametrize("k", [0, 16, 32])
+    @parametrize("n", [16, 32])
+    @parametrize("use_transpose_a", [True, False])
+    @parametrize("use_transpose_b", [True, False])
+    @parametrize("non_contig_type", [0, 1, 2])
+    def test__int_mm_cpu(self, device, m, k, n, use_transpose_a, use_transpose_b, non_contig_type):
+        # non_contig_type:
+        # 0: the whole data buffer is contiguous (can be transposed)
+        # 1: stride of one dimension is 1, but the whole buffer is not contiguous
+        # 2: Neither stride is 1
+
+        def genf_int_float(x, y, use_transpose, non_contig_type):
+            if use_transpose:
+                x, y = y, x
+            if non_contig_type != 0:
+                y = y * 2
+            x_int8 = torch.randint(-10, 10, (x, y), dtype=torch.int8, device=device)
+            x_float = x_int8.to(torch.float32)
+            if non_contig_type == 1:
+                x_int8 = x_int8[:, : y // 2]
+                x_float = x_float[:, : y // 2]
+            elif non_contig_type == 2:
+                x_int8 = x_int8[:, ::2]
+                x_float = x_float[:, ::2]
+            if use_transpose:
+                return x_int8.t(), x_float.t()
+            return x_int8, x_float
+
+        if non_contig_type != 0 and (m == 0 or k == 0):
+            return
+        a_int8, a_float = genf_int_float(m, k, use_transpose_a, non_contig_type)
+        b_int8, b_float = genf_int_float(k, n, use_transpose_b, non_contig_type)
+        c_int32 = torch._int_mm(a_int8, b_int8)
+        self.assertTrue(c_int32.dtype is torch.int32)
+        self.assertEqual(c_int32.device, torch.device(device))
+        self.assertEqual(c_int32.float(), torch.mm(a_float, b_float))
+        c_int32_result = c_int32.new_empty(c_int32.size())
+        # Checking out variant
+        torch._int_mm(a_int8, b_int8, out=c_int32_result)
+        self.assertEqual(c_int32_result.float(), torch.mm(a_float, b_float))
+
     def _group_quantize_tensor(self, w, n_bit=4, q_group_size=16):
         assert w.dim() == 2
         w = w.transpose(0, 1).contiguous()
@@ -5902,12 +5973,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @onlyCUDA
+    @onlyNativeDeviceTypes
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test__int4_mm(self, device, m, k, n):
+        if self.device_type == 'cuda' and not SM80OrLater:
+            self.skipTest("requires SM80 or later")
+
         if TEST_WITH_ROCM:
             self.skipTest("_int4_mm not compiled for ROCM")
 
@@ -5942,12 +6015,14 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
     @unittest.skipIf(IS_WINDOWS, "Skipped on Windows!")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
-    @unittest.skipIf(not SM80OrLater, "need sm_80")
-    @onlyCUDA
+    @onlyNativeDeviceTypes
     @parametrize("m", [32, 64])
     @parametrize("k", [32, 64])
     @parametrize("n", [48, 64])
     def test_compile_int4_mm(self, device, m, k, n):
+        if self.device_type == 'cuda' and not SM80OrLater:
+            self.skipTest("requires SM80 or later")
+
         if TEST_WITH_ROCM:
             self.skipTest("_int4_mm not compiled for ROCM")
 
@@ -5973,6 +6048,89 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         res = int4_mm(a, b_int32, b_scales_and_zeros)
         ref = torch.mm(a, b)
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
+
+    def _dynamically_quantize_per_channel(self, x, quant_min, quant_max, target_dtype):
+        # source: https://github.com/pytorch-labs/gpt-fast/blob/main/quantize.py
+        # default setup for affine quantization of activations
+        x_dtype = x.dtype
+        x = x.float()
+        eps = torch.finfo(torch.float32).eps
+
+        # get min and max
+        min_val, max_val = torch.aminmax(x, dim=1)
+
+        # calculate scales and zero_points based on min and max
+        # reference: https://fburl.com/code/srbiybme
+        min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
+        max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
+        device = min_val_neg.device
+
+        # reference: https://fburl.com/code/4wll53rk
+        max_val_pos = torch.max(-min_val_neg, max_val_pos)
+        scales = max_val_pos / (float(quant_max - quant_min) / 2)
+        # ensure scales is the same dtype as the original tensor
+        scales = torch.clamp(scales, min=eps).to(x.dtype)
+        zero_points = torch.zeros(min_val_neg.size(), dtype=torch.int64, device=device)
+
+        # quantize based on qmin/qmax/scales/zp
+        x_div = x / scales.unsqueeze(-1)
+        x_round = torch.round(x_div)
+        x_zp = x_round + zero_points.unsqueeze(-1)
+        quant = torch.clamp(x_zp, quant_min, quant_max).to(target_dtype)
+
+        return quant, scales.to(x_dtype), zero_points
+
+    @onlyCPU
+    @parametrize("m", [32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [48, 64])
+    def test__int8_mm(self, device, m, k, n):
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
+
+        def convert_weight_to_int8pack(b):
+            b_int8pack, b_scales, _ = self._dynamically_quantize_per_channel(
+                b, -128, 127, torch.int8
+            )
+            return b_int8pack, b_scales
+
+        def weight_int8pack_mm(a, b_int8pack, b_scales):
+            return torch._weight_int8pack_mm(
+                a, b_int8pack, b_scales
+            )
+
+        b_int8pack, b_scales = convert_weight_to_int8pack(b)
+        res = weight_int8pack_mm(a, b_int8pack, b_scales)
+        ref = torch.mm(a, b.transpose(0, 1))
+
+        mean_err = ((res - ref).abs() / ref).mean()
+        self.assertTrue(mean_err < 0.05)
+
+    @onlyCPU
+    @parametrize("m", [32, 64])
+    @parametrize("k", [32, 64])
+    @parametrize("n", [48, 64])
+    def test_compile_int8_mm(self, device, m, k, n):
+        torch.manual_seed(1)
+        a = torch.rand((m, k), dtype=torch.bfloat16, device=device)
+        b = torch.rand((n, k), dtype=torch.bfloat16, device=device)
+
+        b_int8pack, b_scales, _ = self._dynamically_quantize_per_channel(
+            b, -128, 127, torch.int8
+        )
+
+        @torch.compile
+        def int8_mm(a, b_int8pack, b_scales):
+            return torch._weight_int8pack_mm(
+                a, b_int8pack, b_scales
+            )
+
+        res = int8_mm(a, b_int8pack, b_scales)
+        ref = torch.mm(a, b.transpose(0, 1))
 
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
@@ -7493,6 +7651,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
 
         def run_subtest(guess_rank, actual_rank, matrix_size, batches, device, pca, **options):
             density = options.pop('density', 1)
+            use_svd_lowrank = options.pop('use_svd_lowrank', False)
             if isinstance(matrix_size, int):
                 rows = columns = matrix_size
             else:
@@ -7504,7 +7663,11 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 a_input = random_sparse_matrix(rows, columns, density, device=device, dtype=dtype)
                 a = a_input.to_dense()
 
-            u, s, v = pca(a_input, q=guess_rank, **options)
+            if use_svd_lowrank:
+                m = a_input.mean(dim=-2, keepdim=True)
+                u, s, v = pca(a_input, q=guess_rank, M=m, **options)
+            else:
+                u, s, v = pca(a_input, q=guess_rank, **options)
 
             self.assertEqual(s.shape[-1], guess_rank)
             self.assertEqual(u.shape[-2], rows)
@@ -7542,6 +7705,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                     if guess_rank <= min(*size):
                         run_subtest(guess_rank, actual_rank, size, batches, device, torch.pca_lowrank)
                         run_subtest(guess_rank, actual_rank, size[::-1], batches, device, torch.pca_lowrank)
+                        run_subtest(guess_rank, actual_rank, size, batches, device, torch.svd_lowrank, use_svd_lowrank=True)
+                        run_subtest(guess_rank, actual_rank, size[::-1], batches, device, torch.svd_lowrank, use_svd_lowrank=True)
 
         # sparse input
         for guess_rank, size in [

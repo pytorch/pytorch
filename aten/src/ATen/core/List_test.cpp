@@ -1118,7 +1118,7 @@ TEST(ListTestNonIValueBasedList, sameValueDifferentStorage_thenIsReturnsFalse) {
 TEST(ListTest, canAccessStringByReference) {
   List<std::string> list({"one", "two"});
   const auto& listRef = list;
-  static_assert(std::is_same<decltype(listRef[1]), const std::string&>::value,
+  static_assert(std::is_same_v<decltype(listRef[1]), const std::string&>,
                 "const List<std::string> access should be by const reference");
   std::string str = list[1];
   const std::string& strRef = listRef[1];
@@ -1130,7 +1130,7 @@ TEST(ListTest, canAccessOptionalStringByReference) {
   List<c10::optional<std::string>> list({"one", "two", c10::nullopt});
   const auto& listRef = list;
   static_assert(
-      std::is_same<decltype(listRef[1]), c10::optional<std::reference_wrapper<const std::string>>>::value,
+      std::is_same_v<decltype(listRef[1]), c10::optional<std::reference_wrapper<const std::string>>>,
       "List<c10::optional<std::string>> access should be by const reference");
   c10::optional<std::string> str1 = list[1];
   c10::optional<std::string> str2 = list[2];
@@ -1148,7 +1148,7 @@ TEST(ListTest, canAccessTensorByReference) {
   List<at::Tensor> list;
   const auto& listRef = list;
   static_assert(
-      std::is_same<decltype(listRef[0]), const at::Tensor&>::value,
+      std::is_same_v<decltype(listRef[0]), const at::Tensor&>,
       "List<at::Tensor> access should be by const reference");
 }
 
