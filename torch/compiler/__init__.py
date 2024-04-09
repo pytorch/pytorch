@@ -1,5 +1,4 @@
 import torch
-import functools
 from typing import List
 
 __all__ = [
