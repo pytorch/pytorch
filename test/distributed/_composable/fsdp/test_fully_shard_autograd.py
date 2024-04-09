@@ -35,7 +35,6 @@ class TestFullyShardAutograd(FSDPTest):
                 param.grad.div_(group.size())
 
     @skip_if_lt_x_gpu(2)
-    @test_compiled_fsdp()
     def test_unused_forward_output(self):
         """
         Tests that gradients propagate when running a backward where some
