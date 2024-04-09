@@ -85,7 +85,7 @@ def efficient_conv_bn_fn_eval(
     conv_weight,
     conv_bias,
     x,
-    conv_remainging_args: tuple,
+    conv_remainging_args,
 ):
     """
     Implementation based on https://arxiv.org/abs/2305.11624
