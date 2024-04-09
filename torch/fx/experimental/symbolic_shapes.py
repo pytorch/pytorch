@@ -4107,7 +4107,7 @@ class ShapeEnv:
         if is_debug and config.extended_debug_cpp:
             cpp_stack = CapturedTraceback.extract(cpp=True)
             maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
-        else:
+        elif is_debug:
             maybe_extra_debug += (
                 "\nFor C++ stack trace, run with "
                 "TORCHDYNAMO_EXTENDED_DEBUG_CPP=1"
