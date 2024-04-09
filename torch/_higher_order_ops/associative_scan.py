@@ -95,7 +95,6 @@ def associative_scan(
     for x in leaves[1:]:
         assert x.shape == shape, "All input tensors must have the same shape"
 
-
     combine_fn = functools.partial(
         wrap_combine_fn_flat, combine_fn=combine_fn, spec=spec, num_leaves=len(leaves)
     )
