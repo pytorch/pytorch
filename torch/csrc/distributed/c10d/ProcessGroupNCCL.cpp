@@ -2004,8 +2004,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   }
 
   // Creates the NCCL streams
-  auto streamVal =
-      at::cuda::getStreamFromPool(options_->is_high_priority_stream);
+  bool force_high = getCvarBool(TORCH_NCCL_HIGH_PRIORITY, false);
+  auto streamVal = at::cuda::getStreamFromPool(
+      options_->is_high_priority_stream || force_high);
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
