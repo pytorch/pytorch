@@ -1720,8 +1720,7 @@ class CheckFunctionManager:
         w_builder = weakref.ref(builder, cleanup_builder)
 
         # Delay the duplicate input guards because the sort_key does not give
-        # correct sequence. This is not needed for CPP guards because tree
-        # structure takes care of the order.
+        # correct sequence.
         duplicate_input_guards = set()
 
         for guard in sorted(guards or [], key=Guard.sort_key):
@@ -1737,19 +1736,17 @@ class CheckFunctionManager:
                 continue
 
             # Delay the duplicate input guards
-            if not config.enable_cpp_guard_manager:
-                if isinstance(guard.create_fn, functools.partial):
-                    fn = guard.create_fn.func
-                    if fn is GuardBuilder.DUPLICATE_INPUT:
-                        duplicate_input_guards.add(guard)
-                        continue
+            if isinstance(guard.create_fn, functools.partial):
+                fn = guard.create_fn.func
+                if fn is GuardBuilder.DUPLICATE_INPUT:
+                    duplicate_input_guards.add(guard)
+                    continue
 
             guard.create(builder)
 
         # Build duplicate input guards
-        if not config.enable_cpp_guard_manager:
-            for guard in duplicate_input_guards:
-                guard.create(builder)
+        for guard in sorted(duplicate_input_guards, key=Guard.sort_key):
+            guard.create(builder)
 
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         # Keep track of weak references of objects with ID_MATCH guard. This
