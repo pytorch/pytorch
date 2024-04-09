@@ -167,11 +167,10 @@ def get_device_op_overrides(device: str):
 
     if not device_op_overrides_dict.keys():
         from .cuda import device_op_overrides  # noqa: F401
+        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
     if device in device_op_overrides_dict.keys():
         return device_op_overrides_dict[device]
-
-    return DeviceOpOverrides()
 
 
 @functools.lru_cache(None)
@@ -593,28 +592,21 @@ class OpOverrides:
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
-            if impl is None:
-                continue
-
             if isinstance(impl, str):
                 nof_args = 2 if "{y}" in impl else 1
                 # extend the following dictionary with factory
                 # functions for a specific number of arguments as
                 # needed:
                 factory = {1: pointwise_factory_1, 2: pointwise_factory_2}[nof_args]
-                impl = factory(impl)
-
-            setattr(cls, funcname, staticmethod(impl))
+                setattr(cls, funcname, staticmethod(factory(impl)))
 
 
 @dataclasses.dataclass
 class OverridesData:
     name: str
-    cpp: Union[str, Callable[..., str]]
-    # None when not impl in libdevice/triton
-    triton: Union[Optional[str], Callable[..., str]] = None
-    # None when not impl in aten/.../vec
-    cppvec: Union[Optional[str], Callable[..., str]] = None
+    cpp: str
+    triton: Optional[str] = None  # None when not impl in libdevice/triton
+    cppvec: Optional[str] = None  # None when not impl in aten/.../vec
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -663,13 +655,6 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
         cpp="calc_erfcx({x})",
         triton="libdevice.erfcx({x})",
         name="special_erfcx",
-    ),
-    fma=OverridesData(
-        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y, z: f"std::fma({x}, {y}, {z})",
-        cppvec=lambda x, y, z: f"fmadd({x}, {y}, {z})",
-        triton=lambda x, y, z: f"libdevice.fma({x}, {y}, {z})",
-        name="fma",
     ),
     # erfinv, exp2, expit, gammaln
     igamma=OverridesData(
