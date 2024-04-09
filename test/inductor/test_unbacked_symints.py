@@ -156,6 +156,38 @@ class TestUnbackedSymints(InductorTestCase):
 
         torch.testing.assert_close(actual, expected)
 
+    @inductor_config.patch({"max_autotune": True})
+    @dynamo_config.patch({"capture_scalar_outputs": True})
+    def test_equivalent_backed_unbacked(self, device):
+        # Tests scenario when there are two equivalent backed & unbacked symints,
+        # but when we look-up a size hint on the unbacked symint, we ignorantly
+        # use the default fallback hint.
+
+        def fn(x, w, a, b):
+            # Make tensors where 1st dim is unbacked/backed.
+            u0, s0 = a.item(), b.size(0)
+            unbacked = x.expand(u0, *x.shape)
+            backed = x.expand(s0, *x.shape)
+
+            # The cat unifies u0 and s0 -- i.e. u0 == s0.
+            cat = torch.cat([backed, unbacked, unbacked], dim=1)  # [s0, 30, 16]
+            mat1 = torch.permute(cat, [0, 2, 1])  # [s0, 16, 30]
+            mat2 = w.expand(u0, *w.shape)  # [u0, 30, 32]
+            bmm = torch.ops.aten.bmm(mat1, mat2)
+            return bmm
+
+        example_inputs = (
+            torch.randn((10, 16), dtype=torch.float32, device=device),
+            torch.randn((30, 32), dtype=torch.float32, device=device),
+            torch.tensor(7, device=device),
+            backed := torch.randn((7,), device=device),
+        )
+        torch._dynamo.mark_dynamic(backed, 0)  # create backed symint
+
+        actual = torch.compile(fn, fullgraph=True)(*example_inputs)
+        expected = fn(*example_inputs)
+        torch.testing.assert_close(actual, expected)
+
 
 instantiate_device_type_tests(
     TestUnbackedSymints, globals(), only_for=(GPU_TYPE, "cpu")

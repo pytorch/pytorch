@@ -2,6 +2,7 @@
 
 import functools
 import itertools
+import sys
 import unittest
 from copy import deepcopy
 from enum import Enum
@@ -25,6 +26,14 @@ from torch.optim import (
     Rprop,
     SGD,
     SparseAdam,
+)
+from torch.optim.lr_scheduler import (
+    ConstantLR,
+    ExponentialLR,
+    LinearLR,
+    PolynomialLR,
+    ReduceLROnPlateau,
+    StepLR,
 )
 from torch.testing._internal.common_device_type import tol, toleranceOverride
 from torch.testing._internal.common_methods_invocations import DecorateInfo
@@ -101,13 +110,28 @@ class OptimizerInfo:
         # to the test using the OptimizerInfo. OptimizerInput.params is likely None.
         # Can optionally take in device to filter out certain unsupported configs
         optim_inputs_func,
+        # Tuple of lambdas to generate LRScheduler instances to run with the optimizer for the
+        # LRScheduler tests like test_forloop_goes_right_direction with_lrsched.
+        # We DO NOT expect to thoroughly test LRSchedulers through the optimizers, so not every
+        # LRScheduler configuration will be included. See test_lrscheduler.py for that instead.
+        # A few optimizers like SGD and Adam will test more LRSchedulers.
+        scheduler_inputs=(
+            [
+                lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                lambda opt: ReduceLROnPlateau(opt),
+            ],
+        ),
         # A subset of the global-cliquey flags (fused, foreach, differentiable) the optimizer
         # supports. See NOTE: [optimizer kwarg categories] for what global-cliquey means.
         supported_impls: Tuple[str] = ("foreach", "differentiable"),
-        # the devices on which the optim supports sparse tensors for params and grads, see SGD
-        supports_sparse_on: Tuple[str] = (),
+        # the optim supports passing in sparse gradients as well as dense grads
+        supports_sparse: bool = False,
         # the optim only supports one config: sparse grads w/ dense params, see SparseAdam
         only_supports_sparse_grads: bool = False,
+        # Tuple of (optimizer kwargs, schedulers_constructors) specifically for sparse tests,
+        # with especially tuned hyperparameters. These only apply if the optimizer supports
+        # sparse parameters or grads.
+        metadata_for_sparse=({}, []),
         # the optim supports complex parameters
         supports_complex: bool = True,
         # whether the optimizer.step() function requires a closure to be passed
@@ -122,8 +146,10 @@ class OptimizerInfo:
     ):
         self.optim_cls = optim_cls
         self.optim_inputs_func = optim_inputs_func
+        self.scheduler_inputs = scheduler_inputs
         self.supported_impls = supported_impls
-        self.supports_sparse_on = supports_sparse_on
+        self.supports_sparse = supports_sparse
+        self.metadata_for_sparse = metadata_for_sparse
         self.only_supports_sparse_grads = only_supports_sparse_grads
         self.supports_complex = supports_complex
         self.step_requires_closure = step_requires_closure
@@ -1028,11 +1054,10 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
-                "test_foreach_matches_forloop",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1042,9 +1067,7 @@ optim_db: List[OptimizerInfo] = [
                 "test_peak_memory_foreach",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
-                ),
+                skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
@@ -1061,13 +1084,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1094,6 +1110,13 @@ optim_db: List[OptimizerInfo] = [
                 "CompiledOptimizerParityTests",
                 "test_correctness",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1101,7 +1124,14 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adagrad,
         optim_error_inputs_func=optim_error_inputs_func_adagrad,
         supported_impls=("foreach", "differentiable"),
-        supports_sparse_on=("cpu"),
+        supports_sparse=True,
+        metadata_for_sparse=(
+            {"lr": 0.1, "weight_decay": 0, "lr_decay": 0},
+            [
+                lambda opt: StepLR(opt, gamma=1 - 1e-5, step_size=500),
+                lambda opt: ReduceLROnPlateau(opt, threshold=1e-4),
+            ],
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1124,11 +1154,10 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115607"
-                ),
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
-                "test_foreach_matches_forloop",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1138,11 +1167,16 @@ optim_db: List[OptimizerInfo] = [
                 "test_peak_memory_foreach",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115607 and #116028"
-                ),
+                skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Fails assertion of params close to params_c at all, see #123147"
+                ),
+                "TestOptimRenewed",
+                "test_rosenbrock_sparse",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1165,13 +1199,48 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
         Adam,
         optim_inputs_func=optim_inputs_func_adam,
+        scheduler_inputs=(
+            [lambda opt: ExponentialLR(opt, gamma=0.9)],
+            [lambda opt: LinearLR(opt, start_factor=0.4, total_iters=4)],
+            [
+                lambda opt: ConstantLR(opt, factor=0.4, total_iters=4),
+                lambda opt: ExponentialLR(opt, gamma=0.9),
+            ],
+            [
+                lambda opt: ExponentialLR(opt, gamma=0.9),
+                lambda opt: ReduceLROnPlateau(opt),
+            ],
+            [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
+            [lambda opt: PolynomialLR(opt, power=0.9, total_iters=4)],
+            [
+                lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                lambda opt: ReduceLROnPlateau(opt),
+            ],
+        ),
         optim_error_inputs_func=optim_error_inputs_func_adam,
         supported_impls=("foreach", "differentiable", "fused"),
+        decorators=(
+            # Expected floating point error between fused and compiled forloop
+            DecorateInfo(
+                toleranceOverride({torch.float64: tol(atol=4.5e-7, rtol=2.2e-6)}),
+                "TestOptimRenewed",
+                "test_fused_matches_forloop",
+                active_if=lambda kwargs: TEST_WITH_TORCHDYNAMO
+                and kwargs["dtype"] == torch.float64,
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1187,6 +1256,11 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction",
             ),
             DecorateInfo(
+                skipIfTorchDynamo("initial_value is incorrect in dynamo, see #123202"),
+                "TestOptimRenewed",
+                "test_param_group_with_lrscheduler_goes_right_direction",
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
                 ),
@@ -1194,18 +1268,17 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Fixing #115607 should fix this test. fused is correct, but forloop is not."
-                ),
-                "TestOptimRenewed",
-                "test_fused_matches_forloop",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1234,6 +1307,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
             ),
         ),
     ),
@@ -1264,21 +1344,18 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo("Mismatched _foreach_addcdiv_ types, see #118159"),
                 "TestOptimRenewed",
                 "test_complex",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115607"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115607 and #116028"
-                ),
+                skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
@@ -1316,12 +1393,6 @@ optim_db: List[OptimizerInfo] = [
                 "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
-                skipIfTorchDynamo("cpu fails due to #115607"),
-                "TestOptimRenewed",
-                "test_can_load_older_state_dict",
-                device_type="cpu",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo(
                     "capturable path no longer called after hitting cache limit, see #121178"
                 ),
@@ -1342,6 +1413,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_param_groups_lr",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1349,6 +1427,16 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamw,
         optim_error_inputs_func=optim_error_inputs_func_adamw,
         supported_impls=("foreach", "differentiable", "fused"),
+        decorators=(
+            # Expected error between compiled forloop and fused optimizers
+            DecorateInfo(
+                toleranceOverride({torch.float64: tol(atol=4.5e-7, rtol=2.2e-6)}),
+                "TestOptimRenewed",
+                "test_fused_matches_forloop",
+                active_if=lambda kwargs: TEST_WITH_TORCHDYNAMO
+                and kwargs["dtype"] == torch.float64,
+            ),
+        ),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1371,18 +1459,17 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "Errors w/ Global state changed, see https://github.com/pytorch/pytorch/issues/116028"
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Fixing #115607 should fix this test. fused is correct, but forloop is not."
-                ),
-                "TestOptimRenewed",
-                "test_fused_matches_forloop",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1412,6 +1499,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1435,11 +1529,10 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See discrepancy in https://github.com/pytorch/pytorch/issues/115607"
-                ),
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
-                "test_foreach_matches_forloop",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1485,6 +1578,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1529,6 +1629,17 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
             ),
+            DecorateInfo(
+                unittest.skip("Does not support param groups"),
+                "TestOptimRenewed",
+                "test_param_group_with_lrscheduler_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1556,6 +1667,12 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1614,6 +1731,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1635,6 +1759,12 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1665,13 +1795,6 @@ optim_db: List[OptimizerInfo] = [
                 "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115607"
-                ),
-                "TestOptimRenewed",
-                "test_foreach_matches_forloop",
-            ),
-            DecorateInfo(
                 toleranceOverride(
                     {
                         # previously atol=1e-7, rtol=1e-7
@@ -1690,11 +1813,10 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "Should be fixed by https://github.com/pytorch/pytorch/issues/115607"
+                    "This test uses mocks, which dynamo does not support"
                 ),
                 "TestOptimRenewed",
-                "test_can_load_older_state_dict",
-                device_type="cpu",
+                "test_defaults_changed_to_foreach",
             ),
         ),
     ),
@@ -1725,11 +1847,10 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
-                "test_foreach_matches_forloop",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1739,9 +1860,7 @@ optim_db: List[OptimizerInfo] = [
                 "test_peak_memory_foreach",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
-                ),
+                skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
@@ -1771,17 +1890,17 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "fails, https://github.com/pytorch/pytorch/issues/117165"
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
             ),
         ),
     ),
@@ -1812,11 +1931,10 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
-                "test_foreach_matches_forloop",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1826,9 +1944,7 @@ optim_db: List[OptimizerInfo] = [
                 "test_peak_memory_foreach",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679 and #116028"
-                ),
+                skipIfTorchDynamo("See #116028"),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
             ),
@@ -1848,26 +1964,61 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "fails, https://github.com/pytorch/pytorch/issues/117165"
                 ),
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
             ),
         ),
     ),
     OptimizerInfo(
         SGD,
         optim_inputs_func=optim_inputs_func_sgd,
+        scheduler_inputs=(
+            [lambda opt: StepLR(opt, gamma=0.9, step_size=10)],
+            [
+                lambda opt: LinearLR(
+                    opt, start_factor=0.4, end_factor=0.8, total_iters=4
+                )
+            ],
+            [
+                lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                lambda opt: LinearLR(
+                    opt, start_factor=0.4, end_factor=0.6, total_iters=4
+                ),
+            ],
+            [
+                lambda opt: StepLR(opt, gamma=0.99, step_size=10),
+                lambda opt: ExponentialLR(opt, gamma=0.99),
+                lambda opt: ReduceLROnPlateau(opt),
+            ],
+            [lambda opt: ConstantLR(opt, factor=0.4, total_iters=4)],
+            [lambda opt: PolynomialLR(opt, power=0.9, total_iters=4)],
+            [
+                lambda opt: StepLR(opt, gamma=0.9, step_size=10),
+                lambda opt: ReduceLROnPlateau(opt),
+            ],
+        ),
         optim_error_inputs_func=optim_error_inputs_func_sgd,
         supported_impls=("foreach", "differentiable", "fused"),
-        supports_sparse_on=("cpu", "cuda"),
+        supports_sparse=True,
+        metadata_for_sparse=(
+            {
+                "lr": 4.8e-3,
+                "maximize": False,
+                "momentum": 0,
+                "nesterov": False,
+                "weight_decay": 0,
+            },
+            [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
+        ),
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1884,6 +2035,17 @@ optim_db: List[OptimizerInfo] = [
                 "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
+                skipIfTorchDynamo("initial_value is incorrect in dynamo, see #123202"),
+                "TestOptimRenewed",
+                "test_param_group_with_lrscheduler_goes_right_direction",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
+                active_if=sys.version_info < (3, 9) and sys.version_info > (3, 7),
+            ),
+            DecorateInfo(
                 skipIfTorchDynamo(
                     "Dynamo memory usage is flaky, see https://github.com/pytorch/pytorch/issues/116046"
                 ),
@@ -1896,6 +2058,13 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_set_default_dtype_works_with_foreach",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "Fails assertion of params close to params_c at all, see #123147"
+                ),
+                "TestOptimRenewed",
+                "test_rosenbrock_sparse",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1967,6 +2136,13 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_deepcopy_copies_all_public_attrs",
             ),
+            DecorateInfo(
+                skipIfTorchDynamo(
+                    "This test uses mocks, which dynamo does not support"
+                ),
+                "TestOptimRenewed",
+                "test_defaults_changed_to_foreach",
+            ),
         ),
     ),
     OptimizerInfo(
@@ -1975,6 +2151,7 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_sparseadam,
         supported_impls=(),
         only_supports_sparse_grads=True,
+        metadata_for_sparse=({"lr": 4e-2}, []),
         supports_complex=False,  # Missing complex support, see #118153
         skips=(
             DecorateInfo(
@@ -1992,6 +2169,11 @@ optim_db: List[OptimizerInfo] = [
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
                 "TestOptimRenewed",
                 "test_param_groups_lr",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
+                "TestOptimRenewed",
+                "test_tensor_lr",
             ),
             DecorateInfo(
                 unittest.skip(
@@ -2014,6 +2196,11 @@ optim_db: List[OptimizerInfo] = [
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction_multigpu",
+            ),
+            DecorateInfo(
+                skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
+                "TestOptimRenewed",
+                "test_param_group_with_lrscheduler_goes_right_direction",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("cannot call to_sparse on p.grad, see #117184"),
