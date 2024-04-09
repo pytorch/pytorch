@@ -2011,7 +2011,7 @@ class SourcelessBuilder:
         elif isinstance(
             value, (torch.utils._pytree.TreeSpec, torch.utils._pytree.LeafSpec)
         ):
-            return UserDefinedObjectVariable(value)        
+            return UserDefinedObjectVariable(value)
         elif PlacementVariable.is_placement(value):
             return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
