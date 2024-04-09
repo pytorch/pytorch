@@ -32,8 +32,6 @@ struct XPUCachingHostAllocatorImpl
   }
 };
 
-} // anonymous namespace
-
 void raw_local_deleter(void* ptr);
 
 struct XPUCachingHostAllocator final
@@ -50,13 +48,15 @@ struct XPUCachingHostAllocator final
 
 static XPUCachingHostAllocator caching_host_allocator;
 
-void raw_local_deleter(void* ptr) {
-  caching_host_allocator.free(ptr);
-}
-
 static inline XPUCachingHostAllocator& getXPUCachingHostAllocator() {
   return caching_host_allocator;
 }
+
+void raw_local_deleter(void* ptr) {
+  getXPUCachingHostAllocator().free(ptr);
+}
+
+} // anonymous namespace
 
 bool CachingHostAllocator_recordEvent(
     void* ptr,
@@ -70,7 +70,7 @@ void CachingHostAllocator_emptyCache() {
 }
 
 at::Allocator* getCachingHostAllocator() {
-  return &caching_host_allocator;
+  return &getXPUCachingHostAllocator();
 }
 
 } // namespace at::xpu

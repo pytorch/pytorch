@@ -343,10 +343,7 @@ static struct PyMethodDef _THXPModule_methods[] = {
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"_xpu_synchronize", THXPModule_xpuSynchronize, METH_O, nullptr},
-    {"_xpu_xpuHostAllocator",
-     THXPModule_xpuHostAllocator,
-     METH_NOARGS,
-     nullptr},
+    {"_xpu_hostAllocator", THXPModule_xpuHostAllocator, METH_NOARGS, nullptr},
     {"_xpu_emptyCache", THXPModule_emptyCache, METH_NOARGS, nullptr},
     {nullptr}};
 

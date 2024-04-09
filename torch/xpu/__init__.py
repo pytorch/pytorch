@@ -400,7 +400,7 @@ def empty_cache() -> None:
 
 def _host_allocator():
     _lazy_init()
-    return torch._C._xpu_xpuHostAllocator()
+    return torch._C._xpu_hostAllocator()
 
 
 def _get_generator(device: torch.device) -> torch._C.Generator:
