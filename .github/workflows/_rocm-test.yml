@@ -92,9 +92,9 @@ jobs:
           docker run --rm \
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -w /var/lib/jenkins/workspace \
+            -w /var/lib/jenkins \
             "${DOCKER_IMAGE}" \
-            sudo rm -rf /var/lib/jenkins/workspace/*
+            sudo rm -rf /var/lib/jenkins/workspace
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
