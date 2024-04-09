@@ -1,7 +1,7 @@
 #pragma once
 
 #include <c10/core/Device.h>
-
+#include <c10/core/Stream.h>
 namespace at {
 
 // AcceleratorHooksInterface is a shared interface provided by all
@@ -15,7 +15,32 @@ struct TORCH_API AcceleratorHooksInterface {
   virtual ~AcceleratorHooksInterface() = default;
 
   // Whether the device at device_index is fully initialized or not.
-  virtual bool hasPrimaryContext(DeviceIndex device_index) const = 0;
+  virtual bool hasPrimaryContext(DeviceIndex device_index) const {
+    return false;
+  }
+
+  virtual DeviceIndex deviceCount() const {
+    return 0;
+  }
+
+  virtual void setCurrentDevice(DeviceIndex device) const {
+    TORCH_CHECK(false, "Backend doesn't support setCurrentDevice()");
+  }
+
+  virtual DeviceIndex getCurrentDevice() const {
+    TORCH_CHECK(false, "Backend doesn't support getCurrentDevice()");
+    return -1;
+  }
+
+  virtual DeviceIndex exchangeDevice(DeviceIndex device) const {
+    TORCH_CHECK(false, "Backend doesn't support exchangeDevice()");
+    return -1;
+  }
+
+  virtual DeviceIndex maybeExchangeDevice(DeviceIndex device) const {
+    TORCH_CHECK(false, "Backend doesn't support maybeExchangeDevice()");
+    return -1;
+  }
 };
 
 } // namespace at

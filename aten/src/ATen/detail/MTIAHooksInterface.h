@@ -1,7 +1,9 @@
 #pragma once
 
+#include <c10/core/Device.h>
 #include <c10/util/Exception.h>
 
+#include <c10/core/Stream.h>
 #include <c10/util/Registry.h>
 
 #include <ATen/detail/AcceleratorHooksInterface.h>
@@ -20,33 +22,69 @@ constexpr const char* MTIA_HELP =
     "to use some MTIA's functionality without MTIA extension included.";
 
 struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
+// this fails the implementation if MTIAHooks functions are called, but
+// MTIA backend is not present.
+#define FAIL_MTIAHOOKS_FUNC(func) \
+  TORCH_CHECK(false, "Cannot execute ", func, "() without MTIA backend.");
+
   virtual ~MTIAHooksInterface() override = default;
 
   virtual void initMTIA() const {
-    TORCH_CHECK(
-        false,
-        "Cannot initialize MTIA without MTIA Extension for PyTorch.",
-        MTIA_HELP);
+    TORCH_WARN("MTIA backend is not available. ");
   }
 
   virtual bool hasMTIA() const {
     return false;
   }
 
+  virtual DeviceIndex deviceCount() const override {
+    return 0;
+  }
+
+  virtual void deviceSynchronize(c10::DeviceIndex device_index) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
   virtual std::string showConfig() const {
-    TORCH_CHECK(
-        false,
-        "Cannot query detailed MTIA version without MTIA Extension for PyTorch.",
-        MTIA_HELP);
+    FAIL_MTIAHOOKS_FUNC(__func__);
   }
 
   virtual bool hasPrimaryContext(DeviceIndex device_index) const override {
-    TORCH_CHECK(
-        false,
-        "Cannot check MTIA primary context without MTIA Extension for PyTorch.",
-        MTIA_HELP);
+    return false;
   }
 
+  virtual void setCurrentDevice(DeviceIndex device) const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
+
+  virtual DeviceIndex getCurrentDevice() const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return -1;
+  }
+
+  virtual DeviceIndex exchangeDevice(DeviceIndex device) const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return -1;
+  }
+
+  virtual DeviceIndex maybeExchangeDevice(DeviceIndex device) const override {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return -1;
+  }
+
+  virtual c10::Stream getCurrentStream(DeviceIndex device) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return c10::Stream::unpack3(-1, 0, c10::DeviceType::MTIA);
+  }
+
+  virtual c10::Stream getDefaultStream(DeviceIndex device) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+    return c10::Stream::unpack3(-1, 0, c10::DeviceType::MTIA);
+  }
+
+  virtual void setCurrentStream(const c10::Stream& stream) const {
+    FAIL_MTIAHOOKS_FUNC(__func__);
+  }
 };
 
 struct TORCH_API MTIAHooksArgs {};
