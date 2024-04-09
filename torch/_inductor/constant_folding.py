@@ -60,6 +60,14 @@ class ConstantFolder(torch.fx.Interpreter):
         self.user_to_last_uses = self.node_to_last_non_output_use()
 
     def is_impure(self, node: torch.fx.node.Node):
+        if (
+            node.target == torch.ops.prims.convert_element_type.default
+            and node.args[0].op == "get_attr"  # type: ignore[union-attr]
+            and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
+            and node.args[1] == torch.bfloat16
+        ):
+            # For int8_weight -> dq -> bf16_weight
+            return True
         if node.target in [
             torch.ops.quantized_decomposed.dequantize_per_channel.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
