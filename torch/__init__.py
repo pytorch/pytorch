@@ -1576,6 +1576,7 @@ from torch import cuda as cuda
 from torch import cpu as cpu
 from torch import mps as mps
 from torch import xpu as xpu
+from torch import mtia as mtia
 from torch import autograd as autograd
 from torch.autograd import (
     no_grad as no_grad,
@@ -2010,6 +2011,21 @@ else:
             return importlib.import_module(f".{name}", __name__)
 
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
+
+def get_device_module(device):
+    """
+	Returns the module associated with a given device
+	"""
+    if(device.type == "mtia"):
+        return torch.mtia
+    elif(device.type == "cuda"):
+        return torch.cuda
+    elif(device.type == "xpu"):
+        return torch.xpu
+    elif(device.type == "mps"):
+        return torch.mps
+    elif(device.type == "cpu"):
+        return torch.cpu
 
 
 def _constrain_as_value(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):

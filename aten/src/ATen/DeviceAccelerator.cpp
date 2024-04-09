@@ -18,6 +18,8 @@ C10_API std::optional<DeviceType> getAccelerator(bool checked) {
     } else if (at::hasCUDA()) {
         CHECK_NO_PU1
         return kCUDA;
+    } else if (at::hasMTIA()) {
+        return kMTIA;
     } else {
         TORCH_CHECK(!checked, "Cannot access accelerator device when none is available.")
         return std::nullopt;
