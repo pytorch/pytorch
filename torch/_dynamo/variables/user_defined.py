@@ -707,6 +707,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return variables.TorchCtxManagerClassVariable(
                     obj.__class__
                 ).call_function(tx, [var], kwargs)
+
+            if self.source is None:
+                unimplemented(
+                    "Sourceless UserDefinedObjectVariable method not supported"
+                )
+            func_src = AttrSource(self.source, "__func__")
+            func_var = VariableBuilder(tx, func_src)(func)
+            obj_src = AttrSource(self.source, "__self__")
+            obj_var = VariableBuilder(tx, obj_src)(obj)
+            return func_var.call_function(tx, [obj_var] + args, kwargs)
         elif (
             istype(self.value, functools.partial)
             and trace_rules.lookup(self.value.func)
