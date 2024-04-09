@@ -23,7 +23,7 @@ from torch.distributed.tensor.parallel import (
 )
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_fsdp import FSDPTestMultiThread, MLP
-from torch.testing._internal.common_utils import run_tests, wrapSwapTensorsTest
+from torch.testing._internal.common_utils import run_tests
 
 
 class TestFullyShardDeviceTensor(FSDPTestMultiThread):
@@ -453,18 +453,11 @@ class TestFullyShardLazyInit(FSDPTestMultiThread):
 
 
 class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
-    """
-    Set ``torch.__future__.set_swap_module_params_on_conversion(True)`` using
-    ``@wrapSwapTensorsTest(True)`` until ``_apply`` swaps wrapper subclasses by
-    default in the future.
-    """
-
     @property
     def world_size(self) -> int:
         return 4
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    @wrapSwapTensorsTest(True)
     def test_meta_device_1d_init(self):
         default_pg = torch.distributed.distributed_c10d._get_default_group()
         mesh = init_device_mesh("cuda", mesh_shape=(default_pg.size(),))
@@ -483,7 +476,6 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
             self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
 
     @unittest.skipIf(not TEST_CUDA, "no cuda")
-    @wrapSwapTensorsTest(True)
     def test_meta_device_2d_init(self):
         assert self.world_size >= 4, f"{self.world_size}"
         dp_size = 2
