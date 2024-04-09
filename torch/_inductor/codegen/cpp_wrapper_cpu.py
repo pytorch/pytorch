@@ -1383,7 +1383,7 @@ class CppWrapperCpu(WrapperCodeGen):
     def codegen_device(self, device):
         if config.abi_compatible:
             self.used_cached_devices.add(device.type)
-            return f"cached_torch_device_type_{device.type},{device.index if device.index else 0}"
+            return f"cached_torch_device_type_{device.type}, {device.index if device.index else 0}"
         else:
             from .cpp import DEVICE_TO_ATEN
 
@@ -2073,8 +2073,22 @@ RAIIAtenTensorHandle {output_arg}(
                 return "0"  # nullptr is not available in C
             if not isinstance(type_.getElementType(), torch.TensorType):
                 var_name = f"var_{next(self.arg_var_id)}"
-                self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
-                return f"&{var_name}"
+                if isinstance(
+                    type_.getElementType(),
+                    (torch.ListType, torch.TupleType, torch.DeviceObjType),
+                ):
+                    # For non-POD data types with auxiliary info, we need to hoist out the extra arguments.
+                    arg_str = self.val_to_arg_str(val)
+                    if val is None:
+                        return "{arg_str}, 0"
+                    else:
+                        # NOTE: This only works if there is one additional argument, though it can easily be generalized.
+                        array_ptr, len_ = arg_str.rsplit(", ")
+                        self.writeline(f"auto {var_name} = {array_ptr};")
+                        return f"&{var_name}, {len_}"
+                else:
+                    self.writeline(f"auto {var_name} = {self.val_to_arg_str(val)};")
+                    return f"&{var_name}"
             elif config.c_shim_version == "2":
                 # Similar to other data type, use pointer to denote optional tensor arg in v2 C shim
                 base_handle = self.val_to_arg_str(val)
