@@ -236,8 +236,8 @@ class _RecordFunctionFast:
     def __init__(
         self,
         name: str,
-        args: Optional[Union[list, tuple]] = None,
-        kwargs: Optional[dict] = None,
+        input_values: Optional[Union[list, tuple]] = None,
+        keyword_values: Optional[dict] = None,
     ) -> None: ...
     def __enter__(self) -> None: ...
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None: ...

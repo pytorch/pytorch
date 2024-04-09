@@ -343,6 +343,15 @@ struct TORCH_API RecordFunction {
     return inputs_;
   }
 
+  std::unordered_map<std::string, IValue> kwinputs() const {
+#ifndef NDEBUG
+    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+        inputs_valid_,
+        "Called kwinputs() outside RecordFunction start callback");
+#endif
+    return kwinputs_;
+  }
+
   const std::vector<c10::IValue>& outputs() const {
     return outputs_;
   }
