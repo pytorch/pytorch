@@ -760,8 +760,6 @@ def get_current_device_index() -> int:
     """
     if torch.cuda.device_count() > 0:
         return torch.cuda.current_device()
-    if torch.mtia.device_count() > 0:
-        return torch.mtia.current_device()
     return -1
 
 
