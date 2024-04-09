@@ -72,22 +72,21 @@ struct ComparatorSize {
  * list. Remove all element of free list, then remove them from block list and
  * release the associated pinned memory allocation via free_block.
  *
- * We generalize the caching host allocator into two interfaces: allocator and
+ * We generalize the caching host allocator into two parts: interface and
  * implementation. For any new backend looking to integrate with host allocator
- * and reuse caching mechanism, these two interfaces are necessary to be
- * specialized.
+ * and reuse caching mechanism, these two parts are necessary to be specialized.
  *
- * For the implementation, we provide a CachingHostAllocatorImplInterface struct
+ * For the implementation, we provide a CachingHostAllocatorImpl struct
  * to abstract the caching mechanism. Any backend needs to provide a customized
  * implementation by specializing its own public functions and the related
  * runtime functions. Its template parameter S represents runtime Stream, E
  * denotes runtime Event, B indicates the fundamental memory block, and C
  * signifies the sorting compartor algorithm for the memory blocks.
  *
- * For the allocator, we provide a HostAllocatorInterface struct as an
+ * For the interface, we provide a CachingHostAllocatorInterface struct as an
  * interface. Any backend needs to derive its own host allocator from this
  * interface. Its template parameter T refers to an implementation that
- * inherited from CachingHostAllocatorImplInterface.
+ * inherited from CachingHostAllocatorImpl.
  *
  * So this design can share the caching mechanism across each backend, and
  * provide flexibility to each backend. A backend can choose to follow this
@@ -95,9 +94,9 @@ struct ComparatorSize {
  * Taking CUDA as an example, it specializes runtime related functions to reuse
  * the caching mechanism. Additionally, it extends the allocator's functionality
  * by adding the allocWithCudaHostRegister function to support page-locking the
- * memory range used by CUDA. Of course, you can also refer to XPUHostAllocator,
- * which is a host caching allocator supported on XPU backend, to implement a
- * basic host caching allocator.
+ * memory range used by CUDA. Of course, you can also refer to
+ * XPUCachingHostAllocator, which is a host caching allocator supported on XPU
+ * backend, to implement a basic host caching allocator.
  *
  * Some of the invariants here are less strict than they could be - for example,
  * we do not enforce that free(Block* block) => block->event_count == 0. This is
@@ -113,8 +112,8 @@ template <
     typename E,
     typename B = HostBlock<S>,
     typename C = ComparatorSize<B>>
-struct CachingHostAllocatorImplInterface {
-  virtual ~CachingHostAllocatorImplInterface() = default;
+struct CachingHostAllocatorImpl {
+  virtual ~CachingHostAllocatorImpl() = default;
 
  public:
   // return data_ptr and block pair.
@@ -350,8 +349,8 @@ struct CachingHostAllocatorImplInterface {
 };
 
 template <typename T>
-struct HostAllocatorInterface : public at::Allocator {
-  HostAllocatorInterface() :impl_(std::make_unique<T>()) {}
+struct CachingHostAllocatorInterface : public at::Allocator {
+  CachingHostAllocatorInterface() :impl_(std::make_unique<T>()) {}
 
   at::DataPtr allocate(size_t size) override {
     TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented for allocate");

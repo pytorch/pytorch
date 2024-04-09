@@ -67,12 +67,10 @@ class EventPool {
 };
 
 using Block = HostBlock<CUDAStream>;
-using AllocatorImplInterface =
-    CachingHostAllocatorImplInterface<CUDAStream, EventPool::Event>;
 
-struct CUDAHostAllocatorImpl : public AllocatorImplInterface {
-
-private:
+struct CUDACachingHostAllocatorImpl
+    : public CachingHostAllocatorImpl<CUDAStream, EventPool::Event> {
+ private:
   void allocate_host_memory(size_t size, void** ptr) override {
     // Pinned memory pointers allocated by any device can be directly used by
     // any other device, regardless of the current device at the time of
@@ -97,7 +95,7 @@ private:
 
   void free_block(Block* block) override {
     if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
-              pinned_use_cuda_host_register()) {
+            pinned_use_cuda_host_register()) {
       void* ptr = block->ptr_;
       AT_CUDA_CHECK(cudaHostUnregister(ptr));
       free(ptr);
@@ -116,10 +114,10 @@ private:
 
   bool query_event(EventPool::Event& event) override {
     cudaError_t err = cudaEventQuery(*event);
-    if(err == cudaErrorNotReady) {
+    if (err == cudaErrorNotReady) {
       (void)cudaGetLastError(); // clear CUDA error
       return false;
-    } else if (err!= cudaSuccess){
+    } else if (err != cudaSuccess) {
       C10_CUDA_CHECK(err);
     }
     return true;
@@ -194,13 +192,19 @@ private:
       for (size_t i = 0; i < numMapThreads; i++) {
         promises.emplace_back();
         futures.push_back(promises[i].get_future());
-        auto task = [this, i, ptr, roundSize, numMapThreads, pageSize, &promises]() mutable {
+        auto task = [this,
+                     i,
+                     ptr,
+                     roundSize,
+                     numMapThreads,
+                     pageSize,
+                     &promises]() mutable {
           mapPagesForRegister(
-            *ptr,
-            roundSize,
-            i, // thread task-id
-            numMapThreads,
-            pageSize);
+              *ptr,
+              roundSize,
+              i, // thread task-id
+              numMapThreads,
+              pageSize);
           // set the promise when mapping pages are done
           promises[i].set_value();
         };
@@ -223,8 +227,8 @@ private:
 
 void raw_local_deleter(void* ptr);
 
-struct CUDAHostAllocator final
-    : public HostAllocatorInterface<CUDAHostAllocatorImpl> {
+struct CUDACachingHostAllocator final
+    : public CachingHostAllocatorInterface<CUDACachingHostAllocatorImpl> {
   at::DataPtr allocate(size_t size) override {
     auto ptr_and_ctx = impl_->allocate(size);
     return {
@@ -235,30 +239,30 @@ struct CUDAHostAllocator final
   }
 };
 
-static CUDAHostAllocator host_allocator;
+static CUDACachingHostAllocator caching_host_allocator;
 
 void raw_local_deleter(void* ptr) {
-  host_allocator.free(ptr);
+  caching_host_allocator.free(ptr);
 }
 
-static inline CUDAHostAllocator& getCUDAHostAllocator() {
-  return host_allocator;
+static inline CUDACachingHostAllocator& getCUDACachingHostAllocator() {
+  return caching_host_allocator;
 }
 
 bool CachingHostAllocator_recordEvent(
     void* ptr,
     void* ctx,
     at::cuda::CUDAStream stream) {
-  return getCUDAHostAllocator().record_event(ptr, ctx, stream);
+  return getCUDACachingHostAllocator().record_event(ptr, ctx, stream);
 }
 
 // Releases cached pinned memory allocations via cudaHostFree
 void CachingHostAllocator_emptyCache() {
-  getCUDAHostAllocator().empty_cache();
+  getCUDACachingHostAllocator().empty_cache();
 }
 
 at::Allocator* getCachingHostAllocator() {
-  return &host_allocator;
+  return &caching_host_allocator;
 }
 
 } // namespace at::cuda
