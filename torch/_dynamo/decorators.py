@@ -1,9 +1,10 @@
+import functools
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import torch
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-from . import trace_rules, variables
+from . import config, trace_rules, variables
 from .comptime import comptime
 from .eval_frame import DisableContext, innermost_fn, RunOnlyContext
 from .exc import IncorrectUsage
@@ -65,6 +66,20 @@ def skip(fn=None):
     skip_code(fn.__code__)
     fn._torchdynamo_disable = True
     return fn
+
+
+def disable_if_config_true(config_attr: str):
+    def decorator(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            if getattr(config, config_attr, None):
+                return disable(func)(*args, **kwargs)
+            else:
+                return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def assume_constant_result(fn):
