@@ -500,9 +500,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> miopen_rnn(
     auto weight_buf = at::empty(num_weights, x.options());
     w_desc.set(weight_buf, 3);
     weight_buf.zero_();
-    std::vector<Tensor> params;
-    size_t params_stride0;
-    std::tie(params, params_stride0) = get_parameters(handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, weight_buf);
+    auto [params, params_stride0] = get_parameters(handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, weight_buf);
     if (fn_mode < 2)
         _copyParams(MatrixRef<Tensor>{weight, static_cast<size_t>(weight_stride0)},
                 MatrixRef<Tensor>{params, params_stride0});
@@ -742,9 +740,7 @@ std::vector<Tensor> miopen_rnn_backward_weight(
         fn_reserve.data_ptr(), fn_reserve.size(0)
         ));
 
-    std::vector<Tensor> grad_params_arr;
-    size_t grad_params_stride0;
-    std::tie(grad_params_arr, grad_params_stride0) = get_parameters(handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, dw);
+    auto [grad_params_arr, grad_params_stride0] = get_parameters(handle, fn.rnn, descs.rnn_desc, descs.x_descs[0], w_desc, dw);
     if (grad_params_stride0 == static_cast<size_t>(weight_stride0)) {
         _viewParams(MatrixRef<Tensor>{grad_params_arr, grad_params_stride0},
             MatrixRef<Tensor>{weight_arr, static_cast<size_t>(weight_stride0)});
@@ -782,8 +778,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> miopen_rnn_backward(
     auto grad_hy = grad_hy_r.defined() ? grad_hy_r : at::zeros_like(hx, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
     auto grad_cy = cx.defined() ? (grad_cy_r.defined() ? grad_cy_r : at::zeros_like(cx, LEGACY_CONTIGUOUS_MEMORY_FORMAT)) : grad_cy_r;
 
-    Tensor dx, dhx, dcx, ws;
-    std::tie(dx, dhx, dcx, ws) = at::native::miopen_rnn_backward_input(input, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, {output_mask[0], output_mask[1], output_mask[2]});
+    auto [dx, dhx, dcx, ws] = at::native::miopen_rnn_backward_input(input, weight_buf, hx, cx, output, grad_output, grad_hy, grad_cy, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, {output_mask[0], output_mask[1], output_mask[2]});
     std::vector<Tensor> dw;
     if (output_mask[3]) {
         dw = at::native::miopen_rnn_backward_weight(input, weight, weight_stride0, weight_buf, hx, cx, output, mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, reserve, ws);
@@ -828,8 +823,7 @@ std::pair<Tensor, hidden_type> _miopen_impl(
     const Tensor& input, const Tensor& _batch_sizes, const hidden_type& hidden,
     TensorList params, bool has_biases, miopenRNNMode_t mode,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional) {
-    Tensor hx, cx;
-    std::tie(hx, cx) = unpack_hidden(hidden);
+    auto [hx, cx] = unpack_hidden(hidden);
     int64_t hidden_size = hx.size(2);
 
     TORCH_CHECK(_batch_sizes.dim() == 1, "batch_sizes tensor should be 1D");
@@ -851,8 +845,7 @@ std::pair<Tensor, hidden_type> _miopen_impl(
     const Tensor& input, const hidden_type& hidden,
     TensorList params, bool has_biases, miopenRNNMode_t mode,
     int64_t num_layers, double dropout_p, bool train, bool bidirectional, bool batch_first) {
-    Tensor hx, cx;
-    std::tie(hx, cx) = unpack_hidden(hidden);
+    auto [hx, cx] = unpack_hidden(hidden);
     int64_t hidden_size = hx.size(2);
 
     Tensor dropout_state = at::empty({0}, input.options());
@@ -915,7 +908,7 @@ void lstm_packed_miopen(Tensor& output, Tensor& hy, Tensor& cy,
 REGISTER_CUDA_DISPATCH(lstm_miopen_stub, &lstm_miopen);
 REGISTER_CUDA_DISPATCH(lstm_packed_miopen_stub, &lstm_packed_miopen);
 
-} // anonymous namepsace
+} // anonymous namespace
 }} //namespace native.
 
 #endif

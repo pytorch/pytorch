@@ -7,7 +7,7 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <c10/core/SymIntArrayRef.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 template <typename A, A a, typename C>
 struct NewBlahBatchRuleHelperSymInt;
@@ -243,4 +243,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(_new_zeros_with_same_feature_meta, _new_zeros_with_same_feature_meta_batch_rule);
   // Not sure how to add the ones with irregular args to the mix cleanly (i.e. randint takes an extra int parameter)
 }
-}}
+} // namespace at::functorch

@@ -162,6 +162,133 @@ vTensor pack_biases(
   }
 }
 
+// Old version of pack_biases that fixes issues with quantization and to be
+// removed in the future.
+vTensor pack_biases_quantized_weights(
+    const Tensor& weight_arg,
+    const c10::optional<Tensor>& bias_arg,
+    const bool use_batch = false) {
+  TORCH_CHECK(
+      weight_arg.is_quantized(),
+      "pack_biases_quantized to be used only when using quantized linear ops");
+
+  if (bias_arg && bias_arg->is_vulkan()) {
+    return convert(*bias_arg);
+  }
+
+  api::Context* const context = api::context();
+
+  if (bias_arg) {
+    const Tensor bias = bias_arg->contiguous();
+    const IntArrayRef b_sizes = bias.sizes();
+    const float* const src_bias_ptr = bias.data_ptr<float>();
+
+    /* Source */
+    int64_t src_kb_sz = 0;
+    int64_t src_kw_sz = 0;
+    int64_t src_kh_sz = 0;
+    if (use_batch) {
+      if (bias.sizes().size() == 3) {
+        src_kb_sz = b_sizes[Layout::BatchMatrices::batch];
+        src_kw_sz = b_sizes[Layout::BatchMatrices::width];
+        src_kh_sz = b_sizes[Layout::BatchMatrices::height];
+      } else if (bias.sizes().size() == 2) {
+        // skip batch dim for boardcasting; index -1
+        src_kb_sz = 1;
+        src_kw_sz = b_sizes[Layout::BatchMatrices::height];
+        src_kh_sz = b_sizes[Layout::BatchMatrices::batch];
+      } else {
+        // skip batch & height dim for boardcasting; index -2
+        src_kb_sz = 1;
+        src_kw_sz = b_sizes[Layout::BatchMatrices::batch];
+        src_kh_sz = 1;
+      }
+    } else {
+      src_kb_sz = 1;
+      if (bias.sizes().size() == 2) {
+        src_kw_sz = b_sizes[Layout::Parameter::width];
+        src_kh_sz = b_sizes[Layout::Parameter::height];
+      } else {
+        src_kw_sz = b_sizes[Layout::Parameter::height];
+        src_kh_sz = 1;
+      }
+    }
+    const int64_t src_matrix_sz = src_kw_sz * src_kh_sz;
+
+    /* Destination */
+    const int64_t dst_kw_sz = div_up(src_kw_sz, INT64_C(2));
+    const int64_t dst_kh_sz = div_up(src_kh_sz, INT64_C(2));
+    const int64_t dst_plane_sz = dst_kw_sz * dst_kh_sz;
+    const int64_t dst_matrix_sz = dst_plane_sz * 4;
+
+    vTensor v_bias{
+        context,
+        {
+            src_kb_sz,
+            4,
+            dst_kh_sz,
+            dst_kw_sz,
+        },
+        convert_dtype(bias_arg->scalar_type()),
+    };
+
+    api::StorageBuffer staging(
+        context, api::ScalarType::Float, v_bias.gpu_numel());
+    {
+      api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
+
+      float* dst_bias_ptr = mapping.template data<float>();
+
+      memset(dst_bias_ptr, 0, v_bias.nbytes());
+
+      for (const auto src_b : c10::irange(src_kb_sz)) {
+        for (const auto src_h : c10::irange(src_kh_sz == 1 ? 2 : src_kh_sz)) {
+          for (const auto src_w :
+               c10::irange((use_batch && src_kw_sz == 1) ? 2 : src_kw_sz)) {
+            int64_t dst_plane = 2 * (src_h % 2) + (src_w % 2);
+            int64_t dst_index = (src_h / 2) * dst_kw_sz + (src_w / 2);
+            memcpy(
+                dst_bias_ptr + src_b * dst_matrix_sz +
+                    dst_plane * dst_plane_sz + dst_index,
+                src_bias_ptr + src_b * src_matrix_sz +
+                    (src_kh_sz == 1 ? 0 : src_h * src_kw_sz) +
+                    ((use_batch && src_kw_sz == 1) ? 0 : src_w),
+                sizeof(float));
+          }
+        }
+      }
+    }
+    utils::pack_staging_to_vtensor(staging.buffer(), v_bias);
+
+    return v_bias;
+  } else {
+    vTensor v_bias{
+        api::context(),
+        {1},
+        convert_dtype(weight_arg.scalar_type()),
+    };
+
+    api::StorageBuffer staging(
+        context, api::ScalarType::Float, v_bias.gpu_numel());
+    {
+      api::MemoryMap mapping(staging.buffer(), api::MemoryAccessType::WRITE);
+
+      float* data_ptr = mapping.template data<float>();
+
+      memset(
+          data_ptr,
+          // 2's complement integers and IEEE-754 floating point numbers both
+          // have identical bit representations for 0, so can use memset which
+          // only accepts uint8_t parameter.
+          0,
+          v_bias.nbytes());
+    }
+    utils::pack_staging_to_vtensor(staging.buffer(), v_bias);
+
+    return v_bias;
+  }
+}
+
 bool available_check_with_batch(
     const Tensor& weight,
     const c10::optional<Tensor>& bias) {
@@ -287,8 +414,12 @@ bool usable(
 
 static Tensor reshape_to_2d(const Tensor& input_arg) {
   TORCH_CHECK(
-      input_arg.dim() >= 2,
-      "Vulkan Linear op only supports input tensor with dim >= 2");
+      input_arg.dim() >= 1,
+      "Vulkan Linear op only supports input tensor with dim >= 1");
+
+  if (input_arg.dim() == 1) {
+    return input_arg.unsqueeze(0);
+  }
   const IntArrayRef input_sizes = input_arg.sizes();
   const auto d =
       c10::multiply_integers(input_sizes.cbegin(), input_sizes.end() - 1);
@@ -308,8 +439,7 @@ Tensor run_quantized_addmm_context(
       input_arg.dim() == 2 ? input_arg : reshape_to_2d(input_arg);
   const Tensor input =
       input_arg_2d.is_vulkan() ? input_arg_2d : input_arg_2d.vulkan();
-  const vTensor& v_input = pack_inputs_using_width_packing(input);
-
+  const vTensor& v_input = convert(input);
   const vTensor& packed_v_weight = convert(
       linear_context->get_val(LinearPackedContext::Packed::Weight).toTensor());
   const vTensor& packed_v_bias = convert(
@@ -331,11 +461,6 @@ Tensor run_quantized_addmm_context(
   TORCH_CHECK(
       (packed_v_weight.is_quantized() && v_input.is_quantized()),
       "run_quantized_addmm_context called for quantized version with unquantized input");
-
-  TORCH_CHECK(
-      packed_v_weight.gpu_memory_layout() ==
-          api::GPUMemoryLayout::TENSOR_HEIGHT_PACKED,
-      "run_quantized_addmm_context called for non-quantized version with unpacked weight");
 
   vTensor v_output{
       context,
@@ -410,9 +535,9 @@ Tensor run_quantized_addmm_context(
         // global work group size
         {
             safe_downcast<uint32_t>(
-                div_up(v_output.sizes()[Layout::Parameter::width], INT64_C(4))),
+                div_up(v_output.sizes()[Layout::Parameter::width], INT64_C(2))),
             safe_downcast<uint32_t>(div_up(
-                v_output.sizes()[Layout::Parameter::height], INT64_C(4))),
+                v_output.sizes()[Layout::Parameter::height], INT64_C(2))),
             1,
         },
         // local work group size
@@ -482,9 +607,9 @@ Tensor run_quantized_addmm_context(
         // global work group size
         {
             safe_downcast<uint32_t>(
-                div_up(v_output.sizes()[Layout::Parameter::width], INT64_C(4))),
+                div_up(v_output.sizes()[Layout::Parameter::width], INT64_C(2))),
             safe_downcast<uint32_t>(div_up(
-                v_output.sizes()[Layout::Parameter::height], INT64_C(4))),
+                v_output.sizes()[Layout::Parameter::height], INT64_C(2))),
             1,
         },
         // local work group size
@@ -827,7 +952,10 @@ LinearPackedContext::LinearPackedContext(
 
   packed_.reserve(Packed::NumArgs);
   packed_.emplace_back(convert(pack_weights(weight, use_batch)));
-  packed_.emplace_back(convert(pack_biases(weight, bias, use_batch)));
+  const auto& packed_biases = weight.is_quantized()
+      ? pack_biases_quantized_weights(weight, bias, use_batch)
+      : pack_biases(weight, bias, use_batch);
+  packed_.emplace_back(convert(packed_biases));
   packed_.emplace_back(weight.sizes());
   packed_.emplace_back(bias && bias->defined());
 

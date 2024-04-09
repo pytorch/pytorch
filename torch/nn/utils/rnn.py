@@ -56,7 +56,7 @@ class PackedSequence(PackedSequence_):
         However, :attr:`batch_sizes` should always be a CPU ``torch.int64`` tensor.
 
         This invariant is maintained throughout :class:`PackedSequence` class,
-        and all functions that construct a `:class:PackedSequence` in PyTorch
+        and all functions that construct a :class:`PackedSequence` in PyTorch
         (i.e., they only pass in tensors conforming to this constraint).
 
     """
@@ -347,9 +347,9 @@ def pad_sequence(
     r"""Pad a list of variable length Tensors with ``padding_value``.
 
     ``pad_sequence`` stacks a list of Tensors along a new dimension,
-    and pads them to equal length. For example, if the input is a list of
-    sequences with size ``L x *`` and ``batch_first`` is False, the output is
-    of size ``T x B x *``.
+    and pads them to equal length. For example, consider a list of sequences
+    with size ``L x *`` as the input. If ``batch_first`` is ``False``,
+    the output is of size ``T x B x *``, and ``B x T x *`` otherwise.
 
     `B` is batch size. It is equal to the number of elements in ``sequences``.
     `T` is length of the longest sequence.

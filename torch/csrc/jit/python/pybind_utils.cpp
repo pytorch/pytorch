@@ -641,7 +641,7 @@ py::object toPyObject(IValue ivalue) {
       return std::move(t);
     }
   } else if (ivalue.isDevice()) {
-    return py::cast<py::object>(THPDevice_New(std::move(ivalue).toDevice()));
+    return py::cast(std::move(ivalue).toDevice());
   } else if (ivalue.isStream()) {
     return py::cast(std::move(ivalue).toStream());
   } else if (ivalue.isGenericDict()) {
@@ -762,9 +762,7 @@ py::object invokeOperatorFromPython(
     py::args args,
     const py::kwargs& kwargs,
     c10::optional<c10::DispatchKey> dk) {
-  auto opWithStack = getOpWithStack(operations, args, kwargs);
-  std::shared_ptr<Operator> found_op = std::get<0>(opWithStack);
-  Stack stack = std::get<1>(opWithStack);
+  auto [found_op, stack] = getOpWithStack(operations, args, kwargs);
   {
     pybind11::gil_scoped_release no_gil_guard;
     if (dk) {

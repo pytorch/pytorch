@@ -59,11 +59,11 @@ inline int64_t target_index_checked(
 template <typename scalar_t>
 static inline void multi_margin_loss_cpu_kernel(
     Tensor& output,
-    scalar_t* input_data,
-    int64_t* target_data,
+    const scalar_t* input_data,
+    const int64_t* target_data,
     const int p,
     scalar_t margin,
-    scalar_t* weight_data,
+    const scalar_t* weight_data,
     const int64_t nframe,
     const int64_t dim,
     const int64_t reduction) {
@@ -131,10 +131,10 @@ void multi_margin_loss_out_cpu_template(
 
   AT_DISPATCH_FLOATING_TYPES(
       input.scalar_type(), "multi_margin_loss_cpu_kernel", [&] {
-        auto input_data = input_contiguous.data_ptr<scalar_t>();
-        auto target_data = target_contiguous.data_ptr<int64_t>();
+        auto input_data = input_contiguous.const_data_ptr<scalar_t>();
+        auto target_data = target_contiguous.const_data_ptr<int64_t>();
         auto weight_data =
-            weight_contiguous.defined() ? weight_contiguous.data_ptr<scalar_t>() : nullptr;
+            weight_contiguous.defined() ? weight_contiguous.const_data_ptr<scalar_t>() : nullptr;
         multi_margin_loss_cpu_kernel<scalar_t>(
             output,
             input_data,

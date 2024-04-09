@@ -219,7 +219,7 @@ __global__ void nll_loss_forward_reduce_cuda_kernel_1d(
       *output = -cur_weight * input[t];
     }
   } else {
-    // If the only element was omited, we get 0. See the discussion in
+    // If the only element was omitted, we get 0. See the discussion in
     // https://github.com/pytorch/pytorch/pull/64572#issuecomment-926504162
     *output = scalar_t{0};
     *total_weight = scalar_t{0};
