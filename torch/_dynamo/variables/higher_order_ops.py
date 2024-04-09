@@ -963,7 +963,7 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
             if combine_result_meta.shape != ():
                 unimplemented(
-                    f"Expected cond_fn to return a tensor with shape () but got {combine_result_meta.shape}"
+                    f"Expected combine_fn to return a tensor with shape () but got {combine_result_meta.shape}"
                 )
 
         combine_gm = torch.fx.GraphModule(dict(tx.output.nn_modules), combine_graph)
