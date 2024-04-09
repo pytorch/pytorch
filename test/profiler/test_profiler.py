@@ -1850,7 +1850,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 self.assertTrue(e.input_shapes == [])
         with profile(record_shapes=True) as p:
             # add optional args
-            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf2", [x, y])
+            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf2", [x, y], {"stream" : 0})
             for _ in range(4):
                 with cm:
                     x.add(y)

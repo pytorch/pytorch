@@ -194,7 +194,7 @@ int RecordFunctionFast_init(
     self->inputValues = inputValues;
   }
   if (keywordValues) {
-    TORCH_CHECK(PyDict_Check(kwargs), "keywordValues must be dict");
+    TORCH_CHECK(PyDict_Check(keywordValues), "keywordValues must be dict");
     Py_INCREF(keywordValues);
     self->keywordValues = keywordValues;
 
