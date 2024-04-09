@@ -1379,7 +1379,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             quantizer = X86InductorQuantizer().set_global(
                 xiq.get_default_x86_inductor_quantization_config()
             )
-            quantizer._set_aten_operator_qconfig(torch.ops.aten.conv2d.default, None)
+            quantizer.set_module_type_qconfig(torch.nn.Conv2d, None)
             node_occurrence = {
                 # one for input and weight of the conv
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
@@ -1414,7 +1414,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             quantizer = X86InductorQuantizer().set_global(
                 xiq.get_default_x86_inductor_quantization_config()
             )
-            quantizer._set_aten_operator_qconfig(torch.ops.aten.linear.default, None)
+            quantizer.set_function_type_qconfig(torch.nn.functional.linear, None)
             node_occurrence = {
                 # one for input and weight of the conv
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
@@ -1446,7 +1446,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             quantizer = X86InductorQuantizer().set_global(
                 xiq.get_default_x86_inductor_quantization_config()
             )
-            quantizer._set_aten_operator_qconfig(torch.ops.aten.max_pool2d.default, None)
+            quantizer.set_function_type_qconfig(torch.nn.functional.max_pool2d, None)
             node_occurrence = {
                 # one for input and weight of the conv
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
@@ -1492,7 +1492,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
                 if annotate_matmul:
-                    quantizer._set_aten_operator_qconfig(torch.ops.aten.matmul.default, quantizer.global_config)
+                    quantizer.set_function_type_qconfig(torch.matmul, quantizer.get_global_quantization_config())
 
                 node_occurrence = {
                     torch.ops.quantized_decomposed.quantize_per_tensor.default: 5 if annotate_matmul else 1,
