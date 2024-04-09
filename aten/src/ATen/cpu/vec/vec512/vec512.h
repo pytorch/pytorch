@@ -13,6 +13,7 @@
 #include <ATen/cpu/vec/vec512/vec512_qint.h>
 #include <ATen/cpu/vec/vec512/vec512_complex_float.h>
 #include <ATen/cpu/vec/vec512/vec512_complex_double.h>
+#include <ATen/cpu/vec/vec512/vec512_convert.h>
 #include <ATen/cpu/vec/vec512/vec512_mask.h>
 
 #include <algorithm>
