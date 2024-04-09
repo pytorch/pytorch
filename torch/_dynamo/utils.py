@@ -2613,15 +2613,19 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
 
     compiled_fn = compile_gm(GmWrapper(), inputs)
 
+    args_to_steal = [
+        i
+        for i, node in enumerate(gm.graph.nodes)
+        if node.op == "placeholder" and node.meta["steal_arg"]
+    ]
+
     def wrapper(*args):
         # note this doesn't check the spec, assuming it is the same
-
         flat_args = pytree.arg_tree_leaves(*args)
 
-        # TODO: check the locals_to_steal compiled autograd flag
-        for arg in args:
-            if isinstance(arg, list):
-                arg.clear()
+        # flat_args is a new list, so we need to clear references from the old list
+        for i in args_to_steal:
+            args[i].clear()
 
         # this call is boxed to avoid increasing refcount until we reach aot_module_simplified forward
         return compiled_fn(flat_args)

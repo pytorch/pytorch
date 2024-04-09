@@ -68,6 +68,7 @@ from ..utils import (
     clone_input,
     common_constant_types,
     get_fake_value,
+    get_locals_to_steal,
     get_static_address_type,
     is_function_or_wrapper,
     is_namedtuple,
@@ -859,14 +860,7 @@ class VariableBuilder:
 
         use_boxed_call = False
         maybe_gm = self.tx.output.local_scope.get("self")
-        if isinstance(self.source, LocalSource) and isinstance(
-            maybe_gm, torch.fx.GraphModule
-        ):
-            locals_to_steal = maybe_gm.meta.get("locals_to_steal", [])
-            if self.source.local_name in locals_to_steal:
-                use_boxed_call = True
-
-        if use_boxed_call:
+        if self.source.local_name in get_locals_to_steal(maybe_gm):
             # The input tensor list to dynamo from compiled autograd may contain activations
             # which are freed as they are used in inductor. Dynamo's default behavior is to
             # lift all tensors to the graph inputs, but this will cause dynamo to hold an
@@ -880,6 +874,7 @@ class VariableBuilder:
             tensor_list_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
             )
+            tensor_list_proxy.node.meta["steal_arg"] = True
 
             list_variable = wrap_fx_proxy_cls(
                 target_cls=TensorVariable,
