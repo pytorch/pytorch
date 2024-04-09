@@ -1960,7 +1960,6 @@ out_symbolic_tensor_failures = {
     xfail('max', 'reduction_with_dim'),
     xfail('min', 'reduction_with_dim'),
     xfail('nn.functional.avg_pool2d', ''),
-    xfail('nn.functional.linear', ''),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('take_along_dim', ''),

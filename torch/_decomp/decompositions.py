@@ -4168,6 +4168,7 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
 
 
 @aten.matmul.default.py_impl(DispatchKey.CompositeImplicitAutograd)
+@aten.matmul.out.py_impl(DispatchKey.CompositeImplicitAutograd)
 @out_wrapper(pass_is_out=True)
 def matmul(tensor1, tensor2, *, is_out=False):
     dim_tensor1 = tensor1.dim()
