@@ -3360,17 +3360,6 @@ def meta__foreach_addcop__scalarlist(self, tensor1, tensor2, scalars):
     )
 
 
-@register_meta(
-    [
-        aten._foreach_addcdiv.ScalarList,
-        aten._foreach_addcmul.ScalarList,
-    ]
-)
-def meta__foreach_addcop_scalarlist(self, tensor1, tensor2, scalars):
-    meta__foreach_addcop__scalarlist(self, tensor1, tensor2, scalars)
-    return [torch.empty_like(s) for s in self]
-
-
 @register_meta([aten._fused_adam_.default])
 def meta__fused_adam_(
     self,
