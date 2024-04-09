@@ -2105,7 +2105,10 @@ optim_db: List[OptimizerInfo] = [
             },
             [lambda opt: StepLR(opt, gamma=0.99999, step_size=300)],
         ),
-        supports_fused_on=("cuda",),
+        supports_fused_on=(
+            "cpu",
+            "cuda",
+        ),
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(

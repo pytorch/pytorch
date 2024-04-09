@@ -3,6 +3,7 @@ from torch import Tensor
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
                         _differentiable_doc, _foreach_doc, _maximize_doc, _fused_doc)
 from typing import List, Optional
+from torch.utils._foreach_utils import _get_fused_kernels_supported_devices
 
 __all__ = ['SGD', 'sgd']
 
@@ -28,6 +29,15 @@ class SGD(Optimizer):
 
         if fused:
             self._step_supports_amp_scaling = True
+
+            fused_supported_devices = _get_fused_kernels_supported_devices() + ['cpu']
+            if not all(
+                p.device.type in fused_supported_devices and
+                torch.is_floating_point(p)
+                for pg in self.param_groups for p in pg['params']
+            ):
+                raise RuntimeError("`fused=True` requires all the params to be floating point Tensors of "
+                                   f"supported devices: {fused_supported_devices}.")
             if differentiable:
                 raise RuntimeError("`fused` does not support `differentiable`")
             if foreach:

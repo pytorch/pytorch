@@ -15544,6 +15544,7 @@
   # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
   variants: function
   dispatch:
+    CPU: _fused_sgd_kernel_cpu_
     CUDA: _fused_sgd_kernel_cuda_
   autogen: _fused_sgd, _fused_sgd.out
 
