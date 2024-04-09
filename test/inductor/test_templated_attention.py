@@ -32,6 +32,7 @@ test_dtypes = (
 )
 
 # TODO float16 was causing ERRORs for tests on ROCm
+# See https://github.com/pytorch/pytorch/issues/123531
 if common_utils.TEST_WITH_ROCM:
     test_dtypes = [torch.float32]
 
