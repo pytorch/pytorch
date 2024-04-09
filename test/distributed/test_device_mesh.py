@@ -271,35 +271,26 @@ class DeviceMeshTestNDim(DTensorTestBase):
 
     def test_device_mesh_parent_child_hash(self):
         mesh_2d = init_device_mesh(
-            self.device_type, (2, 4), mesh_dim_names=("DP", "TP")
+            self.device_type, (2, self.world_size // 2), mesh_dim_names=("DP", "TP")
         )
-        mesh_group_1 = [0, 1, 2, 3]
-        mesh_group_2 = [4, 5, 6, 7]
-        ep_mesh = (
-            DeviceMesh(self.device_type, mesh_group_1)
-            if self.rank < 4
-            else DeviceMesh(self.device_type, mesh_group_2)
-        )
-        # ep_mesh is considered different from mesh_2d["TP"]
-        # since mesh_2d["TP"] has a parent mesh while ep_mesh does not.
-        self.assertEqual(mesh_2d["TP"]._flatten_mesh_list, ep_mesh._flatten_mesh_list)
-        self.assertEqual(mesh_2d["TP"].mesh.shape, ep_mesh.mesh.shape)
-        self.assertEqual(mesh_2d["TP"].device_type, ep_mesh.device_type)
-        self.assertNotEqual(mesh_2d["TP"].mesh_dim_names, ep_mesh.mesh_dim_names)
+
+        mesh_group_1 = torch.arange(0, self.world_size // 2)
+        mesh_group_2 = torch.arange(self.world_size // 2, self.world_size)
+        ep_mesh_1 = DeviceMesh(self.device_type, mesh_group_1)
+        ep_mesh_2 = DeviceMesh(self.device_type, mesh_group_2)
+        ep_mesh = ep_mesh_1 if self.rank < self.world_size // 2 else ep_mesh_2
+        # # ep_mesh is considered different from mesh_2d["TP"]
+        # # since mesh_2d["TP"] has a parent mesh while ep_mesh does not.
         self.assertNotEqual(mesh_2d["TP"]._hash, ep_mesh._hash)
         self.assertNotEqual(mesh_2d["TP"], ep_mesh)
 
+        another_mesh_1 = DeviceMesh(self.device_type, mesh_group_1)
+        another_mesh_2 = DeviceMesh(self.device_type, mesh_group_2)
+        another_mesh = (
+            another_mesh_1 if self.rank < self.world_size // 2 else another_mesh_2
+        )
         # another_mesh is considered the same as ep_mesh
         # since they have the same mesh and no parent mesh.
-        another_mesh = (
-            DeviceMesh(self.device_type, mesh_group_1)
-            if self.rank < 4
-            else DeviceMesh(self.device_type, mesh_group_2)
-        )
-        self.assertEqual(ep_mesh._flatten_mesh_list, another_mesh._flatten_mesh_list)
-        self.assertEqual(ep_mesh.mesh.shape, another_mesh.mesh.shape)
-        self.assertEqual(ep_mesh.device_type, another_mesh.device_type)
-        self.assertEqual(ep_mesh.mesh_dim_names, another_mesh.mesh_dim_names)
         self.assertEqual(ep_mesh._hash, another_mesh._hash)
         self.assertEqual(ep_mesh, another_mesh)
 
@@ -312,19 +303,19 @@ class InitDeviceMeshTest(DTensorTestBase):
     @with_comms
     def test_init_device_mesh(self):
         mesh_shape = (2, 4)
-        ref_mesh = DeviceMesh(self.device_type, torch.arange(8).view(mesh_shape))
+        mesh_dim_names = ("DP", "TP")
+        ref_mesh = DeviceMesh(
+            self.device_type,
+            torch.arange(8).view(mesh_shape),
+            mesh_dim_names=mesh_dim_names,
+        )
 
         # test init_device_mesh with mesh_dim_names
-        mesh_dim_names = ("DP", "TP")
         mesh_2d = init_device_mesh(
             self.device_type, mesh_shape, mesh_dim_names=mesh_dim_names
         )
         self.assertEqual(mesh_2d, ref_mesh)
         self.assertEqual(mesh_2d.mesh_dim_names, mesh_dim_names)
-
-        # test init_device_mesh without mesh_dim_names
-        mesh_2d = init_device_mesh(self.device_type, mesh_shape)
-        self.assertEqual(mesh_2d, ref_mesh)
 
     @with_comms
     def test_raises_duplicate_mesh_dim_names(self):

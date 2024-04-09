@@ -74,10 +74,8 @@ else:
             # swap the current dim to the last dim then reshape to flatten out other
             # dims, so we can just extract the list of ranks which contains cur_rank.
             cur_rank = device_mesh.get_rank()
-            pg_ranks_by_dim = (
-                device_mesh.mesh.swapdims(-1, mesh_dim)
-                .reshape(-1, device_mesh.mesh.size(mesh_dim))
-                .to(torch.int32)
+            pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
+                -1, device_mesh.mesh.size(mesh_dim)
             )
 
             for mesh_1d in pg_ranks_by_dim:
@@ -219,21 +217,14 @@ else:
 
             # private field to pre-generate DeviceMesh's hash
             self._flatten_mesh_list = tuple(self.mesh.flatten().tolist())
-            hash_obj = (
+            self._hash = hash(
                 (
                     self._flatten_mesh_list,
                     self.mesh.shape,
                     self.device_type,
                     self.mesh_dim_names,
                 )
-                if self.mesh_dim_names
-                else (
-                    self._flatten_mesh_list,
-                    self.mesh.shape,
-                    self.device_type,
-                )
             )
-            self._hash = hash(hash_obj)
 
             # Skip process group initialization if xla device or init backend is False
             # TODO(yeounoh) implement DeviceMesh backend and register XLA backend.
