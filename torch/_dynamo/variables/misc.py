@@ -946,27 +946,6 @@ class DebuggingVariable(VariableTracker):
         return True
 
 
-class LoggingLoggerVariable(VariableTracker):
-    """
-    Represents a call to any of logging.Logger methods
-    """
-
-    def __init__(self, value, **kwargs):
-        super().__init__(**kwargs)
-
-    def call_method(
-        self,
-        tx,
-        name,
-        args: "List[VariableTracker]",
-        kwargs: "Dict[str, VariableTracker]",
-    ) -> "VariableTracker":
-        if tx.export:
-            # For export cases, we can just make debugging functions no-ops
-            return
-        unimplemented("Logger not supported for non-export cases")
-
-
 class StopIterationVariable(VariableTracker):
     def __init__(self, args, **kwargs):
         super().__init__(**kwargs)
