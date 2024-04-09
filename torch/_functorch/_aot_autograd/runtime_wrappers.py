@@ -72,13 +72,14 @@ def create_runtime_wrapper(
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
 
-    def runtime_wrapper(*args):
+    def runtime_wrapper(args: List[Any]):
         num_tokens = len(runtime_metadata.tokens)
         if config.unlift_effect_tokens:
             assert num_tokens == 0
         elif num_tokens > 0:
             # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-            args = ([None] * num_tokens, *args)
+            # NOTE: this keeps an extra reference to the old args until the end of this function
+            args = [[None] * num_tokens, *args]
 
         if trace_joint:
             args_ = list(args)
@@ -572,11 +573,8 @@ fw_metadata={str(fw_metadata)}
         wrapped_flat_fn, deduped_flat_args, aot_config, fw_metadata=updated_fw_metadata
     )
 
-    if not hasattr(compiled_fn, "_boxed_call"):
-        compiled_fn = make_boxed_func(compiled_fn)
-
     @wraps(compiled_fn)
-    def wrapped_compiled_fn(args):
+    def wrapped_compiled_fn(args: List[Any]):
         deduped_args = remove_dupe_args(args)
         args.clear()
         return compiled_fn(deduped_args)
@@ -741,9 +739,6 @@ fw_metadata={str(fw_metadata)}
         aot_config,
         fw_metadata=fw_metadata_updated,
     )
-
-    if not hasattr(compiled_fn, "_boxed_call"):
-        compiled_fn = make_boxed_func(compiled_fn)
 
     @wraps(compiled_fn)
     def wrapped_compiled_fn(args):
