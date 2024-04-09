@@ -104,6 +104,9 @@ def dmap(
                         if isinstance(in_placements, tuple)
                         else in_placements
                     )
+                    if not isinstance(spec, tuple):
+                        spec = tuple(spec)
+
                     if arg.placements != spec:
                         if resharding:
                             # redistribute to input placements

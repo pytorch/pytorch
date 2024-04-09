@@ -52,7 +52,7 @@ class TestDmap(DTensorTestBase):
             mm_allreduce_forward,
             out_placements=[Replicate()],
             device_mesh=device_mesh,
-            in_placements=[col_wise, row_wise],
+            in_placements=(col_wise, row_wise),
         )
         dY = d_mm_allreduce_forward(dW, dX)
         for placement in dY.placements:
