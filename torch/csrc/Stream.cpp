@@ -29,16 +29,17 @@ static PyObject* THPStream_pynew(
   int64_t priority = 0;
 
   static torch::PythonArgParser parser({
-      "Steram(Device device=None, int64_t priority=0)",
-      "Stream(int64_t stream_id, int64_t device_index, int64_t device_type, int64_t priority=0)",
+      "Steram(Device device=None, *, int64_t priority=0)",
+      "Stream(int64_t stream_id, int64_t device_index, int64_t device_type, *, int64_t priority=0)",
   });
 
   torch::ParsedArgs<4> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
 
   std::unique_ptr<c10::DeviceGuard> device_guard_ptr;
+
   bool work_as_wrapper = (r.idx > 0);
-  if (!work_as_wrapper) {
+  if (r.idx == 0) {
     auto default_accelerator = at::getAccelerator(false);
     auto device = r.deviceOptional(0);
     if (device.has_value()) {
@@ -58,12 +59,17 @@ static PyObject* THPStream_pynew(
       device_index = current_device.index();
     }
     priority = r.toInt64WithDefault(1, 0);
-  } else {
+  } else if (r.idx == 1) {
     stream_id = r.toInt64WithDefault(0, -1);
     device_index = r.toInt64WithDefault(1, 0);
     device_type =
         r.toInt64WithDefault(2, static_cast<int64_t>(c10::DeviceType::CPU));
     priority = r.toInt64WithDefault(3, 0);
+  } else {
+    TORCH_CHECK(
+        false,
+        "parse stream arg fails please check the usage: ",
+        parser.get_signatures());
   }
 
   THPObjectPtr ptr(type->tp_alloc(type, 0));
@@ -77,7 +83,7 @@ static PyObject* THPStream_pynew(
   // stream pool. It requires other device backends override
   // getStreamFromGlobalPool method.
   c10::Stream stream(c10::Stream::DEFAULT, c10::Device(c10::DeviceType::CPU));
-  if (!work_as_wrapper) {
+  if (r.idx == 0) {
     c10::impl::VirtualGuardImpl impl{static_cast<c10::DeviceType>(device_type)};
     stream = impl.getStreamFromGlobalPool(
         c10::Device(static_cast<c10::DeviceType>(device_type), device_index),
