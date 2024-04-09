@@ -103,10 +103,7 @@ def create_runtime_wrapper(
                     args_[idx] = args_[idx].detach()
             with torch.autograd._force_original_view_tracking(True):
                 all_outs = call_func_at_runtime_with_args(
-                    compiled_fn,
-                    args_,
-                    disable_amp=disable_amp,
-                    steal_args=True
+                    compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
         else:
             # When we have an inference graph, we run with torch.no_grad.
@@ -116,17 +113,11 @@ def create_runtime_wrapper(
             if torch.is_grad_enabled():
                 with torch.no_grad():
                     all_outs = call_func_at_runtime_with_args(
-                        compiled_fn,
-                        args,
-                        disable_amp=disable_amp,
-                        steal_args=True
+                        compiled_fn, args, disable_amp=disable_amp, steal_args=True
                     )
             else:
                 all_outs = call_func_at_runtime_with_args(
-                    compiled_fn,
-                    args,
-                    disable_amp=disable_amp,
-                    steal_args=True
+                    compiled_fn, args, disable_amp=disable_amp, steal_args=True
                 )
         del args
 
