@@ -58,6 +58,7 @@ __all__ = [
     'SymBool', 'sym_not', 'unravel_index',
     'sym_int', 'sym_float', 'sym_max', 'sym_min', 'sym_ite', 'compile', 'vmap',
     'export', 'autocast', 'cond', 'GradScaler',
+    'get_device_module',
 ]
 
 ################################################################################
@@ -2016,15 +2017,15 @@ def get_device_module(device):
     """
     Returns the module associated with a given device
     """
-    if(device.type == "mtia"):
+    if (device.type == "mtia"):
         return torch.mtia
-    elif(device.type == "cuda"):
+    elif (device.type == "cuda"):
         return torch.cuda
-    elif(device.type == "xpu"):
+    elif (device.type == "xpu"):
         return torch.xpu
-    elif(device.type == "mps"):
+    elif (device.type == "mps"):
         return torch.mps
-    elif(device.type == "cpu"):
+    elif (device.type == "cpu"):
         return torch.cpu
 
 
