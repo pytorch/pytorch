@@ -28,7 +28,7 @@ static PyObject* THPEvent_pynew(
   unsigned char interprocess = 0;
 
   static torch::PythonArgParser parser({
-      "Event(Device device=None, bool enable_timing=True, bool blocking=False, bool interprocess=False)",
+      "Event(Device device=None, *, bool enable_timing=True, bool blocking=False, bool interprocess=False)",
   });
 
   torch::ParsedArgs<4> parsed_args;
@@ -49,8 +49,13 @@ static PyObject* THPEvent_pynew(
   }
 
   THPEvent* self = (THPEvent*)ptr.get();
+
+  // TODO: blocking and interprocess are not supported yet. To support them, the
+  // flag system of c10::Event needs to be refactored. C10::Event should also
+  // provide a generic constructor to support blocking and interprocess events.
   (void)blocking;
   (void)interprocess;
+
   new (&self->event) c10::Event(
       device->type(),
       (enable_timing ? c10::EventFlag::PYTORCH_DEFAULT
@@ -136,15 +141,17 @@ static PyObject* THPEvent_from_ipc_handle(
 
   at::Device device = r.device(0);
   std::string handle_string = r.string(1);
-  TORCH_CHECK(false, "Not implemented");
-
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "torch.Event ipc is not supported yet, please open an issue if you need this!");
   THPObjectPtr ptr(type->tp_alloc(type, 0));
   if (!ptr) {
     return nullptr;
   }
   THPEvent* self = (THPEvent*)ptr.get();
 
-  // TODO: c10 Event should provide a constructor that takes the IPC handle.
+  // TODO: for constructing event from ipc handle, the c10::Event needs to have
+  // more general constructor to achieve that.
   new (&self->event) c10::Event(device.type(), c10::EventFlag::PYTORCH_DEFAULT);
 
   return (PyObject*)ptr.release();
@@ -155,7 +162,9 @@ static PyObject* THPEvent_ipc_handle(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = (THPEvent*)_self;
   (void)self;
-  TORCH_CHECK(false, "Not implemented");
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      false,
+      "torch.Event ipc is not supported yet, please open an issue if you need this!");
   std::string handle = "0";
   return PyBytes_FromStringAndSize((const char*)&handle, sizeof(handle));
   END_HANDLE_TH_ERRORS
