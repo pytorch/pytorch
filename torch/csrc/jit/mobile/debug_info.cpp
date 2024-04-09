@@ -119,9 +119,7 @@ MobileDebugTable::MobileDebugTable(
   const c10::string_view suffix(".debug_pkl");
   for (const auto& record_name : record_names) {
     if (c10::string_view(record_name).ends_with(suffix)) {
-      at::DataPtr debug_data;
-      size_t debug_size{0};
-      std::tie(debug_data, debug_size) = reader->getRecord(record_name);
+      auto [debug_data, debug_size] = reader->getRecord(record_name);
       auto ivalueTuple = jit::unpickle(
           reinterpret_cast<const char*>(debug_data.get()),
           debug_size,
@@ -157,9 +155,7 @@ MobileDebugTable::MobileDebugTable(
   }
   const std::string callstack_debug_file("callstack_debug_map.pkl");
   if (reader->hasRecord("callstack_debug_map.pkl")) {
-    at::DataPtr callstack_data;
-    size_t callstack_data_size{0};
-    std::tie(callstack_data, callstack_data_size) =
+    auto [callstack_data, callstack_data_size] =
         reader->getRecord(callstack_debug_file);
     CallStackDebugInfoUnpickler unpickler;
     callstack_ptr_map_ = unpickler.unpickle(

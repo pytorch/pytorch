@@ -161,7 +161,7 @@ class PT2EQATTestCase(QuantizationTestCase):
         if verify_convert:
             # We don't want to impose any ordering requirements between move_exported_model_to_eval and convert_pt2e
             torch.ao.quantization.move_exported_model_to_eval(model_pt2e)
-            model_pt2e = convert_pt2e(model_pt2e, fold_quantize=True)
+            model_pt2e = convert_pt2e(model_pt2e)
             quant_result_pt2e = model_pt2e(*example_inputs)
             model_fx.eval()
             model_fx = _convert_to_reference_decomposed_fx(
@@ -631,7 +631,7 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         m = capture_pre_autograd_graph(m, example_inputs)
         m = prepare_qat_pt2e(m, quantizer)
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
 
         # Extract the conv and relu nodes (bn was folded into conv)
         first_conv, first_relu, second_conv, second_relu = None, None, None, None
@@ -690,7 +690,7 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         quantizer = ConvBnDerivedBiasQuantizer()
         m = prepare_qat_pt2e(m, quantizer)
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
         m(*example_inputs)
 
         # Assert that both weight and bias are quantized
@@ -737,7 +737,7 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         quantizer = ConvBnInt32WeightQuantizer()
         m = prepare_qat_pt2e(m, quantizer)
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
         m(*example_inputs)
 
         # Assert that conv weight is quantized per channel
@@ -972,7 +972,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         for name, child in model.named_children():
             if isinstance(child, torch.fx.GraphModule):
                 torch.ao.quantization.move_exported_model_to_eval(child)
-                converted_child = convert_pt2e(child, fold_quantize=True)
+                converted_child = convert_pt2e(child)
                 setattr(model, name, converted_child)
             else:
                 self._convert_qat_linears(child)
@@ -999,7 +999,7 @@ class TestQuantizeMixQATAndPTQ(QuantizationTestCase):
         quantizer.set_global(quantization_config)
         model_pt2e = prepare_pt2e(model_pt2e, quantizer)
         after_prepare_result_pt2e = model_pt2e(*example_inputs)
-        model_pt2e = convert_pt2e(model_pt2e, fold_quantize=True)
+        model_pt2e = convert_pt2e(model_pt2e)
         quant_result_pt2e = model_pt2e(*example_inputs)
 
         exported_model = torch.export.export(model_pt2e, example_inputs)

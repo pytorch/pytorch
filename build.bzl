@@ -261,6 +261,7 @@ _GENERATED_AUTOGRAD_PYTHON_HEADERS = [
 _GENERATED_AUTOGRAD_CPP_HEADERS = [
     "torch/csrc/autograd/generated/Functions.h",
     "torch/csrc/autograd/generated/VariableType.h",
+    "torch/csrc/autograd/generated/ViewFuncs.h",
     "torch/csrc/autograd/generated/variable_factories.h",
 ]
 
@@ -303,6 +304,7 @@ GENERATED_AUTOGRAD_CPP = [
     "torch/csrc/autograd/generated/VariableType_2.cpp",
     "torch/csrc/autograd/generated/VariableType_3.cpp",
     "torch/csrc/autograd/generated/VariableType_4.cpp",
+    "torch/csrc/autograd/generated/ViewFuncs.cpp",
     "torch/csrc/autograd/generated/TraceType_0.cpp",
     "torch/csrc/autograd/generated/TraceType_1.cpp",
     "torch/csrc/autograd/generated/TraceType_2.cpp",

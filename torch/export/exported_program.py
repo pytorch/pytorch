@@ -1,7 +1,10 @@
 import copy
 import dataclasses
 import functools
+import re
 import types
+import warnings
+from collections import namedtuple
 from typing import (
     Any,
     Callable,
@@ -15,6 +18,8 @@ from typing import (
     Union,
 )
 
+from torch.fx.immutable_collections import immutable_dict, immutable_list
+
 if TYPE_CHECKING:
     # Import the following modules during type checking to enable code intelligence features,
     # such as auto-completion in tools like pylance, even when these modules are not explicitly
@@ -26,7 +31,7 @@ if TYPE_CHECKING:
 
 import torch
 import torch.utils._pytree as pytree
-from torch.export._tree_utils import reorder_kwargs
+from torch.export._tree_utils import is_equivalent, reorder_kwargs
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import maybe_disable_fake_tensor_mode
 
@@ -45,6 +50,7 @@ from .graph_signature import (  # noqa: F401
     OutputSpec,
     SymIntArgument,
     TensorArgument,
+    TokenArgument,
 )
 
 
@@ -81,6 +87,60 @@ def _disable_prexisiting_fake_mode(fn):
     return wrapper
 
 
+def _fx_collection_equivalence_fn(
+    spec1_type: Optional[type],
+    spec1_context: pytree.Context,
+    spec2_type: Optional[type],
+    spec2_context: pytree.Context,
+) -> bool:
+    """Treat containers and their immutable variants as the same type. Otherwise
+    compare as normal.
+    """
+    if spec1_type is None or spec2_type is None:
+        return spec1_type is spec2_type and spec1_context == spec2_context
+
+    if issubclass(spec1_type, (dict, immutable_dict)) and issubclass(
+        spec2_type, (dict, immutable_dict)
+    ):
+        return spec1_context == spec2_context
+
+    if issubclass(spec1_type, (list, immutable_list)) and issubclass(
+        spec2_type, (list, immutable_list)
+    ):
+        return spec1_context == spec2_context
+
+    return spec1_type is spec2_type and spec1_context == spec2_context
+
+
+def _rename_without_collisions(
+    name_map: Dict[str, str],
+    orig_name: str,
+    name: str,
+    is_placeholder: bool = False,
+):
+    """
+    Renames nodes to avoid name collisions, with suffixing.
+    name_map: map from original name to new name
+    orig_name: mapping key
+    name: candidate name (potentially suffixed, e.g. mul_2)
+    is_placeholder: if the node is a placeholder, avoid detecting suffix
+    """
+    if name in name_map.values():
+        # non-placeholder nodes may be suffixed with the count
+        # instead of adding another suffix, we will try to increment it
+        match = re.match(r"(.*)_(\d+)", name)
+        if match and not is_placeholder:
+            name, n = match.group(1), int(match.group(2))
+        else:
+            n = 0
+        while (dup_name := f"{name}_{n + 1}") in name_map.values():
+            n += 1
+        name_map[orig_name] = dup_name
+    else:
+        name_map[orig_name] = name
+    return name_map[orig_name]
+
+
 class ExportedProgram:
     """
     Package of a program from :func:`export`. It contains
@@ -114,8 +174,6 @@ class ExportedProgram:
             Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]
         ] = None,
     ):
-        from torch._export.exported_program import _create_graph_module_for_export
-
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
         self._graph_module = _create_graph_module_for_export(root, graph)
@@ -192,8 +250,12 @@ class ExportedProgram:
         Returns an iterator over original module buffers, yielding
         both the name of the buffer as well as the buffer itself.
         """
+        non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
         for buffer_name in self.graph_signature.buffers:
-            yield buffer_name, self.state_dict[buffer_name]
+            if buffer_name in non_persistent_buffers:
+                yield buffer_name, self.constants[buffer_name]
+            else:
+                yield buffer_name, self.state_dict[buffer_name]
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -213,7 +275,7 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def call_spec(self):
-        from torch._export.exported_program import CallSpec
+        CallSpec = namedtuple("CallSpec", ["in_spec", "out_spec"])
 
         if len(self.module_call_graph) == 0:
             return CallSpec(in_spec=None, out_spec=None)
@@ -243,18 +305,43 @@ class ExportedProgram:
     def constants(self):
         return self._constants
 
-    def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        import torch._export.error as error
+    def _get_flat_args_with_check(self, args, kwargs):
+        """Flatten args, kwargs using pytree, then, check specs.
 
+        Args:
+            args: List[Any] original args passed to __call__
+            kwargs: Dict[str, Any] original kwargs passed to __call
+
+        Returns:
+            A tuple of (flat_args, received_spec)
+            flat_args is flattend args / kwargs
+            received_spec is the pytree spec produced while flattening the
+            tuple (args, kwargs)
+        """
         in_spec = self.call_spec.in_spec
         if in_spec is not None:
             kwargs = reorder_kwargs(kwargs, in_spec)
-
         flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
             (args, kwargs)
         )  # type: ignore[possibly-undefined]
+        self._check_input_constraints(flat_args_with_path)
+        flat_args = tuple(x[1] for x in flat_args_with_path)
+        return flat_args, received_spec
 
-        if in_spec is not None and received_spec != in_spec:
+    def _graph_module_flat_inputs(self, args: Any, kwargs: Any) -> Any:
+        """Transform args, kwargs of __call__ to args for graph_module.
+
+        self.graph_module takes stuff from state dict as inputs.
+        The invariant is for ep: ExportedProgram is
+        ep(args, kwargs) ==
+          ep.postprocess(ep.graph_module(ep.graph_module_flat_inputs(args, kwargs)))
+        """
+
+        in_spec = self.call_spec.in_spec
+        flat_args, received_spec = self._get_flat_args_with_check(args, kwargs)
+        if in_spec is not None and not is_equivalent(
+            received_spec, in_spec, _fx_collection_equivalence_fn
+        ):
             raise ValueError(
                 "Trying to flatten user inputs with exported input tree spec: \n"
                 f"{in_spec}\n"
@@ -266,23 +353,42 @@ class ExportedProgram:
         for input_ in self.graph_signature.input_specs:
             if input_.kind == InputKind.USER_INPUT:
                 continue
-            elif input_.kind in (InputKind.PARAMETER, InputKind.BUFFER):
-                additional_inputs.append(self.state_dict[input_.target])
-            elif input_.kind in (InputKind.CONSTANT_TENSOR, InputKind.CUSTOM_OBJ):
+            elif input_.kind in (
+                InputKind.PARAMETER,
+                InputKind.BUFFER,
+            ):
+                if input_.persistent is False:
+                    # This is a non-persistent buffer, grab it from our
+                    # constants instead of the state dict.
+                    additional_inputs.append(self.constants[input_.target])
+                else:
+                    additional_inputs.append(self.state_dict[input_.target])
+            elif input_.kind in (
+                InputKind.CONSTANT_TENSOR,
+                InputKind.CUSTOM_OBJ,
+            ):
                 additional_inputs.append(self.constants[input_.target])
         additional_inputs = tuple(additional_inputs)
 
-        self._check_input_constraints(flat_args_with_path)
-        flat_args = [x[1] for x in flat_args_with_path]
-
         # NOTE: calling convention is first params, then buffers, then args as user supplied them.
         # See: torch/_functorch/aot_autograd.py#L1034
-        res = torch.fx.Interpreter(self.graph_module).run(
-            *additional_inputs,
-            *flat_args,
-            enable_io_processing=False,
+        return additional_inputs + flat_args
+
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        raise RuntimeError(
+            "Unable to call ExportedProgram directly. "
+            "You should use `exported_program.module()` instead."
         )
 
+    def _postprocess_graph_module_outputs(self, res, orig_args, orig_kwargs):
+        """Process potential mutations to the input.
+
+        Because self.graph_module is functional, so mutations has to be written
+        back after execution of graph_module.
+        """
+        import torch._export.error as error
+
+        flat_args, _ = self._get_flat_args_with_check(orig_args, orig_kwargs)
         if self.call_spec.out_spec is not None:
             buffer_mutation = self.graph_signature.buffers_to_mutate
             user_input_mutation = self.graph_signature.user_inputs_to_mutate
@@ -327,7 +433,6 @@ class ExportedProgram:
                         flat_args[index].copy_(value)
                     else:
                         raise AssertionError(f"Unexpected kind: {output_spec.kind}")
-
         return res
 
     def __str__(self) -> str:
@@ -376,7 +481,10 @@ class ExportedProgram:
         from torch._export.passes.add_runtime_assertions_for_constraints_pass import (
             _AddRuntimeAssertionsForInlineConstraintsPass,
         )
-        from torch._export.passes.lift_constants_pass import lift_constants_pass
+        from torch._export.passes.lift_constants_pass import (
+            ConstantAttrMap,
+            lift_constants_pass,
+        )
         from torch._export.passes.replace_sym_size_ops_pass import (
             _replace_sym_size_ops_pass,
         )
@@ -399,9 +507,15 @@ class ExportedProgram:
         for name in buffers_to_remove:
             delattr(self.graph_module, name)
         # TODO(zhxhchen17) Return the new graph_signature directly.
-        gm, graph_signature = aot_export_module(
-            self.graph_module, fake_args, decompositions=decomp_table, trace_joint=False
-        )
+        from torch.export._trace import _ignore_backend_decomps
+
+        with _ignore_backend_decomps():
+            gm, graph_signature = aot_export_module(
+                self.graph_module,
+                fake_args,
+                decompositions=decomp_table,
+                trace_joint=False,
+            )
 
         # Update the signatures with the new placeholder names in case they
         # changed when calling aot_export
@@ -417,6 +531,18 @@ class ExportedProgram:
         new_placeholders = _get_placeholders(gm)
         new_outputs = list(gm.graph.nodes)[-1].args[0]
 
+        # rename the placeholders
+        assert len(new_placeholders) == len(old_placeholders)
+        for old_ph, new_ph in zip(old_placeholders, new_placeholders):
+            new_ph.name = new_ph.target = old_ph.name
+
+        # handle name collisions with newly decomposed graph nodes
+        name_map = {ph.name: ph.name for ph in new_placeholders}
+        for node in gm.graph.nodes:
+            if node.op == "placeholder":
+                continue
+            node.name = _rename_without_collisions(name_map, node.name, node.name)
+
         # To match the output target with correct input for input mutations
         # need to find the old to new placeholder map
         old_new_placeholder_map = {
@@ -426,7 +552,12 @@ class ExportedProgram:
         }
 
         input_specs = [
-            InputSpec(spec.kind, update_arg(spec.arg, new_placeholders[i]), spec.target)
+            InputSpec(
+                spec.kind,
+                update_arg(spec.arg, new_placeholders[i]),
+                spec.target,
+                spec.persistent,
+            )
             for i, spec in enumerate(self.graph_signature.input_specs)
         ]
         output_specs = [
@@ -465,7 +596,7 @@ class ExportedProgram:
 
         new_range_constraints = _get_updated_range_constraints(gm)
 
-        constants = lift_constants_pass(gm, new_graph_signature)
+        constants = lift_constants_pass(gm, new_graph_signature, ConstantAttrMap())
         for k, v in constants.items():
             assert k not in self.constants
             self.constants[k] = v
@@ -492,7 +623,12 @@ class ExportedProgram:
 
     def _transform_do_not_use(self, *passes: PassType) -> "ExportedProgram":
         pm = PassManager(list(passes))
-        res = pm(self.graph_module)
+        # Since we abstractly run the passes, we need to disable backend decomp here
+        # again.
+        from torch.export._trace import _ignore_backend_decomps
+
+        with _ignore_backend_decomps():
+            res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
@@ -524,7 +660,12 @@ class ExportedProgram:
                     else type(old_input_spec.arg)(node.name)
                 )
                 new_input_specs.append(
-                    InputSpec(old_input_spec.kind, arg, old_input_spec.target)
+                    InputSpec(
+                        old_input_spec.kind,
+                        arg,
+                        old_input_spec.target,
+                        old_input_spec.persistent,
+                    )
                 )
 
             output_node = list(new_gm.graph.nodes)[-1]
@@ -631,7 +772,28 @@ def _get_updated_range_constraints(
     # Only when we have an unbacked symint, and it's used as constructor inputs,
     # runtime_var_to_range will make a difference compated to var_to_range.
     # e.g. [2, oo) -> [0, oo)
-    for k, v in shape_env.runtime_var_to_range.items():
+    for k, v in shape_env.var_to_range.items():
         if k not in shape_env.replacements:
             range_constraints[k] = v
     return range_constraints
+
+
+def _create_graph_module_for_export(root, graph):
+    try:
+        gm = torch.fx.GraphModule(root, graph)
+    except SyntaxError:
+        # If custom objects stored in memory are being used in the graph,
+        # the generated python code will result in a syntax error on the custom
+        # object, since it is unable to parse the in-memory object. However
+        # we can still run the graph eagerly through torch.fx.Interpreter,
+        # so we will bypass this error.
+        warnings.warn(
+            "Unable to execute the generated python source code from "
+            "the graph. The graph module will no longer be directly callable, "
+            "but you can still run the ExportedProgram, and if needed, you can "
+            "run the graph module eagerly using torch.fx.Interpreter."
+        )
+        gm = torch.fx.GraphModule(root, torch.fx.Graph())
+        gm._graph = graph
+
+    return gm
