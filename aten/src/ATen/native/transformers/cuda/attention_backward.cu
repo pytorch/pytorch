@@ -172,7 +172,8 @@ _efficient_attention_backward(
     int64_t custom_mask_type,
     const bool bias_requires_grad,
     const c10::optional<double> scale,
-    c10::optional <int64_t> num_splits_key) {
+    c10::optional <int64_t> num_splits_key,
+    const c10::optional<int64_t> window_size) {
   #if defined(USE_MEM_EFF_ATTENTION)
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{});
@@ -361,6 +362,9 @@ _efficient_attention_backward(
     if (cu_seqlens_q.has_value()) {
       p.cu_seqlens_q_ptr = (int32_t*)cu_seqlens_q->data_ptr();
       p.cu_seqlens_k_ptr = (int32_t*)cu_seqlens_k->data_ptr();
+    }
+    if (window_size.has_value()) {
+      p.window_size = *window_size;
     }
 
     ASSIGN_CHECK_OVERFLOW(p.lse_strideB, logsumexp.stride(0));
