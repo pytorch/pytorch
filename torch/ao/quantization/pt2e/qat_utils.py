@@ -522,11 +522,12 @@ def _fuse_conv_bn_qat(m: GraphModule) -> GraphModule:
     has_bn = any(_is_bn_node(n) for n in m.graph.nodes)
     if not has_bn:
         return m
-    m = _fuse_conv_bn_qat_helper(m, F.conv1d, _conv1d_bn_example_inputs, is_cuda=False)
-    m = _fuse_conv_bn_qat_helper(m, F.conv2d, _conv2d_bn_example_inputs, is_cuda=False)
-    if torch.cuda.is_available():
-        m = _fuse_conv_bn_qat_helper(m, F.conv1d, _conv1d_bn_example_inputs, is_cuda=True)
-        m = _fuse_conv_bn_qat_helper(m, F.conv2d, _conv2d_bn_example_inputs, is_cuda=True)
+    is_cuda_options = [True, False] if torch.cuda.is_available() else [False]
+    for is_cuda in is_cuda_options:
+        m = _fuse_conv_bn_qat_helper(m, F.conv1d, _conv1d_bn_example_inputs, is_cuda=is_cuda)
+        m = _fuse_conv_bn_qat_helper(m, F.conv2d, _conv2d_bn_example_inputs, is_cuda=is_cuda)
+        m = _fuse_conv_bn_qat_helper(m, F.conv_transpose1d, _conv1d_bn_example_inputs, is_cuda=is_cuda)
+        m = _fuse_conv_bn_qat_helper(m, F.conv_transpose2d, _conv2d_bn_example_inputs, is_cuda=is_cuda)
     return m
 
 def _fuse_conv_bn_qat_helper(
@@ -701,11 +702,12 @@ def _fold_conv_bn_qat(m: GraphModule) -> GraphModule:
     has_bn = any(_is_bn_node(n) for n in m.graph.nodes)
     if not has_bn:
         return m
-    m = _fold_conv_bn_qat_helper(m, F.conv1d, _quantized_conv1d_bn_example_inputs, is_cuda=False)
-    m = _fold_conv_bn_qat_helper(m, F.conv2d, _quantized_conv2d_bn_example_inputs, is_cuda=False)
-    if torch.cuda.is_available():
-        m = _fold_conv_bn_qat_helper(m, F.conv1d, _quantized_conv1d_bn_example_inputs, is_cuda=True)
-        m = _fold_conv_bn_qat_helper(m, F.conv2d, _quantized_conv2d_bn_example_inputs, is_cuda=True)
+    is_cuda_options = [True, False] if torch.cuda.is_available() else [False]
+    for is_cuda in is_cuda_options:
+        m = _fold_conv_bn_qat_helper(m, F.conv1d, _quantized_conv1d_bn_example_inputs, is_cuda=is_cuda)
+        m = _fold_conv_bn_qat_helper(m, F.conv2d, _quantized_conv2d_bn_example_inputs, is_cuda=is_cuda)
+        m = _fold_conv_bn_qat_helper(m, F.conv_transpose1d, _quantized_conv1d_bn_example_inputs, is_cuda=is_cuda)
+        m = _fold_conv_bn_qat_helper(m, F.conv_transpose2d, _quantized_conv2d_bn_example_inputs, is_cuda=is_cuda)
     return m
 
 def _fold_conv_bn_qat_helper(

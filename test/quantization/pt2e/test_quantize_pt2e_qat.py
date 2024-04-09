@@ -78,6 +78,7 @@ class PT2EQATTestCase(QuantizationTestCase):
         has_conv_bias: bool = True,
         has_bn: bool = True,
         has_relu: bool = False,
+        transpose: bool = False,
         **conv_kwargs,
     ):
         """
@@ -86,7 +87,7 @@ class PT2EQATTestCase(QuantizationTestCase):
         conv-bn model with conv bias.
         """
         return self._BaseConvBnModel(
-            self.conv_class,
+            self.conv_transpose_class if transpose else self.conv_class,
             self.bn_class,
             has_conv_bias,
             has_bn,
@@ -761,6 +762,14 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         self.assertEqual(dq_qmax, 2**31 - 1)
         self.assertEqual(dq_dtype, torch.int32)
 
+    def test_qat_conv_transpose_bn(self):
+        m = self._get_conv_bn_model(transpose=True)
+        self._verify_symmetric_xnnpack_qat_graph(m, self.example_inputs, has_relu=False)
+
+    def test_qat_conv_transpose_bn_relu(self):
+        m = self._get_conv_bn_model(has_relu=True, transpose=True)
+        self._verify_symmetric_xnnpack_qat_graph(m, self.example_inputs, has_relu=True)
+
 
 # TODO: enable this in the next PR
 @skipIfNoQNNPACK
@@ -768,6 +777,7 @@ class TestQuantizePT2EQAT_ConvBn1d(TestQuantizePT2EQAT_ConvBn_Base):
     dim = 1
     example_inputs = (torch.randn(1, 3, 5),)
     conv_class = torch.nn.Conv1d
+    conv_transpose_class = torch.nn.ConvTranspose1d
     bn_class = torch.nn.BatchNorm1d
 
 
@@ -776,6 +786,7 @@ class TestQuantizePT2EQAT_ConvBn2d(TestQuantizePT2EQAT_ConvBn_Base):
     dim = 2
     example_inputs = (torch.randn(1, 3, 5, 5),)
     conv_class = torch.nn.Conv2d
+    conv_transpose_class = torch.nn.ConvTranspose2d
     bn_class = torch.nn.BatchNorm2d
 
 
@@ -783,6 +794,8 @@ def _is_conv_node(n: torch.fx.Node):
     return n.op == "call_function" and n.target in [
         torch.ops.aten.conv1d.default,
         torch.ops.aten.conv2d.default,
+        torch.ops.aten.conv_transpose1d.default,
+        torch.ops.aten.conv_transpose2d.input,
     ]
 
 
