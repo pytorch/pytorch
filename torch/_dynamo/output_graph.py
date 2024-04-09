@@ -294,12 +294,14 @@ class OutputGraph:
 
         # In export mode, we force the shape_env to strictly disallow any constraining
         # of the user marked dynamic dims
-        fake_mode = torch._subclasses.FakeTensorMode(
-            shape_env=shape_env,
-            # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
-            allow_non_fake_inputs=True if self.export else False,
-            _allow_unsafe_data_ptr_access=False,
-        )
+        import torch._functorch.config as _config
+
+        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            fake_mode = torch._subclasses.FakeTensorMode(
+                shape_env=shape_env,
+                # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
+                allow_non_fake_inputs=True if self.export else False,
+            )
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.init_ambient_guards()
 
@@ -429,6 +431,12 @@ class OutputGraph:
         self.guards.add(
             GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
         )
+
+        ci = torch._C._functorch.peek_interpreter_stack()
+        if ci is not None:
+            self.guards.add(
+                GlobalStateSource().make_guard(GuardBuilder.FUNCTORCH_STACK_MATCH)
+            )
 
     def synthetic_graph_input(self, fn, args):
         """
@@ -725,11 +733,10 @@ class OutputGraph:
                 # are registered as get_attr nodes in the root graph.
                 tracer = self.root_tracer
 
-            if not is_constant_source(source):
-                install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
-
             if get_static_address_type(target) == "guarded":
-                install_guard(source.make_guard(GuardBuilder.DATA_PTR_MATCH))
+                install_guard(source.make_guard(GuardBuilder.ID_MATCH))
+            elif not is_constant_source(source):
+                install_guard(source.make_guard(GuardBuilder.TENSOR_MATCH))
 
             def wrap_name(module_key):
                 assert self.param_name_to_source is not None
@@ -745,10 +752,19 @@ class OutputGraph:
         elif isinstance(target, torch.nn.Module):
             assert isinstance(target, torch.nn.Module)
 
-            install_guard(source.make_guard(GuardBuilder.NN_MODULE))
+            if source:
+                install_guard(source.make_guard(GuardBuilder.NN_MODULE))
 
-            def wrap_name(module_key):
-                return NNModuleVariable(type(target), module_key, target, **options)
+                def wrap_name(module_key):
+                    return NNModuleVariable(type(target), module_key, target, **options)
+
+            else:
+                # This is Dynamo created graph module, e.g., graph module coming
+                # from higher order ops. NNModuleVariable tracker can't be
+                # sourceless, so let's return a unspecializedNNModule variable
+                # tracker.
+                def wrap_name(module_key):
+                    return variables.UnspecializedNNModuleVariable(target, **options)
 
         elif isinstance(target, (torch.SymInt, torch.SymFloat)):
             # HACKY CODE REGION BEGIN
@@ -928,6 +944,12 @@ class OutputGraph:
         self.cleanup_graph()
         tx.prune_dead_locals()
         stack_values = list(tx.stack)
+
+        # realize any unrealized tensor VTs in case they
+        # need to be added to self.nn_modules as attributes
+        for value in stack_values:
+            value.realize()
+
         # Use nn.Module "proxies" in the constructed GraphModule so that
         # the resulting GM does not hold additional strong references to the original modules.
         # This prevents a strong ref cycle where Dynamo created code holds on to references
@@ -1064,6 +1086,7 @@ class OutputGraph:
             for arg in args:
                 cg(arg)
             cg.extend_output(create_call_function(len(args), True))
+            cg.extend_output([create_instruction("POP_TOP")])
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
         self.side_effects.codegen_update_mutated(cg)
@@ -1202,11 +1225,13 @@ class OutputGraph:
         self.call_cleanup_hooks()
         old_fake_mode = self.tracing_context.fake_mode
         if not self.export:
-            # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
-            backend_fake_mode = torch._subclasses.FakeTensorMode(
-                shape_env=old_fake_mode.shape_env,
-                _allow_unsafe_data_ptr_access=False,
-            )
+            import torch._functorch.config as _config
+
+            with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                # TODO(voz): The way export uses gm, and fake tensors, is not supported with us resetting
+                backend_fake_mode = torch._subclasses.FakeTensorMode(
+                    shape_env=old_fake_mode.shape_env,
+                )
             # TODO(voz): Ostensibily, this should be scoped and
             # restore back to old_fake_mode, but doing so currently violates
             # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
@@ -1226,13 +1251,7 @@ class OutputGraph:
 
     @property
     def placeholders(self) -> List[fx.Node]:
-        r = []
-        for node in self.graph.nodes:
-            if node.op == "placeholder":
-                r.append(node)
-                continue
-            break
-        return r
+        return self.graph.find_nodes(op="placeholder")
 
     @property
     def graphargs(self) -> List[GraphArg]:
