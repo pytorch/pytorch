@@ -70,6 +70,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if name == "_init_group":
             try:
+                self.graph_break_if_pending_mutation(tx)
                 self.move_step_if_cpu()
                 py_args, py_kwargs = self.get_python_args(*args, **kwargs)
                 ret_val = self.value._init_group(*py_args, **py_kwargs)
@@ -103,6 +104,21 @@ class OptimizerVariable(UserDefinedObjectVariable):
             self._set_capturable(tx)
 
         return super().var_getattr(tx, name)
+
+    def graph_break_if_pending_mutation(self, tx):
+        # If there are pending mutations on a parameter (due to using closure)
+        # then we need to graph break to allow the python version of the parameter
+        # to update, so that running _init_group will initialize the states with
+        # the correct values
+        for g in self.value.param_groups:
+            for p in g["params"]:
+                side_effects = tx.output.side_effects
+                if side_effects.has_pending_mutation(
+                    side_effects.id_to_variable.get(id(p), None)
+                ):
+                    from ..exc import Unsupported
+
+                    raise Unsupported("Pending mutation on parameter")
 
     def _set_capturable(self, tx):
         from . import LazyVariableTracker
