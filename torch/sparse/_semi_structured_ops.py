@@ -70,8 +70,8 @@ def semi_sparse_t(func, types, args=(), kwargs=None) -> torch.Tensor:
         meta=self.meta_t,
         packed_t=self.packed,
         meta_t=self.meta,
-        compressed_swizzled_bitmask=self.compressed_swizzled_bitmask.transpose(0, 1)
-        if self.compressed_swizzled_bitmask is not None
+        threads_masks=self.threads_masks.transpose(0, 1)
+        if self.threads_masks is not None
         else None,
         fuse_transpose_cusparselt=args[0].fuse_transpose_cusparselt,
         alg_id_cusparselt=args[0].alg_id_cusparselt,
@@ -97,7 +97,7 @@ def semi_sparse_detach(func, types, args, kwargs) -> torch.Tensor:
         meta=self.meta,
         packed_t=self.packed_t,
         meta_t=self.meta_t,
-        compressed_swizzled_bitmask=self.compressed_swizzled_bitmask,
+        threads_masks=self.threads_masks,
         requires_grad=False,
     )
 

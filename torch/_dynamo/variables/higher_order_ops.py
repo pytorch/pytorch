@@ -1022,8 +1022,16 @@ class FunctorchHigherOrderVariable(UserFunctionVariable):
     ) -> "VariableTracker":
         if not torch._dynamo.config.capture_func_transforms:
             name = self.get_name()
-            assert name in ("grad_impl", "vmap_impl")
-            fn = name.split("_")[0]
+            fn = {
+                "grad_impl": "grad",
+                "vmap_impl": "vmap",
+                "vjp": "vjp",
+                "jvp": "jvp",
+                "jacrev": "jacrev",
+                "jacfwd": "jacfwd",
+                "hessian": "hessian",
+            }.get(name)
+            assert name is not None
             unimplemented(
                 f"torch.func.{fn} capture is disabled, "
                 "it can be turned on by setting "
