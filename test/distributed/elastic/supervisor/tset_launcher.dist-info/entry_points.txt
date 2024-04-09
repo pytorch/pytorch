@@ -1,0 +1,3 @@
+# Used for testing launcher registry
+[torchrun.supervisor.launchers]
+test_launcher=torch.distributed.elastic.supervisor.launchers:_test_launcher
