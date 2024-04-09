@@ -748,17 +748,16 @@ def cache_dir() -> str:
 
 
 @contextlib.contextmanager
-def temporary_directory(dir=None, delete=True):
+def temporary_directory(root_dir=None, delete=True):
     """
-    tempfile.TemporaryDirectory prior to Python 3.12 does not support an
-    optional delete, so we roll our own:
+    Create a temporary directory with optional root and optional deletion.
+    (tempfile.TemporaryDirectory prior to Python 3.12 does not support a
+    delete, so we roll our own)
     """
-    if dir is not None:
-        try:
-            os.makedirs(dir)
-        except FileExistsError:
-            pass
-    temp_dir = tempfile.mkdtemp(dir=dir)
+    if root_dir is not None:
+        os.makedirs(root_dir, exist_ok=True)
+
+    temp_dir = tempfile.mkdtemp(dir=root_dir)
     try:
         yield temp_dir
     finally:
@@ -766,21 +765,26 @@ def temporary_directory(dir=None, delete=True):
             try:
                 shutil.rmtree(temp_dir)
             except OSError:
+                # Swallow failure to clean up.
                 pass
 
 
 @contextlib.contextmanager
-def fresh_inductor_cache(cache_entries=None, dir=None, delete=True):
+def fresh_inductor_cache(cache_entries=None, root_dir=None, delete=True):
     """
-    Contextmanager that provides a clean tmp cachedir for inductor.
+    Contextmanager that provides a clean tmp cachedir for inductor. If root_dir is
+    set, create the tmp dir under that location, otherwise use the system default.
+    If delete is set, delete the tmp dir when the contextmanager exits.
 
     Optionally, pass a dict as 'cache_entries' to get a list of filenames and sizes
     generated with this cache instance.
     """
-    with temporary_directory(dir=dir, delete=delete) as inductor_cache_dir:
+    with temporary_directory(root_dir=root_dir, delete=delete) as inductor_cache_dir:
         with mock.patch.dict(
             os.environ, {"TORCHINDUCTOR_CACHE_DIR": inductor_cache_dir}
         ):
+            # TESTING: delete me
+            print(f"***\n*** INDUCTOR CACHE DIR = {inductor_cache_dir}; delete = {delete} ***\n***")
             triton_cache_dir = os.path.join(inductor_cache_dir, "triton")
             with mock.patch.dict(os.environ, {"TRITON_CACHE_DIR": triton_cache_dir}):
                 yield

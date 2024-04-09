@@ -1949,13 +1949,15 @@ def get_dynamo_stats():
     )
 
 
-def maybe_fresh_cache(fn, is_cold_start, cache_dir=None):
+def maybe_fresh_cache(fn, is_cold_start, cache_root_dir=None):
     def inner(*args, **kwargs):
         cache_minder = contextlib.nullcontext()
         if is_cold_start:
             cache_entries = {}
             cache_minder = fresh_inductor_cache(
-                cache_entries, dir=cache_dir, delete=cache_dir is None
+                cache_entries,
+                root_dir=cache_root_dir,
+                delete=cache_root_dir is None,
             )
 
         try:
@@ -3414,14 +3416,18 @@ def process_entry(rank, runner, original_dir, args):
         world_size=args.world_size,
         port=args.distributed_master_port,
     ):
-        cache_dir = None
-        if args.ci and args.only and args.only in CI_PRESERVE_CACHE_DIR:
-            cache_dir = os.path.join(
+        # For CI runs for specified models, we want to preserve the inductor
+        # cache dir at a known location so we can upload the artifacts if
+        # there's a failure.
+        cache_root_dir = None
+        if args.ci and args.only in CI_PRESERVE_CACHE_DIR:
+            cache_root_dir = os.path.join(
                 tempfile.gettempdir(), "torchinductor_ci_preserve", args.only
             )
+            log.warning("Preserving inductor cache under: %s", cache_root_dir)
 
         return maybe_fresh_cache(
-            run, (args.cold_start_latency and args.only) or args.ci, cache_dir
+            run, (args.cold_start_latency and args.only) or args.ci, cache_root_dir
         )(runner, args, original_dir)
 
 
