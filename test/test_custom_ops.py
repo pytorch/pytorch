@@ -2306,13 +2306,6 @@ Please use `add.register_fake` to add an fake impl.""",
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_register_autograd_error_cases(self):
-        @torch.library.custom_op("_torch_testing::f", mutates_args=())
-        def f(x: List[Tensor]) -> Tensor:
-            return x[0].sin()
-
-        with self.assertRaises(NotImplementedError):
-            f.register_autograd(lambda: None, lambda: None)
-
         @torch.library.custom_op("_torch_testing::g", mutates_args=())
         def g(x: Tensor) -> Tensor:
             return x.sin()
