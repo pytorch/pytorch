@@ -239,6 +239,10 @@ def pre_grad_passes(gm: torch.fx.GraphModule, example_inputs=None):
             config.fx_passes_numeric_check.get("precision", 1e-4),
         )
 
+    from .quantization import quant_lift_up
+
+    quant_lift_up(gm)
+
     return gm
 
 
