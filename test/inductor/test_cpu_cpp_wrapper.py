@@ -88,7 +88,6 @@ if config.abi_compatible:
         "test_qlinear_cpu",
         "test_qlinear_dequant_promotion_cpu",
         "test_qlinear_relu_cpu",
-        "test_randn_with_dtype_and_device_cpu",
         "test_scatter5_cpu",
         "test_scatter6_cpu",
         "test_tensor2_cpu",
