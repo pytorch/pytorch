@@ -926,7 +926,7 @@ def aot_module_simplified(
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
     # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
-    def forward(*runtime_args: Union[Tuple[torch.Tensor], Tuple[List[torch.Tensor]]]):
+    def forward(*runtime_args: Tuple[torch.Tensor]):
         full_args = []
         full_args.extend(params_flat)
         full_args.extend(runtime_args)
@@ -936,6 +936,7 @@ def aot_module_simplified(
     forward.zero_grad = mod.zero_grad
     forward.named_parameters = mod.named_parameters
     forward.named_buffers = mod.named_buffers
+
     return forward
 
 
