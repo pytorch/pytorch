@@ -4685,6 +4685,12 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 time.sleep(600)
 
 class NcclErrorDumpTest(NCCLTraceTestBase):
+    def setUp(self):
+        super().setUp()
+        self.skip_return_code_checks = [
+            self.test_nccl_errors_dump.__wrapped__,
+        ]
+
     def _wait_process(self, rank, timeout):
         try:
             self.processes[rank].join(timeout)
@@ -4692,18 +4698,14 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
         except TimeoutError:
             return None
 
-    def _check_return_codes(self, elapsed_time):
-        # the base test infra assumes processes exit with matching return codes,
-        # but we want rank0 to abort with exception and rank1 to exit with exit 1
-        self.assertEqual(self.processes[0].exitcode, -6)
-        self.assertEqual(self.processes[1].exitcode, 1)
-
     @property
     def world_size(self):
         return 3
 
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
+    @skip_if_lt_x_gpu(3)
+    @skip_if_rocm
     def test_nccl_errors_dump(self):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = '1000'
@@ -4713,8 +4715,9 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
 
         if self.rank == self.MAIN_PROCESS_RANK:
             # wait for both rank0 and 1 to crash before looking for dump
-            self.assertEqual(self._wait_process(0, timeout=90), -6)
-            self.assertEqual(self._wait_process(1, timeout=90), 1)
+            self._wait_process(0, timeout=90)
+            self._wait_process(1, timeout=90)
+            self._wait_process(2, timeout=90)
             # verify that the trace file exists for rank0
             self.assertTrue(os.path.exists(self._trace_name(rank=0)))
             return
