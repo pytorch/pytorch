@@ -5994,7 +5994,6 @@ else:
         assert scaler._scale != float("inf") and scaler._scale != float("nan")
 
     @onlyNativeDeviceTypes
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/123238")
     @dtypes(*floating_types_and(torch.bfloat16, torch.half))
     @precisionOverride({torch.half : 1e-3, torch.bfloat16 : 1e-3})
     def test_fused_adam_and_adamw(self, device, dtype):

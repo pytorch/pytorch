@@ -9,10 +9,8 @@ def _get_foreach_kernels_supported_devices() -> List[str]:
     r"""Return the device type list that supports foreach kernels."""
     return ["cuda", "xpu", torch._C._get_privateuse1_backend_name()]
 
-def _get_fused_kernels_supported_devices(optimizer_cls=None) -> List[str]:
+def _get_fused_kernels_supported_devices() -> List[str]:
     r"""Return the device type list that supports fused kernels in optimizer."""
-    if optimizer_cls and optimizer_cls.__name__ in ("Adam", "AdamW", ):
-        return ["cuda", "xpu", "cpu", torch._C._get_privateuse1_backend_name()]
     return ["cuda", "xpu", torch._C._get_privateuse1_backend_name()]
 
 TensorListList: TypeAlias = List[List[Optional[Tensor]]]

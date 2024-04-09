@@ -35,10 +35,7 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TEST_WITH_TORCHDYNAMO,
 )
-from torch.utils._foreach_utils import (
-    _get_foreach_kernels_supported_devices,
-    _get_fused_kernels_supported_devices,
-)
+from torch.utils._foreach_utils import _get_foreach_kernels_supported_devices
 
 
 class OptimizerInput:
@@ -119,6 +116,7 @@ class OptimizerInfo:
         skips=(),  # Indicates which tests to skip
         decorators=None,  # Additional decorators to apply to generated tests
         optim_error_inputs_func=None,  # Function to generate optim inputs that error
+        supports_fused_on: Tuple[str] = (),
     ):
         self.optim_cls = optim_cls
         self.optim_inputs_func = optim_inputs_func
@@ -134,6 +132,7 @@ class OptimizerInfo:
             *(skips if skips else []),
         )
         self.optim_error_inputs_func = optim_error_inputs_func
+        self.supports_fused_on = supports_fused_on
 
     def get_decorators(self, test_class, test_name, device, dtype, param_kwargs):
         result = [set_single_threaded_if_parallel_tbb]
@@ -969,11 +968,7 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
         x
         for x in optim_info.supported_impls
         if x not in skip
-        and (
-            _get_device_type(device)
-            in _get_fused_kernels_supported_devices(optim_info.optim_cls)
-            or x != "fused"
-        )
+        and (_get_device_type(device) in optim_info.supports_fused_on or x != "fused")
         and (
             _get_device_type(device) in _get_foreach_kernels_supported_devices()
             or x != "foreach"
@@ -1173,6 +1168,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adam,
         optim_error_inputs_func=optim_error_inputs_func_adam,
         supported_impls=("foreach", "differentiable", "fused"),
+        supports_fused_on=("cpu", "cuda"),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1350,6 +1346,7 @@ optim_db: List[OptimizerInfo] = [
         optim_inputs_func=optim_inputs_func_adamw,
         optim_error_inputs_func=optim_error_inputs_func_adamw,
         supported_impls=("foreach", "differentiable", "fused"),
+        supports_fused_on=("cpu", "cuda"),
         skips=(
             DecorateInfo(
                 skipIfMps,  # addcdiv doesn't work for non-contiguous, see #118115
@@ -1869,6 +1866,7 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_sgd,
         supported_impls=("foreach", "differentiable", "fused"),
         supports_sparse_on=("cpu", "cuda"),
+        supports_fused_on=("cuda",),
         skips=(
             DecorateInfo(
                 skipIfTorchDynamo(

@@ -18,7 +18,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_optimizers import (
     optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS, onlyNativeDeviceTypes, skipIfTorchDynamo)
+    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS, onlyNativeDeviceTypes)
 from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase
 from torch.testing._internal.common_cuda import _create_scaling_case
 
@@ -560,10 +560,8 @@ class TestOptimRenewed(TestCase):
     @onlyNativeDeviceTypes
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float64])
     def test_fused_matches_forloop(self, device, dtype, optim_info):
-        if device == 'cpu' and optim_info.optim_cls.__name__ not in ("Adam", "AdamW"):
-            # For cpu, we only support fused with Adam/AdamW now
-            # TODO: haozhe, support SGD
-            self.skipTest("For CPU, only support fused with Adam")
+        if device not in optim_info.supports_fused_on:
+            self.skipTest(f"Not support fused on {optim_info.optim_cls.__name__}")
         self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
 
@@ -571,10 +569,8 @@ class TestOptimRenewed(TestCase):
     @largeTensorTest("64GB")
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float16])
     def test_fused_large_tensor(self, device, dtype, optim_info):
-        if device == 'cpu' and optim_info.optim_cls.__name__ not in ("Adam", "AdamW"):
-            # For cpu, we only support fused with Adam/AdamW now
-            # TODO: haozhe, support SGD
-            self.skipTest("For CPU, only support fused with Adam")
+        if device not in optim_info.supports_fused_on:
+            self.skipTest(f"Not support fused on {optim_info.optim_cls.__name__}")
         optim_cls = optim_info.optim_cls
         optim_inputs = optim_info.optim_inputs_func(device=device)
         for optim_input in optim_inputs:
@@ -1302,7 +1298,6 @@ class TestOptimRenewed(TestCase):
             self.assertEqual(type(res1), type(res2))
 
     @onlyCPU
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/123238")
     def test_grad_scaling_autocast_fused_optimizers(self):
         # This ut is from test_cuda.py test_grad_scaling_autocast_fused_optimizers
         # but only test Adam/AdamW on CPU
@@ -1323,17 +1318,6 @@ class TestOptimRenewed(TestCase):
         opt_control = optimizer_ctor(mod_control.parameters(), lr=1.0, **kwargs)
 
         scaler = torch.cpu.amp.GradScaler(init_scale=128.0)
-        tol = {'atol' : 1e-3, 'rtol' : 1e-3}
-        '''
-        Expected 105.9955825805664 but got 105.96931457519531.
-        Absolute difference: 0.02626800537109375 (up to 5e-05 allowed)
-        Relative difference: 0.0002478216990894658 (up to 5e-06 allowed)
-
-        Mismatched elements: 6 / 64 (9.4%)
-        Greatest absolute difference: 0.0009765625 at index (0, 4) (up to 5e-05 allowed)
-        Greatest relative difference: 0.0009718172950670123 at index (0, 3) (up to 5e-06 allowed)
-        '''
-
         for input, target in data:
             opt_control.zero_grad()
             with torch.autocast('cpu', dtype=torch.half):
@@ -1353,10 +1337,10 @@ class TestOptimRenewed(TestCase):
             scaler.step(opt_scaling)
             scaler.update()
 
-            self.assertEqual(loss_control, loss_scaling, **tol)
+            self.assertEqual(loss_control, loss_scaling,)
             for param_control, param_scaling in zip(mod_control.parameters(), mod_scaling.parameters()):
-                self.assertEqual(param_control.grad, param_scaling.grad, **tol)
-                self.assertEqual(param_control, param_scaling, **tol)
+                self.assertEqual(param_control.grad, param_scaling.grad,)
+                self.assertEqual(param_control, param_scaling,)
 
                 state_control, state_scaling = opt_control.state[param_control], opt_scaling.state[param_scaling]
 
@@ -1364,7 +1348,7 @@ class TestOptimRenewed(TestCase):
                     actual = state_scaling[k]
                     if k == "step":
                         actual = actual.squeeze()
-                    self.assertEqual(state_control[k], actual, **tol)
+                    self.assertEqual(state_control[k], actual,)
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 
