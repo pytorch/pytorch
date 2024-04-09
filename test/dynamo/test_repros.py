@@ -11,13 +11,15 @@ import inspect
 import itertools
 import random
 import unittest
+import warnings
 import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
 from enum import Enum
 from functools import wraps
-from typing import List
+from typing import Any, Dict, Iterator, List, Tuple
+from unittest import mock
 
 import numpy as np
 import torch
@@ -360,6 +362,56 @@ class ReformerEncoder(torch.nn.Module):
             all_attentions=all_attentions,
             past_buckets_states=past_buckets_states,
         )
+
+
+class ListConfig:
+    class ValueNode:
+        def __init__(self, value):
+            self.value = value
+
+        def _dereference_node(self):
+            return self
+
+        def _is_missing(self):
+            return False
+
+        def _value(self):
+            return self.value
+
+    # Based on an example from omegaconfig.listconfig
+    class ListIterator(Iterator[Any]):
+        def __init__(self, lst: Any, resolve: bool) -> None:
+            self.resolve = resolve
+            self.iterator = iter(lst.__dict__["_content"])
+            self.index = 0
+
+        def __next__(self) -> Any:
+            x = next(self.iterator)
+            if self.resolve:
+                x = x._dereference_node()
+                if x._is_missing():
+                    raise AssertionError()
+
+            self.index = self.index + 1
+            if isinstance(x, ListConfig.ValueNode):
+                return x._value()
+            raise AssertionError()
+
+    def __iter__(self):
+        return self._iter_ex(True)
+
+    def _iter_ex(self, resolve: bool) -> Iterator[Any]:
+        try:
+            return ListConfig.ListIterator(self, resolve)
+        except Exception:
+            raise AssertionError()
+
+    def __init__(self):
+        self._content = [
+            ListConfig.ValueNode(1),
+            ListConfig.ValueNode(3),
+            ListConfig.ValueNode(torch.tensor([7.0])),
+        ]
 
 
 def longformer_chunk(hidden_states, window_overlap=256):
@@ -2489,6 +2541,50 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnt.op_count, 5)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_omegaconf_listconfig_iter(self):
+        obj = ListConfig()
+        x = torch.zeros(2)
+
+        def fn():
+            y = x
+            for i in obj:
+                y += i
+            return y
+
+        expected = fn()
+        actual = torch.compile(fn, fullgraph=True, backend="eager")()
+        self.assertEqual(actual, expected)
+
+    def test_user_defined_iter(self):
+        class MyIter:
+            def __init__(self):
+                self.i = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self.i < 3:
+                    self.i += 1
+                    return self.i
+                raise StopIteration()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            for i in MyIter():
+                x += i
+            return x
+
+        self.assertEqual(fn(torch.zeros(1)), torch.full([1], 6.0))
+
+    def test_stop_iteration_reconstruct(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.sin(), StopIteration(1, 2, 3)
+
+        _, res = fn(torch.ones(1))
+        self.assertEqual(str(res), str(StopIteration(1, 2, 3)))
+
     def test_tensor_data_kwarg(self):
         # https://github.com/pytorch/pytorch/issues/96278
         def f():
@@ -3389,6 +3485,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         actual = fn_opt(*inputs)
         self.assertTrue(same(actual, expected))
 
+    @mock.patch("torch._dynamo.config.guard_nn_modules", True)
     def test_hf_xsoftmax_training(self):
         from torch._dynamo.utils import counters
 
@@ -4356,6 +4453,93 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         # We graph-break here, so the failure should be eager
         with self.assertRaisesRegex(AssertionError, ""):
             f_fail(torch.ones(6, 4))
+
+    def test_detectron2_instances_cat(self):
+        class Instances:
+            def __init__(self, image_size: Tuple[int, int], **kwargs: Any):
+                self._image_size = image_size
+                self._fields: Dict[str, Any] = {}
+                for k, v in kwargs.items():
+                    self.set(k, v)
+
+            @property
+            def image_size(self) -> Tuple[int, int]:
+                return self._image_size
+
+            def __setattr__(self, name: str, val: Any) -> None:
+                if name.startswith("_"):
+                    super().__setattr__(name, val)
+                else:
+                    self.set(name, val)
+
+            def __getattr__(self, name: str) -> Any:
+                if name == "_fields" or name not in self._fields:
+                    raise AttributeError(
+                        f"Cannot find field '{name}' in the given Instances!"
+                    )
+                return self._fields[name]
+
+            def __len__(self) -> int:
+                for v in self._fields.values():
+                    # use __len__ because len() has to be int and is not friendly to tracing
+                    return v.__len__()
+                raise NotImplementedError("Empty Instances does not support __len__!")
+
+            def set(self, name: str, value: Any) -> None:
+                with warnings.catch_warnings(record=True):
+                    data_len = len(value)
+                if len(self._fields):
+                    assert (
+                        len(self) == data_len
+                    ), f"Adding a field of length {data_len} to a Instances of length {len(self)}"
+                self._fields[name] = value
+
+            def get(self, name: str) -> Any:
+                return self._fields[name]
+
+            @staticmethod
+            def cat(instance_lists: List["Instances"]) -> "Instances":
+                assert all(isinstance(i, Instances) for i in instance_lists)
+                assert len(instance_lists) > 0
+                if len(instance_lists) == 1:
+                    return instance_lists[0]
+
+                image_size = instance_lists[0].image_size
+                if not isinstance(
+                    image_size, torch.Tensor
+                ):  # could be a tensor in tracing
+                    for i in instance_lists[1:]:
+                        assert i.image_size == image_size
+                ret = Instances(image_size)
+                for k in instance_lists[0]._fields.keys():
+                    values = [i.get(k) for i in instance_lists]
+                    v0 = values[0]
+                    if isinstance(v0, torch.Tensor):
+                        values = torch.cat(values, dim=0)
+                    elif isinstance(v0, list):
+                        values = list(itertools.chain(*values))
+                    elif hasattr(type(v0), "cat"):
+                        values = type(v0).cat(values)
+                    else:
+                        raise ValueError(
+                            f"Unsupported type {type(v0)} for concatenation"
+                        )
+                    ret.set(k, values)
+                return ret
+
+        instances = [
+            Instances((16, 16), a=torch.randn(16, 16), b=torch.randn(16, 16))
+            for _ in range(3)
+        ]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(instances):
+            return instances[0].cat(instances)
+
+        actual = fn(instances)
+        expected = instances[0].cat(instances)
+        self.assertEqual(type(actual), type(expected))
+        self.assertEqual(actual.__dict__, expected.__dict__)
 
     def test_super_in_staticmethod(self):
         class A:
