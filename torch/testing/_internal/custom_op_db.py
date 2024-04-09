@@ -230,7 +230,8 @@ def numpy_split_copy_setup_context(ctx, inputs, output):
     ctx.dim = dim
 
 def numpy_split_copy_backward(ctx, grad_out):
-    return torch.ops._torch_testing.numpy_cat(grad_out, dim=ctx.dim), None, None
+    result = torch.ops._torch_testing.numpy_cat(grad_out, dim=ctx.dim)
+    return result, None, None
 
 numpy_split_copy.register_autograd(numpy_split_copy_setup_context, numpy_split_copy_backward)
 
@@ -256,7 +257,7 @@ def numpy_split_copy_with_int_setup_context(ctx, inputs, output):
 def numpy_split_copy_with_int_backward(ctx, grad_out, _):
     return torch.ops._torch_testing.numpy_cat(grad_out, dim=ctx.dim), None, None
 
-numpy_split_copy_with_int.register_autograd(numpy_split_copy_with_int_setup_context, numpy_split_copy_backward)
+numpy_split_copy_with_int.register_autograd(numpy_split_copy_with_int_setup_context, numpy_split_copy_with_int_backward)
 
 @custom_ops.custom_op('_torch_testing::numpy_nms')
 def numpy_nms(boxes: Tensor, scores: Tensor, iou_threshold: Number) -> Tensor:
