@@ -83,18 +83,22 @@ jobs:
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
 
-      - name: Clean workspace
+      - name: Chown workspace
         shell: bash
         env:
           DOCKER_IMAGE: ${{ inputs.docker-image }}
         run: |
           echo "${GITHUB_WORKSPACE}"
+          export ORIG_U="$(id -u)"
+          export ORIG_G="$(id -g)"
           docker run --rm \
+            -e ORIG_U
+            -e ORIG_G
             --user jenkins \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -w /var/lib/jenkins \
+            -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
-            sudo rm -rf /var/lib/jenkins/workspace
+            "sudo chown -R ${ORIG_U}:${ORIG_G} /var/lib/jenkins/workspace"
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
