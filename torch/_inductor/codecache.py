@@ -35,7 +35,18 @@ from pathlib import Path
 from threading import Thread
 from time import sleep, time
 from types import ModuleType
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 
@@ -55,6 +66,7 @@ from torch._subclasses.fake_tensor import (
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
 if TYPE_CHECKING:
+    from torch._dynamo.device_interface import DeviceInterface
     from torch._inductor.graph import GraphLowering
     from torch._inductor.ir import ChoiceCaller
 
@@ -2593,9 +2605,12 @@ def _set_triton_ptxas_path() -> None:
 
 
 def _worker_compile(
-    kernel_name: str, source_code: str, cc: int, device: torch.device
+    kernel_name: str,
+    source_code: str,
+    cc: int,
+    device: torch.device,
+    device_interface: Type[DeviceInterface],
 ) -> None:
-    device_interface = get_interface_for_device(device.type)
     device_interface.Worker.set_device(device.index)
     kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile(warm_cache_only_with_cc=cc)
@@ -2758,7 +2773,7 @@ class AsyncCompile:
             device = torch.device(device_str, device_interface.current_device())
             cc = device_interface.get_compute_capability(device)
             future = self.process_pool().submit(
-                _worker_compile, kernel_name, source_code, cc, device
+                _worker_compile, kernel_name, source_code, cc, device, device_interface
             )
             return TritonFuture(kernel_name, source_code, future)
         else:
