@@ -277,7 +277,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         mesh_group_2 = [4, 5, 6, 7]
         ep_mesh = (
             DeviceMesh(self.device_type, mesh_group_1)
-            if self.rank < 2
+            if self.rank < 4
             else DeviceMesh(self.device_type, mesh_group_2)
         )
         # ep_mesh is considered different from mesh_2d["TP"]
@@ -293,7 +293,7 @@ class DeviceMeshTestNDim(DTensorTestBase):
         # since they have the same mesh and no parent mesh.
         another_mesh = (
             DeviceMesh(self.device_type, mesh_group_1)
-            if self.rank < 2
+            if self.rank < 4
             else DeviceMesh(self.device_type, mesh_group_2)
         )
         self.assertEqual(ep_mesh._flatten_mesh_list, another_mesh._flatten_mesh_list)
