@@ -1,4 +1,5 @@
 # Owner(s): ["module: dynamo"]
+import functools
 import os
 import unittest.mock as mock
 from unittest.mock import patch
@@ -65,6 +66,23 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(ref, res)
+
+    def test_disable_ignores_outer_wraps(self):
+        def orig_inner():
+            pass
+
+        def inner():
+            pass
+
+        inner._torchdynamo_orig_callable = orig_inner
+
+        @functools.wraps(inner)
+        def wrapper():
+            raise AssertionError("wrapper called")
+
+        # This behavior is not ideal, but supporting it would add overhead
+        # to callsites of eval_frame.innermost_fn. A warning would also be very noisy.
+        w = torch._dynamo.disable(fn=wrapper, recursive=True)
 
     def test_allow_in_graph(self):
         cnts = torch._dynamo.testing.CompileCounter()

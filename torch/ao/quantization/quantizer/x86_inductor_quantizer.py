@@ -4,7 +4,7 @@ import itertools
 import operator
 import warnings
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 import torch
 import torch.nn.functional as F
@@ -84,8 +84,36 @@ default_quantizable_ops = propagation_quantizable_ops | {
 # but not enabled by default recipe of X86InductorQuantizer.
 quantizable_ops = default_quantizable_ops
 
-
 QUANT_ANNOTATION_KEY = "quantization_annotation"
+
+
+def _map_module_function_to_aten_operator_type():
+    module_function_to_aten_operator: Dict[Callable, torch._ops.OpOverloadPacket] = {}
+    map_list = (
+        ([torch.nn.Conv2d, F.conv2d], torch.ops.aten.conv2d.default),
+        ([torch.nn.Linear, F.linear], torch.ops.aten.linear.default),
+        ([torch.nn.MaxPool2d, F.max_pool2d], torch.ops.aten.max_pool2d.default),
+        (
+            [
+                torch.cat,
+            ],
+            torch.ops.aten.cat.default,
+        ),
+        ([torch.nn.AvgPool2d, F.avg_pool2d], torch.ops.aten.avg_pool2d.default),
+        (
+            [torch.nn.AdaptiveAvgPool2d, F.adaptive_avg_pool2d],
+            torch.ops.aten.adaptive_avg_pool2d.default,
+        ),
+        (
+            [
+                torch.flatten,
+            ],
+            torch.ops.aten.flatten.using_ints,
+        ),
+    )
+    for map_item in map_list:
+        module_function_to_aten_operator.update(dict.fromkeys(map_item[0], map_item[1]))  # type: ignore[call-overload]
+    return module_function_to_aten_operator
 
 
 def _mark_nodes_as_annotated(nodes: List[Node]):
@@ -247,6 +275,7 @@ def _get_supported_config_and_operators() -> List[OperatorConfig]:
 
 class X86InductorQuantizer(Quantizer):
     supported_config_and_operators = _get_supported_config_and_operators()
+    module_function_to_aten_operator_type = _map_module_function_to_aten_operator_type()
 
     def __init__(self):
         super().__init__()
@@ -279,6 +308,40 @@ class X86InductorQuantizer(Quantizer):
 
     def set_global(self, quantization_config: QuantizationConfig):
         self.global_config = quantization_config
+        return self
+
+    def set_function_type_qconfig(
+        self,
+        function_type: Callable,
+        quantization_config: Optional[QuantizationConfig],
+    ) -> "X86InductorQuantizer":
+        if function_type in X86InductorQuantizer.module_function_to_aten_operator_type:
+            self._set_aten_operator_qconfig(
+                X86InductorQuantizer.module_function_to_aten_operator_type[
+                    function_type
+                ],
+                quantization_config,
+            )
+        else:
+            warnings.warn(
+                f"function: Unable to customize quantization config for {function_type} by X86InductorQuantizer."
+            )
+        return self
+
+    def set_module_type_qconfig(
+        self,
+        module_type: torch.nn.Module,
+        quantization_config: Optional[QuantizationConfig],
+    ) -> "X86InductorQuantizer":
+        if module_type in X86InductorQuantizer.module_function_to_aten_operator_type:
+            self._set_aten_operator_qconfig(
+                X86InductorQuantizer.module_function_to_aten_operator_type[module_type],
+                quantization_config,
+            )
+        else:
+            warnings.warn(
+                f"Module: Unable to customize quantization config for {module_type} by X86InductorQuantizer."
+            )
         return self
 
     def _set_aten_operator_qconfig(
