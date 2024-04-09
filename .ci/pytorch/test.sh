@@ -327,7 +327,7 @@ test_inductor() {
   python tools/dynamo/verify_dynamo.py
   python test/run_test.py --inductor --include test_modules test_ops test_ops_gradients test_torch --verbose
   # Do not add --inductor for the following inductor unit tests, otherwise we will fail because of nested dynamo state
-  python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo --verbose
+  python test/run_test.py --include inductor/test_torchinductor inductor/test_torchinductor_opinfo inductor/test_aot_inductor --verbose
 
   # docker build uses bdist_wheel which does not work with test_aot_inductor
   # TODO: need a faster way to build
