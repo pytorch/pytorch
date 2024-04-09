@@ -6,8 +6,6 @@ from typing import Dict, List
 import torch
 from torch.utils._pytree import tree_map_only
 
-from ..exc import unimplemented, Unsupported
-
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -42,23 +40,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
-    @classmethod
-    def throw_if_unsupported_step(cls, symbolic_locals, f_name):
-        """
-        We don't support calling the step with closure argument, so graph break if
-        if that's the case.
-        """
-        if (
-            "closure" in symbolic_locals
-            and not isinstance(symbolic_locals["closure"], ConstantVariable)
-            and "self" in symbolic_locals
-            and isinstance(symbolic_locals["self"], OptimizerVariable)
-            and f_name == "step"
-        ):
-            unimplemented(
-                "Optimizer step with closure not supported by torch.compile()"
-            )
-
     def __init__(
         self,
         value,
@@ -89,6 +70,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if name == "_init_group":
             try:
+                self.move_step_if_cpu()
                 py_args, py_kwargs = self.get_python_args(*args, **kwargs)
                 ret_val = self.value._init_group(*py_args, **py_kwargs)
                 self.map_sources_and_install_guards(tx)
@@ -107,17 +89,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
             except (ArgMappingException, GuardInstallException) as _:
                 # trace normally if we can't map args or install guards correctly
                 pass
-
-        if name == "step":
-            if (
-                "closure" in kwargs
-                and not isinstance(kwargs["closure"], ConstantVariable)
-                or len(args) == 1
-                and not isinstance(args[0], ConstantVariable)
-            ):
-                raise Unsupported(
-                    "Optimizer step with closure not supported by torch.compile()"
-                )
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -176,6 +147,16 @@ class OptimizerVariable(UserDefinedObjectVariable):
         new_kwargs = {k: map_arg(v) for k, v in kwargs.items()}
 
         return new_args, new_kwargs
+
+    # If users load an old state dictionary,
+    # it's possible that step could be on the cpu
+    # if this is the case, move it to the GPU
+    # corresponding to the parameter
+    # in most cases this is a no-op because the state is empty
+    def move_step_if_cpu(self):
+        for p, state in self.value.state.items():
+            if "step" in state and state["step"].is_cpu:
+                state["step"] = state["step"].to(p.device)
 
     def map_sources_and_install_guards(self, tx):
         from ..decorators import mark_static_address
