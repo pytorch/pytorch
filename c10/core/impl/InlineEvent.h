@@ -110,7 +110,7 @@ struct InlineEvent final {
         other.was_marked_for_recording(),
         "other was not marked for recording.");
     TORCH_CHECK(
-        was_marked_for_recording(), "other was not marked for recording.");
+        was_marked_for_recording(), "self was not marked for recording.");
     TORCH_CHECK(
         other.device_type() == device_type_,
         "Event device type ",
