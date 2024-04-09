@@ -179,13 +179,17 @@ def vmap(
         vmap does not provide general autobatching or handle variable-length
         sequences out of the box.
     """
+    from torch._dynamo import is_compiling
+
     _check_randomness_arg(randomness)
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError(f"vmap: chunk_size should be None or greater than 0. (got {chunk_size})")
 
-    # @functools.wraps(func)
     def wrapped(*args, **kwargs):
         return vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs)
+
+    if not is_compiling():
+        wrapped = functools.wraps(func)(wrapped)
 
     return wrapped
 
@@ -357,10 +361,14 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
     """
     # To avoid cyclical dependency.
     import torch._functorch.eager_transforms as eager_transforms
+    from torch._dynamo import is_compiling
 
-    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         return eager_transforms.grad_impl(func, argnums, has_aux, args, kwargs)
+
+    if not is_compiling():
+        wrapper = functools.wraps(func)(wrapper)
+
     return wrapper
 
 
@@ -394,8 +402,12 @@ def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False
     See :func:`grad` for examples
     """
     from torch._functorch import eager_transforms
+    from torch._dynamo import is_compiling
 
-    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         return eager_transforms.grad_and_value_impl(func, argnums, has_aux, args, kwargs)
+
+    if not is_compiling():
+        wrapper = functools.wraps(func)(wrapper)
+
     return wrapper
