@@ -2594,6 +2594,17 @@ def nn_module_proxy(mod):
     return proxy
 
 
+class GmWrapper(torch.nn.Module):
+    def __init__(self, gm, spec):
+        super().__init__()
+        self.gm = gm
+        self.spec = spec
+
+    def forward(self, *args):
+        args: List[Any] = list(args)
+        return self.gm(*pytree.tree_unflatten(args, self.spec))
+
+
 def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     """
     Mutate inputs so that they are flat and wrap gm such that it
@@ -2601,22 +2612,12 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     bumpy inputs.
     """
     inputs, spec = pytree.tree_flatten(inputs)
+    compiled_fn = compile_gm(GmWrapper(gm, spec), inputs)
 
-    class GmWrapper(torch.nn.Module):
-        def __init__(self):
-            super().__init__()
-            self.gm = gm
-
-        def forward(self, *args):
-            args: List[Any] = list(args)
-            return self.gm(*pytree.tree_unflatten(args, spec))
-
-    compiled_fn = compile_gm(GmWrapper(), inputs)
-
-    args_to_steal = [
+    idx_to_steal = [
         i
         for i, node in enumerate(gm.graph.nodes)
-        if node.op == "placeholder" and node.meta["steal_arg"]
+        if node.op == "placeholder" and node.meta.get("steal_arg", False)
     ]
 
     def wrapper(*args):
@@ -2624,7 +2625,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         flat_args = pytree.arg_tree_leaves(*args)
 
         # flat_args is a new list, so we need to clear references from the old list
-        for i in args_to_steal:
+        for i in idx_to_steal:
             args[i].clear()
 
         # this call is boxed to avoid increasing refcount until we reach aot_module_simplified forward

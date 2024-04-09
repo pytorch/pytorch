@@ -906,33 +906,36 @@ def aot_module_simplified(
             aot_config,
         )
 
+    if isinstance(mod, torch._dynamo.utils.GmWrapper):
+        # When we have list inputs to the graph, this function is called by the flatten_graph_inputs
+        # wrapper, which boxes the inputs so that they can be freed before the end of this scope
+        def boxed_forward(runtime_args: List[torch.Tensor]):
+            flat_args = []
+            flat_args.extend(params_flat)
+            flat_args.extend(runtime_args)
+            return compiled_fn(flat_args)
+
+        # Just for convenience
+        boxed_forward.zero_grad = mod.zero_grad
+        boxed_forward.named_parameters = mod.named_parameters
+        boxed_forward.named_buffers = mod.named_buffers
+        return boxed_forward
+
     # TODO: There is something deeply wrong here; compiled_fn running with
     # the boxed calling convention, but aot_module_simplified somehow
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
+    # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
     def forward(*runtime_args: Union[Tuple[torch.Tensor], Tuple[List[torch.Tensor]]]):
-        # When executing dynamo compiled graphs, this function is called by OptimizedModule.
-        # Usually, this function receives runtime_args: Tuple[torch.Tensor], which cannot be freed until
-        # the end of this scope.
-        # When we have list inputs to the graph, this function is also called by the flatten_graph_inputs
-        # wrapper, which boxes the inputs so that they can be freed before the end of this scope
-
-        flat_args = []
-        flat_args.extend(params_flat)
-        if len(runtime_args) == 1 and isinstance(runtime_args[0], list):
-            # This is the earliest point we can have this unpacking logic without changing
-            # the calling convention used by nn.Module.forward
-            flat_args.extend(runtime_args[0])
-            runtime_args[0].clear()
-        else:
-            flat_args.extend(runtime_args)
-        return compiled_fn(flat_args)
+        full_args = []
+        full_args.extend(params_flat)
+        full_args.extend(runtime_args)
+        return compiled_fn(full_args)
 
     # Just for convenience
     forward.zero_grad = mod.zero_grad
     forward.named_parameters = mod.named_parameters
     forward.named_buffers = mod.named_buffers
-
     return forward
 
 

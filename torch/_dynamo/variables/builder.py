@@ -858,9 +858,10 @@ class VariableBuilder:
             for i, item in enumerate(value)
         ]
 
-        use_boxed_call = False
         maybe_gm = self.tx.output.local_scope.get("self")
-        if self.source.local_name in get_locals_to_steal(maybe_gm):
+        if isinstance(
+            self.source, LocalSource
+        ) and self.source.local_name in get_locals_to_steal(maybe_gm):
             # The input tensor list to dynamo from compiled autograd may contain activations
             # which are freed as they are used in inductor. Dynamo's default behavior is to
             # lift all tensors to the graph inputs, but this will cause dynamo to hold an
