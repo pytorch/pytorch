@@ -36,6 +36,7 @@ test_dtypes = (
 if common_utils.TEST_WITH_ROCM:
     test_dtypes = [torch.float32]
 
+
 def _identity_mod(score, b, h, m, n):
     return score
 
