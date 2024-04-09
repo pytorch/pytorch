@@ -223,8 +223,6 @@ struct CUDACachingHostAllocatorImpl
   }
 };
 
-} // anonymous namespace
-
 void raw_local_deleter(void* ptr);
 
 struct CUDACachingHostAllocator final
@@ -239,15 +237,17 @@ struct CUDACachingHostAllocator final
   }
 };
 
-static CUDACachingHostAllocator caching_host_allocator;
-
-void raw_local_deleter(void* ptr) {
-  caching_host_allocator.free(ptr);
-}
+CUDACachingHostAllocator caching_host_allocator;
 
 static inline CUDACachingHostAllocator& getCUDACachingHostAllocator() {
   return caching_host_allocator;
 }
+
+void raw_local_deleter(void* ptr) {
+  getCUDACachingHostAllocator().free(ptr);
+}
+
+} // anonymous namespace
 
 bool CachingHostAllocator_recordEvent(
     void* ptr,
@@ -262,7 +262,7 @@ void CachingHostAllocator_emptyCache() {
 }
 
 at::Allocator* getCachingHostAllocator() {
-  return &caching_host_allocator;
+  return &getCUDACachingHostAllocator();
 }
 
 } // namespace at::cuda
