@@ -53,9 +53,7 @@ class TestCppExtensionStreamAndEvent(common.TestCase):
     def setUpClass(cls):
         remove_build_path()
         build_dir = tempfile.mkdtemp()
-        src = "{}/cpp_extensions/mtia_extension.cpp".format(
-            os.path.abspath(os.path.dirname(__file__))
-        )
+        src = f"{os.path.abspath(os.path.dirname(__file__))}/cpp_extensions/mtia_extension.cpp"
         # Load the fake device guard impl.
         cls.module = torch.utils.cpp_extension.load(
             name="mtia_extension",
@@ -67,12 +65,32 @@ class TestCppExtensionStreamAndEvent(common.TestCase):
                 "path with quote'",
             ],
             extra_cflags=["-g"],
+            is_python_module=False,
             verbose=True,
         )
 
-    def test_stream_creation(self):
-        stream = torch.Stream("mtia")
-        self.assertEqual(stream.device_type, torch._C._autograd.DeviceType.MTIA)
+    def test_stream_event(self):
+        s = torch.Stream()
+        self.assertTrue(s.device_type, int(torch._C._autograd.DeviceType.MTIA))
+        e = torch.Event()
+        self.assertTrue(e.device.type, "mtia")
+        # Should be nullptr by default
+        self.assertTrue(e.event_id == 0)
+        s.record_event(event=e)
+        print(f"recorded event 1: {e}")
+        self.assertTrue(e.event_id != 0)
+        e2 = s.record_event()
+        print(f"recorded event 2: {e2}")
+        self.assertTrue(e2.event_id != 0)
+        self.assertTrue(e2.event_id != e.event_id)
+        e.synchronize()
+        e2.synchronize()
+        time_elapsed = e.elapsed_time(e2)
+        print(f"time elapsed between e1 and e2: {time_elapsed}")
+        old_event_id = e.event_id
+        e.record(stream=s)
+        print(f"recorded event 1: {e}")
+        self.assertTrue(e.event_id == old_event_id)
 
 
 if __name__ == "__main__":

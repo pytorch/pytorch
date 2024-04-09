@@ -15,7 +15,6 @@ torch.mtia
     init
     is_available
     is_initialized
-    set_device
     set_stream
     stream
     synchronize

@@ -1,12 +1,23 @@
+#include <ATen/detail/MTIAHooksInterface.h>
 #include <c10/core/Device.h>
 #include <c10/core/Stream.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/util/Logging.h>
-#include <ATen/detail/MTIAHooksInterface.h>
+#include <torch/csrc/utils/device_lazy_init.h>
+#include <thread>
 namespace torch::mtia {
 
 constexpr c10::DeviceType kMTIADeviceType = c10::DeviceType::MTIA;
-
+constexpr c10::DeviceIndex kMTIADeviceCount = 2;
+static thread_local c10::DeviceIndex current_device = 0;
+static thread_local std::array<c10::Stream, kMTIADeviceCount> current_streams =
+    {c10::Stream::unpack3(0, 0, c10::DeviceType::MTIA),
+     c10::Stream::unpack3(0, 1, c10::DeviceType::MTIA)};
+static int64_t stream_id_gen = 1;
+static int64_t event_id_gen = 1;
+static std::array<c10::Stream, kMTIADeviceCount> default_streams = {
+    c10::Stream::unpack3(0, 0, c10::DeviceType::MTIA),
+    c10::Stream::unpack3(0, 1, c10::DeviceType::MTIA)};
 struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   MTIAGuardImpl() = default;
   explicit MTIAGuardImpl(c10::DeviceType t) {
@@ -23,30 +34,28 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return old_device;
   }
   c10::Device getDevice() const override {
-    int64_t device_ordinal = 0;
-    return c10::Device(
-        kMTIADeviceType, static_cast<c10::DeviceIndex>(device_ordinal));
+    return c10::Device(kMTIADeviceType, current_device);
   }
 
   void setDevice(c10::Device d) const override {
     c10::Device current_device = getDevice();
+    if (current_device.index() != d.index()) {
+      current_device = d;
+    }
   }
   void uncheckedSetDevice(c10::Device d) const noexcept override {
-    (void) d;
+    (void)d;
   }
   c10::Stream getStream(c10::Device d) const noexcept override {
-    return c10::Stream::unpack3(
-        static_cast<c10::StreamId>(0), d.index(), d.type());
+    return current_streams[d.index()];
   }
   c10::Stream getDefaultStream(c10::Device d) const override {
-    return c10::Stream::unpack3(
-        static_cast<c10::StreamId>(0), d.index(), d.type());
+    return default_streams[d.index()];
   }
   c10::Stream getStreamFromGlobalPool(
       c10::Device d,
       bool isHighPriority = false) const override {
-    return c10::Stream::unpack3(
-        static_cast<c10::StreamId>(0), d.index(), d.type());
+    return c10::Stream::unpack3(stream_id_gen++, d.index(), d.type());
   }
   // NB: These do NOT set the current device
   c10::Stream exchangeStream(c10::Stream s) const noexcept override {
@@ -54,10 +63,7 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return old_stream;
   }
   c10::DeviceIndex deviceCount() const noexcept override {
-    // Avoid logging or throwing exception here, since PyTorch use this function
-    // to check the device availability.
-    uint32_t count = 2;
-    return static_cast<c10::DeviceIndex>(count);
+    return kMTIADeviceCount;
   }
 
   void destroyEvent(void* event, const c10::DeviceIndex device_index)
@@ -83,8 +89,7 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     setDevice(stream.device());
 
     if (*event == nullptr) {
-      int64_t mtia_event{1};
-      *event = reinterpret_cast<void*>(mtia_event);
+      *event = reinterpret_cast<void*>(event_id_gen++);
     }
     setDevice(orig_device);
   }
@@ -116,6 +121,15 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     (void)data_ptr;
     (void)stream;
   }
+
+  double elapsedTime(void* event1, void* event2) const override {
+    uint64_t elapsed_time = 1e6;
+    return (double)(elapsed_time / 1e6);
+  }
+
+  void synchronizeEvent(void* event) const override {
+    (void)event;
+  }
 };
 
 struct MTIAHooks : public at::MTIAHooksInterface {
@@ -127,43 +141,68 @@ struct MTIAHooks : public at::MTIAHooksInterface {
   }
 
   c10::DeviceIndex deviceCount() const override {
+    torch::utils::device_lazy_init(at::kMTIA);
     return c10::DeviceIndex(2);
   }
 
   void deviceSynchronize(c10::DeviceIndex device_index) const override {
+    torch::utils::device_lazy_init(at::kMTIA);
     (void)device_index;
   }
 
-  std::string showConfig() const override{return "None config";}
+  std::string showConfig() const override {
+    return "None config";
+  }
 
   c10::DeviceIndex exchangeDevice(c10::DeviceIndex device) const override {
-    return device;
+    torch::utils::device_lazy_init(at::kMTIA);
+    auto orig_device = current_device;
+    if (current_device != device) {
+      current_device = device;
+    }
+    return orig_device;
   }
 
   c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device) const override {
-    return device;
+    torch::utils::device_lazy_init(at::kMTIA);
+
+    auto orig_device = current_device;
+    if (current_device != device) {
+      current_device = device;
+    }
+    return orig_device;
   }
 
   c10::Stream getDefaultStream(c10::DeviceIndex device) const override {
-    return c10::Stream::unpack3(
-        static_cast<c10::StreamId>(1), device, c10::DeviceType::MTIA);
+    torch::utils::device_lazy_init(at::kMTIA);
+
+    return default_streams[device];
   }
 
   c10::Stream getCurrentStream(c10::DeviceIndex device) const override {
-    return c10::Stream::unpack3(
-        static_cast<c10::StreamId>(1), device, c10::DeviceType::MTIA);
+    torch::utils::device_lazy_init(at::kMTIA);
+
+    return current_streams[device];
   }
 
   void setCurrentStream(const c10::Stream& stream) const override {
-    (void)stream;
+    torch::utils::device_lazy_init(at::kMTIA);
+
+    current_streams[stream.device_index()] = stream;
   }
 
   c10::DeviceIndex getCurrentDevice() const override {
-    return c10::DeviceIndex(0);
+    torch::utils::device_lazy_init(at::kMTIA);
+
+    return current_device;
   }
 
   void setCurrentDevice(c10::DeviceIndex device) const override {
-    (void)device;
+    torch::utils::device_lazy_init(at::kMTIA);
+
+    if (current_device != device) {
+      current_device = device;
+    }
   }
 };
 
