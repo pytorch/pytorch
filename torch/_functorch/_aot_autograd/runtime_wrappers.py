@@ -108,7 +108,7 @@ def create_runtime_wrapper(
                     compiled_fn,
                     args_,
                     disable_amp=disable_amp,
-                    steal_args=True,
+                    steal_args=True
                 )
         else:
             # When we have an inference graph, we run with torch.no_grad.
@@ -121,14 +121,14 @@ def create_runtime_wrapper(
                         compiled_fn,
                         args,
                         disable_amp=disable_amp,
-                        steal_args=True,  # only for flattened
+                        steal_args=True
                     )
             else:
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn,
                     args,
                     disable_amp=disable_amp,
-                    steal_args=True,  # only for flattened
+                    steal_args=True
                 )
         del args
 
