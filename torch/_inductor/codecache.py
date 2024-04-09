@@ -37,6 +37,7 @@ from threading import Thread
 from time import sleep, time
 from types import ModuleType
 from typing import (
+    cast,
     Any,
     Callable,
     Dict,
@@ -1799,7 +1800,7 @@ class AotCodeCompiler:
             )
             # TODO: Fix mmap weights with cuda
             use_mmap_weights = (
-                not cuda and config.is_fbcode() and consts_size > 3_000_000_000
+                not cuda and not config.is_fbcode() and consts_size > 2_000_000_000
             )
             if config._force_mmap_aoti_weights and not cuda:
                 use_mmap_weights = True
@@ -1845,9 +1846,9 @@ class AotCodeCompiler:
                 aot_constants = serialized_weights
                 magic_number = 0
             else:
-                magic_number = torch.randint(
-                    0, torch.iinfo(torch.int64).max, (1,)
-                ).item()
+                magic_number = cast(
+                    int, torch.randint(0, torch.iinfo(torch.int64).max, (1,)).item()
+                )
                 aot_constants = struct.pack("qq", consts_size + 8, magic_number)
             consts_o = {
                 "linux": _compile_consts_linux,
