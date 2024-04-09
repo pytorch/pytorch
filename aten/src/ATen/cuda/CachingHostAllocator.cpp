@@ -67,9 +67,8 @@ class EventPool {
 };
 
 using Block = HostBlock<CUDAStream>;
-using Comparator = ComparatorSize<Block>;
 using AllocatorImplInterface =
-    CachingHostAllocatorImplInterface<CUDAStream, EventPool::Event, Block, Comparator>;
+    CachingHostAllocatorImplInterface<CUDAStream, EventPool::Event>;
 
 struct CUDAHostAllocatorImpl : public AllocatorImplInterface {
 

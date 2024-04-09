@@ -1,7 +1,7 @@
 # mypy: ignore-errors
-
 import dataclasses
 import inspect
+import warnings
 from typing import Callable, Dict, List, Optional
 
 import torch._C
@@ -345,6 +345,37 @@ class GradIncrementNestingCtxManagerVariable(ContextWrappingVariable):
             "call_function", torch._C._functorch._grad_decrement_nesting, (), {}
         )
         return variables.ConstantVariable.create(None)
+
+
+class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
+    """Delay a call to warnings.catch_warnings"""
+
+    @staticmethod
+    def create(tx, catch_warnings_args):
+        return CatchWarningsCtxManagerVariable(
+            catch_warnings_args=catch_warnings_args,
+            target_values=None,
+            initial_values=None,
+        )
+
+    def __init__(self, catch_warnings_args, **kwargs):
+        assert isinstance(catch_warnings_args, dict), catch_warnings_args
+        super().__init__(**kwargs)
+        self.catch_warnings_args = catch_warnings_args
+
+    def enter(self, tx):
+        kwargs = {
+            k: v.as_python_constant() for k, v in self.catch_warnings_args.items()
+        }
+        ctx_val = warnings.catch_warnings(**kwargs)
+        self.set_cleanup_hook(tx, lambda: ctx_val.__exit__(None, None, None))
+        return variables.ConstantVariable.create(ctx_val.__enter__())
+
+    def reconstruct(self, cg):
+        cg.load_import_from("warnings", "catch_warnings")
+        cg.foreach(self.catch_warnings_args.values())
+        keys = tuple(self.catch_warnings_args.keys())
+        cg.extend_output(cg.create_call_function_kw(len(keys), keys, True))
 
 
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):

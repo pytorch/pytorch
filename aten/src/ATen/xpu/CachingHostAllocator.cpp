@@ -6,9 +6,8 @@ namespace {
 constexpr size_t kHostAlignment = 512;
 
 using Block = HostBlock<XPUStream>;
-using Comparator = ComparatorSize<Block>;
 using AllocatorImplInterface =
-    CachingHostAllocatorImplInterface<XPUStream, XPUEvent, Block, Comparator>;
+    CachingHostAllocatorImplInterface<XPUStream, XPUEvent>;
 
 struct XPUHostAllocatorImpl : public AllocatorImplInterface {
   void allocate_host_memory(size_t size, void** ptr) override {
