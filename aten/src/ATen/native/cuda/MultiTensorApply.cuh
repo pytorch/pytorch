@@ -348,7 +348,7 @@ struct FusedOptimizerTensorListMetadata {
   }
 
   // Convert a DevArrayPack to FusedOptimizerTensorListMetadata
-  __device__ __forceinline__ static FusedOptimizerTensorListMetadata<n>
+  C10_HOST_DEVICE __forceinline__ static FusedOptimizerTensorListMetadata<n>
   from_dev_array_pack(DevArrayPack& pack) {
     FusedOptimizerTensorListMetadata<n> tl{};
 #pragma unroll n
@@ -595,7 +595,7 @@ void multi_tensor_apply_for_fused_optimizer(
   }
 
   auto device = tensor_lists[0][0].device();
-  auto [dev_array_pack, buf_tensor] =
+  auto [pack, buf_tensor] =
       FusedOptimizerTensorListMetadata<depth>::make_dev_array_pack(
           addresses,
           numel_for_tensor,
@@ -605,12 +605,22 @@ void multi_tensor_apply_for_fused_optimizer(
           device);
 
   if (block_to_tensor.size() > 0) {
-    multi_tensor_apply_kernel<FusedOptimizerTensorListMetadata<depth>>
-        <<<block_to_tensor.size(),
-           kBlockSize,
-           0,
-           at::cuda::getCurrentCUDAStream()>>>(
-            dev_array_pack, callable, args...);
+    if (pack.buffer_ptr != nullptr) {
+      auto tensorListMeta =
+          FusedOptimizerTensorListMetadata<depth>::from_dev_array_pack(pack);
+      multi_tensor_apply_kernel<FusedOptimizerTensorListMetadata<depth>>
+          <<<block_to_tensor.size(),
+             kBlockSize,
+             0,
+             at::cuda::getCurrentCUDAStream()>>>(
+              tensorListMeta, callable, args...);
+    } else {
+      multi_tensor_apply_kernel<FusedOptimizerTensorListMetadata<depth>>
+          <<<block_to_tensor.size(),
+             kBlockSize,
+             0,
+             at::cuda::getCurrentCUDAStream()>>>(pack, callable, args...);
+    }
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
