@@ -549,7 +549,7 @@ class TestDistBackend(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
         # initialize temp directories
-        initialize_temp_directories()
+        initialize_temp_directories(os.getenv("INIT_METHOD"))
         # initialize Barrier
         Barrier.init()
         # Skip return code checking for following tests as they are expected to
