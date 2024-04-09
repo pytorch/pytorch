@@ -743,9 +743,6 @@ fw_metadata={str(fw_metadata)}
         fw_metadata=fw_metadata_updated,
     )
 
-    if not hasattr(compiled_fn, "_boxed_call"):
-        compiled_fn = make_boxed_func(compiled_fn)
-
     @wraps(compiled_fn)
     def wrapped_compiled_fn(args):
         args_with_synthetic_bases, synthetic_base_info = merge_view_inputs(

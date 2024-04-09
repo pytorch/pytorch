@@ -986,7 +986,7 @@ Got grad_output types: {str(grad_output_types)}"""
     ]
 
     @wraps(compiled_function)
-    def debug_compiled_function(*args):
+    def debug_compiled_function(args: List[Any]):
         # TODO: Check aliasing relationships
         # TODO: Check strides for metadata mutation
         # (NB: ideally, this logic is factored out of this function and
@@ -1006,6 +1006,6 @@ Got grad_output types: {str(grad_output_types)}"""
                     f"{describe_input(i, aot_config)} would not require grad",
                 )
 
-        return compiled_function(*args)
+        return compiled_function(args)
 
     return debug_compiled_function
