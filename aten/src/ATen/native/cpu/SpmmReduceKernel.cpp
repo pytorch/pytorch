@@ -80,9 +80,9 @@ void spmm_reduce_kernel_impl(
 
   // access `crow_indices`, `col_indices` and `values` via TensorAccessor
   scalar_t* out_data = out.data_ptr<scalar_t>();
-  auto csr_data = crow_indices.accessor<index_t, 1>();
-  auto col_data = col_indices.accessor<index_t, 1>();
-  auto val_data = values.accessor<scalar_t, 1>();
+  auto csr_data = crow_indices.accessor<const index_t, 1>();
+  auto col_data = col_indices.accessor<const index_t, 1>();
+  auto val_data = values.accessor<const scalar_t, 1>();
   const scalar_t* other_data = other.const_data_ptr<scalar_t>();
 
   int64_t M = crow_indices.numel() - 1;
@@ -178,10 +178,10 @@ void spmm_reduce_arg_kernel_impl(
 
   scalar_t* out_data = out.data_ptr<scalar_t>();
   index_t* arg_out_data = arg_out.data_ptr<index_t>();
-  auto csr_data = crow_indices.accessor<index_t, 1>();
-  auto col_data = col_indices.accessor<index_t, 1>();
-  auto val_data = values.accessor<scalar_t, 1>();
-  scalar_t* other_data = other.data_ptr<scalar_t>();
+  auto csr_data = crow_indices.accessor<const index_t, 1>();
+  auto col_data = col_indices.accessor<const index_t, 1>();
+  auto val_data = values.accessor<const scalar_t, 1>();
+  const scalar_t* other_data = other.const_data_ptr<scalar_t>();
 
   int64_t M = crow_indices.numel() - 1;
   int64_t K = other.size(-1);
@@ -222,7 +222,7 @@ void spmm_reduce_arg_kernel_impl(
           c = col_data[e];
           opmath_t val = opmath_t(val_data[e]);
 
-          scalar_t* other_ptr = other_data + c * K;
+          const scalar_t* other_ptr = other_data + c * K;
           for (const auto k : c10::irange(K)) {
             update_with_index<opmath_t, index_t, reduce>(
                 &buffer_ptr[k], opmath_t(val *  other_ptr[k]), &arg_out_ptr[k], index_t(e));
