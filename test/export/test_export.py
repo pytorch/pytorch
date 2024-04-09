@@ -228,6 +228,22 @@ class TestExport(TestCase):
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
 
+    def test_colon_parameter(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_parameter(
+                    "foo:bar",
+                    torch.nn.Parameter(torch.ones(3, 3))
+                )
+
+            def forward(self, x):
+                return x + getattr(self, "foo:bar")
+
+        ep = export(M(), (torch.randn(3, 3),))
+        x = torch.randn(3, 3)
+        self.assertEqual(ep.module()(x), M()(x))
+
     def test_conv_dynamic(self):
         # Simple module for demonstration
         class M(torch.nn.Module):
