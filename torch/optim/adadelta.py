@@ -2,8 +2,7 @@ import torch
 from torch import Tensor
 
 from .optimizer import (Optimizer, _use_grad_for_differentiable, _default_to_fused_or_foreach,
-                        _differentiable_doc, _foreach_doc, _maximize_doc, _capturable_doc,
-                        _view_as_real, _get_scalar_dtype, _disable_dynamo_if_closure)
+                        _differentiable_doc, _foreach_doc, _maximize_doc, _capturable_doc, _view_as_real, _get_scalar_dtype)
 from typing import List, Optional
 
 __all__ = ["Adadelta", "adadelta"]
@@ -91,7 +90,6 @@ class Adadelta(Optimizer):
         return has_complex
 
     @_use_grad_for_differentiable
-    @_disable_dynamo_if_closure
     def step(self, closure=None):
         """Perform a single optimization step.
 
