@@ -12983,8 +12983,7 @@ op_db: List[OpInfo] = [
            supports_out=False),
     OpInfo(
         "nn.functional.cross_entropy",
-        dtypes=floating_types_and(torch.bfloat16),
-        dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
         sample_inputs_func=sample_inputs_cross_entropy,
         supports_out=False,
         supports_forward_ad=True,
