@@ -241,7 +241,7 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
     // parse through kwargs if they exist
     if (self->keywordValues) {
       Py_ssize_t pos = 0;
-      PyObject *dict, *key, *value;
+      PyObject *key, *value;
       while (PyDict_Next(self->keywordValues, &pos, &key, &value)) {
         // Get the string representation of the key and value
         std::string key_str = THPUtils_unpackString(key);
