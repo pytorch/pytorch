@@ -2495,7 +2495,6 @@ class TestDynamicPatternMatcher(TestPatternMatcherBase):
                 mod,
                 (v,),
                 check_quantization=True,
-                is_qat=True,
                 matcher_check_fn=matcher_check_fn,
                 quantizer=quantizer,
             )
