@@ -1,6 +1,10 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates
 from contextlib import contextmanager
 
 from torch.distributed._tensor.api import DTensor
+from torch.distributed._tensor.experimental.dmap import dmap
+
+__all__ = ["dmap"]
 
 
 @contextmanager
