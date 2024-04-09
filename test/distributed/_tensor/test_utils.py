@@ -18,6 +18,13 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 
+from torch.distributed.tensor.parallel import (
+    ColwiseParallel,
+    parallelize_module,
+    RowwiseParallel,
+)
+from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel as FSDP, StateDictType
+
 
 class UtilTest(DTensorTestBase):
     @property
