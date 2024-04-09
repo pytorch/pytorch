@@ -26,7 +26,7 @@ __global__ void upsample_bicubic2d_out_frame(
     const accscalar_t height_scale,
     const accscalar_t width_scale,
     const bool align_corners,
-    const PackedTensorAccessor64<scalar_t, 4> idata,
+    const PackedTensorAccessor64<const scalar_t, 4> idata,
     PackedTensorAccessor64<scalar_t, 4> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -195,7 +195,7 @@ static void upsample_bicubic2d_out_cuda_template(
       input.scalar_type(), "upsample_bicubic2d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor64<scalar_t, 4>();
+        auto idata = input.packed_accessor64<const scalar_t, 4>();
         auto odata = output.packed_accessor64<scalar_t, 4>();
 
         // Get scaling factors

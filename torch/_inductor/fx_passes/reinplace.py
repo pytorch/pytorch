@@ -1,3 +1,4 @@
+import itertools
 import operator
 from collections import defaultdict
 from dataclasses import dataclass
@@ -64,7 +65,12 @@ def _inplace_generalized_scatter(
             (view.args, view.kwargs),
         )
         tmp = view.target(tmp, *fake_args, **fake_kwargs)
-    tmp.copy_(src)
+    try:
+        tmp.copy_(src)
+    except RuntimeError as e:
+        raise RuntimeError(
+            f"shape error in scatter op, can not broadcast {src.shape} to {tmp.shape}"
+        ) from e
     return inp
 
 
@@ -190,10 +196,10 @@ def should_reinplace_scatter(node: torch.fx.Node) -> bool:
 
 def decompose_generalized_scatter(graph: torch.fx.Graph) -> None:
     """Replace _generalized_scatter with normal aten ops"""
-    for node in graph.nodes:
-        if node.target not in (_generalized_scatter, _inplace_generalized_scatter):
-            continue
-
+    for node in itertools.chain(
+        graph.find_nodes(op="call_function", target=_generalized_scatter),
+        graph.find_nodes(op="call_function", target=_inplace_generalized_scatter),
+    ):
         use_mutation = (
             node.target is _inplace_generalized_scatter
             or scatter_always_uses_mutation(node)
@@ -388,6 +394,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                     and src.args[0].kwargs["kwargs"][src.args[1]] == node.args[0]
                 )
                 or (src.args[0].target in inplaceable_foreach_ops)
+                or (src.args[0].target == torch.ops.higher_order.auto_functionalized)
             ):
                 src = src.args[0]
 
@@ -397,6 +404,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node):
         node_loc = node_order[node]
+        copy_node_loc = node_order[copy_node] if copy_node is not None else None
 
         def is_meta_only_user(node):
             if _is_view_op(node.target):
@@ -405,11 +413,13 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
         for view in shared_view_nodes:
             for user in view.users:
+                user_loc = node_order[user]
                 # Skip all users before node
-                if node_order[user] <= node_loc:
+                if user_loc <= node_loc:
                     continue
-                # Skip over the copy_ epilogue node that could get reinplaced
-                if copy_node == user:
+                # Ignore uses after the copy_ epilogue node, where the input
+                # has already been mutated anyway
+                if copy_node_loc is not None and copy_node_loc <= user_loc:
                     continue
                 # Reinplacing does not change shape metadata
                 if is_meta_only_user(user):
@@ -447,6 +457,23 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             )
 
     replace_dict: Dict[torch.fx.Node, torch.fx.Node] = {}
+
+    def reinplace_and_refine_tensors_to_clone(old_tensors_to_clone, kwargs):
+        tensors_to_clone: List[str] = []
+        for arg in old_tensors_to_clone:
+            assert arg in kwargs
+            mutated_arg = kwargs[arg]
+            if can_inplace(node, mutated_arg):
+                copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
+                if copy_node is not None:
+                    replace_dict[copy_node] = copy_node.args[0]
+                for user in node.users:
+                    if user.target == operator.getitem and user.args[1] == arg:
+                        replace_dict[user] = mutated_arg
+            else:
+                tensors_to_clone.append(arg)
+        return tensors_to_clone
+
     for node in graph.nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
@@ -456,26 +483,34 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 # node tracking logic to support the case.
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
-                    graph.erase_node(copy_node)
+                    replace_dict[copy_node] = copy_node.args[0]
                 node.target = inplaceable_op.inplace_op
+        elif node.target == torch.ops.higher_order.auto_functionalized:
+            _mutable_op = node.args[0]
+            from torch._higher_order_ops.auto_functionalize import get_mutable_arg_names
+
+            tensors_to_clone = get_mutable_arg_names(_mutable_op)
+            # Don't try to reinplace Optional[Tensor] args that are None.
+            tensors_to_clone = [
+                t for t in tensors_to_clone if node.kwargs[t] is not None
+            ]
+            tensors_to_clone = reinplace_and_refine_tensors_to_clone(
+                tensors_to_clone, node.kwargs
+            )
+
+            # Stash the metadata. There is a pass later on where we decompose
+            # auto_functionalized into clones + a mutable op; this metadata
+            # tells the decomp to only clone the following inputs
+            node.meta["only_clone_these_tensors"] = tensors_to_clone
         elif node.target in inplaceable_triton_ops:
             # inplaceable_triton_ops take an additional argument called
             # tensors_to_clone which contain a list of tensors to clone
             # This pass iterates over them and sees which ones are safe
             # to eliminate (i.e. no longer need the clones)
-            tensors_to_clone = []
-            for arg in node.kwargs["tensors_to_clone"]:
-                assert arg in node.kwargs["kwargs"]
-                mutated_arg = node.kwargs["kwargs"][arg]
-                if can_inplace(node, mutated_arg):
-                    copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
-                    if copy_node is not None:
-                        graph.erase_node(copy_node)
-                    for user in node.users:
-                        if user.target == operator.getitem and user.args[1] == arg:
-                            replace_dict[user] = mutated_arg
-                else:
-                    tensors_to_clone.append(arg)
+            tensors_to_clone = reinplace_and_refine_tensors_to_clone(
+                node.kwargs["tensors_to_clone"], node.kwargs["kwargs"]
+            )
+
             kwargs = dict(node.kwargs)
             kwargs["tensors_to_clone"] = tensors_to_clone
             node.kwargs = immutable_dict(kwargs)
@@ -490,7 +525,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             if can_inplace(node, mutated_args):
                 for arg in mutated_args:
                     copy_node = copy_args_to_copy_nodes[(arg, node)]
-                    graph.erase_node(copy_node)
+                    replace_dict[copy_node] = copy_node.args[0]
 
                 node.target = inplaceable_op.inplace_op
     for node, replacement in replace_dict.items():

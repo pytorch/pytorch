@@ -30,5 +30,5 @@ RUN if [ -n "$CLANG_VERSION" ]; then \
 # Install cuda if version is specified
 ARG CUDA_VERSION
 RUN if [ -n "$CUDA_VERSION" ]; then \
-       conda install cuda -c "nvidia/label/cuda-${CUDA_VERSION}"; \
+       conda install -y cuda -c "nvidia/label/cuda-${CUDA_VERSION}"; \
     fi

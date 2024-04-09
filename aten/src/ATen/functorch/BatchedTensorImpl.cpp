@@ -10,8 +10,7 @@
 
 #include <c10/util/irange.h>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 BatchedTensorImpl::BatchedTensorImpl(DispatchKeySet key_set, Tensor value, int64_t bdim, int64_t level)
   : TensorImpl(
@@ -71,7 +70,7 @@ void BatchedTensorImpl::refreshTensorMetadata() {
 int64_t BatchedTensorImpl::actualDim(int64_t dim, bool wrap_dim) const {
   if (wrap_dim) {
     const auto ndim = sizes_and_strides_.size();
-    dim = maybe_wrap_dim(dim, ndim);
+    dim = maybe_wrap_dim(dim, static_cast<int64_t>(ndim));
   }
   if (bdim_ <= dim) {
     return dim + 1;
@@ -161,6 +160,7 @@ c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
 }
 
 c10::intrusive_ptr<TensorImpl> BatchedTensorImpl::shallow_copy_and_detach(
+    // NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
     c10::VariableVersion&& version_counter,
     bool allow_tensor_metadata_change) const {
   TORCH_CHECK(false, "accessing `data` under vmap transform is not allowed");
@@ -185,5 +185,4 @@ Tensor addBatchDim(const Tensor& tensor, int64_t dim, int64_t level) {
   return makeBatched(tensor, dim, level);
 }
 
-}
-} // namespace at
+} // namespace at::functorch

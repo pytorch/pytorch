@@ -106,7 +106,7 @@ def run(rank, world_size):
             if epoch % SAVE_PERIOD == 0:
                 if f is not None:
                     f.result()
-                f = dcp.state_dict_saver._async_save(
+                f = dcp.state_dict_saver.async_save(
                     state_dict, checkpoint_id=CHECKPOINT_DIR
                 )
 

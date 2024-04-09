@@ -150,7 +150,7 @@ __global__ void embedding_backward_kernel(
   // 5     <warp 3>
   // 8     <warp 4>
 
-  // Number of values proceessed by each thread (grain size)
+  // Number of values processed by each thread (grain size)
   const int SZ = 4;
 
   if (idx < numel

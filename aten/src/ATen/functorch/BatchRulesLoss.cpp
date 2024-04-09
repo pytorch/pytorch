@@ -9,7 +9,7 @@
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 // Flattens out all dims except the batch dim, and also moves batch dim
 // (if it exists) to front.
 static at::Tensor flatten_logical(const Tensor& tensor, optional<int64_t> bdim) {
@@ -98,12 +98,8 @@ static Tensor binary_cross_entropy_plumbing(
     return at::binary_cross_entropy(self, target, weight, reduction);
   }
 
-  Tensor self_value;
-  optional<int64_t> self_bdim;
-  std::tie(self_value, self_bdim) = unwrapTensorAtLevel(self, cur_level);
-  Tensor target_value;
-  optional<int64_t> target_bdim;
-  std::tie(target_value, target_bdim) = unwrapTensorAtLevel(target, cur_level);
+  auto [self_value, self_bdim] = unwrapTensorAtLevel(self, cur_level);
+  auto [target_value, target_bdim] = unwrapTensorAtLevel(target, cur_level);
 
   Tensor result;
   if (self_bdim || target_bdim) {
@@ -137,16 +133,10 @@ static Tensor binary_cross_entropy_backward_plumbing(
     return at::binary_cross_entropy_backward(grad, input, target, weight_opt, reduction);
   }
 
-  Tensor grad_value;
-  optional<int64_t> grad_bdim;
-  std::tie(grad_value, grad_bdim) = unwrapTensorAtLevel(
+  auto [grad_value, grad_bdim] = unwrapTensorAtLevel(
       reduction == Reduction::None ? grad : grad.expand_as(input), cur_level);
-  Tensor input_value;
-  optional<int64_t> input_bdim;
-  std::tie(input_value, input_bdim) = unwrapTensorAtLevel(input, cur_level);
-  Tensor target_value;
-  optional<int64_t> target_bdim;
-  std::tie(target_value, target_bdim) = unwrapTensorAtLevel(target, cur_level);
+  auto [input_value, input_bdim] = unwrapTensorAtLevel(input, cur_level);
+  auto [target_value, target_bdim] = unwrapTensorAtLevel(target, cur_level);
 
   Tensor grad_input;
   if (grad_bdim || input_bdim || target_bdim) {
@@ -190,4 +180,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   m.impl("binary_cross_entropy_backward", binary_cross_entropy_backward_plumbing);
 }
 
-}}
+} // namespace at::functorch

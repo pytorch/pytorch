@@ -141,7 +141,7 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
     copy_tensor_metadata(
         /*src_sparse_impl=*/this,
         /*dest_sparse_impl=*/impl.get(),
-        /*version_counter=*/version_counter,
+        /*version_counter=*/std::move(version_counter),
         /*allow_tensor_metadata_change=*/allow_tensor_metadata_change);
     impl->refresh_numel();
     return impl;
@@ -168,12 +168,12 @@ struct TORCH_API SparseCsrTensorImpl : public TensorImpl {
   static void copy_tensor_metadata(
       const SparseCsrTensorImpl* src_sparse_impl,
       SparseCsrTensorImpl* dest_sparse_impl,
-      const c10::VariableVersion& version_counter,
+      c10::VariableVersion version_counter,
       bool allow_tensor_metadata_change) {
     TensorImpl::copy_tensor_metadata(
         src_sparse_impl,
         dest_sparse_impl,
-        version_counter,
+        std::move(version_counter),
         allow_tensor_metadata_change);
 
     // Sparse-specific fields

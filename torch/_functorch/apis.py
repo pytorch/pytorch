@@ -1,4 +1,4 @@
-# NOTE: We allow Dynamo to see this file (via torch/_dynamo/skipfiles.py) so that it can
+# NOTE: We allow Dynamo to see this file (via torch/_dynamo/trace_rules.py) so that it can
 #       trace through functorch transforms.
 #       Currently, we can't allow Dynamo to see `eager_transforms.py`/`vmap.py` as that break a lot of thing
 #       and there isn't a mechanism to selectively expose only some functions (eg. grad) from a file
@@ -179,13 +179,17 @@ def vmap(
         vmap does not provide general autobatching or handle variable-length
         sequences out of the box.
     """
+    from torch._dynamo import is_compiling
+
     _check_randomness_arg(randomness)
     if not (chunk_size is None or chunk_size > 0):
         raise ValueError(f"vmap: chunk_size should be None or greater than 0. (got {chunk_size})")
 
-    # @functools.wraps(func)
     def wrapped(*args, **kwargs):
         return vmap_impl(func, in_dims, out_dims, randomness, chunk_size, *args, **kwargs)
+
+    if not is_compiling():
+        wrapped = functools.wraps(func)(wrapped)
 
     return wrapped
 
@@ -357,8 +361,53 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
     """
     # To avoid cyclical dependency.
     import torch._functorch.eager_transforms as eager_transforms
+    from torch._dynamo import is_compiling
 
-    @functools.wraps(func)
     def wrapper(*args, **kwargs):
         return eager_transforms.grad_impl(func, argnums, has_aux, args, kwargs)
+
+    if not is_compiling():
+        wrapper = functools.wraps(func)(wrapper)
+
+    return wrapper
+
+
+@exposed_in("torch.func")
+def grad_and_value(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Callable:
+    """
+    Returns a function to compute a tuple of the gradient and primal, or
+    forward, computation.
+
+    Args:
+        func (Callable): A Python function that takes one or more arguments.
+            Must return a single-element Tensor. If specified ``has_aux``
+            equals ``True``, function can return a tuple of single-element
+            Tensor and other auxiliary objects: ``(output, aux)``.
+        argnums (int or Tuple[int]): Specifies arguments to compute gradients
+            with respect to. ``argnums`` can be single integer or tuple of
+            integers. Default: 0.
+        has_aux (bool): Flag indicating that ``func`` returns a tensor and
+            other auxiliary objects: ``(output, aux)``. Default: False.
+
+    Returns:
+        Function to compute a tuple of gradients with respect to its inputs
+        and the forward computation. By default, the output of the function is
+        a tuple of the gradient tensor(s) with respect to the first argument
+        and the primal computation. If specified ``has_aux`` equals
+        ``True``, tuple of gradients and tuple of the forward computation with
+        output auxiliary objects is returned. If ``argnums`` is a tuple of
+        integers, a tuple of a tuple of the output gradients with respect to
+        each ``argnums`` value and the forward computation is returned.
+
+    See :func:`grad` for examples
+    """
+    from torch._functorch import eager_transforms
+    from torch._dynamo import is_compiling
+
+    def wrapper(*args, **kwargs):
+        return eager_transforms.grad_and_value_impl(func, argnums, has_aux, args, kwargs)
+
+    if not is_compiling():
+        wrapper = functools.wraps(func)(wrapper)
+
     return wrapper

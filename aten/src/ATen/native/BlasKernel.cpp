@@ -1,6 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/Config.h>
 #include <ATen/OpMathType.h>
+#include <ATen/Parallel.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/complex.h>
@@ -8,6 +10,10 @@
 #include <algorithm>
 #include <climits>
 #include <limits>
+
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+#include <arm_neon.h>
+#endif
 
 namespace {
 
@@ -74,24 +80,53 @@ extern "C" void sgemv_(char *trans, int *m, int *n, float *alpha, float *a, int 
 namespace at::native {
 
 namespace blas_impl {
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+void fp16_gemv_notrans(
+    const int m,
+    const int n,
+    const float alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float beta,
+    float16_t* y,
+    const int incy);
+
+void fp16_gemv_trans(
+    const int m,
+    const int n,
+    const float alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float beta,
+    float16_t* y,
+    const int incy);
+#endif
 
 template <typename scalar_t>
-bool scal_use_fast_path(int64_t n, int64_t incx) {
+bool scal_use_fast_path(C10_UNUSED int64_t n, C10_UNUSED int64_t incx) {
   return false;
 }
 
 template <typename scalar_t>
-bool gemv_use_fast_path(int64_t m, int64_t n, int64_t lda, int64_t incx, int64_t incy) {
+bool gemv_use_fast_path(C10_UNUSED int64_t m, C10_UNUSED int64_t n,
+                        C10_UNUSED int64_t lda, C10_UNUSED int64_t incx, C10_UNUSED int64_t incy) {
   return false;
 }
 
 template <typename scalar_t>
-void scal_fast_path(int *n, scalar_t *a, scalar_t *x, int *incx) {
+void scal_fast_path(C10_UNUSED int *n, C10_UNUSED scalar_t *a, C10_UNUSED scalar_t *x, C10_UNUSED int *incx) {
   TORCH_INTERNAL_ASSERT(false, "scal_fast_path shouldn't be called for this configuration");
 }
 
 template <typename scalar_t>
-void gemv_fast_path(const char *trans, const int *m, const int *n, const scalar_t *alpha, const scalar_t *a, const int *lda, const scalar_t *x, const int *incx, const scalar_t *beta, scalar_t *y, const int *incy) {
+void gemv_fast_path(C10_UNUSED const char *trans, C10_UNUSED const int *m, C10_UNUSED const int *n,
+                    C10_UNUSED  const scalar_t *alpha, C10_UNUSED const scalar_t *a, C10_UNUSED const int *lda,
+                    C10_UNUSED  const scalar_t *x, C10_UNUSED const int *incx, C10_UNUSED const scalar_t *beta,
+                    C10_UNUSED  scalar_t *y, C10_UNUSED const int *incy) {
   TORCH_INTERNAL_ASSERT(false, "gemv_fast_path shouldn't be called for this configuration");
 }
 
@@ -155,7 +190,248 @@ INSTANTIATE(int16_t);
 INSTANTIATE(int);
 INSTANTIATE(int64_t);
 INSTANTIATE(c10::BFloat16);
+#if defined(__aarch64__) && !defined(C10_MOBILE)
+template <>
+bool scal_use_fast_path<at::Half>(C10_UNUSED int64_t n, C10_UNUSED int64_t incx) {
+  return false;
+}
+
+template <>
+bool gemv_use_fast_path<at::Half>(
+    C10_UNUSED int64_t m,
+    C10_UNUSED int64_t n,
+    C10_UNUSED int64_t lda,
+    C10_UNUSED int64_t incx,
+    C10_UNUSED int64_t incy) {
+  return true;
+}
+
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+static inline float16_t reduce(float16x4_t x) {
+        auto sum = vpadd_f16(x, x);
+        return vget_lane_f16(vpadd_f16(sum, sum), 0);
+}
+static inline float16_t reduce(float16x8_t x) {
+        return reduce(vadd_f16(vget_low_f16(x), vget_high_f16(x)));
+}
+
+
+static void fp16_gemv_trans_fp16_arith(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
+  parallel_for(0, n / 4, 1, [&](int begin, int end) {
+    for (auto i = begin * 4 ; i < end * 4; i += 4) {
+      float16x8_t sum0Vec = vdupq_n_f16(0);
+      float16x8_t sum1Vec = vdupq_n_f16(0);
+      float16x8_t sum2Vec = vdupq_n_f16(0);
+      float16x8_t sum3Vec = vdupq_n_f16(0);
+      const auto row0 = a + lda * (i + 0);
+      const auto row1 = a + lda * (i + 1);
+      const auto row2 = a + lda * (i + 2);
+      const auto row3 = a + lda * (i + 3);
+      for (auto j = 0; j < m; j += 8) {
+        float16x8_t xVec = vld1q_f16(x + j);
+        float16x8_t a0Vec = vld1q_f16(row0 + j);
+        sum0Vec = vaddq_f16(sum0Vec, vmulq_f16(a0Vec, xVec));
+        float16x8_t a1Vec = vld1q_f16(row1 + j);
+        sum1Vec = vaddq_f16(sum1Vec, vmulq_f16(a1Vec, xVec));
+        float16x8_t a2Vec = vld1q_f16(row2 + j);
+        sum2Vec = vaddq_f16(sum2Vec, vmulq_f16(a2Vec, xVec));
+        float16x8_t a3Vec = vld1q_f16(row3 + j);
+        sum3Vec = vaddq_f16(sum3Vec, vmulq_f16(a3Vec, xVec));
+      }
+      y[(i + 0) * incy] = reduce(sum0Vec);
+      y[(i + 1) * incy] = reduce(sum1Vec);
+      y[(i + 2) * incy] = reduce(sum2Vec);
+      y[(i + 3) * incy] = reduce(sum3Vec);
+    }
+  });
+}
+#endif
+
+static inline float reduce(float32x4_t x) {
+        auto sum = vpaddq_f32(x, x);
+        return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
+}
+
+static void fp16_gemv_trans_fp32_arith(const int m, const int n, const float16_t* a, const int lda, const float16_t *x, float16_t* y, int incy) {
+  parallel_for(0, n / 4, 1, [&](int begin, int end) {
+    for (auto i =  begin * 4 ; i < end * 4; i += 4) {
+      float32x4_t sum0Vec = vdupq_n_f32(0);
+      float32x4_t sum1Vec = vdupq_n_f32(0);
+      float32x4_t sum2Vec = vdupq_n_f32(0);
+      float32x4_t sum3Vec = vdupq_n_f32(0);
+      const auto row0 = a + lda * (i + 0);
+      const auto row1 = a + lda * (i + 1);
+      const auto row2 = a + lda * (i + 2);
+      const auto row3 = a + lda * (i + 3);
+      for (auto j = 0; j < m; j += 4) {
+        float32x4_t xVec = vcvt_f32_f16(vld1_f16(x + j));
+        float32x4_t a0Vec = vcvt_f32_f16(vld1_f16(row0 + j));
+        sum0Vec = vaddq_f32(sum0Vec, vmulq_f32(a0Vec, xVec));
+        float32x4_t a1Vec = vcvt_f32_f16(vld1_f16(row1 + j));
+        sum1Vec = vaddq_f32(sum1Vec, vmulq_f32(a1Vec, xVec));
+        float32x4_t a2Vec = vcvt_f32_f16(vld1_f16(row2 + j));
+        sum2Vec = vaddq_f32(sum2Vec, vmulq_f32(a2Vec, xVec));
+        float32x4_t a3Vec = vcvt_f32_f16(vld1_f16(row3 + j));
+        sum3Vec = vaddq_f32(sum3Vec, vmulq_f32(a3Vec, xVec));
+      }
+      y[(i + 0) * incy] = reduce(sum0Vec);
+      y[(i + 1) * incy] = reduce(sum1Vec);
+      y[(i + 2) * incy] = reduce(sum2Vec);
+      y[(i + 3) * incy] = reduce(sum3Vec);
+    }
+  });
+}
+
+void fp16_gemv_trans(
+    const int m,
+    const int n,
+    const float alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float beta,
+    float16_t* y,
+    const int incy) {
+  if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && n % 4 == 0) {
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+    return at::globalContext().allowFP16ReductionCPU() && m % 8 == 0 ? fp16_gemv_trans_fp16_arith(m, n, a, lda, x, y, incy)
+                                                                     : fp16_gemv_trans_fp32_arith(m, n, a, lda, x, y, incy);
+#else
+    return fp16_gemv_trans_fp32_arith(m, n, a, lda, x, y, incy);
+#endif
+  }
+  for (const auto i : c10::irange(n)) {
+    float sum = 0;
+    const auto row_ = a + lda * i;
+    for (const auto j : c10::irange(m)) {
+      sum += x[j * incx] * row_[j];
+    }
+    if (beta == 0.0) {
+      y[i * incy] = alpha * sum;
+    } else {
+      y[i * incy] = beta * y[i * incy] + alpha * sum;
+    }
+  }
+}
+
+
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+static void fp16_gemv_notrans_fp16_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
+  for (auto j = 0; j < n; j++) {
+    auto vecCol = vdup_n_f16(x[j]);
+    const auto* column = a + lda * j;
+    for (auto i = 0; i < m; i += 4) {
+      auto yf16 = y + i;
+      auto matRow = vld1_f16(column + i);
+      auto resVec = j != 0 ? vld1_f16(yf16) : vdup_n_f16(0);
+      resVec = vfma_lane_f16(resVec, matRow, vecCol, 0);
+      vst1_f16(yf16, resVec);
+    }
+  }
+}
+#endif
+
+static void fp16_gemv_notrans_fp32_arith(int m, int n, const float16_t* a, const int lda, const float16_t *x, float16_t *y) {
+  std::vector<float> sum(m);
+  for (auto j = 0; j < n; j++) {
+    auto vecCol = vdup_n_f32(x[j]);
+    const auto* column = a + lda * j;
+    for (auto i = 0; i < m; i += 4) {
+      auto sf32 = sum.data() + i;
+      auto matRow = vcvt_f32_f16(vld1_f16(column + i));
+      auto resVec = j != 0 ? vld1q_f32(sf32) : vdupq_n_f32(0);
+      resVec = vfmaq_lane_f32(resVec, matRow, vecCol, 0);
+      vst1q_f32(sf32, resVec);
+    }
+  }
+
+  for (auto i = 0; i < m; i+= 4) {
+    vst1_f16(y + i, vcvt_f16_f32(vld1q_f32(sum.data() + i)));
+  }
+}
+
+void fp16_gemv_notrans(
+    const int m,
+    const int n,
+    const float alpha,
+    const float16_t* a,
+    const int lda,
+    const float16_t* x,
+    const int incx,
+    const float beta,
+    float16_t* y,
+    const int incy) {
+  if (incx == 1 && alpha == 1.0 && beta == 0.0 && m % 4 == 0 && incy == 1) {
+#ifdef __ARM_FEATURE_FP16_SCALAR_ARITHMETIC
+    return at::globalContext().allowFP16ReductionCPU() ? fp16_gemv_notrans_fp16_arith(m, n, a, lda, x, y)
+                                                       : fp16_gemv_notrans_fp32_arith(m, n, a, lda, x, y);
+#else
+    return fp16_gemv_notrans_fp32_arith(m, n, a, lda, x, y);
+#endif
+  }
+  std::vector<float> sum(m);
+  for (const auto j : c10::irange(n)) {
+    const auto* column_ = a + lda * j;
+    auto z = alpha * x[j * incx];
+    for (const auto i : c10::irange(m)) {
+      sum[i] += z * column_[i];
+    }
+  }
+  if (beta == 0.0) {
+    for (const auto i : c10::irange(m)) {
+      y[i * incy] = sum[i];
+    }
+  } else {
+    for (const auto i : c10::irange(m)) {
+      y[i * incy] += sum[i];
+    }
+  }
+}
+
+template <>
+void gemv_fast_path<at::Half>(
+    const char* trans,
+    const int* m,
+    const int* n,
+    const at::Half* alpha,
+    const at::Half* a,
+    const int* lda,
+    const at::Half* x,
+    const int* incx,
+    const at::Half* beta,
+    at::Half* y,
+    const int* incy) {
+  using namespace c10::detail;
+  if ((trans[0] == 'T') || (trans[0] == 't')) {
+    fp16_gemv_trans(
+        *m,
+        *n,
+        fp16_from_bits(alpha->x),
+        reinterpret_cast<const float16_t*>(a),
+        *lda,
+        reinterpret_cast<const float16_t*>(x),
+        *incx,
+        fp16_from_bits(beta->x),
+        reinterpret_cast<float16_t*>(y),
+        *incy);
+  } else {
+    fp16_gemv_notrans(
+        *m,
+        *n,
+        fp16_from_bits(alpha->x),
+        reinterpret_cast<const float16_t*>(a),
+        *lda,
+        reinterpret_cast<const float16_t*>(x),
+        *incx,
+        fp16_from_bits(beta->x),
+        reinterpret_cast<float16_t*>(y),
+        *incy);
+  }
+}
+#else
 INSTANTIATE(c10::Half);
+#endif
 #undef INSTANTIATE
 
 } // namespace blas_impl

@@ -189,7 +189,7 @@ SparseTensor pow_sparse_scalar(const SparseTensor& t, const Scalar& value) {
 }
 
 // --------------------------------------------------------------------
-// div(SparseTensor, Scalar)
+// coalesce(SparseTensor)
 // --------------------------------------------------------------------
 
 static SparseTensor& coalesce_(SparseTensor& tensor) {
@@ -216,6 +216,9 @@ static SparseTensor& coalesce_(SparseTensor& tensor) {
 // A float tensor with values=[3., 3.] floor divided by 2 would also produce
 // values=[1., 1.] (after truncation), which sum to 2.f instead of 3.f.
 // To perform floor division the sparse tensor must be coalesced first.
+// --------------------------------------------------------------------
+// div(SparseTensor, Scalar)
+// --------------------------------------------------------------------
 
 SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value, c10::optional<c10::string_view> rounding_mode, SparseTensor& r) {
   TORCH_CHECK(value.dim() == 0, "Sparse division requires a scalar or ",

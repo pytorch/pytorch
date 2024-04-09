@@ -1,14 +1,27 @@
 import warnings
+import functools
 from typing import Union, Iterable, List, Dict, Tuple, Optional, cast
 
 import torch
-from torch import Tensor, inf
-from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype, _has_foreach_support
+from torch import Tensor
+from torch.utils._foreach_utils import _group_tensors_by_device_and_dtype, _has_foreach_support, _device_has_foreach_support
 
 _tensor_or_tensors = Union[torch.Tensor, Iterable[torch.Tensor]]
 
 __all__ = ['clip_grad_norm_', 'clip_grad_norm', 'clip_grad_value_']
 
+def _no_grad(func):
+    """
+    This wrapper is needed to avoid a circular import when using @torch.no_grad on the exposed functions
+    clip_grad_norm_ and clip_grad_value_ themselves.
+    """
+    def _no_grad_wrapper(*args, **kwargs):
+        with torch.no_grad():
+            return func(*args, **kwargs)
+    functools.update_wrapper(_no_grad_wrapper, func)
+    return _no_grad_wrapper
+
+@_no_grad
 def clip_grad_norm_(
         parameters: _tensor_or_tensors, max_norm: float, norm_type: float = 2.0,
         error_if_nonfinite: bool = False, foreach: Optional[bool] = None) -> torch.Tensor:
@@ -42,23 +55,22 @@ def clip_grad_norm_(
     if len(grads) == 0:
         return torch.tensor(0.)
     first_device = grads[0].device
-    grouped_grads: Dict[Tuple[torch.device, torch.dtype], List[List[Tensor]]] \
-        = _group_tensors_by_device_and_dtype([[g.detach() for g in grads]])  # type: ignore[assignment]
+    grouped_grads: Dict[Tuple[torch.device, torch.dtype], Tuple[List[List[Tensor]], List[int]]] \
+        = _group_tensors_by_device_and_dtype([grads])  # type: ignore[assignment]
 
-    if norm_type == inf:
-        norms = [torch.linalg.vector_norm(g.detach(), inf).to(first_device) for g in grads]
-        total_norm = norms[0] if len(norms) == 1 else torch.max(torch.stack(norms))
-    else:
-        norms = []
-        for ((device, _), ([grads], _)) in grouped_grads.items():  # type: ignore[assignment]
-            if (foreach is None or foreach) and _has_foreach_support(grads, device=device):
-                norms.extend(torch._foreach_norm(grads, norm_type))
-            elif foreach:
-                raise RuntimeError(f'foreach=True was passed, but can\'t use the foreach API on {device.type} tensors')
-            else:
-                norms.extend([torch.linalg.vector_norm(g, norm_type) for g in grads])
+    norms: List[Tensor] = []
+    for ((device, _), ([device_grads], _)) in grouped_grads.items():  # type: ignore[assignment]
+        if (
+            (foreach is None and _has_foreach_support(device_grads, device))
+            or (foreach and _device_has_foreach_support(device))
+        ):
+            norms.extend(torch._foreach_norm(device_grads, norm_type))
+        elif foreach:
+            raise RuntimeError(f'foreach=True was passed, but can\'t use the foreach API on {device.type} tensors')
+        else:
+            norms.extend([torch.linalg.vector_norm(g, norm_type) for g in device_grads])
 
-        total_norm = torch.linalg.vector_norm(torch.stack([norm.to(first_device) for norm in norms]), norm_type)
+    total_norm = torch.linalg.vector_norm(torch.stack([norm.to(first_device) for norm in norms]), norm_type)
 
     if error_if_nonfinite and torch.logical_or(total_norm.isnan(), total_norm.isinf()):
         raise RuntimeError(
@@ -71,15 +83,18 @@ def clip_grad_norm_(
     # avoids a `if clip_coef < 1:` conditional which can require a CPU <=> device synchronization
     # when the gradients do not reside in CPU memory.
     clip_coef_clamped = torch.clamp(clip_coef, max=1.0)
-    for ((device, _), ([grads], _)) in grouped_grads.items():  # type: ignore[assignment]
-        if (foreach is None or foreach) and _has_foreach_support(grads, device=device):  # type: ignore[arg-type]
-            torch._foreach_mul_(grads, clip_coef_clamped.to(device))  # type: ignore[call-overload]
+    for ((device, _), ([device_grads], _)) in grouped_grads.items():  # type: ignore[assignment]
+        if (
+            (foreach is None and _has_foreach_support(device_grads, device))
+            or (foreach and _device_has_foreach_support(device))
+        ):
+            torch._foreach_mul_(device_grads, clip_coef_clamped.to(device))
         elif foreach:
             raise RuntimeError(f'foreach=True was passed, but can\'t use the foreach API on {device.type} tensors')
         else:
             clip_coef_clamped_device = clip_coef_clamped.to(device)
-            for g in grads:
-                g.detach().mul_(clip_coef_clamped_device)
+            for g in device_grads:
+                g.mul_(clip_coef_clamped_device)
 
     return total_norm
 
@@ -98,6 +113,7 @@ def clip_grad_norm(
     return clip_grad_norm_(parameters, max_norm, norm_type, error_if_nonfinite, foreach)
 
 
+@_no_grad
 def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float, foreach: Optional[bool] = None) -> None:
     r"""Clip the gradients of an iterable of parameters at specified value.
 
@@ -122,12 +138,14 @@ def clip_grad_value_(parameters: _tensor_or_tensors, clip_value: float, foreach:
     grouped_grads = _group_tensors_by_device_and_dtype([grads])
 
     for ((device, _), ([grads], _)) in grouped_grads.items():  # type: ignore[assignment]
-        if (foreach is None or foreach) and _has_foreach_support(cast(List[Tensor], grads), device=device):
+        if (
+            (foreach is None and _has_foreach_support(cast(List[Tensor], grads), device=device))
+            or (foreach and _device_has_foreach_support(device))
+        ):
             torch._foreach_clamp_min_(cast(List[Tensor], grads), -clip_value)
             torch._foreach_clamp_max_(cast(List[Tensor], grads), clip_value)
         elif foreach:
             raise RuntimeError(f'foreach=True was passed, but can\'t use the foreach API on {device.type} tensors')
         else:
-            with torch.no_grad():
-                for grad in grads:
-                    cast(Tensor, grad).clamp_(min=-clip_value, max=clip_value)
+            for grad in grads:
+                cast(Tensor, grad).clamp_(min=-clip_value, max=clip_value)
