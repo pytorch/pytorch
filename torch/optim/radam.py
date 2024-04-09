@@ -14,7 +14,6 @@ from .optimizer import (
     _get_value,
     _use_grad_for_differentiable,
     _view_as_real,
-    _disable_dynamo_if_closure
 )
 
 __all__ = ["RAdam", "radam"]
@@ -107,7 +106,6 @@ class RAdam(Optimizer):
         return has_complex
 
     @_use_grad_for_differentiable
-    @_disable_dynamo_if_closure
     def step(self, closure=None):
         """Performs a single optimization step.
 
