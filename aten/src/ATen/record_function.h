@@ -320,11 +320,8 @@ struct TORCH_API RecordFunction {
       return;
     }
     kwinputs_ = *kwargs;
-    before(
-        std::move(fn),
-        args,
-        current_sequence_nr);
-    }
+    before(std::move(fn), args, current_sequence_nr);
+  }
 
   // Destructor calls end callbacks
   virtual ~RecordFunction();

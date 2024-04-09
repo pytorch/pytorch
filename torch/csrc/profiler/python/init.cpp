@@ -164,14 +164,16 @@ int RecordFunctionFast_init(
     PyObject* kwargs) {
   auto self = (RecordFunctionFast*)selfGeneric;
   // NOLINTNEXTLINE(*-c-arrays*)
-  constexpr const char* kwlist[] = {"name", "inputValues", "keywordValues", nullptr};
+  constexpr const char* kwlist[] = {
+      "name", "inputValues", "keywordValues", nullptr};
   PyObject* name = nullptr;
   PyObject* inputValues = nullptr;
   PyObject* keywordValues = nullptr;
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "O|OO", // name is required PyObject, args and kwargs are optional PyObjects
+          "O|OO", // name is required PyObject, args and kwargs are optional
+                  // PyObjects
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &name,
@@ -197,7 +199,6 @@ int RecordFunctionFast_init(
     TORCH_CHECK(PyDict_Check(keywordValues), "keywordValues must be dict");
     Py_INCREF(keywordValues);
     self->keywordValues = keywordValues;
-
   }
   return 0;
 }
@@ -242,11 +243,11 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
       Py_ssize_t pos = 0;
       PyObject *dict, *key, *value;
       while (PyDict_Next(self->keywordValues, &pos, &key, &value)) {
-          // Get the string representation of the key and value
-          std::string key_str = THPUtils_unpackString(key);
-          auto match = torch::jit::tryToInferType(value);
-          at::IValue ivalue = torch::jit::toIValue(value, match.type());
-          kwargs[key_str] = ivalue;
+        // Get the string representation of the key and value
+        std::string key_str = THPUtils_unpackString(key);
+        auto match = torch::jit::tryToInferType(value);
+        at::IValue ivalue = torch::jit::toIValue(value, match.type());
+        kwargs[key_str] = ivalue;
       }
     }
     self->guard->before(THPUtils_unpackString(self->name), &args, &kwargs);
