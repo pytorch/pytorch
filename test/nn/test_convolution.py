@@ -2000,6 +2000,25 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(grad1, grad2, atol=5e-2, rtol=5e-3)
 
     @onlyCUDA
+    @skipCUDAIfRocm
+    @largeTensorTest('20GB', 'cpu')
+    @largeTensorTest('60GB', 'cuda')
+    def test_conv_large_batch_1(self, device):
+        in_channels = 514
+        dim = 2048
+        out_channels = 1
+        kernel_size = 3
+        stride = 1
+        padding = 1
+
+        input_tensor = torch.ones(1, in_channels, dim, dim).cuda().half()
+        model = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding).cuda().half()
+        output = model(input_tensor)
+        model_cpu = model.cpu().float()
+        output_cpu = model(input_tensor.float().cpu())
+        self.assertEqual(output.cpu().float(), output_cpu, atol=1e-3, rtol=1e-3)
+
+    @onlyCUDA
     @skipCUDAIfNoCudnn
     def test_contig_wrong_stride_cudnn(self, device):
         # x has to have batch_size 1 to test contiguous checks
