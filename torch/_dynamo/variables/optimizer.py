@@ -6,8 +6,6 @@ from typing import Dict, List
 import torch
 from torch.utils._pytree import tree_map_only
 
-from ..exc import unimplemented, Unsupported
-
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
@@ -41,23 +39,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         "static_tensor_names",
         *UserDefinedObjectVariable._nonvar_fields,
     }
-
-    @classmethod
-    def throw_if_unsupported_step(cls, symbolic_locals, f_name):
-        """
-        We don't support calling the step with closure argument, so graph break if
-        if that's the case.
-        """
-        if (
-            "closure" in symbolic_locals
-            and not isinstance(symbolic_locals["closure"], ConstantVariable)
-            and "self" in symbolic_locals
-            and isinstance(symbolic_locals["self"], OptimizerVariable)
-            and f_name == "step"
-        ):
-            unimplemented(
-                "Optimizer step with closure not supported by torch.compile()"
-            )
 
     def __init__(
         self,
@@ -108,17 +89,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
             except (ArgMappingException, GuardInstallException) as _:
                 # trace normally if we can't map args or install guards correctly
                 pass
-
-        if name == "step":
-            if (
-                "closure" in kwargs
-                and not isinstance(kwargs["closure"], ConstantVariable)
-                or len(args) == 1
-                and not isinstance(args[0], ConstantVariable)
-            ):
-                raise Unsupported(
-                    "Optimizer step with closure not supported by torch.compile()"
-                )
 
         return super().call_method(tx, name, args, kwargs)
 
