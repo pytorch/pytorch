@@ -80,6 +80,10 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_cuda": 4,
     "test_sgd_cpu": 4,
     "test_rmsprop_tensor_lr_capturable_foreach_cuda": 4,
+    "test_adagrad_initial_accumulator_value_weight_decay_foreach_cuda": 3,
+    "test_adagrad_lr_decay_weight_decay_foreach_cuda": 3,
+    "test_adagrad_weight_decay_foreach_cuda": 3,
+    "test_adagrad_weight_decay_maximize_foreach_cuda": 3,
 }
 
 # also tracks currently supported optimizers
@@ -90,7 +94,7 @@ KERNEL_COUNTS = {
     Rprop: KernelCounts(multitensor=2, singletensor=8),
     RMSprop: KernelCounts(multitensor=2, singletensor=8),
     Adadelta: KernelCounts(multitensor=2, singletensor=8),
-    Adagrad: KernelCounts(multitensor=5, singletensor=8),
+    Adagrad: KernelCounts(multitensor=2, singletensor=8),
     SGD: KernelCounts(multitensor=1, singletensor=8),
     ASGD: KernelCounts(multitensor=2, singletensor=11),
     RAdam: KernelCounts(multitensor=2, singletensor=8),
@@ -433,14 +437,12 @@ class CompiledOptimizerTests(TestCase):
     test_rprop_recompile = make_recompile_test(Rprop, lr=0.01)
     test_rmsprop_recompile = make_recompile_test(RMSprop, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
-    test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
-    test_asgd_recompile_default = make_recompile_test(ASGD, kernel_count=2, lr=0.01)
+    test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)
+    test_asgd_recompile_default = make_recompile_test(ASGD, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
         ASGD, kernel_count=11, lr=0.01, foreach=False
     )
-    test_asgd_recompile_foreach = make_recompile_test(
-        ASGD, kernel_count=2, lr=0.01, foreach=True
-    )
+    test_asgd_recompile_foreach = make_recompile_test(ASGD, lr=0.01, foreach=True)
     test_sgd_recompile_single = make_recompile_test(
         SGD, kernel_count=4, lr=0.01, foreach=False
     )

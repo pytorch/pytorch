@@ -89,6 +89,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if name == "_init_group":
             try:
+                self.move_step_if_cpu()
                 py_args, py_kwargs = self.get_python_args(*args, **kwargs)
                 ret_val = self.value._init_group(*py_args, **py_kwargs)
                 self.map_sources_and_install_guards(tx)
@@ -176,6 +177,16 @@ class OptimizerVariable(UserDefinedObjectVariable):
         new_kwargs = {k: map_arg(v) for k, v in kwargs.items()}
 
         return new_args, new_kwargs
+
+    # If users load an old state dictionary,
+    # it's possible that step could be on the cpu
+    # if this is the case, move it to the GPU
+    # corresponding to the parameter
+    # in most cases this is a no-op because the state is empty
+    def move_step_if_cpu(self):
+        for p, state in self.value.state.items():
+            if "step" in state and state["step"].is_cpu:
+                state["step"] = state["step"].to(p.device)
 
     def map_sources_and_install_guards(self, tx):
         from ..decorators import mark_static_address
