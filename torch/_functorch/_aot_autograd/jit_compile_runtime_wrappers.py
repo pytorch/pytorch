@@ -357,7 +357,19 @@ def aot_dispatch_autograd(
                 == len(fw_metadata.input_info) + inner_meta.num_outputs_rng_offset
             )
             for i, (bw_out) in enumerate(bw_outs):
-                if bw_out is None:
+                # (1) No need to detach if our input already did not require grad.
+                # (2) If our input experiences a metadata mutation inside the graph (e.g. set_()),
+                #     we *must* not detach, otherwise it will be the detach'd input that gets the metadata mutation
+                metadata_mutation_in_graph = (
+                    fw_metadata.input_info[i].mutation_type
+                    == MutationType.MUTATED_IN_GRAPH
+                    and fw_metadata.input_info[i].mutates_storage_metadata
+                )
+                if (
+                    bw_out is None
+                    and fw_metadata.input_info[i].requires_grad
+                    and not metadata_mutation_in_graph
+                ):
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:
