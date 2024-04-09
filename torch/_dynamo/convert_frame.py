@@ -153,35 +153,42 @@ def preserve_global_state(fn):
     def _fn(*args, **kwargs):
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
-        prior_inference_mode = torch.is_inference_mode_enabled()
-        prior_deterministic = torch.are_deterministic_algorithms_enabled()
-        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-        py_rng_state = random.getstate()
-        torch_rng_state = torch.random.get_rng_state()
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.cuda.get_rng_state()
-        allow_tf32 = torch._C._get_cublas_allow_tf32()
-        prior_fwd_from_src = torch.fx.graph_module._forward_from_src
-        torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
-        cleanup = setup_compile_debug()
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            cleanup.close()
-            torch._C._set_grad_enabled(prior_grad_mode)
-            torch.torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
-            torch.use_deterministic_algorithms(
-                prior_deterministic, warn_only=prior_warn_only
-            )
-            random.setstate(py_rng_state)
-            torch.random.set_rng_state(torch_rng_state)
+        # Just in case we get left in a bad dispatch state we want to restore
+        # it. This can happen because the dispatch bits aren't a true
+        # stack/counter - so we can't just increment/decrement them as we enter
+        # and leave.
+        with torch._C._PreserveDispatchKeyGuard():
+            prior_inference_mode = torch.is_inference_mode_enabled()
+            prior_deterministic = torch.are_deterministic_algorithms_enabled()
+            prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+            py_rng_state = random.getstate()
+            torch_rng_state = torch.random.get_rng_state()
             if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
-            torch._C._set_cublas_allow_tf32(allow_tf32)
-            torch.fx.graph_module._forward_from_src = prior_fwd_from_src
-            assert (
-                guards.check()
-            ), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                cuda_rng_state = torch.cuda.get_rng_state()
+            allow_tf32 = torch._C._get_cublas_allow_tf32()
+            prior_fwd_from_src = torch.fx.graph_module._forward_from_src
+            torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
+            cleanup = setup_compile_debug()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                cleanup.close()
+                torch._C._set_grad_enabled(prior_grad_mode)
+                torch.torch.autograd.grad_mode._enter_inference_mode(
+                    prior_inference_mode
+                )
+                torch.use_deterministic_algorithms(
+                    prior_deterministic, warn_only=prior_warn_only
+                )
+                random.setstate(py_rng_state)
+                torch.random.set_rng_state(torch_rng_state)
+                if torch.cuda.is_available():
+                    torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+                torch._C._set_cublas_allow_tf32(allow_tf32)
+                torch.fx.graph_module._forward_from_src = prior_fwd_from_src
+                assert (
+                    guards.check()
+                ), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
