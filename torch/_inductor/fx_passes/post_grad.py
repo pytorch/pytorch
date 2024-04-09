@@ -63,7 +63,6 @@ pass_patterns = [
 ]
 # patterns applied only in inference
 inference_patterns = PatternMatcherPass()
-decompose_mm_pass = PatternMatcherPass()
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -103,7 +102,6 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 ] = upload_graph(gm.graph)
         if is_inference:
             inference_patterns.apply(gm.graph)  # type: ignore[arg-type]
-        decompose_mm_pass.apply(gm.graph)  # type: ignore[arg-type]
 
     if config._fuse_ddp_communication:
         fuse_ddp_communication(
