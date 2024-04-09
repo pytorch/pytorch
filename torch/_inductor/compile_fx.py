@@ -32,11 +32,9 @@ from torch._dynamo import (
     utils as dynamo_utils,
 )
 from torch._dynamo.utils import (
-    counters,
     detect_fake_mode,
     flatten_graph_inputs,
     lazy_format_graph_code,
-    optimus_scuba_log,
 )
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
@@ -48,7 +46,7 @@ from torch._inductor.utils import BoxedBool, count_tangents
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._utils_internal import compiletime_sl_profile_meta, signpost_event
+from torch._utils_internal import compiletime_sl_profile_meta
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -72,7 +70,7 @@ from .utils import (
 from .virtualized import V
 
 if config.is_fbcode():
-    from torch._inductor.fb.utils import time_and_log
+    from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
 else:
     # no-op decorator
     def time_and_log(attr: str, extra_loggings: Optional[Dict[str, str]] = None):
@@ -677,13 +675,8 @@ def fx_codegen_and_compile(
             "inductor_post_grad_graph",
             payload_fn=lambda: gm.print_readable(print_output=False),
         )
-        optimus_scuba_log["inductor"] = counters["inductor"]
-        signpost_event(
-            "optimus",
-            "compile_fx",
-            optimus_scuba_log,
-        )
-        log.debug("optimus parameter sent to the scuba: %s", optimus_scuba_log)
+        if config.is_fbcode():
+            log_optimus_to_scuba()
 
     with V.set_fake_mode(fake_mode):
         const_output_index = None
