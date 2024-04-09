@@ -19670,12 +19670,14 @@ op_db: List[OpInfo] = [
         backward_dtypes=integral_types_and(torch.bool),
         supports_out=False,
         supports_autograd=False,
+        supports_cow_input_no_materialize=False,
         skips=(
             # Skip due to NotImplementedError for MPS device.
             DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
             # vmap: calling random operator not supported
             DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
             DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestInductorOpInfo', 'test_comprehensive'),
         ),
     ),
     OpInfo(
