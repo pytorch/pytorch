@@ -158,6 +158,11 @@ class UserError(Unsupported):
         self.message = msg
 
 
+class UserStopIteration(TorchDynamoException):
+    def __init__(self):
+        super().__init__("unhandled `raise StopIteration`")
+
+
 class UncapturedHigherOrderOpError(TorchDynamoException):
     pass
 

@@ -45,6 +45,7 @@ import torch._inductor.test_operators
 import torch.distributed
 import torch.utils._content_store
 from ..utils import _config_module
+from .resume_execution import TORCH_DYNAMO_RESUME_IN_PREFIX
 from .utils import getfile, hashable, NP_SUPPORTED_MODULES, unwrap_if_wrapper
 
 from .variables import (
@@ -196,17 +197,17 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms._wrap_all_tensors": UserFunctionVariable,
     "torch._functorch.eager_transforms._wrap_tensor_for_grad": UserFunctionVariable,
     # functorch/jacrev
-    "torch._functorch.eager_transforms.jacrev": UserFunctionVariable,
+    "torch._functorch.eager_transforms.jacrev": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms.error_if_complex": UserFunctionVariable,
     "torch._functorch.eager_transforms._chunked_standard_basis_for_": UserFunctionVariable,
     "torch._functorch.eager_transforms._safe_zero_index": UserFunctionVariable,
     # functorch/vjp
-    "torch._functorch.eager_transforms.vjp": UserFunctionVariable,
+    "torch._functorch.eager_transforms.vjp": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms._vjp_with_argnums": UserFunctionVariable,
     "torch._functorch.eager_transforms.assert_non_empty_tensor_output": UserFunctionVariable,
     # functorch/jvp
     "torch._functorch.eager_transforms._jvp_with_argnums": UserFunctionVariable,
-    "torch._functorch.eager_transforms.jvp": UserFunctionVariable,
+    "torch._functorch.eager_transforms.jvp": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms._replace_args": UserFunctionVariable,
     "torch._functorch.eager_transforms.safe_unpack_dual": UserFunctionVariable,
     "torch._functorch.eager_transforms.assert_non_empty_list_of_tensors": UserFunctionVariable,
@@ -216,11 +217,11 @@ manual_torch_name_rule_map = {
     "torch.autograd.forward_ad.make_dual": UserFunctionVariable,
     "torch.autograd.forward_ad.unpack_dual": UserFunctionVariable,
     # functorch/jacfwd
-    "torch._functorch.eager_transforms.jacfwd": UserFunctionVariable,
+    "torch._functorch.eager_transforms.jacfwd": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms._construct_standard_basis_for": UserFunctionVariable,
     "torch._functorch.eager_transforms.safe_unflatten": UserFunctionVariable,
     # functorch/hessian
-    "torch._functorch.eager_transforms.hessian": UserFunctionVariable,
+    "torch._functorch.eager_transforms.hessian": FunctorchHigherOrderVariable,
     # functorch/deprecated
     "torch._functorch.deprecated.jvp": UserFunctionVariable,
     "torch._functorch.deprecated.hessian": UserFunctionVariable,
@@ -252,8 +253,11 @@ manual_torch_name_rule_map = {
     "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
     # avoid skipping user defined modules in distributed unit tests
     "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
+    f"torch/testing/_internal/common_fsdp.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch/testing/_internal/distributed/_tensor/common_dtensor.py#forward": UserFunctionVariable,
+    f"torch/testing/_internal/distributed/_tensor/common_dtensor.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
+    f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
 }
 
 
@@ -2586,6 +2590,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.mps.set_per_process_memory_fraction",
         "torch.mps.set_rng_state",
         "torch.mps.synchronize",
+        "torch.nested._internal.nested_tensor.buffer_from_jagged",
         "torch.nested._internal.nested_tensor.get_tensor_symint",
         "torch.nested._internal.nested_tensor.is_expandable_to",
         "torch.nested._internal.nested_tensor.jagged_from_list",
@@ -3194,6 +3199,7 @@ MOD_INLINELIST = {
     "torch._dynamo.comptime",
     "torch._dynamo.polyfill",
     "torch._functorch.vmap",
+    "torch._library.custom_ops",
     "torch._functorch.eager_transforms",
     "torch._inductor.test_operators",
     "torch.amp.autocast_mode",
@@ -3313,12 +3319,12 @@ def check_file(filename, is_inlined_call=False):
     if any(filename.startswith(d) for d in get_legacy_mod_inlinelist()):
         return SkipResult(
             False,
-            "inlined according trace_rules.LEGACY_MOD_INLINELIST",
+            "LEGACY_MOD_INLINELIST",
         )
     if is_inlined_call and is_torch_inline_allowed(filename):
         return SkipResult(
             False,
-            "inlined according trace_rules.MOD_INLINELIST",
+            "MOD_INLINELIST",
         )
     if (
         is_fbcode
@@ -3327,10 +3333,10 @@ def check_file(filename, is_inlined_call=False):
     ):
         return SkipResult(
             True,
-            "skipped according trace_rules.FBCODE_SKIP_DIRS",
+            "FBCODE_SKIP_DIRS",
         )
     if bool(SKIP_DIRS_RE.match(filename)):
-        return SkipResult(True, "skipped according trace_rules.SKIP_DIRS")
+        return SkipResult(True, "SKIP_DIRS")
     else:
         return SkipResult(False, "inlined by default")
 
@@ -3396,19 +3402,20 @@ def check_verbose(obj, is_inlined_call=False):
         fi = FunctionInfo(obj, None, getfile(obj), None)
 
     # Consulte the central trace rules defined in torch._dynamo.trace_rules.
+    reasons: Set[str] = set()
     rule = torch._dynamo.trace_rules.lookup_inner(
-        fi.py_obj, fi.name, fi.filename, is_inlined_call
+        fi.py_obj, fi.name, fi.filename, is_inlined_call, reasons
     )
     if rule in [UserFunctionVariable, FunctorchHigherOrderVariable]:
         return SkipResult(
             False,
-            "inlined according trace_rules.lookup",
+            f"inlined according trace_rules.lookup {reasons.pop()}",
         )
     else:
         assert rule == SkipFunctionVariable, rule
         return SkipResult(
             True,
-            "skipped according trace_rules.lookup",
+            f"skipped according trace_rules.lookup {reasons.pop()}",
         )
 
 
@@ -3467,36 +3474,60 @@ def lookup(obj):
     return lookup_inner(obj)
 
 
-def lookup_inner(obj, name=None, filename=None, is_direct_call=True):
+def lookup_inner(
+    obj,
+    name=None,
+    filename=None,
+    is_direct_call=True,
+    reasons: Union[None, Set[str]] = None,
+):
     # Step 1: lookup obj's tracing rule in `torch_name_rule_map`.
     # The rules defined in `torch_name_rule_map` mainly includes two parts:
     # - Manually defined rules for any functions.
     # - The list of torch in graph functions.
     if not hashable(obj):
+        if reasons is not None:
+            reasons.add("obj is not hashable")
         return None
     if obj is not None:
         if is_aten_op_or_tensor_method(obj):
             return TorchInGraphFunctionVariable
         rule = get_torch_obj_rule_map().get(obj, None)
         if rule is not None:
+            if reasons is not None:
+                reasons.add("get_torch_obj_rule_map")
             return rule
     elif name is not None and filename is not None and not is_direct_call:
-        rule = get_torch_obj_rule_map().get(filename + "#" + name, None)
+        if name.startswith(TORCH_DYNAMO_RESUME_IN_PREFIX):
+            rule = get_torch_obj_rule_map().get(
+                filename + "#" + TORCH_DYNAMO_RESUME_IN_PREFIX, None
+            )
+        else:
+            rule = get_torch_obj_rule_map().get(filename + "#" + name, None)
         if rule is not None:
+            if reasons is not None:
+                reasons.add("get_torch_obj_rule_map")
             return rule
 
     # Step 2: lookup obj's tracing rule by function name.
     if is_direct_call:
         if name == "patched_init":
+            if reasons is not None:
+                reasons.add("func name is patched_init")
             return SkipFunctionVariable
         elif name == "__torch_function__":
+            if reasons is not None:
+                reasons.add("func name is __torch_function__")
             return UserFunctionVariable
 
     # Step 3: lookup obj's tracing rule by filename.
     if filename is None:
         filename = getfile(obj)
 
-    if check_file(filename, is_direct_call).skipped:
+    skip_result = check_file(filename, is_direct_call)
+    if reasons is not None:
+        reasons.add(skip_result.reason)
+    if skip_result.skipped:
         return SkipFunctionVariable
     else:
         return UserFunctionVariable
