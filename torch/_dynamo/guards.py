@@ -1719,10 +1719,6 @@ class CheckFunctionManager:
         # Break retain cycle. See test_release_input_memory
         w_builder = weakref.ref(builder, cleanup_builder)
 
-        # Delay the duplicate input guards because the sort_key does not give
-        # correct sequence.
-        duplicate_input_guards = set()
-
         for guard in sorted(guards or [], key=Guard.sort_key):
             if (
                 not config.guard_nn_modules
@@ -1735,17 +1731,6 @@ class CheckFunctionManager:
             ):
                 continue
 
-            # Delay the duplicate input guards
-            if isinstance(guard.create_fn, functools.partial):
-                fn = guard.create_fn.func
-                if fn is GuardBuilder.DUPLICATE_INPUT:
-                    duplicate_input_guards.add(guard)
-                    continue
-
-            guard.create(builder)
-
-        # Build duplicate input guards
-        for guard in sorted(duplicate_input_guards, key=Guard.sort_key):
             guard.create(builder)
 
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
