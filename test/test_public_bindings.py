@@ -227,7 +227,6 @@ class TestPublicBindings(TestCase):
             "StaticModule",
             "Stream",
             "StreamObjType",
-            "Event",
             "StringType",
             "SUM",
             "SymFloat",
