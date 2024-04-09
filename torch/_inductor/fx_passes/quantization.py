@@ -2194,6 +2194,7 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
                     new_kwargs = map_arg(new_quant_node.kwargs, maybe_replace_node)
                     new_quant_node.args = new_args
                     new_quant_node.kwargs = new_kwargs
+                    graph_module.graph.erase_node(quant_node)
 
-    graph_module.graph.eliminate_dead_code()
+    graph_module.graph.lint()
     graph_module.recompile()
