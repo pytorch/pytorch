@@ -26,7 +26,7 @@ from .dicts import (
     DefaultDictVariable,
     SetVariable,
 )
-from .distributed import BackwardHookVariable, DistributedVariable
+from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
     FunctoolsPartialVariable,
     NestedUserFunctionVariable,
@@ -70,6 +70,7 @@ from .misc import (
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
+    StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
     TypingVariable,
@@ -129,6 +130,8 @@ __all__ = [
     "NNModuleVariable",
     "NumpyNdarrayVariable",
     "NumpyVariable",
+    "OptimizerVariable",
+    "PlacementVariable",
     "PythonModuleVariable",
     "RangeVariable",
     "RemovableHandleVariable",
@@ -137,6 +140,7 @@ __all__ = [
     "SDPAParamsVariable",
     "SkipFunctionVariable",
     "SliceVariable",
+    "StopIterationVariable",
     "StringFormatVariable",
     "SuperVariable",
     "TensorVariable",
@@ -153,5 +157,4 @@ __all__ = [
     "UserMethodVariable",
     "VariableTracker",
     "WithExitFunctionVariable",
-    "OptimizerVariable",
 ]
