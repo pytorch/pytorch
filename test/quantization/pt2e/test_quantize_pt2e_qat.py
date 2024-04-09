@@ -180,6 +180,8 @@ class PT2EQATTestCase(QuantizationTestCase):
         has_bias: bool = True,
         is_cuda: bool = False,
         expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
+        # TODO: set this to true by default
+        verify_convert: bool = False,
     ):
         self._verify_symmetric_xnnpack_qat_graph_helper(
             m,
@@ -189,6 +191,7 @@ class PT2EQATTestCase(QuantizationTestCase):
             has_bias=has_bias,
             is_cuda=is_cuda,
             expected_conv_literal_args=expected_conv_literal_args,
+            verify_convert=verify_convert,
         )
         self._verify_symmetric_xnnpack_qat_graph_helper(
             m,
@@ -198,6 +201,7 @@ class PT2EQATTestCase(QuantizationTestCase):
             has_bias=has_bias,
             is_cuda=is_cuda,
             expected_conv_literal_args=expected_conv_literal_args,
+            verify_convert=verify_convert,
         )
 
     def _verify_symmetric_xnnpack_qat_graph_helper(
@@ -209,6 +213,7 @@ class PT2EQATTestCase(QuantizationTestCase):
         has_bias: bool = True,
         is_cuda: bool = False,
         expected_conv_literal_args: Optional[Tuple[Any, ...]] = None,
+        verify_convert: bool = False,
     ):
         """
         Verify that the graph module matches the fused QAT [conv - bn (- relu)] pattern
@@ -347,6 +352,47 @@ class PT2EQATTestCase(QuantizationTestCase):
         self.assertEqual(bn_running_var_add_node.target, torch.ops.aten.add.Tensor)
         self.assertTrue("bn_running_var" in bn_running_var_node.target)
         self.assertEqual(eps, 1e-5)
+
+        # Optionally verify convert
+        if not verify_convert:
+            return
+        m = convert_pt2e(m)
+        m(*example_inputs)
+
+        # Verify: conv [- relu] - q - dq - output
+        output_node = list(m.graph.nodes)[-1]
+        output_dq_node = output_node.args[0][0]
+        output_q_node = output_dq_node.args[0]
+        if has_relu:
+            relu_node = output_q_node.args[0]
+            self.assertEqual(relu_node.target, torch.ops.aten.relu.default)
+            conv_node = relu_node.args[0]
+        else:
+            conv_node = output_q_node.args[0]
+        self.assertEqual(output_dq_node.target, torch.ops.quantized_decomposed.dequantize_per_tensor.default)
+        self.assertEqual(output_q_node.target, torch.ops.quantized_decomposed.quantize_per_tensor.default)
+        self.assertTrue(_is_conv_node(conv_node))
+        self.assertEqual(list(output_dq_node.args[-3:]), [-128, 127, torch.int8])
+        self.assertEqual(list(output_q_node.args[-3:]), [-128, 127, torch.int8])
+
+        # Verify: conv_weight - weight_dq - conv
+        conv_weight_dq = conv_node.args[1]
+        conv_weight = conv_weight_dq.args[0]
+        if is_per_channel:
+            expected_weight_target = torch.ops.quantized_decomposed.dequantize_per_channel.default
+        else:
+            expected_weight_target = torch.ops.quantized_decomposed.dequantize_per_tensor.default
+        self.assertEqual(conv_weight_dq.target, expected_weight_target)
+        self.assertEqual(list(conv_weight_dq.args[-3:]), [-127, 127, torch.int8])
+        self.assertEqual(conv_weight.op, "get_attr")
+
+        # Verify: input - q - dq - conv
+        input_dq_node = conv_node.args[0]
+        input_q_node = input_dq_node.args[0]
+        self.assertEqual(input_dq_node.target, torch.ops.quantized_decomposed.dequantize_per_tensor.default)
+        self.assertEqual(input_q_node.target, torch.ops.quantized_decomposed.quantize_per_tensor.default)
+        self.assertEqual(list(input_dq_node.args[-3:]), [-128, 127, torch.int8])
+        self.assertEqual(list(input_q_node.args[-3:]), [-128, 127, torch.int8])
 
 
 class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
@@ -764,11 +810,15 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
 
     def test_qat_conv_transpose_bn(self):
         m = self._get_conv_bn_model(transpose=True)
-        self._verify_symmetric_xnnpack_qat_graph(m, self.example_inputs, has_relu=False)
+        self._verify_symmetric_xnnpack_qat_graph(
+            m, self.example_inputs, has_relu=False, verify_convert=True,
+        )
 
     def test_qat_conv_transpose_bn_relu(self):
         m = self._get_conv_bn_model(has_relu=True, transpose=True)
-        self._verify_symmetric_xnnpack_qat_graph(m, self.example_inputs, has_relu=True)
+        self._verify_symmetric_xnnpack_qat_graph(
+            m, self.example_inputs, has_relu=True, verify_convert=True,
+        )
 
 
 # TODO: enable this in the next PR
