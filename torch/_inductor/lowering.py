@@ -24,7 +24,6 @@ from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
     check,
-    dtype_to_type,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     get_computation_dtype,
