@@ -530,7 +530,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
         @register(torch._assert, torch._check)
-        def handle_assert(self, tx, condition, message):
+        def handle_assert(self, tx, condition, message=None):
             if (condition.is_python_constant() and condition.as_python_constant()) or (
                 isinstance(condition, variables.SymNodeVariable)
                 and condition.evaluate_expr()
