@@ -447,6 +447,12 @@ alias each other from a multi-output view call"
                     output_type = OutputType.is_input
                 else:
                     output_type = OutputType.alias_of_input
+            elif functional_tensor_storage_changed and id(o) in inp_tensor_ids:
+                # When there is a set_() on an input, we cannot rely on checking storages
+                # to detect if we are returning an input (since the inputs storage is different)
+                assert curr_storage is not None
+                base_idx = inp_storage_refs[curr_storage]
+                output_type = OutputType.is_input
 
             # We only need to handle the intermediate base case when both
             # the intermediate base and the output require gradients.

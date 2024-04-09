@@ -533,7 +533,8 @@ def create_functionalized_fn(
                     meta.input_info[info.base_idx].mutation_type
                     == MutationType.MUTATED_IN_GRAPH
                 ):
-                    flat_outs[i] = args[info.base_idx]
+                    fw_args = args[0] if trace_joint else args
+                    flat_outs[i] = fw_args[info.base_idx]
             return pytree.tree_unflatten(flat_outs, outs_spec)
 
         return pytree.tree_map(from_fun, f_outs)
