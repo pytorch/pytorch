@@ -78,7 +78,7 @@ def create_runtime_wrapper(
         # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
         if num_tokens > 0:
             old_args = args
-            args = [*[torch.empty(0)] * num_tokens, *args]
+            args = [*[torch.empty(0)] * num_tokens, *args]  # only for flattened
             old_args.clear()
 
         if trace_joint:
@@ -105,14 +105,14 @@ def create_runtime_wrapper(
                         compiled_fn,
                         args,
                         disable_amp=disable_amp,
-                        steal_args=True, # only for flattened
+                        steal_args=True,  # only for flattened
                     )
             else:
                 all_outs = call_func_at_runtime_with_args(
                     compiled_fn,
                     args,
                     disable_amp=disable_amp,
-                    steal_args=True, # only for flattened
+                    steal_args=True,  # only for flattened
                 )
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
