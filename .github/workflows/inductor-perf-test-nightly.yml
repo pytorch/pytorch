@@ -20,12 +20,12 @@ on:
         description: Run inductor_default?
         required: false
         type: boolean
-        default: true
+        default: false
       dynamic:
         description: Run inductor_dynamic_shapes?
         required: false
         type: boolean
-        default: true
+        default: false
       cudagraphs:
         description: Run inductor_cudagraphs?
         required: false

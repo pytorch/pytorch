@@ -1,5 +1,7 @@
 # Owner(s): ["module: dynamo"]
+import copy
 import re
+import unittest
 from textwrap import dedent
 from unittest.mock import patch
 
@@ -11,6 +13,8 @@ import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._dynamo.testing import CompileCounter, expectedFailureDynamic, rand_strided
 from torch._functorch.aot_autograd import _aot_export_function, create_functional_call
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.profiler import profile
 from torch.testing._internal.common_utils import compare_equal_outs_and_grads
 
@@ -25,7 +29,7 @@ def maybe_dupe_op(x):
 
 
 aten = torch.ops.aten
-lib = torch.library.Library("custom", "DEF")
+lib = torch.library.Library("custom", "DEF")  # noqa: TOR901
 lib.define("maybe_dupe_op(Tensor a) -> (Tensor, Tensor)")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "CPU")
 lib.impl("maybe_dupe_op", maybe_dupe_op, "Meta")
@@ -687,6 +691,27 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         actual_output = aot_fn()
         self.assertEqual(ref_output, actual_output)
 
+    def test_grad_inputs_alias_inputs(self):
+        class Test(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x)
+                return y
+
+            @staticmethod
+            def backward(ctx, grad):
+                (x,) = ctx.saved_tensors
+                return x, grad
+
+        def fn(x, y):
+            return Test.apply(x, y)
+
+        x = torch.ones(1, requires_grad=True)
+        y = torch.ones(1, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="aot_eager")
+        out = compiled_fn(x, y)
+        out.sum().backward()
+
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     @patch("torch._functorch.config.debug_assert", True)
@@ -1040,6 +1065,138 @@ SeqNr|OrigAten|SrcFn
             RuntimeError, "is being used in an in-place operation"
         ):
             f(x)
+
+    def test_aot_autograd_expand_mutation_functionalizes(self):
+        def fn(x):
+            y = x.expand(3, *x.shape)
+            y[0, 0].add_(5)
+            return y
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+
+        x = torch.arange(6)
+        x_opt = x.clone().detach()
+        self.assertEqual(fn(x), opt_fn(x_opt))
+        self.assertEqual(x, x_opt)
+
+    def test_aot_autograd_expand_mutation_backwards(self):
+        def fn(x, z):
+            y = x.expand(3, *x.shape)
+            y[1, 1].mul_(5)
+            ret = y * z
+            return ret
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+
+        x = torch.arange(6, dtype=torch.float)
+        z = x.clone().detach()
+        x_opt = x.clone().detach()
+        z_opt = x.clone().detach()
+
+        z.requires_grad = True
+        z_opt.requires_grad = True
+
+        res = fn(x, z)
+        opt_res = opt_fn(x_opt, z_opt)
+
+        self.assertEqual(res, opt_res)
+
+        res.sum().backward()
+        opt_res.sum().backward()
+
+        self.assertEqual(x, x_opt)
+        self.assertEqual(z.grad, z_opt.grad)
+
+    def test_data_ptr_access_copy(self):
+        import torch._functorch.config as _config
+
+        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+            with FakeTensorMode():
+                x = torch.randn(3)
+                y = copy.copy(x)
+        self.assertEqual(y.shape, x.shape)
+
+    def test_data_ptr_access_fails_in_forward(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::foo", "(Tensor x) -> Tensor", lib=lib)
+
+            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            def _(x):
+                x.data_ptr()
+                return x.clone()
+
+            x = torch.randn(3)
+
+            def data_ptr_graph_input(x):
+                r0 = torch.ops.mylib.foo(x)
+                return r0
+
+            def data_ptr_graph_intermediate(x):
+                y = x.clone()
+                r0 = torch.ops.mylib.foo(y)
+                return r0
+
+            tests = [data_ptr_graph_input, data_ptr_graph_intermediate]
+
+            def ctx():
+                return self.assertRaisesRegex(
+                    RuntimeError, "Cannot access data pointer"
+                )
+
+            for f in tests:
+                with ctx():
+                    make_fx(f, tracing_mode="fake")(x)
+                with ctx():
+                    make_fx(f, tracing_mode="symbolic")(x)
+                with ctx():
+                    torch.compile(f, backend="eager", fullgraph=True)(x)
+
+    def test_data_ptr_access_fails_in_backward(self):
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            torch.library.define("mylib::foo", "(Tensor x) -> Tensor", lib=lib)
+
+            backward_called = False
+
+            class Foo(torch.autograd.Function):
+                @staticmethod
+                def forward(ctx, x):
+                    return x.clone()
+
+                @staticmethod
+                def backward(ctx, grad):
+                    nonlocal backward_called
+                    backward_called = True
+                    grad.data_ptr()
+                    return grad.clone()
+
+            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            def _(x):
+                return Foo.apply(x)
+
+            def f(x):
+                return torch.ops.mylib.foo(x)
+
+            x = torch.randn(3, requires_grad=True)
+            with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer"):
+                y = torch.compile(f, backend="aot_eager", fullgraph=True)(x)
+            self.assertTrue(backward_called)
+
+    # We don't know how to catch multiple mutations to the same memory location
+    @unittest.expectedFailure
+    def test_aot_autograd_expand_mutation_error(self):
+        def fn(x):
+            y = x.expand(3, *x.shape)
+            y[0:3, 0].add_(5)
+            return y
+
+        opt_fn = torch.compile(fn, backend="aot_eager")
+
+        x = torch.arange(6)
+        x_opt = x.clone().detach()
+        with self.assertRaises(Exception):
+            fn(x)
+        with self.assertRaises(Exception):
+            opt_fn(x_opt)
 
 
 if __name__ == "__main__":

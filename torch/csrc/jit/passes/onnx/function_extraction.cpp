@@ -877,9 +877,7 @@ std::tuple<FunctionExtractor::scope_ctx_map, node_list> FunctionExtractor::
     }
 
     for (auto* sub_b : n->blocks()) {
-      scope_ctx_map subblock_scope_ctxs;
-      node_list subblock_no_scope_nlist;
-      std::tie(subblock_scope_ctxs, subblock_no_scope_nlist) =
+      auto [subblock_scope_ctxs, subblock_no_scope_nlist] =
           PartitionNodesByScope(sub_b);
 
       for (auto& it : subblock_scope_ctxs) {

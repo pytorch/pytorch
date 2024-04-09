@@ -11,7 +11,7 @@ import torch.nn.init as init
 import torch.nn.utils.parametrize as parametrize
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, skipIfNoLapack, \
-    TemporaryFileName, instantiate_parametrized_tests, set_default_dtype
+    TemporaryFileName, instantiate_parametrized_tests, set_default_dtype, skipIfTorchDynamo
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_nn import NNTestCase
@@ -1387,6 +1387,21 @@ class TestNNParametrization(NNTestCase):
         out_hat = torch.nn.functional.linear(input, _weight, _bias)
         expect_out = m(input)
         self.assertEqual(expect_out, out_hat)
+
+    @skipIfTorchDynamo("Test does not work with TorchDynamo")
+    def test_new_spectral_norm_value(self):
+        # a test that the spectral norm (= top singular value)
+        # is in fact properly calculated, using example of a simple diagonal matrix.
+        for dtype in (torch.float, torch.cfloat):
+            m = nn.Linear(2, 2, dtype=dtype)
+            with torch.no_grad():
+                # set weight to be diagonal
+                x = torch.diagonal(m.weight)
+                m.weight = nn.Parameter(torch.diag(x))
+                torch.nn.utils.parametrizations.spectral_norm(m)
+                # weights should be rescaled by spectral norm, (i.e., largest diagonal element in norm)
+                expected = torch.diag(x / x.abs().max())
+                self.assertEqual(m.weight.data, expected)
 
     @skipIfNoLapack
     def test_orthogonal_parametrization(self):
