@@ -2787,9 +2787,7 @@ class TestDistributions(DistributionsTestCase):
             scipy.stats.multivariate_normal(
                 mean.detach().numpy(), cov.detach().numpy()
             ),
-            "LowRankMultivariateNormal(loc={}, cov_factor={}, cov_diag={})".format(
-                mean, cov_factor, cov_diag
-            ),
+            f"LowRankMultivariateNormal(loc={mean}, cov_factor={cov_factor}, cov_diag={cov_diag})",
             multivariate=True,
         )
 
@@ -5959,9 +5957,7 @@ class TestNumericalStability(DistributionsTestCase):
             expected_value,
             atol=atol,
             rtol=0,
-            msg="Incorrect value for tensor type: {}. Expected = {}, Actual = {}".format(
-                type(x), expected_value, log_pdf
-            ),
+            msg=f"Incorrect value for tensor type: {type(x)}. Expected = {expected_value}, Actual = {log_pdf}",
         )
         if expected_gradient is not None:
             self.assertEqual(
@@ -5969,9 +5965,7 @@ class TestNumericalStability(DistributionsTestCase):
                 expected_gradient,
                 atol=atol,
                 rtol=0,
-                msg="Incorrect gradient for tensor type: {}. Expected = {}, Actual = {}".format(
-                    type(x), expected_gradient, p.grad
-                ),
+                msg=f"Incorrect gradient for tensor type: {type(x)}. Expected = {expected_gradient}, Actual = {p.grad}",
             )
 
     def test_bernoulli_gradient(self):
