@@ -503,24 +503,18 @@ int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchK
   // Setting sequence number in the Autograd case to associate
   // the forward range with the corresponding Autograd's node
 
-  // the usual case, where we're dealing with Autograd dispatchKey
-  bool dispatchHasAutograd = isIncludedInAlias(dispatchKey, DispatchKey::Autograd);
-
-  // Note [Sequence Numbers for Python Subclasses]
-  // See https://github.com/pytorch/pytorch/issues/121758 for more details
-  // The first entry into the dispatch is usually going to be a call(), but
-  // after that we usually redispatch().
-  // We only profile call() and callBoxed(), not redispatch.*()
-  // dispatcher calls, and when running with python subclasses, the top-level
-  // call is a PythonTLSSnapshot call, not an Autograd call. That means that
-  // we need special handling for subclasses if we want to collect the
-  // sequence number for operators on python subclasses.
-  //
-  // This is the special case: if we're profiling a PythonTLSSnapshot call
-  // and we have an autograd dispatch key in the dispatchKeySet, then we'll
-  // also collect the sequence number
-  dispatchHasAutograd |=
-      (dispatchKey == DispatchKey::PythonTLSSnapshot && !(dispatchKeySet & autograd_dispatch_keyset).empty());
+  // Note: this records a sequence number for both Autograd keys, and for
+  // non-Autograd keys where the dispatchKeySet still contains an autograd key.
+  // This means that we might collect the same sequence nubmer two different
+  // events if they all occurred above Autograd and still had the Autograd
+  // dispatch key in the dispatch key set.
+  // However, this usually doesn't happen: normally the first call will
+  // go through the call() or callBoxed() path in the dispatcher, while
+  // subsequent redispatches go through redispatch() or redispatchBoxed().
+  // `call` has profiler instrumentation, whereas `redispatch` doesn't.
+  // So usually, we'll collect a sequence number on the first call() if the
+  // dispatch keys contain autograd, and not on subsequent redispatches.
+  bool dispatchHasAutograd = !(dispatchKeySet & autograd_dispatch_keyset).empty();
 
   if (dispatchHasAutograd && at::GradMode::is_enabled()) {
     seq_num = at::sequence_number::peek();
