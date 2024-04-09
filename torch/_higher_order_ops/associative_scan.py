@@ -29,9 +29,9 @@ aten = torch._ops.ops.aten
 
 
 def associative_scan(
+    combine_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
     input: torch.Tensor,
     dim: int,
-    combine_fn: Callable[[torch.Tensor, torch.Tensor], torch.Tensor],
 ) -> torch.Tensor:
     r"""
     Performs an inclusive scan with an associative pointwise combine function.
@@ -46,41 +46,41 @@ def associative_scan(
     ``torch.compile``. Further, only CUDA device codegen is supported at the moment.
 
     Args:
-        input (torch.Tensor): The input tensor
-        dim (int): the dimension to scan over
         combine_fn (Callable): A binary callable with type (Tensor, Tensor) -> Tensor,
             which is pure, pointwise, and satisfies the associative property.
             i.e. ``combine_fn(a, combine_fn(b, c)) == combine_fn(combine_fn(a, b), c)``
+        input (torch.Tensor): The input tensor
+        dim (int): the dimension to scan over
 
     Example::
 
         def add(x: torch.Tensor, y: torch.Tensor):
             return x + y
 
-        cumsum = associative_scan(x, dim, combine_fn=add)
+        cumsum = associative_scan(add, x, dim)
 
     """
 
-    torch._check(isinstance(input, torch.Tensor), "input must be a Tensor")
+    assert isinstance(input, torch.Tensor), "input must be a Tensor"
     dim = utils.canonicalize_dim(input.ndim, dim)
-    torch._check(callable(combine_fn), "combine_fn must be a callable")
+    assert callable(combine_fn), "combine_fn must be a callable"
 
     if torch._dynamo.is_compiling():
-        return associative_scan_op(input, dim, combine_fn)
+        return associative_scan_op(combine_fn, input, dim)
 
     if not torch._dynamo.is_dynamo_supported():
         raise RuntimeError("associative_scan requires dynamo support.")
 
     with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
         return torch.compile(associative_scan_op, fullgraph=True)(
-            input, dim, combine_fn
+            combine_fn, input, dim
         )
 
 
 associative_scan_op = HigherOrderOperator("associative_scan")
 
 
-def trace_associative_scan(proxy_mode, func_overload, input, dim, combine_fn):
+def trace_associative_scan(proxy_mode, func_overload, combine_fn, input, dim):
     pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
 
     with disable_proxy_modes_tracing():
@@ -97,30 +97,25 @@ def trace_associative_scan(proxy_mode, func_overload, input, dim, combine_fn):
         if node.op == "output":
             outputs.extend(node.args)
 
-    torch._check(
-        len(outputs) == 1,
-        lambda: f"expected combine_fn to have 1 output but got {len(outputs)}",
-    )
+    assert (
+        len(outputs) == 1
+    ), f"expected combine_fn to have 1 output but got {len(outputs)}"
 
     for o in outputs:
         o_meta = o.meta["tensor_meta"]
-        torch._check(
-            o_meta.dtype == input.dtype,
-            lambda: (
-                f"combine_fn output type mismatch, expected {input.dtype} "
-                + f"but got {o_meta.dtype}"
-            ),
+        assert o_meta.dtype == input.dtype, (
+            f"combine_fn output type mismatch, expected {input.dtype} "
+            + f"but got {o_meta.dtype}"
         )
-        torch._check(
-            o_meta.shape == (),
-            lambda: f"combine_fn must return a scalar tensor but got shape {o_meta.shape}",
-        )
+        assert (
+            o_meta.shape == ()
+        ), f"combine_fn must return a scalar tensor but got shape {o_meta.shape}"
 
     _, combine_graph_name = unique_graph_id(proxy_mode, prefix="scan_combine_graph")
 
     proxy_mode.tracer.root.register_module(combine_graph_name, combine_graph)
 
-    args = (input, dim, combine_graph)
+    args = (combine_graph, input, dim)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
     out_proxy = proxy_mode.tracer.create_proxy(
         "call_function", func_overload, proxy_args, {}, name="associative_scan"
@@ -133,7 +128,7 @@ def trace_associative_scan(proxy_mode, func_overload, input, dim, combine_fn):
 
 
 @associative_scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def associative_scan_op_dense(input, dim, combine_fn):
+def associative_scan_op_dense(combine_fn, input, dim):
     raise NotImplementedError("associative_scan is not implemented for eager")
 
 
@@ -143,31 +138,31 @@ associative_scan_op.py_impl(DispatchKey.Autograd)(
 
 
 @associative_scan_op.py_impl(ProxyTorchDispatchMode)
-def associative_scan_proxy_mode(mode, input, dim, combine_fn):
+def associative_scan_proxy_mode(mode, combine_fn, input, dim):
     if mode.enable_tracing:
-        return trace_associative_scan(mode, associative_scan_op, input, dim, combine_fn)
+        return trace_associative_scan(mode, associative_scan_op, combine_fn, input, dim)
     else:
-        return associative_scan_op(mode, associative_scan_op, input, dim, combine_fn)
+        return associative_scan_op(mode, associative_scan_op, combine_fn, input, dim)
 
 
 @associative_scan_op.py_impl(FakeTensorMode)
-def assoiciative_scan_fake_tensor_mode(mode, input, dim, combine_fn):
+def assoiciative_scan_fake_tensor_mode(mode, combine_fn, input, dim):
     with mode:
         return input.clone()
 
 
 @associative_scan_op.py_functionalize_impl
-def associative_scan_functionalize(ctx, input, dim, combine_fn):
+def associative_scan_functionalize(ctx, combine_fn, input, dim):
     unwrapped_input = ctx.unwrap_tensors(input)
     with ctx.redispatch_to_next() as m:
-        ret = associative_scan_op(unwrapped_input, dim, combine_fn)
+        ret = associative_scan_op(combine_fn, unwrapped_input, dim)
     return ctx.wrap_tensors(ret)
 
 
 @associative_scan_op.py_impl(torch._C._functorch.TransformType.Vmap)
-def associative_scan_batch_rule(interpreter, input, dim, combine_fn):
+def associative_scan_batch_rule(interpreter, combine_fn, input, dim):
     input_ = get_unwrapped(input)
     bdim = maybe_get_bdim(input)
-    res = associative_scan_op(input_, dim + (dim >= bdim), combine_fn)
+    res = associative_scan_op(combine_fn, input_, dim + (dim >= bdim))
     lvl = interpreter.level()
     return _add_batch_dim(res, bdim, lvl)
