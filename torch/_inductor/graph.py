@@ -16,6 +16,7 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
+from torch._higher_order_ops.effects import _EffectType
 from torch._logging import LazyString, trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
@@ -333,6 +334,8 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.init_backend_registration()
 
+        self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
+
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
         """
@@ -635,7 +638,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
         # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
-        if not isinstance(buffer, ir.ComputedBuffer) or not buffer.is_zero_elements():
+        if (
+            not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
+            and buffer.get_device() is not None
+        ):
             self.add_device_info(buffer.get_device())
         return name
 
@@ -911,6 +917,7 @@ class GraphLowering(torch.fx.Interpreter):
                     sympy.Expr,
                     sympy.logic.boolalg.Boolean,
                     int,
+                    ir.EffectfulKernel,
                 ),
             )
             for x in result
