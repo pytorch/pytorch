@@ -2643,20 +2643,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_lengthchecks_cuda(self):
-        target_lengths = [30, 25, 20]
-        input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (3, 29), dtype=torch.long, device='cuda')
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
-        with self.assertRaises(RuntimeError):
-            torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
+            for input_lengths in [[50, 50, 50], [-1, -1, -1]]:
+                targets = torch.randint(1, 15, (3, 29), dtype=torch.long, device='cuda')
+                log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
+                with self.assertRaises(RuntimeError):
+                    torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
     def test_CTCLoss_lengthchecks_cpu(self):
-        target_lengths = [30, 25, 20]
-        input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (3, 29), dtype=torch.int)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
-        with self.assertRaises(RuntimeError):
-            torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
+            for input_lengths in [[50, 50, 50], [-1, -1, -1]]:
+                targets = torch.randint(1, 15, (3, 29), dtype=torch.int)
+                log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+                with self.assertRaises(RuntimeError):
+                    torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_long_targets(self):
@@ -2697,6 +2697,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             res_gpu = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
         res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
         self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
+
+    def test_CTCLoss_zero_lengths(self):
+        devices = ['cpu']
+        devices += ['cuda'] if TEST_CUDA else []
+        N = 3
+        S = 2
+        C = 200
+        T = 1
+        target = torch.randint(low=1, high=C, size=(N, S), dtype=torch.int)
+        input_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
+        target_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
+        for device in devices:
+            inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+            res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
+            self.assertTrue((res == 0).all().item())
+            res.sum().backward()
+            self.assertTrue((inp.grad == 0).all().item())
+        target_lengths = torch.full(size=(N,), fill_value=1, dtype=torch.int)
+        for device in devices:
+            inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+            res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
+            self.assertTrue((res == torch.inf).all().item())
+            res.sum().backward()
+            self.assertTrue((inp.grad == 0).all().item())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_zero_infinity(self):
