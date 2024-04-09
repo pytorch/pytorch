@@ -2064,11 +2064,11 @@ RAIIAtenTensorHandle {output_arg}(
                     type_.getElementType(),
                     (torch.ListType, torch.TupleType, torch.DeviceObjType),
                 ):
-                    # For non-POD data types with auxiliary info, we need to hoist out the extra arguments.
                     arg_str = self.val_to_arg_str(val)
                     if val is None:
                         return "{arg_str}, 0"
                     else:
+                        # For datatypes with auxiliary info, we need to hoist out the extra arguments.
                         # NOTE: This only works if there is one additional argument, though it can easily be generalized.
                         array_ptr, len_ = arg_str.rsplit(", ")
                         self.writeline(f"auto {var_name} = {array_ptr};")
