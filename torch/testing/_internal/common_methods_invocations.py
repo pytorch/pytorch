@@ -11212,7 +11212,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_gradgrad=False,
            assert_autodiffed=False,
-           supports_cow_input_no_materialize_backward=False,
            sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
@@ -11939,7 +11938,6 @@ op_db: List[OpInfo] = [
     OpInfo('sparse.sampled_addmm',
            dtypes=floating_and_complex_types(),
            supports_autograd=True,
-           supports_cow_input_no_materialize_backward=False,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
                skipCUDAIf(not ((_get_torch_cuda_version() >= (11, 3))
@@ -11994,7 +11992,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_gradgrad=False,
            supports_forward_ad=False,
-           supports_cow_input_no_materialize_backward=False,
            sample_inputs_func=sample_inputs_sparse_mm_reduce,
            decorators=[onlyCPU],
            skips=(
@@ -12992,7 +12989,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        supports_cow_input_no_materialize_backward=False,
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-3)}),
@@ -13116,7 +13112,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            assert_jit_shape_analysis=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            sample_inputs_func=sample_inputs_native_layer_norm,
            error_inputs_func=error_inputs_native_layer_norm,
            skips=(
@@ -13136,7 +13131,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            allow_cow_input_materialize_forward=[3, 4],
-           supports_cow_input_no_materialize_backward=False,
+           allow_cow_input_materialize_backward=[3, 4],
            sample_inputs_func=sample_inputs_native_batch_norm,
            skips=(
                # NotImplementedError: Could not run
@@ -13165,7 +13160,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            allow_cow_input_materialize_forward=[3, 4],
-           supports_cow_input_no_materialize_backward=False,
+           allow_cow_input_materialize_backward=[3, 4],
            sample_inputs_func=sample_inputs__native_batch_norm_legit,
            skips=(
                # NotImplementedError: Could not run
@@ -13192,7 +13187,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            allow_cow_input_materialize_forward=[3, 4],
-           supports_cow_input_no_materialize_backward=False,
+           allow_cow_input_materialize_backward=[3, 4],
            sample_inputs_func=sample_inputs__batch_norm_with_update,
            skips=(
                # NotImplementedError: Could not run
@@ -13683,7 +13678,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            error_inputs_func=error_inputs_group_norm,
            decorators=[
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
@@ -13700,7 +13694,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            allow_cow_input_materialize_forward=['running_mean', 'running_var'],
-           supports_cow_input_no_materialize_backward=False,
            decorators=[
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
@@ -13720,7 +13713,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           supports_cow_input_no_materialize_backward=False,
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
@@ -15048,7 +15040,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            allow_cow_input_materialize_forward=[1, 2],
-           supports_cow_input_no_materialize_backward=False,
+           allow_cow_input_materialize_backward=[1, 2],
            sample_inputs_func=sample_inputs_batch_norm,
            skips=(
                # see https://github.com/pytorch/pytorch/issues/71286
@@ -15072,7 +15064,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            allow_cow_input_materialize_forward=[1, 2],
-           supports_cow_input_no_materialize_backward=False,
+           allow_cow_input_materialize_backward=[1, 2],
            decorators=[onlyCUDA, disablecuDNN],
            skips=(
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-04)}),
