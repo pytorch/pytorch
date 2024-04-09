@@ -1897,8 +1897,6 @@ def compile(model: Optional[Callable] = None, *,
     else:
         backend = _TorchCompileWrapper(backend, mode, options, dynamic)
 
-    from torch._dynamo import trace_rules
-    trace_rules.skip_module_hook_by_config(model)
     return torch._dynamo.optimize(backend=backend, nopython=fullgraph, dynamic=dynamic, disable=disable)(model)
 
 
