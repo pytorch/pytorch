@@ -417,7 +417,8 @@ ENFORCE_SAME_TENSOR_STORAGE = CodeTemplate(
     """\
 if (${tensor_name}_storage_saved.has_value() &&
     !at::impl::dispatch_mode_enabled() &&
-    !at::impl::tensor_has_dispatch(${tensor_name}))
+    !at::impl::tensor_has_dispatch(${tensor_name}) &&
+    !at::impl::tensor_has_dispatch(${out_tensor_name}))
   TORCH_INTERNAL_ASSERT(${tensor_name}_storage_saved.value().is_alias_of(${out_tensor_name}.storage()));
 """
 )

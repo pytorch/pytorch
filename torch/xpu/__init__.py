@@ -214,6 +214,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
     return get_device_properties(device).name
 
 
+@lru_cache(None)
 def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
     r"""Get the xpu capability of a device.
 
@@ -227,11 +228,9 @@ def get_device_capability(device: Optional[_device_t] = None) -> Dict[str, Any]:
     Returns:
         Dict[str, Any]: the xpu capability dictionary of the device
     """
-    prop = get_device_properties(device)
+    props = get_device_properties(device)
     return {
-        "max_work_group_size": prop.max_work_group_size,
-        "max_num_sub_groups": prop.max_num_sub_groups,
-        "sub_group_sizes": prop.sub_group_sizes,
+        prop: getattr(props, prop) for prop in dir(props) if not prop.startswith("__")
     }
 
 
