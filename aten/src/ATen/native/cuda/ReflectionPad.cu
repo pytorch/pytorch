@@ -162,7 +162,7 @@ __global__ void reflection_pad2d_backward_out_kernel(
 }
 template <typename scalar_t, typename F>
 __device__ inline void parallel_reflection_pad3d(
-    PackedTensorAccessor64<scalar_t, 5> input,
+    PackedTensorAccessor64<const scalar_t, 5> input,
     PackedTensorAccessor64<scalar_t, 5> output,
     int64_t pad_left,
     int64_t pad_top,
@@ -211,7 +211,7 @@ __device__ inline void parallel_reflection_pad3d(
 
 template<typename scalar_t>
 __global__ void reflection_pad3d_out_kernel(
-    PackedTensorAccessor64<scalar_t, 5> input,
+    PackedTensorAccessor64<const scalar_t, 5> input,
     PackedTensorAccessor64<scalar_t, 5> output,
     int64_t pad_left,  int64_t pad_top, int64_t pad_front,
     int64_t y_shift, int64_t z_shift
@@ -240,13 +240,14 @@ __global__ void reflection_pad3d_out_kernel(
 
 template <typename scalar_t>
 __global__ void reflection_pad3d_backward_out_kernel(
+    PackedTensorAccessor64<const scalar_t, 5> grad_input_const,
     PackedTensorAccessor64<scalar_t, 5> grad_input,
     PackedTensorAccessor64<scalar_t, 5> grad_output,
     int64_t pad_left,  int64_t pad_top, int64_t pad_front,
     int64_t y_shift, int64_t z_shift
 ) {
   parallel_reflection_pad3d(
-      grad_input,
+      grad_input_const,
       grad_output,
       pad_left,
       pad_top,
@@ -595,7 +596,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_out_cuda) (
           output_inner = output.unsqueeze(0);
         }
 
-        auto input_packed = input_inner.packed_accessor64<scalar_t, 5>();
+        auto input_packed = input_inner.packed_accessor64<const scalar_t, 5>();
         auto output_packed = output_inner.packed_accessor64<scalar_t, 5>();
 
         int64_t output_plane_size = output_packed.size(2) * output_packed.size(3) * output_packed.size(4);
@@ -647,6 +648,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
           grad_output_ = grad_output.unsqueeze(0);
         }
 
+        auto grad_input_packed_const = grad_input_.packed_accessor64<const scalar_t, 5>();
         auto grad_input_packed = grad_input_.packed_accessor64<scalar_t, 5>();
         auto grad_output_packed = grad_output_.packed_accessor64<scalar_t, 5>();
 
@@ -666,7 +668,7 @@ TORCH_IMPL_FUNC(reflection_pad3d_backward_out_cuda) (
 
             reflection_pad3d_backward_out_kernel<<<
                 grid_size, block_size,0, at::cuda::getCurrentCUDAStream()>>>(
-                grad_input_packed, grad_output_packed, pad_left, pad_top, pad_front,
+                grad_input_packed_const, grad_input_packed, grad_output_packed, pad_left, pad_top, pad_front,
                 block_y, block_z);
             C10_CUDA_KERNEL_LAUNCH_CHECK();
           }

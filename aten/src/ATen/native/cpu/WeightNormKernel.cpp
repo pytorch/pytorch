@@ -70,8 +70,7 @@ inline void sum_norm_per_row(
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec v_bvec = bVec::loadu(v_ptr + d);
-    fVec v_fvec0, v_fvec1;
-    std::tie(v_fvec0, v_fvec1) = convert_bfloat16_float(v_bvec);
+    auto [v_fvec0, v_fvec1] = convert_bfloat16_float(v_bvec);
 
     fVec out_fvec0 = fVec::loadu(out_ptr + d) + v_fvec0 * v_fvec0;
     fVec out_fvec1 = fVec::loadu(out_ptr + d + fVec::size()) + v_fvec1 * v_fvec1;
@@ -109,8 +108,7 @@ inline void apply_norm_per_row(
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec v_bvec = bVec::loadu(v_ptr + d);
-    fVec v_fvec0, v_fvec1;
-    std::tie(v_fvec0, v_fvec1) = convert_bfloat16_float(v_bvec);
+    auto [v_fvec0, v_fvec1] = convert_bfloat16_float(v_bvec);
 
     fVec w_fvec0 = fVec::loadu(a_ptr + d) * v_fvec0;
     fVec w_fvec1 = fVec::loadu(a_ptr + d + fVec::size()) * v_fvec1;
@@ -249,11 +247,9 @@ inline void sum_product_per_row(
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec grad_w_bvec = bVec::loadu(grad_w_ptr + d);
-    fVec grad_w_fvec0, grad_w_fvec1;
-    std::tie(grad_w_fvec0, grad_w_fvec1) = convert_bfloat16_float(grad_w_bvec);
+    auto [grad_w_fvec0, grad_w_fvec1] = convert_bfloat16_float(grad_w_bvec);
     bVec v_bvec = bVec::loadu(v_ptr + d);
-    fVec v_fvec0, v_fvec1;
-    std::tie(v_fvec0, v_fvec1) = convert_bfloat16_float(v_bvec);
+    auto [v_fvec0, v_fvec1] = convert_bfloat16_float(v_bvec);
 
     fVec out_fvec0 = fVec::loadu(out_ptr + d) + grad_w_fvec0 * v_fvec0;
     fVec out_fvec1 = fVec::loadu(out_ptr + d + fVec::size()) + grad_w_fvec1 * v_fvec1;
@@ -298,11 +294,9 @@ inline void apply_per_row_backward(
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec grad_w_bvec = bVec::loadu(grad_w_ptr + d);
-    fVec grad_w_fvec0, grad_w_fvec1;
-    std::tie(grad_w_fvec0, grad_w_fvec1) = convert_bfloat16_float(grad_w_bvec);
+    auto [grad_w_fvec0, grad_w_fvec1] = convert_bfloat16_float(grad_w_bvec);
     bVec v_bvec = bVec::loadu(v_ptr + d);
-    fVec v_fvec0, v_fvec1;
-    std::tie(v_fvec0, v_fvec1) = convert_bfloat16_float(v_bvec);
+    auto [v_fvec0, v_fvec1] = convert_bfloat16_float(v_bvec);
 
     fVec grad_v_fvec0 = fVec::loadu(a_ptr + d) * grad_w_fvec0 - fVec::loadu(b_ptr + d) * v_fvec0;
     fVec grad_v_fvec1 = fVec::loadu(a_ptr + d + fVec::size()) * grad_w_fvec1

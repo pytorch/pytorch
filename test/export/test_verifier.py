@@ -9,7 +9,7 @@ from torch.export import export
 
 from torch._export.verifier import SpecViolationError, Verifier
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
 
 @unittest.skipIf(not is_dynamo_supported(), "dynamo isn't supported")
 class TestVerifier(TestCase):
@@ -56,6 +56,7 @@ class TestVerifier(TestCase):
         with self.assertRaises(SpecViolationError):
             verifier.check(ep)
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     def test_verifier_higher_order(self) -> None:
         class Foo(torch.nn.Module):
             def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -76,6 +77,7 @@ class TestVerifier(TestCase):
         verifier = Verifier()
         verifier.check(ep)
 
+    @unittest.skipIf(IS_WINDOWS, "Windows not supported for this test")
     def test_verifier_nested_invalid_module(self) -> None:
         class Foo(torch.nn.Module):
             def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -126,7 +128,7 @@ class TestVerifier(TestCase):
         # Parameter doesn't exist in the state dict
         ep.graph_signature.input_specs[0] = InputSpec(
             kind=InputKind.PARAMETER,
-            arg=TensorArgument(name="arg0_1"),
+            arg=TensorArgument(name="p_a"),
             target="bad_param"
         )
         with self.assertRaisesRegex(SpecViolationError, "not in the state dict"):
@@ -153,8 +155,9 @@ class TestVerifier(TestCase):
         # Buffer doesn't exist in the state dict
         ep.graph_signature.input_specs[0] = InputSpec(
             kind=InputKind.BUFFER,
-            arg=TensorArgument(name="arg0_1"),
-            target="bad_buffer"
+            arg=TensorArgument(name="c_a"),
+            target="bad_buffer",
+            persistent=True,
         )
         with self.assertRaisesRegex(SpecViolationError, "not in the state dict"):
             ep._validate()

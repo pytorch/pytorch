@@ -31,7 +31,7 @@ class RankLocal {
     const auto node = torch::autograd::get_current_node();
     auto fwd_thread_id = node == nullptr ? at::RecordFunction::currentThreadId()
                                          : node->thread_id();
-    // Optimistically aquire the read lock first, since most likely we are in
+    // Optimistically acquire the read lock first, since most likely we are in
     // an autograd thread and the object has already been constructed.
     {
       std::shared_lock read_lock(lock_);

@@ -64,9 +64,8 @@ skipIfQuantizationBackendQNNPack = _skipper(
 
 
 # skips tests for all versions below min_opset_version.
-# if exporting the op is only supported after a specific version,
 # add this wrapper to prevent running the test for opset_versions
-# smaller than the currently tested opset_version
+# smaller than `min_opset_version`.
 def skipIfUnsupportedMinOpsetVersion(min_opset_version):
     def skip_dec(func):
         @functools.wraps(func)
@@ -83,6 +82,8 @@ def skipIfUnsupportedMinOpsetVersion(min_opset_version):
 
 
 # skips tests for all versions above max_opset_version.
+# add this wrapper to prevent running the test for opset_versions
+# higher than `max_opset_version`.
 def skipIfUnsupportedMaxOpsetVersion(max_opset_version):
     def skip_dec(func):
         @functools.wraps(func)
@@ -199,10 +200,10 @@ def xfail_dynamic_fx_test(
     model_type: Optional[TorchModelType] = None,
     reason: Optional[str] = None,
 ):
-    """Skip dynamic exporting test.
+    """Xfail dynamic exporting test.
 
     Args:
-        reason: The reason for skipping dynamic exporting test.
+        reason: The reason for xfailing dynamic exporting test.
         model_type (TorchModelType): The model type to xfail dynamic exporting test for.
             When None, model type is not used to skip dynamic tests.
 

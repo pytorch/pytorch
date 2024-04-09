@@ -979,7 +979,6 @@ class TestVmapAPI(TestCase):
         jacobian = vmap(vjp_mul)(batched_v)
         self.assertEqual(jacobian, torch.diagflat(y))
 
-    @xfailIfTorchDynamo
     def test_functools_partial(self):
         x = torch.randn(3)
         y = torch.randn(2, 3)
@@ -1726,7 +1725,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
             x = torch.randn(B0, 0, 3)
             vmap(lambda x: x.as_strided([3], [1]))(x)
 
-    @xfailIfTorchDynamo
     def test_nll_loss(self):
         test = self._vmap_test
         op = F.nll_loss
@@ -1744,7 +1742,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(functools.partial(op, reduction='sum'), (y, t), in_dims=(0, None))
         test(functools.partial(op, reduction='none'), (y, t), in_dims=(0, None))
 
-    @xfailIfTorchDynamo
     def test_adaptive_avg_pool2d(self):
         test = self._vmap_test
         op = functools.partial(F.adaptive_avg_pool2d, output_size=(3, 3))
@@ -3175,7 +3172,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._test_arithmetic(torch.div, device)
         self._test_arithmetic(lambda x, y: x / y, device)
 
-    @xfailIfTorchDynamo
     def test_binary_cross_entropy(self, device):
         x = F.sigmoid(torch.randn(3, 2, device=device, requires_grad=True))
         target = torch.rand(3, 2, device=device)
@@ -3185,7 +3181,6 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
         self._batched_grad_test(op, (x,), {})
         self._batched_grad_grad_test(op, (x,), {})
 
-    @xfailIfTorchDynamo
     def test_log_softmax(self, device):
         op = functools.partial(torch.log_softmax, dim=-1)
         x = torch.randn(3, 2, device=device, requires_grad=True)
@@ -3628,6 +3623,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
+        # TODO: implement batching rule
+        xfail('_batch_norm_with_update'),
         xfail('tril'),  # Exception not raised on error input
         xfail('triu'),  # Exception not raised on error input
         xfail('as_strided', 'partial_views'),
@@ -3667,6 +3664,8 @@ class TestVmapOperatorsOpInfo(TestCase):
         # which will be updated in place, were not batched.
         xfail('native_batch_norm'),
         xfail('_native_batch_norm_legit'),
+        # TODO: implement batching rule
+        xfail('_batch_norm_with_update'),
         xfail('histogram'),
         xfail('scatter_reduce', 'sum'),
         xfail('scatter_reduce', 'mean'),
@@ -3676,7 +3675,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # masked index as input which is not supported
         xfail('index_put', ''),
         xfail('isin'),
-        xfail('lu_unpack'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('masked_select'),
@@ -4453,8 +4451,6 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['same', 'different', 'error'])
     @parametrize('use_generator', [True, False])
     def test_factory_ops(self, device, randomness, use_generator):
-        if TEST_WITH_TORCHDYNAMO and randomness == "different":
-            self.skipTest("needs investigation")
 
         generator = torch.Generator(device=device)
         orig_state = generator.get_state()
@@ -4493,8 +4489,6 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['same', 'different', 'error'])
     @parametrize('use_generator', [True, False])
     def test_randperm(self, device, randomness, use_generator):
-        if TEST_WITH_TORCHDYNAMO and randomness == "different":
-            self.skipTest("needs investigation")
 
         # needs a special case because randperm doesn't take a batch size
         B0 = 4
@@ -4535,8 +4529,6 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_dropout(self, device, randomness, batched_input):
-        if TEST_WITH_TORCHDYNAMO and randomness == "different" and batched_input == "none":
-            self.skipTest("needs investigation")
 
         def op(t, ignored):
             return torch.nn.functional.dropout(torch.ones_like(t), training=True)
@@ -4569,8 +4561,6 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_alpha_dropout(self, device, randomness, batched_input):
-        if TEST_WITH_TORCHDYNAMO and randomness == "different" and batched_input == "none":
-            self.skipTest("needs investigation")
 
         def op(t, ignored):
             return torch.nn.functional.alpha_dropout(torch.ones_like(t), training=True)
@@ -4599,8 +4589,6 @@ class TestRandomness(TestCase):
     @parametrize('batched_input', ["first", "last", "none"])
     @parametrize('dim', [2, 3])
     def test_feature_dropout(self, device, randomness, batched_input, dim):
-        if TEST_WITH_TORCHDYNAMO and randomness == "different" and batched_input == "none":
-            self.skipTest("needs investigation")
 
         def op(t, ignored):
             f = torch.nn.functional.dropout2d if dim == 2 else torch.nn.functional.dropout3d
@@ -4638,8 +4626,6 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_feature_alpha_dropout(self, device, randomness, batched_input):
-        if TEST_WITH_TORCHDYNAMO and randomness == "different" and batched_input == "none":
-            self.skipTest("needs investigation")
 
         def op(t, ignored):
             return torch.nn.functional.feature_alpha_dropout(torch.ones_like(t), training=True)
@@ -4679,8 +4665,6 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_like_functions(self, device, randomness, batched_input):
-        if TEST_WITH_TORCHDYNAMO and randomness == "different" and batched_input == "none":
-            self.skipTest("needs investigation")
 
         seed = 1234567
         supported_ops = [
@@ -4844,8 +4828,6 @@ class TestRandomness(TestCase):
     @parametrize('batched_input', ["first", "last", "none"])
     @parametrize('batched_other', ["first", "last", "none"])
     def test_random_binary_out_of_place(self, device, use_generator, randomness, batched_input, batched_other):
-        if TEST_WITH_TORCHDYNAMO and randomness == "different" and batched_input == "none":
-            self.skipTest("needs investigation")
 
         generator = torch.Generator(device=device)
         orig_state = generator.get_state()
@@ -4897,8 +4879,6 @@ class TestRandomness(TestCase):
     @parametrize('randomness', ['error', 'same', 'different'])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_random_unary_out_of_place(self, device, use_generator, randomness, batched_input):
-        if TEST_WITH_TORCHDYNAMO and randomness == "different" and batched_input == "none":
-            self.skipTest("needs investigation")
 
         generator = torch.Generator(device=device)
         orig_state = generator.get_state()
@@ -4950,8 +4930,6 @@ class TestRandomness(TestCase):
     @parametrize('batched_call', [True, False])
     @parametrize('batched_input', ["first", "last", "none"])
     def test_multinomial(self, device, use_generator, randomness, batched_call, batched_input):
-        if TEST_WITH_TORCHDYNAMO and randomness == "different" and batched_input == "none":
-            self.skipTest("needs investigation")
 
         def flatten_input(input, batch_call, batch_location):
             if batch_call and batch_location != "none":
@@ -5068,7 +5046,6 @@ class TestRandomness(TestCase):
             self._assert_all_slices_unique(output)
 
 
-    @xfailIfTorchDynamo
     def test_jacfwd_with_random(self):
         # checks on behavior are above, this just checks that jacfwd respects
         # the randomness param
@@ -5083,8 +5060,6 @@ class TestRandomness(TestCase):
 
     @parametrize('randomness', ['error', 'same', 'different'])
     def test_dropout_unbatched(self, device, randomness):
-        if TEST_WITH_TORCHDYNAMO and randomness == "different":
-            self.skipTest("needs investigation")
 
         x = torch.randn(3, device=device)
         y = torch.randn(1, 3, device=device)

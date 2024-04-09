@@ -77,10 +77,7 @@ void MergeInferredTypeAndSetMap(
     Value* dest_v,
     TypePtr existing_type,
     TypePtr inferred_type) {
-  TypePtr mergedType;
-  bool inferred;
-  std::tie(mergedType, inferred) =
-      MergeInferredType(existing_type, inferred_type);
+  auto [mergedType, inferred] = MergeInferredType(existing_type, inferred_type);
   dest_v->setType(mergedType);
   ConstantValueMap::SetUseInferredType(dest_v->debugName(), inferred);
 }
@@ -298,10 +295,8 @@ Node* CloneNodeToGraph(
     std::shared_ptr<Graph> n_graph,
     const ParamMap& params_dict,
     int opset_version) {
-  auto vals_to_params_map =
-      buildValueToParamsMap(n->owningGraph()->block(), params_dict);
   auto clone_node = n_graph->createClone(
-      n, [&n_graph, &vals_to_params_map, opset_version](Value* v) {
+      n, [&n_graph, &params_dict, opset_version](Value* v) {
         auto v_n = v->node();
         switch (v_n->kind()) {
           case ::c10::prim::Constant:
@@ -331,9 +326,10 @@ Node* CloneNodeToGraph(
             // If the input value is unknown, set it to graph input in the new
             // graph, and copy over metadata, such as datatype and shape.
             ::c10::optional<at::Tensor> val = ::c10::nullopt;
-            if (vals_to_params_map.find(v) != vals_to_params_map.end()) {
-              val = vals_to_params_map.find(v)->second.second.toTensor();
-            } else if (ConstantValueMap::HasValue(v->debugName())) {
+            auto v0 = params_dict.find(v->debugName());
+            if (v0 != params_dict.end()) {
+              val = v0->second.toTensor();
+            } else {
               val = ConstantValueMap::GetValue(v->debugName());
             }
 
@@ -919,11 +915,15 @@ void ProcessReduceNode(Node* n) {
     size_t rank_0 = input_shape_value_0.value().size();
     std::vector<::c10::ShapeSymbol> final_shape;
     std::vector<int64_t> axes_vector(rank_0);
-    if (!n->hasAttributeS("axes")) {
-      std::iota(axes_vector.begin(), axes_vector.end(), 0);
-    } else {
+    if (n->hasAttributeS("axes")) {
       axes_vector = n->is(attr::axes);
+    } else if (n->inputs().size() > 1) {
+      axes_vector =
+          ConstantValueMap::GetValueInto1DInt64Vector(n->input(1)->debugName());
+    } else {
+      std::iota(axes_vector.begin(), axes_vector.end(), 0);
     }
+
     for (auto idx : c10::irange(axes_vector.size())) {
       if (axes_vector[idx] < 0) {
         axes_vector[idx] += rank_0;
@@ -1968,8 +1968,6 @@ void UpdateReliable(
       nodeTypeReliableForTracer.end();
   if (!inferred && !isTypeReliableForTracer &&
       !output->node()->kind().is_onnx() && no_type_warning) {
-    // TODO(84661): This warning comes before setType in symbolic_fn.
-    // tracked in #84661
     TORCH_WARN(
         "The shape inference of ",
         output->node()->kind().toDisplayString(),

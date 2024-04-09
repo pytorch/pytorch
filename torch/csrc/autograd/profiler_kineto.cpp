@@ -22,9 +22,6 @@
 
 #include <ATen/Context.h>
 
-#include <deque>
-#include <limits>
-#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -270,6 +267,8 @@ struct AddGenericMetadata : public MetadataBase {
       addMetadata("Fwd thread id", std::to_string(op_event.forward_tid_));
       addMetadata("Sequence number", std::to_string(op_event.sequence_number_));
     }
+    addMetadata(
+        "Record function id", std::to_string(op_event.record_function_id_));
   }
 
   void operator()(ExtraFields<EventType::Backend>& backend_event) {
@@ -784,16 +783,16 @@ int64_t KinetoEvent::debugHandle() const {
       [](const auto&) -> int64_t { return -1; }));
 }
 
-uint8_t KinetoEvent::deviceIndex() const {
+int KinetoEvent::deviceIndex() const {
   return result_->visit(c10::overloaded(
       [](const ExtraFields<EventType::Allocation>& i) {
-        return static_cast<uint8_t>(i.device_index_);
+        return static_cast<int>(i.device_index_);
       },
       [](const ExtraFields<EventType::OutOfMemory>& i) {
-        return static_cast<uint8_t>(i.device_index_);
+        return static_cast<int>(i.device_index_);
       },
       [&](const auto&) {
-        return static_cast<uint8_t>(result_->kineto_info_.device);
+        return static_cast<int>(result_->kineto_info_.device);
       }));
 }
 
