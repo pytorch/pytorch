@@ -338,6 +338,7 @@ template struct VaryingShape<c10::ShapeSymbol>;
 template struct VaryingShape<bool>;
 template struct VaryingShape<size_t>;
 template struct VaryingShape<int64_t>;
+template struct VaryingShape<c10::Stride>;
 
 VaryingShape<int64_t> TensorType::sizes() const {
   if (!sizes_.rank()) {
