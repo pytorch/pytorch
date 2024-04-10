@@ -26,7 +26,7 @@ from torch._prims_common import (
     type_to_dtype,
 )
 
-from . import config, inductor_prims
+from . import config
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -655,13 +655,16 @@ def select_decomp_table():
 
 @register_decomposition(aten.masked_scatter)
 def masked_scatter(self, mask, source):
-    if self.device.type == "cuda":
-        # This two-step algorithm is the same as eager CUDA, for eager CPU we
-        # use a 1-shot serial iteration.
-        self, mask = aten.broadcast_tensors([self, mask])
-        source_idx = mask.reshape(-1).cumsum(0) - 1
-        return inductor_prims.masked_scatter_with_index(self, mask, source_idx, source)
-    return NotImplemented
+    # This two-step algorithm is the same as eager CUDA, for eager CPU we
+    # use a 1-shot serial iteration.
+    if self.device.type != "cuda":
+        return NotImplemented
+
+    self, mask = aten.broadcast_tensors([self, mask])
+    source_idx = mask.reshape(-1).cumsum(0) - 1
+    self_flat, mask_flat, source_flat = (x.flatten() for x in (self, mask, source))
+    result = aten._unsafe_masked_index(source_flat, mask_flat, [source_idx], 0)
+    return torch.where(mask_flat, result, self_flat).view(self.shape)
 
 
 @register_decomposition(quantized_decomposed.choose_qparams.tensor)
