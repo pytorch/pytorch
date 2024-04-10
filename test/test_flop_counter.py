@@ -328,6 +328,17 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(str(flops_fw_bw_math), """805306368""")
         self.assertExpectedInline(str(flops_fw_bw_efficient), """939524096""")
 
+    def test_addmm_out(self):
+        def f(x):
+            y = torch.zeros(10, 10)
+            return torch.mm(x, x, out=y)
+
+        mode = FlopCounterMode()
+        with mode:
+            f(torch.randn(10, 10))
+
+        self.assertExpectedInline(get_total_flops(mode), """2000""")
+
     def test_hook_registration(self):
         model = torch.nn.Linear(100, 100)
         x = torch.randn(3, 100)

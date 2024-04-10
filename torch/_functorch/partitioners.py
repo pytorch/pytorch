@@ -1009,7 +1009,7 @@ def choose_saved_values_set(joint_graph, node_classifications, memory_budget=1):
     recomputable_banned_nodes = get_recomputable_banned_nodes(banned_nodes, aggressive_recomputation_saved_values)
 
     def print_budget_real_mem(act_size, name=""):
-        print(f"{get_mem_ratio(act_size):.2f}: {act_size:.2f}GB")
+        print(f"{get_mem_ratio(act_size):.2f}: {act_size:.2f}GB ({name})")
 
     print_budget_real_mem(estimate_activations_size(runtime_optimized_saved_values), "default")
     print_budget_real_mem(estimate_activations_size(more_aggressive_saved_values), "more aggressive")
@@ -1020,7 +1020,6 @@ def choose_saved_values_set(joint_graph, node_classifications, memory_budget=1):
     memories = [get_normalized_size(_size_of(i)) for i in all_recomputable_banned_nodes]
     runtimes = [1 for idx, i in enumerate(all_recomputable_banned_nodes)]
     cur_memory_budget = sum(memories)
-    print("start memory budget", cur_memory_budget)
     from torch.utils._mode_utils import no_dispatch
     with no_dispatch():
         while cur_memory_budget > 1e-2:
@@ -1029,12 +1028,12 @@ def choose_saved_values_set(joint_graph, node_classifications, memory_budget=1):
             for idx, i in enumerate(banned_nodes.tolist()):
                 if not i:
                     dont_ban.add(all_recomputable_banned_nodes[idx])
-            print(cur_memory_budget, all_recomputable_banned_nodes, dont_ban)
+            # print([(i, get_normalized_size(_size_of(i))) for i in dont_ban])
             cur_memory_budget = estimate_activations_size(set(all_recomputable_banned_nodes) - dont_ban) / (max_act_size - min_act_size)
             saved_values, banned_nodes = get_saved_values(joint_graph, node_classifications, (False, False, False, False, BAN_IF_REDUCTION), dont_ban)
-            print_budget_real_mem(estimate_activations_size(saved_values))
+            print_budget_real_mem(estimate_activations_size(saved_values), "milp")
 
-            if get_mem_ratio(estimate_activations_size(saved_values)) < memory_budget:
+            if get_mem_ratio(estimate_activations_size(saved_values)) < memory_budget + 1e-2:
                 print(f"Below memory budget! Saving {saved_values}")
                 return saved_values
 
