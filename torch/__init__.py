@@ -2013,20 +2013,25 @@ else:
 
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
-def get_device_module(device):
+def get_device_module(device = None):
     """
     Returns the module associated with a given device
     """
-    if (device.type == "mtia"):
-        return torch.mtia
-    elif (device.type == "cuda"):
-        return torch.cuda
-    elif (device.type == "xpu"):
-        return torch.xpu
-    elif (device.type == "mps"):
-        return torch.mps
-    elif (device.type == "cpu"):
-        return torch.cpu
+    if isinstance(device, torch.device):
+        device_type_str = device.type
+    elif isinstance(device, str):
+        device_type_str = device
+    elif isinstance(device, None):
+        device_type_str = "cpu"
+    else:
+        raise RuntimeError(f"Device '{device}' is not a valid device type.")
+
+    device_module = getattr(torch, device_type_str, None)
+    if device_module is None:
+        raise RuntimeError(
+            f"Device '{device_type_str}' does not have a corresponding module registered as 'torch.{device_type_str}'."
+        )
+    return device_module
 
 
 def _constrain_as_value(symbol, min: Optional[builtins.int] = None, max: Optional[builtins.int] = None):
