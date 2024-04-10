@@ -1770,7 +1770,7 @@ class OneCycleLR(LRScheduler):
 
     def load_state_dict(self, state_dict):
         if 'anneal_func' in state_dict:
-            state_dict['anneal_func'] = self.__getattr__(state_dict['anneal_func'])
+            state_dict['anneal_func'] = self.__getattribute__(state_dict['anneal_func'])
         super().load_state_dict(state_dict)
 
     @staticmethod

@@ -2302,7 +2302,7 @@ class TestLRScheduler(TestCase):
             opt, schedulers=[ConstantLR(opt), ConstantLR(opt)], milestones=[2], **kwargs),
         ReduceLROnPlateau,
         partial(CyclicLR, base_lr=0.01, max_lr=0.1),
-        partial(OneCycleLR, max_lr=0.01, total_steps=10),
+        partial(OneCycleLR, max_lr=0.01, total_steps=10, anneal_strategy='linear'),
         partial(CosineAnnealingWarmRestarts, T_0=20),
     ])
     @parametrize("weights_only", [True, False])
@@ -2313,8 +2313,12 @@ class TestLRScheduler(TestCase):
         with tempfile.TemporaryFile() as f:
             torch.save(state_dict, f)
             f.seek(0)
-            state_dict_copy = torch.load(f, weights_only=weights_only)
-            self.assertEqual(state_dict, state_dict_copy)
+            state_dict_loaded = torch.load(f, weights_only=weights_only)
+            self.assertEqual(state_dict, state_dict_loaded)
+            # Make sure state_dict can be loaded
+            scheduler2 = LRClass(self.opt)
+            scheduler2.load_state_dict(state_dict_loaded)
+            self.assertEqual(scheduler2.state_dict(), state_dict)
 
 
 instantiate_parametrized_tests(TestLRScheduler)
