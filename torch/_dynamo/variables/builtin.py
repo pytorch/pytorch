@@ -1550,14 +1550,13 @@ class BuiltinVariable(VariableTracker):
     def call_setattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker
     ):
-        from .distributed import PlacementVariable
-
         if isinstance(
             obj,
             (
                 variables.DataClassVariable,
                 variables.CustomizedDictVariable,
-                PlacementVariable,
+                variables.PlacementVariable,
+                variables.UserDefinedObjectVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
@@ -1602,7 +1601,7 @@ class BuiltinVariable(VariableTracker):
 
                     # Step 3 - drop the version counter - this is a step required to get
                     # .data setting to play correctly with the autograd engine.
-                    # Esentially, dynamo is trying to faithful preserve the (absurd)
+                    # Essentially, dynamo is trying to faithfully preserve the (absurd)
                     # behavior of .data= from eager mode
                     def _lower_version_count_by_1(x):
                         version = x._version
