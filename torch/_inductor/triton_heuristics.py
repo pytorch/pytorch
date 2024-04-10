@@ -733,8 +733,9 @@ class CachingAutotuner(KernelInterface):
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
+            grid_info = grid.grid_meta
             with torch._C._profiler._RecordFunctionFast(
-                self.inductor_meta.get("kernel_name", "triton kernel"), args
+                self.inductor_meta.get("kernel_name", "triton kernel"), args, {"grid": grid_info},
             ):
                 return launcher(
                     *args,
@@ -1602,6 +1603,8 @@ def grid(*numels):
             z_grid,
         )
 
+    grid_fn.grid_meta = ("grid", *numels)
+
     return grid_fn
 
 
@@ -1609,5 +1612,7 @@ def split_scan_grid(xnumel, rnumel):
     def grid_fn(meta):
         assert meta.get("XBLOCK", 1) == 1
         return (ceildiv(rnumel, meta.get("RBLOCK", 1)), xnumel, 1)
+
+    grid_fn.grid_meta = ("split_scan_grid", xnumel, rnumel)
 
     return grid_fn
