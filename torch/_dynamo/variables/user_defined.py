@@ -249,6 +249,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 tx, self.value, *args, **kwargs
             )
 
+        if (
+            name in ("__ne__", "__eq__")
+            and len(args) == 1
+            and not kwargs
+            and hasattr(args[0], "value")
+        ):
+            method = inspect.getattr_static(self.value, name, None)
+            if method is getattr(object, name):
+                return variables.ConstantVariable(method(self.value, args[0].value))
+
         return super().call_method(tx, name, args, kwargs)
 
     def call_function(
@@ -603,6 +613,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert not kwargs
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 return self.odict_getitem(tx, args[0])
+
+            if (
+                method in (object.__ne__, object.__eq__)
+                and len(args) == 1
+                and not kwargs
+                and hasattr(args[0], "value")
+            ):
+                return ConstantVariable(
+                    (self.value is args[0].value) is (method is object.__eq__)
+                )
 
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
