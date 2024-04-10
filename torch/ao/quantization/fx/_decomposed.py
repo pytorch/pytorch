@@ -606,7 +606,8 @@ def choose_qparams_per_token_asymmetric(
     """
     # Based on https://github.com/google/XNNPACK/blob/df156f0cf3db5a4576cc711123eeb54915f82ffc/src/xnnpack/quantization.h#L18
     qmin, qmax = -128, 127
-    min_val, max_val = torch.aminmax(input, dim=-1, keepdim=True)
+    min_val = torch.amin(input, dim=-1, keepdim=True)
+    max_val = torch.amax(input, dim=-1, keepdim=True)
     min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
     max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
     eps = torch.finfo(torch.float32).eps  # use xnnpack eps?
