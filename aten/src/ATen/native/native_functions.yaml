@@ -15555,3 +15555,7 @@
 # This op is ONLY used by pytorch/XLA in functionalization, and should never show up in vanilla eager mode or in any pytorch tracing contexts.
 - func: _propagate_xla_data(Tensor input, Tensor output) -> ()
   variants: function
+
+- func: rotary_embedding(Tensor q, Tensor k, Tensor cos, Tensor sin, Tensor position_ids, int unsqueeze_dim) -> (Tensor, Tensor)
+  use_const_ref_for_mutable_tensors: True
+  variants: function
