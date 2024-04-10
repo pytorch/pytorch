@@ -5,12 +5,11 @@ import torch
 from functorch.experimental import control_flow
 from torch import Tensor
 from torch._dynamo.eval_frame import is_dynamo_supported
+from torch.export import export
 
 from torch._export.verifier import SpecViolationError, Verifier
-from torch.export import export
 from torch.export.exported_program import InputKind, InputSpec, TensorArgument
-from torch.testing._internal.common_utils import IS_WINDOWS, run_tests, TestCase
-
+from torch.testing._internal.common_utils import run_tests, TestCase, IS_WINDOWS
 
 @unittest.skipIf(not is_dynamo_supported(), "dynamo isn't supported")
 class TestVerifier(TestCase):
@@ -67,7 +66,9 @@ class TestVerifier(TestCase):
                 def false_fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                     return x - y
 
-                return control_flow.cond(x.shape[0] > 2, true_fn, false_fn, [x, y])
+                return control_flow.cond(
+                    x.shape[0] > 2, true_fn, false_fn, [x, y]
+                )
 
         f = Foo()
 
@@ -86,7 +87,9 @@ class TestVerifier(TestCase):
                 def false_fn(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                     return x - y
 
-                return control_flow.cond(x.shape[0] > 2, true_fn, false_fn, [x, y])
+                return control_flow.cond(
+                    x.shape[0] > 2, true_fn, false_fn, [x, y]
+                )
 
         f = Foo()
 
@@ -115,9 +118,7 @@ class TestVerifier(TestCase):
         class M(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
-                self.register_parameter(
-                    name="a", param=torch.nn.Parameter(torch.randn(100))
-                )
+                self.register_parameter(name="a", param=torch.nn.Parameter(torch.randn(100)))
 
             def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
                 return x + y + self.a
@@ -126,7 +127,9 @@ class TestVerifier(TestCase):
 
         # Parameter doesn't exist in the state dict
         ep.graph_signature.input_specs[0] = InputSpec(
-            kind=InputKind.PARAMETER, arg=TensorArgument(name="p_a"), target="bad_param"
+            kind=InputKind.PARAMETER,
+            arg=TensorArgument(name="p_a"),
+            target="bad_param"
         )
         with self.assertRaisesRegex(SpecViolationError, "not in the state dict"):
             ep._validate()
@@ -217,5 +220,5 @@ class TestVerifier(TestCase):
             ep._validate()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     run_tests()

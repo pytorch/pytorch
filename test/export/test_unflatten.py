@@ -4,13 +4,23 @@ import dataclasses
 import unittest
 from contextlib import contextmanager
 from dataclasses import dataclass
+from typing import List, Any
 from re import escape
-from typing import Any, List
 
 import torch
 import torch._dynamo as torchdynamo
 from functorch.experimental.control_flow import cond, map
 from torch import Tensor
+from torch.export import (
+    Constraint,
+    Dim,
+    dynamic_dim,
+    export,
+    unflatten,
+    FlatArgsAdapter,
+)
+from torch._higher_order_ops.torchbind import enable_torchbind_tracing
+from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
 from torch._export.utils import (
     get_buffer,
     get_param,
@@ -18,27 +28,18 @@ from torch._export.utils import (
     is_param,
     register_dataclass_as_pytree_node,
 )
-from torch._higher_order_ops.torchbind import enable_torchbind_tracing
-from torch.export import (
-    Constraint,
-    Dim,
-    dynamic_dim,
-    export,
-    FlatArgsAdapter,
-    unflatten,
-)
-from torch.export._trace import DEFAULT_EXPORT_DYNAMO_CONFIG
+from torch.export import Constraint, Dim, export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
-    find_library_location,
+    run_tests,
+    TestCase,
     IS_FBCODE,
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
-    run_tests,
+    find_library_location,
     skipIfTorchDynamo,
-    TestCase,
 )
 from torch.utils._pytree import (
     LeafSpec,
@@ -251,7 +252,7 @@ class TestUnflatten(TestCase):
                 inps,
                 {},
                 preserve_module_call_signature=("foo.nested",),
-                strict=strict,
+                strict=strict
             )
             unflattened = unflatten(export_module)
             self.compare_outputs(export_module.module(), unflattened, inps)
@@ -304,9 +305,7 @@ class TestUnflatten(TestCase):
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(
-            export_module.module(), unflattened, (torch.randn((2, 3)),)
-        )
+        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
 
     def test_unflatten_wrong_input(self):
         class Mod(torch.nn.Module):
@@ -328,17 +327,11 @@ class TestUnflatten(TestCase):
                 return a
 
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
-        with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6"),
-        ):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6")):
             export_module.module()(torch.randn(6, 6))
 
         unflattened = unflatten(export_module)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6"),
-        ):
+        with self.assertRaisesRegex(RuntimeError, escape("Expected input at *args[0].shape[0] to be equal to 2, but got 6")):
             unflattened(torch.randn(6, 6))
 
     def test_unflatten_with_inplace_compile(self):
@@ -531,9 +524,7 @@ class TestUnflatten(TestCase):
                 for sub_node in transpose_module.graph.nodes:
                     if sub_node.op == "placeholder" or sub_node.op == "get_attr":
                         call_module_input_order.append(sub_node.op)
-        self.assertEqual(
-            call_module_input_order, ["placeholder", "get_attr", "get_attr"]
-        )
+        self.assertEqual(call_module_input_order, ["placeholder", "get_attr", "get_attr"])
 
     def test_unflatten_constant_tensor(self):
         class SubMod(torch.nn.Module):
@@ -555,9 +546,7 @@ class TestUnflatten(TestCase):
         export_module = torch.export.export(Mod(), (torch.randn((2, 3)),))
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(
-            export_module.module(), unflattened, (torch.randn((2, 3)),)
-        )
+        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
 
     @skipIfTorchDynamo("custom objects not supported in dynamo yet")
     def test_unflatten_constant_obj(self):
@@ -591,14 +580,10 @@ class TestUnflatten(TestCase):
                 return x + self.submod(x)
 
         with enable_torchbind_tracing():
-            export_module = torch.export.export(
-                Mod(), (torch.randn((2, 3)),), strict=False
-            )
+            export_module = torch.export.export(Mod(), (torch.randn((2, 3)),), strict=False)
         unflattened = unflatten(export_module)
 
-        self.compare_outputs(
-            export_module.module(), unflattened, (torch.randn((2, 3)),)
-        )
+        self.compare_outputs(export_module.module(), unflattened, (torch.randn((2, 3)),))
 
     def test_nested_leaf_non_strict(self):
         class Leaf(torch.nn.Module):
@@ -670,7 +655,6 @@ class TestUnflatten(TestCase):
             [x for x, _ in mod.named_modules(remove_duplicate=False)],
             fqn_list,
         )
-
 
 if __name__ == "__main__":
     run_tests()
