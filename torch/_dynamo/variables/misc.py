@@ -25,10 +25,15 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import is_standard_setattr, UserDefinedObjectVariable
 
 
 class SuperVariable(VariableTracker):
+    _nonvar_fields = {
+        "specialized",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, typevar, objvar=None, specialized=False, **kwargs):
         super().__init__(**kwargs)
         # typevar is the fist argument to super(). In the case where no argument
@@ -165,8 +170,12 @@ class SuperVariable(VariableTracker):
             return super(variables.CustomizedDictVariable, self.objvar).call_method(
                 tx, "__setitem__", args, kwargs
             )
-        else:
-            unimplemented(f"non-function or method super: {inner_fn}")
+        elif is_standard_setattr(inner_fn) and isinstance(
+            self.objvar, UserDefinedObjectVariable
+        ):
+            return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+
+        unimplemented(f"non-function or method super: {inner_fn}")
 
 
 class UnknownVariable(VariableTracker):
@@ -239,6 +248,11 @@ class ComptimeVariable(VariableTracker):
 
 
 class ClosureVariable(UnknownVariable):
+    _nonvar_fields = {
+        "name",
+        *UnknownVariable._nonvar_fields,
+    }
+
     def __init__(self, name, **kwargs):
         super().__init__(**kwargs)
         self.name = name
@@ -249,6 +263,11 @@ class ClosureVariable(UnknownVariable):
 
 # closure variable created by an inlined function
 class InlinedClosureVariable(UnknownVariable):
+    _nonvar_fields = {
+        "name",
+        *UnknownVariable._nonvar_fields,
+    }
+
     def __init__(self, name, **kwargs):
         super().__init__(**kwargs)
         self.name = name
@@ -309,6 +328,11 @@ def produce_trampoline_autograd_apply(fn_cls):
 class AutogradFunctionVariable(VariableTracker):
     """represents a torch.autograd.Function subclass"""
 
+    _nonvar_fields = {
+        "fn_cls",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, fn_cls, **kwargs):
         super().__init__(**kwargs)
         self.fn_cls = fn_cls
@@ -324,9 +348,8 @@ class AutogradFunctionVariable(VariableTracker):
             if isinstance(node, variables.NNModuleVariable):
                 if node.is_training(tx):
                     requires_grad = True
-            return node
 
-        VariableTracker.apply(visit, (args, kwargs))
+        VariableTracker.visit(visit, (args, kwargs))
 
         if (
             requires_grad
@@ -435,6 +458,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     _nonvar_fields = {
         "proxy",
         "inference",
+        "saved_tensors",
         *UserDefinedObjectVariable._nonvar_fields,
     }
 
@@ -483,6 +507,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if name == "__setattr__":
+            return super().call_method(tx, name, args, kwargs)
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
         if self.saved_tensors is None:
@@ -523,6 +549,11 @@ class LambdaVariable(VariableTracker):
 
 
 class GetAttrVariable(VariableTracker):
+    _nonvar_fields = {
+        "name",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, obj, name, **kwargs):
         super().__init__(**kwargs)
         assert isinstance(obj, VariableTracker)
@@ -559,6 +590,33 @@ class GetAttrVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         return self.obj.call_method(tx, self.name, args, kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if (
+            name == "__getitem__"
+            and self.name == "__dict__"
+            and len(args) == 1
+            and not kwargs
+            and args[0].is_python_constant()
+        ):
+            obj = self.obj
+            key = args[0].as_python_constant()
+            # redirect to var_getattr on the original obj
+            if isinstance(obj, variables.UserDefinedObjectVariable):
+                obj._check_for_getattribute()
+                if (
+                    key in obj.value.__dict__
+                    or tx.output.side_effects.has_pending_mutation_of_attr(obj, key)
+                ):
+                    return obj.var_getattr(tx, key)
+
+        return super().call_method(tx, name, args, kwargs)
 
 
 class MethodWrapperVariable(VariableTracker):
@@ -608,6 +666,12 @@ class GetSetDescriptorVariable(VariableTracker):
 
 
 class PythonModuleVariable(VariableTracker):
+    _nonvar_fields = {
+        "value",
+        "is_torch",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, value: types.ModuleType, **kwargs):
         super().__init__(**kwargs)
         self.value = value
@@ -880,3 +944,14 @@ class DebuggingVariable(VariableTracker):
                 return False
 
         return True
+
+
+class StopIterationVariable(VariableTracker):
+    def __init__(self, args, **kwargs):
+        super().__init__(**kwargs)
+        self.args = args
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("builtins", "StopIteration")
+        codegen.foreach(self.args)
+        codegen.call_function(len(self.args), True)

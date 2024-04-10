@@ -10,6 +10,7 @@ import math
 import operator
 import typing
 import copyreg
+import re
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -190,6 +191,7 @@ class SerializedArtifact:
     exported_program: bytes
     state_dict: bytes
     constants: bytes
+    example_inputs: bytes
 
 
 @dataclass
@@ -197,6 +199,7 @@ class _SerializedProgram:
     exported_program: ExportedProgram
     state_dict: bytes
     constants: bytes
+    example_inputs: bytes
 
 
 def deserialize_device(d: Device) -> torch.device:
@@ -297,15 +300,15 @@ def serialize_torch_artifact(artifact: Dict[str, Any]) -> bytes:
         del copyreg.dispatch_table[FakeTensor]
 
 
-def deserialize_torch_artifact(serialized: Union[Dict[str, Any], bytes]):
-    if isinstance(serialized, dict):
+def deserialize_torch_artifact(serialized: Union[Dict[str, Any], Tuple[Any, ...], bytes]):
+    if isinstance(serialized, (dict, tuple)):
         return serialized
     if len(serialized) == 0:
         return {}
     buffer = io.BytesIO(serialized)
     buffer.seek(0)
     artifact = torch.load(buffer)
-    assert isinstance(artifact, dict)
+    assert isinstance(artifact, (tuple, dict))
     return artifact
 
 
@@ -538,6 +541,9 @@ class GraphModuleSerializer:
                 for source_fn in source_fn_st
             ]
             ret["source_fn_stack"] = ST_DELIMITER.join(source_fn_list)
+
+        if torch_fn := node.meta.get("torch_fn"):
+            ret["torch_fn"] = ST_DELIMITER.join(list(torch_fn))
 
         return ret
 
@@ -1275,6 +1281,7 @@ class ExportedProgramSerializer:
             serialized_ep,
             serialize_torch_artifact(exported_program.state_dict),
             serialize_torch_artifact(constants),
+            serialize_torch_artifact(exported_program.example_inputs),
         )
 
 
@@ -1287,6 +1294,7 @@ class GraphModuleDeserializer:
         names_to_symbols: Dict[str, sympy.Symbol]
         state_dict: Dict[str, Union[torch.Tensor, torch.nn.Parameter]]
         constants: Dict[str, Union[torch.Tensor, torch.ScriptObject]]
+        example_inputs: Optional[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]]]
 
     def __init__(self):
         self.serialized_name_to_node: Dict[str, torch.fx.Node] = {}
@@ -1433,13 +1441,17 @@ class GraphModuleDeserializer:
             class_fqn=script_obj_meta.class_fqn,
         )
 
-    def deserialize_graph_output(self, output) -> torch.fx.Node:
+    def deserialize_graph_output(self, output) -> Optional[Union[torch.fx.Node, int]]:
         if output.type == "as_tensor":
             return self.serialized_name_to_node[output.as_tensor.name]
         elif output.type == "as_sym_int":
             return self.serialized_name_to_node[output.as_sym_int.as_name]
         elif output.type == "as_sym_bool":
             return self.serialized_name_to_node[output.as_sym_bool.as_name]
+        elif output.type == "as_int":
+            return output.as_int
+        elif output.type == "as_none":
+            return None
         else:
             raise SerializeError(f"Unable to deserialize output node {output}")
 
@@ -1467,6 +1479,9 @@ class GraphModuleDeserializer:
             if input_.type in ("as_tensor", "as_sym_int", "as_custom_obj"):
                 node_name = input_.value.name
                 placeholder_node = self.graph.placeholder(node_name)
+                # FX might declare a name illegal (e.g. some nn.Modules use "input" as forward() arguments)
+                # we will overwrite it
+                placeholder_node.name = node_name
                 self.sync_fx_node(node_name, placeholder_node)
             elif input_.type in (
                 "as_int",
@@ -1509,7 +1524,8 @@ class GraphModuleDeserializer:
             output_node.meta["val"] = output_node.args[0].meta["val"]
         else:
             output_node.meta["val"] = tuple(
-                arg.meta["val"] for arg in output_node.args[0]
+                arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
+                for arg in output_node.args[0]
             )
 
         return self.graph
@@ -1569,6 +1585,8 @@ class GraphModuleDeserializer:
             )
 
         fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
+        if fx_node.op not in ["placeholder", "output"] and "nn_module_stack" not in fx_node.meta:
+            fx_node.meta["nn_module_stack"] = {}  # serialization throws away empty dicts
 
     def deserialize_input_spec(self, i: InputSpec) -> ep.InputSpec:
         if i.type == "user_input":
@@ -1670,6 +1688,7 @@ class GraphModuleDeserializer:
         serialized_graph_module: GraphModule,
         serialized_state_dict: Union[Dict[str, torch.Tensor], bytes],
         constants: Union[Dict[str, Any], bytes],
+        example_inputs: Optional[Union[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]], bytes]] = None,
         symbol_name_to_range: Optional[Dict[str, symbolic_shapes.ValueRanges]] = None,
     ) -> Result:
         global _CURRENT_DESERIALIZER
@@ -1683,13 +1702,23 @@ class GraphModuleDeserializer:
                 shape_env=self.shape_env,
             )
             self.symbol_name_to_symbol: Dict[str, sympy.Symbol] = {}
-            self.symbol_name_to_range = (
-                {} if symbol_name_to_range is None else symbol_name_to_range
-            )
-            self.signature = self.deserialize_signature(
-                serialized_graph_module.signature
-            )
             self.constants = deserialize_torch_artifact(constants)
+            self.signature = self.deserialize_signature(serialized_graph_module.signature)
+
+            # deserialization does analysis with checks on 0/1, so we create fake range constraints and
+            # restore the original range constraints afterwards
+            self.symbol_name_to_range = {}
+            if symbol_name_to_range:
+                for k, vr in symbol_name_to_range.items():
+                    lower = int(vr.lower)
+                    if vr.upper >= 2:  # no specialization on 0/1
+                        lower = max(2, lower)
+                    self.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), vr.upper)
+
+            if example_inputs is not None and len(example_inputs) > 0:
+                self.example_inputs = deserialize_torch_artifact(example_inputs)
+            else:
+                self.example_inputs = None
             self.deserialize_graph(serialized_graph_module.graph)
 
             module_call_graph = self.deserialize_module_call_graph(
@@ -1704,6 +1733,7 @@ class GraphModuleDeserializer:
                 names_to_symbols=self.symbol_name_to_symbol,
                 state_dict=deserialize_torch_artifact(serialized_state_dict),
                 constants=self.constants,
+                example_inputs=self.example_inputs,
             )
         finally:
             _CURRENT_DESERIALIZER = None
@@ -1957,8 +1987,20 @@ class GraphModuleDeserializer:
             def import_nn_module_stack(key, path, ty):
                 return key, (path, ty)
 
+            # Helper function that splits strings by commas except for those
+            # encapsulated by parens, which are valid traces.
+            # TODO: Currently this is needed due to indexing Sequential
+            # layers introducing names in the form "layer.slice(1, None, None)".
+            # If that naming is improved, this fancier splitting can probably be
+            # reverted to a simple split by comma.
+            def metadata_split(metadata):
+                # Remove the parentheses and commas inside them
+                metadata = re.sub(r'\(.*?\)', '', metadata)
+                # Split the string by comma, except for those inside parentheses
+                return re.split(r'(?<!\()\s*,\s*(?!\()', metadata)
+
             nn_module_stack = dict(
-                import_nn_module_stack(*item.split(","))
+                import_nn_module_stack(*metadata_split(item))
                 for item in nn_module_stack_str.split(ST_DELIMITER)
             )
             ret["nn_module_stack"] = nn_module_stack
@@ -1970,6 +2012,9 @@ class GraphModuleDeserializer:
                 name, target_str = source_fn_str.split(",")
                 source_fn_st.append((name, deserialize_meta_func(target_str)))
             ret["source_fn_stack"] = source_fn_st
+
+        if torch_fn_str := metadata.get("torch_fn"):
+            ret["torch_fn"] = tuple(torch_fn_str.split(ST_DELIMITER))
         return ret
 
     def deserialize_argument_spec(self, x: Argument) -> ep.ArgumentSpec:
@@ -2036,10 +2081,13 @@ class ExportedProgramDeserializer:
         exported_program: ExportedProgram,
         state_dict: Union[Dict[str, torch.Tensor], bytes],
         constants: Union[Dict[str, torch.Tensor], bytes],
+        example_inputs: Optional[Union[Tuple[Tuple[torch.Tensor, ...], Dict[str, Any]], bytes]] = None,
     ) -> ep.ExportedProgram:
         assert isinstance(exported_program, ExportedProgram)
+        version = exported_program.schema_version
 
-        if exported_program.schema_version.major != SCHEMA_VERSION[0]:
+        # TODO(zhxchen17) blocked on thrift schema refactor
+        if version.major != SCHEMA_VERSION[0] and not (version.major == 0 and version.minor == 0):
             raise SerializeError(
                 f"Serialized schema version {exported_program.schema_version} "
                 f"does not match our current schema version {SCHEMA_VERSION}."
@@ -2051,11 +2099,15 @@ class ExportedProgramDeserializer:
             )
             for k, v in exported_program.range_constraints.items()
         }
-        res = GraphModuleDeserializer().deserialize(
-            exported_program.graph_module,
-            state_dict,
-            constants,
-            symbol_name_to_range,
+        res = (
+            GraphModuleDeserializer()
+            .deserialize(
+                exported_program.graph_module,
+                state_dict,
+                constants,
+                example_inputs,
+                symbol_name_to_range,
+            )
         )
         range_constraints = self.deserialize_range_constraints(
             symbol_name_to_range,
@@ -2075,10 +2127,9 @@ class ExportedProgramDeserializer:
             state_dict=res.state_dict,  # type: ignore[arg-type]
             range_constraints=range_constraints,
             module_call_graph=res.module_call_graph,
-            example_inputs=None,
+            example_inputs=res.example_inputs,
             verifier=load_verifier(exported_program.dialect),
             constants=res.constants,
-            from_export=True
         )
         return upgrader.upgrade(exported_program)
 
@@ -2172,7 +2223,10 @@ def serialize(
     )
     json_bytes = json_program.encode("utf-8")
     artifact = SerializedArtifact(
-        json_bytes, serialized_program.state_dict, serialized_program.constants
+        json_bytes,
+        serialized_program.state_dict,
+        serialized_program.constants,
+        serialized_program.example_inputs
     )
     return artifact
 
@@ -2219,11 +2273,15 @@ def deserialize(
     assert isinstance(artifact.exported_program, bytes)
     exported_program_str = artifact.exported_program.decode("utf-8")
     exported_program_dict = json.loads(exported_program_str)
-    serialized_exported_program = _dict_to_dataclass(
-        ExportedProgram, exported_program_dict
-    )
-    return ExportedProgramDeserializer(expected_opset_version).deserialize(
-        serialized_exported_program, artifact.state_dict, artifact.constants
+    serialized_exported_program = _dict_to_dataclass(ExportedProgram, exported_program_dict)
+    return (
+        ExportedProgramDeserializer(expected_opset_version)
+        .deserialize(
+            serialized_exported_program,
+            artifact.state_dict,
+            artifact.constants,
+            artifact.example_inputs,
+        )
     )
 
 
@@ -2594,6 +2652,7 @@ def canonicalize(ep: ExportedProgram) -> ExportedProgram:
                     raise AssertionError(f"Unknown sym_int type: {s}")
             elif arg.type in (
                 "as_none",
+                "as_bool",
                 "as_int",
                 "as_float",
                 "as_string",

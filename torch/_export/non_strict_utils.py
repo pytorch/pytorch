@@ -15,19 +15,23 @@ from torch._export.passes.add_runtime_assertions_for_constraints_pass import Inp
 from torch._guards import Source
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
-from torch.export.graph_signature import CustomObjArgument
+from torch.export.dynamic_shapes import _Dim
+from torch.export.exported_program import InputKind
+from torch.export.graph_signature import CustomObjArgument, InputSpec, TensorArgument
 from torch.fx.experimental.symbolic_shapes import (
     ConstraintViolationError,
     DimDynamic,
     EqualityConstraint,
     ShapeEnv,
     StatelessSymbolicContext,
+    ValueRanges,
 )
 from torch.utils._pytree import (
     GetAttrKey,
     KeyPath,
     MappingKey,
     SequenceKey,
+    tree_flatten,
     tree_map_with_path,
 )
 
@@ -78,9 +82,9 @@ def fakify(
             symbolic_context.dynamic_sizes[i] = DimDynamic.DYNAMIC
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
-            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name
+            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name  # type: ignore[assignment]
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
-    mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))
+    mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
     return fake
 
 
@@ -171,10 +175,12 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
 
 
 def make_constraints(
-    fake_mode,
-    equalities_inputs,
-    original_signature,
-    gm,
+    fake_mode: FakeTensorMode,
+    equalities_inputs: EqualityConstraint,
+    dynamic_shapes: Union[Dict[str, Any], Tuple[Any], List[Any]],
+    input_specs: List[InputSpec],
+    original_signature: inspect.Signature,
+    gm: torch.fx.GraphModule,
 ):
     """
     Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
@@ -193,7 +199,26 @@ def make_constraints(
     #   - eval_frame.py solves constraints
     #   - _trace.py installs shape metadata in IR.
 
+    inline_constraints = gm.meta.get("inline_constraints", [])
+    range_constraints = {
+        symbol: inline_constraints[symbol] for symbol in inline_constraints
+    }
+    if dynamic_shapes == []:
+        return range_constraints
+
+    def _is_dynamic_shape_leaf(x):
+        if x is None:
+            return True
+        if isinstance(x, dict):
+            x = list(x.values())
+        return all(isinstance(y, (_Dim, int)) or y is None for y in x)
+
+    flat_dynamic_shapes, _ = tree_flatten(
+        dynamic_shapes, is_leaf=_is_dynamic_shape_leaf
+    )
+
     shape_env = fake_mode.shape_env
+    assert shape_env.tracked_fakes is not None
     placeholders = [tf.fake for tf in shape_env.tracked_fakes]
     sources = [tf.source for tf in shape_env.tracked_fakes]
     input_contexts = [tf.symbolic_context for tf in shape_env.tracked_fakes]
@@ -230,16 +255,23 @@ def make_constraints(
     if constraint_violation_error:
         raise constraint_violation_error
 
-    range_constraints = {}
+    user_tensor_input_names = {
+        spec.arg.name
+        for spec in input_specs
+        if spec.kind == InputKind.USER_INPUT and isinstance(spec.arg, TensorArgument)
+    }
+
     input_dims = defaultdict(list)
     free_symbols = set()
+    input_index = 0
     for node in gm.graph.nodes:
-        if node.op != "placeholder":
+        if node.name not in user_tensor_input_names:
             continue
         if _is_constant_argument(node.meta["val"]) or isinstance(
             node.meta["val"], CustomObjArgument
         ):
             continue
+        shape_spec = flat_dynamic_shapes[input_index]
         for i, d in enumerate(node.meta["val"].shape):
             if isinstance(d, torch.SymInt):
                 # Look up the range constraint for the symbol corresponding to this shape dimension
@@ -247,9 +279,18 @@ def make_constraints(
                 # NOTE(avik): Use node._expr instead of node.expr for the lookup here because
                 # we want the symbol, not its replacement, which could be an expression. Maybe
                 # there's a better way to do this, e.g., by (re)computing value ranges for expressions?
-                range_constraints[d.node.expr] = shape_env.var_to_range[d.node._expr]
+                dim = shape_spec[i] if shape_spec else None
+                if dim:
+                    range_constraints[d.node.expr] = ValueRanges(
+                        lower=dim.min, upper=dim.max
+                    )
+                else:
+                    range_constraints[d.node.expr] = shape_env.var_to_range[
+                        d.node._expr
+                    ]
                 input_dims[d.node.expr].append(InputDim(input_name=node.name, dim=i))
                 free_symbols.update(d.node.expr.free_symbols)
+        input_index += 1
 
     for symbol in free_symbols:
         if symbol not in range_constraints:

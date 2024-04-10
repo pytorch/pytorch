@@ -317,7 +317,8 @@ def meta_randperm_default(
     )
 
 
-@register_meta(aten.randint.default)
+@register_meta([aten.randint.default, aten.randint.out])
+@out_wrapper()
 def meta_randint(
     high, size, *, dtype=torch.long, layout=None, device=None, pin_memory=None
 ):
@@ -326,7 +327,8 @@ def meta_randint(
     )
 
 
-@register_meta(aten.randint.low)
+@register_meta([aten.randint.low, aten.randint.low_out])
+@out_wrapper()
 def meta_randint_low(
     low,
     high,
@@ -342,7 +344,8 @@ def meta_randint_low(
     )
 
 
-@register_meta(aten.rand.default)
+@register_meta([aten.rand.default, aten.rand.out])
+@out_wrapper()
 def meta_rand_default(size, *, dtype=None, layout=None, device=None, pin_memory=None):
     return torch.empty(
         size, dtype=dtype, layout=layout, device=device, pin_memory=pin_memory
@@ -611,7 +614,7 @@ def make_dep_token(
     pin_memory=None,
     memory_format=None,
 ):
-    return torch.empty([], device="meta")
+    return torch.empty(0, device="meta")
 
 
 @register_meta(aten.sym_constrain_range.default)
@@ -5040,8 +5043,10 @@ def gather_shape_check(self, dim, index):
 
 @register_meta(aten.gather.default)
 def meta_gather(self, dim, index, sparse_grad=False):
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     wrapped_dim = maybe_wrap_dim(dim, self.dim())
-    is_index_empty = index.numel() == 0
+    is_index_empty = guard_size_oblivious(index.numel() == 0)
     if not is_index_empty:
         torch._check(
             index.dtype == torch.long,
@@ -5080,7 +5085,9 @@ def get_operator_enum(reduce_, use_new_options=False):
 
 # From aten/src/ATen/native/ScatterGatherChecks.h
 def scatter_gather_dtype_check(method_name, self, index, src_opt=None):
-    if index.numel() != 0:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(index.numel() != 0):
         torch._check(
             index.dtype == torch.long,
             lambda: f"{method_name}(): Expected dtype int64 for index",
@@ -5099,7 +5106,9 @@ def ensure_nonempty_dim(dim):
 
 # From aten/src/ATen/native/ScatterGatherChecks.h
 def scatter_shape_check(self, dim, index, src_opt=None):
-    if index.numel() == 0:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(index.numel() == 0):
         return
     torch._check(
         ensure_nonempty_dim(self.dim()) == ensure_nonempty_dim(index.dim()),

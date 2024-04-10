@@ -1078,9 +1078,11 @@ std::vector<Tensor> cat_tensors_backward(
     }
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
-    if (shape == std::vector<c10::SymInt>({c10::SymInt(0)})) {
-      grad_inputs[i] = at::zeros({0}, grad_val.options());
-      continue;
+    if (shape.size() == 1) {
+      if (TORCH_GUARD_SIZE_OBLIVIOUS(shape[0].sym_eq(0))) {
+        grad_inputs[i] = at::zeros({0}, grad_val.options());
+        continue;
+      }
     }
     const auto& size = shape[dim];
     accumulate += size;
@@ -6943,8 +6945,7 @@ Tensor take_backward(
   // For Composite Compliance,
   // if `grad` and `indices` are CCT but `grad_self` is not
   // then we use the out-of-place variant of `put`.
-  if (!isTensorSubclassLike(grad_self) &&
-      areAnyTensorSubclassLike({grad, indices})) {
+  if (areAnyTensorSubclassLike({grad, indices})) {
     return grad_self.put(indices, grad, true);
   }
   return grad_self.put_(indices, grad, true);

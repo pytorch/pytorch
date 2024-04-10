@@ -92,13 +92,14 @@ import importlib
 import torch
 import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
+import torch.utils._pytree as pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map_only
 from torch.utils._triton import has_triton, has_triton_package
+
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
 optimus_scuba_log: Dict[str, Any] = {}
@@ -363,12 +364,6 @@ def setup_compile_debug():
     compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     if compile_debug:
-        torch._logging.set_logs(
-            dynamo=logging.DEBUG,
-            aot=logging.DEBUG,
-            inductor=logging.DEBUG,
-            output_code=True,  # this is off by default
-        )
         return add_file_handler()
 
     return contextlib.ExitStack()
@@ -489,6 +484,19 @@ def istype(obj, allowed_types):
     return type(obj) is allowed_types
 
 
+if sys.version_info >= (3, 12):
+    # Some typing classes moved to C in 3.12,
+    # which no longer have the _Final mixin.
+    _builtin_final_typing_classes = (
+        typing.ParamSpecArgs,
+        typing.ParamSpecKwargs,
+        typing.ParamSpec,
+        typing.TypeVar,
+        typing.TypeVarTuple,
+        typing.TypeAliasType,
+    )
+
+
 def is_typing(value):
     # _Final catches most of typing classes:
     #   - Any
@@ -498,6 +506,8 @@ def is_typing(value):
     #
     # NB: we intentionally ignore classes that inherit from Generic, since they
     # can be used as both TypingVariable as well as UserDefinedClassVariable.
+    if sys.version_info >= (3, 12) and isinstance(value, _builtin_final_typing_classes):
+        return True
     return isinstance(value, typing._Final) or value is typing.Generic  # type: ignore[attr-defined]
 
 
@@ -627,9 +637,10 @@ def proxy_args_kwargs(args, kwargs):
         from .exc import unimplemented
         from .variables.base import typestr
 
-        raise unimplemented(
-            f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}"
-        ) from e
+        unimplemented(
+            f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
+            from_exc=e,
+        )
 
 
 @dataclasses.dataclass
@@ -671,6 +682,13 @@ _compilation_metrics: Deque[CompilationMetrics] = collections.deque(
 def record_compilation_metrics(compilation_metrics: CompilationMetrics):
     global _compilation_metrics
     _compilation_metrics.append(compilation_metrics)
+    torch._logging.trace_structured(
+        "compilation_metrics",
+        lambda: {
+            k: list(v) if isinstance(v, set) else v
+            for k, v in dataclasses.asdict(compilation_metrics).items()
+        },
+    )
     if config.log_compilation_metrics:
         log_compilation_event(compilation_metrics)
 
@@ -700,7 +718,9 @@ class CleanupHook:
     name: str
 
     def __call__(self, *args):
-        CleanupManager.count -= 1
+        # Make sure we're not shutting down
+        if CleanupManager is not None:
+            CleanupManager.count -= 1
         del self.scope[self.name]
 
     @staticmethod
@@ -876,12 +896,12 @@ def is_namedtuple(obj):
 
 
 def is_namedtuple_cls(cls):
-    """Test if an object is a namedtuple or a torch.return_types.* quasi-namedtuple"""
+    """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
     try:
         if issubclass(cls, tuple):
             bases = getattr(cls, "__bases__", []) or [None]
             module = getattr(cls, "__module__", None)
-            return module == "torch.return_types" or (
+            return module in ("torch.return_types", "torch.autograd.forward_ad") or (
                 bases[0] is tuple and hasattr(cls, "_make") and hasattr(cls, "_fields")
             )
     except TypeError:
@@ -981,6 +1001,7 @@ common_constant_types = {
     torch.memory_format,
     torch.layout,
 }
+
 if has_triton_package():
     import triton
 
@@ -1209,7 +1230,7 @@ def wrap_fake_exception(fn):
 
         msg = f"Unsupported: {e.reason} with fake tensor propagation."
         log.warning(msg)
-        raise unimplemented(msg) from e
+        unimplemented(msg, from_exc=e)
 
 
 def deepcopy_to_fake_tensor(obj, fake_mode):
@@ -1258,6 +1279,22 @@ def same(
                 log_error=log_error,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
+        )
+    elif type(ref).__name__ == "QuestionAnsweringModelOutput":
+        # This skips checking accuracy for start_logits/end_logits.
+        # Tentatively, start_logits/end_logits appear to be very prone to
+        # inaccuracies and is somewhat subsumed by checking the loss.
+        return same(
+            ref.loss,
+            res.loss,
+            fp64_ref.loss,
+            cos_similarity,
+            tol,
+            equal_nan,
+            exact_dtype,
+            relax_numpy_equality,
+            ignore_non_fp,
+            log_error=log_error,
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
@@ -1743,7 +1780,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:
-        _ = tree_map_only(
+        _ = pytree.tree_map_only(
             torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
         )
     return ret_val
@@ -1806,7 +1843,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
             # NB: mimic how wrap_fake_exception does it
             from .exc import unimplemented
 
-            raise unimplemented(make_error_message(e)) from e
+            unimplemented(make_error_message(e), from_exc=e)
         except Exception as e:
             raise RuntimeError(make_error_message(e)).with_traceback(
                 e.__traceback__
@@ -2573,3 +2610,44 @@ def invalid_removeable_handle():
         pass
 
     return RemovableHandle(Invalid())
+
+
+# Returns a "proxy" (new object with the same class and dict) for (non-GraphModule) nn.Module's.
+# Attribute changes to the original object/proxy will be reflected in the other.
+# This is useful for cases where we want a keep-alive reference to a module without increasing
+# its reference count.
+def nn_module_proxy(mod):
+    if not isinstance(mod, torch.nn.Module):
+        return mod
+    if isinstance(mod, torch.fx.GraphModule):
+        # Dynamo-generated GM's shouldn't contain user-created GM's
+        return mod
+    proxy = mod.__class__.__new__(mod.__class__)
+    proxy.__dict__ = mod.__dict__
+    return proxy
+
+
+def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
+    """
+    Mutate inputs so that they are flat and wrap gm such that it
+    accepts those inputs.  This is needed for graphs that take
+    bumpy inputs.
+    """
+    inputs, spec = pytree.tree_flatten(inputs)
+
+    class GmWrapper(torch.nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.gm = gm
+
+        def forward(self, *args):
+            args: List[Any] = list(args)
+            return self.gm(*pytree.tree_unflatten(args, spec))
+
+    compiled_fn = compile_gm(GmWrapper(), inputs)
+
+    def wrapper(*args):
+        # note this doesn't check the spec, assuming it is the same
+        return compiled_fn(*pytree.arg_tree_leaves(*args))
+
+    return wrapper
