@@ -5185,14 +5185,14 @@ class FallbackKernel(ExternKernelAlloc):
     @staticmethod
     def find_device(tensor_args, example_output):
         if tensor_args:
-            devices = {arg.get_device() for arg in tensor_args if arg.get_device()}
+            devices = [arg.get_device() for arg in tensor_args if arg.get_device()]
             return devices[0]
         if isinstance(example_output, torch.Tensor):
             return example_output.device
         if isinstance(example_output, (list, tuple)):
-            devices = {FallbackKernel.find_device(None, x) for x in example_output}
+            device_set = {FallbackKernel.find_device(None, x) for x in example_output}
             # Remove None
-            devices = [device for device in devices if device]
+            devices = [device for device in device_set if device]
             if len(devices) == 1:
                 return devices[0]
             for device in devices:
