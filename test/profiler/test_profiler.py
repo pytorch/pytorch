@@ -615,14 +615,12 @@ class TestExecutionTrace(TestCase):
         def fn(nt):
             return nt.sin().cos()
 
-        fn_c = torch.compile(fn)
-
         with torch.profiler.profile(execution_trace_observer=observer) as prof:
             for i in range(3):
                 values = torch.rand((8 + i, 4 + i))
                 offsets = torch.tensor([0, 2, 4, 6, 8 + i])
                 nt = torch.nested.nested_tensor_from_jagged(values, offsets)
-                fn_c(nt)
+                fn(nt)
 
         nodes = self.get_execution_trace_root(fp.name)
         found_cos = False
@@ -1877,7 +1875,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 self.assertTrue(e.input_shapes == [])
         with profile(record_shapes=True) as p:
             # add optional args
-            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf2", [x, y])
+            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf2", [x, y], {"stream" : 0, "grid" : "lambda x : x + 1"})
             for _ in range(4):
                 with cm:
                     x.add(y)
@@ -1889,7 +1887,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 self.assertTrue(e.input_shapes == [[4, 4], [4, 4]])
 
         with profile(record_shapes=True) as p:
-            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf3", ["hi"])
+            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf3", input_values=["hi"], keyword_values={"hi" : "hello"})
             for _ in range(4):
                 try:
                     with cm:
