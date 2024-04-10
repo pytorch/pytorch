@@ -44,6 +44,11 @@ void initModule(PyObject* module) {
     at::globalContext().lazyInitMTIA();
   });
 
+  m.def("_mtia_isBuilt", []() {
+    // Check if the MTIAHooks class has been registered with the registry.
+    return at::detail::isMTIAHooksBuilt();
+  });
+
   m.def("_mtia_isInBadFork", []() { return in_bad_fork; });
 
   m.def("_mtia_getCurrentStream", [](c10::DeviceIndex device_index) {

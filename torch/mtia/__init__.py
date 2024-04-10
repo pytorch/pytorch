@@ -95,7 +95,7 @@ class DeferredMtiaCallError(Exception):
 
 def _is_compiled() -> bool:
     r"""Return true if compiled with MTIA support."""
-    return hasattr(torch._C, "_mtia_init")
+    return torch._C._mtia_isBuilt()
 
 
 def is_available() -> bool:
