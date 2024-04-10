@@ -1151,17 +1151,17 @@ class WrapperCodeGen(CodeGen):
         symbols_included = {original_name}
 
         def traverse(cur_kernel):
+            unqualified_loads = {
+                node.id
+                for node in ast.walk(ast.parse(cur_kernel.src))
+                if isinstance(node, ast.Name)
+                and hasattr(node, "ctx")
+                and isinstance(node.ctx, ast.Load)
+                and hasattr(node, "id")
+            }
             for symbol_name in cur_kernel.fn.__code__.co_names:
                 if symbol_name in symbols_included:
                     continue
-                unqualified_loads = {
-                    node.id
-                    for node in ast.walk(ast.parse(kernel.src))
-                    if isinstance(node, ast.Name)
-                    and hasattr(node, "ctx")
-                    and isinstance(node.ctx, ast.Load)
-                    and hasattr(node, "id")
-                }
                 if symbol_name in cur_kernel.fn.__globals__:
                     symbol = cur_kernel.fn.__globals__[symbol_name]
                     if isinstance(symbol, JITFunction):
