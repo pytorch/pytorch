@@ -1136,8 +1136,38 @@ class CppWrapperCpu(WrapperCodeGen):
         # ArrayRefTensor and at::Tensor is still fragile.
         self.allow_stack_allocation = False
 
+        # HACK: val_to_arg_str jams multiple arguments together using a comma. If that
+        # ever breaks, it needs to be reworked to be able to return multiple arguments,
+        # and the split-on-comma code here needs to be removed.
+        def is_number(s: str):
+            try:
+                int(s)
+                return True
+            except ValueError:
+                pass
+
+            try:
+                float(s)
+                return True
+            except ValueError:
+                return False
+
+        wrapped_args = []
+        for x in args:
+            pieces = x.split(", ")
+            for piece in pieces:
+                # We only really *need* convert_arrayref_tensor_to_tensor for
+                # ArrayRefTensors. The code flowing into here uses `0` for nullptr,
+                # which convert_arrayref_tensor_to_tensor would blindly coerce to int,
+                # so just avoid wrapping integers.
+                if not is_number(piece):
+                    piece = f"convert_arrayref_tensor_to_tensor({piece})"
+                wrapped_args.append(piece)
+
         shim_fn = self.get_c_shim_func_name(kernel)
-        self.writeline(f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(args)}));")
+        self.writeline(
+            f"AOTI_TORCH_ERROR_CODE_CHECK({shim_fn}({', '.join(wrapped_args)}));"
+        )
 
     def generate_c_shim_extern_kernel_alloc(self, extern_kernel, args):
         # registered output buffer name
