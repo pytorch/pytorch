@@ -8,3 +8,4 @@ from .random_ops import *  # noqa: F403
 from .view_ops import *  # noqa: F403
 from .conv_ops import *  # noqa: F403
 from .experimental_ops import *  # noqa: F403
+from .collectives_ops import *  # noqa: F403
