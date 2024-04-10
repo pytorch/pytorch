@@ -281,11 +281,12 @@ class EventList(list):
         with open(path, "w") as f:
             for evt in self:
                 if evt.stack and len(evt.stack) > 0:
-                    metric_value = getattr(evt,
-                                           metric.replace('cuda', 'device')
-                                                 .replace('xpu', 'device')
-                                                 .replace('privateuse1', 'device')
-                                           )
+                    metric_value = getattr(
+                        evt,
+                        metric.replace("cuda", "device")
+                        .replace("xpu", "device")
+                        .replace("privateuse1", "device"),
+                    )
                     if int(metric_value) > 0:
                         stack_str = ""
                         for entry in reversed(evt.stack):
@@ -576,7 +577,6 @@ class FunctionEvent(FormattedTimesMixin):
             assert self.device_type in [DeviceType.CUDA, DeviceType.PrivateUse1]
             return self.device_time_total
 
-
     @property
     def key(self):
         return self.name
@@ -796,9 +796,7 @@ def _build_table(
     has_device_mem = any(event.self_device_memory_usage > 0 for event in events)
     use_device = events[0].use_device
     if not use_device and (has_device_mem or has_device_time):
-        raise RuntimeError(
-            "use_device is None, but there is device performance data."
-        )
+        raise RuntimeError("use_device is None, but there is device performance data.")
 
     has_input_shapes = any(
         (event.input_shapes is not None and len(event.input_shapes) > 0)
@@ -807,13 +805,16 @@ def _build_table(
 
     if sort_by is not None:
         events = EventList(
-            sorted(events,
-                   key=lambda evt: getattr(evt,
-                                           sort_by.replace('cuda', 'device')
-                                                  .replace('xpu', 'device')
-                                                  .replace('privateuse1', 'device')
-                                           ),
-                   reverse=True),
+            sorted(
+                events,
+                key=lambda evt: getattr(
+                    evt,
+                    sort_by.replace("cuda", "device")
+                    .replace("xpu", "device")
+                    .replace("privateuse1", "device"),
+                ),
+                reverse=True,
+            ),
             use_device=use_device,
             profile_memory=profile_memory,
             with_flops=with_flops,
@@ -1065,5 +1066,7 @@ def _build_table(
     append(header_sep)
     append(f"Self CPU time total: {_format_time(sum_self_cpu_time_total)}")
     if has_device_time:
-        append(f"Self {use_device.upper()} time total: {_format_time(sum_self_device_time_total)}")
+        append(
+            f"Self {use_device.upper()} time total: {_format_time(sum_self_device_time_total)}"
+        )
     return "".join(result)
