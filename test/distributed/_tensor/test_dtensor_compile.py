@@ -219,9 +219,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(64, 32, requires_grad=True)
         out = fn(x)
-        print(type(out))
         out2 = torch.compile(fn, backend="eager")(x)
-        print(type(out2))
 
     def test_dtensor_noncontiguous_output(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -508,7 +506,7 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             FileCheck().check(
                 "buf0 = torch.ops._c10d_functional.all_gather_into_tensor.default(primal"
             ).check("buf1 = torch.ops._c10d_functional.wait_tensor.default(buf0").check(
-                "extern_kernels.mm(buf1,"
+                "extern_kernels.mm(buf0,"
             ).run(
                 code
             )
@@ -518,8 +516,8 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             FileCheck() \
                 .check("buf1_work = dist.all_gather_into_tensor(buf1[0]") \
                 .check("buf2 = buf1[0]") \
-                .check("buf3 = _wait_tensor(buf2)") \
-                .check("extern_kernels.mm(buf3,") \
+                .check("buf2 = _wait_tensor(buf2)") \
+                .check("extern_kernels.mm(buf2,") \
                 .run(code)
 
 
