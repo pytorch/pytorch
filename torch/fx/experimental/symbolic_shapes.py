@@ -680,7 +680,7 @@ def rename_unbacked_to(orig: SymInt, new: SymInt):
     # orig is eliminated, new is preserved
     shape_env = orig.node.shape_env
     assert shape_env is new.node.shape_env
-    shape_env.rename_unbacked_to(orig, new)
+    shape_env._rename_unbacked_to(orig, new)
 
 def guard_bool(a):
     if isinstance(a, SymBool):
@@ -2184,7 +2184,7 @@ class ShapeEnv:
             self.is_recording = False
 
     @record_shapeenv_event()
-    def rename_unbacked_to(self, orig: SymInt, new: SymInt):
+    def _rename_unbacked_to(self, orig: SymInt, new: SymInt):
         if not isinstance(orig.node.expr, sympy.Symbol):
             return
         if not isinstance(new.node.expr, sympy.Symbol):
