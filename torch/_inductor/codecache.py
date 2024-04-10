@@ -2720,7 +2720,10 @@ def after_fork():
     AsyncCompile.process_pool.cache_clear()
 
 
-os.register_at_fork(after_in_child=after_fork)
+try:
+    os.register_at_fork(after_in_child=after_fork)
+except AttributeError:
+    pass  # register_at_fork does not exists on windows
 
 
 class AsyncCompile:
