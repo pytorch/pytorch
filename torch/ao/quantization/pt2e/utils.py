@@ -167,7 +167,7 @@ def _is_supported_batch_norm_for_training(node: Node):
     return node.target in supported_ops
 
 # TODO: move this to torch/ao/quantization/utils.py
-def _is_conv_node(n: Node):
+def _is_conv_or_conv_transpose_node(n: Node):
     """
     Return whether the node refers to an aten conv or conv transpose op.
     """
@@ -186,6 +186,9 @@ def _is_conv_transpose_node(n: Node):
         torch.ops.aten.conv_transpose2d,
         torch.ops.aten.conv_transpose2d.input,
     ]
+
+def _is_conv_transpose_fn(conv_fn: Callable):
+    return conv_fn in [F.conv_transpose1d, F.conv_transpose2d]
 
 def _is_bn_node(n: Node):
     return _is_supported_batch_norm_for_training(n) or n.target == torch.ops.aten._native_batch_norm_legit_no_training.default
@@ -271,7 +274,7 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
             continue
         bn_node = n
         n = bn_node.args[0]
-        if not (_is_conv_node(n) or _is_conv_transpose_node(n)):
+        if not _is_conv_or_conv_transpose_node(n):
             continue
         conv_node = n
         conv_weight_node = conv_node.args[1]
