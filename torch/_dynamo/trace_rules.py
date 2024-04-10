@@ -227,6 +227,7 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.hessian": UserFunctionVariable,
     "torch._functorch.deprecated.jacfwd": UserFunctionVariable,
     "torch._functorch.deprecated.jacrev": UserFunctionVariable,
+    "torch._functorch.deprecated.grad": UserFunctionVariable,
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     #
