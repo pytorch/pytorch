@@ -1905,8 +1905,7 @@ class InstructionTranslatorBase(
         self.symbolic_locals[inst.argval] = NullVariable()
 
     def LOAD_SUPER_ATTR(self, inst):
-        super_vt, cls_vt, self_vt = self.popn(3)
-        self.call_function(super_vt, [cls_vt, self_vt], {})
+        self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
         if inst.arg & 1:
             self.LOAD_METHOD(inst)
         else:
@@ -2151,8 +2150,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if k in f_locals
             }
 
-            self._throw_if_unsupported_optimizer_step()
-
             self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
@@ -2165,13 +2162,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
-
-    def _throw_if_unsupported_optimizer_step(self):
-        from .variables import OptimizerVariable
-
-        OptimizerVariable.throw_if_unsupported_step(
-            self.symbolic_locals, self.code_options["co_name"]
-        )
 
     def _throw_if_in_functorch(self):
         # Fallback to eager in case of a graph break inside vmap
