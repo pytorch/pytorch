@@ -2835,7 +2835,9 @@ def constant_pad_nd(
     padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
 
     out_indices = [
-        torch.arange(-padding_left[i], inp_shape[i] + padding_right[i], device=a.device)
+        torch.arange(
+            -padding_left[i], inp_shape[i] + padding_right[i], device=a.device
+        ).reshape(-1, *[1] * (dim - 1 - i))
         for i in range(dim)
     ]
 
