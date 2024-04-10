@@ -874,6 +874,7 @@ class DoubleLinear(nn.Module):
             return self.relu(self.lin1(x)), self.relu(self.lin2(x))
         return self.relu(self.lin1(x))
 
+
 # NOTE: For these patch methods, if we want safety under multi-threading (e.g.
 # when using multi-threaded process group), then we want:
 # (1) a barrier immediately after reading the original value to ensure that all
