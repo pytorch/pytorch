@@ -100,7 +100,7 @@ def disable(fn=None, recursive=True):
 
 def disable_if_config_true(config_attr: str):
     """
-    If ``torch._dynamo.config.config_attr` is `True`, the decorator will disable compilation
+    If `torch._dynamo.config.config_attr` is `True`, the decorator will disable compilation
     It's executed when calling `func`. In contrast, `torch.compile.disable` is executed when defining function
 
     Args:
