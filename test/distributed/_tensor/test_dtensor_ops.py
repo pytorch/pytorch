@@ -114,6 +114,7 @@ dtensor_fails = {
     xfail("as_strided", "partial_views"),
     xfail("as_strided_scatter"),
     xfail("bernoulli"),
+    xfail("_batch_norm_with_update"),
     xfail("block_diag"),
     xfail("broadcast_shapes"),
     xfail("cauchy"),
@@ -485,7 +486,6 @@ dtensor_fails = {
     xfail("var_mean", "unbiased"),
     xfail("vdot"),
     xfail("view_copy"),
-    xfail("view_as_complex"),
     xfail("zeros"),
     # ops inside this might even fail without dtensor
     # tests, as we rescale op db common test size factor (i.e. L, M, S)

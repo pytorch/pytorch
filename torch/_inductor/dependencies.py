@@ -475,6 +475,9 @@ class FreeUnbackedSymbolsOpsHandler:
     def frexp(self, x):
         return (None,) * 2
 
+    def scan(self, dtypes, combine_fn, values, inits):
+        return (None,) * len(values)
+
     def reduction(
         self,
         dtype: torch.dtype,

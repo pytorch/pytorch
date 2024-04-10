@@ -60,6 +60,7 @@ linear_pointwise_ops = [
 
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
+    aten._conj.default,
     aten.abs.default,
     aten.abs.out,
     aten.abs_.default,
@@ -547,6 +548,7 @@ for_each_ops = [
     aten._foreach_neg.default,
     aten._foreach_neg_.default,
     aten._foreach_reciprocal_.default,
+    aten._foreach_sub.List,
     aten._foreach_sub_.Scalar,
     aten._foreach_sqrt.default,
     aten._foreach_sqrt_.default,
