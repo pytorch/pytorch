@@ -449,6 +449,10 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"math.floor({self._print(expr.args[0])})"
 
+    def _print_Trunc(self, expr):
+        assert len(expr.args) == 1
+        return f"math.trunc({self._print(expr.args[0])})"
+
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
         return f"math.ceil({self._print(expr.args[0])})"
