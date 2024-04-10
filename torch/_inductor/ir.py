@@ -3632,6 +3632,8 @@ class InputsKernel(Buffer):
     def get_read_writes(self):
         star_dep = []
         for input in self.inputs:
+            # if isinstance(input, torch._C.ScriptObject):
+            #     continue
             if isinstance(input, list):
                 star_dep.extend([self.get_read_writes_input(x) for x in input])
             else:
@@ -3660,6 +3662,8 @@ class InputsKernel(Buffer):
             # into TensorBox / StorageBox pair as a result of the
             # cls.copy_input call; so we should unwrap recursively
             return cls.unwrap_storage_for_input(x)
+        if isinstance(x, TorchBindObject):
+            return x
         assert isinstance(x, (Buffer, ReinterpretView)), x
         return x
 
@@ -3934,7 +3938,8 @@ class ExternKernel(InputsKernel):
             else:
                 if isinstance(arg, sympy.Expr):
                     arg = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
-                non_tensor_args.append(arg)
+                else:
+                    non_tensor_args.append(arg)
 
         def unflatten_args(new_tensor_args, new_non_tensor_args):
             result = []
@@ -4063,6 +4068,8 @@ class ExternKernel(InputsKernel):
         if isinstance(x, StorageBox):
             # TODO(jansel): impose layout preference on realized buffer
             x.realize()
+            return x
+        if isinstance(x, TorchBindObject):
             return x
         return cls.copy_input(x)
 
@@ -5181,13 +5188,14 @@ class FallbackKernel(ExternKernelAlloc):
     @staticmethod
     def find_device(tensor_args, example_output):
         if tensor_args:
-            return tensor_args[0].get_device()
+            devices = [arg.get_device() for arg in tensor_args if arg.get_device()]
+            return devices[0]
         if isinstance(example_output, torch.Tensor):
             return example_output.device
         if isinstance(example_output, (list, tuple)):
-            devices = {FallbackKernel.find_device(None, x) for x in example_output}
+            device_set = {FallbackKernel.find_device(None, x) for x in example_output}
             # Remove None
-            devices = [device for device in devices if device]
+            devices = [device for device in device_set if device]
             if len(devices) == 1:
                 return devices[0]
             for device in devices:
@@ -6240,12 +6248,7 @@ class ConvolutionTransposeUnary(ExternKernelAlloc):
         algorithm,
     ):
         transposed = True
-        (
-            inputs,
-            constant_args,
-            kernel_layout,
-            _,
-        ) = _prepare_convolution_fusion_create(
+        (inputs, constant_args, kernel_layout, _,) = _prepare_convolution_fusion_create(
             cls,
             x,
             weight,
@@ -7383,7 +7386,7 @@ class EffectfulKernel(FallbackKernel):
         kwargs=None,
     ):
         super().__init__(
-            NoneLayout(layout.device),
+            layout,
             kernel,
             tensor_args,
             nontensor_args,
@@ -7411,6 +7414,21 @@ class EffectfulKernel(FallbackKernel):
 
     def has_side_effects(self):
         return True
+
+
+@dataclasses.dataclass
+class TorchBindObject(IRNode):
+    name: str
+    value: torch._C.ScriptObject
+
+    def get_name(self):
+        return self.name
+
+    def get_device(self):
+        return None  # is there a device??
+
+    def codegen_reference(self, writer=None):
+        return self.name
 
 
 class InterpreterShim(torch.fx.Interpreter):

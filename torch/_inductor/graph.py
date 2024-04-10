@@ -54,6 +54,7 @@ from .ir import (
     Reduction,
     StorageBox,
     TensorBox,
+    TorchBindObject,
 )
 from .lowering import (
     constrain_to_fx_strides,
@@ -272,7 +273,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.folded_constants: Set[str] = (
             set(const_output_index.keys()) if const_output_index else set()
         )
-        self.constants: Dict[str, torch.Tensor] = (
+        self.constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]] = (
             const_module.constants if const_module else {}
         )
         self.constant_reprs: Dict[str, str] = {}
@@ -605,7 +606,9 @@ class GraphLowering(torch.fx.Interpreter):
 
     def get_dtype(self, buffer_name: str):
         if buffer_name in self.constants:
-            return self.constants[buffer_name].dtype
+            buffer = self.constants[buffer_name]
+            assert isinstance(buffer, torch.Tensor)
+            return buffer.dtype
         if buffer_name in self.name_to_buffer:
             return self.name_to_buffer[buffer_name].get_dtype()
         if buffer_name in self.graph_inputs:
@@ -619,7 +622,9 @@ class GraphLowering(torch.fx.Interpreter):
         from .ir import MultiOutputLayout
 
         if buffer_name in self.constants:
-            return self.constants[buffer_name].numel()
+            buffer = self.constants[buffer_name]
+            assert isinstance(buffer, torch.Tensor)
+            return buffer.numel()
         if buffer_name in self.name_to_buffer:
             buf = self.name_to_buffer[buffer_name]
             if isinstance(getattr(buf, "layout", None), MultiOutputLayout):
@@ -701,10 +706,13 @@ class GraphLowering(torch.fx.Interpreter):
             else self.constants[name]
         )
 
-    def add_tensor_constant(self, data, name=None):
+    def add_tensor_constant(self, data: torch.Tensor, name=None):
         def allocate(name):
             if not config.aot_inductor.use_runtime_constant_folding:
                 for constant_name, value in self.constants.items():
+                    if not isinstance(value, torch.Tensor):
+                        continue
+
                     if (
                         not data.is_mkldnn
                         and data.size() == value.size()
@@ -753,11 +761,14 @@ class GraphLowering(torch.fx.Interpreter):
         If device_override doesn't match the constant's device, then
         copy it and return a different name.
         """
-        if self.constants[name].device == device_override or device_override is None:
+        const = self.constants[name]
+        if not isinstance(const, torch.Tensor):
+            return name
+        if const.device == device_override or device_override is None:
             return name
         alt_name = f"{name}_{device_override.type}{device_override.index or 0}"
         if alt_name not in self.constants:
-            self.constants[alt_name] = self.constants[name].to(device_override)
+            self.constants[alt_name] = const.to(device_override)
         return alt_name
 
     def placeholder(self, target: str, args, kwargs):
@@ -876,7 +887,14 @@ class GraphLowering(torch.fx.Interpreter):
         if isinstance(value, torch.fx.GraphModule):
             return ir.Subgraph(name=target, graph_module=value)
 
-        if (
+        elif isinstance(value, torch._C.ScriptObject):
+            self.constants[target] = value
+            import pickle
+
+            self.constant_reprs[target] = str(pickle.dumps(value))
+            return TorchBindObject(target, value)
+
+        elif (
             config.aot_inductor.use_runtime_constant_folding
             or config.always_keep_tensor_constants
             or unsupported_output_tensor(value)

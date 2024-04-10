@@ -116,7 +116,10 @@ class ConstantFolder(torch.fx.Interpreter):
         args, kwargs = self.fetch_args_kwargs_from_env(node)
         flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
 
-        if self.unknown_value in flattened_inputs:
+        # We need to convert flattend_inputs to a set because in cases where
+        # flattened_inputs contains a ScriptObject, `in` checks for equality
+        # which results in a type error, rather than against the hashes
+        if self.unknown_value in set(flattened_inputs):
             return self.unknown_value
 
         # TODO - fix errors with this

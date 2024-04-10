@@ -951,6 +951,11 @@ class WrapperCodeGen(CodeGen):
                 f"device='{device}', dtype={dtype})"
             )
 
+        def add_torchbind_input(name, value):
+            import pickle
+
+            output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
+
         def add_expr_input(name, val):
             output.writeline(f"{name} = {val}")
 
@@ -966,13 +971,20 @@ class WrapperCodeGen(CodeGen):
                 strip=True,
             )
 
+            num_torchbind = 0
             for name, value in V.graph.constants.items():
                 # all the constants are global variables, that's why we need
                 # these 'global var_name' lines
                 output.writeline(f"global {name}")
-                add_fake_input(
-                    name, value.size(), value.stride(), value.device, value.dtype
-                )
+                if isinstance(value, torch._C.ScriptObject):
+                    if num_torchbind == 0:
+                        output.writeline("import pickle")
+                    add_torchbind_input(name, value)
+                    num_torchbind += 1
+                else:
+                    add_fake_input(
+                        name, value.size(), value.stride(), value.device, value.dtype
+                    )
 
             for name, value in V.graph.graph_inputs.items():
                 if isinstance(value, sympy.Symbol) and isinstance(

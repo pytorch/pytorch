@@ -355,6 +355,31 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             self.assertTrue("MockModule.linear:mean" in recorded_dict)
             self.assertTrue("MockModule:mean" in recorded_dict)
 
+    @unittest.skipIf(IS_WINDOWS, "triton")
+    def test_torchbind_inductor(self):
+        import torch._inductor
+
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tuple_return(self.attr, x)
+                y = a[0] + a[1]
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, y)
+                return x + b
+
+        orig_res = M()(torch.ones(2, 3))
+
+        # We can't directly torch.compile because dynamo doesn't trace ScriptObjects yet
+        with enable_torchbind_tracing():
+            ep = torch.export.export(M(), (torch.ones(2, 3),), strict=False)
+        compiled = torch._inductor.compile(ep.module(), (torch.ones(2, 3),))
+
+        new_res = compiled(torch.ones(2, 3))
+        self.assertTrue(torch.allclose(orig_res, new_res))
+
 
 if __name__ == "__main__":
     run_tests()
