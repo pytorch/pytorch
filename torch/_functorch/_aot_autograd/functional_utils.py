@@ -20,8 +20,6 @@ from torch.utils._python_dispatch import (
     transform_subclass,
 )
 
-from .schemas import FunctionalTensorMetadataEq
-
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 
 
@@ -202,7 +200,7 @@ def gen_alias_from_base(
     aliased_base_tensor,
     target_meta_tensor,
     target_requires_grad,
-    target_functional_tensor: Optional[FunctionalTensorMetadataEq] = None,
+    target_functional_tensor: Optional["FunctionalTensorMetadataEq"] = None,
 ):
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
