@@ -19670,7 +19670,7 @@ op_db: List[OpInfo] = [
         backward_dtypes=integral_types_and(torch.bool),
         supports_out=False,
         supports_autograd=False,
-        supports_cow_input_no_materialize=False,
+        allow_cow_input_materialize_forward=[0],
         skips=(
             # Skip due to NotImplementedError for MPS device.
             DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
