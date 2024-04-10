@@ -1020,7 +1020,7 @@ class ConstantLikeVariable(VariableTracker):
         result = getattr(self.value, name)
         if variables.ConstantVariable.is_literal(result):
             return variables.ConstantVariable.create(result)
-        unimplemented(f"{self._error_prefix}.{name} -> {result}")
+        return GetAttrVariable(self, name)
 
 
 class RegexPatternVariable(ConstantLikeVariable):
