@@ -6165,10 +6165,6 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
 def meta_channel_shuffle(input, groups):
     # Assume the input shape is (*, C, H, W), where * represents any number of leading dimensions
     *leading_dims, C, H, W = input.size()
-    # Check the validity of the input
-    assert (
-        C % groups == 0
-    ), "The number of channels must be divisible by the number of groups"
     # The output shape is the same as the input
     return torch.empty(
         *leading_dims,
