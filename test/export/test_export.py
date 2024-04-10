@@ -4,6 +4,7 @@ import copy
 import dataclasses
 import io
 import re
+import logging
 import unittest
 import warnings
 from contextlib import contextmanager
@@ -226,6 +227,22 @@ class TestExport(TestCase):
         args = (torch.randn(1, 3),)
         ep = export(f, args, strict=False)
         self.assertEqual(ep.module()(*args), f(*args))
+
+    def test_colon_parameter(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_parameter(
+                    "foo:bar",
+                    torch.nn.Parameter(torch.ones(3, 3))
+                )
+
+            def forward(self, x):
+                return x + getattr(self, "foo:bar")
+
+        ep = export(M(), (torch.randn(3, 3),))
+        x = torch.randn(3, 3)
+        self.assertEqual(ep.module()(x), M()(x))
 
     def test_conv_dynamic(self):
         # Simple module for demonstration
@@ -4220,6 +4237,29 @@ def forward(self, q, k, v):
                 print(x1)
                 x2 = x1 * x1
                 print(1, 2, 3)
+                x3 = x2 + x2
+                return (x1, x3)
+
+        gm = export(M(), (torch.randn(3, 3),)).graph_module
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    add = torch.ops.aten.add.Tensor(x, x);  x = None
+    mul = torch.ops.aten.mul.Tensor(add, add)
+    add_1 = torch.ops.aten.add.Tensor(mul, mul);  mul = None
+    return (add, add_1)""",
+        )
+
+    def test_logging_logger(self):
+        logger = logging.getLogger(__name__)
+        class M(torch.nn.Module):
+            def forward(self, x):
+                logger.log("start")
+                x1 = x + x
+                logger.debug(x1)
+                x2 = x1 * x1
+                logger.info(1, 2, 3)
                 x3 = x2 + x2
                 return (x1, x3)
 
