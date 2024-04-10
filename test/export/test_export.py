@@ -240,10 +240,7 @@ class TestExport(TestCase):
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.register_parameter(
-                    "foo:bar",
-                    torch.nn.Parameter(torch.ones(3, 3))
-                )
+                self.register_parameter("foo:bar", torch.nn.Parameter(torch.ones(3, 3)))
 
             def forward(self, x):
                 return x + getattr(self, "foo:bar")
