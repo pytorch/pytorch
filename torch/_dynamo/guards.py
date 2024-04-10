@@ -31,6 +31,7 @@ import torch
 import torch.utils._device
 from torch._dynamo.source import (
     is_from_local_source,
+    is_from_optimizer_source,
     TensorProperty,
     TensorPropertySource,
 )
@@ -65,11 +66,13 @@ from .source import (
     GlobalSource,
     GlobalStateSource,
     GlobalWeakRefSource,
+    GradSource,
     LocalSource,
     NNModuleSource,
     NotNNModuleSource,
     NumpyTensorSource,
     ODictGetItemSource,
+    OptimizerSource,
     ShapeEnvSource,
     TupleIteratorGetItemSource,
     TypeSource,
@@ -370,16 +373,9 @@ def getitem_on_dict_manager(
     )
 
 
-def is_grad_source(source):
-    if isinstance(source, AttrSource):
-        return source.member == "grad"
-    return False
-
-
 def match_on_id_for_tensor(guard):
-    return guard.originating_source.is_dict_key() and not is_grad_source(
-        guard.originating_source
-    )
+    source = guard.originating_source
+    return source.is_dict_key() and not isinstance(source, GradSource)
 
 
 # The ready to eval generated code (possibly multiple parts) for a guard, plus
@@ -499,6 +495,20 @@ class GuardBuilder(GuardBuilderBase):
             base_example_value = self.get(base_source_name)
             base_guard_manager = self.get_guard_manager_from_source(source.base)
 
+        # TODO(anijain2305) - We special case for sys.modules in builder.py with
+        # PythonSysModulesVariable. We specialize because otherwise using a
+        # ConstDictVariable tracker installs guards on all the keys, resulting
+        # in a large number of guards. Even with LazyVariable trackers, we still
+        # install guards on all the keys because of how HashableTracker is
+        # currently implemented. Therefore to fix this issue, we will need to
+        # improve key guard installation for ConstDictVariable tracker and
+        # then remove specialization for sys.modules in builder.py.
+        # Set example_value to None to prevent installation fo DictGuardManager.
+        if example_value is sys.modules:
+            example_value = None
+        if base_example_value is sys.modules:
+            base_example_value = None
+
         # Use istype instead of isinstance to check for exact type of source.
         if istype(source, LocalSource):
             # RootGuardManager accepts a dict but still its not a
@@ -535,9 +545,17 @@ class GuardBuilder(GuardBuilderBase):
             return base_guard_manager.type_manager(
                 source=source_name, example_value=example_value
             )
-        elif istype(source, (NNModuleSource, NotNNModuleSource, FSDPNNModuleSource)):
+        elif istype(
+            source,
+            (OptimizerSource, NNModuleSource, NotNNModuleSource, FSDPNNModuleSource),
+        ):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager
+        elif istype(source, GradSource):
+            assert base_guard_manager  # to make mypy happy
+            return base_guard_manager.grad_manager(
+                source=source_name, example_value=example_value
+            )
         elif istype(source, AttrSource):
             assert base_guard_manager  # to make mypy happy
             return base_guard_manager.getattr_manager(
@@ -575,6 +593,19 @@ class GuardBuilder(GuardBuilderBase):
                     source=source_name,
                     example_value=example_value,
                 )
+            elif isinstance(base_example_value, list) and not source.index_is_slice:
+                return base_guard_manager.list_getitem_manager(
+                    key=source.index,
+                    source=source_name,
+                    example_value=example_value,
+                )
+            elif isinstance(base_example_value, tuple) and not source.index_is_slice:
+                return base_guard_manager.tuple_getitem_manager(
+                    key=source.index,
+                    source=source_name,
+                    example_value=example_value,
+                )
+
             index = source.index
             if source.index_is_slice:
                 index = source.unpack_slice()
@@ -719,12 +750,13 @@ class GuardBuilder(GuardBuilderBase):
 
     # Note: the order of the guards in this file matters since we sort guards on the same object by lineno
     def HASATTR(self, guard: Guard):
-        assert isinstance(
-            guard.originating_source, AttrSource
-        ), f"invalid source {guard.name}"
-        base_source = guard.originating_source.base
+        source = guard.originating_source
+        if isinstance(source, NNModuleSource):
+            source = source.base
+        assert isinstance(source, AttrSource), f"invalid source {guard.name}"
+        base_source = source.base
         base = base_source.name()
-        attr = guard.originating_source.member
+        attr = source.member
 
         ref = self.arg_ref(base)
         val = hasattr(self.get(base), attr)
@@ -742,7 +774,7 @@ class GuardBuilder(GuardBuilderBase):
             if val:
                 # Just install a getattr manager. GetAttrGuardAccessor itself
                 # acts as hasattr guard.
-                example_value = self.get(guard.originating_source.name())
+                example_value = self.get(source.name())
                 base_manager.getattr_manager(
                     attr=attr, source=guard.name, example_value=example_value
                 )
@@ -858,10 +890,29 @@ class GuardBuilder(GuardBuilderBase):
                 if weak_id is not None:
                     self.id_matched_objs[local_name] = weak_id
 
+    def NOT_NONE_MATCH(self, guard: Guard, value=None):
+        ref = self.arg_ref(guard)
+        val = self.get(guard.name)
+        assert isinstance(val, torch.Tensor)
+        code = f"{ref} is not None"
+        self._set_guard_export_info(guard, [code])
+
+        if config.enable_cpp_guard_manager:
+            self.get_guard_manager(guard).add_not_none_guard(
+                get_verbose_code_parts(code, guard)
+            )
+        else:
+            self._produce_guard_code(guard, [code])
+
     def NAME_MATCH(self, guard: Guard):
         self._guard_on_attribute(guard, "__name__", GuardBuilder.EQUALS_MATCH)
 
     def DATA_PTR_MATCH(self, guard: Guard):
+        # Add a type check. C++ guard has the type check internally, so only
+        # enable it for Python guards.
+        if not config.enable_cpp_guard_manager:
+            self.TYPE_MATCH(guard)
+
         obj = self.get(guard.name)
         code = f"{self.arg_ref(guard)}.data_ptr() == {obj.data_ptr()}"
         self._set_guard_export_info(guard, [code])
@@ -878,7 +929,20 @@ class GuardBuilder(GuardBuilderBase):
         # in the fx graph
         dual_level = torch.autograd.forward_ad._current_level
         code = [f"torch.autograd.forward_ad._current_level == {dual_level}"]
-        self._produce_guard_code(guard, code)
+        self._set_guard_export_info(guard, [code])
+        if config.enable_cpp_guard_manager:
+            # TODO(anijain2305) - Consider this moving this guard to C++
+            forward_ad = torch.autograd.forward_ad
+
+            def fn(x):
+                return forward_ad._current_level == dual_level
+
+            assert self.guard_manager  # to make mypy happy
+            self.guard_manager.root.add_lambda_guard(
+                fn, get_verbose_code_parts(code, guard)
+            )
+        else:
+            self._produce_guard_code(guard, code)
 
     def FUNCTORCH_STACK_MATCH(self, guard: Guard):
         # Invalidate functorch code if current level is different than
@@ -1039,19 +1103,17 @@ class GuardBuilder(GuardBuilderBase):
 
     def FUNCTION_MATCH(self, guard: Guard):
         """things like torch.add and user defined functions"""
-        if guard.is_local():
-            return self.ID_MATCH(guard)
+        return self.ID_MATCH(guard)
 
     def CLOSURE_MATCH(self, guard: Guard):
         """matches a closure by __code__ id."""
-        if guard.is_local():
-            val = self.get(guard.name)
-            # Strictly only want user-defined functions
-            if type(val) == types.FunctionType and hasattr(val, "__code__"):
-                self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)
-                self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)
-            else:
-                self.FUNCTION_MATCH(guard)
+        val = self.get(guard.name)
+        # Strictly only want user-defined functions
+        if type(val) == types.FunctionType and hasattr(val, "__code__"):
+            self._guard_on_attribute(guard, "__code__", GuardBuilder.HASATTR)
+            self._guard_on_attribute(guard, "__code__", GuardBuilder.FUNCTION_MATCH)
+        else:
+            self.FUNCTION_MATCH(guard)
 
     def BUILTIN_MATCH(self, guard: Guard):
         return self.FUNCTION_MATCH(guard)
@@ -1112,6 +1174,11 @@ class GuardBuilder(GuardBuilderBase):
         ref_a = self.arg_ref(guard)
         ref_b = self.arg_ref(source_b.name())
 
+        if is_from_optimizer_source(
+            guard.originating_source
+        ) or is_from_optimizer_source(source_b):
+            return
+
         code = [f"{ref_b} is {ref_a}"]
         self._set_guard_export_info(guard, code)
 
@@ -1153,7 +1220,7 @@ class GuardBuilder(GuardBuilderBase):
 
         self._set_guard_export_info(guard, code)
         if config.enable_cpp_guard_manager:
-            self.get_guard_manager(guard).add_weakref_alive_guard(
+            self.get_guard_manager(guard).add_not_none_guard(
                 get_verbose_code_parts(code, guard)
             )
         else:
@@ -1356,8 +1423,8 @@ class GuardBuilder(GuardBuilderBase):
                     else:
                         code.append(f"{tensor_name}.{term} == {real_value}")
             else:
-                self.tensor_check_names.append(tensor_name)
                 self.tensor_check_examples.append(value)
+                self.tensor_check_names.append(tensor_name)
                 self.tensor_check_guards.append(guard)
 
                 if config.enable_cpp_guard_manager:
