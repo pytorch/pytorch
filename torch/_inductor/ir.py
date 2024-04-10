@@ -2518,7 +2518,7 @@ class Layout(IRNode):
 
     def is_channels_last_contiguous(self):
         ndim = len(self.size)
-        if ndim not in [4, 5]:
+        if ndim not in [4, 5] or self.size[1] == 1:
             return False
         for left, right, size in zip(
             self.stride, make_channels_last_strides_for(self.size), self.size  # type: ignore[arg-type]
