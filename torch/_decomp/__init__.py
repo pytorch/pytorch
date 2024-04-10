@@ -407,6 +407,7 @@ def core_aten_decompositions() -> Dict[torch._ops.OperatorBase, Callable]:
             aten.sinc,
             aten.sinc_,
             aten.slice_backward,
+            aten.slice_scatter,
             aten.smooth_l1_loss,
             aten.smooth_l1_loss_backward,
             aten.soft_margin_loss,
