@@ -1,6 +1,6 @@
 import types
 import math
-from torch import inf
+from torch import inf, Tensor
 from functools import partial
 import warnings
 from collections import Counter
@@ -111,7 +111,10 @@ class LRScheduler:
 
         for i, data in enumerate(zip(self.optimizer.param_groups, values)):
             param_group, lr = data
-            param_group['lr'] = lr
+            if isinstance(param_group['lr'], Tensor):
+                param_group['lr'].fill_(lr)
+            else:
+                param_group['lr'] = lr
 
         self._last_lr = [group['lr'] for group in self.optimizer.param_groups]
 
@@ -1202,7 +1205,10 @@ class CyclicLR(LRScheduler):
         base_lrs = self._format_param('base_lr', optimizer, base_lr)
         if last_epoch == -1:
             for lr, group in zip(base_lrs, optimizer.param_groups):
-                group['lr'] = lr
+                if isinstance(group['lr'], Tensor):
+                    group['lr'].fill_(lr)
+                else:
+                    group['lr'] = lr
 
         self.max_lrs = self._format_param('max_lr', optimizer, max_lr)
 
