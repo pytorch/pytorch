@@ -135,15 +135,10 @@ class VecMask {
   }
 
   void store(bool* b, int count) {
-    using int_t = int_same_size_t<T>;
-    int size_ = Vectorized<T>::size();
-    TORCH_CHECK(count == size_ * N, "Expect same number of elements in VecMask::store.");
-#pragma unroll(2)
-    for (int i = 0; i < N; i++) {
-      for (int j = 0; j < size_; j++) {
-        b[i * size_ + j] = ((int_t)(mask_[i].values[j]) == (int_t)0) ? 0x00 : 0x01;
-      }
-    }
+    TORCH_CHECK(count == Vectorized<T>::size() * N, "Expect same number of elements in VecMask::store.");
+    TORCH_CHECK(count <= Vectorized<bool>::size(), "Expect the number is less or equal to Vectorized<bool>.");
+    Vectorized<bool> res = this->to<bool, 1>();
+    res.store(b, count);
     return;
   }
 
