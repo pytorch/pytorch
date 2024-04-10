@@ -18,7 +18,7 @@ from torch._higher_order_ops.triton_kernel_wrap import (
 from torch._inductor import metrics
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import skipIfRocm
+from torch.testing._internal.common_utils import skipIfRocm, TEST_WITH_ROCM
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import *  # noqa: F403
@@ -27,10 +27,11 @@ if HAS_CUDA:
     import triton
     from triton import language as tl
 
-    from triton.language.extra.cuda.libdevice import (
-        fast_dividef,
-        fast_dividef as my_fast_dividef,
-    )
+    if not TEST_WITH_ROCM:
+        from triton.language.extra.cuda.libdevice import (
+            fast_dividef,
+            fast_dividef as my_fast_dividef,
+        )
 
 
 # Define shared triton constants here.
