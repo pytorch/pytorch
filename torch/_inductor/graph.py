@@ -889,9 +889,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         elif isinstance(value, torch._C.ScriptObject):
             self.constants[target] = value
-            import pickle
-
-            self.constant_reprs[target] = str(pickle.dumps(value))
+            # self.constant_reprs[target] = ??
             return TorchBindObject(target, value)
 
         elif (

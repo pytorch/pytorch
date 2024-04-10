@@ -3632,8 +3632,6 @@ class InputsKernel(Buffer):
     def get_read_writes(self):
         star_dep = []
         for input in self.inputs:
-            # if isinstance(input, torch._C.ScriptObject):
-            #     continue
             if isinstance(input, list):
                 star_dep.extend([self.get_read_writes_input(x) for x in input])
             else:
@@ -3938,8 +3936,7 @@ class ExternKernel(InputsKernel):
             else:
                 if isinstance(arg, sympy.Expr):
                     arg = V.graph.sizevars.shape_env.create_symintnode(arg, hint=None)
-                else:
-                    non_tensor_args.append(arg)
+                non_tensor_args.append(arg)
 
         def unflatten_args(new_tensor_args, new_non_tensor_args):
             result = []
@@ -5188,14 +5185,14 @@ class FallbackKernel(ExternKernelAlloc):
     @staticmethod
     def find_device(tensor_args, example_output):
         if tensor_args:
-            devices = [arg.get_device() for arg in tensor_args if arg.get_device()]
+            devices = {arg.get_device() for arg in tensor_args if arg.get_device()}
             return devices[0]
         if isinstance(example_output, torch.Tensor):
             return example_output.device
         if isinstance(example_output, (list, tuple)):
-            device_set = {FallbackKernel.find_device(None, x) for x in example_output}
+            devices = {FallbackKernel.find_device(None, x) for x in example_output}
             # Remove None
-            devices = [device for device in device_set if device]
+            devices = [device for device in devices if device]
             if len(devices) == 1:
                 return devices[0]
             for device in devices:
