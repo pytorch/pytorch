@@ -128,7 +128,7 @@ class TestVerifier(TestCase):
         # Parameter doesn't exist in the state dict
         ep.graph_signature.input_specs[0] = InputSpec(
             kind=InputKind.PARAMETER,
-            arg=TensorArgument(name="arg0_1"),
+            arg=TensorArgument(name="p_a"),
             target="bad_param"
         )
         with self.assertRaisesRegex(SpecViolationError, "not in the state dict"):
@@ -155,7 +155,7 @@ class TestVerifier(TestCase):
         # Buffer doesn't exist in the state dict
         ep.graph_signature.input_specs[0] = InputSpec(
             kind=InputKind.BUFFER,
-            arg=TensorArgument(name="arg0_1"),
+            arg=TensorArgument(name="c_a"),
             target="bad_buffer",
             persistent=True,
         )
