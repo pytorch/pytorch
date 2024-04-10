@@ -13006,6 +13006,9 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
+            DecorateInfo(unittest.skip("FP16 corss_entropy cases have not been enabled on MPS yet"),
+                         device_type="mps"),
+
         )
     ),
     OpInfo('nn.functional.normalize',
