@@ -100,6 +100,12 @@ if(USE_XPU)
     # message(WARNING "Not compiling with XPU. Could NOT find SYCL."
     # "Suppress this warning with -DUSE_XPU=OFF.")
     caffe2_update_option(USE_XPU OFF)
+  else()
+    if(USE_KINETO AND NOT PYTORCH_FOUND_XPU_PTI)
+      message(WARNING "Not PTI-sdk found. Turn USE_KINETO to OFF.")
+      set(USE_KINETO OFF)
+      caffe2_update_option(USE_KINETO OFF)
+    endif()
   endif()
 endif()
 

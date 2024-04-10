@@ -3,6 +3,9 @@
 
 #ifdef USE_KINETO
 #include <libkineto.h>
+#ifdef USE_XPU
+#include <c10/xpu/profiler/XPUActivityProfiler.h>
+#endif
 #endif
 
 #include <c10/util/Exception.h>
@@ -220,7 +223,12 @@ void prepareTrace(
     libkineto_init(/*cpuOnly=*/cpuOnly, /*logOnError=*/true);
     libkineto::api().suppressLogMessages();
   }
-
+#ifdef USE_XPU
+  libkineto::api().registerProfilerFactory(
+      []() -> std::unique_ptr<IActivityProfiler> {
+        return std::make_unique<XPUActivityProfiler>();
+      });
+#endif
   if (!libkineto::api().isProfilerInitialized()) {
     libkineto::api().initProfilerIfRegistered();
   }
