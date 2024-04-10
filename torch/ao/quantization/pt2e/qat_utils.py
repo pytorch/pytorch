@@ -21,7 +21,7 @@ from torch.ao.quantization.quantizer import (
 from .utils import (
     _conv1d_bn_example_inputs,
     _conv2d_bn_example_inputs,
-    _is_conv,
+    _is_conv_node,
     _is_bn_node,
     fold_bn_weights_into_conv_node,
     _get_aten_graph_module_for_pattern,
@@ -271,7 +271,7 @@ def _has_conv_bias_filter(
     the original graph has bias.
     """
     for n in match.nodes_map.values():
-        if _is_conv(n):
+        if _is_conv_node(n):
             return len(n.args) > 2 and n.args[2] is not None
     raise ValueError("Could not find conv node in matched conv + bn pattern")
 
@@ -325,7 +325,7 @@ def _get_conv_bn_pattern_nodes(r: ReplacedPatterns) -> Dict[str, Tuple[Node, Nod
         for n in nodes:
             if n.op != "call_function":
                 continue
-            if _is_conv(n):
+            if _is_conv_node(n):
                 assert conv_node is None
                 conv_node = n
             if _is_bn_node(n):
@@ -440,8 +440,8 @@ def _copy_over_literal_conv_args(original_node: Node, new_node: Node):
     Note: Unlike other tensor args like conv weights and biases, literal args are
     preserved in the original nodes after replacement, so we can access them here.
     """
-    assert _is_conv(original_node)
-    assert _is_conv(new_node)
+    assert _is_conv_node(original_node)
+    assert _is_conv_node(new_node)
     # x, weight, bias, [stride, padding, dilation, transposed, output_padding, groups]
     new_args = list(new_node.args)
     if len(new_args) < 3:
@@ -457,8 +457,8 @@ def _update_conv_input_qspec_map_after_replacement(original_node: Node, replacem
     so the keys in the `input_qspec_map` will need to be updated to reflect
     the corresponding nodes in the replacement graph.
     """
-    assert _is_conv(original_node)
-    assert _is_conv(replacement_node)
+    assert _is_conv_node(original_node)
+    assert _is_conv_node(replacement_node)
     if "quantization_annotation" not in original_node.meta:
         return
     original_input_qspec_map = original_node.meta["quantization_annotation"].input_qspec_map
@@ -609,7 +609,7 @@ def _fuse_conv_bn_qat_helper(
         for original_node, replacement_node in _get_conv_bn_pattern_nodes(r).values():
             # Step (3a): Copy over metadata for all nodes in [conv - bn - getitem]
             replacement_node.meta = original_node.meta
-            if _is_conv(original_node):
+            if _is_conv_node(original_node):
                 # Step (3b): Copy over conv literal args
                 _copy_over_literal_conv_args(original_node, replacement_node)
                 # Step (3c): Update old references in the conv node's input_qspec_map
@@ -780,7 +780,7 @@ def _fold_conv_bn_qat_helper(
 
         # Copy over literal args for conv
         for original_node in _filter_nodes_map(r.nodes_map).values():
-            if _is_conv(original_node):
+            if _is_conv_node(original_node):
                 _copy_over_literal_conv_args(original_node, conv_node)
 
     m.graph.eliminate_dead_code()

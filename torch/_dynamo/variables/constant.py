@@ -30,8 +30,6 @@ _type_to_assert_reason = {
 
 
 class ConstantVariable(VariableTracker):
-    _has_child_nodes = False
-
     @staticmethod
     def create(value, **kwargs) -> VariableTracker:
         source = kwargs.get("source", None)

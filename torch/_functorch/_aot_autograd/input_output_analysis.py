@@ -17,6 +17,7 @@ import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
+from .collect_metadata_analysis import coerce_tangent
 from .schemas import (
     BackwardSignature,
     GraphSignature,
@@ -44,6 +45,7 @@ def remove_dupe_metadata(
     other_traced_tangents = m.traced_tangents[num_data_mutations:]
     inp_traced_tangents = m.traced_tangents[:num_data_mutations]
     filtered_inp_traced_tangents = [
+        # See Note [Tangents must be contiguous]
         x
         for i, x in enumerate(inp_traced_tangents)
         if keep_arg_mask[m.mutated_inp_runtime_indices[i]]
@@ -223,7 +225,8 @@ def create_synthetic_base_metadata(
         )
 
     inner_mutated_tangents = [
-        x
+        # See Note [Tangents must be contiguous]
+        coerce_tangent(x)
         for inner_idx, x in enumerate(inner_args)
         if input_infos[inner_idx].mutates_data and input_infos[inner_idx].requires_grad
     ]
@@ -344,7 +347,7 @@ def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
 
 
 def _graph_input_names(gm):
-    return [node.name for node in gm.graph.nodes if node.op == "placeholder"]
+    return [node.name for node in gm.graph.find_nodes(op="placeholder")]
 
 
 def _graph_output_names(gm):
