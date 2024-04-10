@@ -4378,6 +4378,27 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         else:
             self.fail("expected exception")
 
+    def test_megablocks_moe(self):
+        try:
+            from megablocks.layers import moe
+            from megablocks.layers.arguments import Arguments
+        except ImportError:
+            raise unittest.SkipTest("requires megablocks")
+        bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
+        args = Arguments(
+            hidden_size=hs,
+            ffn_hidden_size=hs * 2,
+            moe_num_experts=num_experts,
+            moe_capacity_factor=1,
+            moe_top_k=top_k,
+        )
+        moe_mlp = moe.MoE(args)
+        moe_mlp.cuda(torch.cuda.current_device()).half()
+        x = torch.randn(sl, bs, hs).cuda().half()
+        out1, _ = moe_mlp(x)
+        out2, _ = torch.compile(moe_mlp, backend="eager")(x)
+        self.assertEqual(out1, out2)
+
     def test_udf_classes_reconstruction(self):
         def fn(x):
             o = T(5)

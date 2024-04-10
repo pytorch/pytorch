@@ -1042,7 +1042,14 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
                 instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             if should_compute_arg():
-                instructions[i].arg = names[instructions[i].argval]
+                name = instructions[i].argval
+                try:
+                    instructions[i].arg = names[name]
+                except KeyError:
+                    # Add a missing item to co_names
+                    instructions[i].arg = names[name] = len(names)
+                    code_options["co_names"] = (*code_options["co_names"], name)
+                    assert len(code_options["co_names"]) == len(names)
         elif instructions[i].opcode in HAS_FREE:
             if should_compute_arg():
                 instructions[i].arg = freenames[instructions[i].argval]
