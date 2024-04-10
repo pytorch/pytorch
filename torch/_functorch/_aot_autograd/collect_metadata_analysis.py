@@ -593,7 +593,7 @@ from a multi-output view call"
                 # anymore.
                 output_type == OutputType.alias_of_input
                 and base_idx is not None
-                and input_info[base_idx].mutates_metadata
+                and not input_info[base_idx].mutates_metadata
             ):
                 functional_tensor = FunctionalTensorMetadataEq(o.elem)
             else:
