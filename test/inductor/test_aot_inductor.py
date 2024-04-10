@@ -2577,8 +2577,8 @@ CPU_TEST_FAILURES = {
     ),
     "test_amp_fallback_random": fail_minimal_arrayref_interface(),  # undefined symbol: _Z16aoti_torch_dtypeIN3c108BFloat16EEiv
     "test_simple_dynamic": fail_minimal_arrayref_interface(),
-    # https://github.com/pytorch/pytorch/issues/122989
-    "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(
+    # https://github.com/pytorch/pytorch/issues/123691
+    "test_zero_grid_with_unbacked_symbols": fail_minimal_arrayref_interface(
         is_skip=True
     ),
     # failed on MacOS
