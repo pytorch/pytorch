@@ -40,7 +40,7 @@ if torch._inductor.config.is_fbcode():
     # but we should really default to 1 here (1 aliased input == no aliasing)
     _max_aliased_inputs_with_dynamic_shapes_enabled = max(
         torch._utils_internal.justknobs_getval_int(
-            "pytorch/dynamo:pytorch/dynamo:_max_aliased_inputs_with_dynamic_shapes_enabled"
+            "pytorch/dynamo:_max_aliased_inputs_with_dynamic_shapes_enabled"
         ),
         1
     )
