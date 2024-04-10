@@ -2013,23 +2013,21 @@ else:
 
         raise AttributeError(f"module '{__name__}' has no attribute '{name}'")
 
-def get_device_module(device = None):
+def get_device_module(device: Optional[Union[torch.device, str]] = None):
     """
-    Returns the module associated with a given device
+    Returns the module associated with a given device(e.g., torch.device('cuda'), "mtia:0", "xpu", ...)
     """
     if isinstance(device, torch.device):
-        device_type_str = device.type
+        device_module_name = device.type
     elif isinstance(device, str):
-        device_type_str = device
-    elif isinstance(device, None):
-        device_type_str = "cpu"
+        device_module_name = torch.device(device).type
     else:
-        raise RuntimeError(f"Device '{device}' is not a valid device type.")
-
-    device_module = getattr(torch, device_type_str, None)
+        # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
+        device_module_name = torch._C._get_accelerator().type
+    device_module = getattr(torch, device_module_name, None)
     if device_module is None:
         raise RuntimeError(
-            f"Device '{device_type_str}' does not have a corresponding module registered as 'torch.{device_type_str}'."
+            f"Device '{device_module_name}' does not have a corresponding module registered as 'torch.{device_module_name}'."
         )
     return device_module
 

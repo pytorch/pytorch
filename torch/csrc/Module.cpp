@@ -1,3 +1,4 @@
+#include <ATen/DeviceAccelerator.h>
 #include <c10/util/Optional.h>
 #include <fmt/core.h>
 #include <sys/types.h>
@@ -1992,6 +1993,16 @@ Call this whenever a new thread is created in order to propagate values from
         }
         return c10::DeviceIndex(-1);
       });
+
+  py_module.def(
+      "_get_accelerator",
+      [](c10::optional<bool> check = c10::nullopt) {
+        return c10::Device(
+            at::getAccelerator(check.value_or(false))
+                .value_or(c10::DeviceType::CPU),
+            -1);
+      },
+      py::arg("check") = nullptr);
 
   py_module.def(
       "_construct_storage_from_data_pointer",
