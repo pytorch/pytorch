@@ -2509,7 +2509,9 @@ Example::
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
       .def_readwrite(
           "global_ranks_in_group",
-          &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group);
+          &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
+      .def_readwrite(
+          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name);
 
 #endif
 
