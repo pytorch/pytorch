@@ -7,14 +7,12 @@ import dis
 import enum
 import functools
 import gc
-import io
 import itertools
 import logging
 import math
 import operator
 import os
 import random
-import re
 import sys
 import tempfile
 import threading
@@ -27,8 +25,6 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
-import pytest
-import sympy
 import torch
 
 import torch._dynamo.test_case
@@ -2108,6 +2104,33 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(result.b, x - 1)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
+
+    def test_catch_watchings1(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            with warnings.catch_warnings(record=True):
+                return x.sin()
+
+        x = torch.randn(8)
+        self.assertEqual(fn(x), x.sin())
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_catch_watchings2(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return x.sin(), warnings.catch_warnings(record=True)
+
+        x = torch.randn(8)
+        _, a = fn(x)
+        _, b = fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertIsInstance(a, warnings.catch_warnings)
+        self.assertIsInstance(b, warnings.catch_warnings)
+        self.assertIsNot(a, b)
 
     def test_tensor_build_list_unpack(self):
         def fn(x):
@@ -6430,6 +6453,11 @@ def fn():
         finally:
             builtins.isinstance = builtin_isinstance
 
+        # check recompilation because builtins is now unpatched
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(res, x + 1))
+
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
         def fn(x, y):
@@ -9922,6 +9950,20 @@ fn
 
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(torch.randn(5, 5))
+
+    def test_super_after_graph_break(self):
+        class Foo(torch.nn.Sequential):
+            def __init__(self, layers):
+                torch._dynamo.graph_break()
+                super().__init__(*layers)
+
+        def fn(x):
+            layers = [torch.nn.Linear(3, 3) for _ in range(3)]
+            mod = Foo(layers)
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(3, 3))
 
     def test_raises_importerror1(self):
         @torch.compile(backend="eager")
