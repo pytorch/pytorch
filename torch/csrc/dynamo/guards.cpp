@@ -2163,7 +2163,8 @@ class DictSubclassGuardManager : public DictGuardManager {
     PyObject* iterator = PyObject_GetIter(obj); // new reference
     PyObject* key = nullptr;
 
-    while ((key = PyIter_Next(iterator))) { // new reference
+    while (index_pointer < _indices.size() &&
+           (key = PyIter_Next(iterator))) { // new reference
       if (dict_pointer == _indices[index_pointer]) {
         KeyValueManager& key_value_manager = _key_value_managers[dict_pointer];
         std::unique_ptr<GuardManager>& key_manager = key_value_manager.first;
@@ -2178,10 +2179,6 @@ class DictSubclassGuardManager : public DictGuardManager {
         }
 
         index_pointer++;
-        if (index_pointer == _indices.size()) {
-          Py_DECREF(key);
-          break;
-        }
       }
       dict_pointer++;
       Py_DECREF(key);
@@ -2219,7 +2216,8 @@ class DictSubclassGuardManager : public DictGuardManager {
     PyObject* iterator = PyObject_GetIter(obj); // new reference
     PyObject* key = nullptr;
 
-    while ((key = PyIter_Next(iterator))) { // new reference
+    while (index_pointer < _indices.size() &&
+           (key = PyIter_Next(iterator))) { // new reference
       if (dict_pointer == _indices[index_pointer]) {
         KeyValueManager& key_value_manager = _key_value_managers[dict_pointer];
         std::unique_ptr<GuardManager>& key_manager = key_value_manager.first;
@@ -2243,12 +2241,7 @@ class DictSubclassGuardManager : public DictGuardManager {
                 false, debug_info.verbose_code_parts, num_guards_executed);
           }
         }
-
         index_pointer++;
-        if (index_pointer == _indices.size()) {
-          Py_DECREF(key);
-          break;
-        }
       }
       Py_DECREF(key);
       dict_pointer++;
