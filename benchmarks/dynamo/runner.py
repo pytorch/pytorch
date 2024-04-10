@@ -384,6 +384,10 @@ def get_skip_tests(suite, is_training: bool):
             skip_tests.update(
                 module.TorchBenchmarkRunner().skip_not_suitable_for_training_models
             )
+        if device == "cpu":
+            skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cpu)
+        elif device == "cuda":
+            skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cuda)
     else:
         if hasattr(module, "SKIP"):
             skip_tests.update(module.SKIP)
