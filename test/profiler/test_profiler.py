@@ -605,6 +605,31 @@ class TestExecutionTrace(TestCase):
                 found_root_node = True
         assert found_root_node
 
+    def test_execution_trace_nested_tensor(self):
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        fp.close()
+
+        et = ExecutionTraceObserver()
+        observer = et.register_callback(fp.name)
+
+        def fn(nt):
+            return nt.sin().cos()
+
+        with torch.profiler.profile(execution_trace_observer=observer) as prof:
+            for i in range(3):
+                values = torch.rand((8 + i, 4 + i))
+                offsets = torch.tensor([0, 2, 4, 6, 8 + i])
+                nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+                fn(nt)
+
+        nodes = self.get_execution_trace_root(fp.name)
+        found_cos = False
+        for n in nodes:
+            assert "name" in n
+            if "cos" in n["name"]:
+                found_cos = True
+        assert found_cos
+
 
 @instantiate_parametrized_tests
 class TestProfiler(TestCase):
