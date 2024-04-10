@@ -724,7 +724,6 @@ class Node:
         update = False
         if (
                 hasattr(self, name) and
-                getattr(self, name) != value and
                 hasattr(self.graph, "_find_nodes_lookup_table") and
                 self in self.graph._find_nodes_lookup_table
         ):
