@@ -77,6 +77,7 @@ def assert_metadata_eq(
     m2: torch.Tensor,
     *,
     skip_symbolic=False,
+    skip_leaf=False,
 ):
     if isinstance(m1, torch.Tensor):
         m1 = MetaTensorDescriber().describe_tensor(m1)
@@ -86,7 +87,8 @@ def assert_metadata_eq(
         if not skip_symbolic:
             assert_eq(m1.shape, m2.shape)
         assert_eq(m1.requires_grad, m2.requires_grad)
-        assert_eq(m1.is_leaf, m2.is_leaf)
+        if not skip_leaf:
+            assert_eq(m1.is_leaf, m2.is_leaf)
         # MetaTensorDesc doesn't store grad_fn; inferred from leaf
         # assert_eq(m1.grad_fn is None, m2.grad_fn is None)
         assert_eq(m1.is_sparse, m2.is_sparse)
@@ -855,6 +857,8 @@ class MetaConverter:
             return fake_t
 
         if self.get_tensor_memo(t) is None:
+            GRAD_TENSOR_SENTINEL_VALUE = -2
+
             with torch.inference_mode(t.is_inference):
                 if t.is_sparse:
                     is_leaf = t.is_leaf
@@ -888,62 +892,33 @@ class MetaConverter:
                 elif is_sparse_compressed_layout(t.layout):
                     is_leaf = t.is_leaf
 
-                    def mk_meta():
+                    if t.layout in {torch.sparse_bsr, torch.sparse_bsc}:
                         assert t.sparse_dim is not None
                         assert t.dense_dim is not None
-                        nnz = 0
-                        batch_dim = t.ndim - t.sparse_dim - t.dense_dim
-                        batch_size = t.shape[:batch_dim]
-                        if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
-                            assert t.crow_indices is not None
-                            assert t.col_indices is not None
-                            index_dtype = t.crow_indices.dtype
-                            compressed_indices = torch.empty(
-                                t.crow_indices.shape, device="meta", dtype=index_dtype
-                            )
-                            plain_indices = torch.empty(
-                                (*t.col_indices.shape[:-1], nnz),
-                                device="meta",
-                                dtype=index_dtype,
-                            )
-                        else:
-                            assert t.ccol_indices is not None
-                            assert t.row_indices is not None
-                            index_dtype = t.ccol_indices.dtype
-                            compressed_indices = torch.empty(
-                                t.ccol_indices.shape, device="meta", dtype=index_dtype
-                            )
-                            plain_indices = torch.empty(
-                                (*t.row_indices.shape[:-1], nnz),
-                                device="meta",
-                                dtype=index_dtype,
-                            )
                         assert t.values is not None
-                        values_shape = t.values.shape
-                        values = torch.empty(
-                            (
-                                *values_shape[:batch_dim],
-                                nnz,
-                                *values_shape[batch_dim + 1 :],
-                            ),
-                            dtype=t.dtype,
-                            device="meta",
-                        )
-                        return torch.ops.aten.sparse_compressed_tensor(
-                            compressed_indices,
-                            plain_indices,
-                            values,
+                        batch_dim = t.ndim - t.sparse_dim - t.dense_dim
+                        blocksize = t.values.shape[batch_dim + 1 : batch_dim + 3]
+                    else:
+                        blocksize = ()
+                    if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                        assert t.crow_indices is not None
+                        index_dtype = t.crow_indices.dtype
+                    else:
+                        assert t.ccol_indices is not None
+                        index_dtype = t.ccol_indices.dtype
+
+                    r = callback(
+                        lambda: torch.ops.aten._sparse_compressed_tensor_with_dims(
+                            0,
+                            t.dense_dim,
                             t.shape,
+                            blocksize,
+                            index_dtype,
                             layout=t.layout,
                             dtype=t.dtype,
                             device="meta",
                         )
-
-                    # `mk_meta()` is similar to `t.to(device='meta'))`
-                    # except `to('meta')` preserves nnz value while
-                    # `mk_meta` result has nnz == 0.
-                    r = callback(mk_meta)
-
+                    )
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = True
@@ -1010,10 +985,13 @@ class MetaConverter:
                             with disable_functorch():
                                 ft = _to_fake_tensor(t.unwrapped)
                             lvl = t.level
-                            with torch._functorch.pyfunctorch.temporarily_restore_interpreter_stack(
-                                t.functorch_stack
-                            ):
-                                r = torch._C._functorch._wrap_for_grad(ft, lvl)
+                            if lvl == GRAD_TENSOR_SENTINEL_VALUE:
+                                r = ft
+                            else:
+                                with torch._functorch.pyfunctorch.temporarily_restore_interpreter_stack(
+                                    t.functorch_stack
+                                ):
+                                    r = torch._C._functorch._wrap_for_grad(ft, lvl)
 
                             is_leaf = t.is_leaf
                             if t.requires_grad and safe_is_leaf(r):
@@ -1291,7 +1269,10 @@ class MetaConverter:
                 torch._C._set_conj(r, t.is_conj)
                 torch._C._set_neg(r, t.is_neg)
             # This can be skipped if necessary for performance reasons
-            assert_metadata_eq(assert_eq, t, r, skip_symbolic=True)
+            skip_leaf = (
+                t.is_gradtrackingtensor and t.level == GRAD_TENSOR_SENTINEL_VALUE
+            )
+            assert_metadata_eq(assert_eq, t, r, skip_symbolic=True, skip_leaf=skip_leaf)
             self.set_tensor_memo(t, r)
 
         return self.get_tensor_memo(t)
