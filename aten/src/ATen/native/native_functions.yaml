@@ -3342,6 +3342,11 @@
   dispatch:
     CUDA: _cslt_sparse_mm_search
 
+# DEPRECATED: Use torch.__sparse_semi_structured_mm/torch._sparse_semi_structured_addmm instead
+- func: _sparse_semi_structured_linear(Tensor input, Tensor weight, Tensor meta, *, Tensor? bias=None, str? activation=None, ScalarType? out_dtype=None) -> Tensor
+  dispatch:
+    CUDA: _sparse_semi_structured_linear
+
 - func: _sparse_semi_structured_mm(Tensor mat1, Tensor mat1_meta, Tensor mat2, *, ScalarType? out_dtype=None) -> Tensor
   dispatch:
     CUDA: _sparse_semi_structured_mm
