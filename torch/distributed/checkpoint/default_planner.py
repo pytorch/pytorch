@@ -241,7 +241,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
         if key in self.keys:
             True
 
-        unflattened_keys = []
+        unflattened_keys: List[str] = []
         planner_data = metadata.planner_data.get(key)
         for unflattened_key in planner_data:
             if unflattened_keys:
@@ -267,7 +267,6 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
         # rebuild the state dict from the metadata
         for k, v in metadata.state_dict_metadata.items():
-
             if not self._should_include_key(k, metadata):
                 continue
 
