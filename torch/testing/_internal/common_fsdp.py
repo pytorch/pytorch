@@ -878,20 +878,24 @@ class DoubleLinear(nn.Module):
 @contextlib.contextmanager
 def patch_all_gather(new_all_gather_into_tensor: Callable):
     orig_all_gather = dist.all_gather_into_tensor
+    dist.barrier()
     dist.all_gather_into_tensor = new_all_gather_into_tensor
     try:
         yield
     finally:
+        dist.barrier()
         dist.all_gather_into_tensor = orig_all_gather
 
 
 @contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
     orig_reduce_scatter = dist.reduce_scatter_tensor
+    dist.barrier()
     dist.reduce_scatter_tensor = new_reduce_scatter_tensor
     try:
         yield
     finally:
+        dist.barrier()
         dist.reduce_scatter_tensor = orig_reduce_scatter
 
 
@@ -899,10 +903,12 @@ def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
 @contextlib.contextmanager
 def patch_unshard(new_unshard: Callable):
     orig_unshard = FSDPParamGroup.unshard
+    dist.barrier()
     FSDPParamGroup.unshard = new_unshard
     try:
         yield
     finally:
+        dist.barrier()
         FSDPParamGroup.unshard = orig_unshard
 
 
@@ -910,10 +916,12 @@ def patch_unshard(new_unshard: Callable):
 @contextlib.contextmanager
 def patch_post_backward(new_post_backward: Callable):
     orig_post_backward = FSDPParamGroup.post_backward
+    dist.barrier()
     FSDPParamGroup.post_backward = new_post_backward
     try:
         yield
     finally:
+        dist.barrier()
         FSDPParamGroup.post_backward = orig_post_backward
 
 
@@ -921,10 +929,12 @@ def patch_post_backward(new_post_backward: Callable):
 @contextlib.contextmanager
 def patch_register_post_backward_hook_backward(new_backward: Callable):
     orig_backward = RegisterPostBackwardFunction.backward
+    dist.barrier()
     RegisterPostBackwardFunction.backward = new_backward
     try:
         yield
     finally:
+        dist.barrier()
         RegisterPostBackwardFunction.backward = orig_backward
 
 
