@@ -136,12 +136,12 @@ class VecMask {
 
   void store(bool* b, int count) {
     using int_t = int_same_size_t<T>;
-    int size_ = mask_[0].size();
+    int size_ = Vectorized<T>::size();
     TORCH_CHECK(count == size_ * N, "Expect same number of elements in VecMask::store.");
 #pragma unroll(2)
     for (int i = 0; i < N; i++) {
       for (int j = 0; j < size_; j++) {
-        b[i * size_ + j] = ((int_t)mask_[i].values[j] == (int_t)0) ? 0x00 : 0x01;
+        b[i * size_ + j] = ((int_t)(mask_[i].values[j]) == (int_t)0) ? 0x00 : 0x01;
       }
     }
     return;
