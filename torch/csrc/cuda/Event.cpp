@@ -1,5 +1,6 @@
 #include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
+#include <torch/csrc/Event.h>
 #include <torch/csrc/THP.h>
 #include <torch/csrc/cuda/Event.h>
 #include <torch/csrc/cuda/Module.h>
@@ -238,6 +239,8 @@ PyTypeObject THCPEventType = {
 };
 
 void THCPEvent_init(PyObject* module) {
+  Py_INCREF(THPEventClass);
+  THCPEventType.tp_base = (PyTypeObject*)THPEventClass;
   THCPEventClass = (PyObject*)&THCPEventType;
   if (PyType_Ready(&THCPEventType) < 0) {
     throw python_error();

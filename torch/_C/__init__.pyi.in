@@ -1926,7 +1926,7 @@ class _CudaStreamBase(Stream):
     def priority_range(self) -> Tuple[_int, _int]: ...
 
 # Defined in torch/csrc/cuda/Event.cpp
-class _CudaEventBase:
+class _CudaEventBase(Event):
     device: _device
     cuda_event: _int
 
@@ -2013,7 +2013,7 @@ class _XpuStreamBase(Stream):
     def priority_range() -> Tuple: ...
 
 # Defined in torch/csrc/xpu/Event.cpp
-class _XpuEventBase:
+class _XpuEventBase(Event):
     device: _device
     sycl_event: _int
 
