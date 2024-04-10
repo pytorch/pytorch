@@ -134,6 +134,11 @@ f32 = torch.float32
 i64 = torch.int64
 i32 = torch.int32
 
+def expectedFailureCodegenDynamicIfNotSM80OrLater(fn):
+    if not SM80OrLater:
+        fn._expected_failure_codegen_dynamic = True
+    return fn
+
 
 def _large_cumprod_input(shape, dim, dtype, device):
     # Construct a cumprod input which guaruntees not to overflow or underflow
@@ -2420,6 +2425,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
+    @expectedFailureCodegenDynamicIfNotSM80OrLater
     @config.patch(force_mixed_mm=True)
     def test_mixed_mm(self):
         def fn(a, b):
