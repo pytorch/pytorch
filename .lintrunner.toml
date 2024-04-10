@@ -1417,7 +1417,6 @@ exclude_patterns = [
     'test/test_expanded_weights.py',
     'test/test_fake_tensor.py',
     'test/test_flop_counter.py',
-    'test/test_foreach.py',
     'test/test_function_schema.py',
     'test/test_functional_autograd_benchmark.py',
     'test/test_functional_optim.py',
