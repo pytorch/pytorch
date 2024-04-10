@@ -373,9 +373,6 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
     "schedule_comm_wait",
 ]
 
-# Force apending aoti weights at the end of the file
-_force_mmap_aoti_weights = False
-
 
 def decide_compile_threads():
     """
