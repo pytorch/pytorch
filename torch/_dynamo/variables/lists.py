@@ -63,9 +63,6 @@ class BaseListVariable(VariableTracker):
     def _as_proxy(self):
         return [x.as_proxy() for x in self.items]
 
-    def can_be_proxied_in_fx(self):
-        return all(x.can_be_proxied_in_fx() for x in self.items)
-
     def modified(self, items, **kwargs):
         return type(self)(items, **kwargs)
 
