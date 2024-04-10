@@ -1421,7 +1421,6 @@ exclude_patterns = [
     'test/test_decomp.py',
     'test/test_deploy.py',
     'test/test_determination.py',
-    'test/test_dispatch.py',
     'test/test_dlpack.py',
     'test/test_dynamic_shapes.py',
     'test/test_expanded_weights.py',
