@@ -6,8 +6,11 @@ This file contains utilities related to functionalization in AOTAutograd:
 4. checking if a graph is functional i.e. whether it contains any mutation ops
 """
 
+from typing import Optional
+
 import torch
 from torch import Tensor
+from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
 from torch.fx.experimental.symbolic_shapes import definitely_true, sym_eq
@@ -16,6 +19,8 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
+
+from .schemas import FunctionalTensorMetadataEq
 
 aot_joint_log = getArtifactLogger(__name__, "aot_joint_graph")
 
@@ -229,9 +234,10 @@ def gen_alias_from_base(
             #
             # In order for this to work, we should have a way to replace those
             # symbolic shapes with concrete numbers.
-            aot_joint_log.warn(
+            aot_joint_log.warning(
                 "could not reconstruct view by re-applying a ViewMeta sequence. "
-                f"This error is possibly caused by dynamic shapes. Error message: {e}"
+                "This error is possibly caused by dynamic shapes. Error message: %s",
+                str(e),
             )
         else:
             # If re-applying the ViewMeta sequence succeeded, there should be no more

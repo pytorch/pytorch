@@ -566,36 +566,38 @@ from a multi-output view call"
             # The FunctionalTensor will be saved if one of the 2 conditions below
             # is true:
             if (
-                (
-                    # 1. If the output_type is either of:
-                    #    (i) alias_of_intermediate;
-                    #    (ii) alias_of_intermediate_save_as_output; or
-                    #    (iii) alias_of_intermediate_base_is_user_output.
-                    #
-                    # No need to worry about in-place view operations here, since
-                    # this functionalization step elimitates mutations.
-                    #
-                    # i.e. we have access to the actual base tensor, before the
-                    # in-place operation was applied.
-                    output_type in (
-                        OutputType.alias_of_intermediate,
-                        OutputType.alias_of_intermediate_save_as_output,
-                        OutputType.alias_of_intermediate_base_is_user_output
-                    )
-                ) or (
-                    # 2. If the output_type is alias_of_input, and no in-place view
-                    #    operationthe was run on the input (base tensor).
-                    #
-                    # In this case, we need to check for metadata mutation because
-                    # the runtime explicitly reconstructs the inputs, before actually
-                    # reconstructing the outputs. Due to in-place view operations, the
-                    # fully reconstructed input may not be this output base tensor
-                    # anymore.
-                    output_type == OutputType.alias_of_input
-                    and input_info[base_idx].mutates_metadata
+                # 1. If the output_type is either of:
+                #    (i) alias_of_intermediate;
+                #    (ii) alias_of_intermediate_save_as_output; or
+                #    (iii) alias_of_intermediate_base_is_user_output.
+                #
+                # No need to worry about in-place view operations here, since
+                # this functionalization step elimitates mutations.
+                #
+                # i.e. we have access to the actual base tensor, before the
+                # in-place operation was applied.
+                output_type
+                in (
+                    OutputType.alias_of_intermediate,
+                    OutputType.alias_of_intermediate_save_as_output,
+                    OutputType.alias_of_intermediate_base_is_user_output,
                 )
+            ) or (
+                # 2. If the output_type is alias_of_input, and no in-place view
+                #    operationthe was run on the input (base tensor).
+                #
+                # In this case, we need to check for metadata mutation because
+                # the runtime explicitly reconstructs the inputs, before actually
+                # reconstructing the outputs. Due to in-place view operations, the
+                # fully reconstructed input may not be this output base tensor
+                # anymore.
+                output_type == OutputType.alias_of_input
+                and base_idx is not None
+                and input_info[base_idx].mutates_metadata
             ):
                 functional_tensor = FunctionalTensorMetadataEq(o.elem)
+            else:
+                functional_tensor = None
 
             out_info = OutputAliasInfo(
                 output_type=output_type,
