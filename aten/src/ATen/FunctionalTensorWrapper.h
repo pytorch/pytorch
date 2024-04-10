@@ -75,24 +75,26 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
     return has_metadata_mutation_;
   };
 
+  void mark_mutation() {
+    functional_storage_impl()->mark_mutation();
+  }
   // Denotes a mutation that's hidden from autograd,
   // e.g. for the purposes of passing a tensor to a triton kernel
   void mark_mutation_hidden_from_autograd() {
-    mutation_hidden_from_autograd_counter_++;
+    functional_storage_impl()->mark_mutation_hidden_from_autograd();
   }
   void mark_mutation_during_no_grad_or_inference_mode() {
-    mutation_during_no_grad_or_inference_mode_++;
+    functional_storage_impl()->mark_mutation_during_no_grad_or_inference_mode();
   }
   // Are all the mutations happening to the tensor hidden from autograd
   bool are_all_mutations_hidden_from_autograd() const {
-    return mutation_hidden_from_autograd_counter_ == mutation_counter_;
+    return functional_storage_impl()->are_all_mutations_hidden_from_autograd();
   }
   // Did all mutations happen under no_grad or inference_mode
   // (We also need to ignore mutations fully hidden from autograd here)
   bool are_all_mutations_under_no_grad_or_inference_mode() const {
-    return mutation_hidden_from_autograd_counter_ +
-        mutation_during_no_grad_or_inference_mode_ ==
-        mutation_counter_;
+    return functional_storage_impl()
+        ->are_all_mutations_under_no_grad_or_inference_mode();
   }
 
   // Sync's the underlying tensor with its alias, if it's out of date. This
@@ -156,7 +158,7 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // a.replace_(tmp)
   //
   // replace_() swaps out the wrapped tensor, value_, with tmp.
-  void replace_(const Tensor& other);
+  void replace_(const Tensor& other, bool from_lazy_regenerate = false);
 
   bool is_multi_output_view() {
     return is_multi_output_view_;
@@ -227,9 +229,6 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
   // not. If we have an input mutation that is hidden from autograd, then once
   // we convert the input mutation to a copy_() we know it will be safe to hide
   // the copy_() from autograd as well.
-  uint64_t mutation_counter_ = 0;
-  uint64_t mutation_hidden_from_autograd_counter_ = 0;
-  uint64_t mutation_during_no_grad_or_inference_mode_ = 0;
   bool has_metadata_mutation_ = false;
   bool is_multi_output_view_ = false;
   // Did the tensor experience a set_() call.
