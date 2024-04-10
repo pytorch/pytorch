@@ -1,3 +1,4 @@
+import ast
 import collections
 import contextlib
 import dataclasses
@@ -1153,6 +1154,14 @@ class WrapperCodeGen(CodeGen):
             for symbol_name in cur_kernel.fn.__code__.co_names:
                 if symbol_name in symbols_included:
                     continue
+                unqualified_loads = {
+                    node.id
+                    for node in ast.walk(ast.parse(kernel.src))
+                    if isinstance(node, ast.Name)
+                    and hasattr(node, "ctx")
+                    and isinstance(node.ctx, ast.Load)
+                    and hasattr(node, "id")
+                }
                 if symbol_name in cur_kernel.fn.__globals__:
                     symbol = cur_kernel.fn.__globals__[symbol_name]
                     if isinstance(symbol, JITFunction):
@@ -1164,6 +1173,17 @@ class WrapperCodeGen(CodeGen):
                     elif isinstance(symbol, (int, str, bool)):
                         compile_wrapper.newline()
                         compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
+                        symbols_included.add(symbol_name)
+                    elif (
+                        symbol_name in unqualified_loads
+                        and symbol_name != "tl"  # already imported
+                        and hasattr(symbol, "__module__")
+                    ):
+                        # a global symbol referenced without module
+                        # qualification: need to codegen an import
+                        compile_wrapper.writeline(
+                            f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
+                        )
                         symbols_included.add(symbol_name)
 
         traverse(kernel)

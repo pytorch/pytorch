@@ -27,6 +27,11 @@ if HAS_CUDA:
     import triton
     from triton import language as tl
 
+    from triton.language.extra.cuda.libdevice import (
+        fast_dividef,
+        fast_dividef as my_fast_dividef,
+    )
+
 
 # Define shared triton constants here.
 CONSTANT_C = 4
@@ -1006,6 +1011,70 @@ def forward(self, x_1, output_1):
             self.assertTrue("equal_to_1=()" in sources[0])
         else:
             self.assertTrue("equal_to_1=(3,)" in sources[0])
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
+    def test_triton_kernel_with_imported_symbol(self):
+        @triton.jit
+        def add_kernel_with_imported_symbol(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = fast_dividef(x, 3.14)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            add_kernel_with_imported_symbol[(n_elements,)](
+                x, out, n_elements, BLOCK_SIZE=16
+            )
+            return out
+
+        x = torch.randn(4, device="cuda")
+        eager_out = f(x)
+        compiled_out = torch.compile(f)(x)
+
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
+    def test_triton_kernel_with_imported_symbol_with_custom_name(self):
+        @triton.jit
+        def add_kernel_with_imported_symbol(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            output = my_fast_dividef(x, 3.14)
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            add_kernel_with_imported_symbol[(n_elements,)](
+                x, out, n_elements, BLOCK_SIZE=16
+            )
+            return out
+
+        x = torch.randn(4, device="cuda")
+        eager_out = f(x)
+        compiled_out = torch.compile(f)(x)
+
         self.assertEqual(compiled_out, eager_out)
 
     @requires_cuda
