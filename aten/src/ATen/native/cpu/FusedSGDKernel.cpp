@@ -240,11 +240,7 @@ void sgd_fused_step_impl(
         );
       };
   at::parallel_for(
-      0, n_task_cache_line_aligned, chunk_size_cache_line_aligned, sgd_fn);
-  if (n_task_cache_line_aligned < num_tasks) {
-    at::parallel_for(
-        n_task_cache_line_aligned, num_tasks, 0, sgd_fn);
-  }
+      0, num_units, 0, sgd_fn);
 }
 
 void fused_sgd_kernel(
