@@ -258,6 +258,11 @@ CI_USE_SGD = {
 DO_NOT_CAST_INPUTS = {"stable_diffusion"}
 
 
+CI_SAVE_CACHE_DIR = {
+    "mnasnet1_0",
+}
+
+
 def model_specified_by_path(path_and_class_str):
     return ":" in path_and_class_str
 
@@ -2343,6 +2348,19 @@ class BenchmarkRunner:
                 torch._inductor.config.triton.cudagraphs = False
         return model
 
+    def save_cache_dir_in_test_reports(self, name):
+        try:
+            cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
+            if not cache_dir:
+                log.error("INDUCTOR_CACHE_DIR is unset")
+            else:
+                dst_dir = os.path.join(os.getcwd(), "test", "test-reports", "torchinductor")
+                os.makedirs(dst_dir, exist_ok=True)
+                archive = os.path.join(dst_dir, name + ".tgz")
+                shutil.make_archive(archive, "gztar", cache_dir)
+        except OSError as e:
+            log.error(f"Failed to save torchinductor cache dir: {e}")
+
     def check_accuracy(
         self, name, model, example_inputs, optimize_ctx, experiment, tag
     ):
@@ -2379,6 +2397,10 @@ class BenchmarkRunner:
                 fields.append(v)
 
             output_csv(output_filename, headers, fields)
+
+            if accuracy_status != "pass" and name in CI_SAVE_CACHE_DIR:
+                self.save_cache_dir_in_test_reports(name)
+
             return accuracy_status
 
         if name in self.skip_accuracy_checks_large_models_dashboard:
@@ -2565,6 +2587,9 @@ class BenchmarkRunner:
                 else:
                     accuracy_status = "fail_accuracy"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
+
+        # TESTING: delete me
+        accuracy_status = "fail_accuracy"
 
         return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
