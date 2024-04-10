@@ -19411,6 +19411,9 @@ op_db: List[OpInfo] = [
                 "test_cow_input",
                 device_type='cuda',
             ),
+            DecorateInfo(unittest.skip("FP16 nll_loss cases have not been enabled on MPS yet"),
+                         device_type="mps"),
+
         ),
     ),
     OpInfo(
