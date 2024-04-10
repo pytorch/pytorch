@@ -333,7 +333,7 @@ class profile:
         if self.use_cuda or self.use_device == "cuda":
             torch.cuda.synchronize()
         elif self.use_device == "xpu":
-            torch.xpu.synchronize()  # type: ignore[attr-defined]
+            torch.xpu.synchronize()
 
         t0 = perf_counter_ns()
         self.kineto_results = _disable_profiler()
