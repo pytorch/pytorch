@@ -1898,7 +1898,7 @@ class TestDict(JitTestCase):
         def missing_index(x: Dict[str, int]) -> int:
             return x["dne"]
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x['dne'"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x[\"dne\""):
             missing_index({"item": 20, "other_item": 120})
 
         code = dedent(
