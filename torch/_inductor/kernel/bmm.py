@@ -8,6 +8,7 @@ from ..select_algorithm import (
     TritonTemplate,
 )
 from ..utils import ceildiv as cdiv, use_aten_gemm_kernels, use_triton_template
+from ..virtualized import V
 
 from .mm_common import addmm_epilogue, mm_args, mm_configs, mm_options
 
@@ -91,16 +92,20 @@ def tuned_bmm(mat1, mat2, *, layout=None):
     # Make the inputs of bmm contiguous
     # because bmm cpu implementation does contiguous() if not
     # this is to avoid additional copies in bmm
-    def do_bmm_input_contiguous(t: ir.TensorBox):
-        if isinstance(t.data, ir.View) and isinstance(t.data.data, ir.PermuteView):
-            if ir.is_pointwise_contiguous_or_transposed_after_perm(t.data.data):
-                return t
+    def do_bmm_input_contiguous(t, meta_t):
+        sizes = meta_t.meta["val"].size()
+        strides = meta_t.meta["val"].stride()
+        if not ir.is_contiguous_or_transposed(sizes, strides):
             t = ir.ExternKernel.require_contiguous(t)
         return t
 
-    if mat1.get_device().type == "cpu" and mat2.get_device().type == "cpu":
-        mat1 = do_bmm_input_contiguous(mat1)
-        mat2 = do_bmm_input_contiguous(mat2)
+    if all(x.get_device().type == "cpu" for x in [mat1, mat2]):
+        if not ir.is_storage_and_layout(mat1):
+            meta_mat1 = V.graph.current_node.args[0]
+            mat1 = do_bmm_input_contiguous(mat1, meta_mat1)
+        if not ir.is_storage_and_layout(mat2):
+            meta_mat2 = V.graph.current_node.args[1]
+            mat2 = do_bmm_input_contiguous(mat2, meta_mat2)
 
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
