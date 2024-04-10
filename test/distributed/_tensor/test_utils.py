@@ -8,23 +8,16 @@ from torch.distributed._tensor._utils import (
     compute_local_shape,
     compute_local_shape_and_global_offset,
 )
+
+from torch.distributed._tensor.debug import CommDebugMode
 from torch.distributed._tensor.placement_types import Replicate, Shard
 from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
-    skip_if_lt_x_gpu,
     with_comms,
 )
-
-from torch.distributed.tensor.parallel import (
-    ColwiseParallel,
-    parallelize_module,
-    RowwiseParallel,
-)
-from torch.distributed.fsdp.fully_sharded_data_parallel import FullyShardedDataParallel as FSDP, StateDictType
-from torch.distributed._tensor.debug import CommDebugMode
 
 c10d_functional = torch.ops.c10d_functional
 
@@ -130,32 +123,81 @@ class UtilTest(DTensorTestBase):
                 )
 
 
-class Test2DOffsets(DTensorTestBase):
+class Test2DStridedLocalShard(DTensorTestBase):
     @property
     def world_size(self):
         return 4
 
     @with_comms
-    def test_FSDP1_TP_2D_offsets_sizes(self):
-        # We are mocking the behavior of FSDP1 + TP.
-        global_tensor = torch.arange(8).view(4, 2)
-        mesh_2d = init_device_mesh(self.device_type, (2, 2), mesh_dim_names=("DP", "TP"))
-        tp_mesh = mesh_2d["TP"]
-        dtensor_tp = distribute_tensor(global_tensor, tp_mesh, placements=[Shard(0)])
-
+    def test_fsdp1_tp_2d_dtensor_local_shards_and_offsets(self):
+        # We are mimicking the behavior of FSDP1 + TP.
+        # Currently, the 2D DTensor's local shard is correct, since from_local + redistribute incurs a all_gather behind the scene.
+        # When we have a global_tensor of [0, 1, 2, 3, 4, 5, 6, 7], the local shard of 2D DTensor would be:
+        # rank0: [0, 1], rank1: [2, 3], rank2: [4, 5], rank3: [6, 7]
         comm_mode = CommDebugMode()
         with comm_mode:
-            dtensor_2d = DTensor.from_local(dtensor_tp.to_local(), mesh_2d, [Replicate(), Shard(0)]).redistribute(mesh_2d, [Shard(0), Shard(0)])
-            # print(f"self.rank: {self.rank}\n{mesh_2d['TP']=}\n{dtensor_tp=}\n{dtensor_2d=}\n\n")
-            self.assertEqual(comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 1)
-            # print(comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor])
+            global_tensor = torch.arange(8).view(4, 2)
+            mesh_2d = init_device_mesh(
+                self.device_type, (2, 2), mesh_dim_names=("DP", "TP")
+            )
+            tp_mesh = mesh_2d["TP"]
+            dtensor_tp = distribute_tensor(
+                global_tensor, tp_mesh, placements=[Shard(0)]
+            )
+            dtensor_2d = DTensor.from_local(
+                dtensor_tp.to_local(), mesh_2d, [Replicate(), Shard(0)]
+            ).redistribute(mesh_2d, [Shard(0), Shard(0)])
+            self.assertEqual(len(comm_mode.get_comm_counts()), 1)
+            self.assertEqual(
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 1
+            )
 
-        self.assertEqual(dtensor_2d.to_local(), global_tensor[self.rank:self.rank+1])
-        local_size, global_offset = compute_local_shape_and_global_offset(global_tensor.shape, mesh_2d, [Shard(0), Shard(0)])
+        self.assertEqual(
+            dtensor_2d.to_local(), global_tensor[self.rank : self.rank + 1]
+        )
+        # compute_local_shape_and_global_offset currently does take into consideration of strided sharding,
+        # which should after strided sharding is added.
+        local_size, global_offset = compute_local_shape_and_global_offset(
+            global_tensor.shape, mesh_2d, [Shard(0), Shard(0)]
+        )
         self.assertEqual(local_size, torch.Size([1, 2]))
         self.assertEqual(global_offset, torch.Size([self.rank, 0]))
-        # print(f"rank:{self.rank=}, {global_tensor[self.rank:self.rank+1]=}, {local_size=}, {global_offset=}")
-        # self.assertEqual(dtensor_2d.to_local(), global_tensor[self.rank:])
+
+    @with_comms
+    def test_fsdp2_tp_2d_dtensor_local_shards_and_offsets(self):
+        # We are mimicking the behavior of FSDP2 + TP.
+        # Currently, the 2D DTensor's local shard is incorrect, since we want to avoid extra communication.
+        # When we have a global_tensor of [0, 1, 2, 3, 4, 5, 6, 7], the local shard of 2D DTensor would be:
+        # rank0: [0, 1], rank1: [4, 5], rank2: [2, 3], rank3: [6, 7]
+        # TODO: to make the local shard of FSDP2 + TP correct for resharding, it would require strided_sharding
+        # as well as let compute_local_shape_and_global_offset takes into consideration of strided_sharding.
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            global_tensor = torch.arange(8).view(4, 2)
+            mesh_2d = init_device_mesh(
+                self.device_type, (2, 2), mesh_dim_names=("DP", "TP")
+            )
+            tp_mesh = mesh_2d["TP"]
+            dtensor_tp = distribute_tensor(
+                global_tensor, tp_mesh, placements=[Shard(0)]
+            )
+            chunks = list(torch.chunk(dtensor_tp.to_local(), 2, dim=0))
+            shard_rank = 0 if self.rank // 2 == 0 else 1
+            sharded_param = chunks[shard_rank]
+            dtensor_2d = DTensor(
+                sharded_param,
+                mesh_2d,
+                [Shard(0), Shard(0)],
+                shape=global_tensor.size(),
+                dtype=global_tensor.dtype,
+                requires_grad=False,
+                stride=global_tensor.stride(),
+            )
+
+            self.assertEqual(len(comm_mode.get_comm_counts()), 0)
+            self.assertEqual(
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 0
+            )
 
 
 if __name__ == "__main__":
