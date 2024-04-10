@@ -34,7 +34,6 @@ from ..utils import (
     free_symbol_startswith,
     IndentedBuffer,
     sympy_dot,
-    sympy_index_symbol,
     sympy_subs,
     unique,
 )
@@ -168,11 +167,10 @@ def get_device_op_overrides(device: str):
 
     if not device_op_overrides_dict.keys():
         from .cuda import device_op_overrides  # noqa: F401
+        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
     if device in device_op_overrides_dict.keys():
         return device_op_overrides_dict[device]
-
-    return DeviceOpOverrides()
 
 
 @functools.lru_cache(None)
@@ -594,21 +592,28 @@ class OpOverrides:
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
+            if impl is None:
+                continue
+
             if isinstance(impl, str):
                 nof_args = 2 if "{y}" in impl else 1
                 # extend the following dictionary with factory
                 # functions for a specific number of arguments as
                 # needed:
                 factory = {1: pointwise_factory_1, 2: pointwise_factory_2}[nof_args]
-                setattr(cls, funcname, staticmethod(factory(impl)))
+                impl = factory(impl)
+
+            setattr(cls, funcname, staticmethod(impl))
 
 
 @dataclasses.dataclass
 class OverridesData:
     name: str
-    cpp: str
-    triton: Optional[str] = None  # None when not impl in libdevice/triton
-    cppvec: Optional[str] = None  # None when not impl in aten/.../vec
+    cpp: Union[str, Callable[..., str]]
+    # None when not impl in libdevice/triton
+    triton: Union[Optional[str], Callable[..., str]] = None
+    # None when not impl in aten/.../vec
+    cppvec: Union[Optional[str], Callable[..., str]] = None
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -657,6 +662,13 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
         cpp="calc_erfcx({x})",
         triton="libdevice.erfcx({x})",
         name="special_erfcx",
+    ),
+    fma=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+        cpp=lambda x, y, z: f"std::fma({x}, {y}, {z})",
+        cppvec=lambda x, y, z: f"fmadd({x}, {y}, {z})",
+        triton=lambda x, y, z: f"libdevice.fma({x}, {y}, {z})",
+        name="fma",
     ),
     # erfinv, exp2, expit, gammaln
     igamma=OverridesData(
@@ -1251,11 +1263,11 @@ class CSE:
 
 
 class IndirectAssertLine(DeferredLineBase):
-    def __init__(self, line, assert_fn, var, mask, size_map):
+    def __init__(self, line, indirect_assert, var, mask, size_map):
+        super().__init__(line)
         self.var = var
         self.mask = mask
-        self.line = line
-        self.assert_fn = assert_fn
+        self.indirect_assert = indirect_assert
         self.size_map = size_map
 
     def __call__(self):
@@ -1265,31 +1277,26 @@ class IndirectAssertLine(DeferredLineBase):
         assert_min = (self.var.bounds.lower >= 0) != sympy.true
         assert_max = (self.var.bounds.upper < size) != sympy.true
 
-        # FooBar interview question
+        lower = None
+        upper = None
         if not (assert_min or assert_max):
             return None
         elif assert_min and assert_max:
-            # The conditions need to be in parens because of Python's operator precedence.
-            # It'd be less error-prone to use and/or/not, which is suported by triton
-            cond = f"(0 <= {self.var}) & ({self.var} < {size_str})"
-            cond_print = f"0 <= {self.var} < {size_str}"
+            lower = "0"
+            upper = size_str
         elif assert_min:
-            cond = f"0 <= {self.var}"
-            cond_print = cond
+            lower = "0"
         else:
             assert assert_max
-            cond = f"{self.var} < {size_str}"
-            cond_print = cond
+            upper = size_str
 
-        if self.mask:
-            cond = f"({cond}) | ~{self.mask}"
         return self.line.format(
-            assert_fn=self.assert_fn, cond=cond, cond_print=cond_print
+            assert_line=self.indirect_assert(self.var, lower, upper, self.mask)
         )
 
     def _new_line(self, line):
         return IndirectAssertLine(
-            line, self.assert_fn, self.var, self.mask, self.size_map
+            line, self.indirect_assert, self.var, self.mask, self.size_map
         )
 
 
@@ -1414,7 +1421,6 @@ class Kernel(CodeGen):
             [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
         ],
         values: Tuple[CSEVariable, ...],
-        inits: Tuple[int, ...],
     ) -> Tuple[CSEVariable, ...]:
         raise NotImplementedError()
 
@@ -1434,6 +1440,25 @@ class Kernel(CodeGen):
     @property
     def assert_function(self) -> str:
         raise NotImplementedError()
+
+    def indirect_assert(self, var, lower, upper, mask=None):
+        if lower and upper:
+            # The conditions need to be in parens because of Python's operator precedence.
+            # It'd be less error-prone to use and/or/not, which is suported by triton
+            cond = f"({lower} <= {var}) & ({var} < {upper})"
+            cond_print = f"{lower} <= {var} < {upper}"
+        elif lower:
+            cond = f"{lower} <= {var}"
+            cond_print = cond
+        else:
+            assert upper
+            cond = f"{var} < {upper}"
+            cond_print = cond
+
+        if mask:
+            cond = f"({cond}) | ~{mask}"
+
+        return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
     def index_to_str(self, index: sympy.Expr) -> str:
         raise NotImplementedError()
@@ -1490,7 +1515,7 @@ class Kernel(CodeGen):
                     stm = ops.add(var, self.rename_indexing(size))
                     # Mixed negative and non-negative
                     if var.bounds.upper >= 0:  # type: ignore[operator]
-                        lt = ops.lt(var, "0")
+                        lt = ops.lt(var, 0)
                         stm = ops.where(lt, stm, var)
                     new_var = self.cse.generate(self.compute, stm, bounds=new_bounds)
 
@@ -1509,13 +1534,10 @@ class Kernel(CodeGen):
                     if existing_size is not None:
                         size = sympy.Min(size, existing_size)
                     else:
-                        line = (
-                            '{assert_fn}({cond}, "index out of bounds: {cond_print}")'
-                        )
                         self.compute.writeline(
                             IndirectAssertLine(
-                                line,
-                                self.assert_function,
+                                "{assert_line}",
+                                self.indirect_assert,
                                 var,
                                 mask,
                                 self.indirect_max_sizes,
@@ -1523,7 +1545,7 @@ class Kernel(CodeGen):
                         )
 
                     self.indirect_max_sizes[map_key] = (size, self.index_to_str(size))
-                return sympy_index_symbol(str(var))
+                return parent_handler.indirect_indexing(var, size, check)
 
             @staticmethod
             def load(name: str, index: sympy.Expr) -> CSEVariable:
@@ -1581,9 +1603,8 @@ class Kernel(CodeGen):
                     Tuple[CSEVariable, ...],
                 ],
                 values: Tuple[CSEVariable, ...],
-                inits: Tuple[int, ...],
             ) -> Tuple[CSEVariable, ...]:
-                return self.scan(dtypes, combine_fn, values, inits)
+                return self.scan(dtypes, combine_fn, values)
 
             @staticmethod
             def bucketize(
@@ -1661,14 +1682,8 @@ class Kernel(CodeGen):
 class OptimizationContext:
     key: ClassVar[str] = "opt_ctx"
 
-    # Load value as mask
-    is_load_as_mask: bool = False
-
     dtype: Optional[torch.dtype] = None
     ops_name: str = ""
-
-    # Load uint8/int8 value as float32
-    is_load_int8_as_float: bool = False
 
 
 @functools.lru_cache(None)
@@ -1691,9 +1706,19 @@ class KernelTemplate:
     """
 
     @staticmethod
+    def indent_except_first(source: str, num_indents: int, indents_spacing=4):
+        lines = source.splitlines(True)
+        if len(lines) > 1:
+            lines[1:] = [
+                (" " * indents_spacing * num_indents) + line for line in lines[1:]
+            ]
+        return "".join(lines)
+
+    @staticmethod
     def _template_from_string(source):
         env = jinja2_env()
         if env is not None:
+            env.filters["indent_except_first"] = KernelTemplate.indent_except_first
             return env.from_string(source)
         return None
 

@@ -493,6 +493,7 @@ class WrapperCodeGen(CodeGen):
 
                 aten = torch.ops.aten
                 inductor_ops = torch.ops.inductor
+                _quantized = torch.ops._quantized
                 assert_size_stride = torch._C._dynamo.guards.assert_size_stride
                 empty_strided_cpu = torch._C._dynamo.guards._empty_strided_cpu
                 empty_strided_cuda = torch._C._dynamo.guards._empty_strided_cuda
@@ -647,11 +648,10 @@ class WrapperCodeGen(CodeGen):
                 f"run_intermediate_hooks({origin_node.name!r}, {output_name})"
             )
 
-    def generate_extern_kernel_out(self, output_view, codegen_reference, args, kernel):
-        if output_view:
-            args.append(f"out={output_view.codegen_reference()}")
-        else:
-            args.append(f"out={codegen_reference}")
+    def generate_extern_kernel_out(
+        self, kernel: str, out: str, out_view: Optional[str], args: List[str]
+    ):
+        args.append(f"out={out_view if out_view else out}")
         self.writeline(f"{kernel}({', '.join(args)})")
 
     def generate_user_defined_triton_kernel(
@@ -691,17 +691,18 @@ class WrapperCodeGen(CodeGen):
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed(
         self,
-        name,
-        kernel,
-        codegen_args,
-        cpp_op_schema,
-        cpp_kernel_key,
-        cpp_kernel_overload_name="",
-        op_overload=None,
+        buf_name: str,
+        python_kernel_name: str,
+        cpp_kernel_name: str,
+        codegen_args: List[str],
+        cpp_op_schema: str,
+        cpp_kernel_key: str,
+        cpp_kernel_overload_name: str = "",
+        op_overload: Optional[torch._ops.OpOverload] = None,
         raw_args=None,
         outputs=None,
     ):
-        self.writeline(f"{name} = {kernel}({', '.join(codegen_args)})")
+        self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(codegen_args)})")
 
     def generate_inf_and_nan_checker(self, node):
         # TODO: Add check for python too.
@@ -713,6 +714,10 @@ class WrapperCodeGen(CodeGen):
             self.write_triton_header_once()
         result = IndentedBuffer()
         result.splice(self.header)
+        # We do not want the cpp header for intermediate const graph. Headers would be
+        # rendered by the main module instead.
+        if V.graph.aot_mode and V.graph.cpp_wrapper and V.graph.is_const_graph:
+            result = IndentedBuffer()
 
         with contextlib.ExitStack() as stack:
             stack.enter_context(self.wrapper_call.indent())
@@ -1298,6 +1303,10 @@ class WrapperCodeGen(CodeGen):
     def writeline(self, line):
         self.lines.append(line)
 
+    def writelines(self, lines):
+        for line in lines:
+            self.lines.append(line)
+
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
 
@@ -1311,7 +1320,7 @@ class WrapperCodeGen(CodeGen):
             import triton
 
         if isinstance(s, SymTypes):
-            return pexpr(sympy.expand(repr(s)))
+            return pexpr(s.node.expr)
         elif isinstance(s, sympy.Expr):
             return pexpr(s)
         elif isinstance(s, (tuple, list)):
@@ -1535,21 +1544,30 @@ class WrapperCodeGen(CodeGen):
 
     def codegen_while_loop(self, while_loop):
         name = while_loop.get_name()
-        outer_inputs = [buf.codegen_reference() for buf in while_loop.operands]
+        outer_carried_inputs = [
+            buf.codegen_reference() for buf in while_loop.carried_inputs
+        ]
+        outer_additional_inputs = [
+            buf.codegen_reference() for buf in while_loop.additional_inputs
+        ]
 
-        self.writeline(f"{name} = [None] * {len(while_loop.operands)}")
-        for i, inp in enumerate(outer_inputs):
+        self.writeline(f"{name} = [None] * {len(outer_carried_inputs)}")
+        for i, inp in enumerate(outer_carried_inputs):
             # set the initial state before the loop
             self.writeline(f"{name}[{i}] = {inp}")
 
-        cond_outer_inputs = [f"{name}[{i}]" for i in range(len(while_loop.operands))]
+        cond_outer_inputs = [
+            *[f"{name}[{i}]" for i in range(len(outer_carried_inputs))],
+            *outer_additional_inputs,
+        ]
         cond_outer_outputs = [f"{name}_cond_result"]
         body_outer_inputs = list(
             cond_outer_inputs
         )  # same inputs for cond_fn and body_fn
-        body_outer_outputs = list(
-            body_outer_inputs
-        )  # carry over the state from body_fn
+        # Carry over the state from body_fn. Note: We only carry over
+        # the carried_inputs part of the inputs, the additional ones
+        # are passed in as they're before.
+        body_outer_outputs = body_outer_inputs[: len(outer_carried_inputs)]
 
         self.writeline("while True:")
         self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))

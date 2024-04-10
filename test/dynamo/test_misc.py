@@ -7,14 +7,12 @@ import dis
 import enum
 import functools
 import gc
-import io
 import itertools
 import logging
 import math
 import operator
 import os
 import random
-import re
 import sys
 import tempfile
 import threading
@@ -27,8 +25,6 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
-import pytest
-import sympy
 import torch
 
 import torch._dynamo.test_case
@@ -141,6 +137,18 @@ def closure_adder(val):
         return torch.sin(x + val)
 
     return inner
+
+
+class UserDefineSetAttr:
+    setup = False
+
+    def __setattr__(self, key, value):
+        assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
+        super().__setattr__(f"pfx_{key}", value)
+
+    def __getattr__(self, key):
+        assert torch.compiler.is_dynamo_compiling() or UserDefineSetAttr.setup
+        return self.__dict__[f"pfx_{key}"]
 
 
 class MiscTests(torch._dynamo.test_case.TestCase):
@@ -487,6 +495,34 @@ class MiscTests(torch._dynamo.test_case.TestCase):
 
         cleanup_op("mylib::foo")
         del lib
+
+    def test_user_defined_setattr1(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(obj):
+            obj.y = obj.x + 1
+
+        obj = UserDefineSetAttr()
+        with patch.object(UserDefineSetAttr, "setup", True):
+            obj.x = torch.randn(8)
+        fn(obj)
+        with patch.object(UserDefineSetAttr, "setup", True):
+            self.assertEqual(obj.y, obj.x + 1)
+        self.assertEqual(obj.__dict__.keys(), {"pfx_x", "pfx_y"})
+
+    def test_user_defined_setattr2(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            obj = UserDefineSetAttr()
+            obj.x = x
+            obj.y = obj.x + 1
+            return obj
+
+        x = torch.randn(8)
+        obj = fn(x)
+        with patch.object(UserDefineSetAttr, "setup", True):
+            self.assertIs(obj.x, x)
+            self.assertEqual(obj.y, x + 1)
+        self.assertEqual(obj.__dict__.keys(), {"pfx_x", "pfx_y"})
 
     def test_closure_recompiles(self):
         cnt = CompileCounter()
@@ -2068,6 +2104,33 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(result.b, x - 1)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
+
+    def test_catch_watchings1(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            with warnings.catch_warnings(record=True):
+                return x.sin()
+
+        x = torch.randn(8)
+        self.assertEqual(fn(x), x.sin())
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_catch_watchings2(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return x.sin(), warnings.catch_warnings(record=True)
+
+        x = torch.randn(8)
+        _, a = fn(x)
+        _, b = fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertIsInstance(a, warnings.catch_warnings)
+        self.assertIsInstance(b, warnings.catch_warnings)
+        self.assertIsNot(a, b)
 
     def test_tensor_build_list_unpack(self):
         def fn(x):
@@ -3816,6 +3879,9 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(len(l1), len(l2))
         for p1, p2 in zip(l1, l2):
             self.assertEqual(p1, p2)
+        # TODO co_lnotab is deprecated in 3.12 and will be removed in 3.14
+        # In 3.11+,. it is computed lazily from other linetable attributes (e.g. co_linetable),
+        # so we do not set this attribute ourselves.
         self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
 
     @skipIfNotPy311
@@ -3841,7 +3907,8 @@ def fn():
         fn = locals["fn"]
         orig_inst_str = "\n".join(list(map(str, dis.get_instructions(fn))))
         self.assertIn("EXTENDED_ARG", orig_inst_str)
-        self.assertIn("LOAD_METHOD", orig_inst_str)
+        load_method_str = "LOAD_ATTR" if sys.version_info >= (3, 12) else "LOAD_METHOD"
+        self.assertIn(load_method_str, orig_inst_str)
         keys = bytecode_transformation.get_code_keys()
         code_options = {k: getattr(fn.__code__, k) for k in keys}
         result = bytecode_transformation.clean_and_assemble_instructions(
@@ -3851,7 +3918,7 @@ def fn():
         )
         new_inst_str = "\n".join(list(map(str, result[0])))
         self.assertIn("EXTENDED_ARG", new_inst_str)
-        self.assertIn("LOAD_METHOD", new_inst_str)
+        self.assertIn(load_method_str, new_inst_str)
         l1, l2 = list(fn.__code__.co_positions()), list(result[1].co_positions())
         self.assertEqual(len(l1), len(l2))
         for p1, p2 in zip(l1, l2):
@@ -6386,6 +6453,11 @@ def fn():
         finally:
             builtins.isinstance = builtin_isinstance
 
+        # check recompilation because builtins is now unpatched
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(res, x + 1))
+
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
         def fn(x, y):
@@ -6961,6 +7033,8 @@ def fn():
         dis.dis(fn)
         self.assertEqual(torch._dynamo.optimize("eager")(fn)(), 3)
 
+    # NOTE this test can be removed once multiline errors are in Python.
+    # See https://github.com/python/cpython/issues/106922
     @skipIfNotPy311
     def test_get_instruction_source_311(self):
         def f():
@@ -7011,7 +7085,11 @@ def fn():
 
         from torch._dynamo.utils import get_instruction_source_311
 
-        offsets = (3, 11, 15, 19, 23, 29, 35, 46, 58, 74)
+        if sys.version_info >= (3, 12):
+            # Offsets changed in 3.12, e.g. due to removal of PRECALL inst
+            offsets = (3, 11, 15, 19, 23, 29, 35, 44, 53, 65)
+        else:
+            offsets = (3, 11, 15, 19, 23, 29, 35, 46, 58, 74)
         insts = list(dis.get_instructions(f))
         # uncomment to determine offsets
         # print(*enumerate(insts), sep="\n")
@@ -7091,8 +7169,9 @@ def fn():
 """,
         )
         # test unicode (since assertExpectedInline doesn't support unicode)
+        op_offset = 74 if sys.version_info >= (3, 12) else 84
         self.assertEqual(
-            get_instruction_source_311(f.__code__, insts[84]),
+            get_instruction_source_311(f.__code__, insts[op_offset]),
             """\
             a = ("🔥🔥🔥" +
                 ~~~~~~~~
@@ -8228,6 +8307,8 @@ def ___make_guard_fn():
 
         f(torch.tensor([2, 3, 4]), torch.randn(9))
 
+    # See https://github.com/pytorch/pytorch/issues/119689
+    @unittest.expectedFailure
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_runtime_assert_replacement(self):
         @torch.compile(backend="aot_eager")
@@ -9202,9 +9283,9 @@ def ___make_guard_fn():
             """\
 ShapeEnv not equal: field values don't match:
 
-==> allow_scalar_outputs: values don't match.
-  >  Left: False
-  > Right: True
+==> settings: values don't match.
+  >  Left: ShapeEnvSettings(allow_scalar_outputs=False, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False)
+  > Right: ShapeEnvSettings(allow_scalar_outputs=True, allow_dynamic_output_shape_ops=True, assume_static_by_default=False, specialize_zero_one=True, duck_shape=True, prefer_deferred_runtime_asserts_over_guards=False)
 """,
         )
         self._replay_and_check(main)
@@ -9828,6 +9909,7 @@ fn
 
         self._test_compile_model_free(model_inp_ctr, lambda mod: mod.fc_ref)
 
+    @unittest.skipIf(sys.version_info >= (3, 12), "leaks in 3.12+")
     def test_parameter_free(self):
         def model_inp_ctr():
             param = torch.nn.Parameter(torch.randn(100, 100))
@@ -9844,6 +9926,44 @@ fn
             return Mod(), (torch.randn(100, 100), param)
 
         self._test_compile_model_free(model_inp_ctr, lambda mod: mod.param)
+
+    def test_conditional_list_comp_in_context(self):
+        def fn(inp):
+            try:
+                return [torch.sin(x) for x in inp if x is not None]
+            except Exception:
+                pass
+
+        inp = [torch.randn(3, 3) for _ in range(3)] + [None]
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(inp)
+
+    def test_312_binary_slice_with_graph_break(self):
+        l1 = torch.nn.Linear(5, 5)
+        l2 = torch.nn.Linear(5, 5)
+
+        def fn(x):
+            # causes a graph break with items in the stack
+            n = torch.nn.Sequential(l1, l2)
+            out = n[1:](x)
+            return out
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(5, 5))
+
+    def test_super_after_graph_break(self):
+        class Foo(torch.nn.Sequential):
+            def __init__(self, layers):
+                torch._dynamo.graph_break()
+                super().__init__(*layers)
+
+        def fn(x):
+            layers = [torch.nn.Linear(3, 3) for _ in range(3)]
+            mod = Foo(layers)
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(3, 3))
 
     def test_raises_importerror1(self):
         @torch.compile(backend="eager")
@@ -9871,35 +9991,25 @@ fn
             fn(x)
 
     def test_dynamo_cache_move_to_front(self):
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super(Mod, self).__init__()
-                self.fc = torch.nn.Linear(3, 3)
+        def fn(x, const):
+            return x + const
 
-            def forward(self, out):
-                return self.fc(out)
+        # dynamic=False forces Dynamo to recompile
+        opt_fn = torch.compile(fn, backend="eager", dynamic=False)
 
-        def fn(x, mod):
-            return mod(x)
-
-        opt_fn = torch.compile(fn, backend="eager")
-
-        m1 = Mod()
-        m2 = Mod()
-        m3 = Mod()
         inp = torch.randn(3, 3)
 
         # NOTE: assumes that each cache entry is guarded
         # on unique Mod instance
-        opt_fn(inp, m1)
-        opt_fn(inp, m2)
-        opt_fn(inp, m3)
+        opt_fn(inp, 1)
+        opt_fn(inp, 2)
+        opt_fn(inp, 3)
 
         c1 = _debug_get_cache_entry_list(fn.__code__)
         self.assertEqual(len(c1), 3)
 
         # move cache entry to front
-        opt_fn(inp, m2)
+        opt_fn(inp, 2)
         c2 = _debug_get_cache_entry_list(fn.__code__)
         self.assertIs(c1[1], c2[0])
 
@@ -10021,6 +10131,27 @@ fn
         self.assertEqual(expected.shape, actual.shape)
         self.assertEqual(expected.stride(), actual.stride())
         self.assertEqual(expected.storage_offset(), actual.storage_offset())
+
+    @torch._dynamo.config.patch(guard_nn_modules=True)
+    def test_hasattr_nn_module_guard(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.a = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                if hasattr(self, "a"):
+                    return self.a(x)
+                else:
+                    return x
+
+        m = M()
+        x = torch.randn(3, 3)
+        ref = m(x)
+
+        opt_m = torch.compile(backend="eager")(m)
+        res = opt_m(x)
+        self.assertEqual(ref, res)
 
 
 class TestTracer(JitTestCase):
