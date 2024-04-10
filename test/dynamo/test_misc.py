@@ -7,14 +7,12 @@ import dis
 import enum
 import functools
 import gc
-import io
 import itertools
 import logging
 import math
 import operator
 import os
 import random
-import re
 import sys
 import tempfile
 import threading
@@ -27,8 +25,6 @@ import weakref
 from unittest.mock import patch
 
 import numpy as np
-import pytest
-import sympy
 import torch
 
 import torch._dynamo.test_case
@@ -2109,6 +2105,33 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(cnt.op_count, 2)
 
+    def test_catch_watchings1(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            with warnings.catch_warnings(record=True):
+                return x.sin()
+
+        x = torch.randn(8)
+        self.assertEqual(fn(x), x.sin())
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_catch_watchings2(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, fullgraph=True)
+        def fn(x):
+            return x.sin(), warnings.catch_warnings(record=True)
+
+        x = torch.randn(8)
+        _, a = fn(x)
+        _, b = fn(x)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertIsInstance(a, warnings.catch_warnings)
+        self.assertIsInstance(b, warnings.catch_warnings)
+        self.assertIsNot(a, b)
+
     def test_tensor_build_list_unpack(self):
         def fn(x):
             # seen in fastNLP_Bert
@@ -3856,6 +3879,9 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(len(l1), len(l2))
         for p1, p2 in zip(l1, l2):
             self.assertEqual(p1, p2)
+        # TODO co_lnotab is deprecated in 3.12 and will be removed in 3.14
+        # In 3.11+,. it is computed lazily from other linetable attributes (e.g. co_linetable),
+        # so we do not set this attribute ourselves.
         self.assertEqual(fn.__code__.co_lnotab, result[1].co_lnotab)
 
     @skipIfNotPy311
@@ -6426,6 +6452,11 @@ def fn():
             self.assertTrue(same(res, x - 1))
         finally:
             builtins.isinstance = builtin_isinstance
+
+        # check recompilation because builtins is now unpatched
+        opt_fn = torch.compile(backend="eager", fullgraph=True)(fn)
+        res = opt_fn(x, y)
+        self.assertTrue(same(res, x + 1))
 
     # specifically test for tensor.attribute -> torch.something()
     def test_real_imag_tensor_attribute(self):
@@ -9041,6 +9072,18 @@ def ___make_guard_fn():
 
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_packaging_version_parse(self):
+        from packaging import version
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            x = torch.zeros(1)
+            if version.parse(torch.__version__) >= version.parse("2.0.0"):
+                return x + 1
+            return x
+
+        self.assertEqual(fn().item(), 1)
 
     def test_itertools_accumulate_tensors_user_defined(self):
         def udo_fn_0(a, b):
