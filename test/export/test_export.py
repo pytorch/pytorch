@@ -567,6 +567,7 @@ class TestExport(TestCase):
 
         self.assertEqual(ep.module()(torch.randn(4), torch.randn(5)).size()[0], 4)
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_nested(self):
         class Foo(torch.nn.Module):
             def forward(self, x, y):
@@ -632,6 +633,7 @@ class TestExport(TestCase):
 
         self.assertEqual(ep.module()(torch.randn(5), torch.randn(9)).size()[0], 4)
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_integer(self):
         class Foo(torch.nn.Module):
             def forward(self, w):
@@ -878,6 +880,7 @@ class TestExport(TestCase):
             6,
         )
 
+    @testing.expectedFailurePreDispatchRunDecomp  # T183704046
     def test_static_dim_constraints(self):
         class Foo(torch.nn.Module):
             def __init__(self):
@@ -946,7 +949,7 @@ class TestExport(TestCase):
         self.assertEqual(vr.lower, 1)
         self.assertEqual(vr.upper, 2)
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703911
+    @testing.expectedFailurePreDispatchRunDecomp  # T183703359
     def test_derived_dim_1_2(self):
         class Bar(torch.nn.Module):
             def forward(self, x, y):
