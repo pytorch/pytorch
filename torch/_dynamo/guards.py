@@ -366,7 +366,10 @@ def getitem_on_dict_manager(
 
     key_source = get_key_index_source(base_source_name, index)
     key_example_value = list(base_example_value.keys())[index]
-    value_source = f"{base_source_name}[{key_example_value!r}]"
+    if isinstance(key_example_value, (int, str)):
+        value_source = f"{base_source_name}[{key_example_value!r}]"
+    else:
+        value_source = f"{base_source_name}[{key_source}]"
     if not isinstance(source.index, ConstDictKeySource):
         # We have to insert a key manager guard here
         # TODO - source debug string is probably wrong here.
