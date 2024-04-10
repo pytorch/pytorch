@@ -190,11 +190,6 @@ class CachingAutotuner(KernelInterface):
             is_mm=False, name=self.fn.__name__, size_hints=size_hints
         )
 
-        # pre-create the profiler context manager to reduce latency
-        self.record_function_ctx = torch._C._profiler._RecordFunctionFast(
-            self.inductor_meta.get("kernel_name", "triton kernel")
-        )
-
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
             if self.launchers:
@@ -732,13 +727,15 @@ class CachingAutotuner(KernelInterface):
                 {**dict(zip(self.arg_names, args)), **launcher.config.kwargs, **kwargs}
             )
 
-        # guard the record_function_ctx and only call it if profiling is currently
+        # guard the record function and only call it if profiling is currently
         # in progress, to reduce latency when profiler is not turned on. Note that
         # the "if" statement (instead of, say, a contextlib.nullcontext) is intentional;
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
-            with self.record_function_ctx:
+            with torch._C._profiler._RecordFunctionFast(
+                self.inductor_meta.get("kernel_name", "triton kernel"), args
+            ):
                 return launcher(
                     *args,
                     **kwargs,
@@ -848,13 +845,13 @@ class DebugAutotuner(CachingAutotuner):
             if num_gb is None:
                 num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
             gb_per_s = num_gb / (ms / 1e3)
-            self.cached = (ms, num_gb, gb_per_s, kernel_name)
-        else:
-            ms, num_gb, gb_per_s, kernel_name = self.cached
-        collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
-        print(
-            create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
-        )
+            self.cached = ms, num_gb, gb_per_s, kernel_name
+            collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
+            print(
+                create_bandwidth_info_str(
+                    ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}"
+                )
+            )
 
 
 def hash_configs(configs: List[Config]):

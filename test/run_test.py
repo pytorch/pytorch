@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     retry_shell,
     set_cwd,
     shell,
+    TEST_CUDA,
     TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
@@ -1180,7 +1181,15 @@ def parse_args():
         action="store_true",
         help="Enables removing tests based on TD",
         default=IS_CI
-        and (TEST_WITH_CROSSREF or TEST_WITH_ASAN)
+        and (
+            TEST_WITH_CROSSREF
+            or TEST_WITH_ASAN
+            or (
+                strtobool(os.environ.get("TD_DISTRIBUTED", "False"))
+                and os.getenv("TEST_CONFIG") == "distributed"
+                and TEST_CUDA
+            )
+        )
         and os.getenv("BRANCH", "") != "main"
         and not strtobool(os.environ.get("NO_TD", "False")),
     )
