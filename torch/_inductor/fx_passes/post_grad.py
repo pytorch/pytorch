@@ -65,7 +65,7 @@ pass_patterns = [
 inference_patterns = PatternMatcherPass()
 
 
-def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
+def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool, example_inputs):
     """
     Passes that run on after grad.  This is called once on the forwards
     graph and once on the backwards graph.
@@ -86,6 +86,12 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     if config.pattern_matcher:
         lazy_init()
+        if (
+            hasattr(config, "fx_passes_numeric_check")
+            and config.fx_passes_numeric_check.get("post_grad", False)
+            and example_inputs is not None
+        ):
+            gm_before_fx_passes = gm.__copy__()
         optimus_scuba_log["before_recompile_post_grad"] = upload_graph(gm.graph)
         group_batch_fusion_passes(gm.graph, pre_grad=False)
         remove_noop_ops(gm.graph)
@@ -126,6 +132,47 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     gm.recompile()
     optimus_scuba_log["after_recompile_post_grad"] = upload_graph(gm.graph)
+    if (
+        config.pattern_matcher
+        and hasattr(config, "fx_passes_numeric_check")
+        and config.fx_passes_numeric_check.get("post_grad", False)
+        and example_inputs is not None
+    ):
+        should_run_numeric_check = True
+        from .numeric_utils import numeric_check_if_enabled
+        # need to topo-sort graphmodule before we run the model,
+        # otherwise it may fail as refer before def
+        stable_topological_sort(gm.graph)
+        gm_after_fx_passes = gm.__copy__()
+        model_inputs = []
+        for example_input in example_inputs:
+            # convert to real tensor
+            device, shape, dtype, requires_grad = (
+                example_input.device,
+                example_input.shape,
+                example_input.dtype,
+                example_input.requires_grad,
+            )
+            # print("device, dtype, requires_grad: ", device, dtype, requires_grad)
+            if "float" in str(dtype).lower():
+                model_input = torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+            elif "int" in str(dtype).lower():
+                model_input = torch.randint(0, 2, shape, device=device, dtype=dtype, requires_grad=requires_grad)
+            elif "bool" in str(dtype).lower():
+                model_input = torch.randint(0, 2, shape, device=device, dtype=dtype, requires_grad=requires_grad).bool()
+            else:
+                log.debug(f"dtype {dtype} is not supported")
+                should_run_numeric_check = False
+                break
+            model_inputs.append(model_input)
+        if should_run_numeric_check:
+            numeric_check_if_enabled(
+                gm_before_fx_passes,  # type: ignore[possibly-undefined]
+                gm_after_fx_passes,
+                model_inputs,
+                config.fx_passes_numeric_check.get("num_iterations", 1),
+                config.fx_passes_numeric_check.get("precision", 1e-4),
+            )
     gm.graph.lint()
 
 

@@ -205,6 +205,6 @@ def numeric_check_if_enabled(
             )
     except Exception as e:
         logger.warning(
-            "Runtime numeric check failed in pre grad fx passes with error: %s", e
+            "Runtime numeric check failed in fx passes with error: %s", e
         )
         traceback.print_exc()

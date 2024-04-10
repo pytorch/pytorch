@@ -239,11 +239,11 @@ def _recursive_joint_graph_passes(gm):
     joint_graph_passes(gm)
 
 
-def _recursive_post_grad_passes(gm, is_inference: bool = False):
+def _recursive_post_grad_passes(gm, example_inputs, is_inference: bool = False):
     for subgraph_name in _get_subgraph_names(gm):
         subgraph = getattr(gm, subgraph_name)
-        _recursive_post_grad_passes(subgraph, is_inference)
-    post_grad_passes(gm, is_inference)
+        _recursive_post_grad_passes(subgraph, example_inputs, is_inference)
+    post_grad_passes(gm, is_inference, example_inputs)
 
 
 def split_const_gm(
@@ -333,7 +333,7 @@ def count_bytes_inner(
     fake_mode = fake_tensor_prop(gm, example_inputs)
 
     with V.set_fake_mode(fake_mode):
-        _recursive_post_grad_passes(gm, False)
+        _recursive_post_grad_passes(gm, example_inputs, False)
 
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
     with V.set_graph_handler(graph), V.set_real_inputs(example_inputs):
@@ -668,7 +668,7 @@ def fx_codegen_and_compile(
 
     with V.set_fake_mode(fake_mode):
         # has some issues with memory in training
-        _recursive_post_grad_passes(gm, is_inference=is_inference)
+        _recursive_post_grad_passes(gm, example_inputs, is_inference=is_inference)
         V.debug.fx_graph_transformed(gm, example_inputs)
         post_grad_graphs_log.debug("%s", lazy_format_graph_code("AFTER POST GRAD", gm))
         trace_structured(
