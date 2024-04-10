@@ -30,7 +30,10 @@ struct TORCH_API MTIAHooksInterface : AcceleratorHooksInterface {
   virtual ~MTIAHooksInterface() override = default;
 
   virtual void initMTIA() const {
-    TORCH_WARN("MTIA backend is not available. ");
+    // Avoid logging here, since MTIA needs init devices first then it will know
+    // how many devices are available. Make it as no-op if mtia extension is not
+    // dynamically loaded.
+    return;
   }
 
   virtual bool hasMTIA() const {
@@ -95,5 +98,6 @@ C10_DECLARE_REGISTRY(MTIAHooksRegistry, MTIAHooksInterface, MTIAHooksArgs);
 
 namespace detail {
 TORCH_API const MTIAHooksInterface& getMTIAHooks();
+TORCH_API bool isMTIAHooksBuilt();
 } // namespace detail
 } // namespace at

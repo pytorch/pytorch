@@ -1,5 +1,8 @@
 torch.mtia
 ===================================
+
+The MTIA backend is implemented out of the tree, only interfaces are be defined here.
+
 .. automodule:: torch.mtia
 .. currentmodule:: torch.mtia
 

@@ -38,7 +38,6 @@ static PyObject* THPStream_pynew(
 
   std::unique_ptr<c10::DeviceGuard> device_guard_ptr;
 
-  bool work_as_wrapper = (r.idx > 0);
   if (r.idx == 0) {
     auto default_accelerator = at::getAccelerator(false);
     auto device = r.deviceOptional(0);

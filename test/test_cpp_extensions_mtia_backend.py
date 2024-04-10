@@ -9,7 +9,7 @@ import unittest
 import torch
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
-from torch.testing._internal.common_utils import IS_ARM64, TEST_CUDA
+from torch.testing._internal.common_utils import IS_ARM64, IS_WINDOWS, TEST_CUDA
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
@@ -26,7 +26,7 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
-@unittest.skipIf(IS_ARM64, "Does not work on arm")
+@unittest.skipIf(IS_ARM64 or IS_WINDOWS, "Does not work on arm and windows")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionMTIABackend(common.TestCase):
     """Tests Stream and Event with C++ extensions."""

@@ -15,9 +15,7 @@ struct TORCH_API AcceleratorHooksInterface {
   virtual ~AcceleratorHooksInterface() = default;
 
   // Whether the device at device_index is fully initialized or not.
-  virtual bool hasPrimaryContext(DeviceIndex device_index) const {
-    return false;
-  }
+  virtual bool hasPrimaryContext(DeviceIndex device_index) const = 0;
 
   virtual DeviceIndex deviceCount() const {
     return 0;

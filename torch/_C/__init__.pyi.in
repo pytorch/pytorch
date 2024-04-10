@@ -33,7 +33,6 @@ from typing_extensions import ParamSpec
 
 import torch
 from torch import inf, SymInt, Tensor
-from torch._streambase import _StreamBase, _EventBase
 from torch.autograd.graph import Node as _Node
 from torch.package import PackageExporter
 from torch.storage import UntypedStorage, TypedStorage
@@ -106,7 +105,7 @@ class device:
     def __reduce__(self) -> Tuple[Any, ...]: ...  # THPDevice_reduce
 
 # Defined in torch/csrc/Stream.cpp
-class Stream(_StreamBase):
+class Stream:
     stream_id: _int  # Stream id
     device_index: _int
     device_type: _int
@@ -128,7 +127,7 @@ class Stream(_StreamBase):
 
 
 # Defined in torch/csrc/Event.cpp
-class Event(_EventBase):
+class Event:
 
     device: _device  # The device of the Event
     event_id: _int # The raw event created by device backend
@@ -1686,6 +1685,7 @@ def _accelerator_hooks_maybe_exchange_device(device_index: _int) -> _int: ...
 
 # Defined in torch/csrc/mtia/Module.cpp
 def _mtia_init() -> None: ...
+def _mtia_isBuilt() -> _bool: ...
 def _mtia_isInBadFork() -> _bool: ...
 def _mtia_deviceSynchronize() -> None: ...
 def _mtia_getCurrentStream(device: _int) -> Stream: ...
