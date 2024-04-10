@@ -10,6 +10,7 @@ Global flags for aot autograd
 import os
 import sys
 from typing import TYPE_CHECKING
+import torch
 
 # Converts torch rng ops to their functional philox rng equivalents. Note that
 # we functionalize only CUDA rng ops today.
@@ -34,7 +35,17 @@ debug_partitioner = os.environ.get("AOT_PARTITIONER_DEBUG", False)
 # Eventually, we should make these checks faster.
 # For now, however, you can simply turn off dynamic shapes by marking your inputs static
 # when you run into this situation.
-_max_aliased_inputs_with_dynamic_shapes_enabled = 5
+if torch._inductor.config.is_fbcode():
+    # Mostly for safety: if justknobs isn't available, getval_int defaults to zero,
+    # but we should really default to 1 here (1 aliased input == no aliasing)
+    _max_aliased_inputs_with_dynamic_shapes_enabled = max(
+        torch._utils_internal.justknobs_getval_int(
+            "pytorch/dynamo:pytorch/dynamo:_max_aliased_inputs_with_dynamic_shapes_enabled"
+        ),
+        1
+    )
+else:
+    _max_aliased_inputs_with_dynamic_shapes_enabled = 5
 
 static_weight_shapes = True
 
