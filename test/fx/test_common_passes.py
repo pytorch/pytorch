@@ -1,14 +1,19 @@
 # Owner(s): ["oncall: fx"]
 
+import itertools
+
 import torch
+from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.graph_module import GraphModule
+from torch.fx.passes.dialect.common.cse_pass import CSEPass
 
 from torch.testing._internal.common_utils import (
-    TestCase, parametrize, instantiate_parametrized_tests, run_tests)
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.passes.dialect.common.cse_pass import CSEPass
-from torch.fx.graph_module import GraphModule
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
-import itertools
 
 def FactoryFunctionCall(x, device):
     y = torch.full(x.shape, 3, device=device)
@@ -62,12 +67,14 @@ def MutationMetadata(x):
 
 
 Passes = [CSEPass]
-Test_Cases = [TakeList,
-              ReturnList,
-              Mutation,
-              MutationInput,
-              MutationMetadata,
-              MutationTorchTensorCall]
+Test_Cases = [
+    TakeList,
+    ReturnList,
+    Mutation,
+    MutationInput,
+    MutationMetadata,
+    MutationTorchTensorCall,
+]
 Factory_Test_Cases = [FactoryFunctionCall, MutationFactory]
 Devices = ["cpu"]
 if torch.cuda.is_available():
@@ -76,12 +83,14 @@ if torch.cuda.is_available():
 
 def name_fn(common_pass, f, device):
     """Names parameterized test cases."""
-    return f'{type(common_pass()).__name__}_{f.__name__}_{device}'
+    return f"{type(common_pass()).__name__}_{f.__name__}_{device}"
+
 
 @instantiate_parametrized_tests
 class TestCommonPass(TestCase):
-
-    @parametrize("common_pass,f,device", itertools.product(Passes, Test_Cases, Devices), name_fn)
+    @parametrize(
+        "common_pass,f,device", itertools.product(Passes, Test_Cases, Devices), name_fn
+    )
     def test_correctness(self, common_pass, f, device):
         inp = torch.randn(10, device=device)
 
@@ -98,8 +107,11 @@ class TestCommonPass(TestCase):
 
         self.assertEqual(result, expected)
 
-
-    @parametrize("common_pass,f,device", itertools.product(Passes, Factory_Test_Cases, Devices), name_fn)
+    @parametrize(
+        "common_pass,f,device",
+        itertools.product(Passes, Factory_Test_Cases, Devices),
+        name_fn,
+    )
     def test_correctness_factory(self, common_pass, f, device):
         inp = torch.randn(10, device=device)
         traced_m = make_fx(f)(inp, device)
@@ -116,5 +128,5 @@ class TestCommonPass(TestCase):
         self.assertEqual(result, expected)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
