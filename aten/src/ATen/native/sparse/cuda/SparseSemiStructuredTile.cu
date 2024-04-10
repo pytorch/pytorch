@@ -20,6 +20,7 @@
 namespace at::native {
 
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#else
 struct MetadataCuSparseLt {
   // Format used by cuSparseLt
   // This is based on reverse-engineering, for a visual illustration:
@@ -272,7 +273,6 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> sparse_semi_structured_tile_t
       packed_trans_meta_reordered,
       threads_masks);
 }
-#else
 #endif
 
 // <packed, packed_meta_reordered, packed_trans, packed_trans_meta_reorderd, threads_masks>
