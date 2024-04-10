@@ -2858,7 +2858,7 @@ def constant_pad_nd(
         result = aten._unsafe_masked_index(input, mask, indices, value)
 
     # convert output to correct memory format, if necessary
-    memory_format = utils.suggest_memory_format(result)
+    memory_format = utils.suggest_memory_format(input)
     result = result.contiguous(memory_format=memory_format)
     return result
 
