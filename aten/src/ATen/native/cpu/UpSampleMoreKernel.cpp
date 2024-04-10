@@ -15,9 +15,10 @@ namespace {
 using scale_t = std::vector<c10::optional<double>>;
 
 template <typename acc_t, typename scalar_t,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t> || !std::is_same<acc_t, float>::value, int> = 0>
+          typename scalar_nonconst_t = std::remove_const_t<scalar_t>,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_nonconst_t> || !std::is_same<acc_t, float>::value, int> = 0>
 void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) {
-  TORCH_CHECK((std::is_same<acc_t, scalar_t>::value),
+  TORCH_CHECK((std::is_same<acc_t, scalar_nonconst_t>::value),
               "acc data type of Upsample backward should be same as scalar_t for float or double on CPU.")
   using Vec = Vectorized<acc_t>;
   int64_t d = 0;
@@ -31,14 +32,15 @@ void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) 
 }
 
 template <typename acc_t, typename scalar_t,
-          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t> && std::is_same<acc_t, float>::value, int> = 0>
+          typename scalar_nonconst_t = std::remove_const_t<scalar_t>,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_nonconst_t> && std::is_same<acc_t, float>::value, int> = 0>
 void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) {
-  using bVec = Vectorized<scalar_t>;
+  using bVec = Vectorized<scalar_nonconst_t>;
   using fVec = Vectorized<float>;
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec gout_bvec = bVec::loadu(gout + d);
-    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_t>(gout_bvec);
+    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_nonconst_t>(gout_bvec);
     fVec gin_fvec0 = fVec::loadu(gin + d) + gout_fvec0;
     fVec gin_fvec1 = fVec::loadu(gin + d + fVec::size()) + gout_fvec1;
     gin_fvec0.store(gin + d);
@@ -50,9 +52,10 @@ void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) 
 }
 
 template <typename acc_t, typename scalar_t,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t> || !std::is_same<acc_t, float>::value, int> = 0>
+          typename scalar_nonconst_t = std::remove_const_t<scalar_t>,
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_nonconst_t> || !std::is_same<acc_t, float>::value, int> = 0>
 void inline linear_channels_last_acc(acc_t* gin, const scalar_t* gout, acc_t w, int64_t size) {
-  TORCH_CHECK((std::is_same<acc_t, scalar_t>::value),
+  TORCH_CHECK((std::is_same<acc_t, scalar_nonconst_t>::value),
               "acc data type of Upsample backward should be same as scalar_t for float or double on CPU.")
   using Vec = Vectorized<acc_t>;
   int64_t d = 0;
@@ -66,14 +69,15 @@ void inline linear_channels_last_acc(acc_t* gin, const scalar_t* gout, acc_t w, 
 }
 
 template <typename acc_t, typename scalar_t,
-          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t> && std::is_same<acc_t, float>::value, int> = 0>
+          typename scalar_nonconst_t = std::remove_const_t<scalar_t>,
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_nonconst_t> && std::is_same<acc_t, float>::value, int> = 0>
 void inline linear_channels_last_acc(acc_t* gin, const scalar_t* gout, acc_t w, int64_t size) {
-  using bVec = Vectorized<scalar_t>;
+  using bVec = Vectorized<scalar_nonconst_t>;
   using fVec = Vectorized<float>;
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec gout_bvec = bVec::loadu(gout + d);
-    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_t>(gout_bvec);
+    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_nonconst_t>(gout_bvec);
     fVec gin_fvec0 = fVec::loadu(gin + d) + fVec(w) * gout_fvec0;
     fVec gin_fvec1 = fVec::loadu(gin + d + fVec::size()) + fVec(w) * gout_fvec1;
     gin_fvec0.store(gin + d);
