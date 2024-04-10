@@ -651,6 +651,7 @@ class TensorMetadata:
     layout: torch.layout
     memory_format: Optional[torch.memory_format]
     storage_offset: int
+    storage_bytes: Optional[int]
     requires_grad: bool
     is_quantized: bool
     is_conj: bool
@@ -678,6 +679,8 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         layout=t.layout,
         memory_format=memory_format,
         storage_offset=t.storage_offset(),
+        # Only set storage_bytes for tensors that have storage (not sparse)
+        storage_bytes=t.untyped_storage().nbytes() if not t.is_sparse else None,
         requires_grad=t.requires_grad,
         is_quantized=t.is_quantized,
         is_conj=t.is_conj(),
@@ -947,15 +950,11 @@ class FakeTensorMode(TorchDispatchMode):
         if func in self.lift_fns:
             raise _BypassDispatchCache("lift")
 
+        if func.name() == "inductor::resize_storage_bytes_":
+            raise _BypassDispatchCache("inductor::resize_storage_bytes_")
+
         if not torch._library.utils.is_builtin(func):
             raise _BypassDispatchCache("non-builtin")
-
-        # TODO: Probably need to fix this before landing
-        # (real fix will look something like including the storage size in the cache key)
-        if func.is_view:
-            raise _BypassDispatchCache(
-                "view caching is broken when we have storage resizing"
-            )
 
         # In order to handle storage aliasing, we need to establish the alias
         # for any view op on a cache hit. But CompositeImplicitAutograd ops may
@@ -1136,6 +1135,8 @@ class FakeTensorMode(TorchDispatchMode):
                 empty.set_(
                     storage, metadata.storage_offset, metadata.shape, metadata.stride
                 )
+        if metadata.storage_bytes == 0:
+            empty.untyped_storage().resize_(0)
 
         return FakeTensor(self, empty, metadata.device)
 

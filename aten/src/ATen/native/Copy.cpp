@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Copy.h>
+#include <ATen/native/Copy.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -27,6 +28,8 @@
 #include <ATen/ops/_propagate_xla_data_native.h>
 #include <ATen/ops/copy.h>
 #include <ATen/ops/copy_native.h>
+#include <ATen/ops/_foreach_copy.h>
+#include <ATen/ops/_foreach_copy_native.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
 #include <ATen/ops/expand_copy.h>
