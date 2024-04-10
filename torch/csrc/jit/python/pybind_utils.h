@@ -873,11 +873,37 @@ struct VISIBILITY_HIDDEN tuple_slice {
   int64_t e;
 };
 
+inline IValue fakeScriptObjectToIValue(
+    const c10::FunctionSchema& schema,
+    size_t argumentPosition,
+    py::handle object) {
+  auto argument = schema.arguments().at(argumentPosition);
+  auto class_type = argument.real_type()->expect<c10::ClassType>();
+  auto fake_class_registry =
+      py::module::import("torch._library.fake_class_registry");
+  auto fake_class = fake_class_registry.attr("find_fake_class")(
+      class_type->name().value().qualifiedName());
+  if (!py::isinstance(object.attr("wrapped_obj"), fake_class)) {
+    throw schema_match_error(c10::str(
+        schema.formatTypeMismatchMsg(
+            argument,
+            friendlyTypeName(object),
+            argumentPosition,
+            py::repr(object.attr("wrapped_obj"))),
+        "\nCast error details: ",
+        argument.name(),
+        " is expected to be a FakeScriptObject of ",
+        class_type->name().value().qualifiedName()));
+  }
+  return toIValue(object, PyObjectType::get());
+}
+
 inline Stack createStackForSchema(
     const FunctionSchema& schema,
     const tuple_slice& args,
     const py::kwargs& kwargs,
-    c10::optional<IValue> self) {
+    c10::optional<IValue> self,
+    bool allow_fake_script_object = false) {
   size_t all_arguments = (self ? 1 : 0) + args.size() + kwargs.size();
   if (all_arguments > schema.arguments().size()) {
     throw schema_match_error(c10::str(
@@ -912,7 +938,14 @@ inline Stack createStackForSchema(
           schema));
     }
     // Use the type information from the schema to convert the PyObject.
-    push(stack, argumentToIValue(schema, stack.size(), arg));
+    const auto& argument = schema.arguments().at(arg_idx);
+    if (allow_fake_script_object &&
+        argument.real_type()->kind() == TypeKind::ClassType) {
+      push(stack, fakeScriptObjectToIValue(schema, stack.size(), arg));
+    } else {
+      push(stack, argumentToIValue(schema, stack.size(), arg));
+    }
+
     arg_idx++;
   }
 
@@ -923,7 +956,14 @@ inline Stack createStackForSchema(
   for (size_t i = stack.size(); i < schema.arguments().size(); ++i) {
     const auto& arg = schema.arguments()[i];
     if (kwargs.contains(arg.name().c_str())) {
-      push(stack, argumentToIValue(schema, i, kwargs[arg.name().c_str()]));
+      if (allow_fake_script_object &&
+          arg.real_type()->kind() == TypeKind::ClassType) {
+        push(
+            stack,
+            fakeScriptObjectToIValue(schema, i, kwargs[arg.name().c_str()]));
+      } else {
+        push(stack, argumentToIValue(schema, i, kwargs[arg.name().c_str()]));
+      }
       consumed_kwargs += 1;
     } else if (arg.default_value()) {
       push(stack, *arg.default_value());
@@ -1152,6 +1192,11 @@ TORCH_PYTHON_API py::tuple _maybe_handle_torch_function(
     const std::string& method_name,
     const std::string& overload_name,
     bool is_overload,
+    py::args args,
+    const py::kwargs& kwargs);
+
+TORCH_PYTHON_API Stack checkSchemaSkipScriptObject(
+    const FunctionSchema& schema,
     py::args args,
     const py::kwargs& kwargs);
 
