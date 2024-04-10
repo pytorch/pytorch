@@ -7,6 +7,7 @@ from torch.fx import (
     GraphModule,
     Node,
 )
+import torch.nn.functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
@@ -167,14 +168,14 @@ def _is_supported_batch_norm_for_training(node: Node):
     return node.target in supported_ops
 
 # TODO: move this to torch/ao/quantization/utils.py
-def _is_conv_or_conv_transpose_node(n: Node):
+def _is_conv_node(n: Node):
     """
-    Return whether the node refers to an aten conv or conv transpose op.
+    Return whether the node refers to an aten conv op.
     """
     return n.op == "call_function" and n.target in [
         torch.ops.aten.conv1d.default,
         torch.ops.aten.conv2d.default,
-    ] or _is_conv_transpose_node(n)
+    ]
 
 def _is_conv_transpose_node(n: Node):
     """
@@ -186,6 +187,12 @@ def _is_conv_transpose_node(n: Node):
         torch.ops.aten.conv_transpose2d,
         torch.ops.aten.conv_transpose2d.input,
     ]
+
+def _is_conv_or_conv_transpose_node(n: Node):
+    """
+    Return whether the node refers to an aten conv or conv transpose op.
+    """
+    return _is_conv_node(n) or _is_conv_transpose_node(n)
 
 def _is_conv_transpose_fn(conv_fn: Callable):
     return conv_fn in [F.conv_transpose1d, F.conv_transpose2d]

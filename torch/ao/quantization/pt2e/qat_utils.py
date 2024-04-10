@@ -114,7 +114,7 @@ def _get_qat_conv_bn_pattern(conv_fn: Callable) -> Callable:
         running_std = torch.sqrt(bn_running_var + bn_eps)
         scale_factor = bn_weight / running_std
         weight_shape = [1] * len(conv_weight.shape)
-        weight_in_channel_axis = 1 if _is_conv_transpose_fn else 0
+        weight_in_channel_axis = 1 if _is_conv_transpose_fn(conv_fn) else 0
         weight_shape[weight_in_channel_axis] = -1
         bias_shape = [1] * len(conv_weight.shape)
         bias_shape[1] = -1
@@ -146,7 +146,7 @@ def _get_qat_conv_bn_pattern_no_conv_bias(conv_fn: Callable) -> Callable:
         running_std = torch.sqrt(bn_running_var + bn_eps)
         scale_factor = bn_weight / running_std
         weight_shape = [1] * len(conv_weight.shape)
-        weight_in_channel_axis = 1 if _is_conv_transpose_fn else 0
+        weight_in_channel_axis = 1 if _is_conv_transpose_fn(conv_fn) else 0
         weight_shape[weight_in_channel_axis] = -1
         bias_shape = [1] * len(conv_weight.shape)
         bias_shape[1] = -1
