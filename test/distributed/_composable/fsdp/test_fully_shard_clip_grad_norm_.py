@@ -2,18 +2,18 @@
 
 import copy
 import functools
-from typing import Union, Optional
+from typing import Optional, Union
 
 import torch
 import torch.nn as nn
 from torch.distributed._composable import replicate
 from torch.distributed._composable.fsdp import fully_shard
+from torch.distributed._tensor import Shard
 from torch.distributed._tensor.debug import CommDebugMode
+from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest
 from torch.testing._internal.common_utils import run_tests
-from torch.distributed._tensor import Shard
-from torch.distributed.device_mesh import DeviceMesh, init_device_mesh
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -74,9 +74,11 @@ class _TestClipGradNormBase(FSDPTest):
                     foreach=True,
                 )
             self.assertEqual(ref_total_norm, total_norm)
-            # TODO: For 2D, we need to reshard PR to PP to delay all-reduce.
+            # Expect one all-reduce per mesh dim for partial -> replicate
+            expected_all_reduces = len(total_norm.placements)
             self.assertEqual(
-                comm_mode.get_comm_counts()[torch.ops.c10d_functional], 1
+                comm_mode.get_comm_counts()[torch.ops.c10d_functional.all_reduce],
+                expected_all_reduces,
             )
             # For zero gradients, clipping has no effect
             for param, grad in zip(ref_model.parameters(), ref_grads):
@@ -89,7 +91,6 @@ class _TestClipGradNormBase(FSDPTest):
                 )
                 if torch.count_nonzero(grad):
                     self.assertFalse(torch.equal(param.grad.to_local(), grad))
-
 
 
 class TestClipGradNormWorldSize2(_TestClipGradNormBase):
@@ -120,16 +121,20 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
 
     @skip_if_lt_x_gpu(4)
     def test_clip_grad_norm_2d(self):
-        for norm_type in (2, 1, float("inf")):
+        for norm_type in (2, 1, 3, float("inf")):
             dp_size = 2
             global_mesh = init_device_mesh(
-                "cuda", (dp_size, self.world_size // dp_size), mesh_dim_names=("dp", "tp")
+                "cuda",
+                (dp_size, self.world_size // dp_size),
+                mesh_dim_names=("dp", "tp"),
             )
             dp_mesh, tp_mesh = global_mesh["dp"], global_mesh["tp"]
             torch.manual_seed(42)
             model_args = ModelArgs(dropout_p=0.0)
             model = Transformer(model_args)
-            ref_model = replicate(copy.deepcopy(model).cuda(), process_group=dp_mesh.get_group())
+            ref_model = replicate(
+                copy.deepcopy(model).cuda(), process_group=dp_mesh.get_group()
+            )
             ref_optim = torch.optim.Adam(ref_model.parameters(), lr=1e-2)
             model = Transformer.parallelize(model, tp_mesh, use_seq_parallel=True)
             for module in model.modules():
@@ -137,7 +142,9 @@ class TestClipGradNormWorldSize4(_TestClipGradNormBase):
                     fully_shard(module, mesh=dp_mesh)
             fully_shard(model, mesh=dp_mesh)
             optim = torch.optim.Adam(model.parameters(), lr=1e-2)
-            self._test_clip_grad_norm(1, norm_type, ref_model, ref_optim, model, optim, dp_mesh)
+            self._test_clip_grad_norm(
+                1, norm_type, ref_model, ref_optim, model, optim, dp_mesh
+            )
 
 
 if __name__ == "__main__":

@@ -12,7 +12,6 @@
 namespace c10d {
 
 namespace {
-constexpr int64_t kBusyWaitMillis = 10;
 
 const std::map<c10::DeviceType, ucc_memory_type_t> ucc_mtype_map = {
     {c10::kCPU, UCC_MEMORY_TYPE_HOST},

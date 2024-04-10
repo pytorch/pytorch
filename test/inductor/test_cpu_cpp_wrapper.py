@@ -5,14 +5,11 @@ from typing import NamedTuple
 
 import torch
 from torch._inductor import config
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
-from torch.testing._internal.common_utils import (
-    IS_MACOS,
-    slowTest,
-    TestCase as TorchTestCase,
-)
+from torch.testing._internal.common_utils import IS_MACOS, slowTest
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -47,11 +44,11 @@ class CppWrapperTemplate:
     pass
 
 
-class TestCppWrapper(TorchTestCase):
+class TestCppWrapper(InductorTestCase):
     device = "cpu"
 
 
-class DynamicShapesCppWrapperCpuTests(TorchTestCase):
+class DynamicShapesCppWrapperCpuTests(InductorTestCase):
     device = "cpu"
 
 
@@ -78,11 +75,9 @@ if config.abi_compatible:
         "test_conv2d_binary_inplace_fusion_failed_cpu",
         "test_conv2d_binary_inplace_fusion_pass_cpu",
         "test_cumsum_cpu",
-        "test_custom_op_cpu",  # needs custom op support
         "test_dtype_sympy_expr_cpu",
         "test_dynamic_qlinear_cpu",
         "test_dynamic_qlinear_qat_cpu",
-        "test_index_put_deterministic_fallback_cpu",
         "test_lstm_packed_change_input_sizes_cpu",
         "test_profiler_mark_wrapper_call_cpu",
         "test_qconv2d_add_cpu",
@@ -173,7 +168,7 @@ if RUN_CPU:
     class BaseTest(NamedTuple):
         name: str
         device: str = "cpu"
-        tests: TorchTestCase = test_torchinductor.CpuTests()
+        tests: InductorTestCase = test_torchinductor.CpuTests()
         condition: bool = True
         slow: bool = False
         func_inputs: list = None
@@ -216,7 +211,9 @@ if RUN_CPU:
         ),
         BaseTest("test_conv_transpose2d_packed", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest("test_cumsum"),
-        BaseTest("test_custom_op"),
+        BaseTest("test_custom_op_1"),
+        BaseTest("test_custom_op_2"),
+        BaseTest("test_custom_op_3"),
         BaseTest("test_dtype_sympy_expr"),
         BaseTest("test_embedding_bag"),  # test default FallbackKernel
         BaseTest("test_index_put1"),
@@ -374,7 +371,7 @@ if RUN_CPU:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if RUN_CPU:
         run_tests(needs="filelock")

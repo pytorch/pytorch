@@ -7,6 +7,7 @@ import os
 import re
 import sys
 import warnings
+from collections import namedtuple
 from os.path import abspath, exists
 
 import torch
@@ -273,6 +274,18 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             model.eval()
         gc.collect()
         batch_size = benchmark.batch_size
+        if model_name == "torchrec_dlrm":
+            batch_namedtuple = namedtuple(
+                "Batch", "dense_features sparse_features labels"
+            )
+            example_inputs = tuple(
+                batch_namedtuple(
+                    dense_features=batch.dense_features,
+                    sparse_features=batch.sparse_features,
+                    labels=batch.labels,
+                )
+                for batch in example_inputs
+            )
         # Torchbench has quite different setup for yolov3, so directly passing
         # the right example_inputs
         if model_name == "yolov3":

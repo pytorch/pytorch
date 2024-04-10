@@ -2709,6 +2709,9 @@ class BenchmarkRunner:
                     f"ratio: {compression_ratio:.2f}"
                 )
 
+            if self.args.print_compilation_time:
+                print(f"Compilation time: {compilation_time:.2f}")
+
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
                 experiment_kwargs["compression_ratio"] = compression_ratio
@@ -3115,6 +3118,11 @@ def parse_args(args=None):
         "--print-memory",
         action="store_true",
         help="print extra memory statistics",
+    )
+    parser.add_argument(
+        "--print-compilation-time",
+        action="store_true",
+        help="print compilation latency",
     )
     parser.add_argument(
         "--print-dataframe-summary",

@@ -205,7 +205,6 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
             approved_by=["pytorch/metamates", "ngimel"],
             mandatory_checks_name=[
                 "Lint",
-                "Facebook CLA Check",
                 "pull / linux-xenial-cuda11.3-py3.7-gcc7 / build",
             ],
             ignore_flaky_failures=True,

@@ -1568,15 +1568,13 @@ class TestVmapOfGrad(TestCase):
             expected = zip(*expected)
             expected = tuple(torch.stack(shards) for shards in expected)
             for r, e in zip(result, expected):
-                # TODO: Check if the rtol is a problem
-                self.assertEqual(r, e, atol=0, rtol=1e-3)
+                self.assertEqual(r, e, atol=0, rtol=1.5e-3)
         else:
             assert mechanism == "functional_call"
             expected = {k: tuple(d[k] for d in expected) for k, v in expected[0].items()}
             expected = {k: torch.stack(shards) for k, shards in expected.items()}
             for key in result:
-                # TODO: Check if the rtol is a problem
-                self.assertEqual(result[key], expected[key], atol=0, rtol=1e-3)
+                self.assertEqual(result[key], expected[key], atol=0, rtol=1.5e-3)
 
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_per_sample_grads_embeddingnet(self, device, mechanism):

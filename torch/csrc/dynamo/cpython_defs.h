@@ -18,4 +18,16 @@ PyFunctionObject* _PyFunction_CopyWithNewCode(
 
 void THP_PyFrame_Clear(_PyInterpreterFrame* frame);
 
+_PyInterpreterFrame* THP_PyThreadState_BumpFramePointerSlow(
+    PyThreadState* tstate,
+    size_t size);
+
+void THP_PyThreadState_PopFrame(
+    PyThreadState* tstate,
+    _PyInterpreterFrame* frame);
+
 #endif
+
+// pointers to _PyOpcode_Caches for C++
+extern const uint8_t* THP_PyOpcode_Caches;
+extern const int THP_PyOpcode_Caches_size;
