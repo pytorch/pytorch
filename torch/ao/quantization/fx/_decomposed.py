@@ -230,7 +230,7 @@ def dequantize_per_tensor_tensor(
     return dequantize_per_tensor(input, scale.item(), zero_point.item(), quant_min, quant_max, dtype, out_dtype=out_dtype)
 
 @dequantize_per_tensor_tensor.register_fake
-def dequantize_per_tensor_tensor_meta(
+def dequantize_per_tensor_tensor_fake(
         input: torch.Tensor,
         scale: torch.Tensor,
         zero_point: torch.Tensor,
@@ -283,7 +283,7 @@ def _(
         *,
         out_dtype: Optional[torch.dtype] = None
 ) -> torch.Tensor:
-    return dequantize_per_tensor_tensor_meta(input, scale, zero_point, quant_min, quant_max, dtype, out_dtype=out_dtype)
+    return dequantize_per_tensor_tensor_fake(input, scale, zero_point, quant_min, quant_max, dtype, out_dtype=out_dtype)
 
 @custom_op(f"{ns}::choose_qparams.tensor", mutates_args=())
 def choose_qparams_tensor(
@@ -871,6 +871,8 @@ def dequantize_per_channel_group(
 
 quantized_decomposed_lib = Library(ns, "DEF")
 
+# TODO: Migrate this to the new torch.library.custom_ops API. This requires a refactor
+# of the autograd.Function. We leave this work to the future.
 quantized_decomposed_lib.define(
     "fake_quant_per_channel(Tensor input, Tensor scales, Tensor zero_points, int axis, "
     "int quant_min, int quant_max) -> Tensor")
