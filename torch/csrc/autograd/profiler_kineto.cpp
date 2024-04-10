@@ -497,6 +497,7 @@ void pushProfilingCallbacks(const std::unordered_set<at::RecordScope>& scopes) {
           onFunctionEnter<use_global_callback>,
           onFunctionExit<use_global_callback>)
           .needsInputs(registration_state_ptr->config().report_input_shapes)
+          .needsIds(true)
           .scopes(scopes);
 
   if constexpr (use_global_callback) {

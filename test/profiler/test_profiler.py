@@ -1569,7 +1569,7 @@ class TestProfiler(TestCase):
                         self.assertEqual(args["Input type"], ["TensorList", "Scalar"])
 
                     # check that each op has record function id
-                    self.assertGreaterEqual(
+                    self.assertGreater(
                         args.get("Record function id", -1),
                         0,
                         f"Failed finding record funciont for op = {e}"
