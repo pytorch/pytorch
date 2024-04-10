@@ -294,8 +294,9 @@ jobs:
           test_config: ${{ matrix.config }}
           job_identifier: ${{ github.workflow }}_${{ inputs.build-environment }}
 
-      - name: Store Inductor Cache on S3
+      - name: Store Inductor Cache on S3 if tests failed
         uses: seemethere/upload-artifact-s3@v5
+        if: failure() && steps.test.conclusion && steps.test.conclusion == 'failure'
         with:
           name: inductor_cache-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}
           retention-days: 14
