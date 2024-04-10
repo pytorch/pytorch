@@ -57,6 +57,7 @@
 #include <ATen/native/transformers/cuda/mem_eff_attention/transform/tile_smem_loader.h>
 
 #include <cinttypes>
+#include <c10/util/Exception.h>
 
 using namespace gemm_kernel_utils;
 
@@ -647,6 +648,9 @@ struct AttentionBackwardKernel {
         nullptr; // (will be calculated by the kernel)
     GradQTempStorage* workspace_gq =
         nullptr; // (will be calculated by the kernel)
+
+    // Sliding window. ignored if == 0
+    int32_t window_size = 0;
 
     // Scale
     accum_t scale = 1.0f;
@@ -1271,6 +1275,9 @@ struct AttentionBackwardKernel {
         p.num_splits_key,
         ") - too large for `num_keys` = ",
         p.num_keys);
+    if (p.window_size > 0) {
+      TORCH_CHECK(p.custom_mask_type == CausalFromTopLeft);
+    }
     return true;
   }
 
@@ -1459,7 +1466,13 @@ struct AttentionBackwardKernel {
         ? MatmulQK::Mma::Shape::kM
         : warp_uniform(cutlass::fast_min(
               (int32_t)MatmulQK::Mma::Shape::kM, p.num_keys - key_start));
-
+    if (p.window_size > 0) {
+      if (p.custom_mask_type == CausalFromTopLeft &&
+          key_start + num_keys_in_block <=
+              int32_t(query_start) - p.window_size) {
+        return;
+      }
+    }
     auto prologueGradV = [&](int col) {
       typename MatmulGradV::Mma::IteratorB iterator_dO(
           {int32_t(p.gO_strideM)},
@@ -1625,7 +1638,26 @@ struct AttentionBackwardKernel {
             },
             [&](int accum_m) {});
       }
+      if (p.window_size > 0) {
+        auto lane_offset = MatmulQK::AccumLambdaIterator::get_lane_offset(
+            lane_id, warp_id, output_tile_coords);
+        int shift = query_start - key_start - p.window_size;
+        // current_key = key_start + accum_m
+        // current_query = query_start + accum_n
+        // mask if: `current_key < current_query - window_size`
+        // if accum_m < accum_n + query_start - window_size - key_start
 
+        MatmulQK::AccumLambdaIterator::iterateRows(
+            lane_offset,
+            [&](int accum_m) {},
+            [&](int accum_m, int accum_n, int idx) {
+              if (accum_m <= accum_n + shift) {
+                accum[idx] =
+                    -cutlass::platform::numeric_limits<accum_t>::infinity();
+              }
+            },
+            [&](int accum_m) {});
+      }
       __syncthreads();
       if (kPrologueGV) {
         prologueGradV(0);
@@ -2247,7 +2279,15 @@ struct AttentionBackwardKernel {
     if (p.custom_mask_type == CausalFromTopLeft) {
       int32_t last_key_for_block = query_start + kBlockSizeI - 1;
       last_key_for_block = cutlass::fast_min(last_key_for_block, p.num_keys);
-      num_key_blocks = ceil_div(last_key_for_block, kBlockSizeJ);
+      if (p.window_size == 0) {
+        num_key_blocks = ceil_div(last_key_for_block, kBlockSizeJ);
+      } else {
+        int32_t first_key_for_block =
+            cutlass::fast_max(query_start - p.window_size + 1, 0);
+        int32_t first_key_block = first_key_for_block / kBlockSizeJ;
+        int32_t last_key_block = last_key_for_block / kBlockSizeJ;
+        num_key_blocks = last_key_block - first_key_block + 1;
+      }
     } else if (p.custom_mask_type == CausalFromBottomRight) {
       int32_t last_key_for_block =
           query_start + (kBlockSizeI - 1) + (1 + p.num_keys - p.num_queries);
@@ -2278,8 +2318,14 @@ struct AttentionBackwardKernel {
         return;
       }
     } else {
-      if (next_query < p.num_queries) {
+      if (p.window_size == 0 && next_query < p.num_queries) {
         return;
+      } else if (p.window_size > 0) {
+        if (next_query <
+            cutlass::fast_min(
+                key_start + kBlockSizeJ + p.window_size, p.num_queries)) {
+          return;
+        }
       }
       // jump to next key
     }
