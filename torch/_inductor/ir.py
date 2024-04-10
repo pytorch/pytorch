@@ -3732,8 +3732,11 @@ class ConcatKernel(NopKernel):
                 fx_node_args,
             ]
         if any_input_is_storage_and_layout is False and any(
-            arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
-            or arg.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
+            "val" in arg.meta
+            and (
+                arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
+                or arg.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
+            )
             for arg in fx_node_args
         ):
             output_stride = make_channels_last_strides_for(new_size)
