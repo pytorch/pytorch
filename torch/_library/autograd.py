@@ -1,6 +1,8 @@
 from typing import Any, Callable, Optional
 
 from .. import _C, autograd, Tensor
+
+from ..utils import _pytree
 from . import utils
 
 
@@ -53,6 +55,9 @@ def supports_tensorlist(cls: Any) -> Any:
     Tensors. Applying @supports_tensorlist enables an autograd.Function to support
     autograd for List[Tensor] inputs and outputs.
     """
+    # NB: All calls to the autograd.Function.apply shares these variables
+    # We assume that only one call to .apply happens at a time. This means that
+    # you cannot call the autograd.Function recursively (e.g. from its own forward).
     input_spec: Optional[spec_t] = None
     output_spec: Optional[spec_t] = None
     result_is_tuple = None
@@ -62,7 +67,12 @@ def supports_tensorlist(cls: Any) -> Any:
     orig_apply = cls.apply
 
     def new_forward(ctx, *args):
-        assert input_spec is not None
+        if input_spec is None:
+            raise NotImplementedError(
+                "NYI: calling supports_tensorlist autograd.Function.forward directly. "
+                "You should probably be calling .apply instead. "
+                "Please file an issue if not."
+            )
         args = unflatten(list(args), input_spec)
         result = orig_forward(ctx, *args)
         nonlocal output_spec
@@ -70,28 +80,60 @@ def supports_tensorlist(cls: Any) -> Any:
         result_is_tuple = isinstance(result, tuple)
         if not result_is_tuple:
             result = (result,)
-        flat_result, output_spec = flatten(result)
+        nonlocal output_spec
+        flat_result, output_spec = flatten(result, not_list_of_tensor)
+
+        # Save the input_spec/output_spec for backward because another call to
+        # .apply will override the nonlocals.
+        if hasattr(ctx, "_pt_metadata"):
+            raise RuntimeError(
+                "Please don't set ctx._pt_metadata; PyTorch uses it to store info"
+            )
+        ctx._pt_metadata = (input_spec, output_spec)
+
         return tuple(flat_result)
 
     def new_backward(ctx, *grads):
-        assert output_spec is not None
+        if not hasattr(ctx, "_pt_metadata"):
+            raise NotImplementedError(
+                "NYI: calling supports_tensorlist autograd.Function.backward directly. "
+                "This will automatically get called by PyTorch autograd. "
+                "Please file an issue if you need this."
+            )
+
+        input_spec, output_spec = ctx._pt_metadata
         grads = unflatten(list(grads), output_spec)
         grad_inputs = orig_backward(ctx, *grads)
         if not isinstance(grad_inputs, tuple):
             grad_inputs = (grad_inputs,)
-        flat_grad_inputs, grad_inputs_spec = flatten(grad_inputs)
+        # Assume that any Nones in the backward are Tensors.
+        # If the forward has an arg that is [1, 2, 3], the backward should
+        # return None as the grad.
+        # If the forward has an arg that is [tensor, tensor], the backward
+        # may return [None, None], [grad, None], [None, grad], or [grad, grad].
+        flat_grad_inputs, grad_inputs_spec = flatten(
+            grad_inputs, not_list_of_optional_tensor
+        )
         if grad_inputs_spec != input_spec:
             raise RuntimeError(
-                "Expected the return from backward to be of the same structure "
-                "as the inputs. Got: {grad_inputs_spec} (return from backward), "
-                "{input_spec} (inputs)"
+                f"Expected the return from backward to be of the same structure "
+                f"as the inputs. Got: {grad_inputs_spec} (return from backward), "
+                f"{input_spec} (inputs)"
             )
         return tuple(flat_grad_inputs)
 
     def new_apply(*args):
         nonlocal input_spec
-        flat_args, input_spec = flatten(args)
-        result = orig_apply(*flat_args)  # type: ignore[misc]
+        if input_spec is not None:
+            raise NotImplementedError(
+                "NYI: Recursive call to autograd.Function decorated with "
+                "`supports_tensorlist`. Please file an issue."
+            )
+        try:
+            flat_args, input_spec = flatten(args, is_leaf=not_list_of_tensor)
+            result = orig_apply(*flat_args)  # type: ignore[misc]
+        finally:
+            input_spec = None
         assert output_spec is not None
         result = unflatten(list(result), output_spec)
         if not result_is_tuple:
@@ -106,12 +148,7 @@ def supports_tensorlist(cls: Any) -> Any:
     return cls
 
 
-import functools
-
-from ..utils import _pytree
-
-
-def is_leaf(tree):
+def not_list_of_tensor(tree):
     if isinstance(tree, tuple):
         return False
     if isinstance(tree, list):
@@ -119,8 +156,14 @@ def is_leaf(tree):
     return True
 
 
-# Inputs/outputs to operators are at most TensorList, so we use a custom is_leaf
-# to say that everything that is not a TensorList is a leaf.
-flatten = functools.partial(_pytree.tree_flatten, is_leaf=is_leaf)
+def not_list_of_optional_tensor(tree):
+    if isinstance(tree, tuple):
+        return False
+    if isinstance(tree, list):
+        return any(l is not None and not isinstance(l, Tensor) for l in tree)
+    return True
+
+
+flatten = _pytree.tree_flatten
 unflatten = _pytree.tree_unflatten
 spec_t = _pytree.TreeSpec
