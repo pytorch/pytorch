@@ -1368,7 +1368,6 @@ def get_selected_tests(options) -> List[str]:
 
     # these tests failing in Python 3.12 temporarily disabling
     if sys.version_info >= (3, 12):
-        options.exclude.extend(INDUCTOR_TESTS)
         options.exclude.extend(
             [
                 "functorch/test_dims",
