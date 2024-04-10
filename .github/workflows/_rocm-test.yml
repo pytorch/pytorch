@@ -100,7 +100,7 @@ jobs:
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}" \
-            "sudo chown -R ${ORIG_U}:${ORIG_G} /var/lib/jenkins/workspace"
+            sudo chown -R ${ORIG_U}:${ORIG_G} /var/lib/jenkins/workspace
 
       # [see note: pytorch repo ref]
       - name: Checkout PyTorch
