@@ -4006,8 +4006,26 @@ class ExternKernel(InputsKernel):
         # NOTE: Don't use extract_read_writes here as it fails when
         # make_loader() inlines the computation
         x_unwrap_view = x.unwrap_view()
-        fx_node_args = V.graph.get_buffer(x_unwrap_view.data.name).get_origin_node()
-        x_unwrap_view.freeze_layout_with_same_order(fx_node_args.meta["val"].stride())
+        x_unwrap_view_node = V.graph.get_buffer(
+            x_unwrap_view.data.name
+        ).get_origin_node()
+        if (
+            "val" in x_unwrap_view_node.meta
+            and isinstance(x_unwrap_view.layout, FlexibleLayout)
+            and (
+                x_unwrap_view_node.meta["val"].is_contiguous(
+                    memory_format=torch.channels_last
+                )
+                or x_unwrap_view_node.meta["val"].is_contiguous(
+                    memory_format=torch.channels_last_3d
+                )
+            )
+        ):
+            x_unwrap_view.freeze_layout_with_same_order(
+                x_unwrap_view_node.meta["val"].stride()
+            )
+        else:
+            x_unwrap_view.freeze_layout()
 
         index_args, var_ranges = dependencies.index_vars_squeeze(
             x.get_size(), prefix="r"
