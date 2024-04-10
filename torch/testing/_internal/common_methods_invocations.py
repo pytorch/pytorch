@@ -13007,7 +13007,7 @@ op_db: List[OpInfo] = [
                 device_type="cuda",
             ),
             DecorateInfo(unittest.skip("FP16 corss_entropy cases have not been enabled on MPS yet"),
-                         device_type="mps"),
+                         dtypes=(torch.half,), device_type="mps"),
 
         )
     ),
@@ -19412,7 +19412,7 @@ op_db: List[OpInfo] = [
                 device_type='cuda',
             ),
             DecorateInfo(unittest.skip("FP16 nll_loss cases have not been enabled on MPS yet"),
-                         device_type="mps"),
+                         dtypes=(torch.half,), device_type="mps"),
 
         ),
     ),
