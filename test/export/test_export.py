@@ -1093,7 +1093,11 @@ class TestExport(TestCase):
                 c, image_height, image_width = image.shape
                 crop_top = int(round((image_height - crop_height) / 2.0))
                 crop_left = int(round((image_width - crop_width) / 2.0))
-                return image[..., crop_top : crop_top + crop_height, crop_left : crop_left + crop_width]
+                return image[
+                    ...,
+                    crop_top : crop_top + crop_height,
+                    crop_left : crop_left + crop_width,
+                ]
 
         crop = CropLike()
         imagew = Dim("width")
