@@ -982,7 +982,6 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        breakpoint()
         fn_variable = variables.UserFunctionVariable(self.value.forward.__func__)
         args = [self] + args
         return tx.inline_user_function_return(
