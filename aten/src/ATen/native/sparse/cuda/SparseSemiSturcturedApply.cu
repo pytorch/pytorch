@@ -2,13 +2,19 @@
 #include <ATen/Tensor.h>
 #include <ATen/Functions.h>
 #include <ATen/Utils.h>
-#include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <c10/util/accumulate.h>
 #include <torch/library.h>
 
+#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#else
+#include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
+#endif
+
 namespace at::native {
 
+#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#else
 template <typename KT>
 __global__ void __launch_bounds__(32 /* num_threads */)
   sparse_semi_structured_apply_kernel(typename KT::Params p)
@@ -80,10 +86,14 @@ std::tuple<Tensor, Tensor> _sparse_semi_structured_apply_typed(Tensor input, Ten
   }
   return std::make_tuple(packed, packed_trans);
 }
-
+#endif
 
 std::tuple<Tensor, Tensor> _sparse_semi_structured_apply(const Tensor& input, const Tensor& threads_masks) // Returned by `_sparse_semi_structured_tile`
 {
+#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+  AT_ERROR("_sparse_semi_structured_apply: not supported");
+  return std::make_tuple(Tensor{}, Tensor{});
+#else
   TORCH_CHECK(
     input.scalar_type() == at::ScalarType::Half || input.scalar_type() == at::ScalarType::BFloat16,
     "Unsupported dtype - only `float16` and `bfloat16` are supported currently"
@@ -92,6 +102,7 @@ std::tuple<Tensor, Tensor> _sparse_semi_structured_apply(const Tensor& input, co
             ? _sparse_semi_structured_apply_typed<false, cutlass::half_t>(input, threads_masks)
             : _sparse_semi_structured_apply_typed<false, cutlass::bfloat16_t>(input, threads_masks);
   return result;
+#endif
 }
 
 } // namespace

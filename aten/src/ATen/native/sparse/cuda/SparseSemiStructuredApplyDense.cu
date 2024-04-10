@@ -2,12 +2,19 @@
 #include <ATen/Tensor.h>
 #include <ATen/Functions.h>
 #include <ATen/autocast_mode.h>
-#include <ATen/native/sparse/cuda/ComputeSparseTile.h>
-#include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <torch/library.h>
 
+#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#else
+#include <ATen/native/sparse/cuda/ComputeSparseTile.h>
+#include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
+#endif
+
 namespace at::native {
+
+#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+#else
 struct Params {
   uint64_t const* threads_masks;
 
@@ -111,11 +118,16 @@ __global__ void __launch_bounds__(32 /* num_threads */, 32) sparse_semi_structur
         lines[i], output + i * p.output_stride, true);
   }
 }
+#endif
 
 Tensor _sparse_semi_structured_apply_dense(
     const Tensor& input,
     const Tensor& threads_masks) {
 
+#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+  AT_ERROR("_sparse_semi_structured_apply_dense: not supported");
+  return Tensor{};
+#else
   TORCH_CHECK(
       input.scalar_type() == at::ScalarType::Half ||
           input.scalar_type() == at::ScalarType::BFloat16,
@@ -169,6 +181,7 @@ Tensor _sparse_semi_structured_apply_dense(
   }
   C10_CUDA_KERNEL_LAUNCH_CHECK();
   return output;
+#endif
 }
 
 } // namespace
