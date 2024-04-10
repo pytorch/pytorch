@@ -565,6 +565,7 @@ from a multi-output view call"
             #
             # The FunctionalTensor will be saved if one of the 2 conditions below
             # is true:
+            functional_tensor = None
             if (
                 # 1. If the output_type is either of:
                 #    (i) alias_of_intermediate;
@@ -595,9 +596,8 @@ from a multi-output view call"
                 and base_idx is not None
                 and not input_info[base_idx].mutates_metadata
             ):
-                functional_tensor = FunctionalTensorMetadataEq(o.elem)
-            else:
-                functional_tensor = None
+                if isinstance(o, FunctionalTensor):
+                    functional_tensor = FunctionalTensorMetadataEq(o.elem)
 
             out_info = OutputAliasInfo(
                 output_type=output_type,

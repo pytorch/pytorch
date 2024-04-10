@@ -234,7 +234,9 @@ def gen_alias_from_base(
             # symbolic shapes with concrete numbers.
             aot_joint_log.warning(
                 "could not reconstruct view by re-applying a ViewMeta sequence. "
-                "This error is possibly caused by dynamic shapes. Error message: %s",
+                "This error is possibly caused by dynamic shapes. "
+                "Fallbacking to reconstruction using as_strided. "
+                "Error message: %s",
                 str(e),
             )
         else:
