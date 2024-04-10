@@ -2440,7 +2440,8 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
   }
 
   bool may_have_symbolic_sizes_strides() const {
-    return has_symbolic_sizes_strides() || matches_policy(SizesStridesPolicy::CustomStrides);
+    return has_symbolic_sizes_strides() ||
+        matches_policy(SizesStridesPolicy::CustomStrides);
   }
 
  private:
