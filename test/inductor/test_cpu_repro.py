@@ -1630,6 +1630,19 @@ class CPUReproTests(TestCase):
                         self.common(fn, (value, mask))
                         assert metrics.generated_cpp_vec_kernel_count >= 1
 
+    def test_channels_last_view_as_complex(self):
+        # https://github.com/pytorch/pytorch/issues/122448#issuecomment-2046169554
+
+        def reduce_example(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            """Applies the rotary embedding to the query and key tensors."""
+            x_out = torch.view_as_complex(torch.stack([x.float(), y.float()], dim=-1))
+            return x_out
+
+        args = [torch.randn(1, 1, 1, 128), torch.randn(1, 1, 1, 128)]
+        expected = reduce_example(*args)
+        actual = torch.compile(reduce_example, fullgraph=True)(*args)
+        self.assertEqual(expected, actual)
+
     def test_load_same_bool_tensor_twice(self):
         @torch._dynamo.optimize("inductor")
         def fn(a, b):
