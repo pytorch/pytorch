@@ -1594,7 +1594,7 @@ def run_tests(
             pool.terminate()
 
     keep_going_message = (
-        "Tip: You can keep running tests even on failure by passing --keep-going to run_test.py.\n"
+        "\n\nTip: You can keep running tests even on failure by passing --keep-going to run_test.py.\n"
         "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
     )
 
