@@ -125,7 +125,7 @@ jobs:
 
   linux-focal-py3_8-clang10-onnx-build:
     name: linux-focal-py3.8-clang10-onnx
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build-rg.yml
     with:
       build-environment: linux-focal-py3.8-clang10-onnx
       docker-image-name: pytorch-linux-focal-py3-clang10-onnx
