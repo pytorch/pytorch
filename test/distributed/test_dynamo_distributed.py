@@ -445,9 +445,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                 checkpoint_wrapper,
                 checkpoint_impl=CheckpointImpl.NO_REENTRANT,
             )
-            check_fn = lambda submodule: isinstance(
+            check_fn = lambda submodule: isinstance(  # noqa: E731
                 submodule, torch.nn.Linear
-            )  # noqa: E731
+            )
             apply_activation_checkpointing(
                 model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn
             )
@@ -593,9 +593,9 @@ class TestMultiProc(DynamoDistributedMultiProcTestCase):
                     f"Running hf_bert_activation_checkpointing test for {test_instance}"
                 )
                 model, inputs = get_hf_bert(self.rank)
-                check_fn = lambda submodule: isinstance(
+                check_fn = lambda submodule: isinstance(  # noqa: E731
                     submodule, BertLayer
-                )  # noqa: E731
+                )
                 reset_rng_state()
                 eager_model = apply_fsdp_with_checkpointing(
                     model, wrap_policy, check_fn

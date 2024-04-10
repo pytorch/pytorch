@@ -445,10 +445,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
 
             FileCheck().check_regex(
-                "all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[u\\d+, u\\d+\\], input_split_sizes=\\[u\\d+, u\\d+\\]"
+                "all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[u\\d+, u\\d+\\], input_split_sizes=\\[u\\d+, u\\d+\\]"  # noqa: B950
             ).run(
                 code
-            )  # noqa: B950
+            )
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -488,10 +488,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck().check_regex(
-                "all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=None, input_split_sizes=\\[u\\d+, u\\d+\\]"
+                "all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=None, input_split_sizes=\\[u\\d+, u\\d+\\]"  # noqa: B950
             ).run(
                 code
-            )  # noqa: B950
+            )
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
@@ -540,10 +540,10 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             compiled_fn = torch.compile(example, fullgraph=True, dynamic=True)
             code = run_and_get_triton_code(compiled_fn, *inputs, **trs)
             FileCheck().check_regex(
-                "all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[u\\d+, u\\d+\\], input_split_sizes=None"
+                "all_to_all_single\\(buf\\d+\\[0\\], buf\\d+_inputs\\[0\\], output_split_sizes=\\[u\\d+, u\\d+\\], input_split_sizes=None"  # noqa: B950
             ).run(
                 code
-            )  # noqa: B950
+            )
 
             eager_out = example(*inputs, **trs)
             inductor_out = compiled_fn(*inputs, **trs)
