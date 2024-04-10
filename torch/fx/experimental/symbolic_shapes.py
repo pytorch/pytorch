@@ -23,7 +23,6 @@ import traceback
 from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
-import weakref
 from enum import Enum
 import atexit
 from typing import (
@@ -115,10 +114,12 @@ def lru_cache(maxsize):
         prev_hits = 0
         prev_misses = 0
 
-        wrapped_f_ref = weakref.ref(wrapped_f)
+        # TODO: There's a ref-cycle here (wrapped_f -> cumulative_cache_info
+        # -> wrapped_f) but cannot be solved with weakref as wrapped_f is not
+        # weakref'able on some versions of Python
 
         def cumulative_cache_info():
-            cur = wrapped_f_ref().cache_info()
+            cur = wrapped_f.cache_info()
             return functools._CacheInfo(
                 prev_hits + cur.hits,
                 prev_misses + cur.misses,
@@ -128,7 +129,7 @@ def lru_cache(maxsize):
 
         def new_cache_clear():
             nonlocal prev_hits, prev_misses
-            cur = wrapped_f_ref().cache_info()
+            cur = wrapped_f.cache_info()
             prev_hits += cur.hits
             prev_misses += cur.misses
             old_cache_clear()
