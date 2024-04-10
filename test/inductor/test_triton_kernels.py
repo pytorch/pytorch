@@ -7,6 +7,8 @@ import torch
 import torch._dynamo.testing
 
 import torch._inductor.test_case
+from torch._dynamo import config
+from torch._dynamo.testing import make_test_cls_with_patches
 
 from torch._higher_order_ops.triton_kernel_wrap import (
     generate_ttir,
@@ -1223,6 +1225,7 @@ def forward(self, x_1, output_1):
 
 def make_mutation_test(fn):
     @requires_cuda
+    @requires_lark
     @skipIfRocm
     def test_fn(self):
         from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
@@ -1773,7 +1776,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
         )
 
 
-if HAS_CUDA:
+if HAS_CUDA and HAS_LARK:
     t = torch.randn(4)
     tt = torch.randn(4, 1)
     tests = [
@@ -1918,6 +1921,15 @@ if HAS_CUDA:
 
 common_utils.instantiate_parametrized_tests(KernelTests)
 
+no_opt_test_class = make_test_cls_with_patches(
+    KernelTests,
+    "NoOptimization",
+    "_no_optimizations",
+    (config, "optimize_user_defined_triton_kernels", False),
+)
+
+globals()[no_opt_test_class.__name__] = no_opt_test_class
+no_opt_test_class.__module__ = __name__
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
