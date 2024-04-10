@@ -11,6 +11,8 @@ import re
 import sys
 import threading
 import types
+import warnings
+
 from typing import Dict, Generic, List
 
 from ..bytecode_transformation import create_call_function
@@ -304,6 +306,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.functions.FunctoolsPartialVariable(
                 fn, args=rest_args, keywords=kwargs
             )
+        elif self.value is warnings.catch_warnings and not args:
+            return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
         elif (
             issubclass(type(self.value), type)
             and hasattr(
@@ -704,6 +708,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return variables.TorchCtxManagerClassVariable(
                     obj.__class__
                 ).call_function(tx, [var], kwargs)
+
+            if self.source is None:
+                unimplemented(
+                    "Sourceless UserDefinedObjectVariable method not supported"
+                )
+            func_src = AttrSource(self.source, "__func__")
+            func_var = VariableBuilder(tx, func_src)(func)
+            obj_src = AttrSource(self.source, "__self__")
+            obj_var = VariableBuilder(tx, obj_src)(obj)
+            return func_var.call_function(tx, [obj_var] + args, kwargs)
         elif (
             istype(self.value, functools.partial)
             and trace_rules.lookup(self.value.func)
