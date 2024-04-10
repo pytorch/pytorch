@@ -26,10 +26,11 @@ thread_local DeviceIndex curDeviceIndex = 0;
 
 struct DevicePool {
   std::vector<std::unique_ptr<sycl::device>> devices;
+  std::vector<std::array<unsigned char, 16>> uuids;
   std::unique_ptr<sycl::context> context;
 } gDevicePool;
 
-void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
+void enumDevices() {
   auto platform_list = sycl::platform::get_platforms();
   // Enumerated GPU devices from the specific platform.
   for (const auto& platform : platform_list) {
@@ -39,7 +40,13 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
     auto device_list = platform.get_devices();
     for (const auto& device : device_list) {
       if (device.is_gpu()) {
-        devices.push_back(std::make_unique<sycl::device>(device));
+        gDevicePool.devices.push_back(std::make_unique<sycl::device>(device));
+	if (device.has(sycl::aspect::ext_intel_device_info_uuid))
+	  gDevicePool.uuids.push_back(
+		  device.get_info<sycl::ext::intel::info::device::uuid>());
+	else
+	  gDevicePool.uuids.push_back(
+		  std::array<unsigned char, 16>{});
       }
     }
   }
@@ -47,7 +54,7 @@ void enumDevices(std::vector<std::unique_ptr<sycl::device>>& devices) {
 
 inline void initGlobalDevicePoolState() {
   // Enumerate all GPU devices and record them.
-  enumDevices(gDevicePool.devices);
+  enumDevices();
   if (gDevicePool.devices.empty()) {
     TORCH_WARN("XPU device count is zero!");
     return;
@@ -152,6 +159,15 @@ DeviceIndex get_device_idx_from_pointer(void* ptr) {
       "Can't find the pointer from XPU devices.");
   return static_cast<DeviceIndex>(
       std::distance(gDevicePool.devices.begin(), it));
+}
+
+DeviceIndex get_device_idx_from_uuid(const uint8_t device_uuid[16]) {
+  std::array<unsigned char, 16> key;
+  memcpy(key.data(), device_uuid, 16);
+  auto it = std::find(gDevicePool.uuids.begin(), gDevicePool.uuids.end(), key);
+  if (it != gDevicePool.uuids.end())
+    return static_cast<DeviceIndex>(std::distance(gDevicePool.uuids.begin(), it));
+  return static_cast<DeviceIndex>(-1);
 }
 
 DeviceIndex device_count() {

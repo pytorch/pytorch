@@ -32,4 +32,6 @@ C10_XPU_API void get_device_properties(
 
 C10_XPU_API DeviceIndex get_device_idx_from_pointer(void* ptr);
 
+C10_XPU_API DeviceIndex get_device_idx_from_uuid(const uint8_t device_uuid[16]);
+
 } // namespace c10::xpu

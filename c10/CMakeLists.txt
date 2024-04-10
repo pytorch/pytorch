@@ -144,6 +144,14 @@ if(USE_XPU)
   add_subdirectory(xpu)
 endif()
 
+if(USE_KINETO)
+  add_subdirectory(kineto_plugin)
+  if (TARGET kineto_plugin)
+    list(APPEND Caffe2_DEPENDENCY_LIBS kineto_plugin)
+    set(Caffe2_DEPENDENCY_LIBS ${Caffe2_DEPENDENCY_LIBS} PARENT_SCOPE)
+  endif()
+endif()
+
 # ---[ Installation
 # Note: for now, we will put all export path into one single Caffe2Targets group
 # to deal with the cmake deployment need. Inside the Caffe2Targets set, the
