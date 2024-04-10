@@ -144,9 +144,7 @@ from .misc import (
     MethodWrapperVariable,
     NumpyVariable,
     PythonModuleVariable,
-    RegexPatternVariable,
     SavedTensorBox,
-    TorchVersionVariable,
     TypingVariable,
 )
 from .nn_module import FSDPManagedNNModuleVariable, UnspecializedNNModuleVariable
@@ -348,7 +346,6 @@ class VariableBuilder:
             (tuple_iterator, cls.wrap_tuple_iterator),
             ((slice, range), cls.wrap_slice_range),
             (tuple(common_constant_types), cls.wrap_literal),
-            (re.Pattern, cls.wrap_regex_pattern),
         ]
 
         if config.trace_numpy and np:
@@ -361,11 +358,6 @@ class VariableBuilder:
                 result[t] = fn
 
         return result
-
-    def wrap_regex_pattern(self, value: re.Pattern):
-        # TODO(jansel): something like a REPR_MATCH might be more robust here
-        self.install_guards(GuardBuilder.ID_MATCH)
-        return RegexPatternVariable(value)
 
     @classmethod
     @functools.lru_cache(None)
@@ -390,7 +382,6 @@ class VariableBuilder:
                     **self.install_guards(GuardBuilder.FUNCTION_MATCH),
                 ),
             ),
-            (torch.__version__, lambda self, value: TorchVersionVariable()),
         ]
 
         result = {}

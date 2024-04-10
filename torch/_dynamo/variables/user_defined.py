@@ -7,7 +7,6 @@ import importlib
 import inspect
 import itertools
 import random
-import re
 import sys
 import threading
 import types
@@ -869,7 +868,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 (
                     torch.Tensor,
                     torch.nn.Module,
-                    re.Pattern,
                 ),
             )
         ):
@@ -881,10 +879,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if (
             name not in getattr(value, "__dict__", {})
-            and (
-                type(value).__module__.startswith("torch.")
-                or isinstance(subobj, re.Pattern)
-            )
+            and type(value).__module__.startswith("torch.")
             and "torch.optim" not in type(value).__module__
             and not callable(value)
             and not isinstance(subobj, types.MethodDescriptorType)
