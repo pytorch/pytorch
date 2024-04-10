@@ -1130,12 +1130,7 @@ class CppWrapperCpu(WrapperCodeGen):
             shim_fn = f"aoti_torch_{self.device}_{kernel_suffix}"
         return shim_fn
 
-    def generate_c_shim_extern_kernel_call(self, kernel, args):
-        # In the abi_compatible mode, we call fallback aten ops through a C shim layer
-        # Setting self.allow_stack_allocation to False because the exchange between
-        # ArrayRefTensor and at::Tensor is still fragile.
-        self.allow_stack_allocation = False
-
+    def convert_arrayref_tensors_to_tensors(self, args):
         # HACK: val_to_arg_str jams multiple arguments together using a comma. If that
         # ever breaks, it needs to be reworked to be able to return multiple arguments,
         # and the split-on-comma code here needs to be removed.
@@ -1163,6 +1158,15 @@ class CppWrapperCpu(WrapperCodeGen):
                 if not is_number(piece):
                     piece = f"convert_arrayref_tensor_to_tensor({piece})"
                 wrapped_args.append(piece)
+
+        return wrapped_args
+
+    def generate_c_shim_extern_kernel_call(self, kernel, args):
+        # In the abi_compatible mode, we call fallback aten ops through a C shim layer
+        # Setting self.allow_stack_allocation to False because the exchange between
+        # ArrayRefTensor and at::Tensor is still fragile.
+        self.allow_stack_allocation = False
+        wrapped_args = self.convert_arrayref_tensors_to_tensors(args)
 
         shim_fn = self.get_c_shim_func_name(kernel)
         self.writeline(
@@ -1291,10 +1295,17 @@ class CppWrapperCpu(WrapperCodeGen):
             # See the comment in codegen_reinterpret_view about why having something like
             # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
             # tensor prematurely deallocated, thus this std::vector().data() trick here.
-            indices_str = (
-                f"std::vector<AtenTensorHandle>{{{', '.join(indices)}}}.data()"
+            converted_indices = ", ".join(
+                self.convert_arrayref_tensors_to_tensors(indices)
             )
-            args = [x, indices_str, str(len(indices)), values, accumulate]
+            indices_str = f"std::vector<AtenTensorHandle>{{{converted_indices}}}.data()"
+            args = [
+                x,
+                indices_str,
+                str(len(indices)),
+                f"convert_arrayref_tensor_to_tensor({values})",
+                accumulate,
+            ]
         else:
             indices_str = (
                 f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
