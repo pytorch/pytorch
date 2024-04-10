@@ -2819,43 +2819,43 @@ def conj(input: TensorLikeType) -> TensorLikeType:
 @register_decomposition(aten.constant_pad_nd)
 @out_wrapper()
 def constant_pad_nd(
-    a: Tensor,
-    padding: Tuple[int, ...],
-    fill_value: NumberType = 0,
+    input: Tensor,
+    pad: Tuple[int, ...],
+    value: NumberType = 0,
 ) -> Tensor:
     torch._check(
-        len(padding) % 2 == 0,
+        len(pad) % 2 == 0,
         lambda: "constant_pad_nd requires an even number of padding",
     )
-    dim = len(padding) // 2
-    inp_shape = a.shape[-dim:]
-    nc_dim = a.dim() - dim
+    dim = len(pad) // 2
+    inp_shape = input.shape[-dim:]
+    nc_dim = input.dim() - dim
 
-    padding_left = [padding[2 * (dim - 1 - i)] for i in range(dim)]
-    padding_right = [padding[2 * (dim - 1 - i) + 1] for i in range(dim)]
+    pad_left = [pad[2 * (dim - 1 - i)] for i in range(dim)]
+    pad_right = [pad[2 * (dim - 1 - i) + 1] for i in range(dim)]
 
     out_indices = [
         torch.arange(
-            -padding_left[i], inp_shape[i] + padding_right[i], device=a.device
+            -pad_left[i], inp_shape[i] + pad_right[i], device=input.device
         ).reshape(-1, *[1] * (dim - 1 - i))
         for i in range(dim)
     ]
 
-    indices: List[Any] = [None] * a.dim()
+    indices: List[Any] = [None] * input.dim()
     for i in range(dim):
         indices[i + nc_dim] = out_indices[i]
 
-    if builtins.all(pad <= 0 for pad in padding):
-        result = aten._unsafe_index(a, indices)
+    if builtins.all(pad <= 0 for pad in pad):
+        result = aten._unsafe_index(input, indices)
     else:
         conds = []
         for i in range(dim):
-            view_shape = [1] * a.dim()
+            view_shape = [1] * input.dim()
             view_shape[nc_dim + i] = out_indices[i].shape[0]
             idx = out_indices[i].view(view_shape)
-            conds.append(torch.logical_and(idx >= 0, idx < a.shape[nc_dim + i]))
+            conds.append(torch.logical_and(idx >= 0, idx < input.shape[nc_dim + i]))
         mask = reduce(torch.logical_and, conds)
-        result = aten._unsafe_masked_index(a, mask, indices, fill_value)
+        result = aten._unsafe_masked_index(input, mask, indices, value)
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(result)
