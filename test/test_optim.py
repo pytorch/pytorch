@@ -790,12 +790,9 @@ class TestOptimRenewed(TestCase):
                 nintermediates = 2
 
             expected_max_mem = st_max_mem + intermediate_size * nintermediates
-            # hipcc currently can't generate efficient code for the small buffer optimization
-            # code path (see Note [small buffer optimization] for details), thus we always
-            # dynamically allocate the tensor metadata for ROCM. Adjusting the expected max
-            # memory usage to account for this.
-            if TEST_WITH_ROCM:
-                expected_max_mem *= 1.02
+            # When [small buffer optimization] is not applied, multi_tensor_apply dynamically allocate
+            # a small amount of memory for the metadata (rounded up to 512 bytes for this test).
+            expected_max_mem += 512
 
             self.assertLessEqual(mt_max_mem, expected_max_mem)
 

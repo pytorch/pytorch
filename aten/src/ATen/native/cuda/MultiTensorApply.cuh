@@ -161,19 +161,21 @@ std::tuple<DevArrayPack, c10::optional<at::Tensor>> pack_vectors(
   TORCH_CHECK(ptrs.size() <= DevArrayPack::max_arrays);
   DevArrayPack pack{};
 
-// hipcc generates very inefficient code for the small buffer optimization.
-// Disabling the small buffer optimization for hipcc for now.
-#if !defined(USE_ROCM)
-  // Use the small buffer in DevArrayPack to pack the vectors
-  if (total_bytes < DevArrayPack::small_buffer_size) {
-    pack.buffer_ptr = nullptr;
-    for (const auto i : c10::irange(ptrs.size())) {
-      pack.offsets[i] = offsets[i];
-      memcpy(pack.small_buffer + offsets[i], ptrs[i], sizes[i]);
-    }
-    return std::make_tuple(pack, c10::optional<at::Tensor>(c10::nullopt));
-  }
-#endif
+  // hipcc and older versions of nvcc seems to generate inefficient code for the
+  // small buffer optimization. Disabling it for now.
+  // TODO(yifu): find a way for the small buffer optimization to play well with
+  // the compilers in question, or remove the optimization all together.
+  // #if !defined(USE_ROCM)
+  //   // Use the small buffer in DevArrayPack to pack the vectors
+  //   if (total_bytes < DevArrayPack::small_buffer_size) {
+  //     pack.buffer_ptr = nullptr;
+  //     for (const auto i : c10::irange(ptrs.size())) {
+  //       pack.offsets[i] = offsets[i];
+  //       memcpy(pack.small_buffer + offsets[i], ptrs[i], sizes[i]);
+  //     }
+  //     return std::make_tuple(pack, c10::optional<at::Tensor>(c10::nullopt));
+  //   }
+  // #endif
 
   const bool is_capturing = at::cuda::currentStreamCaptureStatusMayInitCtx() !=
       at::cuda::CaptureStatus::None;
@@ -507,11 +509,13 @@ void multi_tensor_apply(
       addresses, numel_for_tensor, block_to_tensor, block_to_chunk, device);
 
   if (block_to_tensor.size() > 0) {
+    auto tensorListMeta = TensorListMetadata<depth>::from_dev_array_pack(pack);
     multi_tensor_apply_kernel<TensorListMetadata<depth>>
         <<<block_to_tensor.size(),
            kBlockSize,
            0,
-           at::cuda::getCurrentCUDAStream()>>>(pack, callable, args...);
+           at::cuda::getCurrentCUDAStream()>>>(
+            tensorListMeta, callable, args...);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
 }
