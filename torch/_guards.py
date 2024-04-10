@@ -172,7 +172,16 @@ class Guard:
         return self._hash
 
     def sort_key(self):
+        # Put the duplicate input guards at the end. The duplicate guards have
+        # two sources while guard.name only considers one source.
+        from ._dynamo.guards import GuardBuilder
+
+        is_duplicate_input = (
+            isinstance(self.create_fn, functools.partial)
+            and self.create_fn.func is GuardBuilder.DUPLICATE_INPUT
+        )
         return (
+            is_duplicate_input,
             self.source.value if self.source else -1,
             len(self.name),
             self.name,
