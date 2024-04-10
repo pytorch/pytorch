@@ -56,6 +56,28 @@ jobs:
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: Chown workspace
+        shell: bash
+        run: |
+          echo "${GITHUB_WORKSPACE}"
+          ORIG_U="$(id -u)"
+          ORIG_G="$(id -g)"
+          export ORIG_U
+          export ORIG_G
+          docker run --rm \
+            -e ORIG_U \
+            -e ORIG_G \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            alpine:latest \
+            chown -R ${ORIG_U}:${ORIG_G} /var/lib/jenkins/workspace
+
+      # [see note: pytorch repo ref]
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
 
@@ -82,31 +104,6 @@ jobs:
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
           docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
-
-      - name: Chown workspace
-        shell: bash
-        env:
-          DOCKER_IMAGE: ${{ inputs.docker-image }}
-        run: |
-          echo "${GITHUB_WORKSPACE}"
-          ORIG_U="$(id -u)"
-          ORIG_G="$(id -g)"
-          export ORIG_U
-          export ORIG_G
-          docker run --rm \
-            -e ORIG_U \
-            -e ORIG_G \
-            --user jenkins \
-            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
-            -w /var/lib/jenkins/workspace \
-            "${DOCKER_IMAGE}" \
-            sudo chown -R ${ORIG_U}:${ORIG_G} /var/lib/jenkins/workspace
-
-      # [see note: pytorch repo ref]
-      - name: Checkout PyTorch
-        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
-        with:
-          no-sudo: true
 
       - name: Start monitoring script
         id: monitor-script
