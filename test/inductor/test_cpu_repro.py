@@ -4,6 +4,7 @@ import copy
 import itertools
 import math
 import platform
+import os
 import sys
 import unittest
 from typing import Callable
@@ -1575,8 +1576,12 @@ class CPUReproTests(TestCase):
         self.assertTrue(vec_avx512.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
 
+
         with config.patch({"cpp.simdlen": None}):
+            print("get env ATEN_CPU_CAPABILITY: ", os.getenv("ATEN_CPU_CAPABILITY"))
             isa = codecache.pick_vec_isa()
+            print("isa: ", isa)
+            self.assertTrue(False)
             if vec_avx512 in codecache.valid_vec_isa_list():
                 self.assertTrue(isa == vec_avx512)
             else:

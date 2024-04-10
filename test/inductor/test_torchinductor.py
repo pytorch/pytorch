@@ -1274,6 +1274,8 @@ class CommonTemplate:
 
         self.common(fn, (torch.rand((16, 16, 352, 352), dtype=torch.float16),))
         self.common(fn, (torch.rand((14923), dtype=torch.float16),))
+        print("os.getenv ATEN_CPU_CAPABILITY: ", os.getenv("ATEN_CPU_CAPABILITY"))
+        self.assertTrue(False)
 
     def test_split_cumsum(self):
         def fn(a):
