@@ -241,8 +241,8 @@ class profile:
                 use_kineto
             ), "Device-only events supported only with Kineto (use_kineto=True)"
 
-        VAID_DEVICE_OPTIONS = ["cuda", "xpu", _get_privateuse1_backend_name()]
-        if self.use_device not in VAID_DEVICE_OPTIONS:
+        VALID_DEVICE_OPTIONS = ["cuda", "xpu", _get_privateuse1_backend_name()]
+        if self.use_device not in VALID_DEVICE_OPTIONS:
             warn(f"The {self.use_device} is not a valid device option.")
             self.use_device = None
 
@@ -274,7 +274,7 @@ class profile:
                 use_kineto and ProfilerActivity.XPU in _supported_activities()
             ), "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
             self.kineto_activities.add(ProfilerActivity.XPU)
-        elif self.use_device:
+        elif self.use_device != "privateuseone":
             if (
                 not use_kineto
                 or ProfilerActivity.PrivateUse1 not in _supported_activities()

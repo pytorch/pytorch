@@ -132,9 +132,8 @@ class _KinetoProfile:
         elif ProfilerActivity.XPU in self.activities:
             self.use_device = "xpu"
         else:
-            privateuse1_backend = _get_privateuse1_backend_name()
-            if privateuse1_backend != "privateuseone":
-                self.use_device = privateuse1_backend
+            self.use_device = _get_privateuse1_backend_name()
+
         # user-defined metadata to be amended to the trace
         self.preset_metadata: Dict[str, str] = dict()
 
