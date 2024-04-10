@@ -1127,6 +1127,14 @@ class TestOptimRenewed(TestCase):
 
             optimizer.load_state_dict(old_state_dict)
 
+            # Check invariant that step is on cpu if capturable/fused is now False
+            for group in optimizer.param_groups:
+                if 'capturable' in optim_input.kwargs or 'fused' in optim_input.kwargs:
+                    for p in group["params"]:
+                        step = optimizer.state[p].get('step', None)
+                        if step:
+                            self.assertEqual(optimizer.state[p]['step'].device, torch.device("cpu"))
+
             # Make sure we can still step
             if optim_info.step_requires_closure:
                 optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
