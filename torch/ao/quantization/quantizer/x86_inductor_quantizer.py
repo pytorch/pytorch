@@ -331,17 +331,13 @@ class X86InductorQuantizer(Quantizer):
         function_type: Callable,
         quantization_config: Optional[QuantizationConfig],
     ) -> "X86InductorQuantizer":
-        if function_type in X86InductorQuantizer.module_function_to_aten_operator_type:
-            self._set_aten_operator_qconfig(
-                X86InductorQuantizer.module_function_to_aten_operator_type[
-                    function_type
-                ],
-                quantization_config,
-            )
-        else:
-            warnings.warn(
-                f"function: Unable to customize quantization config for {function_type} by X86InductorQuantizer."
-            )
+        assert (
+            function_type in X86InductorQuantizer.module_function_to_aten_operator_type
+        ), "function: Unable to customize quantization config for {function_type} by X86InductorQuantizer."
+        self._set_aten_operator_qconfig(
+            X86InductorQuantizer.module_function_to_aten_operator_type[function_type],
+            quantization_config,
+        )
         return self
 
     def set_module_type_qconfig(
@@ -349,15 +345,13 @@ class X86InductorQuantizer(Quantizer):
         module_type: torch.nn.Module,
         quantization_config: Optional[QuantizationConfig],
     ) -> "X86InductorQuantizer":
-        if module_type in X86InductorQuantizer.module_function_to_aten_operator_type:
-            self._set_aten_operator_qconfig(
-                X86InductorQuantizer.module_function_to_aten_operator_type[module_type],
-                quantization_config,
-            )
-        else:
-            warnings.warn(
-                f"Module: Unable to customize quantization config for {module_type} by X86InductorQuantizer."
-            )
+        assert (
+            module_type in X86InductorQuantizer.module_function_to_aten_operator_type
+        ), f"Module: Unable to customize quantization config for {module_type} by X86InductorQuantizer."
+        self._set_aten_operator_qconfig(
+            X86InductorQuantizer.module_function_to_aten_operator_type[module_type],
+            quantization_config,
+        )
         return self
 
     def _set_aten_operator_qconfig(
