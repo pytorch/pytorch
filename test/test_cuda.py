@@ -257,6 +257,7 @@ class TestCuda(TestCase):
         c.copy_(b, non_blocking=True)
         self.assertEqual(a, c, exact_dtype=False)
 
+    @serialTest()
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
 
@@ -2705,6 +2706,7 @@ exit(2)
             {True: "_allow_unused_input", False: "_not_allow_unused_input"}[z],
         ),
     )
+    @serialTest()
     def test_graph_make_graphed_callables(
         self, with_amp, cache_enabled, allow_unused_input
     ):
