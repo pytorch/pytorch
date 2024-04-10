@@ -1,4 +1,5 @@
 import copy
+from dataclasses import dataclass, fields
 import logging
 import re
 from typing import cast, Dict, List, Optional, Tuple
@@ -9,7 +10,7 @@ from ..common import IndentedBuffer
 
 from . import cutlass_utils
 from .cuda_kernel import CUDATemplateKernel
-from .cuda_template import CUTLASSTemplate
+from .cuda_template import CKTemplate, CUTLASSTemplate
 from .cutlass_epilogue_gen import (
     CutlassEVTEpilogueArgumentFormatter,
     CutlassEVTEpilogueTypeFormatter,
@@ -705,3 +706,162 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         )
         res = self._template_from_string(GEMM_TEMPLATE).render(**options)
         return res
+
+# template <typename ALayout,
+#           typename BLayout,
+#           typename CLayout,
+#           typename ADataType,
+#           typename BDataType,
+#           typename CDataType,
+#           typename GemmAccDataType,
+#           typename CShuffleDataType,
+#           typename AElementwiseOperation,
+#           typename BElementwiseOperation,
+#           typename CElementwiseOperation,
+#           GemmSpecialization GemmSpec,
+#           index_t BlockSize,
+#           index_t MPerBlock,
+#           index_t NPerBlock,
+#           index_t KPerBlock,
+#           index_t AK1,
+#           index_t BK1,
+#           index_t MPerXDL,
+#           index_t NPerXDL,
+#           index_t MXdlPerWave,
+#           index_t NXdlPerWave,
+#           typename ABlockTransferThreadClusterLengths_AK0_M_AK1,
+#           typename ABlockTransferThreadClusterArrangeOrder,
+#           typename ABlockTransferSrcAccessOrder,
+#           index_t ABlockTransferSrcVectorDim,
+#           index_t ABlockTransferSrcScalarPerVector,
+#           index_t ABlockTransferDstScalarPerVector_AK1,
+#           bool ABlockLdsExtraM,
+#           typename BBlockTransferThreadClusterLengths_BK0_N_BK1,
+#           typename BBlockTransferThreadClusterArrangeOrder,
+#           typename BBlockTransferSrcAccessOrder,
+#           index_t BBlockTransferSrcVectorDim,
+#           index_t BBlockTransferSrcScalarPerVector,
+#           index_t BBlockTransferDstScalarPerVector_BK1,
+#           bool BBlockLdsExtraN,
+#           index_t CShuffleMXdlPerWavePerShuffle,
+#           index_t CShuffleNXdlPerWavePerShuffle,
+#           typename CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
+#           index_t CShuffleBlockTransferScalarPerVector_NPerBlock,
+#           BlockGemmPipelineScheduler BlkGemmPipeSched = BlockGemmPipelineScheduler::Intrawave,
+#           BlockGemmPipelineVersion BlkGemmPipelineVer = BlockGemmPipelineVersion::v1,
+#           typename ComputeTypeA                       = CDataType,
+#           typename ComputeTypeB                       = ComputeTypeA>
+# struct DeviceGemm_Xdl_CShuffleV3;
+@dataclass
+class CKGemmOperation:
+    a_layout: str
+    b_layout: str
+    c_layout: str
+
+    a_element_dtype: str
+    b_element_dtype: str
+    c_element_dtype: str
+
+    acc_dtype: str
+    c_shuffle_dtype: str
+
+    a_elementwise_op: str
+    b_elementwise_op: str
+    c_elementwise_op: str
+
+    gemm_specialization: str
+
+    block_size: int
+
+    m_per_block: int
+    n_per_block: int
+    k_per_block: int
+
+    a_k1: int
+    b_k1: int
+
+    m_per_xdl: int
+    n_per_xdl: int
+
+    m_xdl_per_wave: int
+    n_xdl_per_wave: int
+
+    a_block_transfer_thread_cluster_lengths_ak0_m_ak1: Tuple[int, int, int]  # or sequence[int]?
+    a_block_transfer_thread_cluster_arrange_order: Tuple[int, int, int]  # or sequence[int]?
+    a_block_transfer_src_access_order: Tuple[int, int, int]  # or sequence[int]?
+
+    a_block_transfer_src_vector_dim: int
+    a_block_transfer_src_scalar_per_vector: int
+    a_block_transfer_dst_scalar_per_vector_ak1: int
+    a_block_lds_extra_m: bool
+
+    b_block_transfer_thread_cluster_lengths_ybk0_n_bk1: Tuple[int, int, int]  # or sequence[int]?
+    b_block_transfer_thread_cluster_arrange_order: Tuple[int, int, int]  # or sequence[int]?
+    b_block_transfer_src_access_order: Tuple[int, int, int]  # or sequence[int]?
+
+    b_block_transfer_src_vector_dim: int
+    b_block_transfer_src_scalar_per_vector: int
+    b_block_transfer_dst_scalar_per_vector_bk1: int
+    b_block_lds_extra_n: bool
+
+    c_shuffle_m_xdl_per_wave_per_shuffle: int
+    c_shuffle_n_xdl_per_wave_per_shuffle: int
+
+    c_shuffle_block_transfer_cluster_lengths_m_block_m_per_block_n_block_n_per_block: Tuple[int, int, int, int]
+    c_shuffle_block_transfer_scalar_per_vector_n_per_block: int
+
+    block_gemm_pipeline_scheduler: Optional[str]
+    block_gemm_pipeline_version: Optional[str]
+
+    a_compute_dtype: Optional[str]
+    b_compute_dtype: Optional[str]
+
+    def name(self):
+        # TBD; must be unique per instance
+        return f"ck_devicegemm_xdl_shuffle_v3_{'_'.join([''.join(iter(f)) if hasattr(f, '__iter__') else f for f in fields(self)])}"
+
+class CKGemmTemplate(CKTemplate):
+    def __init__(self, 
+                 input_nodes: List[Buffer],
+                 layout: Layout,
+                 alpha: float,
+                 beta: float,
+                 input_reorder: Optional[List[int]] = None):
+        super().__init__("ck_gemm_template", 
+                         input_nodes=input_nodes, 
+                         layout=layout, 
+                         input_reorder=input_reorder)
+        self.alpha = alpha
+        self.beta = beta
+
+    def header(self) -> IndentedBuffer:
+        res = super().header()
+        res.splice(
+            """
+                #include "ck/tensor_operation/gpu/device/impl/device_gemm_xdl_cshuffle_v3.hpp"
+
+                using Row = tensor_layout::gemm::RowMajor;
+                using Col = tensor_layout::gemm::ColumnMajor;
+            """
+        )
+        return res
+
+    def filter_op(self, op: CKGemmOperation) -> Optional[CKGemmOperation]:
+        # TBD return None if alignment or layout is invalid
+        return op
+
+    def emit_ck_instance(self, op: CKGemmOperation):
+        template = r"""
+    // Gemm operator {{operation_name}}
+    using Operation_{{operation_name}} = 
+        ck::tensor_operation::device::DeviceGemm_Xdl_CShuffleV3<{{template_params}}>;
+"""
+        template_params = []
+        for f in fields(op):
+            if hasattr(f, "__iter__"):
+                template_params.append(f"ck::Sequence<{', '.join(iter(f))}>")
+            else:
+                template_params.append(str(f))
+        return self._template_from_string(template).render(
+            operation_name=op.name(),
+            template_params=", ".join(template_params))
