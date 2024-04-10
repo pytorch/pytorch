@@ -4054,7 +4054,7 @@ def new_subgroups(
         >>> tensor = torch.ones(1, device=rank) * rank
         >>> dist.all_reduce(tensor, group=cur_subgroup)
         >>> tensor
-        tensor([8])     # Assume 8 is the number of CUDA devices per machine.
+        tensor([28])  # Assume 8 CUDA devices per machine.  28 is sum(range(8)).
         >>> # Cleanup.
         >>> for subgroup in subgroups:
         >>>     dist.destroy_process_group(subgroup)
