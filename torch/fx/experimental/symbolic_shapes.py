@@ -24,7 +24,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from functools import lru_cache
+import atexit
 from typing import (
     Any,
     cast,
@@ -100,6 +100,47 @@ __all__ = [
 # FX node metadata keys for symbolic shape FX graph.
 SHAPEENV_EVENT_KEY = "shapeenv_event"
 CURRENT_NODE_KEY = "current_node"
+
+
+def log_lru_cache_stats(wrapped_f):
+    log.debug("lru_cache_stats %s: %s", wrapped_f.__name__, wrapped_f.cumulative_cache_info())
+
+
+# Wrapper on lru_cache that reports statistics at process end
+def lru_cache(maxsize):
+    def inner(f):
+        wrapped_f = functools.lru_cache(maxsize)(f)
+        old_cache_clear = wrapped_f.cache_clear
+        prev_hits = 0
+        prev_misses = 0
+
+        # TODO: There's a ref-cycle here (wrapped_f -> cumulative_cache_info
+        # -> wrapped_f) but cannot be solved with weakref as wrapped_f is not
+        # weakref'able on some versions of Python
+
+        def cumulative_cache_info():
+            cur = wrapped_f.cache_info()
+            return functools._CacheInfo(
+                prev_hits + cur.hits,
+                prev_misses + cur.misses,
+                cur.maxsize,
+                cur.currsize,
+            )
+
+        def new_cache_clear():
+            nonlocal prev_hits, prev_misses
+            cur = wrapped_f.cache_info()
+            prev_hits += cur.hits
+            prev_misses += cur.misses
+            old_cache_clear()
+
+        wrapped_f.cache_clear = new_cache_clear
+        wrapped_f.cumulative_cache_info = cumulative_cache_info
+        if log.isEnabledFor(logging.DEBUG):
+            atexit.register(log_lru_cache_stats, wrapped_f)
+        return wrapped_f
+
+    return inner
 
 # These are modules that contain generic code for interacting with ShapeEnv
 # which are unlikely to identify a particular interesting guard statement
@@ -4143,7 +4184,8 @@ class ShapeEnv:
 
         # TODO: split conjunctions and evaluate them separately
 
-        @lru_cache(None)
+        # Don't track this one
+        @functools.lru_cache(None)
         def compute_concrete_val():
             if hint is None:
                 return self.size_hint(orig_expr)
