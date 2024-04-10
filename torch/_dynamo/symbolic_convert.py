@@ -324,7 +324,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         self.pop()
 
         if_next = self.create_call_resume_at(self.next_instruction)
-        push and self.push(value)
+        if push:
+            self.push(value)
         if_jump = self.create_call_resume_at(inst.target)
 
         self.output.add_output_instructions(
@@ -392,7 +393,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
 
         if value.is_python_constant():
             if truth_fn(value.as_python_constant()):
-                push and self.push(value)
+                if push:
+                    self.push(value)
                 self.jump(inst)
         elif (
             isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
@@ -402,7 +404,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # Equivalent of "self.nn_module is not None"
             mod = self.output.get_submodule(value.module_key)
             if truth_fn(mod):
-                push and self.push(value)
+                if push:
+                    self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
             x = value.var_getattr(self, "__bool__")
@@ -417,7 +420,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     result.value, (bool, int)
                 ):
                     if truth_fn(result.value):
-                        push and self.push(value)
+                        if push:
+                            self.push(value)
                         self.jump(inst)
                 else:
                     unimplemented(
@@ -426,13 +430,15 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # __bool__ or __len__ is non-function or not existed in the user defined object
             else:
                 if truth_fn(True):
-                    push and self.push(value)
+                    if push:
+                        self.push(value)
                     self.jump(inst)
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):
             if truth_fn(len(value.unpack_var_sequence(self))):
-                push and self.push(value)
+                if push:
+                    self.push(value)
                 self.jump(inst)
         elif isinstance(value, SymNodeVariable):
             try:
@@ -442,18 +448,21 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     return jump_graph_break(self, inst, value, extra_msg=f"\n{e}")
                 raise
             if truth_fn(eval_result):
-                push and self.push(value)
+                if push:
+                    self.push(value)
                 self.jump(inst)
         elif isinstance(value, variables.BackwardHookVariable):
             if truth_fn(True):
-                push and self.push(value)
+                if push:
+                    self.push(value)
                 self.jump(inst)
         else:
             from .source import is_constant_source
 
             if value.source is not None and is_constant_source(value.source):
                 if truth_fn(value.get_real_value()):  # type: ignore[attr-defined]
-                    push and self.push(value)
+                    if push:
+                        self.push(value)
                     self.jump(inst)
             else:
                 # TODO link the torch.cond doc later
