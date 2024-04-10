@@ -211,24 +211,14 @@ void sgd_fused_step_impl(
   bool has_momentum_buffer = momentum != 0.0;
   scalar_t* momentum_buffer_data = has_momentum_buffer ? momentum_buffer.data_ptr<scalar_t>() : nullptr;
 
-  constexpr size_t cacche_line_size = 64;
-  size_t num_tasks = param.numel();
-  size_t n_task_cache_line_aligned = num_tasks;
-  size_t size_type = sizeof(scalar_t);
-  size_t num_threads = get_num_threads();
-  int64_t chunk_size = divup(num_tasks, num_threads);
-  size_t nelement_per_cache_line = cacche_line_size / size_type;
-  size_t chunk_size_cache_line_aligned = std::floor(chunk_size / nelement_per_cache_line) * nelement_per_cache_line;
-#if AT_PARALLEL_OPENMP
-  n_task_cache_line_aligned = chunk_size_cache_line_aligned * num_threads;
-#else
-if (n_task_cache_line_aligned < num_tasks) {
-  chunk_size_cache_line_aligned += nelement_per_cache_line;
-}
-#endif
+  constexpr size_t cache_line_size = 64;
+  constexpr int64_t cache_line_aligned_task_unit = cache_line_size / sizeof(scalar_t);
+  size_t num_units = divup(param.numel(), cache_line_aligned_task_unit);
 
   auto sgd_fn = [&](int64_t begin, int64_t end) {
         // local pointers
+        begin *= cache_line_aligned_task_unit;
+        end = std::min(end * cache_line_aligned_task_unit, param.numel());
         scalar_t* param_ptr = param_data + begin;
         scalar_t* grad_ptr = grad_data + begin;
         scalar_t* momentum_buffer_ptr = has_momentum_buffer ? momentum_buffer_data + begin : nullptr;
