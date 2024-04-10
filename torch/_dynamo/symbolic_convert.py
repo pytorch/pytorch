@@ -1905,8 +1905,7 @@ class InstructionTranslatorBase(
         self.symbolic_locals[inst.argval] = NullVariable()
 
     def LOAD_SUPER_ATTR(self, inst):
-        super_vt, cls_vt, self_vt = self.popn(3)
-        self.call_function(super_vt, [cls_vt, self_vt], {})
+        self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
         if inst.arg & 1:
             self.LOAD_METHOD(inst)
         else:

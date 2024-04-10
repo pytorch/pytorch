@@ -9951,6 +9951,20 @@ fn
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(torch.randn(5, 5))
 
+    def test_super_after_graph_break(self):
+        class Foo(torch.nn.Sequential):
+            def __init__(self, layers):
+                torch._dynamo.graph_break()
+                super().__init__(*layers)
+
+        def fn(x):
+            layers = [torch.nn.Linear(3, 3) for _ in range(3)]
+            mod = Foo(layers)
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(3, 3))
+
     def test_raises_importerror1(self):
         @torch.compile(backend="eager")
         def fn(x):
