@@ -615,6 +615,8 @@ class TracingContext:
         self.loc_in_frame = None
         # this is only set after aot_autograd
         self.fw_metadata = None
+        # this is only set after aot_autograd
+        self.aot_graph_name = None
         self.params_flat = None
         # this is for extended return calling convention from backend
         # compiler to aot_autograd

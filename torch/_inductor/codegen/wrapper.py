@@ -473,8 +473,13 @@ class WrapperCodeGen(CodeGen):
         self.header.writeline(f"{name} = None  # {hashed}")
 
     def write_header(self) -> None:
+        context = torch._guards.TracingContext.try_get()
+        aot_config_comment = ""
+        if context is not None and context.aot_graph_name is not None:
+            aot_config_comment = f"# AOT ID: {context.aot_graph_name}"
         self.header.splice(
             f"""
+                {aot_config_comment}
                 from ctypes import c_void_p, c_long
                 import torch
                 import math
