@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 import operator
+import unittest
 
 import torch
 
@@ -87,7 +88,23 @@ class TestVerifyCorrectness(torch._dynamo.test_case.TestCase):
         self.assertEqual(r1.device, r2.device)
         self.assertEqual(r1.device, r3.device)
 
+    """
+    RuntimeError:
+    attribute lookup is not defined on builtin:
+    File "<eval_with_key>.5", line 8
+        child = self.getattr_L__self___layers___0___weight
+        child_1 = self.getattr_L__self___layers___0___bias
+        linear = torch.ops.aten.linear.default(l_x_, child, child_1);  l_x_ = child = child_1 = None
+                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
+        relu = torch.ops.aten.relu.default(linear);  linear = None
+        child_2 = self.getattr_L__self___layers___2___weight
+    """
+
     @_force_skip_lazy_graph_module()
+    @unittest.skipIf(
+        torch._dynamo.config.use_single_step_graph,
+        "attribute lookup is not defined on builtin",
+    )
     def test_torchscript(self):
         s = Seq()
         i = torch.randn(10)

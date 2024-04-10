@@ -45,6 +45,7 @@ from torch._dynamo.testing import (
     skipIfNotPy311,
     unsupported,
     xfailIfPy311,
+    xfailIfSingleStepGraph,
 )
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
@@ -4409,6 +4410,7 @@ def fn():
         del x
         self.assertIs(x_ref(), None)
 
+    @xfailIfSingleStepGraph
     def test_release_module_memory(self):
         mod = torch.nn.Linear(10, 10)
         x = torch.rand([10, 10])
@@ -9883,6 +9885,7 @@ fn
         )
 
     @xfailIfPy311
+    @xfailIfSingleStepGraph
     def test_linear_module_free(self):
         self._test_compile_model_free(
             lambda: (torch.nn.Linear(100, 100), torch.randn(100, 100)),

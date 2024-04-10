@@ -107,6 +107,10 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self._check_backend_works("eager")
 
     @_force_skip_lazy_graph_module()
+    @unittest.skipIf(
+        torch._dynamo.config.use_single_step_graph,
+        "attribute lookup is not defined on builtin",
+    )
     def test_torchscript(self):
         self._check_backend_works("ts")
 
