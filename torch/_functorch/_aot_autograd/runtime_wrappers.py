@@ -166,6 +166,7 @@ def create_runtime_wrapper(
                 original_inpt = orig_inputs[inpt_idx]
                 updated_inpt = updated_inputs[i]
                 if meta.mutates_storage_metadata:
+                    # See Note [set_() Input Mutations in AOTAutograd]
                     # mutates_storage_metadata means our input saw a x.set_(y) call.
                     # What if x **also** saw a data and/or a metadata mutation?
                     # (1) If the [meta]data mutation occurred after the set_(),

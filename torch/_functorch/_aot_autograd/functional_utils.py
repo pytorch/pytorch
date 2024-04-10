@@ -313,7 +313,7 @@ def was_tensor_metadata_updated(arg, new_arg):
 # Returns the number of detected copy_
 def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
     placeholders = set()
-    copy_count = 0
+    mutation_count = 0
     # NB: It would also be nice to verify that the mutations all happen at the
     # end, but we also do some administrative views after mutations so this
     # isn't actually true.  (TODO: Could this cause problems for Inductor?)
@@ -321,17 +321,20 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
         if n.op == "placeholder":
             placeholders.add(n)
         if isinstance(n.target, torch._ops.OpOverload):
-            if n.target is torch.ops.aten.copy_.default:
+            if n.target in [
+                torch.ops.aten.copy_.default,
+                torch.ops.aten.set_.source_Tensor,
+            ]:
                 suffix = True
-                # Can only copy_ into an input, and can only do so once
+                # Can only copy_/set_ into an input, and can only do so once
                 assert n.args[0] in placeholders
                 placeholders.remove(n.args[0])
-                copy_count += 1
+                mutation_count += 1
             else:
                 assert (
                     not n.target._schema.is_mutable
                 ), f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
-    return copy_count
+    return mutation_count
 
 
 def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
@@ -358,12 +361,22 @@ def _check_if_mutation_can_be_in_graph(
     mutates_metadata,
     mutations_hidden_from_autograd,
     mutations_under_no_grad_or_inference_mode,
+    mutates_storage_metadata,
     requires_grad,
 ):
     if keep_input_mutations:
-        return mutates_data and (
+        in_graph = (mutates_data or mutates_storage_metadata) and (
             (not mutates_metadata and not requires_grad)
             or mutations_hidden_from_autograd
             or mutations_under_no_grad_or_inference_mode
         )
-    return False
+    else:
+        in_graph = False
+    # See Note [set_() Input Mutations in AOTAutograd]
+    # If there was a `set_()`, we require that all mutations were under no_grad,
+    # so we can (safely) emit the set_() in the graph at runtime
+    if mutates_storage_metadata:
+        assert (
+            in_graph
+        ), "input tensor encountered a set_(), but had other mutations that prevented us from including it in the graph safely"
+    return in_graph
