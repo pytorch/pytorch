@@ -304,52 +304,15 @@ void adam_fused_step_impl(
   double exp_avg_sq_grad_coefficient = 1 - beta2;
   double bias_correction2_sqrt = std::sqrt(bias_correction2);
 
-  /*
-  calc num tasks and grain size for cache line alignment
-  For OPENMP, the chunk_size in invoke_parallel is calculated as:
-    int64_t chunk_size = divup(ntasks, get_num_threads());
-  While in TBB and native backend, the chunk_size in invoke_parallel is calculated as:
-    int64_t chunk_size = divup(ntasks, get_num_threads());
-    chunk_size = std::max(grain_size, chunk_size);
-  Which means for non-OPENMO backene, we can achieve memory alignment by setting a proper grain_size
-  to achieve cache line alignment.
-  e.g. N_threads=4, nele_per_cache_line=4, ntasks = 412, we can set grain_size=104
-  ThreadID     Thread0 Thread1 Thread2 Thread3
-  Threadtask   104     104     104     100  -> cache line aligned
-  But for OPENMP backend, we need not only change the grain_size, but also the ntasks to
-  achieve cache line alignment for main loop.
-  ThreadID     Thread0 Thread1 Thread2 Thread3
-  Threadtask   103     103     103     103  -> cache line not aligned
-  |
-  Threadtask   100     100     100     100  -> cachle line aligned (ntask=0-399)
-  Threadtask   3       3       3       3    -> cache line not aligned tail (ntask=400-411)
-  The usage will be:
-    std::tie(cache_line_align_num_tasks, grain_size) =
-        at::calc_num_tasks_and_grain_size_for_cache_line_aligment(num_tasks, sizeof(scalar_type));
-    at::parallel_for(0, cache_line_align_num_tasks, grain_size, fn);
-    // if there are remaining tasks for OPENMP backend, just finish the work
-    if (cache_line_align_num_tasks < num_tasks) {
-      at::parallel_for(cache_line_align_num_tasks, num_tasks, 0, fn);
-    }
-  */
-  constexpr size_t cacche_line_size = 64;
-  size_t num_tasks = param.numel();
-  size_t n_task_cache_line_aligned = num_tasks;
-  size_t size_type = sizeof(scalar_t);
-  size_t num_threads = get_num_threads();
-  int64_t chunk_size = divup(num_tasks, num_threads);
-  size_t nelement_per_cache_line = cacche_line_size / size_type;
-  size_t chunk_size_cache_line_aligned = std::floor(chunk_size / nelement_per_cache_line) * nelement_per_cache_line;
-#if AT_PARALLEL_OPENMP
-  n_task_cache_line_aligned = chunk_size_cache_line_aligned * num_threads;
-#else
-if (n_task_cache_line_aligned < num_tasks) {
-  chunk_size_cache_line_aligned += nelement_per_cache_line;
-}
-#endif
+
+  constexpr size_t cache_line_size = 64;
+  constexpr int64_t cache_line_aligned_task_unit = cache_line_size / sizeof(scalar_t);
+  size_t num_units = divup(param.numel(), cache_line_aligned_task_unit);
 
   auto adam_fn = [&](int64_t begin, int64_t end) {
         // local pointers
+        begin *= cache_line_aligned_task_unit;
+        end = std::min(end * cache_line_aligned_task_unit, param.numel());
         scalar_t* param_ptr = param_data + begin;
         scalar_t* exp_avg_ptr = exp_avg_data + begin;
         scalar_t* exp_avg_sq_ptr = exp_avg_sq_data + begin;
@@ -379,11 +342,7 @@ if (n_task_cache_line_aligned < num_tasks) {
         );
       };
   at::parallel_for(
-      0, n_task_cache_line_aligned, chunk_size_cache_line_aligned, adam_fn);
-  if (n_task_cache_line_aligned < num_tasks) {
-    at::parallel_for(
-        n_task_cache_line_aligned, num_tasks, 0, adam_fn);
-  }
+      0, num_units, 0, adam_fn);
 }
 
 void fused_adam_kernel(
