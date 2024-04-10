@@ -316,6 +316,7 @@ test_inductor_distributed() {
   pytest test/distributed/_composable/fsdp/test_fully_shard_frozen.py
   pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_compute_dtype
   pytest test/distributed/_composable/fsdp/test_fully_shard_mixed_precision.py -k test_reduce_dtype
+  pytest test/distributed/fsdp/test_fsdp_tp_integration.py -k test_fsdp_tp_integration
 
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
