@@ -1761,6 +1761,18 @@ class OneCycleLR(LRScheduler):
         else:
             return [param] * len(optimizer.param_groups)
 
+
+    def state_dict(self):
+        state = super().state_dict()
+        anneal_func = state.pop('anneal_func')
+        state['anneal_func'] = anneal_func.__name__
+        return state
+
+    def load_state_dict(self, state_dict):
+        if 'anneal_func' in state_dict:
+            state_dict['anneal_func'] = self.__getattr__(state_dict['anneal_func'])
+        super().load_state_dict(state_dict)
+
     @staticmethod
     def _annealing_cos(start, end, pct):
         "Cosine anneal from `start` to `end` as pct goes from 0.0 to 1.0."

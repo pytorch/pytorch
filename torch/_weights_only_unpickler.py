@@ -7,6 +7,7 @@
 # - torch types (Storage, dtypes, Tensor, `torch.Size`),
 # - `torch._utils._rebuild` functions.
 # - `torch.nn.Parameter`
+# - `collections.Counter`
 # - `collections.OrderedDict`
 
 # Based of https://github.com/python/cpython/blob/main/Lib/pickle.py
@@ -17,7 +18,7 @@
 # weights = torch.load(buf, weights_only = True)
 
 import functools as _functools
-from collections import OrderedDict
+from collections import Counter, OrderedDict
 from pickle import (
     APPEND,
     APPENDS,
@@ -69,6 +70,7 @@ import torch
 def _get_allowed_globals():
     rc: Dict[str, Any] = {
         "collections.OrderedDict": OrderedDict,
+        "collections.Counter": Counter,
         "torch.nn.parameter.Parameter": torch.nn.Parameter,
         "torch.serialization._get_layout": torch.serialization._get_layout,
         "torch.Size": torch.Size,
