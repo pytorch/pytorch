@@ -1,16 +1,35 @@
 #include <torch/csrc/dynamo/init.h>
 
+#include <pybind11/stl_bind.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/dynamo/cache_entry.h>
+#include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/eval_frame.h>
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
+#include <torch/csrc/utils/pybind.h>
+#include <torch/csrc/utils/python_compat.h>
 
 static struct PyModuleDef _module =
     {PyModuleDef_HEAD_INIT, "torch._C._dynamo", "", -1, nullptr};
 
+PYBIND11_MAKE_OPAQUE(std::vector<uint8_t>);
+
 namespace torch::dynamo {
+
+#if IS_PYTHON_3_11_PLUS
+
+std::vector<uint8_t> _PyOpcode_Caches_vec(
+    THP_PyOpcode_Caches,
+    THP_PyOpcode_Caches + THP_PyOpcode_Caches_size);
+
+#else
+
+std::vector<uint8_t> _PyOpcode_Caches_vec;
+
+#endif
+
 using torch::dynamo::autograd::torch_c_dynamo_compiled_autograd_init;
 
 void initDynamoBindings(PyObject* torch) {
@@ -47,6 +66,8 @@ void initDynamoBindings(PyObject* torch) {
       .def("invalidate", &ExtraState::invalidate);
 
   m.def("_debug_get_cache_entry_list", &_debug_get_cache_entry_list);
+  py::bind_vector<std::vector<uint8_t>>(m, "VectorUInt8");
+  m.attr("py_opcode_caches") = _PyOpcode_Caches_vec;
 }
 
 } // namespace torch::dynamo

@@ -35,6 +35,8 @@
 - test/distributed/tensor/parallel/test_fsdp_2d_parallel.py
 - torch/distributed/_tensor/**
 - torch/distributed/fsdp/**
+- torch/csrc/inductor/**
+- test/cpp/aot_inductor/**
 
 "module: cpu":
 - aten/src/ATen/cpu/**
