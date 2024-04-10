@@ -1172,14 +1172,14 @@ def cleaned_instructions(code, safe=False) -> List[Instruction]:
     if not safe:
         if sys.version_info < (3, 11):
             remove_load_call_method(instructions)
-        else:
-            remove_jump_if_none(instructions)
-            update_offsets(instructions)
-            devirtualize_jumps(instructions)
         if sys.version_info < (3, 12):
             explicit_super(code, instructions)
-        else:
-            remove_binary_store_slice(instructions)
+    if sys.version_info >= (3, 11):
+        remove_jump_if_none(instructions)
+        update_offsets(instructions)
+        devirtualize_jumps(instructions)
+    if sys.version_info >= (3, 12):
+        remove_binary_store_slice(instructions)
     return instructions
 
 
