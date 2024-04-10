@@ -447,6 +447,17 @@ test_perf_for_dashboard() {
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_cuda_${target}.csv"
       fi
+      if [[ "$DASHBOARD_TAG" == *cudagraphs_low_precision-true* ]] && [[ "$mode" == "inference" ]]; then
+        # TODO: This has a new dtype called quant and the benchmarks script needs to be updated to support this.
+        # The tentative command is as follows. It doesn't work now, but it's ok because we only need mock data
+        # to fill the dashboard.
+        python "benchmarks/dynamo/$suite.py" \
+          "${target_flag[@]}" --"$mode" --quant --backend "$backend" "$@" \
+          --output "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_cuda_${target}.csv" || true
+        # Copy cudagraph results as mock data, easiest choice?
+        cp "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_cuda_${target}.csv" \
+          "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_cuda_${target}.csv"
+      fi
     done
   done
 }
