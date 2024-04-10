@@ -53,15 +53,15 @@ def track_graph_compiling(aot_config, graph_name):
         has_tracing_context = True
     else:
         has_tracing_context = False
-        try:
-            yield
-        finally:
-            global nth_graph
-            nth_graph += 1
-            graph_being_compiled = []
-            if has_tracing_context:
-                if tracing_context := torch._guards.TracingContext.try_get():
-                    tracing_context.aot_graph_name = old_name
+    try:
+        yield
+    finally:
+        global nth_graph
+        nth_graph += 1
+        graph_being_compiled = []
+        if has_tracing_context:
+            if tracing_context := torch._guards.TracingContext.try_get():
+                tracing_context.aot_graph_name = old_name
 
 
 # Set up hooks so that during backward the fx's stack_trace is properly set
