@@ -1418,7 +1418,9 @@ def forward(self, x_1, y_1):
         def f(x):
             i0 = x.item()
             torch._check_is_size(i0)
-            torch._check(i0 <= 1000000)
+            # To trigger the original issue, the max bound has to
+            # be chosen such that 448 / 447 < 2 (which it is.)
+            torch._check(i0 <= 448)
             return torch.zeros(256 * i0).view(-1, 447)
         make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447))
 
