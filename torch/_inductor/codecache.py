@@ -19,7 +19,6 @@ import re
 import shlex
 import shutil
 import signal
-import struct
 import subprocess
 import sys
 import sysconfig
@@ -39,7 +38,6 @@ from types import ModuleType
 from typing import (
     Any,
     Callable,
-    cast,
     Dict,
     List,
     Optional,
@@ -1541,7 +1539,6 @@ def cpp_compile_command(
     aot_mode: bool = False,
     compile_only: bool = False,
     use_absolute_path: bool = False,
-    use_mmap_weights: bool = False,
 ) -> str:
     ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
@@ -1574,9 +1571,6 @@ def cpp_compile_command(
     if compile_only:
         libs, lpaths = "", ""
     inp_name_str = " ".join(inp_name)
-    if use_mmap_weights:
-        macros += " -D USE_MMAP_SELF"
-
     return re.sub(
         r"[ \n]+",
         " ",
@@ -1654,11 +1648,7 @@ class AotCodeCompiler:
         picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
-                "i",
-                "o",
-                vec_isa=picked_vec_isa,
-                cuda=cuda,
-                aot_mode=graph.aot_mode,
+                "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
             )
         )
         fbcode_aot_cpu_re = False
@@ -1786,17 +1776,6 @@ class AotCodeCompiler:
             )
 
             output_o = os.path.splitext(input_path)[0] + ".o"
-            consts_size = sum(
-                tensor.untyped_storage().nbytes()
-                for (name, tensor) in graph.constants.items()
-                if name not in graph.folded_constants
-            )
-            # TODO: Fix mmap weights with cuda
-            use_mmap_weights = (
-                not cuda and not config.is_fbcode() and consts_size > 2_000_000_000
-            )
-            if config._force_mmap_aoti_weights and not cuda:
-                use_mmap_weights = True
             compile_cmd = cpp_compile_command(
                 input=input_path,
                 output=output_o,
@@ -1805,7 +1784,6 @@ class AotCodeCompiler:
                 aot_mode=graph.aot_mode,
                 compile_only=True,
                 use_absolute_path=use_absolute_path,
-                use_mmap_weights=use_mmap_weights,
             )
             log.debug("aot compilation command: %s", compile_cmd)
             if fbcode_aot_cpu_re:
@@ -1830,19 +1808,11 @@ class AotCodeCompiler:
 
                 return bytes(raw_array.contents)
 
-            serialized_weights = b"".join(
+            aot_constants = b"".join(
                 _to_bytes(graph.get_original_value_of_constant(name))
                 for name in graph.constants.keys()
                 if name not in graph.folded_constants
             )
-            if not use_mmap_weights:
-                aot_constants = serialized_weights
-                magic_number = 0
-            else:
-                magic_number = cast(
-                    int, torch.randint(0, torch.iinfo(torch.int64).max, (1,)).item()
-                )
-                aot_constants = struct.pack("qq", consts_size + 8, magic_number)
             consts_o = {
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
@@ -1862,14 +1832,6 @@ class AotCodeCompiler:
                 os.chmod(output_so, 0o755)
             else:
                 run_command_and_check(link_cmd)
-
-            if use_mmap_weights:
-                with open(output_so, "a+b") as f_so:
-                    so_size = f_so.tell()
-                    # Page align the weights
-                    f_so.write(b" " * (16384 - so_size % 16384))
-                    f_so.write(serialized_weights)
-                    f_so.write(struct.pack("q", magic_number))
 
             # Append cmds to the end of codegen-ed wrapper file
             with open(input_path, "a") as f:
