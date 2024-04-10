@@ -736,6 +736,11 @@ class profile(_KinetoProfile):
             for action in action_list:
                 action()
 
+    def _stats(self) -> Optional[prof._ProfilerStats]:
+        if self.profiler is None:
+            return None
+        return self.profiler._stats
+
 
 class ExecutionTraceObserver(_ITraceObserver):
     """Execution Trace Observer

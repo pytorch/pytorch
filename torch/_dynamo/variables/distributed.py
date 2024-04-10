@@ -144,11 +144,6 @@ class PlacementVariable(DistributedVariable):
             return ConstantVariable.create(self.value.dim)
         return super().var_getattr(tx, name)
 
-    # The Placement will desugar during tracing,
-    # but it cannot be proxied directly into a dynamo graph
-    def can_be_proxied_in_fx(self):
-        return False
-
     def call_method(
         self,
         tx,
@@ -214,11 +209,6 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "device_type":
             return ConstantVariable.create(self.value.device_type)
         return super().var_getattr(tx, name)
-
-    # The DeviceMesh will desugar during tracing,
-    # but it cannot be proxied directly into a dynamo graph
-    def can_be_proxied_in_fx(self):
-        return False
 
     def call_method(
         self,
