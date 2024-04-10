@@ -1151,6 +1151,10 @@ class WrapperCodeGen(CodeGen):
         symbols_included = {original_name}
 
         def traverse(cur_kernel):
+            # here we extract the unqualified names (i.e., not attributes and
+            # without prepended module name) loaded in the kernel code, which
+            # are matched with the co_names and __globals__ below to codegen
+            # the respective imports necessary for the kernel compilation
             unqualified_loads = {
                 node.id
                 for node in ast.walk(ast.parse(cur_kernel.src))
@@ -1178,9 +1182,14 @@ class WrapperCodeGen(CodeGen):
                         symbol_name in unqualified_loads
                         and symbol_name != "tl"  # already imported
                         and hasattr(symbol, "__module__")
+                        # only codegen imports from triton; JITFunctions
+                        # imported from other modules will be codegened
+                        # in the separate branch above
+                        and symbol.__module__.startswith("triton")
                     ):
-                        # a global symbol referenced without module
-                        # qualification: need to codegen an import
+                        # a global symbol imported from triton is referenced
+                        # without module qualification (i.e., `store` instead
+                        # of `tl.store`): need to codegen an import
                         compile_wrapper.writeline(
                             f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
                         )
