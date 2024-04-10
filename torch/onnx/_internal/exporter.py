@@ -344,7 +344,9 @@ class ResolvedExportOptions(ExportOptions):
     decomposition_table: Dict[torch._ops.OpOverload, Callable]
     """A dictionary that maps operators to their decomposition functions."""
 
-    onnxfunction_dispatcher: torch.onnx._internal.fx.onnxfunction_dispatcher.OnnxFunctionDispatcher
+    onnxfunction_dispatcher: (
+        torch.onnx._internal.fx.onnxfunction_dispatcher.OnnxFunctionDispatcher
+    )
     """The ONNX dispatcher used to dispatch ATen operators to ONNX functions."""
 
     fx_tracer: FXGraphExtractor
@@ -577,7 +579,7 @@ class LargeProtobufONNXProgramSerializer:
     Fallback to serializing as Protobuf with external data for models larger than 2GB.
     """
 
-    _destination_path: Final[str]
+    _destination_path: Final[str]  # type: ignore[misc]
 
     def __init__(self, destination_path: str):
         self._destination_path = destination_path
@@ -650,14 +652,14 @@ class ONNXProgram:
         model_signature: The model signature for the exported ONNX graph.
     """
 
-    _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined]
-    _input_adapter: Final[io_adapter.InputAdapter]
-    _output_adapter: Final[io_adapter.OutputAdapter]
-    _diagnostic_context: Final[diagnostics.DiagnosticContext]
-    _fake_context: Final[Optional[ONNXFakeContext]]
-    _export_exception: Final[Optional[Exception]]
-    _model_signature: Final[Optional[torch.export.ExportGraphSignature]]
-    _model_torch: Final[
+    _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined, misc]
+    _input_adapter: Final[io_adapter.InputAdapter]  # type: ignore[misc]
+    _output_adapter: Final[io_adapter.OutputAdapter]  # type: ignore[misc]
+    _diagnostic_context: Final[diagnostics.DiagnosticContext]  # type: ignore[misc]
+    _fake_context: Final[Optional[ONNXFakeContext]]  # type: ignore[misc]
+    _export_exception: Final[Optional[Exception]]  # type: ignore[misc]
+    _model_signature: Final[Optional[torch.export.ExportGraphSignature]]  # type: ignore[misc]
+    _model_torch: Final[  # type: ignore[misc]
         Optional[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]]
     ]
 
@@ -785,6 +787,7 @@ class ONNXProgram:
             the last 2 inputs are user inputs (namely x and b).
             The first output is a buffer mutation (namely my_buffer2) and the last output is the actual model output.
 
+            >>> import pprint
             >>> class CustomModule(torch.nn.Module):
             ...     def __init__(self):
             ...         super().__init__()
@@ -813,31 +816,45 @@ class ONNXProgram:
             >>> inputs = (torch.rand((64, 1, 28, 28), dtype=torch.float32), torch.randn(3))
             >>> exported_program = torch.export.export(CustomModule(), args=inputs)
             >>> onnx_program = torch.onnx.dynamo_export(exported_program, *inputs)
-            >>> print(onnx_program.model_signature)
-            ExportGraphSignature(
-                input_specs=[
-                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg0_1'),
-                              target='conv1.weight', persistent=None),
-                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg1_1'),
-                              target='conv2.weight', persistent=None),
-                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg2_1'),
-                              target='fc1.weight', persistent=None),
-                    InputSpec(kind=<InputKind.PARAMETER: 2>, arg=TensorArgument(name='arg3_1'),
-                              target='fc2.weight', persistent=None),
-                    InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg4_1'),
-                              target='my_buffer2', persistent=True),
-                    InputSpec(kind=<InputKind.BUFFER: 3>, arg=TensorArgument(name='arg5_1'),
-                              target='my_buffer1', persistent=True),
-                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg6_1'),
-                              target=None, persistent=None),
-                    InputSpec(kind=<InputKind.USER_INPUT: 1>, arg=TensorArgument(name='arg7_1'),
-                              target=None, persistent=None)
-                ],
-                output_specs=[
-                    OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>, arg=TensorArgument(name='add'), target='my_buffer2'),
-                    OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>, arg=TensorArgument(name='_log_softmax'), target=None)
-                ]
-            )
+            >>> pprint.pprint(onnx_program.model_signature)
+            ExportGraphSignature(input_specs=[InputSpec(kind=<InputKind.PARAMETER: 2>,
+                                                  arg=TensorArgument(name='p_conv1_weight'),
+                                                  target='conv1.weight',
+                                                  persistent=None),
+                                        InputSpec(kind=<InputKind.PARAMETER: 2>,
+                                                  arg=TensorArgument(name='p_conv2_weight'),
+                                                  target='conv2.weight',
+                                                  persistent=None),
+                                        InputSpec(kind=<InputKind.PARAMETER: 2>,
+                                                  arg=TensorArgument(name='p_fc1_weight'),
+                                                  target='fc1.weight',
+                                                  persistent=None),
+                                        InputSpec(kind=<InputKind.PARAMETER: 2>,
+                                                  arg=TensorArgument(name='p_fc2_weight'),
+                                                  target='fc2.weight',
+                                                  persistent=None),
+                                        InputSpec(kind=<InputKind.BUFFER: 3>,
+                                                  arg=TensorArgument(name='b_my_buffer2'),
+                                                  target='my_buffer2',
+                                                  persistent=True),
+                                        InputSpec(kind=<InputKind.BUFFER: 3>,
+                                                  arg=TensorArgument(name='b_my_buffer1'),
+                                                  target='my_buffer1',
+                                                  persistent=True),
+                                        InputSpec(kind=<InputKind.USER_INPUT: 1>,
+                                                  arg=TensorArgument(name='x'),
+                                                  target=None,
+                                                  persistent=None),
+                                        InputSpec(kind=<InputKind.USER_INPUT: 1>,
+                                                  arg=TensorArgument(name='b'),
+                                                  target=None,
+                                                  persistent=None)],
+                           output_specs=[OutputSpec(kind=<OutputKind.BUFFER_MUTATION: 3>,
+                                                    arg=TensorArgument(name='add'),
+                                                    target='my_buffer2'),
+                                         OutputSpec(kind=<OutputKind.USER_OUTPUT: 1>,
+                                                    arg=TensorArgument(name='_log_softmax'),
+                                                    target=None)])
         """
 
         return self._model_signature
@@ -1190,12 +1207,18 @@ class Exporter:
             self._assert_fake_tensor_mode()
 
     def export(self) -> ONNXProgram:
+        from torch.export._trace import (  # TODO: Prevent circular dependency
+            DEFAULT_EXPORT_DYNAMO_CONFIG,
+        )
+
         # TODO: Defer `import onnxscript` out of `import torch` path
         # https://github.com/pytorch/pytorch/issues/103764
         from torch.onnx._internal.fx import decomposition_skip
 
         with self.options.diagnostic_context, decomposition_skip.enable_decomposition_skips(
             self.options
+        ), torch._dynamo.config.patch(
+            dataclasses.asdict(DEFAULT_EXPORT_DYNAMO_CONFIG)
         ):
             graph_module = self.options.fx_tracer.generate_fx(
                 self.options, self.model, self.model_args, self.model_kwargs
@@ -1231,6 +1254,16 @@ class Exporter:
             onnx_model = onnxscript_graph.to_model_proto(
                 self.options.onnx_registry.opset_version,
             )
+
+            try:
+                from onnxscript import optimizer
+
+                onnx_model = optimizer.optimize(onnx_model)
+            except ImportError:
+                warnings.warn(
+                    "ONNXScript optimizer is not available. Skipping optimization. "
+                    "Please `pip install onnxscript -U` to enable post-export optimization."
+                )
 
             return torch.onnx.ONNXProgram(
                 onnx_model,
@@ -1301,7 +1334,7 @@ class OnnxExporterError(RuntimeError):
     access to the partial export results and associated metadata.
     """
 
-    onnx_program: Final[ONNXProgram]
+    onnx_program: Final[ONNXProgram]  # type: ignore[misc]
 
     def __init__(self, onnx_program: ONNXProgram, message: str):
         """
