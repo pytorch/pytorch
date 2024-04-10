@@ -154,6 +154,20 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             self.assertTrue(event_found)
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
+    def test_inductor_profiling_record_shapes(self):
+        @torch.compile
+        def fn(x, y):
+            return (x + y).sin().cos()
+
+        inp = [torch.rand((4, 4), device="cuda") for _ in range(2)]
+
+        fn(*inp)
+        with torch.profiler.profile(record_shapes=True) as prof:
+            fn(*inp)
+
+        self.assertTrue(any(("sin" in evt.name) for evt in prof.events()))
+
+    @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_inductor_profiling_triton_hooks(self):
         from triton.compiler import CompiledKernel
 
