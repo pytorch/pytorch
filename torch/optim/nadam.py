@@ -468,9 +468,9 @@ def _multi_tensor_nadam(params: List[Tensor],
             # finally, update params
             torch._foreach_addcdiv_(grouped_params, numerator, exp_avg_sq_sqrt)
         else:
-            step_size_grads = _stack_if_compiling([(lr * (1. - mu) / (1. - _get_value(mu_product))) * -1
+            step_size_grads = _stack_if_compiling([(_get_value(lr) * (1. - mu) / (1. - _get_value(mu_product))) * -1
                                                    for mu_product, mu in zip(grouped_mu_products, mus)])
-            step_size_expavg = _stack_if_compiling([(lr * mu_next / (1. - _get_value(mu_product) * mu_next)) * -1
+            step_size_expavg = _stack_if_compiling([(_get_value(lr) * mu_next / (1. - _get_value(mu_product) * mu_next)) * -1
                                                     for mu_product, mu_next in zip(grouped_mu_products, mu_nexts)])
 
             torch._foreach_addcdiv_(grouped_params, grouped_grads, exp_avg_sq_sqrt, step_size_grads)
