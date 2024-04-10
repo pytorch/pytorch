@@ -317,7 +317,7 @@ class X86InductorQuantizer(Quantizer):
     ) -> "X86InductorQuantizer":
         assert (
             function_type in X86InductorQuantizer.module_function_to_aten_operator_type
-        ), "function: Unable to customize quantization config for {function_type} by X86InductorQuantizer."
+        ), f"function: Unable to customize quantization config for {function_type} by X86InductorQuantizer."
         self._set_aten_operator_qconfig(
             X86InductorQuantizer.module_function_to_aten_operator_type[function_type],
             quantization_config,
