@@ -134,8 +134,7 @@ class Test2DStridedLocalShard(DTensorTestBase):
         # Currently, the 2D DTensor's local shard is correct, since from_local + redistribute incurs a all_gather behind the scene.
         # When we have a global_tensor of [0, 1, 2, 3, 4, 5, 6, 7], the local shard of 2D DTensor would be:
         # rank0: [0, 1], rank1: [2, 3], rank2: [4, 5], rank3: [6, 7]
-        comm_mode = CommDebugMode()
-        with comm_mode:
+        with CommDebugMode():
             global_tensor = torch.arange(8).view(4, 2)
             mesh_2d = init_device_mesh(
                 self.device_type, (2, 2), mesh_dim_names=("DP", "TP")
@@ -166,13 +165,16 @@ class Test2DStridedLocalShard(DTensorTestBase):
     @with_comms
     def test_fsdp2_tp_2d_dtensor_local_shards_and_offsets(self):
         # We are mimicking the behavior of FSDP2 + TP.
-        # Currently, the 2D DTensor's local shard is incorrect, since we want to avoid extra communication.
+        # Currently, the 2D DTensor's local shard is incorrect for resharding, since we want to avoid extra communication.
+        # It's incorrect for resharding, since `compute_local_shape_and_global_offset` doesn't know the correct offsets for resharding.
         # When we have a global_tensor of [0, 1, 2, 3, 4, 5, 6, 7], the local shard of 2D DTensor would be:
-        # rank0: [0, 1], rank1: [4, 5], rank2: [2, 3], rank3: [6, 7]
+        # local tensor -- rank0: [0, 1], rank1: [4, 5], rank2: [2, 3], rank3: [6, 7]
+        # current offsets -- rank0: [0, 0], rank1: [1, 0], rank2: [2, 0], rank3: [3, 0]
+        # Ideally, with strided sharding, the offsets should be  rank0: [0, 0], rank1: [2, 0], rank2: [1, 0], rank3: [3, 0]
         # TODO: to make the local shard of FSDP2 + TP correct for resharding, it would require strided_sharding
         # as well as let compute_local_shape_and_global_offset takes into consideration of strided_sharding.
         comm_mode = CommDebugMode()
-        with comm_mode:
+        with CommDebugMode():
             global_tensor = torch.arange(8).view(4, 2)
             mesh_2d = init_device_mesh(
                 self.device_type, (2, 2), mesh_dim_names=("DP", "TP")
