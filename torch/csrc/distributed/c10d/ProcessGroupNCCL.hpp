@@ -37,6 +37,10 @@
 
 namespace c10d {
 
+// Control whether to always use high priority streams
+static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
+    "TORCH_NCCL_HIGH_PRIORITY"};
+
 // Control whether or not wait() is blocking or non-blocking.
 static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
     "TORCH_NCCL_BLOCKING_WAIT",
@@ -430,6 +434,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::shared_ptr<ProcessGroupNCCL> split_from;
     int64_t split_color{0};
     std::vector<uint64_t> global_ranks_in_group;
+    std::string group_name;
   };
 
   // If you wish to create multiple process groups, each with a potentially

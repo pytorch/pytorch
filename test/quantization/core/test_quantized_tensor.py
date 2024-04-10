@@ -1603,7 +1603,7 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(dequantized_X, dequantized_decomposed_X)
 
     def test_decomposed_choose_qparams_per_token_asymmetric_backward(self):
-         # register the ops
+        # register the ops
         import torch.ao.quantization.fx._decomposed
         x = torch.randn(2, 3).requires_grad_()
         (s, zp) = torch.ops.quantized_decomposed.choose_qparams_per_token_asymmetric(x, torch.int8)

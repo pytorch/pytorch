@@ -3615,7 +3615,16 @@ class ShapeEnv:
             # variables have to have their value range bounds adjusted as
             # well)
             s = sympy.Symbol(f"shape_{idx}", positive=True, integer=True)
-            offset = lower - 1
+
+            # Note:
+            #   Offset might be a fraction(e.g. aten.split.Tensor), but shapes are always integers.
+            #   Sympy might give unexepected results when comparing an integer with a non-integer
+            #   Therefore, we cast offset to int here.
+            #   For example:
+            #       shape_0 = sympy.Symbol("shape_0", positive=True, integer=True)
+            #       expr = sympy.Eq(shape_0 - 1/3, 4)
+            #       expr.xreplace({}) # False
+            offset = int(lower - 1)
             new_shape_env[k] = s + offset
             new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
 
@@ -4098,7 +4107,7 @@ class ShapeEnv:
         if is_debug and config.extended_debug_cpp:
             cpp_stack = CapturedTraceback.extract(cpp=True)
             maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
-        else:
+        elif is_debug:
             maybe_extra_debug += (
                 "\nFor C++ stack trace, run with "
                 "TORCHDYNAMO_EXTENDED_DEBUG_CPP=1"
