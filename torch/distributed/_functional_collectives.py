@@ -175,9 +175,7 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
     group_name = _resolve_group_name(group, tag)
-    tensor = torch.ops._c10d_functional.all_reduce(
-        self, reduceOp.lower(), group_name
-    )
+    tensor = torch.ops._c10d_functional.all_reduce(self, reduceOp.lower(), group_name)
     return _maybe_wrap_tensor(tensor)
 
 
