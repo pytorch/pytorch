@@ -31,6 +31,8 @@ from typing import (
 )
 from typing_extensions import ParamSpec
 
+import numpy
+
 import torch
 from torch import inf, SymInt, Tensor
 from torch.autograd.graph import Node as _Node
