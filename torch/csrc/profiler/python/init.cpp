@@ -1,6 +1,7 @@
 #include <torch/csrc/profiler/python/init.h>
 
 #include <ATen/record_function.h>
+#include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -9,7 +10,6 @@
 #include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/utils/pybind.h>
-#include <c10/core/impl/PyInterpreter.h>
 
 struct THPCapturedTraceback {
   PyObject_HEAD std::shared_ptr<torch::CapturedTraceback> data;
