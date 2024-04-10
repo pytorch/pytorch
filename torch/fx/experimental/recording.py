@@ -1,4 +1,5 @@
 import functools
+import inspect
 import itertools
 import logging
 from dataclasses import dataclass
@@ -220,13 +221,20 @@ def _extract_shape_env_and_assert_equal(args, kwargs):
 def record_shapeenv_event(*, save_tracked_fakes: bool = False) -> Callable:
     def decorator(fn: Callable) -> Callable:
         assert callable(fn)
+        args = inspect.getfullargspec(fn).args
+        assert args and args[0] == "self", (
+            "record_shapeenv_event should only wrap methods on ShapeEnv; refactor your "
+            "code so that it calls into a method on ShapeEnv"
+        )
         name = fn.__name__
 
         @functools.wraps(fn)
         def wrapper(*args, **kwargs):
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-            if isinstance(args[0], ShapeEnv) and args[0].is_recording:  # type: ignore[has-type]
+            assert isinstance(args[0], ShapeEnv)
+
+            if args[0].is_recording:  # type: ignore[has-type]
                 # If ShapeEnv is already recording an event, call the wrapped
                 # function directly.
                 #
