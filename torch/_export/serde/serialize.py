@@ -1084,7 +1084,7 @@ class GraphModuleSerializer(metaclass=Final):
                 # undefined Tensor which will be implicitly converted to None in Python.
                 output_arguments.append(Argument.create(as_none=()))
             elif isinstance(meta, FakeTensor):
-                assert isinstance(return_schema.real_type, torch.TensorType)
+                assert isinstance(return_schema.real_type, (torch.OptionalType, torch.TensorType))
                 user_node = _output_node_at_index(node, idx)
                 name = (
                     user_node.name
