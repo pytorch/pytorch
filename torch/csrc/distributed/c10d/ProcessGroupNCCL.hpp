@@ -37,10 +37,6 @@
 
 namespace c10d {
 
-// Control whether to always use high priority streams
-static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
-    "TORCH_NCCL_HIGH_PRIORITY"};
-
 // Control whether or not wait() is blocking or non-blocking.
 static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
     "TORCH_NCCL_BLOCKING_WAIT",
@@ -108,7 +104,7 @@ static std::vector<std::string> TORCH_NCCL_ABORT_IN_DESTROY_PG = {
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
-constexpr const char* EXCEPTION_DUMP = "exception_dump";
+constexpr const char* TIMEOUT_DUMP = "timeout_dump";
 
 constexpr const int kWorkStatusUpdatePeriodMs = 30 * 1000; // 30 seconds
 
@@ -434,7 +430,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::shared_ptr<ProcessGroupNCCL> split_from;
     int64_t split_color{0};
     std::vector<uint64_t> global_ranks_in_group;
-    std::string group_name;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -1031,9 +1026,8 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // Whether or not to enable timeout root cause analysis.
   bool desyncDebug_;
 
-  // Whether or not to dump debug info on exception including both watchdog
-  // timeout and nccl errors.
-  bool dumpOnException_;
+  // Whether or not to dump debug info on timeout
+  bool dumpOnTimeout_;
 
   // Whether or not to create start CUDAEvent and enable timing for start
   // and end events. Note that enableTiming_ is always true if desyncDebug_

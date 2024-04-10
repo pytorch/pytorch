@@ -46,16 +46,6 @@ use_buck = inductor_config.is_fbcode()
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-def _accuracy_fails(gm, example_inputs, compiler_fn):
-    return backend_accuracy_fails(
-        gm,
-        example_inputs,
-        compiler_fn,
-        only_fwd=config.repro_forward_only,
-        ignore_non_fp=config.repro_ignore_non_fp,
-    )
-
-
 def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
     """
     A minifier decorator that wraps the TorchDynamo produced Fx graph modules.
@@ -88,7 +78,7 @@ def wrap_backend_debug(unconfigured_compiler_fn, compiler_name: str):
             if config.repro_level == 4:
                 # Check Accuracy
                 compiled_gm = compiler_fn(copy.deepcopy(gm), example_inputs)
-                if _accuracy_fails(gm, example_inputs, compiler_fn):
+                if backend_accuracy_fails(gm, example_inputs, compiler_fn):
                     log.warning(
                         "Accuracy failed for the TorchDynamo produced graph. Creating script to minify the error."
                     )
@@ -314,14 +304,17 @@ def dynamo_accuracy_minifier_backend(gm, example_inputs, compiler_name):
     gm.eval()
 
     # Check Accuracy
-    if _accuracy_fails(gm, example_inputs, compiler_fn):
+    if backend_accuracy_fails(
+        gm, example_inputs, compiler_fn, only_fwd=config.repro_forward_only
+    ):
         log.warning("Accuracy failed for the TorchDynamo produced graph")
         dump_state_fn = functools.partial(
             dump_backend_state, compiler_name=compiler_name, check_accuracy=True
         )
         fails_fn = functools.partial(
-            _accuracy_fails,
+            backend_accuracy_fails,
             compiler_fn=compiler_fn,
+            only_fwd=config.repro_forward_only,
         )
         dump_state_fn(fx.GraphModule(gm, copy.deepcopy(gm.graph)), example_inputs)
         minifier(
@@ -431,13 +424,7 @@ def repro_run(options, mod, load_args):
             # TODO: disable clone
             args = run_load_args(options, mod, load_args)
             assert same_two_models(mod, mod, args), "Eager itself failed"
-            if not same_two_models(
-                mod,
-                opt_mod,
-                args,
-                only_fwd=config.repro_forward_only,
-                ignore_non_fp=config.repro_ignore_non_fp,
-            ):
+            if not same_two_models(mod, opt_mod, args):
                 raise AccuracyError("Dynamo failed")
     else:
         with torch.cuda.amp.autocast(enabled=options.autocast):

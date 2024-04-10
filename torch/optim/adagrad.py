@@ -338,7 +338,7 @@ def _multi_tensor_adagrad(
                 lr_decay=lr_decay,
                 eps=eps,
                 has_sparse_grad=True,
-                maximize=maximize,
+                maximize=False,
                 differentiable=differentiable,
                 has_complex=has_complex,
             )

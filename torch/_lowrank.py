@@ -116,8 +116,7 @@ def svd_lowrank(
                                integer, and defaults to 2
 
         M (Tensor, optional): the input tensor's mean of size
-                              :math:`(*, 1, n)`, which will be broadcasted
-                              to the size of A in this function.
+                              :math:`(*, 1, n)`.
 
     References::
         - Nathan Halko, Per-Gunnar Martinsson, and Joel Tropp, Finding
@@ -150,7 +149,6 @@ def _svd_lowrank(
     if M is None:
         M_t = None
     else:
-        M = M.broadcast_to(A.size())
         M_t = _utils.transpose(M)
     A_t = _utils.transpose(A)
 

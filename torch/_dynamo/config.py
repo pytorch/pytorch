@@ -187,13 +187,6 @@ repro_forward_only = os.environ.get("TORCHDYNAMO_REPRO_FORWARD_ONLY") == "1"
 # [@compile_ignored: debug]
 repro_tolerance = 1e-3
 
-
-# Whether to ignore non-floating point values when checking accuracy.
-# Checking accuracy of non-floating point values such as boolean tensors
-# can lead to false positives.
-# [@compile_ignored: debug]
-repro_ignore_non_fp = os.environ.get("TORCHDYNAMO_REPRO_IGNORE_NON_FP") == "1"
-
 # If True, when testing if two models are the same, we will test them against
 # a third fp64 reference and only report a problem if the RMSE relative to the
 # fp64 is greater.  However, this will use more memory; you may disable this
@@ -377,11 +370,6 @@ _save_config_ignore = {
     "skipfiles_inline_module_allowlist",
 }
 
-# for backend="cudagraphs", mutations on input be sent to the cudagraph backend
-# or replayed in aot_autograd epilogue. default is False because mutation on inputs
-# can prevent cudagraphing.
-cudagraph_backend_keep_input_mutation = False
-
 # When True, only ops that have the torch.Tag.pt2_compliant tag
 # will be allowed into the graph; all other ops will be disallowed
 # and will fall back to eager-mode PyTorch. Useful to ensure
@@ -391,7 +379,7 @@ only_allow_pt2_compliant_ops = False
 capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
-capture_func_transforms = True
+capture_func_transforms = False
 
 # enable/disable user-defined triton kernel optimizations
 optimize_user_defined_triton_kernels = True

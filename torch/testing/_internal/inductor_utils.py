@@ -32,8 +32,6 @@ HAS_CPU = LazyVal(test_cpu)
 
 HAS_CUDA = torch.cuda.is_available() and has_triton()
 
-HAS_XPU = torch.xpu.is_available() and has_triton()
-
 HAS_GPU = HAS_CUDA
 
 GPUS = ["cuda"]
@@ -43,7 +41,7 @@ HAS_MULTIGPU = any(
     for gpu in GPUS
 )
 
-tmp_gpus = [x for x in ["cuda", "xpu"] if getattr(torch, x).is_available()]
+tmp_gpus = [x for x in GPUS if getattr(torch, x).is_available()]
 assert len(tmp_gpus) <= 1
 GPU_TYPE = "cuda" if len(tmp_gpus) == 0 else tmp_gpus.pop()
 del tmp_gpus
@@ -86,5 +84,4 @@ def skipDeviceIf(cond, msg, *, device):
     return decorate_fn
 
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
-skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
 skipCPUIf = functools.partial(skipDeviceIf, device="cpu")

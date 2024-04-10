@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 import copy
+import sys
 import unittest
 from typing import Any, Dict
 
@@ -91,6 +92,9 @@ _DEQUANTIZE_OPS = [
 
 
 @unittest.skipIf(IS_WINDOWS, "Windows not yet supported for torch.compile")
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestDuplicateDQPass(QuantizationTestCase):
     def _test_duplicate_dq(
         self,

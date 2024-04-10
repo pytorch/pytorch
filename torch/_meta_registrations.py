@@ -614,7 +614,7 @@ def make_dep_token(
     pin_memory=None,
     memory_format=None,
 ):
-    return torch.empty(0, device="meta")
+    return torch.empty([], device="meta")
 
 
 @register_meta(aten.sym_constrain_range.default)

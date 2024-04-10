@@ -557,17 +557,15 @@ def prop_index_select(op_schema: OpSchema) -> OutputSharding:
             kwargs_schema=op_schema.kwargs_schema,
         )
     )
-    if result.redistribute_schema:
-        schema_suggestion = result.redistribute_schema
-        result.redistribute_schema = OpSchema(
-            op=op_schema.op,
-            args_schema=(
-                schema_suggestion.args_schema[0],
-                dim,
-                schema_suggestion.args_schema[1][dim],
-            ),
-            kwargs_schema=op_schema.kwargs_schema,
-        )
+    if result.schema_suggestions:
+        result.schema_suggestions = [
+            OpSchema(
+                op=op_schema.op,
+                args_schema=(s.args_schema[0], dim, s.args_schema[1][dim]),
+                kwargs_schema=op_schema.kwargs_schema,
+            )
+            for s in result.schema_suggestions
+        ]
     return result
 
 
@@ -612,8 +610,8 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
         assert isinstance(indices_out.output_spec, DTensorSpec)
         indices_spec: DTensorSpec = indices_out.output_spec
     else:
-        assert indices_out.redistribute_schema is not None
-        valid_indices_suggestion = indices_out.redistribute_schema
+        assert indices_out.schema_suggestions is not None
+        valid_indices_suggestion = indices_out.schema_suggestions[0]
         for i, v in enumerate(valid_indices_suggestion.args_spec):
             multi_indices_spec[valid_indices_spec[i][0]] = v
         # we'll need to call pointwise_rule again to see what's our ideal indices_spec and then
@@ -672,23 +670,25 @@ def prop_index(op_schema: OpSchema) -> OutputSharding:
     else:
         result = OutputSharding(
             output_spec=None,
-            redistribute_schema=OpSchema(
-                op=op_schema.op,
-                args_schema=(
-                    DTensorSpec(
-                        mesh=values_spec.mesh,
-                        placements=tuple(
-                            [
-                                Replicate() if need_reshard_on_values[i] else v
-                                for i, v in enumerate(values_spec.placements)
-                            ]
+            schema_suggestions=[
+                OpSchema(
+                    op=op_schema.op,
+                    args_schema=(
+                        DTensorSpec(
+                            mesh=values_spec.mesh,
+                            placements=tuple(
+                                [
+                                    Replicate() if need_reshard_on_values[i] else v
+                                    for i, v in enumerate(values_spec.placements)
+                                ]
+                            ),
+                            tensor_meta=values_spec.tensor_meta,
                         ),
-                        tensor_meta=values_spec.tensor_meta,
+                        multi_indices_spec,
                     ),
-                    multi_indices_spec,
-                ),
-                kwargs_schema=op_schema.kwargs_schema,
-            ),
+                    kwargs_schema=op_schema.kwargs_schema,
+                )
+            ],
         )
         return result
 
@@ -733,11 +733,13 @@ def split_rule(op_schema: OpSchema) -> OutputSharding:
     if need_reshard:
         return OutputSharding(
             None,
-            redistribute_schema=OpSchema(
-                op=op_schema.op,
-                args_schema=(input_spec,) + op_schema.args_schema[1:],
-                kwargs_schema=op_schema.kwargs_schema,
-            ),
+            schema_suggestions=[
+                OpSchema(
+                    op=op_schema.op,
+                    args_schema=(input_spec,) + op_schema.args_schema[1:],
+                    kwargs_schema=op_schema.kwargs_schema,
+                ),
+            ],
         )
 
     def size_split(N, i):

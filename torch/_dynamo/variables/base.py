@@ -327,9 +327,6 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Used by LazyVariableTracker to indicate an unrealized node"""
         return True
 
-    def next_variable(self, tx):
-        unimplemented(f"next({self})")
-
     def __init__(
         self,
         *,

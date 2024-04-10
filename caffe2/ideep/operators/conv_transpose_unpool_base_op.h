@@ -3,19 +3,21 @@
 #include "caffe2/ideep/ideep_utils.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 
+using namespace caffe2;
+
 namespace {
 
-class IDEEPConvTransposeUnpoolBase : public caffe2::IDEEPOperator {
+class IDEEPConvTransposeUnpoolBase : public IDEEPOperator {
  public:
   USE_IDEEP_DEF_ALIASES();
   USE_IDEEP_OPERATOR_FUNCTIONS();
 
-  IDEEPConvTransposeUnpoolBase(const caffe2::OperatorDef& operator_def, caffe2::Workspace* ws)
+  IDEEPConvTransposeUnpoolBase(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPOperator(operator_def, ws),
         legacy_pad_(
-            static_cast<caffe2::LegacyPadding>(OperatorBase::GetSingleArgument<int>(
+            static_cast<LegacyPadding>(OperatorBase::GetSingleArgument<int>(
                 "legacy_pad",
-                caffe2::LegacyPadding::NOTSET))),
+                LegacyPadding::NOTSET))),
         kernel_(OperatorBase::GetRepeatedArgument<int>("kernels")),
         stride_(OperatorBase::GetRepeatedArgument<int>("strides")),
         pads_(OperatorBase::GetRepeatedArgument<int>("pads")),
@@ -24,8 +26,8 @@ class IDEEPConvTransposeUnpoolBase : public caffe2::IDEEPOperator {
             OperatorBase::GetSingleArgument<int>("shared_buffer", 0)) {
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
-    if (legacy_pad_ == caffe2::LegacyPadding::VALID ||
-        legacy_pad_ == caffe2::LegacyPadding::SAME) {
+    if (legacy_pad_ == LegacyPadding::VALID ||
+        legacy_pad_ == LegacyPadding::SAME) {
       CAFFE_ENFORCE(
           !OperatorBase::HasArgument("pads"),
           "If you use legacy padding VALID or SAME, you should not specify "
@@ -61,8 +63,8 @@ class IDEEPConvTransposeUnpoolBase : public caffe2::IDEEPOperator {
 
     if (OperatorBase::HasArgument("pad")) {
       CAFFE_ENFORCE(
-          legacy_pad_ != caffe2::LegacyPadding::VALID &&
-              legacy_pad_ != caffe2::LegacyPadding::SAME,
+          legacy_pad_ != LegacyPadding::VALID &&
+              legacy_pad_ != LegacyPadding::SAME,
           "If you use legacy padding VALID or SAME, you should not specify "
           "any specific padding values.");
       pads_.resize(4, OperatorBase::GetSingleArgument<int>("pad", 0));
@@ -72,8 +74,8 @@ class IDEEPConvTransposeUnpoolBase : public caffe2::IDEEPOperator {
         OperatorBase::HasArgument("pad_b") &&
         OperatorBase::HasArgument("pad_r")) {
       CAFFE_ENFORCE(
-          legacy_pad_ != caffe2::LegacyPadding::VALID &&
-              legacy_pad_ != caffe2::LegacyPadding::SAME,
+          legacy_pad_ != LegacyPadding::VALID &&
+              legacy_pad_ != LegacyPadding::SAME,
           "If you use legacy padding VALID or SAME, you should not specify "
           "any specific padding values.");
       pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_t", 0));
@@ -102,8 +104,8 @@ class IDEEPConvTransposeUnpoolBase : public caffe2::IDEEPOperator {
     CAFFE_ENFORCE_EQ(stride_.size(), kernel_.size());
     CAFFE_ENFORCE_EQ(adj_.size(), kernel_.size());
 
-    if (legacy_pad_ != caffe2::LegacyPadding::VALID &&
-        legacy_pad_ != caffe2::LegacyPadding::SAME) {
+    if (legacy_pad_ != LegacyPadding::VALID &&
+        legacy_pad_ != LegacyPadding::SAME) {
       CAFFE_ENFORCE_EQ(pads_.size(), 2 * kernel_.size());
     }
 
@@ -172,13 +174,13 @@ class IDEEPConvTransposeUnpoolBase : public caffe2::IDEEPOperator {
   }
 
  private:
-  caffe2::LegacyPadding legacy_pad_;
+  LegacyPadding legacy_pad_;
 
  protected:
-  std::vector<int> kernel_;
-  std::vector<int> stride_;
-  std::vector<int> pads_;
-  std::vector<int> adj_;
+  vector<int> kernel_;
+  vector<int> stride_;
+  vector<int> pads_;
+  vector<int> adj_;
   bool shared_buffer_;
 
   // Accessors for 2D conv params.
@@ -232,7 +234,7 @@ class IDEEPConvTransposeUnpoolBase : public caffe2::IDEEPOperator {
       int* pad_tail,
       int* out_size) {
     switch (legacy_pad_) {
-      case caffe2::LegacyPadding::NOTSET:
+      case LegacyPadding::NOTSET:
         CAFFE_ENFORCE_GE(*pad_head, 0);
         CAFFE_ENFORCE_GE(*pad_tail, 0);
         *out_size =
@@ -240,13 +242,13 @@ class IDEEPConvTransposeUnpoolBase : public caffe2::IDEEPOperator {
         break;
       // We handle cases of LegacyPadding::VALID and LegacyPadding::SAME
       // the same way
-      case caffe2::LegacyPadding::VALID:
-      case caffe2::LegacyPadding::SAME:
+      case LegacyPadding::VALID:
+      case LegacyPadding::SAME:
         *pad_head = 0;
         *pad_tail = 0;
         *out_size = (in_size - 1) * stride + kernel + adj;
         break;
-      case caffe2::LegacyPadding::CAFFE_LEGACY_POOLING:
+      case LegacyPadding::CAFFE_LEGACY_POOLING:
         LOG(FATAL) << "CAFFE_LEGACY_POOLING is no longer supported.";
         break;
     }

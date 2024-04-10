@@ -139,7 +139,7 @@ inline int getCvarInt(const std::vector<std::string>& env, int def) {
 
     try {
       ret = std::stoi(val);
-    } catch (std::exception&) {
+    } catch (std::exception& e) {
       TORCH_CHECK(false, "Invalid value for environment variable: " + env[i]);
     }
   }

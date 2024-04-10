@@ -3,7 +3,6 @@
 import sys
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
-from torch.testing._internal.inductor_utils import HAS_CUDA
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -117,5 +116,4 @@ class TestMemoryPlanning(TestCase):
 
 
 if __name__ == "__main__":
-    if HAS_CUDA:
-        run_tests()
+    run_tests()

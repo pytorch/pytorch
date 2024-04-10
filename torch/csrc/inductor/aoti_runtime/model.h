@@ -26,9 +26,8 @@
 // the "binary-architecture" flag:
 // https://man7.org/linux/man-pages/man1/objcopy.1.html
 // todo: use #embed in C++ 23 once available
-// The constants are NOT readonly because they may be mutated.
-extern uint8_t _binary_constants_bin_start[];
-extern uint8_t _binary_constants_bin_end[];
+extern const uint8_t _binary_constants_bin_start[];
+extern const uint8_t _binary_constants_bin_end[];
 
 #define AOTI_CONST_GPU_ALIGNMENT 64
 

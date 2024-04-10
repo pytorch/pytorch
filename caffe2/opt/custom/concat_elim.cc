@@ -6,8 +6,6 @@
 #include "nomnigraph/Support/Common.h"
 #include "nomnigraph/Transformations/SubgraphMatcher.h"
 
-using namespace nom::repr;
-
 namespace caffe2 {
 namespace opt {
 

@@ -242,10 +242,6 @@ pyhpc_equation_of_state,pass,0
 
 
 
-pyhpc_isoneutral_mixing,fail_to_run,0
-
-
-
 pyhpc_turbulent_kinetic_energy,pass,0
 
 
@@ -254,7 +250,7 @@ pytorch_CycleGAN_and_pix2pix,pass,0
 
 
 
-pytorch_stargan,pass,0
+pytorch_stargan,fail_to_run,0
 
 
 

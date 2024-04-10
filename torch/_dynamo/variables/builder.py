@@ -54,13 +54,10 @@ from ..source import (
     ConstDictKeySource,
     ConvertIntSource,
     GetItemSource,
-    GradSource,
     is_constant_source,
     is_from_defaults,
-    is_from_optimizer_source,
     LocalSource,
     NumpyTensorSource,
-    OptimizerSource,
     RandomValueSource,
     Source,
     TupleIteratorGetItemSource,
@@ -633,19 +630,8 @@ class VariableBuilder:
             return StreamContextVariable.create(self.tx, stream_var)
         elif isinstance(value, _StreamBase):
             self.install_guards(GuardBuilder.ID_MATCH)
-            stream_proxy = self.tx.output.create_proxy(
-                "call_function",
-                torch.cuda.Stream,
-                (),
-                {
-                    "stream_id": value.stream_id,
-                    "device_index": value.device_index,
-                    "device_type": value.device_type,
-                },
-            )
-            stream_proxy.node.meta["example_value"] = value
             return StreamVariable(
-                stream_proxy,
+                None,
                 value,
                 value.device,
                 source=self.source,
@@ -677,8 +663,7 @@ class VariableBuilder:
             # TODO: this doing it manually is bad
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif isinstance(value, torch.optim.Optimizer):
-            self.install_guards(GuardBuilder.ID_MATCH)
-            self.source = OptimizerSource(self.source)
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             return OptimizerVariable(value, source=self.source)
         elif WorldMetaClassVariable.is_group_member_type(value):
             return WorldMetaClassVariable(value, source=self.source)
@@ -1103,14 +1088,9 @@ class VariableBuilder:
             **options,
         )
 
-        guard_type = GuardBuilder.TENSOR_MATCH
-
-        if isinstance(source, GradSource) and is_from_optimizer_source(source):
-            guard_type = GuardBuilder.NOT_NONE_MATCH
-
         self.install_guards(
             functools.partial(
-                guard_type,
+                GuardBuilder.TENSOR_MATCH,
                 value=value
                 if isinstance(source, NumpyTensorSource)
                 else TensorWeakRef(value),
@@ -1349,9 +1329,7 @@ def _dataclasses_fields_lambda(obj):
     return TupleVariable(items)
 
 
-def wrap_fx_proxy(
-    tx, proxy, example_value=None, subclass_type=None, **options
-) -> VariableTracker:
+def wrap_fx_proxy(tx, proxy, example_value=None, subclass_type=None, **options):
     kwargs = {
         "tx": tx,
         "proxy": proxy,

@@ -225,9 +225,6 @@ class FunctionalizeInterpreter(FuncTorchInterpreter):
     def functionalize_add_back_views(self):
         return self._cptr.functionalizeAddBackViews()
 
-    def get_state(self):
-        return (self.key().name, self.level())
-
 
 def coerce_cinterpreter(cinterpreter: CInterpreter) -> FuncTorchInterpreter:
     key = cinterpreter.key()
