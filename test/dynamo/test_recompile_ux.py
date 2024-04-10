@@ -112,6 +112,7 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
 
         a = torch.rand(3, 4, 5, device="cuda")
         b = torch.rand(3, 4, 5, device="cuda")
+        b_v = torch.rand(3, 5, 4, device="cuda").view(3, 4, 5)
         b_p = torch.rand(3, 5, 4, device="cuda").permute(0, 2, 1)
         c = torch.rand(3, 4, 5, device="cuda")
         compile_counter = torch._dynamo.testing.CompileCounter()
@@ -122,6 +123,9 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(compile_counter.frame_count, 1)
 
             opt_func(a, b, c)  # no guard fail or recompile
+            self.assertEqual(compile_counter.frame_count, 1)
+
+            opt_func(a, b_v, c)  # a view should not cause nvfuser recompile
             self.assertEqual(compile_counter.frame_count, 1)
 
             opt_func(a, b_p, c)  # a permutation should cause recompile
