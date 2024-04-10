@@ -245,11 +245,11 @@ class TestList(JitTestCase):
     def test_list_keyword(self):
         def foo():
             return (
-                list([1, 2, 3]),
-                list(("a", "b")),
+                list([1, 2, 3]),  # noqa: C410
+                list(("a", "b")),  # noqa: C410
                 list(range(5)),
                 list("abcdefg"),
-            )  # noqa: C410
+            )
 
         self.checkScript(foo, ())
 
@@ -345,9 +345,9 @@ class TestList(JitTestCase):
 
             @torch.jit.script
             def fn():
-                x: Dict[int, str] = dict(
+                x: Dict[int, str] = dict(  # noqa: C406
                     [("foo", 1), ("bar", 2), ("baz", 3)]
-                )  # noqa: C406
+                )
                 return x
 
     def test_dict_keyword_with_nested_call(self):
