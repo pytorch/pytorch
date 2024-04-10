@@ -25,7 +25,7 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import is_standard_setattr, UserDefinedObjectVariable
 
 
 class SuperVariable(VariableTracker):
@@ -170,8 +170,12 @@ class SuperVariable(VariableTracker):
             return super(variables.CustomizedDictVariable, self.objvar).call_method(
                 tx, "__setitem__", args, kwargs
             )
-        else:
-            unimplemented(f"non-function or method super: {inner_fn}")
+        elif is_standard_setattr(inner_fn) and isinstance(
+            self.objvar, UserDefinedObjectVariable
+        ):
+            return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+
+        unimplemented(f"non-function or method super: {inner_fn}")
 
 
 class UnknownVariable(VariableTracker):
@@ -503,6 +507,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if name == "__setattr__":
+            return super().call_method(tx, name, args, kwargs)
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
         if self.saved_tensors is None:
@@ -584,6 +590,33 @@ class GetAttrVariable(VariableTracker):
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         return self.obj.call_method(tx, self.name, args, kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if (
+            name == "__getitem__"
+            and self.name == "__dict__"
+            and len(args) == 1
+            and not kwargs
+            and args[0].is_python_constant()
+        ):
+            obj = self.obj
+            key = args[0].as_python_constant()
+            # redirect to var_getattr on the original obj
+            if isinstance(obj, variables.UserDefinedObjectVariable):
+                obj._check_for_getattribute()
+                if (
+                    key in obj.value.__dict__
+                    or tx.output.side_effects.has_pending_mutation_of_attr(obj, key)
+                ):
+                    return obj.var_getattr(tx, key)
+
+        return super().call_method(tx, name, args, kwargs)
 
 
 class MethodWrapperVariable(VariableTracker):
@@ -911,3 +944,35 @@ class DebuggingVariable(VariableTracker):
                 return False
 
         return True
+
+
+class LoggingLoggerVariable(VariableTracker):
+    """
+    Represents a call to any of logging.Logger methods
+    """
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if tx.export:
+            # For export cases, we can just make debugging functions no-ops
+            return
+        unimplemented("Logger not supported for non-export cases")
+
+
+class StopIterationVariable(VariableTracker):
+    def __init__(self, args, **kwargs):
+        super().__init__(**kwargs)
+        self.args = args
+
+    def reconstruct(self, codegen):
+        codegen.load_import_from("builtins", "StopIteration")
+        codegen.foreach(self.args)
+        codegen.call_function(len(self.args), True)
