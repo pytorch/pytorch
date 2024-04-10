@@ -214,6 +214,14 @@ class ExperimentalConfigWrapper {
 };
 } // namespace
 
+bool collectivesProfilerExists() {
+#ifdef KINETO_HAS_NCCL_PROFILER
+  return true;
+#else
+  return false;
+#endif
+}
+
 void prepareTrace(
     const bool cpuOnly,
     const ActivitySet& activities,
@@ -247,6 +255,9 @@ void prepareTrace(
       LOG(INFO) << "Enabling CUDA Sync Events";
       k_activities.insert(libkineto::ActivityType::CUDA_SYNC);
     }
+  }
+  if (collectivesProfilerExists()) {
+    k_activities.insert(libkineto::ActivityType::COLLECTIVE_COMM);
   }
   if (activities.count(torch::autograd::profiler::ActivityType::PrivateUse1)) {
     k_activities.insert(kPrivateUse1Types.begin(), kPrivateUse1Types.end());
