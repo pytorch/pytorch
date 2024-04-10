@@ -845,13 +845,13 @@ class DebugAutotuner(CachingAutotuner):
             if num_gb is None:
                 num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
             gb_per_s = num_gb / (ms / 1e3)
-            self.cached = (ms, num_gb, gb_per_s, kernel_name)
-        else:
-            ms, num_gb, gb_per_s, kernel_name = self.cached
-        collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
-        print(
-            create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
-        )
+            self.cached = ms, num_gb, gb_per_s, kernel_name
+            collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
+            print(
+                create_bandwidth_info_str(
+                    ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}"
+                )
+            )
 
 
 def hash_configs(configs: List[Config]):
