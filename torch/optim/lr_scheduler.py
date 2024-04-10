@@ -1,9 +1,8 @@
 import types
 import math
 from torch import inf
-from functools import wraps, partial
+from functools import partial
 import warnings
-import weakref
 from collections import Counter
 from bisect import bisect_right
 
@@ -50,43 +49,11 @@ class LRScheduler:
                                    f"in param_groups[{i}] when resuming an optimizer")
         self.base_lrs = [group['initial_lr'] for group in optimizer.param_groups]
         self.last_epoch = last_epoch
-
-        # Following https://github.com/pytorch/pytorch/issues/20124
-        # We would like to ensure that `lr_scheduler.step()` is called after
-        # `optimizer.step()`
-        def with_counter(method):
-            if getattr(method, '_with_counter', False):
-                # `optimizer.step()` has already been replaced, return.
-                return method
-
-            # Keep a weak reference to the optimizer instance to prevent
-            # cyclic references.
-            instance_ref = weakref.ref(method.__self__)
-            # Get the unbound method for the same purpose.
-            func = method.__func__
-            cls = instance_ref().__class__
-            del method
-
-            @wraps(func)
-            def wrapper(*args, **kwargs):
-                instance = instance_ref()
-                instance._step_count += 1
-                wrapped = func.__get__(instance, cls)
-                return wrapped(*args, **kwargs)
-
-            # Note that the returned function here is no longer a bound method,
-            # so attributes like `__func__` and `__self__` no longer exist.
-            wrapper._with_counter = True
-            return wrapper
-
-        self.optimizer.step = with_counter(self.optimizer.step)
         self.verbose = _check_verbose_deprecated_warning(verbose)
-
         self._initial_step()
 
     def _initial_step(self):
         """Initialize step counts and performs a step"""
-        self.optimizer._step_count = 0
         self._step_count = 0
         self.step()
 
@@ -127,25 +94,7 @@ class LRScheduler:
                              "%.5d") % epoch
                 print(f'Epoch {epoch_str}: adjusting learning rate of group {group} to {lr:.4e}.')
 
-
     def step(self, epoch=None):
-        # Raise a warning if old pattern is detected
-        # https://github.com/pytorch/pytorch/issues/20124
-        if self._step_count == 1:
-            if not hasattr(self.optimizer.step, "_with_counter"):
-                warnings.warn("Seems like `optimizer.step()` has been overridden after learning rate scheduler "
-                              "initialization. Please, make sure to call `optimizer.step()` before "
-                              "`lr_scheduler.step()`. See more details at "
-                              "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
-
-            # Just check if there were two first lr_scheduler.step() calls before optimizer.step()
-            elif self.optimizer._step_count < 1:
-                warnings.warn("Detected call of `lr_scheduler.step()` before `optimizer.step()`. "
-                              "In PyTorch 1.1.0 and later, you should call them in the opposite order: "
-                              "`optimizer.step()` before `lr_scheduler.step()`.  Failure to do this "
-                              "will result in PyTorch skipping the first value of the learning rate schedule. "
-                              "See more details at "
-                              "https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate", UserWarning)
         self._step_count += 1
 
         with _enable_get_lr_call(self):
