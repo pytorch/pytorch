@@ -56,6 +56,9 @@ jobs:
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     runs-on: ${{ matrix.runner }}
     steps:
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm
+        
       - name: Chown workspace
         shell: bash
         run: |
@@ -77,9 +80,6 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
-
-      - name: Setup ROCm
-        uses: ./.github/actions/setup-rocm
 
       - name: configure aws credentials
         id: aws_creds
