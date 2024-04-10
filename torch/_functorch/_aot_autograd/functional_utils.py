@@ -6,7 +6,6 @@ This file contains utilities related to functionalization in AOTAutograd:
 4. checking if a graph is functional i.e. whether it contains any mutation ops
 """
 
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -200,7 +199,10 @@ def gen_alias_from_base(
     aliased_base_tensor,
     target_meta_tensor,
     target_requires_grad,
-    target_functional_tensor: Optional["FunctionalTensorMetadataEq"] = None,
+    # Actual type: Optional[FunctionalTensorMetadataEq]
+    # Can't use it here because it lives inside schemas.py. Importing that class would lead
+    # to an error due to an import cycle.
+    target_functional_tensor=None,
 ):
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
@@ -218,6 +220,9 @@ def gen_alias_from_base(
     # functions applied to itself (collected during functionalization) so as
     # to replay them (view functions) on the aliased_base_tensor.
     if target_functional_tensor is not None:
+        from .schemas import FunctionalTensorMetadataEq
+
+        assert isinstance(target_functional_tensor, FunctionalTensorMetadataEq)
         functional_tensor = target_functional_tensor.tensor
 
         try:
