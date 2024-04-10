@@ -311,7 +311,6 @@ std::unique_ptr<KinetoObserverContext> ThreadLocalSubqueue::begin_op(
           fn.forwardThreadId(),
           fn.scope(),
           fn.isAsync(),
-          fn.handle(),
           fn.debugHandle(),
           fn.name()});
   if (config_.report_input_shapes) {

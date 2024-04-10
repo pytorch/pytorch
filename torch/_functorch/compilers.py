@@ -33,8 +33,9 @@ log = logging.getLogger(__name__)
 # These canonicalizations are needed here (and not decompositions), as the ops
 # we're trying to canonicalize to CompositeImplicitAutograd.
 def _canonicalize(fx_g):
-    for node in fx_g.graph.find_nodes(op="call_function", target=torch.ops.aten._to_copy):
-        node.target = torch.ops.aten.to
+    for node in fx_g.graph.nodes:
+        if node.target == torch.ops.aten._to_copy:
+            node.target = torch.ops.aten.to
     fx_g.recompile()
     return fx_g
 
@@ -66,9 +67,10 @@ def ts_compile(fx_g: fx.GraphModule, inps) -> Callable:
     with _disable_jit_autocast():
         strip_overloads(fx_g)
 
-        for node in fx_g.graph.find_nodes(op="call_function", target=torch.ops.aten._to_copy):
+        for node in fx_g.graph.nodes:
             if (
-                len(node.args) == 1
+                node.target == torch.ops.aten._to_copy
+                and len(node.args) == 1
                 and len(node.kwargs) == 1
                 and "dtype" in node.kwargs
             ):

@@ -2,8 +2,6 @@
 #include <ATen/Functions.h>
 #include <ATen/Tensor.h>
 #include <ATen/autocast_mode.h>
-#include <ATen/native/sparse/cuda/ComputeSparseTile.h>
-#include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/ATen.h>
 #include <ATen/core/Tensor.h>
@@ -14,6 +12,8 @@
 
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
 #else
+#include <ATen/native/sparse/cuda/ComputeSparseTile.h>
+#include <ATen/native/sparse/cuda/SparseSemiStructuredPack.h>
 #include <cuda_runtime.h>
 #endif
 
@@ -278,6 +278,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile(
   c10::string_view algorithm,
   bool use_cutlass)
 {
+#if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
+  AT_ERROR("_sparse_semi_structured_tile: not supported");
+  return std::make_tuple(Tensor{}, Tensor{}, Tensor{}, Tensor{}, Tensor{});
+#else
   std::string algo(algorithm.data(), algorithm.size());
 
   auto runTyped = [&](auto type)
@@ -300,6 +304,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _sparse_semi_structured_tile(
         input.scalar_type() == at::ScalarType::BFloat16, input.scalar_type());
     return runTyped(cutlass::bfloat16_t());
   }
+#endif
 }
 
 } // namespace at::native

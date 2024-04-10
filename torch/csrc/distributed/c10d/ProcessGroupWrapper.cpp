@@ -89,15 +89,15 @@ struct CollectiveFingerPrint {
   // Takes a serialized fingerprint from
   // CollectiveFingerPrint::serialize_fingerprint and deserializes it back to a
   // CollectiveFingerPrint struct
-  CollectiveFingerPrint deserialize_fingerprint(
-      const at::Tensor& serialized_tensor) {
+  CollectiveFingerPrint deserialize_fingerprint(at::Tensor serialized_tensor) {
+    OpType optype;
     auto dtypes = std::vector<int8_t>();
     auto device_types = std::vector<int8_t>();
     auto sizes = std::vector<std::vector<int64_t>>();
     int index = 0;
-    int64_t seq = 0;
+    int seq = 0;
     // 1. OpType
-    auto optype = OpType(serialized_tensor[index].item<int>());
+    optype = OpType(serialized_tensor[index].item<int>());
     index++;
     int num_tensors = 0;
     if (index < serialized_tensor.size(0)) {
@@ -383,7 +383,7 @@ bool check_same_size(const std::vector<at::Tensor>& input_tensors) {
 } // namespace
 
 ProcessGroupWrapper::ProcessGroupWrapper(
-    const c10::intrusive_ptr<Backend>& backend,
+    c10::intrusive_ptr<Backend> backend,
     c10::intrusive_ptr<Backend> glooBackend)
     : Backend(backend->getRank(), backend->getSize()),
       backend_(backend),

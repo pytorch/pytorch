@@ -2,10 +2,6 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,fail_to_run,3
-
-
-
 BERT_pytorch,pass,6
 
 
@@ -166,6 +162,10 @@ moco,pass,11
 
 
 
+moondream,model_fail_to_load,0
+
+
+
 nanogpt,pass,7
 
 
@@ -283,3 +283,7 @@ vision_maskrcnn,pass,33
 
 
 yolov3,pass,9
+
+
+
+torchrec_dlrm,fail_to_run,3

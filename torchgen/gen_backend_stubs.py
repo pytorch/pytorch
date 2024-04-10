@@ -108,10 +108,10 @@ def parse_backend_yaml(
     supported.extend(full_codegen)
 
     # non_native is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
-    yaml_values.pop("non_native", {})
+    non_native = yaml_values.pop("non_native", {})
 
     # ir_gen is ignored by parse_backend_yaml, and re-parsed in gen_lazy_tensor.py
-    yaml_values.pop("ir_gen", {})
+    _ = yaml_values.pop("ir_gen", {})
 
     assert (
         len(yaml_values.keys()) == 0

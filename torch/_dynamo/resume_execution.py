@@ -30,9 +30,6 @@ CO_COROUTINE = 0x0080
 CO_ITERABLE_COROUTINE = 0x0100
 CO_ASYNC_GENERATOR = 0x0200
 
-# trace_rules.py import this constant for consistency
-TORCH_DYNAMO_RESUME_IN_PREFIX = "torch_dynamo_resume_in"
-
 
 @dataclasses.dataclass(frozen=True)
 class ReenterWith:
@@ -373,7 +370,7 @@ class ContinueExecutionCache:
             )
             code_options[
                 "co_name"
-            ] = f"{TORCH_DYNAMO_RESUME_IN_PREFIX}_{code_options['co_name']}_at_{lineno}"
+            ] = f"torch_dynamo_resume_in_{code_options['co_name']}_at_{lineno}"
             if is_py311_plus:
                 qualified_path = code_options["co_qualname"].rsplit(".", maxsplit=1)
                 if len(qualified_path) == 1:
@@ -383,7 +380,7 @@ class ContinueExecutionCache:
                     module_name, co_name = qualified_path
                     code_options[
                         "co_qualname"
-                    ] = f"{module_name}.{TORCH_DYNAMO_RESUME_IN_PREFIX}_{co_name}_at_{lineno}"
+                    ] = f"{module_name}.torch_dynamo_resume_in_{co_name}_at_{lineno}"
             code_options["co_firstlineno"] = lineno
             code_options["co_cellvars"] = tuple()
             code_options["co_freevars"] = freevars

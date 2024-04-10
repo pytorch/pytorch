@@ -7,9 +7,10 @@ import torch._inductor.config as inductor_config
 from torch._dynamo.test_minifier_common import MinifierTestBase
 from torch._inductor import config
 from torch.testing._internal.common_utils import IS_JETSON, IS_MACOS, TEST_WITH_ASAN
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.utils._triton import has_triton
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+_HAS_TRITON = has_triton()
+requires_cuda = unittest.skipUnless(_HAS_TRITON, "requires cuda")
 
 
 class MinifierTests(MinifierTestBase):

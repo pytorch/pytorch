@@ -216,11 +216,18 @@ class _KinetoProfile:
             return self.profiler.export_chrome_trace(path)
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
-        """Save stack traces to a file
+        """Save stack traces in a file in a format suitable for visualization.
 
         Args:
             path (str): save stacks file to this location;
             metric (str): metric to use: "self_cpu_time_total" or "self_cuda_time_total"
+
+        .. note::
+            Example of using FlameGraph tool:
+
+            - git clone https://github.com/brendangregg/FlameGraph
+            - cd FlameGraph
+            - ./flamegraph.pl --title "CPU time" --countname "us." profiler.stacks > perf_viz.svg
         """
         assert self.profiler
         return self.profiler.export_stacks(path, metric)
@@ -735,11 +742,6 @@ class profile(_KinetoProfile):
         if action_list:
             for action in action_list:
                 action()
-
-    def _stats(self) -> Optional[prof._ProfilerStats]:
-        if self.profiler is None:
-            return None
-        return self.profiler._stats
 
 
 class ExecutionTraceObserver(_ITraceObserver):

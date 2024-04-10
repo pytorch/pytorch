@@ -637,14 +637,14 @@ class ListIteratorVariable(VariableTracker):
     def __repr__(self):
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
-    def next_variable(self, tx):
+    def next_variables(self, tx):
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
             raise StopIteration()
         tx.output.side_effects.mutation(self)
         self.index += 1
-        return self.items[old_index]
+        return self.items[old_index], self
 
     def call_method(
         self,

@@ -167,10 +167,11 @@ def get_device_op_overrides(device: str):
 
     if not device_op_overrides_dict.keys():
         from .cuda import device_op_overrides  # noqa: F401
-        from .xpu import device_op_overrides as xpu_op_overrides  # noqa: F401
 
     if device in device_op_overrides_dict.keys():
         return device_op_overrides_dict[device]
+
+    return DeviceOpOverrides()
 
 
 @functools.lru_cache(None)
@@ -420,9 +421,6 @@ class PythonPrinter(ExprPrinter):
     def _helper_sqrt(self, expr):
         return f"math.sqrt({self._print(expr)})"
 
-    def _print_OpaqueUnaryFn_sqrt(self, expr):
-        return self._helper_sqrt(expr.args[0])
-
     def _print_Pow(self, expr):
         # Pow() confuses triton
         base, exp = expr.args
@@ -465,39 +463,39 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) >= 2
         return f"min({', '.join(map(self._print, expr.args))})"
 
-    def _print_OpaqueUnaryFn_cos(self, expr):
+    def _print_cos(self, expr):
         assert len(expr.args) == 1
         return f"math.cos({self._print(expr.args[0])})"
 
-    def _print_OpaqueUnaryFn_cosh(self, expr):
+    def _print_cosh(self, expr):
         assert len(expr.args) == 1
         return f"math.cosh({self._print(expr.args[0])})"
 
-    def _print_OpaqueUnaryFn_acos(self, expr):
+    def _print_acos(self, expr):
         assert len(expr.args) == 1
         return f"math.acos({self._print(expr.args[0])})"
 
-    def _print_OpaqueUnaryFn_sin(self, expr):
+    def _print_sin(self, expr):
         assert len(expr.args) == 1
         return f"math.sin({self._print(expr.args[0])})"
 
-    def _print_OpaqueUnaryFn_sinh(self, expr):
+    def _print_sinh(self, expr):
         assert len(expr.args) == 1
         return f"math.sinh({self._print(expr.args[0])})"
 
-    def _print_OpaqueUnaryFn_asin(self, expr):
+    def _print_asin(self, expr):
         assert len(expr.args) == 1
         return f"math.asin({self._print(expr.args[0])})"
 
-    def _print_OpaqueUnaryFn_tan(self, expr):
+    def _print_tan(self, expr):
         assert len(expr.args) == 1
         return f"math.tan({self._print(expr.args[0])})"
 
-    def _print_OpaqueUnaryFn_tanh(self, expr):
+    def _print_tanh(self, expr):
         assert len(expr.args) == 1
         return f"math.tanh({self._print(expr.args[0])})"
 
-    def _print_OpaqueUnaryFn_atan(self, expr):
+    def _print_atan(self, expr):
         assert len(expr.args) == 1
         return f"math.atan({self._print(expr.args[0])})"
 
@@ -592,28 +590,21 @@ class OpOverrides:
 
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
-            if impl is None:
-                continue
-
             if isinstance(impl, str):
                 nof_args = 2 if "{y}" in impl else 1
                 # extend the following dictionary with factory
                 # functions for a specific number of arguments as
                 # needed:
                 factory = {1: pointwise_factory_1, 2: pointwise_factory_2}[nof_args]
-                impl = factory(impl)
-
-            setattr(cls, funcname, staticmethod(impl))
+                setattr(cls, funcname, staticmethod(factory(impl)))
 
 
 @dataclasses.dataclass
 class OverridesData:
     name: str
-    cpp: Union[str, Callable[..., str]]
-    # None when not impl in libdevice/triton
-    triton: Union[Optional[str], Callable[..., str]] = None
-    # None when not impl in aten/.../vec
-    cppvec: Union[Optional[str], Callable[..., str]] = None
+    cpp: str
+    triton: Optional[str] = None  # None when not impl in libdevice/triton
+    cppvec: Optional[str] = None  # None when not impl in aten/.../vec
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -662,13 +653,6 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
         cpp="calc_erfcx({x})",
         triton="libdevice.erfcx({x})",
         name="special_erfcx",
-    ),
-    fma=OverridesData(
-        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y, z: f"std::fma({x}, {y}, {z})",
-        cppvec=lambda x, y, z: f"fmadd({x}, {y}, {z})",
-        triton=lambda x, y, z: f"libdevice.fma({x}, {y}, {z})",
-        name="fma",
     ),
     # erfinv, exp2, expit, gammaln
     igamma=OverridesData(
@@ -1421,6 +1405,7 @@ class Kernel(CodeGen):
             [Tuple[CSEVariable, ...], Tuple[CSEVariable, ...]], Tuple[CSEVariable, ...]
         ],
         values: Tuple[CSEVariable, ...],
+        inits: Tuple[int, ...],
     ) -> Tuple[CSEVariable, ...]:
         raise NotImplementedError()
 
@@ -1603,8 +1588,9 @@ class Kernel(CodeGen):
                     Tuple[CSEVariable, ...],
                 ],
                 values: Tuple[CSEVariable, ...],
+                inits: Tuple[int, ...],
             ) -> Tuple[CSEVariable, ...]:
-                return self.scan(dtypes, combine_fn, values)
+                return self.scan(dtypes, combine_fn, values, inits)
 
             @staticmethod
             def bucketize(
@@ -1706,19 +1692,9 @@ class KernelTemplate:
     """
 
     @staticmethod
-    def indent_except_first(source: str, num_indents: int, indents_spacing=4):
-        lines = source.splitlines(True)
-        if len(lines) > 1:
-            lines[1:] = [
-                (" " * indents_spacing * num_indents) + line for line in lines[1:]
-            ]
-        return "".join(lines)
-
-    @staticmethod
     def _template_from_string(source):
         env = jinja2_env()
         if env is not None:
-            env.filters["indent_except_first"] = KernelTemplate.indent_except_first
             return env.from_string(source)
         return None
 

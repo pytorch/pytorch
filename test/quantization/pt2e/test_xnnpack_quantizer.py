@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: mobile"]
 import copy
 import operator
+import sys
+import unittest
 
 import torch
 import torch._dynamo as torchdynamo
@@ -42,6 +44,9 @@ from torch.testing._internal.common_quantized import override_quantized_engine
 
 
 @skipIfNoQNNPACK
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
     def test_conv1d(self):
         quantizer = XNNPACKQuantizer()
@@ -852,7 +857,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             torch.ops.aten.add.Tensor,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            # TODO torch.ops.aten.add.Tensor,
+            torch.ops.aten.add_.Tensor,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
         ]
         self._test_quantizer(
@@ -882,7 +887,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             torch.ops.aten.mul.Tensor,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            # TODO torch.ops.aten.mul.Tensor,
+            torch.ops.aten.mul_.Tensor,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
         ]
         self._test_quantizer(
@@ -901,7 +906,7 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
         node_occurrence = {
             # two input and one output for first add, and output for second add
             torch.ops.quantized_decomposed.quantize_per_tensor.default: 5,
-            # TODO torch.ops.quantized_decomposed.dequantize_per_tensor.default: 9,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 7,
         }
         node_list = [
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
@@ -912,10 +917,10 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
             torch.ops.aten.mul.Tensor,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            # TODO torch.ops.aten.add.Tensor,
+            torch.ops.aten.add_.Tensor,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
             torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-            # TODO torch.ops.aten.mul.Tensor,
+            torch.ops.aten.mul_.Tensor,
             torch.ops.quantized_decomposed.quantize_per_tensor.default,
         ]
         self._test_quantizer(
@@ -985,6 +990,9 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
 
 # TODO: express this using self._test_quantizer, add test for inception_v4
+@unittest.skipIf(
+    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+)
 class TestXNNPACKQuantizerModels(PT2EQuantizationTestCase):
     @skip_if_no_torchvision
     @skipIfNoQNNPACK

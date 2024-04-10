@@ -419,7 +419,7 @@ class OutputSharding:
     """
 
     output_spec: OutputSpecType
-    redistribute_schema: Optional[OpSchema] = None
+    schema_suggestions: Optional[List[OpSchema]] = None
     failed_reason: Optional[str] = None
     needs_redistribute: bool = False
 

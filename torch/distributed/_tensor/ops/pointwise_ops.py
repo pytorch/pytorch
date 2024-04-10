@@ -527,7 +527,6 @@ for op in pointwise_ops:
 
 # TODO: add all for_each ops
 for_each_ops = [
-    aten._foreach_abs.default,
     aten._foreach_abs_.default,
     aten._foreach_addcdiv_.Scalar,
     aten._foreach_addcdiv_.ScalarList,
@@ -536,8 +535,6 @@ for_each_ops = [
     aten._foreach_addcmul_.Scalar,
     aten._foreach_addcmul_.ScalarList,
     aten._foreach_addcmul_.Tensor,
-    aten._foreach_clamp_max_.Scalar,
-    aten._foreach_clamp_min_.Scalar,
     aten._foreach_div_.List,
     aten._foreach_div_.ScalarList,
     aten._foreach_lerp_.Scalar,

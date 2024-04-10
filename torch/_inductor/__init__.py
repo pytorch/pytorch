@@ -1,4 +1,4 @@
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import torch.fx
 import torch.utils._pytree as pytree
@@ -30,9 +30,7 @@ def compile(
 
 def aot_compile(
     gm: torch.fx.GraphModule,
-    args: Tuple[Any],
-    kwargs: Optional[Dict[str, Any]] = None,
-    *,
+    example_inputs: List[torch.Tensor],
     options: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
@@ -40,8 +38,7 @@ def aot_compile(
 
     Args:
         gm: The FX graph to compile.
-        args:  Example arguments
-        kwargs: Example keyword arguments
+        example_inputs:  List of tensor inputs.
         options:  Optional dict of config options.  See `torch._inductor.config`.
 
     Returns:
@@ -73,19 +70,6 @@ def aot_compile(
         pytree.treespec_dumps(out_spec) if out_spec is not None else ""
     )
 
-    flat_args_with_path, received_spec = pytree.tree_flatten_with_path(
-        (args, kwargs or {})
-    )
-    flat_example_inputs = tuple(x[1] for x in flat_args_with_path)
-
-    if in_spec is not None and received_spec != in_spec:
-        raise ValueError(  # noqa: TRY200
-            "Trying to flatten user inputs with exported input tree spec: \n"
-            f"{in_spec}\n"
-            "but actually got inputs with tree spec of: \n"
-            f"{received_spec}"
-        )
-
     options = (
         {
             "aot_inductor.serialized_in_spec": serialized_in_spec,
@@ -101,7 +85,7 @@ def aot_compile(
 
     return compile_fx_aot(
         gm,
-        list(flat_example_inputs),
+        example_inputs,
         config_patches=options,
     )
 

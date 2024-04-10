@@ -80,7 +80,7 @@ struct ThreadLocalCachedOutputTensor<ArrayRefTensor<T>> {
   }
 
   std::unique_ptr<T[]> storage_;
-  int64_t capacity_ = 0;
+  size_t capacity_ = 0;
   RAIIAtenTensorHandle tensor_;
 };
 

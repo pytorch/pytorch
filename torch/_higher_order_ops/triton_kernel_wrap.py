@@ -1,5 +1,4 @@
 import dataclasses
-import inspect
 import logging
 import threading
 import warnings
@@ -171,14 +170,7 @@ def generate_ttir(kernel, kwargs):
     backend.load_dialects(context)
 
     src = ASTSource(kernel, signature, constants, specialization)
-
-    # Triton changes ASTSource.make_ir to take 3 arguments. Handle
-    # backward compatibility here.
-    if len(inspect.signature(src.make_ir).parameters) == 2:
-        ttir_module = src.make_ir(options, context)
-    else:
-        codegen_fns = backend.get_codegen_implementation()
-        ttir_module = src.make_ir(options, codegen_fns, context)
+    ttir_module = src.make_ir(options, context)
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
 

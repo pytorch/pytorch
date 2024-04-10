@@ -1,5 +1,6 @@
 # Owner(s): ["module: meta tensors"]
 
+import sys
 
 from torch.testing._internal.common_utils import (
     TestCase, TEST_WITH_TORCHDYNAMO, run_tests, skipIfCrossRef, skipIfRocm, skipIfTorchDynamo, parametrize,
@@ -771,6 +772,9 @@ class FakeTensorTest(TestCase):
             grad_in = torch.ops.aten._adaptive_avg_pool2d_backward(grad_out, inp)
             self.assertTrue(torch._prims_common.suggest_memory_format(grad_in) == torch.channels_last)
 
+    @unittest.skipIf(
+        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
+    )
     def test_export_numpy(self):
         class MyNumpyModel(torch.nn.Module):
             def forward(self, input):

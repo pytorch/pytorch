@@ -9,9 +9,10 @@ from torch.testing._internal.common_utils import (
     skipIfRocm,
     TEST_WITH_ASAN,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.utils._triton import has_triton
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+_HAS_TRITON = has_triton()
+requires_cuda = unittest.skipUnless(_HAS_TRITON, "requires cuda")
 
 
 # These minifier tests are slow, because they must be run in separate
