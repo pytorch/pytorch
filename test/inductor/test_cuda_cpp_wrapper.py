@@ -3,6 +3,7 @@ import sys
 import unittest
 from typing import NamedTuple
 
+import torch
 from torch._inductor import config
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.testing._internal.common_device_type import (
@@ -142,16 +143,21 @@ def make_test_case(
         tests.setUpClass()
         tests.setUp()
         try:
-            _, code = test_torchinductor.run_and_get_cpp_code(
-                func, *func_inputs if func_inputs else []
-            )
-            self.assertEqual("CppWrapperCodeCache" in code, True)
-            self.assertTrue(
-                all(
-                    code.count(string) == code_string_count[string]
-                    for string in code_string_count
+            with torch._C._PreserveDispatchKeyGuard():
+                torch._C._dispatch_tls_set_dispatch_key_included(
+                    torch._C.DispatchKey.Dense, True
                 )
-            )
+
+                _, code = test_torchinductor.run_and_get_cpp_code(
+                    func, *func_inputs if func_inputs else []
+                )
+                self.assertEqual("CppWrapperCodeCache" in code, True)
+                self.assertTrue(
+                    all(
+                        code.count(string) == code_string_count[string]
+                        for string in code_string_count
+                    )
+                )
         finally:
             tests.tearDown()
             tests.tearDownClass()
