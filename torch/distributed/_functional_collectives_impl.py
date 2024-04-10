@@ -43,9 +43,7 @@ else:
         global _use_native_funcol
         if _use_native_funcol is None:
             # When TORCH_DISABLE_NATIVE_FUNCOL is set, fallback to py funcol
-            _use_native_funcol = (
-                os.environ.get("TORCH_DISABLE_NATIVE_FUNCOL") != "1"
-            )
+            _use_native_funcol = os.environ.get("TORCH_DISABLE_NATIVE_FUNCOL") != "1"
         if not _use_native_funcol:
             warning_once(
                 logger,
