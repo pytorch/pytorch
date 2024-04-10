@@ -419,6 +419,11 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
     Base TestCase to be used for all conv-bn[-relu] fusion patterns.
     """
 
+    # TODO: how can we avoid adding every new test to dynamo/expected_test_failures?
+    # Otherwise it fails with the following error:
+    #   torch._dynamo.exc.InternalTorchDynamoError:
+    #   'QuantizationConfig' object has no attribute '__bool__'
+
     def setUp(self):
         # NB: Skip the test if this is a base class, this is to handle the test
         # discovery logic in buck which finds and runs all tests here including
@@ -828,12 +833,6 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         self.assertEqual(dq_dtype, torch.int32)
 
     def _do_test_qat_conv_transpose_bn(self, has_relu: bool):
-        # TODO: Skip for conv_transpose1d for now, currently failing on CI
-        # only with the following error, unable to reproduce locally:
-        #   torch._dynamo.exc.InternalTorchDynamoError:
-        #   'QuantizationConfig' object has no attribute '__bool__'
-        if self.dim == 1:
-            return
         # Use different in/out channel sizes to test if conv weight is
         # properly transposed in QAT pattern
         m = self._get_conv_bn_model(
@@ -857,7 +856,6 @@ class TestQuantizePT2EQAT_ConvBn_Base(PT2EQATTestCase):
         self._do_test_qat_conv_transpose_bn(has_relu=True)
 
 
-# TODO: enable this in the next PR
 @skipIfNoQNNPACK
 class TestQuantizePT2EQAT_ConvBn1d(TestQuantizePT2EQAT_ConvBn_Base):
     dim = 1
