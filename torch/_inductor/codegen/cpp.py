@@ -562,6 +562,11 @@ class CppPrinter(ExprPrinter):
         r = f"std::floor({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
+    def _print_Trunc(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::trunc({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
         base, exp = expr.args
