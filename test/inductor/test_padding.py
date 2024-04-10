@@ -490,32 +490,16 @@ class PaddingTest(TestCase):
         self.run_acc_and_perf_test(model, inputs, tol=1e-2)
         
     def test_nvidia_deeprecommender(self):
-        # SELU
-        use_variant = True
-        # layer_sizes = [197951, 512, 512, 1024, 512, 512, 197951]  # 9.955 v.s. 9.697
-        # layer_sizes = [197952, 512, 512, 1024, 512, 512, 197951] # 8.446 v.s. 8.924
-        # layer_sizes = [197952, 512, 512, 1024, 512, 512, 197952] # 7.201 v.s. 7.216
-        # XXX also check this since the loss is even larger than ReLU
-        # layer_sizes = [197951, 512, 512, 1024, 512, 512, 197952] # 8.713 v.s. 7.997
-
-        # ReLU
-        layer_sizes = [197951, 512, 512, 1024, 512, 512, 197951] # 9.956 v.s. 9.939
-        # layer_sizes = [197952, 512, 512, 1024, 512, 512, 197951] # 8.369 v.s. 8.882
-        # layer_sizes = [197952, 512, 512, 1024, 512, 512, 197952] # 7.156 v.s. 7.171
-        # layer_sizes = [197951, 512, 512, 1024, 512, 512, 197952] # 8.766 v.s. 8.228
-
+        layer_sizes = [197951, 512, 512, 1024, 512, 512, 197951]
         x = torch.randn(4, layer_sizes[0])
 
         class Model(nn.Module):
-            def __init__(self, use_variant=True):
+            def __init__(self):
                 super().__init__()
                 mod_list = []
                 for i in range(len(layer_sizes) - 1):
                     mod_list.append(nn.Linear(layer_sizes[i], layer_sizes[i + 1]))
-                    if use_variant:
-                        mod_list.append(nn.ReLU())
-                    else:
-                        mod_list.append(nn.SELU())
+                    mod_list.append(nn.SELU())
 
                     if i == 2:
                         mod_list.append(nn.Dropout(0.8))
@@ -524,8 +508,7 @@ class PaddingTest(TestCase):
             def forward(self, x):
                 return self.seq(x)
 
-        m = Model(use_variant=use_variant)
-
+        m = Model()
         perf_inputs = torch.randn(256, layer_sizes[0])
         self.run_acc_and_perf_test(m, x, perf_inputs)
 
@@ -547,35 +530,6 @@ class PaddingTest(TestCase):
         model, inputs = benchmark.get_module()
 
         self.run_acc_and_perf_test(model, inputs)
-
-    def skip_test_efficient_det(self):
-        """
-        Tried to construct the model and input using effdet package directly.
-        But there are too many arguments to setup..
-        """
-        from effdet import create_model, create_loader, create_dataset
-
-        model = create_model(
-            model_name="tf_efficientdet_d1",
-            bench_task="train",
-            num_classes=None,
-            pretrained=False,
-            pretrained_backbone=True,
-            redundant_bias=None,
-            label_smoothing=None,
-            legacy_focal=None,
-            jit_loss=None,
-            soft_nms=None,
-            bench_labeler=False,
-            checkpoint_path="",
-        )
-        dataset_train, _ = create_dataset(
-            "coco",
-            root=root,
-            custom_dataset_cfg=Coco2017MinimalCfg())
-        loader = create_loader(
-        )
-        pass
 
     def test_conv(self):
         x_shape = (1, 128, 640, 959)

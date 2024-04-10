@@ -425,10 +425,12 @@ shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 comprehensive_padding = (
     os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "1") == "1"
 )
-skip_grad_layout_contract = False
 # XXX: Just for testing. Will remove before landing.
 pad_fixed_layout = os.environ.get("TORCHINDUCTOR_PAD_FIXED_LAYOUT") == "1"
 pad_channels_last = False
+
+# Whether to treat output of the backward graph as user visible.
+# For user visible outputs, inductor will make sure the stride matches with eager.
 bw_outputs_user_visible = True
 
 # Record the stacktrace when creating a FixedLayout. Used to figure out

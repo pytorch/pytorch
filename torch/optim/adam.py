@@ -315,7 +315,6 @@ def adam(params: List[Tensor],
     else:
         func = _single_tensor_adam
 
-    # print(f"fused {fused}, foreach {foreach}") # TODO
     func(params,
          grads,
          exp_avgs,

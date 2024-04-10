@@ -26,9 +26,6 @@
 
 namespace torch::autograd {
 
-TORCH_API void setSkipGradLayoutContract(bool skip);
-TORCH_API bool getSkipGradLayoutContract();
-
 struct Edge;
 struct FunctionPostHook;
 struct FunctionPreHook;
