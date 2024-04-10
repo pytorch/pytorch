@@ -1420,7 +1420,7 @@ def forward(self, x_1, y_1):
             torch._check_is_size(i0)
             torch._check(i0 <= 1000000)
             return torch.zeros(256 * i0).view(-1, 447)
-        make_fx(f, tracing_mode="symbolic")(torch.tensor(256*447))
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447))
 
     def test_unbacked_unify_guard(self):
         def f(x, y):
