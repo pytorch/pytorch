@@ -2837,7 +2837,8 @@ def forward(self, arg0_1, arg1_1):
         mod = TestMod(fn)
         inp = torch.randn(2, 2)
 
-        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        with torch.no_grad():
+            gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1, arg1_1):
     add = torch.ops.aten.add.Tensor(arg1_1, 2)
@@ -2858,7 +2859,8 @@ def forward(self, arg0_1, arg1_1):
         mod = TestMod(fn)
         inp = torch.randn(2, 2)
 
-        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        with torch.no_grad():
+            gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1, arg1_1):
     _set_grad_enabled = torch._C._set_grad_enabled(True)
@@ -2994,7 +2996,8 @@ def forward(self, arg0_1, arg1_1):
         inp = torch.randn(2, 2)
         mod = TestMod(foo)
 
-        gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
+        with torch.no_grad():
+            gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1, arg1_1):
     _set_grad_enabled = torch._C._set_grad_enabled(True)
