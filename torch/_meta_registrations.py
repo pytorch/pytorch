@@ -3337,6 +3337,29 @@ def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
     )
 
 
+@register_meta(
+    [
+        aten._foreach_addcdiv_.ScalarList,
+        aten._foreach_addcmul_.ScalarList,
+    ]
+)
+def meta__foreach_addcop__scalarlist(self, tensor1, tensor2, scalars):
+    torch._check(
+        all(isinstance(l, List) for l in [self, tensor1, tensor2, scalars]),
+        lambda: (
+            "_foreach_addc*_ op expects arguments of type: List[Tensor], List[Tensor], List[Tensor], List[Scalar], "
+            f"but got {type(self)}, {type(tensor1)}, {type(tensor2)}, and {type(scalars)}"
+        ),
+    )
+    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
+    torch._check(
+        len(self) == len(tensor1)
+        and len(self) == len(tensor2)
+        and len(self) == len(scalars),
+        lambda: "All input tensor lists must have the same length",
+    )
+
+
 @register_meta([aten._fused_adam_.default])
 def meta__fused_adam_(
     self,
