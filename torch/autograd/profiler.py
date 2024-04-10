@@ -215,9 +215,9 @@ class profile:
             warn(
                 "The attribute `use_cuda` will be deprecated soon, please use ``use_device = 'cuda'`` instead."
             )
-        self.use_device: Optional[str] = (
-            "privateuseone" if use_device is None else use_device
-        )
+            self.use_device = "cuda"
+        else:
+            self.use_device: Optional[str] = use_device
         self.function_events: Optional[EventList] = None
         self.entered = False
         self.record_shapes = record_shapes
@@ -523,7 +523,7 @@ class profile:
             )
             max_evt_id = max(max_evt_id, fe.id)
             if fe.device_type == DeviceType.CPU and not fe.is_async:
-                if self.use_device and self.use_device not in ["cuda", "xpu"]:
+                if self.use_device == "privateuseone":
                     privateuse1_time = kineto_event.privateuse1_elapsed_us()
                     if privateuse1_time > 0:
                         fe.append_kernel(fe.name, fe.device_index, privateuse1_time)
