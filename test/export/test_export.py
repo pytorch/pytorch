@@ -45,8 +45,8 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
-    TestCase as TorchTestCase,
     TEST_TRANSFORMERS,
+    TestCase as TorchTestCase,
 )
 from torch.utils._pytree import (
     LeafSpec,
@@ -4365,7 +4365,9 @@ def forward(self, x):
     @unittest.skipIf(not TEST_TRANSFORMERS, "No transformers")
     def test_hf_logging_logger(self):
         import transformers
+
         logger = transformers.utils.logging.get_logger(__name__)
+
         class M(torch.nn.Module):
             def forward(self, x):
                 logger.warning_once("start")
