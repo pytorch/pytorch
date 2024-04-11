@@ -58,6 +58,8 @@ log = logging.getLogger(__name__)
 _T = TypeVar("_T")
 VarRanges = Dict[sympy.Expr, sympy.Expr]
 
+ALIGNMENT = 16
+
 
 def do_bench_using_profiling(fn: Callable[[], Any], warmup=25, rep=100) -> float:
     """
@@ -1509,3 +1511,12 @@ def is_gpu(device: str):
 def device_need_guard(device: str):
     assert isinstance(device, str)
     return is_gpu(device)
+
+
+def tensor_is_aligned(tensor: torch.Tensor):
+    return (tensor.storage_offset() * get_dtype_size(tensor.dtype)) % ALIGNMENT == 0
+
+
+def should_assume_input_aligned(example_input: torch.Tensor):
+    # See Note: [Input Alignment handling in Inductor]
+    return tensor_is_aligned(example_input) or config.assume_aligned_inputs

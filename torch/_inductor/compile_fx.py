@@ -42,7 +42,12 @@ from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
-from torch._inductor.utils import BoxedBool, count_tangents
+from torch._inductor.utils import (
+    BoxedBool,
+    count_tangents,
+    should_assume_input_aligned,
+    tensor_is_aligned,
+)
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
@@ -63,7 +68,6 @@ from .graph import GraphLowering
 from .ir import ExternKernelNode
 from .utils import (
     get_cloned_parameter_buffer_name,
-    get_dtype_size,
     has_incompatible_cudagraph_ops,
     output_node,
 )
@@ -813,20 +817,29 @@ def get_input_idxs_to_check(
     inputs: Union[List[torch.Tensor], Sequence[int]],
     static_input_idxs: Sequence[int],
 ) -> Sequence[int]:
-    def is_aligned(storage_offset, dtype):
-        return (storage_offset * get_dtype_size(dtype)) % ALIGNMENT == 0
-
+    """
+    This function runs at compile time, and generates a list of indices for which we
+    might need to do a copy to preserve alignment requirements.
+    """
     ids_to_check = []
     for i, input in enumerate(inputs):
-        if (
-            isinstance(input, torch.Tensor)
-            and (
-                i not in static_input_idxs
-                or not is_aligned(input.storage_offset(), input.dtype)
-            )
-            and input.device.type == "cuda"
-        ):
-            ids_to_check.append(i)
+        if not isinstance(input, torch.Tensor):
+            continue  # non-tensors don't need alignment
+        if not input.device.type == "cuda":
+            continue  # right now we only care for cuda tensors
+        if i in static_input_idxs and tensor_is_aligned(input):
+            continue  # static input -> the tensor won't change; and we already know this is aligned
+        if not should_assume_input_aligned(input):
+            # See Note: [Input Alignment handling in Inductor]
+            # we will generate triton code that doesn't assume alignment for this input.
+            continue
+
+        # if we get here, then
+        # (a) our triton code assumes that the input is aligned
+        # (b) we can't be sure ahead of time that the input will actually be aligned.
+        # therefore, at runtime, we'll need to check that the input is aligned
+        # (and if not, clone it to make it aligned.)
+        ids_to_check.append(i)
     return ids_to_check
 
 
@@ -848,10 +861,7 @@ def align_inputs(
     inputs: List[torch.Tensor],
     static_input_idxs: Sequence[int] = (),
 ):
-    if config.assume_aligned_inputs:
-        inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
-    else:
-        inputs_to_check = []
+    inputs_to_check = get_input_idxs_to_check(inputs, static_input_idxs)
     return align_inputs_from_check_idxs(model, inputs_to_check)
 
 
@@ -1380,7 +1390,16 @@ def compile_fx(
             unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
                 "dynamo_flat_name_to_original_fqn"
             ]
-        with V.set_fake_mode(fake_mode), compiled_autograd.disable():
+
+        # Disable amp as in aot_dispatch_autograd (https://github.com/pytorch/pytorch/pull/86515)
+        # In inference_compiler (fw_compiler_base), _recursive_joint_graph_passes will call into
+        # _sfdp_init() to register patterns.
+        # When fallback_random is set to True, the sdpa patterns will be traced during runtime.
+        # If amp is turned on, the traced FP32 patterns will have prims.convert_element_type which
+        # will be the same as the generated FP16 patterns.
+        disable_amp = torch._C._is_any_autocast_enabled()
+        context = torch._C._DisableAutocast if disable_amp else contextlib.nullcontext
+        with V.set_fake_mode(fake_mode), compiled_autograd.disable(), context():
             return inference_compiler(unlifted_gm, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
