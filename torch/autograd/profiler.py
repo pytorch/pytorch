@@ -217,7 +217,7 @@ class profile:
             )
             self.use_device: Optional[str] = "cuda"
         else:
-            self.use_device: Optional[str] = use_device
+            self.use_device = use_device
         self.function_events: Optional[EventList] = None
         self.entered = False
         self.record_shapes = record_shapes
