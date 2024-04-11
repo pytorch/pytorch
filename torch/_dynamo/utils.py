@@ -2628,6 +2628,7 @@ def nn_module_proxy(mod):
     else:
         proxy = mod.__class__.__new__(mod.__class__)
         proxy.__dict__ = mod.__dict__
+        return proxy
 
 
 
