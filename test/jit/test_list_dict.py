@@ -1617,7 +1617,7 @@ class TestDict(JitTestCase):
         cu.define(dedent(inspect.getsource(fn)))
         self.assertEqual(cu.fn(inputs()), python_out)
         self.assertEqual(torch.jit.script(fn)(inputs()), python_out)
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x['hi']"):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", 'x["hi"]'):
             self.checkScript(fn, [{}])
 
     @skipIfTorchDynamo("TorchDynamo fails for this test for unknown reason")
@@ -1898,7 +1898,7 @@ class TestDict(JitTestCase):
         def missing_index(x: Dict[str, int]) -> int:
             return x["dne"]
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", "x[\"dne\""):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "KeyError", 'x["dne"'):
             missing_index({"item": 20, "other_item": 120})
 
         code = dedent(
