@@ -21,7 +21,7 @@ quantized_decomposed = torch.ops.quantized_decomposed
 quantized = torch.ops.quantized
 
 # Only for per tensor quant since permute may changes the channel idx
-_QUANTIZE_PER_TENSOR_OPS = [
+_PER_TENSOR_QUANTIZE_OPS = [
     quantized_decomposed.quantize_per_tensor.default,
     quantized_decomposed.quantize_per_tensor.tensor,
 ]
@@ -2213,9 +2213,14 @@ def quant_lift_up(graph_module: torch.fx.GraphModule):
     It produces a DQ->LINEAR->Q pattern which can be fused by backend.
     """
     for node in graph_module.graph.nodes:
+        # <TODO> Leslie: Here we verify that the quant node has exactly
+        # one input FX node, with constant scalar value for scale and zero point.
+        # For the case input of quant node has more than one input FX nodes,
+        # extend the implementation to lift up all the connected nodes
+        # before the view nodes to keep the topological order.
         if (
             node.op == "call_function"
-            and node.target in _QUANTIZE_PER_TENSOR_OPS
+            and node.target in _PER_TENSOR_QUANTIZE_OPS
             and len(node.all_input_nodes) == 1
         ):
             quant_node = node
