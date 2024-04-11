@@ -644,15 +644,16 @@ def forward(self, arg0_1, arg1_1):
                 super().__init__()
 
             def forward(self, tq, x):
-                torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
-                torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
-                x_sin = torch.ops._TorchScriptTesting.queue_pop(
-                    tq
-                ) - torch.ops._TorchScriptTesting.queue_size(tq)
-                x_cos = torch.ops._TorchScriptTesting.queue_pop(
-                    tq
-                ) + torch.ops._TorchScriptTesting.queue_size(tq)
-                return x_sin, x_cos, tq
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                    torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+                    x_sin = torch.ops._TorchScriptTesting.queue_pop(
+                        tq
+                    ) - torch.ops._TorchScriptTesting.queue_size(tq)
+                    x_cos = torch.ops._TorchScriptTesting.queue_pop(
+                        tq
+                    ) + torch.ops._TorchScriptTesting.queue_size(tq)
+                    return x_sin, x_cos, tq
 
         mod = Model()
 
@@ -680,35 +681,19 @@ def forward(self, arg0_1, arg1_1):
             with torch.library._scoped_library(ns, "FRAGMENT") as lib:
                 for op in ops:
                     lib.impl(
-                        op.__name__, torch.library.fallthrough_kernel, "AutogradCPU"
-                    )
-                    lib.impl(
-                        op.__name__, torch.library.fallthrough_kernel, "ADInplaceOrView"
-                    )
-                    lib.impl(
-                        op.__name__,
-                        torch.library.fallthrough_kernel,
-                        "PythonTLSSnapshot",
+                        op.__name__, torch.library.fallthrough_kernel, "AutocastCUDA"
                     )
 
                 gm = make_fx(mod, tracing_mode="fake")(tq1, x)
         else:
             for op in ops:
-                op.default.py_impl(torch._C.DispatchKey.AutogradCPU)(
-                    torch.library.fallthrough_kernel
-                )
-                op.default.py_impl(torch._C.DispatchKey.ADInplaceOrView)(
-                    torch.library.fallthrough_kernel
-                )
-                op.default.py_impl(torch._C.DispatchKey.PythonTLSSnapshot)(
+                op.default.py_impl(torch._C.DispatchKey.AutocastCUDA)(
                     torch.library.fallthrough_kernel
                 )
             gm = make_fx(mod, tracing_mode="fake")(tq1, x)
             for op in ops:
                 op.default._dispatch_cache.clear()
-                del op.default.py_kernels[torch._C.DispatchKey.AutogradCPU]
-                del op.default.py_kernels[torch._C.DispatchKey.ADInplaceOrView]
-                del op.default.py_kernels[torch._C.DispatchKey.PythonTLSSnapshot]
+                del op.default.py_kernels[torch._C.DispatchKey.AutocastCUDA]
 
         self.assertExpectedInline(
             gm.code.strip(),
