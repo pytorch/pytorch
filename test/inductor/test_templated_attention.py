@@ -12,6 +12,7 @@ from torch.nn.attention._templated_attention import _compose, _templated_attenti
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.utils._triton import has_triton
+from unittest.mock import patch
 
 # Skip tests if Triton is not available
 supported_platform = skipUnless(
@@ -167,6 +168,14 @@ class TestTemplatedSDPA(InductorTestCase):
         value = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
         with self.assertRaisesRegex(ValueError, "NYI: The target sequence length"):
             _templated_attention(query, key, value, _identity_mod)
+
+    @supported_platform
+    @patch.object(torch._inductor.config, "max_autotune", True)
+    def test_max_autotune(self):
+        def score_mod(score, b, h, m, n):
+            return score * 2
+
+        self.run_test(score_mod)
 
 
 common_utils.instantiate_parametrized_tests(TestTemplatedSDPA)

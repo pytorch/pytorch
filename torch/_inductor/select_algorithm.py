@@ -1016,7 +1016,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return choices[0].output_node()
 
         selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
-        print("selected choice: %s", str(selected_choice))
+        log.debug("selected choice: %s", str(selected_choice))
         return selected_choice
 
     @classmethod
@@ -1095,6 +1095,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return result
 
         def benchmark_in_current_process(choices):
+            from triton.runtime.autotuner import OutOfResources
             timings = {}
             for choice in choices:
                 try:
@@ -1114,6 +1115,9 @@ class AlgorithmSelectorCache(PersistentCache):
                         if "illegal memory access" in msg:
                             msg += "\n\nEither error in template or triton bug.\n"
                         raise ErrorFromChoice(msg, choice, debug_str())  # noqa: TRY200
+                except OutOfResources as e:
+                    log.warning(e)
+                    timing = float("inf")
                 except AssertionError as e:
                     raise AssertionError(  # noqa: TRY200
                         f"Incorrect result from choice {choice}\n\n{e}"

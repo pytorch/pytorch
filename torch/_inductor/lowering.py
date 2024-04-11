@@ -5737,28 +5737,23 @@ def templated_attention(*args, **kwargs):
             choices: List[Any] = []
             from .select_algorithm import autotune_select_algorithm
 
-            # for BLOCK_M, BLOCK_N, num_warps, num_stages in [
-            #     (64, 128, 4, 1),
-            #     (64, 128, 4, 3),
-            #     (64, 128, 4, 2),
-            #     (32, 128, 4, 1),
-            #     (128, 128, 4, 1),
-            # ]:
-            BLOCK_N = 128
-            for BLOCK_M in [32, 64, 128]:
-                for num_stages in [3]:
-                    for num_warps in [4, 8]:
-                        sdpa_template.maybe_append_choice(
-                            choices=choices,
-                            input_nodes=(query, key, value),
-                            layout=layout,
-                            subgraphs=subgraph_buffer,
-                            num_stages=num_stages,
-                            num_warps=num_warps,
-                            BLOCK_M=BLOCK_M,
-                            BLOCK_N=BLOCK_N,
-                            BLOCK_DMODEL=query.get_size()[-1],
-                        )
+            for BLOCK_M, BLOCK_N, num_warps, num_stages in [
+                (128, 64, 4, 3),
+                (128, 128, 4, 3),
+                (128, 128, 8, 2),
+                (64, 128, 4, 3),
+            ]:
+                sdpa_template.maybe_append_choice(
+                    choices=choices,
+                    input_nodes=(query, key, value),
+                    layout=layout,
+                    subgraphs=subgraph_buffer,
+                    num_stages=num_stages,
+                    num_warps=num_warps,
+                    BLOCK_M=BLOCK_M,
+                    BLOCK_N=BLOCK_N,
+                    BLOCK_DMODEL=query.get_size()[-1],
+                )
             return autotune_select_algorithm(
                 "sdpa", choices, [query, key, value], layout
             )
