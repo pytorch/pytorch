@@ -1983,7 +1983,7 @@ def custom_op_wrapper(op: str, *args):
 @clear_on_fresh_inductor_cache
 class CppCodeCache:
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags: Dict[str, Any] = {}
 
     @staticmethod
@@ -2076,7 +2076,7 @@ def _worker_compile_cpp(lock_path, input_path, output_path, cmd):
 @clear_on_fresh_inductor_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
         "include_pytorch": False,
@@ -2221,7 +2221,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
 @clear_on_fresh_inductor_cache
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         "include_pytorch": not config.abi_compatible,
         "shared": True,
@@ -2700,6 +2700,7 @@ def _worker_compile_triton(
     device: torch.device,
     device_interface: Type[DeviceInterface],
 ):
+    _set_triton_ptxas_path()
     device_interface.Worker.set_device(device.index)
     kernel = load_kernel()
     kernel.precompile(warm_cache_only_with_cc=cc)
