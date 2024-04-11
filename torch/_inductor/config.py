@@ -699,6 +699,10 @@ class aot_inductor:
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
 
+    # flag to force weight to be appened to the shared library and mmaped  by the runtime
+    # rather than embedded into the data section. Needed to support 1B+ parameter models
+    force_mmap_weights: bool = False
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
