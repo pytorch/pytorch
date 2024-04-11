@@ -3522,7 +3522,7 @@ class ShapeEnv:
             # Clamp values of size-like variables
             for x in self.size_like & var_to_range.keys():
                 if var_to_range[x] is not None:
-                    var_to_range[x] &= ValueRanges(2, sympy.oo)
+                    var_to_range[x] = ValueRanges(2, sympy.oo)
         return bound_sympy(expr, var_to_range)
 
     @_lru_cache
@@ -3869,11 +3869,7 @@ class ShapeEnv:
                 return
             elif a in self.size_like:
                 tgt_bound_so = self.bound_sympy(tgt, size_oblivious=True)
-                # This is morally equivalent to self.bound_sympy(a, size_oblivious=True)
-                # but handles substitutions like u0 == 0
-                src_bound_so = self.var_to_range[a]
-                if src_bound_so.upper >= 2:
-                    src_bound_so &= ValueRanges(2, sympy.oo)
+                src_bound_so = self.bound_sympy(a, size_oblivious=True)
                 if not issubset(tgt_bound_so, src_bound_so):
                     self.log.debug("skipped set_replacement %s = %s (%s) "
                                    "[%s not subset of %s (size-oblivious conditions)]", a, tgt, msg, tgt_bound_so, src_bound_so)
@@ -4107,7 +4103,7 @@ class ShapeEnv:
         if is_debug and config.extended_debug_cpp:
             cpp_stack = CapturedTraceback.extract(cpp=True)
             maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
-        else:
+        elif is_debug:
             maybe_extra_debug += (
                 "\nFor C++ stack trace, run with "
                 "TORCHDYNAMO_EXTENDED_DEBUG_CPP=1"
