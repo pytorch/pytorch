@@ -9010,9 +9010,9 @@ class CommonTemplate:
             for offset2 in (0, 1, 2, 3, 4):
                 base2 = torch.randn(64 * 64 + 64, dtype=torch.float32, device=GPU_TYPE)
                 inp2 = torch.as_strided(base, (64, 64), (64, 1), offset2)
+                ref2 = fn(inp2)
                 res2 = fn_c(inp2)
-
-                self.assertEqual(ref, res2)
+                self.assertEqual(ref2, res2)
 
     @config.patch(implicit_fallbacks=True)
     def test_custom_op_1(self):
