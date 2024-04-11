@@ -171,6 +171,8 @@ def mps_ops_grad_modifier(ops):
         'nn.functional.conv_transpose1d': [torch.float16],
         'nn.functional.conv_transpose2d': [torch.float16],
         'nn.functional.conv_transpose3d': [torch.float16],
+        'nn.functional.nll_loss': [torch.float16],
+        'nn.functional.cross_entropy': [torch.float16],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
@@ -981,6 +983,8 @@ def mps_ops_modifier(ops):
         # Unsupported
         # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
         'nn.functional.avg_pool2d': [torch.float16],
+        'nn.functional.nll_loss': [torch.float16],
+        'nn.functional.cross_entropy': [torch.float16],
     }
 
     def addDecorator(op, d) -> None:
