@@ -264,6 +264,10 @@ def _chunk_dtensor(
     else:
         tp_placements = tensor.placements
         tp_placement = tp_placements[0]
+        # the 1D DTensor should be global shape, as we first shard the tensor using DTensor where
+        # DTensor preserves the global shape
+        global_shape = tensor.shape
+        global_stride = tensor.stride()
 
         tensor = tensor.to_local()
 
@@ -279,7 +283,7 @@ def _chunk_dtensor(
         shard_placements[-1] = tp_placement  # type: ignore[call-overload]
 
         return DTensor.from_local(
-            tensor, parent_mesh, replicate_placements
+            tensor, parent_mesh, replicate_placements, run_check=False, shape=global_shape, stride=global_stride,
         ).redistribute(
             device_mesh=parent_mesh,
             placements=shard_placements,
