@@ -135,7 +135,7 @@ class TestHOP(TestCase):
             buffer.seek(0)
             ep = load(buffer)
             if "while_loop" in str(op):
-                # while_loop's arguments are cast into lbist after deserailize
+                # while_loop's arguments are cast into list after deserailize
                 # but while_loop expects it to still be tuple
                 with self.assertRaisesRegex(
                     RuntimeError, "carried_inputs must be a tuple"
