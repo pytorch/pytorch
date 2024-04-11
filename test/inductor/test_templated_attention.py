@@ -31,6 +31,11 @@ test_dtypes = (
     else [torch.float16, torch.float32]
 )
 
+# TODO float16 was causing ERRORs for tests on ROCm
+# See https://github.com/pytorch/pytorch/issues/123531
+if common_utils.TEST_WITH_ROCM:
+    test_dtypes = [torch.float32]
+
 
 def _identity_mod(score, b, h, m, n):
     return score
