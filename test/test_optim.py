@@ -1582,6 +1582,36 @@ class TestOptimRenewed(TestCase):
                 optim.step()
                 self.assertTrue(mocked_foreach_impl.called)
 
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_non_empty_state(self, device, dtype, optim_info):
+        # There are internal tests that check that the state is not empty
+        optim_cls = optim_info.optim_cls
+        model = torch.nn.Linear(5, 5)
+        model.to(dtype=dtype, device=device)
+        inpt = torch.rand(2, 5, dtype=dtype, device=device)
+
+        for optim_input in optim_info.optim_inputs_func(device=device):
+            optim = optim_cls(model.parameters(), **optim_input.kwargs)
+            optim.zero_grad()
+            output = model(inpt)
+            loss = output.sum()
+            loss.backward()
+
+            if optim_info.only_supports_sparse_grads:
+                for param in model.parameters():
+                    if param.grad is not None:
+                        param.grad = param.grad.to_sparse()
+
+            if optim_info.step_requires_closure:
+                optim.step(lambda: 1.0)
+            else:
+                optim.step()
+
+            for state in optim.state.values():
+                self.assertGreater(len(state), 0)
+
+
+
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
 
