@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
+    TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
 from torch.utils._pytree import (
@@ -4590,6 +4591,31 @@ def forward(self, x):
                 logger.debug(x1)
                 x2 = x1 * x1
                 logger.info(1, 2, 3)
+                x3 = x2 + x2
+                return (x1, x3)
+
+        gm = export(M(), (torch.randn(3, 3),)).graph_module
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    add = torch.ops.aten.add.Tensor(x, x);  x = None
+    mul = torch.ops.aten.mul.Tensor(add, add)
+    add_1 = torch.ops.aten.add.Tensor(mul, mul);  mul = None
+    return (add, add_1)""",
+        )
+
+    @unittest.skipIf(not TEST_TRANSFORMERS, "No transformers")
+    def test_hf_logging_logger(self):
+        import transformers
+
+        logger = transformers.utils.logging.get_logger(__name__)
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                logger.warning_once("start")
+                x1 = x + x
+                x2 = x1 * x1
                 x3 = x2 + x2
                 return (x1, x3)
 
