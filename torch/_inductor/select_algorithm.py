@@ -1096,6 +1096,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         def benchmark_in_current_process(choices):
             from triton.runtime.autotuner import OutOfResources
+
             timings = {}
             for choice in choices:
                 try:
