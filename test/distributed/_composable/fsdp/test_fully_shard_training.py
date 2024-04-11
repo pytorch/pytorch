@@ -710,6 +710,12 @@ class TestFullyShardGradientAccumulation(FSDPTest):
 
     @skip_if_lt_x_gpu(2)
     def test_1f1b_microbatching(self):
+        self.run_subtests(
+            {"use_explicit_unshard": [False, True]},
+            self._test_1f1b_microbatching,
+        )
+
+    def _test_1f1b_microbatching(self, use_explicit_unshard: bool):
         torch.manual_seed(42)
         model_args = ModelArgs(dropout_p=0.0)
         model = Transformer(model_args)
@@ -730,6 +736,14 @@ class TestFullyShardGradientAccumulation(FSDPTest):
             )
             for _ in range(num_microbatches)
         ]
+
+        # Before pipelining, we may prefer to issue all all-gathers ahead of
+        # time to increase overlap opportunity at no difference in parameter
+        # memory usage since we do not reshard after forward
+        if use_explicit_unshard:
+            for module in model.modules():
+                if isinstance(module, FSDP):
+                    module.unshard(async_op=True)
 
         # Emulate the 1f1b pipeline schedule and only reduce gradients on the
         # last microbatch
