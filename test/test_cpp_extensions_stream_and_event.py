@@ -9,7 +9,12 @@ import unittest
 import torch
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
-from torch.testing._internal.common_utils import IS_ARM64, TEST_CUDA
+from torch.testing._internal.common_utils import (
+    IS_ARM64,
+    IS_LINUX,
+    TEST_CUDA,
+    TEST_PRIVATEUSE1,
+)
 from torch.utils.cpp_extension import CUDA_HOME, ROCM_HOME
 
 
@@ -26,7 +31,12 @@ def remove_build_path():
         shutil.rmtree(default_build_root, ignore_errors=True)
 
 
-@unittest.skipIf(IS_ARM64, "Does not work on arm")
+# Since we use a fake MTIA device backend to test generic Stream/Event, device backends are mutual exclusive to each other.
+# The test will be skipped if any of the following conditions are met:
+@unittest.skipIf(
+    IS_ARM64 or not IS_LINUX or TEST_CUDA or TEST_PRIVATEUSE1,
+    "Only on linux platform and mutual exclusive to other backends",
+)
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionStreamAndEvent(common.TestCase):
     """Tests Stream and Event with C++ extensions."""
@@ -53,18 +63,16 @@ class TestCppExtensionStreamAndEvent(common.TestCase):
     def setUpClass(cls):
         remove_build_path()
         build_dir = tempfile.mkdtemp()
-        src = f"{os.path.abspath(os.path.dirname(__file__))}/cpp_extensions/mtia_extension.cpp"
         # Load the fake device guard impl.
         cls.module = torch.utils.cpp_extension.load(
             name="mtia_extension",
-            sources=[src],
+            sources=["cpp_extensions/mtia_extension.cpp"],
             build_directory=build_dir,
             extra_include_paths=[
                 "cpp_extensions",
                 "path / with spaces in it",
                 "path with quote'",
             ],
-            extra_cflags=["-g"],
             is_python_module=False,
             verbose=True,
         )
