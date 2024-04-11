@@ -3017,18 +3017,7 @@ class CppVecKernelChecker(CppVecKernel):
                         ):
                             opt_ctx.dtype = torch.float32
 
-                    supported_dtypes = [
-                        torch.float,
-                        torch.bfloat16,
-                        torch.float16,
-                        torch.bool,
-                        torch.uint8,
-                        torch.int8,
-                        torch.int32,
-                        torch.int64,
-                    ]
-
-                    if opt_ctx.dtype not in supported_dtypes:
+                    if opt_ctx.dtype not in self.supported_dtypes:
                         self.disable_vec(f"constant dtype: {opt_ctx.dtype}")
                     return val
 
@@ -3101,16 +3090,7 @@ class CppVecKernelChecker(CppVecKernel):
 
             @staticmethod
             def to_dtype(x, dtype, src_dtype=None):
-                if dtype not in [
-                    torch.float,
-                    torch.bfloat16,
-                    torch.float16,
-                    torch.bool,
-                    torch.uint8,
-                    torch.int8,
-                    torch.int32,
-                    torch.int64,
-                ]:
+                if dtype not in self.supported_dtypes:
                     self.disable_vec(f"to_dtype: {dtype}")
                 return x
 
