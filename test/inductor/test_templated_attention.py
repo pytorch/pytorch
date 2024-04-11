@@ -5,6 +5,7 @@ from collections import namedtuple
 from typing import Callable
 
 from unittest import expectedFailure, skipUnless
+from unittest.mock import patch
 
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -12,7 +13,6 @@ from torch.nn.attention._templated_attention import _compose, _templated_attenti
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.utils._triton import has_triton
-from unittest.mock import patch
 
 # Skip tests if Triton is not available
 supported_platform = skipUnless(
