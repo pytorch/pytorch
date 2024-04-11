@@ -122,15 +122,15 @@ sdpa_template = TritonTemplate(
         # -- compute scaling constant ---
         row_max = tl.max(qk, 1)
         m_i_new = tl.maximum(m_i, row_max)
-        masked_out_rows = (m_i_new == float("-inf"))
+        # masked_out_rows = (m_i_new == float("-inf"))
 
         # TODO FIX ME and use 2^x instead of exp
         # alpha = tl.math.exp2(m_i - m_i_new)
         # p = tl.math.exp2(qk - m_i_new[:, None])
         alpha = tl.math.exp(m_i - m_i_new)
-        alpha = tl.where(masked_out_rows, 0, alpha)
+        # alpha = tl.where(masked_out_rows, 0, alpha)
         p = tl.math.exp(qk - m_i_new[:, None])
-        p = tl.where(masked_out_rows[:, None], 0, p)
+        # p = tl.where(masked_out_rows[:, None], 0, p)
 
         # -- scale and update acc --
         acc_scale = l_i * 0 + alpha  # workaround some compiler bug
