@@ -189,3 +189,21 @@ def can_generate_trivial_fake_impl(op: torch._ops.OpOverload) -> bool:
         return False
     # If the op returns nothing, then it has a trivial fake impl.
     return True
+
+
+def handle_dispatch_mode(curr_mode, op_overload, *args, **kwargs):
+    assert isinstance(curr_mode, torch.utils._python_dispatch.TorchDispatchMode)
+    overload_types = []
+    args_flattened, _ = torch.utils._pytree.tree_flatten((args, kwargs.values()))
+    for a in args_flattened:
+        # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
+        # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
+        # where in one case we only include tensors with the python key, and in another
+        # we include **all** tensors.
+        if isinstance(a, torch.Tensor) and torch._C._dispatch_keys(a).has(
+            torch._C.DispatchKey.Python
+        ):
+            overload_types.append(type(a))
+    # TODO: check that I got these args correct (in C++, we pass in "0000"??)
+
+    return curr_mode.__torch_dispatch__(op_overload, overload_types, args, kwargs)
