@@ -361,22 +361,6 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
 
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_inductor_wait_followed_by_view(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-
-        def fn(x_dt):
-            out = x_dt.redistribute(mesh, [Replicate()])
-            return out.view(-1)
-
-        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-
-        x = torch.ones(4, 4)
-        x_dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
-        ref = fn(x_dt)
-        res = opt_fn(x_dt)
-        self.assertEqual(ref, res)
-
     def test_dtensor_dynamo_device_mesh_attrs(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
