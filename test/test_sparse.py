@@ -4466,8 +4466,7 @@ class TestSparseMeta(TestCase):
         for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
             m = t.to(device='meta')
             r = torch.add(m, m)
-            self.assertTrue(r.is_meta)
-
+            self.assertEqual(r, m)
 
 
 class _SparseDataset(torch.utils.data.Dataset):
