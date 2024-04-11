@@ -781,23 +781,31 @@ def clone_input(x, *, dtype=None):
             )
         elif x.layout is torch.sparse_csr:
             return torch.sparse_csr_tensor(
-                torch_clone(x.crow_indices()), torch_clone(x.col_indices()),
-                torch_clone(x.values()), x.shape
+                torch_clone(x.crow_indices()),
+                torch_clone(x.col_indices()),
+                torch_clone(x.values()),
+                x.shape
             )
         elif x.layout is torch.sparse_csc:
             return torch.sparse_csc_tensor(
-                torch_clone(x.ccol_indices()), torch_clone(x.row_indices()),
-                torch_clone(x.values()), x.shape
+                torch_clone(x.ccol_indices()),
+                torch_clone(x.row_indices()),
+                torch_clone(x.values()),
+                x.shape
             )
         elif x.layout is torch.sparse_bsr:
             return torch.sparse_bsr_tensor(
-                torch_clone(x.crow_indices()), torch_clone(x.col_indices()),
-                torch_clone(x.values()), x.shape
+                torch_clone(x.crow_indices()),
+                torch_clone(x.col_indices()),
+                torch_clone(x.values()),
+                x.shape
             )
         elif x.layout is torch.sparse_bsc:
             return torch.sparse_bsc_tensor(
-                torch_clone(x.ccol_indices()), torch_clone(x.row_indices()),
-                torch_clone(x.values()), x.shape
+                torch_clone(x.ccol_indices()),
+                torch_clone(x.row_indices()),
+                torch_clone(x.values()),
+                x.shape
             )
 
         needed_size = sum(
