@@ -1241,8 +1241,11 @@ class CppWrapperCpu(WrapperCodeGen):
         if config.abi_compatible:
             # call the ABI shim function instead of the ATen one
             kernel = kernel.replace("at::", "aoti_torch_")
-        inputs_wrapped = [f"convert_arrayref_tensor_to_tensor({x})" for x in inputs]
-        line = f"{kernel}(convert_arrayref_tensor_to_tensor({output}), {','.join(inputs_wrapped)}"
+            inputs_wrapped = [f"convert_arrayref_tensor_to_tensor({x})" for x in inputs]
+            line = f"{kernel}(convert_arrayref_tensor_to_tensor({output}), {','.join(inputs_wrapped)}"
+        else:
+            line = f"{kernel}({output}, {','.join(map(str, inputs))}"
+
         if python_kernel_name == "aten.scatter_":
             if src_is_tensor:
                 if reduce:
@@ -1267,13 +1270,14 @@ class CppWrapperCpu(WrapperCodeGen):
             # tensor prematurely deallocated, thus this std::vector().data() trick here.
             indices_str = ("std::vector<AtenTensorHandle>{" + (', '.join([f"convert_arrayref_tensor_to_tensor({ind})" for ind in indices])) + "}.data()")
             args = [f"convert_arrayref_tensor_to_tensor({x})", indices_str, str(len(indices)), f"convert_arrayref_tensor_to_tensor({values})", accumulate]
+            args.insert(0, f"convert_arrayref_tensor_to_tensor({x})")  # set x as the output tensor, this fallback mutates x.
         else:
             indices_str = (
                 f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
             )
             args = [x, indices_str, values, accumulate]
+            args.insert(0, x) # set x as the output tensor, this fallback mutates
 
-        args.insert(0, f"convert_arrayref_tensor_to_tensor({x})")  # set x as the output tensor, this fallback mutates x.
         self.writeline(self.wrap_kernel_call(kernel, args))
 
     def add_benchmark_harness(self, output):
