@@ -15058,7 +15058,7 @@ op_db: List[OpInfo] = [
         "nn.functional.binary_cross_entropy",
         aten_backward_name='binary_cross_entropy_backward',
         sample_inputs_func=sample_inputs_binary_cross_entropy,
-        dtypes=floating_types(),
+        dtypes=floating_types_and(torch.bfloat16),
         dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         gradcheck_fast_mode=False,
