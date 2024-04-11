@@ -1195,7 +1195,7 @@ TORCH_PYTHON_API py::tuple _maybe_handle_torch_function(
     py::args args,
     const py::kwargs& kwargs);
 
-TORCH_PYTHON_API Stack checkSchemaSkipScriptObject(
+TORCH_PYTHON_API Stack checkSchemaAllowFakeScriptObject(
     const FunctionSchema& schema,
     py::args args,
     const py::kwargs& kwargs);

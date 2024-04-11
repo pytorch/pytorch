@@ -1667,10 +1667,13 @@ void initJITBindings(PyObject* module) {
       });
 
   m.def(
-      "_check_schema_skip_script_object",
+      "_check_schema_allow_fake_script_object",
       [](const FunctionSchema& schema, py::args args, py::kwargs kwargs) {
-        return createPyObjectForStack(
-            std::move(checkSchemaSkipScriptObject(schema, args, kwargs)));
+        // checkSchemaAllowFakeScriptObject will throw runtime error if there is
+        // a schema mismatch. we drop the returned stack as it's not useful when
+        // callling in python.
+        checkSchemaAllowFakeScriptObject(schema, args, kwargs);
+        return true;
       });
 
   m.def(
