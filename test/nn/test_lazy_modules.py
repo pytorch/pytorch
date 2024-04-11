@@ -305,6 +305,7 @@ class TestLazyModules(TestCase):
     def test_lazy_conv_transposed1d(self):
         self._check_lazy_conv(nn.ConvTranspose1d, nn.LazyConvTranspose1d, torch.nn.functional.conv_transpose1d,
                               (32, 2), (192, 16, 50), (16, 32, 2), (32,))
+
     @suppress_warnings
     def test_lazy_conv_tranpose1d_kwargs(self):
         self._check_lazy_conv(nn.ConvTranspose1d, nn.LazyConvTranspose1d, torch.nn.functional.conv_transpose1d,
@@ -325,10 +326,11 @@ class TestLazyModules(TestCase):
     def test_lazy_conv_transpose2d(self):
         self._check_lazy_conv(nn.ConvTranspose2d, nn.LazyConvTranspose2d, torch.nn.functional.conv_transpose2d,
                               (32, 2), (192, 16, 8, 6), (16, 32, 2, 2), (32,))
+
     @suppress_warnings
     def test_lazy_conv_transpose2d_kwargs(self):
         self._check_lazy_conv(nn.ConvTranspose2d, nn.LazyConvTranspose2d, torch.nn.functional.conv_transpose2d,
-                              (32, 2), (192, 16, 8, 6), (16, 32, 2, 2), (32,), output_size=(9,7))
+                              (32, 2), (192, 16, 8, 6), (16, 32, 2, 2), (32,), output_size=(9, 7))
 
     @suppress_warnings
     def test_lazy_conv_transpose2d_pickle(self):
@@ -349,7 +351,7 @@ class TestLazyModules(TestCase):
     @suppress_warnings
     def test_lazy_conv_transpose3d_kwargs(self):
         self._check_lazy_conv(nn.ConvTranspose3d, nn.LazyConvTranspose3d, torch.nn.functional.conv_transpose3d,
-                              (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2), (32,), output_size=(9,8,7))
+                              (32, 2), (192, 16, 8, 7, 6), (16, 32, 2, 2, 2), (32,), output_size=(9, 8, 7))
 
     @suppress_warnings
     def test_lazy_conv_transpose3d_pickle(self):
