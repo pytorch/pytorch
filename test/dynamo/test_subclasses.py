@@ -1456,6 +1456,24 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         for nt_view in self._get_views():
             self._input_view_test(nt_view)
 
+    def test_subclass_gives_static_shapes_when_dynamic_false(self):
+        def check_graph(gm, *args):
+            first_node_example_val = next(iter(gm.graph.nodes)).meta["example_value"]
+            # We compiled with dynamic=False, expect no SymInt sizes on our placeholders
+            self.assertTrue(
+                all(isinstance(x, int) for x in first_node_example_val.shape)
+            )
+            return gm
+
+        @torch.compile(backend=check_graph, dynamic=False)
+        def f(x):
+            return x + 1
+
+        x_inner = torch.ones(4)
+        x = TwoTensor(x_inner, x_inner)
+        x_view = x.view(2, 2)
+        out = f(x_view)
+
     # NJT1 -> Dense -> NJT2 -> Dense view
     # During view replay, the Dense -> NJT2 part will construct an intermediate,
     # symbolically-sized NJT that is immediately deconstructed to return the final dense
