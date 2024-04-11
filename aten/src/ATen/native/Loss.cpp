@@ -480,9 +480,9 @@ Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, 
   auto norm = (reduction == Reduction::Mean) ? (1. / input.numel()) : 1.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
-    .add_input(input)
-    .add_input(target)
-    .add_input(grad_output)
+    .add_const_input(input)
+    .add_const_input(target)
+    .add_const_input(grad_output)
     .build();
   huber_backward_stub(iter.device_type(), iter, norm, delta);
   return grad_input;
@@ -498,9 +498,9 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
   auto norm = reduction == Reduction::Mean ? 2. / input.numel() : 2.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
-    .add_input(input)
-    .add_input(target)
-    .add_input(grad_output)
+    .add_const_input(input)
+    .add_const_input(target)
+    .add_const_input(grad_output)
     .build();
   mse_backward_stub(iter.device_type(), iter, norm);
   return grad_input;
