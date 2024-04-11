@@ -732,6 +732,26 @@ def forward(self, arg0_1, arg1_1):
         # by the time it becomes a graph input. Good to test both cases.
         self.verify_aot_autograd(f, inp, test_mutation=True)
 
+    def test_input_mutation_hidden_from_autograd_aliasing(self):
+        def f(a):
+            a_alias = a.view(-1)
+            with torch.no_grad():
+                a_alias.mul_(2)
+            return a + 1
+        inp = [torch.ones(4, requires_grad=True)]
+        # The important bit: we detected that the input mutation is safe
+        # to include **inside** the graph, since it was under no_grad
+        # (so all we need to do is use mark_dirty() on the input to bump the VC)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, only_keep_inference_mutations=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    view = torch.ops.aten.view.default(primals_1, [-1])
+    mul = torch.ops.aten.mul.Tensor(view, 2);  view = None
+    view_1 = torch.ops.aten.view.default(mul, [4]);  mul = None
+    add = torch.ops.aten.add.Tensor(view_1, 1)
+    copy_ = torch.ops.aten.copy_.default(primals_1, view_1);  primals_1 = view_1 = None
+    return [add]""")
+
     def test_input_mutation_requires_grad_no_grad(self):
         def f(a):
             with torch.no_grad():
@@ -3068,6 +3088,7 @@ def forward(self, arg0_1):
     sin_1 = torch.ops.aten.sin.default(add);  add = None
     return (sin_1,)""")
 
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported")
     def test_aot_export_predispatch_map_1(self):
         class M(torch.nn.Module):
@@ -3289,6 +3310,8 @@ def forward(self, arg0_1):
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
         # 9 outputs: 3 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
+        for node in fx_g.graph.nodes:
+            node.meta.pop("stack_trace", None)
         self.assertExpectedInline(fx_g.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
@@ -3346,6 +3369,8 @@ class <lambda>(torch.nn.Module):
         # Also check the inference graph
         # Main important thing here is that there are 5 total outputs: 3 total mutated buffers (from batchnorm), 2 user outputs.
         fx_g_inference, signature_inference = aot_export_module(mod, [inp], trace_joint=False)
+        for node in fx_g_inference.graph.nodes:
+            node.meta.pop("stack_trace", None)
         self.assertExpectedInline(fx_g_inference.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):

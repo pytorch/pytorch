@@ -11,13 +11,14 @@ import inspect
 import itertools
 import random
 import unittest
+import warnings
 import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
 from enum import Enum
 from functools import wraps
-from typing import Any, Iterator, List
+from typing import Any, Dict, Iterator, List, Tuple
 from unittest import mock
 
 import numpy as np
@@ -127,6 +128,10 @@ def _do_paste_mask(masks, boxes, img_h: int, img_w: int, skip_empty: bool = True
         return img_masks[:, 0], (slice(y0_int, y1_int), slice(x0_int, x1_int))
     else:
         return img_masks[:, 0], ()
+
+
+def global_fn(x):
+    return torch.sin(x)
 
 
 def cat(tensors, dim=0):
@@ -4373,6 +4378,27 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         else:
             self.fail("expected exception")
 
+    def test_megablocks_moe(self):
+        try:
+            from megablocks.layers import moe
+            from megablocks.layers.arguments import Arguments
+        except ImportError:
+            raise unittest.SkipTest("requires megablocks")
+        bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
+        args = Arguments(
+            hidden_size=hs,
+            ffn_hidden_size=hs * 2,
+            moe_num_experts=num_experts,
+            moe_capacity_factor=1,
+            moe_top_k=top_k,
+        )
+        moe_mlp = moe.MoE(args)
+        moe_mlp.cuda(torch.cuda.current_device()).half()
+        x = torch.randn(sl, bs, hs).cuda().half()
+        out1, _ = moe_mlp(x)
+        out2, _ = torch.compile(moe_mlp, backend="eager")(x)
+        self.assertEqual(out1, out2)
+
     def test_udf_classes_reconstruction(self):
         def fn(x):
             o = T(5)
@@ -4453,6 +4479,93 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         with self.assertRaisesRegex(AssertionError, ""):
             f_fail(torch.ones(6, 4))
 
+    def test_detectron2_instances_cat(self):
+        class Instances:
+            def __init__(self, image_size: Tuple[int, int], **kwargs: Any):
+                self._image_size = image_size
+                self._fields: Dict[str, Any] = {}
+                for k, v in kwargs.items():
+                    self.set(k, v)
+
+            @property
+            def image_size(self) -> Tuple[int, int]:
+                return self._image_size
+
+            def __setattr__(self, name: str, val: Any) -> None:
+                if name.startswith("_"):
+                    super().__setattr__(name, val)
+                else:
+                    self.set(name, val)
+
+            def __getattr__(self, name: str) -> Any:
+                if name == "_fields" or name not in self._fields:
+                    raise AttributeError(
+                        f"Cannot find field '{name}' in the given Instances!"
+                    )
+                return self._fields[name]
+
+            def __len__(self) -> int:
+                for v in self._fields.values():
+                    # use __len__ because len() has to be int and is not friendly to tracing
+                    return v.__len__()
+                raise NotImplementedError("Empty Instances does not support __len__!")
+
+            def set(self, name: str, value: Any) -> None:
+                with warnings.catch_warnings(record=True):
+                    data_len = len(value)
+                if len(self._fields):
+                    assert (
+                        len(self) == data_len
+                    ), f"Adding a field of length {data_len} to a Instances of length {len(self)}"
+                self._fields[name] = value
+
+            def get(self, name: str) -> Any:
+                return self._fields[name]
+
+            @staticmethod
+            def cat(instance_lists: List["Instances"]) -> "Instances":
+                assert all(isinstance(i, Instances) for i in instance_lists)
+                assert len(instance_lists) > 0
+                if len(instance_lists) == 1:
+                    return instance_lists[0]
+
+                image_size = instance_lists[0].image_size
+                if not isinstance(
+                    image_size, torch.Tensor
+                ):  # could be a tensor in tracing
+                    for i in instance_lists[1:]:
+                        assert i.image_size == image_size
+                ret = Instances(image_size)
+                for k in instance_lists[0]._fields.keys():
+                    values = [i.get(k) for i in instance_lists]
+                    v0 = values[0]
+                    if isinstance(v0, torch.Tensor):
+                        values = torch.cat(values, dim=0)
+                    elif isinstance(v0, list):
+                        values = list(itertools.chain(*values))
+                    elif hasattr(type(v0), "cat"):
+                        values = type(v0).cat(values)
+                    else:
+                        raise ValueError(
+                            f"Unsupported type {type(v0)} for concatenation"
+                        )
+                    ret.set(k, values)
+                return ret
+
+        instances = [
+            Instances((16, 16), a=torch.randn(16, 16), b=torch.randn(16, 16))
+            for _ in range(3)
+        ]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(instances):
+            return instances[0].cat(instances)
+
+        actual = fn(instances)
+        expected = instances[0].cat(instances)
+        self.assertEqual(type(actual), type(expected))
+        self.assertEqual(actual.__dict__, expected.__dict__)
+
     def test_super_in_staticmethod(self):
         class A:
             @staticmethod
@@ -4475,6 +4588,25 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         except Exception as e:
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
+
+    def test_global_fn_mutation(self):
+        def foo(x, y):
+            return global_fn(x) + y
+
+        x = torch.ones(1)
+        y = torch.ones(1)
+
+        opt = torch.compile(foo, fullgraph=True, backend="eager")
+        self.assertEqual(opt(x, y), foo(x, y))
+
+        # Change global_fn
+        global global_fn
+
+        def new_fn(x):
+            return torch.cos(x)
+
+        global_fn = new_fn
+        self.assertEqual(opt(x, y), foo(x, y))
 
 
 if __name__ == "__main__":
