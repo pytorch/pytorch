@@ -385,7 +385,7 @@ class CachingAutotuner(KernelInterface):
             "bin": binary,
             "launch_enter_hook": binary.launch_enter_hook,
             "launch_exit_hook": binary.launch_exit_hook,
-            "metadata": binary.metadata,
+            "metadata": binary.useful_metadata,
             "shared": binary_shared,
         }
 
@@ -467,7 +467,8 @@ class CachingAutotuner(KernelInterface):
                 stream,
                 function,
                 metadata,
-                bin.launch_metadata(grid, stream, *args),
+                #bin.launch_metadata(grid, stream, *args),
+                None,
                 launch_enter_hook,
                 launch_exit_hook,
             )
