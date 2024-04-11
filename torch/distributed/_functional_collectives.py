@@ -10,10 +10,7 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_innermost_proxy_mode
 
 from . import _functional_collectives_impl as fun_col_impl
-from ._functional_collectives_impl import (  # noqa: F401
-    _register_tensor_wrapper,
-    native_funcol_enabled,
-)
+from ._functional_collectives_impl import _register_tensor_wrapper  # noqa: F401
 
 try:
     from torch.utils._cxx_pytree import tree_map_only
@@ -693,7 +690,6 @@ def _maybe_wrap_tensor(self) -> torch.Tensor:
     if _are_we_tracing():
         return wait_tensor(self)
     res = AsyncCollectiveTensor(self)
-    _register_tensor_wrapper(res)
     return cast(torch.Tensor, res)
 
 
