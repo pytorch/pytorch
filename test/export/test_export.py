@@ -4057,7 +4057,7 @@ class TestOneOffModelExportResult(TestCase):
         k = torch.randn(1, 16, 16, 64, dtype = torch.bfloat16, device="cuda")
         v = torch.randn(1, 16, 16, 64, dtype = torch.bfloat16, device="cuda")
 
-        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v))
+        ep = torch.export.export(ScaledDotProductAttention(), (q, k, v)).run_decompositions()
         self.assertExpectedInline(ep.graph_module.code.strip(), """\
 def forward(self, q, k, v):
     _scaled_dot_product_flash_attention = torch.ops.aten._scaled_dot_product_flash_attention.default(q, k, v, 0.0, True, scale = 0.125);  q = k = v = None
