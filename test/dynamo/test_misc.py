@@ -9828,6 +9828,20 @@ fn
 
         self.assertEqual(fn(torch.tensor([0])), torch.zeros(0))
 
+    def test_guard_size_oblivious_backed(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            y = x.size(0)
+            # This doesn't actually do anything
+            if guard_size_oblivious(y == 0):
+                return torch.randn(1)
+            else:
+                return torch.randn(2)
+
+        # Should not fail in either case
+        self.assertEqual(f(torch.randn(0)).shape, (1,))
+        self.assertEqual(f(torch.randn(2)).shape, (2,))
+
     def _test_compile_model_free(self, model_inp_ctr, weakref_watch):
         """
         Args:
@@ -9950,6 +9964,20 @@ fn
 
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(torch.randn(5, 5))
+
+    def test_super_after_graph_break(self):
+        class Foo(torch.nn.Sequential):
+            def __init__(self, layers):
+                torch._dynamo.graph_break()
+                super().__init__(*layers)
+
+        def fn(x):
+            layers = [torch.nn.Linear(3, 3) for _ in range(3)]
+            mod = Foo(layers)
+            return mod(x)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(3, 3))
 
     def test_raises_importerror1(self):
         @torch.compile(backend="eager")
