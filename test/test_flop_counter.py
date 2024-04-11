@@ -249,7 +249,7 @@ class TestFlopCounter(TestCase):
         self.assertExpectedInline(get_total_flops(mode), """5""")
 
         def count(*args, out_val):
-            return out.numel()
+            return out_val.numel()
         count._get_raw = True
 
         mode = FlopCounterMode(custom_mapping={torch.ops.aten.add: count})

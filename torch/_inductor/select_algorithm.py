@@ -760,6 +760,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 layout=self.layout,
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
+                debug_extra=self.debug_extra,
             )
         )
 
@@ -1015,7 +1016,7 @@ class AlgorithmSelectorCache(PersistentCache):
             return choices[0].output_node()
 
         selected_choice = builtins.min(timings, key=timings.__getitem__).output_node()
-        log.debug("selected choice: %s", str(selected_choice))
+        print("selected choice: %s", str(selected_choice))
         return selected_choice
 
     @classmethod

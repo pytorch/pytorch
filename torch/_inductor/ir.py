@@ -3508,7 +3508,13 @@ class TemplateBuffer(Buffer):
 
 
 class TritonTemplateBuffer(TemplateBuffer):
-    pass
+    def __init__(self, layout, inputs, make_kernel_render, debug_extra=None):
+        super().__init__(layout, inputs, make_kernel_render)
+        self.debug_extra = debug_extra
+
+    def __str__(self):
+        out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
+        return out
 
 
 PrimitiveInfoType = Union[int, float, bool, str, List[Union[int, str, float, bool]]]
