@@ -135,9 +135,8 @@ class VecMask {
   }
 
   void store(bool* b, int count) {
-    TORCH_CHECK(count == Vectorized<T>::size() * N, "Expect same number of elements in VecMask::store.");
-    TORCH_CHECK(count <= Vectorized<bool>::size(), "Expect the number is less or equal to Vectorized<bool>.");
-    Vectorized<bool> res = this->to<bool, 1>();
+    constexpr int L = (VectorizedN<T, N>::size() + Vectorized<bool>::size() - 1)/ Vectorized<bool>::size();
+    auto res = this->to<bool, L>();
     res.store(b, count);
     return;
   }
