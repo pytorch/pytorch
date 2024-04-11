@@ -1459,7 +1459,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         )
 
         fwd_src = AttrSource(self.parent_source, member="forward")
-        ctx = AutogradFunctionContextVariable.create(tx)
+        ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
         if isinstance(self.fwd_graph, types.FunctionType):
             fwd_fn = UserFunctionVariable(self.fwd_graph, source=fwd_src)
             fwd_args = [ctx, *args]
