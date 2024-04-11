@@ -56,6 +56,7 @@ from .utils import (
     make_boxed_func,
     normalize_as_list,
     strict_zip,
+    unlift_tokens,
 )
 
 zip = strict_zip
@@ -161,7 +162,7 @@ def aot_dispatch_base(
 
     # Create a wrapper to set up the rng functionalize bits
     @wraps(compiled_fw)
-    def rng_functionalization_wrapper(args):
+    def rng_functionalization_wrapper(args: List[Any]):
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         nonlocal fakified_out
         if fakified_out is not None:
@@ -270,19 +271,24 @@ def aot_dispatch_autograd(
                     fw_metadata, inner_meta
                 )
             )
+            num_tokens = len(fw_metadata.tokens)
             num_mutated_inp_runtime_indices = len(mutated_inp_runtime_indices)
             num_inner_fwd_outputs = (
                 num_mutated_inp_runtime_indices
                 + inner_meta.num_outputs
                 + inner_meta.num_intermediate_bases
                 + inner_meta.num_outputs_rng_offset
-                + len(
-                    fw_metadata.tokens
-                )  # See Note [Side-Effectful Tokens in AOTAutograd]
+                + num_tokens  # See Note [Side-Effectful Tokens in AOTAutograd]
             )
             fw_module, bw_module = aot_config.partition_fn(
                 fx_g, joint_inputs, num_fwd_outputs=num_inner_fwd_outputs
             )
+
+            # See Note [Side-Effectful Tokens in AOTAutograd]
+            if num_tokens != 0 and config.unlift_effect_tokens:
+                unlift_tokens(fw_module, fw_metadata)
+                num_inner_fwd_outputs -= num_tokens
+                joint_inputs = (joint_inputs[0][num_tokens:], joint_inputs[1])
 
             fw_outs = next(iter(fw_module.graph.find_nodes(op="output"))).args[0]
             # we only need to bookkeep the symints that are saved for bw, not any symints
@@ -987,7 +993,7 @@ Got grad_output types: {str(grad_output_types)}"""
     ]
 
     @wraps(compiled_function)
-    def debug_compiled_function(*args):
+    def debug_compiled_function(args: List[Any]):
         # TODO: Check aliasing relationships
         # TODO: Check strides for metadata mutation
         # (NB: ideally, this logic is factored out of this function and
@@ -1007,6 +1013,6 @@ Got grad_output types: {str(grad_output_types)}"""
                     f"{describe_input(i, aot_config)} would not require grad",
                 )
 
-        return compiled_function(*args)
+        return compiled_function(args)
 
     return debug_compiled_function
