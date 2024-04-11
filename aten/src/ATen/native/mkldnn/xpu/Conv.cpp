@@ -478,6 +478,8 @@ Tensor _convolution_out(
       ? get_cl_tag_by_ndim(input.ndimension())
       : at::MemoryFormat::Contiguous;
   auto bias = bias_r.defined() ? bias_r.contiguous() : bias_r;
+  input = input.contiguous(mfmt);
+  weight = weight.contiguous(mfmt);
 
   auto k = weight.ndimension();
   if (k == input.ndimension() + 1) {
@@ -705,9 +707,11 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   }
 
   // ensure the tensors are contiguous
-  auto mfmt = is_channels_last_suggested
-      ? get_cl_tag_by_ndim(input_.ndimension())
+  auto mfmt = is_channels_last_suggested ? get_cl_tag_by_ndim(input_.ndimension())
       : at::MemoryFormat::Contiguous;
+  grad_output_ =  grad_output_.contiguous(mfmt);
+  weight_ = weight_.contiguous(mfmt);
+  input_ = input_.contiguous(mfmt);
 
   auto opt = grad_output_.options();
   Tensor grad_input = at::empty(input_.sizes(), opt, mfmt);
