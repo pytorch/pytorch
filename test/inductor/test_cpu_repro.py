@@ -1561,7 +1561,7 @@ class CPUReproTests(TestCase):
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_zvec_simd(self):
-        zvec = codecache.valid_vec_isa_list()
+        zvec = codecache.valid_vec_isa_list()[0]
         self.assertTrue(zvec.bit_width() == 256)
 
         with config.patch({"cpp.simdlen": 0}):
@@ -1626,7 +1626,7 @@ class CPUReproTests(TestCase):
     )
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_neon_simd(self):
-        vec_neon = codecache.valid_vec_isa_list()
+        vec_neon = codecache.valid_vec_isa_list()[0]
         self.assertTrue(vec_neon.bit_width() == 256)
 
         with config.patch({"cpp.simdlen": 0}):
