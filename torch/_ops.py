@@ -684,10 +684,21 @@ class OpOverload(OperatorBase):
         assert key not in self._dispatch_cache, f"{self} {key}"
 
         if key == torch._C.DispatchKey.Python:
-            if not self.python_key_mode_table:
+            if (
+                not isinstance(self, TorchBindOpOverload)
+                and not self.python_key_mode_table
+            ):
                 self._dispatch_cache[key] = key
                 add_cached_op(self)
                 return key
+
+            fallback_handler = (
+                lambda mode, *args, **kwargs: _mannually_invoke_dispatch_mode_in_python(
+                    mode, self, *args, **kwargs
+                )
+                if isinstance(self, TorchBindOpOverload)
+                else lambda mode, *args, **kwargs: self._op_dk(key, *args, **kwargs)
+            )
 
             def handler(*args, **kwargs):
                 from torch.utils._python_dispatch import _get_current_dispatch_mode
@@ -698,10 +709,9 @@ class OpOverload(OperatorBase):
                 assert (
                     curr_mode is not None
                 ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
+
                 if curr_mode not in self.python_key_mode_table:
-                    # TODO: This path is slow, should generally encourage this
-                    # case to not happen
-                    return self._op_dk(key, *args, **kwargs)
+                    self.py_impl(curr_mode)(fallback_handler)
 
                 with torch.utils._python_dispatch._pop_mode_temporarily() as mode:
                     return self.python_key_mode_table[curr_mode](mode, *args, **kwargs)
@@ -790,40 +800,12 @@ class OpOverload(OperatorBase):
 class TorchBindOpOverload(OpOverload):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # All torchbind op are considered as having side-effects
-        from torch._higher_order_ops.effects import register_side_effect_op
-
-        register_side_effect_op(self)
-
-    # Note: we automaticallly add implementations for modes that useful for tracing.
-    # We only add implementation when we must dispatch in python by checking the inputs.
-    # We cannot do it before seeing the inputs because some torch bind ops
-    # (e.g. profiler record function) might be registered globally
-    # with a single default implementation in cpp. We might accidently trace them
-    # into graph.
-    @contextlib.contextmanager
-    def _maybe_py_impl_default_dispatch_mode(self):
-        def wrapper(mode, *args, **kwargs):
-            return _mannually_invoke_dispatch_mode_in_python(
-                mode, self, *args, **kwargs
-            )
-
-        modes = [
-            torch._subclasses.functional_tensor.FunctionalTensorMode,
-            torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode,
-            torch._subclasses.fake_tensor.FakeTensorMode,
-        ]
-        default_impl_modes = []
-        try:
-            for mode in modes:
-                if mode not in self.python_key_mode_table:
-                    self.py_impl(mode)(wrapper)
-                    default_impl_modes.append(mode)
-            yield
-        finally:
-            for mode in default_impl_modes:
-                del self.python_key_mode_table[mode]
-                self._dispatch_cache.clear()
+        for key in [
+            DispatchKey.Autograd,
+            DispatchKey.ADInplaceOrView,
+            DispatchKey.PythonTLSSnapshot,
+        ]:
+            self.py_impl(key)(torch.library.fallthrough_kernel)
 
     # use `self_` to avoid naming collide with arguments that
     # are named "self". This way, they can be called by kwargs.
@@ -831,8 +813,7 @@ class TorchBindOpOverload(OpOverload):
         # The path when any inputs are FakeScriptObject, we need to
         # skip c++ dispatcher and dispatch in python through _get_dispatch of python_dispatcher.
         if _must_dispatch_in_python(args, kwargs):
-            with self_._maybe_py_impl_default_dispatch_mode():
-                return self_._dispatch_in_python(args, kwargs, [])
+            return self_._dispatch_in_python(args, kwargs, [])
 
         return self_._op(*args, **kwargs)
 
