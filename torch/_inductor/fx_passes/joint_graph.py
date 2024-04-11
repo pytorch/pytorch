@@ -247,7 +247,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             ):
                 torch._check(runtime_size == compile_time_size)
 
-            # zeros, and ones just get traced into full, so we insert those
+            # zeros and ones just get traced into full, so we insert those
             new_node = graph.call_function(
                 aten.full.default,
                 args=(node_replacements_shapes[node], value),

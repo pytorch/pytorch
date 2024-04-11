@@ -1830,8 +1830,8 @@ class CppKernel(Kernel):
                 if cse_var == var:
                     if is_to_lowp_dtype(expr):
                         m = re.search(r"tmp\d+", expr)
-                        assert m
-                        fp32_cse_var_name = m.group()
+                        if m is not None:
+                            fp32_cse_var_name = m.group()
             if fp32_cse_var_name:
                 for cse_var in cache.values():
                     if cse_var.name == fp32_cse_var_name:
