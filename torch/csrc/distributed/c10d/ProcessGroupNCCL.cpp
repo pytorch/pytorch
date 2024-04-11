@@ -1268,6 +1268,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(EXCEPTION_DUMP)})) {
           int timeOutRank = -1;
+          shouldDump_.store(true);
           try {
             auto vec = globalStore_->get(std::string(EXCEPTION_DUMP));
             TORCH_CHECK_WITH(
@@ -1312,6 +1313,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       if (heartbeat != heartBeatCounter) {
         heartBeatCounter = heartbeat;
       } else {
+        shouldDump_.store(true);
         // No heartbeat increase detected and timeout.
         errorMsg = c10::str(
             logPrefix(),
