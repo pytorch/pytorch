@@ -490,8 +490,8 @@ def forward(self, out_iter_1, it_1, y_1):
     getitem_1 = while_loop[1]
     getitem_2 = while_loop[2];  while_loop = None
     return (getitem, getitem_1, getitem_2)
-    """,
-        )  # noqa: B950
+    """,  # noqa: B950
+        )
         self.assertExpectedInline(
             graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"),
             """\
@@ -513,8 +513,8 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     getitem_2 = while_loop[2];  while_loop = None
     add = torch.ops.aten.add.Tensor(getitem, 1);  getitem = None
     return (add, getitem_1, getitem_2)
-    """,
-        )  # noqa: B950
+    """,  # noqa: B950
+        )
 
     def _wrap_with_functionalize(self, fn, func_type):
         mode = None
@@ -546,8 +546,8 @@ def forward(self, x_1):
     while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (x_1,), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = x_1 = None
     getitem = while_loop[0];  while_loop = None
     return (getitem,)
-    """,
-            )  # noqa: B950
+    """,  # noqa: B950
+            )
             self.assertExpectedInline(
                 graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"),
                 """\
@@ -581,8 +581,8 @@ def forward(self, arg0_1):
     while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (arg0_1,), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = arg0_1 = None
     getitem = while_loop[0];  while_loop = None
     return (getitem,)
-    """,
-            )  # noqa: B950
+    """,  # noqa: B950
+            )
             self.assertExpectedInline(
                 graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"),
                 """\
@@ -616,8 +616,8 @@ def forward(self, x_1):
     while_loop = torch.ops.higher_order.while_loop(while_loop_cond_graph_0, while_loop_body_graph_0, (x_1,), ());  while_loop_cond_graph_0 = while_loop_body_graph_0 = x_1 = None
     getitem = while_loop[0];  while_loop = None
     return (getitem,)
-    """,
-            )  # noqa: B950
+    """,  # noqa: B950
+            )
             self.assertExpectedInline(
                 graphs["symbolic"].while_loop_cond_graph_0.code.strip("\n"),
                 """\
@@ -693,24 +693,24 @@ def forward(self, L_iter_ : torch.Tensor, L_x_ : torch.Tensor):
     while_loop = torch.ops.higher_order.while_loop(cond_fn_0, body_fn_0, (l_iter_, l_x_), (l__self___dec, l__self___linear_bias, l__self___linear_weight));  cond_fn_0 = body_fn_0 = l_iter_ = l_x_ = l__self___dec = l__self___linear_bias = l__self___linear_weight = None
     getitem = while_loop[0]
     getitem_1 = while_loop[1];  while_loop = None
-    return (getitem, getitem_1)""",
-        )  # noqa: B950
+    return (getitem, getitem_1)""",  # noqa: B950
+        )
         self.assertExpectedInline(
             gm.cond_fn_0.code.strip(),
             """\
 def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
     sub = l_iter_ - l__self___dec_cond_fn;  l_iter_ = l__self___dec_cond_fn = None
     gt = sub > 0;  sub = None
-    return gt""",
-        )  # noqa: B950
+    return gt""",  # noqa: B950
+        )
         self.assertExpectedInline(
             gm.body_fn_0.code.strip(),
             """\
 def forward(self, l_iter_, l_x_, l__self___dec_cond_fn, l__self___linear_bias_body_fn, l__self___linear_weight_body_fn):
     sub = l_iter_ - 1;  l_iter_ = None
     linear = torch._C._nn.linear(l_x_, l__self___linear_weight_body_fn, l__self___linear_bias_body_fn);  l_x_ = l__self___linear_weight_body_fn = l__self___linear_bias_body_fn = None
-    return (sub, linear)""",
-        )  # noqa: B950
+    return (sub, linear)""",  # noqa: B950
+        )
 
     def test_while_loop_nested2_traced(self):
         fn, inp = WHILE_LOOP_TESTS["nested2"]
@@ -732,8 +732,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     getitem_2 = while_loop[2]
     getitem_3 = while_loop[3];  while_loop = None
     return (getitem, getitem_1, getitem_2, getitem_3)
-    """,
-        )  # noqa: B950
+    """,  # noqa: B950
+        )
         self.assertExpectedInline(
             outer_body.code.strip("\n"),
             """\
@@ -750,8 +750,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     mul = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
     div = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
     return (sub, clone, mul, div)
-    """,
-        )  # noqa: B950
+    """,  # noqa: B950
+        )
         self.assertExpectedInline(
             outer_body.code.strip("\n"),
             """\
@@ -768,8 +768,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1):
     mul = torch.ops.aten.mul.Tensor(getitem_2, 2);  getitem_2 = None
     div = torch.ops.aten.div.Tensor(getitem_3, 2);  getitem_3 = None
     return (sub, clone, mul, div)
-    """,
-        )  # noqa: B950
+    """,  # noqa: B950
+        )
         self.assertExpectedInline(
             inner_body.code.strip("\n"),
             """\
@@ -1270,8 +1270,8 @@ def forward(self, x_1, pred_1, pred2_1):
     conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
     getitem_1 = conditional_1[0];  conditional_1 = None
     add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
-    return add""",
-        )  # noqa: B950
+    return add""",  # noqa: B950
+        )
         self.assertExpectedInline(
             graph.true_graph_0.code.strip(),
             """\
@@ -1443,8 +1443,8 @@ def forward(self, x_1, pred_1, pred2_1):
     conditional_1 = torch.ops.higher_order.cond(pred2_1, true_graph_1, false_graph_1, [x_1]);  pred2_1 = true_graph_1 = false_graph_1 = x_1 = None
     getitem_1 = conditional_1[0];  conditional_1 = None
     add = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
-    return add""",
-        )  # noqa: B950
+    return add""",  # noqa: B950
+        )
         self.assertExpectedInline(
             graph.true_graph_0.code.strip(),
             """\
@@ -1906,8 +1906,8 @@ def forward(self, x_1):
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
     getitem = conditional[0];  conditional = None
-    return getitem""",
-        )  # noqa: B950
+    return getitem""",  # noqa: B950
+        )
 
         # We expect the traced graph module to work even if input size changes.
         x = torch.ones(4, 3, 2)
@@ -1989,8 +1989,8 @@ def forward(self, x_1):
     _tensor_constant1 = self._tensor_constant1
     conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [x_1, _tensor_constant0, _tensor_constant1]);  true_graph_0 = false_graph_0 = x_1 = _tensor_constant0 = _tensor_constant1 = None
     getitem = conditional[0];  conditional = None
-    return getitem""",
-        )  # noqa: B950
+    return getitem""",  # noqa: B950
+        )
         self.assertExpectedInline(
             gm.true_graph_0.code.strip(),
             """\
@@ -2140,8 +2140,8 @@ def forward(self, arg0_1, arg1_1):
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(arg1_1, true_graph_0, false_graph_0, [arg0_1]);  arg1_1 = true_graph_0 = false_graph_0 = arg0_1 = None
     getitem = conditional[0];  conditional = None
-    return [getitem]""",
-        )  # noqa: B950
+    return [getitem]""",  # noqa: B950
+        )
 
     def test_cond_make_fx_preserve_stack_trace_for_nodes_in_subgraph(self):
         def true_fn(x):
@@ -2224,8 +2224,8 @@ def forward(self, x_1):
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(eq, true_graph_0, false_graph_0, [x_1]);  eq = true_graph_0 = false_graph_0 = x_1 = None
     getitem = conditional[0];  conditional = None
-    return getitem""",
-            )  # noqa: B950
+    return getitem""",  # noqa: B950
+            )
 
             self.assertExpectedInline(
                 gm.true_graph_0.code.strip(),
