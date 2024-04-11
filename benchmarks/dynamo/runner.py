@@ -394,11 +394,6 @@ def get_skip_tests(suite, device, is_training: bool):
         if is_training and hasattr(module, "SKIP_TRAIN"):
             skip_tests.update(module.SKIP_TRAIN)
 
-    if device == "cpu":
-        skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cpu)
-    elif device == "cuda":
-        skip_tests.update(module.TorchBenchmarkRunner().skip_models_for_cuda)
-
     skip_tests = (f"-x {name}" for name in skip_tests)
     skip_str = " ".join(skip_tests)
     return skip_str
