@@ -347,11 +347,8 @@ def _do_annotate_conv_relu(
         relu_node = n
         maybe_conv_node = n.args[0]
 
-        if (
-            not isinstance(maybe_conv_node, Node)
-            or (is_conv_transpose and not _is_conv_transpose_node(maybe_conv_node))
-            or (not is_conv_transpose and not _is_conv_node(maybe_conv_node))
-        ):
+        is_conv_node = _is_conv_transpose_node if is_conv_transpose else _is_conv_node
+        if not isinstance(maybe_conv_node, Node) or not is_conv_node(node):
             continue
         conv_node = maybe_conv_node
 
