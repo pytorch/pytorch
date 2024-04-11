@@ -625,16 +625,16 @@ struct AttentionBackwardKernel {
 
   struct Params {
     // Input tensors
-    scalar_t* query_ptr = nullptr; // [Mq, nH, K]
-    scalar_t* key_ptr = nullptr; // [Mk, nH, K]
-    scalar_t* value_ptr = nullptr; // [Mk, nH, Kv]
-    scalar_t* bias_ptr = nullptr;
-    lse_scalar_t* logsumexp_ptr = nullptr; // [nH, Mq]
-    scalar_t* output_ptr = nullptr; // [Mq, nH, Kv]
-    scalar_t* grad_output_ptr = nullptr; // [Mq, nH, Kv]
+    const scalar_t* query_ptr = nullptr; // [Mq, nH, K]
+    const scalar_t* key_ptr = nullptr; // [Mk, nH, K]
+    const scalar_t* value_ptr = nullptr; // [Mk, nH, Kv]
+    const scalar_t* bias_ptr = nullptr;
+    const lse_scalar_t* logsumexp_ptr = nullptr; // [nH, Mq]
+    const scalar_t* output_ptr = nullptr; // [Mq, nH, Kv]
+    const scalar_t* grad_output_ptr = nullptr; // [Mq, nH, Kv]
     accum_t* delta_ptr = nullptr; // [nH, Mq]
-    int32_t* cu_seqlens_q_ptr = nullptr;
-    int32_t* cu_seqlens_k_ptr = nullptr;
+    const int32_t* cu_seqlens_q_ptr = nullptr;
+    const int32_t* cu_seqlens_k_ptr = nullptr;
 
     // Output tensors
     output_t* grad_query_ptr = nullptr; //  [Mq, nH, K]
@@ -1476,7 +1476,7 @@ struct AttentionBackwardKernel {
     auto prologueGradV = [&](int col) {
       typename MatmulGradV::Mma::IteratorB iterator_dO(
           {int32_t(p.gO_strideM)},
-          p.grad_output_ptr + query_start * p.gO_strideM + col,
+          const_cast<scalar_t*>(p.grad_output_ptr + query_start * p.gO_strideM + col),
           {num_queries_in_block, p.head_dim_value - col},
           thread_id,
           no_offset);
@@ -1489,7 +1489,7 @@ struct AttentionBackwardKernel {
     auto prologueGradQ = [&](int col) {
       typename MatmulGradQ::Mma::IteratorB iterator_K(
           {int32_t(p.k_strideM)},
-          p.key_ptr + key_start * p.k_strideM + col,
+          const_cast<scalar_t*>(p.key_ptr + key_start * p.k_strideM + col),
           {num_keys_in_block, p.head_dim - col},
           thread_id,
           no_offset);
@@ -1499,7 +1499,7 @@ struct AttentionBackwardKernel {
     auto prologueGradK = [&](int col) {
       typename MatmulGradK::Mma::IteratorB iterator_Q(
           {int32_t(p.q_strideM)},
-          p.query_ptr + query_start * p.q_strideM + col,
+          const_cast<scalar_t*>(p.query_ptr + query_start * p.q_strideM + col),
           {num_queries_in_block, p.head_dim - col},
           thread_id,
           no_offset);
@@ -1512,13 +1512,13 @@ struct AttentionBackwardKernel {
     auto prologueDOV = [&]() {
       typename MatmulDOIVJ::Mma::IteratorA iterator_A(
           {int32_t(p.gO_strideM)},
-          p.grad_output_ptr + query_start * p.gO_strideM,
+          const_cast<scalar_t*>(p.grad_output_ptr + query_start * p.gO_strideM),
           {num_queries_in_block, p.head_dim_value},
           thread_id,
           no_offset);
       typename MatmulDOIVJ::Mma::IteratorB iterator_B(
           {int32_t(p.v_strideM)},
-          p.value_ptr + key_start * p.v_strideM,
+          const_cast<scalar_t*>(p.value_ptr + key_start * p.v_strideM),
           {p.head_dim_value, num_keys_in_block},
           thread_id,
           no_offset);
@@ -1545,7 +1545,7 @@ struct AttentionBackwardKernel {
       // k_j
       typename Mma::IteratorA iterator_A(
           {int32_t(p.k_strideM)},
-          p.key_ptr + key_start * p.k_strideM,
+          const_cast<scalar_t*>(p.key_ptr + key_start * p.k_strideM),
           {problem_size.m(), problem_size.k()},
           thread_id,
           no_offset);
@@ -1553,7 +1553,7 @@ struct AttentionBackwardKernel {
       // q_i.transpose(-2, -1)
       typename Mma::IteratorB iterator_B(
           {int32_t(p.q_strideM)},
-          p.query_ptr + query_start * p.q_strideM,
+          const_cast<scalar_t*>(p.query_ptr + query_start * p.q_strideM),
           {problem_size.k(), problem_size.n()},
           thread_id,
           no_offset);
@@ -1592,7 +1592,7 @@ struct AttentionBackwardKernel {
         // load bias tile Bij into shared memory
         typename MatmulQK::BiasLoader::GmemTileIterator bias_iter(
             {cutlass::layout::RowMajor(p.bias_strideM)},
-            p.bias_ptr + query_start * p.bias_strideM + key_start,
+            const_cast<scalar_t*>(p.bias_ptr + query_start * p.bias_strideM + key_start),
             {num_queries_in_block, num_keys_in_block},
             thread_id);
         cutlass::TensorRef<scalar_t, cutlass::layout::RowMajor> bias_tensor_ref(
@@ -1784,7 +1784,7 @@ struct AttentionBackwardKernel {
       };
       typename Mma::IteratorB iterator_B(
           {int32_t(p.gO_strideM)},
-          p.grad_output_ptr + query_start * p.gO_strideM + col,
+          const_cast<scalar_t*>(p.grad_output_ptr + query_start * p.gO_strideM + col),
           {num_queries_in_block, p.head_dim_value - col},
           thread_id,
           no_offset);
@@ -1857,7 +1857,7 @@ struct AttentionBackwardKernel {
       // do_i
       typename Mma::IteratorA iterator_A(
           {int32_t(p.gO_strideM)},
-          p.grad_output_ptr + query_start * p.gO_strideM,
+          const_cast<scalar_t*>(p.grad_output_ptr + query_start * p.gO_strideM),
           {num_queries_in_block, p.head_dim_value},
           thread_id,
           no_offset);
@@ -1865,7 +1865,7 @@ struct AttentionBackwardKernel {
       // v_j.transpose(-2, -1)
       typename Mma::IteratorB iterator_B(
           {int32_t(p.v_strideM)},
-          p.value_ptr + key_start * p.v_strideM,
+          const_cast<scalar_t*>(p.value_ptr + key_start * p.v_strideM),
           {p.head_dim_value, num_keys_in_block},
           thread_id,
           no_offset);
@@ -2026,7 +2026,7 @@ struct AttentionBackwardKernel {
       // k_j
       typename Mma::IteratorB iterator_B(
           {int32_t(p.k_strideM)},
-          p.key_ptr + key_start * p.k_strideM + col,
+          const_cast<scalar_t*>(p.key_ptr + key_start * p.k_strideM + col),
           {problem_size.k(), problem_size.n()},
           thread_id,
           no_offset);
@@ -2161,7 +2161,7 @@ struct AttentionBackwardKernel {
       // q_i
       typename Mma::IteratorB iterator_B(
           {int32_t(p.q_strideM)},
-          p.query_ptr + query_start * p.q_strideM + col,
+          const_cast<scalar_t*>(p.query_ptr + query_start * p.q_strideM + col),
           {problem_size.k(), problem_size.n()},
           thread_id,
           no_offset);
@@ -2351,14 +2351,14 @@ struct AttentionBackwardKernel {
     int thread_id = 32 * warp_id + lane_id;
     typename MatmulQK::Mma::IteratorA iterator_A(
         {int32_t(p.k_strideM)},
-        p.key_ptr + key_start * p.k_strideM,
+        const_cast<scalar_t*>(p.key_ptr + key_start * p.k_strideM),
         {p.num_keys - key_start, p.head_dim},
         thread_id,
         cutlass::MatrixCoord{0, 0});
 
     typename MatmulQK::Mma::IteratorB iterator_B(
         {int32_t(p.q_strideM)},
-        p.query_ptr + query_start * p.q_strideM,
+        const_cast<scalar_t*>(p.query_ptr + query_start * p.q_strideM),
         {p.head_dim, p.num_queries - query_start},
         thread_id,
         cutlass::MatrixCoord{0, 0});
