@@ -198,24 +198,40 @@ Tensor mkldnn_reorder_conv3d_weight(
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    c10::OptionalArrayRef<int64_t> input_size) {
   mkldnn_check_low_precision(self.scalar_type(), "mkldnn_reorder_conv3d_weight");
   const auto padding_expanded = expand_param_if_needed(padding, "padding", 3);
   const auto stride_expanded = expand_param_if_needed(stride, "stride", 3);
   const auto dilation_expanded = expand_param_if_needed(dilation, "dilation", 3);
 
-  auto w = itensor_from_mkldnn(self);
+  ideep::dims src_dims = ideep::dims();
+  bool is_channels_last = false;
+  auto memory_format = at::MemoryFormat::Contiguous;
+  if (input_size.has_value()) {
+    src_dims = input_size.value().vec();
+    // if has input size, we always use channels last.
+    is_channels_last = true;
+    memory_format = at::MemoryFormat::ChannelsLast3d;
+  }
 
-  auto desc =
-      ideep::convolution_forward::expected_weights_desc(
-          w.get_dims(),
-          w.get_data_type(),
-          stride_expanded,
-          padding_expanded,
-          padding_expanded,
-          dilation_expanded,
-          groups,
-          ideep::algorithm::convolution_direct);
+  auto self_ = self.is_mkldnn() ? self : self.contiguous(memory_format);
+  auto w = itensor_from_tensor(self_);
+
+  auto desc = ideep::convolution_forward::expected_weights_desc(
+      w.get_dims(),
+      w.get_data_type(),
+      stride_expanded,
+      padding_expanded,
+      padding_expanded,
+      dilation_expanded,
+      groups,
+      ideep::algorithm::convolution_direct,
+      ideep::prop_kind::forward,
+      w.get_data_type(),
+      src_dims,
+      ideep::attr_t(),
+      is_channels_last);
   ideep::tensor result;
   result.init(desc);
   result.feed_from(w);
@@ -485,8 +501,11 @@ TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_linear_weight"),
       TORCH_FN(mkldnn_reorder_linear_weight));
   m.impl(
-      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_weight"),
+      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution2d_weight"),
       TORCH_FN(mkldnn_reorder_conv2d_weight));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution3d_weight"),
+      TORCH_FN(mkldnn_reorder_conv3d_weight));
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_mkldnn_rnn_layer_weight"),
       TORCH_FN(mkldnn_reorder_mkldnn_rnn_layer_weight));
@@ -517,7 +536,8 @@ Tensor mkldnn_reorder_conv3d_weight(
     IntArrayRef padding,
     IntArrayRef stride,
     IntArrayRef dilation,
-    int64_t groups) {
+    int64_t groups,
+    c10::OptionalArrayRef<int64_t> input_size) {
   TORCH_CHECK(false, "mkldnn_reorder_conv3d_weight: MKL-DNN build is disabled");
 }
 

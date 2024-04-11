@@ -869,7 +869,7 @@ if torch._C._has_mkldnn:
             if (
                 meta_value is None
                 or meta_value.device.type != "cpu"
-                or meta_value.dim() != 4
+                or (meta_value.dim() != 4 and meta_value.dim() != 5)
             ):
                 return False
         if (
@@ -1016,7 +1016,9 @@ if torch._C._has_mkldnn:
             input_size = conv_node.args[0].meta.get("val").shape
             with graph.inserting_before(conv_node):
                 constant_args = [args[4], args[3], args[5], args[-1]]
-                packed_weight_op = mkldnn._reorder_convolution_weight
+                packed_weight_op = mkldnn._reorder_convolution2d_weight
+                if len(input_size) == 5:
+                    packed_weight_op = mkldnn._reorder_convolution3d_weight
                 packed_conv_op = mkldnn._convolution_pointwise.default
                 if is_transposed:
                     constant_args.insert(1, args[-2])  # output_padding
@@ -1188,6 +1190,7 @@ if torch._C._has_mkldnn:
 
         packed_weight_ops = [
             torch._C._nn.mkldnn_reorder_conv2d_weight,
+            torch._C._nn.mkldnn_reorder_conv3d_weight,
             mkldnn._reorder_convolution_transpose_weight,
             mkldnn._reorder_linear_weight,
             mkldnn._reorder_mkldnn_rnn_layer_weight,
