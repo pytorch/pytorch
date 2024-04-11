@@ -71,6 +71,7 @@ from ..utils import (
     clone_input,
     common_constant_types,
     get_fake_value,
+    get_locals_to_steal,
     get_static_address_type,
     is_function_or_wrapper,
     is_namedtuple,
@@ -872,16 +873,10 @@ class VariableBuilder:
             for i, item in enumerate(value)
         ]
 
-        use_boxed_call = False
         maybe_gm = self.tx.output.local_scope.get("self")
-        if isinstance(self.source, LocalSource) and isinstance(
-            maybe_gm, torch.fx.GraphModule
-        ):
-            locals_to_steal = maybe_gm.meta.get("locals_to_steal", [])
-            if self.source.local_name in locals_to_steal:
-                use_boxed_call = True
-
-        if use_boxed_call:
+        if isinstance(
+            self.source, LocalSource
+        ) and self.source.local_name in get_locals_to_steal(maybe_gm):
             # The input tensor list to dynamo from compiled autograd may contain activations
             # which are freed as they are used in inductor. Dynamo's default behavior is to
             # lift all tensors to the graph inputs, but this will cause dynamo to hold an
