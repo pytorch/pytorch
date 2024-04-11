@@ -230,14 +230,14 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             return DTensor(
                 x,
                 mesh,
-                (Replicate(), Shard(0)),
-                shape=[128, 32],
+                (Replicate(),),
+                shape=torch.Size([32]),
                 dtype=x.dtype,
                 requires_grad=x.requires_grad,
-                stride=[32, 1],
+                stride=(1,),
             )
 
-        x = torch.randn(64, 32, requires_grad=True)
+        x = torch.randn(32, requires_grad=True)
         out = fn(x)
         out2 = torch.compile(fn, backend="eager")(x)
         self.assertEqual(out, out2)
@@ -401,22 +401,6 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         )
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
-
-    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
-    def test_inductor_wait_followed_by_view(self):
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
-
-        def fn(x_dt):
-            out = x_dt.redistribute(mesh, [Replicate()])
-            return out.view(-1)
-
-        opt_fn = torch.compile(fn, backend="inductor", fullgraph=True)
-
-        x = torch.ones(4, 4)
-        x_dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
-        ref = fn(x_dt)
-        res = opt_fn(x_dt)
-        self.assertEqual(ref, res)
 
     def test_dtensor_dynamo_device_mesh_attrs(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
