@@ -248,7 +248,9 @@ class Guard:
         try:
             return self.create_fn(builder, self)
         except Exception:
-            log.error("Error while creating guard:\n%s", str(self).rstrip())
+            log.error(
+                "Error while creating guard:\n%s", str(self).rstrip(), exc_info=True
+            )
             if self.stack:
                 log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
             raise
