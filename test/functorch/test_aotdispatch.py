@@ -3063,8 +3063,8 @@ def forward(self, primals_1, primals_2, primals_3, primals_4, primals_5, primals
     copy_ = torch.ops.aten.copy_.default(primals_3, getitem_3);  primals_3 = None
     copy__1 = torch.ops.aten.copy_.default(primals_4, getitem_4);  primals_4 = None
     copy__2 = torch.ops.aten.copy_.default(primals_5, add);  primals_5 = add = None
-    return [getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4]""",
-        )  # noqa: B950
+    return [getitem, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem_4]""",  # noqa: B950
+        )
 
         self.assertEqual(out_ref, out_test)
 
@@ -3083,8 +3083,8 @@ def forward(self, primals_1, primals_6, getitem_1, getitem_2, getitem_3, getitem
     getitem_5 = native_batch_norm_backward[0]
     getitem_6 = native_batch_norm_backward[1]
     getitem_7 = native_batch_norm_backward[2];  native_batch_norm_backward = None
-    return [getitem_6, getitem_7, None, None, None, getitem_5]""",
-        )  # noqa: B950
+    return [getitem_6, getitem_7, None, None, None, getitem_5]""",  # noqa: B950
+        )
 
         self.assertEqual(inp_ref.grad, inp_test.grad)
 
@@ -3555,8 +3555,8 @@ def forward(self, arg0_1):
     getitem = conditional[0];  conditional = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-    return (add, add_1)""",
-        )  # noqa: B950
+    return (add, add_1)""",  # noqa: B950
+        )
 
         self.assertExpectedInline(
             str(gm.true_graph_0.code).strip(),
@@ -3570,8 +3570,8 @@ def forward(self, arg0_1):
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [cos_1]);  true_graph_0 = false_graph_0 = cos_1 = None
     getitem = conditional[0];  conditional = None
-    return (getitem,)""",
-        )  # noqa: B950
+    return (getitem,)""",  # noqa: B950
+        )
 
         self.assertExpectedInline(
             str(gm.true_graph_0.true_graph_0.code).strip(),
@@ -3627,8 +3627,8 @@ def forward(self, arg0_1, arg1_1):
     getitem = conditional[0];  conditional = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-    return (add, add_1)""",
-        )  # noqa: B950
+    return (add, add_1)""",  # noqa: B950
+        )
         self.assertExpectedInline(
             str(gm.true_graph_0.code).strip(),
             """\
@@ -3744,8 +3744,8 @@ def forward(self, arg0_1):
     getitem = conditional[0];  conditional = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-    return (add, add_1)""",
-        )  # noqa: B950
+    return (add, add_1)""",  # noqa: B950
+        )
         self.assertExpectedInline(
             str(gm.true_graph_0.code).strip(),
             """\
@@ -3785,8 +3785,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1, arg6_1, arg7_1
     getitem = _native_batch_norm_legit_functional[0]
     getitem_3 = _native_batch_norm_legit_functional[3]
     getitem_4 = _native_batch_norm_legit_functional[4];  _native_batch_norm_legit_functional = None
-    return (getitem_3, getitem_4, add, getitem)""",
-        )  # noqa: B950
+    return (getitem_3, getitem_4, add, getitem)""",  # noqa: B950
+        )
 
     def test_aot_export_predispatch_reshape(self):
         class Reshape(torch.nn.Module):
@@ -3894,8 +3894,8 @@ class <lambda>(torch.nn.Module):
         getitem_9: "f32[3, 1, 1, 1]" = convolution_backward[1]
         getitem_10: "f32[3]" = convolution_backward[2];  convolution_backward = None
         return (getitem_3, getitem_4, add, sum_1, detach_10, getitem_9, getitem_10, getitem_6, getitem_7)
-        """,
-        )  # noqa: B950
+        """,  # noqa: B950
+        )
 
         self.assertExpectedInline(
             str(signature.parameters),
@@ -3954,8 +3954,8 @@ class <lambda>(torch.nn.Module):
         detach_1: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach);  detach = None
         detach_2: "f32[1, 3, 3, 3]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
         return (getitem_3, getitem_4, add, sum_1, detach_2)
-        """,
-        )  # noqa: B950
+        """,  # noqa: B950
+        )
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
         # 9 outputs: 2 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
@@ -4177,8 +4177,8 @@ def forward(self, arg0_1):
     getitem = conditional[0];  conditional = None
     add = torch.ops.aten.add.Tensor(getitem, 3)
     add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
-    return (add, add_1)""",
-        )  # noqa: B950
+    return (add, add_1)""",  # noqa: B950
+        )
 
         self.assertExpectedInline(
             gm.true_graph_0.code.strip(),
