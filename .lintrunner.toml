@@ -1249,7 +1249,6 @@ exclude_patterns = [
     'test/jit/test_warn.py',
     'test/jit/test_with.py',
     'test/jit/xnnpack/test_xnnpack_delegate.py',
-    'test/jit_hooks/model.py',
     'test/lazy/__init__.py',
     'test/lazy/test_bindings.py',
     'test/lazy/test_debug_util.py',
