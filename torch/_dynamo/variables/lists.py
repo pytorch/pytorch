@@ -127,7 +127,7 @@ class BaseListVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return iter_contains(self.items, args[0], tx)
+            return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
             from .builder import SourcelessBuilder
 
