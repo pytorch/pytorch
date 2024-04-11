@@ -788,10 +788,15 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):
-            cls_var = inspect.getattr_static(self.value.__class__, name, NO_SUCH_SUBOBJ)
-            if cls_var is not NO_SUCH_SUBOBJ and name not in self.value.__dict__:
-                # maybe user-defined @property that we need to inline
-                return cls_var
+            try:
+                cls_var = inspect.getattr_static(
+                    self.value.__class__, name, NO_SUCH_SUBOBJ
+                )
+                if cls_var is not NO_SUCH_SUBOBJ and name not in self.value.__dict__:
+                    # maybe user-defined @property that we need to inline
+                    return cls_var
+            except AttributeError:
+                pass  # __slots__
             # this might call torch.nn.Module.__getattr__
             subobj = getattr(self.value, name)
         else:
@@ -806,7 +811,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value = self.value
         source = AttrSource(self.source, name) if self.source else None
         self._check_for_getattribute()
-        getattr_fn = self._check_for_getattr()
 
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
@@ -815,6 +819,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj = self._getattr_static(name)
         except AttributeError:
             subobj = NO_SUCH_SUBOBJ
+            getattr_fn = self._check_for_getattr()
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
                     getattr_fn, self, source=source
