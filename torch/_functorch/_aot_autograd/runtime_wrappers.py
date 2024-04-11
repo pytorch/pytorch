@@ -72,7 +72,17 @@ def create_runtime_wrapper(
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
 
-    # args that are still used after we run compiled function (maybe w/ steal_args)
+    # Note [Inputs needed in runtime epilogue after list clearing]
+    # In Python functions, you can't free the input arguments of a function within the scope of that function. A workaround is to
+    # wrap the input arguments in a list, and clear the list from within the function.
+    # Here, this is implemented as `call_func_at_runtime_with_args(..., steal_args=True)`.
+    #
+    # This is needed for Compiled Autograd since some of the inputs (activations) should be freed early.
+    # However, we cannot blindly clear the entire list, because AOTAutograd may need access to some of the graph inputs
+    # **after** the compiled function has finished running. There are two main cases:
+    #   (1) Input mutations: If there are an input mutations that we must run outside of the graph, we need access to the input.
+    #   (2) Output aliasing: Outputs that aliases graph inputs generally must be regenerated outside of the `autograd.Function`,
+    #       and doing so requires us accessing the corresponding input after the compiled artifact has run.
     epilogue_args_idx = []
     epilogue_args_idx.extend(runtime_metadata.mutated_inp_runtime_indices)
     num_tokens = len(runtime_metadata.tokens)

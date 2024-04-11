@@ -919,9 +919,11 @@ def aot_module_simplified(
         )
 
     if isinstance(mod, torch._dynamo.utils.GmWrapper):
-        # When we have list inputs to the graph, this function is called by the flatten_graph_inputs
-        # wrapper, which boxes the inputs so that they can be freed before the end of this scope
-        def boxed_forward(runtime_args: List[torch.Tensor]):
+        # This function is called by the flatten_graph_inputs wrapper, which boxes
+        # the inputs so that they can be freed before the end of this scope.
+        # For overhead reasons, this is not the default wrapper, see comment:
+        # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
+        def boxed_forward(runtime_args: List[Any]):
             flat_args = []
             flat_args.extend(params_flat)
             flat_args.extend(runtime_args)
