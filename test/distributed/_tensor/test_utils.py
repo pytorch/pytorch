@@ -134,7 +134,8 @@ class Test2DStridedLocalShard(DTensorTestBase):
         # Currently, the 2D DTensor's local shard is correct, since from_local + redistribute incurs a all_gather behind the scene.
         # When we have a global_tensor of [0, 1, 2, 3, 4, 5, 6, 7], the local shard of 2D DTensor would be:
         # rank0: [0, 1], rank1: [2, 3], rank2: [4, 5], rank3: [6, 7]
-        with CommDebugMode():
+        comm_mode = CommDebugMode()
+        with comm_mode:
             global_tensor = torch.arange(8).view(4, 2)
             mesh_2d = init_device_mesh(
                 self.device_type, (2, 2), mesh_dim_names=("DP", "TP")
@@ -174,7 +175,7 @@ class Test2DStridedLocalShard(DTensorTestBase):
         # TODO: to make the local shard of FSDP2 + TP correct for resharding, it would require strided_sharding
         # as well as let compute_local_shape_and_global_offset takes into consideration of strided_sharding.
         comm_mode = CommDebugMode()
-        with CommDebugMode():
+        with comm_mode:
             global_tensor = torch.arange(8).view(4, 2)
             mesh_2d = init_device_mesh(
                 self.device_type, (2, 2), mesh_dim_names=("DP", "TP")
