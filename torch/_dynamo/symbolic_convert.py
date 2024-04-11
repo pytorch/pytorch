@@ -2434,7 +2434,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         suffix = ""
         # TODO: mlazos, add support for enabling multiple artifact logs
         # with a single alias
-        if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
+        if torch._logging._internal.log_state.is_artifact_enabled("bytecode"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
         if sys.version_info >= (3, 11):
             cur_inst = parent.current_instruction
@@ -2655,13 +2655,18 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 return
             try:
                 val = tos.next_variable(self)
+
+                # TODO(anijain2305,jansel) - The last pop is because
+                # YIELD_FROM. If we remove it from there, we don't need to
+                # pop it here.
                 self.push(val)
-                # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
                 self.YIELD_VALUE(inst)
+                self.pop()
+
+                # Pop the old iter and push the new iter
                 self.pop()
                 self.push(tos)
             except (StopIteration, exc.UserStopIteration):
-                # TODO(jansel): do we need a self.pop() here?
                 return
 
     def SEND(self, inst):
@@ -2669,6 +2674,29 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         val = self.pop()
         tos = self.stack[-1]
         if isinstance(tos, ListIteratorVariable):
+            # We handle yield in a very differnt way than CPython does. Instead
+            # of returning to the parent frame on a yield, TorchDynamo instead
+            # just collects the generated_items and proceed to the next
+            # instruction in the same frame. From bytecode tracing stanpoint,
+            # this means that the iterator returned from the child funtion on
+            # `yield from ...` will always be exhausted.
+
+            # Therefore to implement SEND, we have to look at the implementation
+            # when the iterator returns StopIteration. This translates to this code
+            # 3.11 - https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2618
+            # 3.12 - https://github.com/python/cpython/blob/3.12/Python/bytecodes.c#L863-L865
+            # The implementation is different in 3.11 and 3.12. In 3.12, we rely
+            # on END_SEND to clean up. In 3.11, SEND does the cleanup as well.
+
+            if sys.version_info >= (3, 12):
+                # Do not pop, we will rely on END_SEND to pop the iterator
+                pass
+            else:
+                # Check that the iterator is exhausted. It should be because of
+                # how we implement yields.
+                assert tos.is_exhausted()
+                self.pop()
+
             if isinstance(val, ConstantVariable) and val.value is None:
                 self.push(val)
                 self.instruction_pointer = self.indexof[inst.target]
