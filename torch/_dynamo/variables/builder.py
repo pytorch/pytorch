@@ -2066,6 +2066,8 @@ class SourcelessBuilder:
             return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
+        elif isinstance(value, torch._ops.HigherOrderOperator):
+            return TorchHigherOrderOperatorVariable.make(value)
         unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod

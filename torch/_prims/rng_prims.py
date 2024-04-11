@@ -10,6 +10,7 @@ from torch._ops import HigherOrderOperator
 from torch._prims_common import CUDARngStateHelper, make_contiguous_strides_for
 from torch._prims_common.wrappers import backwards_not_supported
 from torch._subclasses.fake_tensor import FakeTensorMode
+from torch._subclasses.functional_tensor import FunctionalTensorMode
 from torch.fx.experimental.proxy_tensor import (
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
@@ -254,6 +255,12 @@ def register_run_with_rng_state_op():
     def impl_fake_tensor_mode(mode, rng_state, op, *args, **kwargs):
         # Skip setting the set_rng_state as it does not work well with fake tensors.
         # And it does not matter for the fake tensor mode.
+        with mode:
+            return op(*args, **kwargs)
+
+    @run_with_rng_state.py_impl(FunctionalTensorMode)
+    def impl_functional_tensor_mode(mode, rng_state, op, *args, **kwargs):
+        # TODO(yf225): is this the right thing to do? it seems to run through at least.
         with mode:
             return op(*args, **kwargs)
 

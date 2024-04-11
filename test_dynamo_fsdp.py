@@ -248,7 +248,7 @@ def init():
     if activation_checkpoint:
         ac_config = ACConfigClass()
         ac_config.mode = "selective"
-        ac_config.selective_ac_option = "2"
+        ac_config.selective_ac_option = "1"
     mesh = init_device_mesh("cuda", (world_size,))
 
     torch.manual_seed(0)

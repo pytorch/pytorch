@@ -307,7 +307,7 @@ class HigherOrderOperator(OperatorBase):
             ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
             assert (
                 type(curr_mode) in self.python_key_mode_table
-            ), f"Current active mode {curr_mode} not registered"
+            ), f"Current active mode {curr_mode} not registered, python_key_mode_table: {self.python_key_mode_table}"
             handler = self.python_key_mode_table[type(curr_mode)]
             with _pop_mode_temporarily() as mode:
                 return handler(mode, *args, **kwargs)

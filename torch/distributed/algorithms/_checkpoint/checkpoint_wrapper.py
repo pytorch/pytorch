@@ -42,10 +42,14 @@ class ActivationWrapper(torch.nn.Module):
 
     def __getattr__(self, name: str) -> Any:
         """Forward missing attributes to wrapped module."""
-        try:
-            return super().__getattr__(name)  # defer to nn.Module's logic
-        except AttributeError:
-            return getattr(self._checkpoint_wrapped_module, name)
+        if not torch.compiler.is_compiling():
+            try:
+                return super().__getattr__(name)  # defer to nn.Module's logic
+            except AttributeError:
+                return getattr(self._checkpoint_wrapped_module, name)
+        else:
+            # maybe should handle it with something like NNModuleVariable._custom_getattr_fallback, but doesn't work yet :(
+            raise Exception("here123")
 
     def __getitem__(self, key: int) -> Any:
         """Forward indexing calls in case the module is a nn.Sequential."""
