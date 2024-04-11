@@ -118,18 +118,13 @@ class ConstantFolder(torch.fx.Interpreter):
         args, kwargs = self.fetch_args_kwargs_from_env(node)
         flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
 
-        if (
-            not isinstance(self.unknown_value, torch._C.ScriptObject)
-            and self.unknown_value in flattened_inputs
+        # We need to do this weird thing because in cases where flattened_inputs
+        # contains a ScriptObject, equality checking results in a type error if
+        # the types are different.
+        if any(
+            type(self.unknown_value) == type(input_) and self.unknown_value == input_
+            for input_ in flattened_inputs
         ):
-            return self.unknown_value
-
-        # We need to convert flattened_inputs to a set because in cases where
-        # flattened_inputs contains a ScriptObject, `in` checks for equality
-        # which results in a type error, rather than against the hashes
-        if isinstance(
-            self.unknown_value, torch._C.ScriptObject
-        ) and self.unknown_value in set(flattened_inputs):
             return self.unknown_value
 
         # TODO - fix errors with this
