@@ -648,8 +648,6 @@ class TestFullyShardUnshard(FSDPTest):
         fully_shard(model.mlps)
         replicate(model.cuda())
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
-        if self.rank == 0:
-            print(model)
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn((batch_size, dim), device="cuda")
         for _ in range(10):
