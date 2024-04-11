@@ -72,14 +72,38 @@ def create_runtime_wrapper(
     if not hasattr(compiled_fn, "_boxed_call"):
         compiled_fn = make_boxed_func(compiled_fn)
 
+    # Note [Inputs needed in runtime epilogue after list clearing]
+    # In Python functions, you can't free the input arguments of a function within the scope of that function. A workaround is to
+    # wrap the input arguments in a list, and clear the list from within the function.
+    # Here, this is implemented as `call_func_at_runtime_with_args(..., steal_args=True)`.
+    #
+    # This is needed for Compiled Autograd since some of the inputs (activations) should be freed early.
+    # However, we cannot blindly clear the entire list, because AOTAutograd may need access to some of the graph inputs
+    # **after** the compiled function has finished running. There are two main cases:
+    #   (1) Input mutations: If there are an input mutations that we must run outside of the graph, we need access to the input.
+    #   (2) Output aliasing: Outputs that aliases graph inputs generally must be regenerated outside of the `autograd.Function`,
+    #       and doing so requires us accessing the corresponding input after the compiled artifact has run.
+    epilogue_args_idx = []
+    epilogue_args_idx.extend(runtime_metadata.mutated_inp_runtime_indices)
+    num_tokens = len(runtime_metadata.tokens)
+    for info in runtime_metadata.output_info:
+        if (
+            info.output_type == OutputType.alias_of_input
+            or info.output_type == OutputType.is_input
+        ):
+            assert isinstance(info.base_idx, int)
+            epilogue_args_idx.append(info.base_idx + num_tokens)
+
     def runtime_wrapper(args: List[Any]):
-        num_tokens = len(runtime_metadata.tokens)
         if config.unlift_effect_tokens:
             assert num_tokens == 0
         elif num_tokens > 0:
             # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
             # NOTE: this keeps an extra reference to the old args until the end of this function
             args = [[None] * num_tokens, *args]
+
+        # stash a ref to each input tensor we plan to use after the compiled function
+        orig_inputs = {i: args[i] for i in epilogue_args_idx}
 
         if trace_joint:
             args_ = list(args)
@@ -89,9 +113,7 @@ def create_runtime_wrapper(
                     args_[idx] = args_[idx].detach()
             with torch.autograd._force_original_view_tracking(True):
                 all_outs = call_func_at_runtime_with_args(
-                    compiled_fn,
-                    args_,
-                    disable_amp=disable_amp,
+                    compiled_fn, args_, disable_amp=disable_amp, steal_args=True
                 )
         else:
             # When we have an inference graph, we run with torch.no_grad.
@@ -101,16 +123,13 @@ def create_runtime_wrapper(
             if torch.is_grad_enabled():
                 with torch.no_grad():
                     all_outs = call_func_at_runtime_with_args(
-                        compiled_fn,
-                        args,
-                        disable_amp=disable_amp,
+                        compiled_fn, args, disable_amp=disable_amp, steal_args=True
                     )
             else:
                 all_outs = call_func_at_runtime_with_args(
-                    compiled_fn,
-                    args,
-                    disable_amp=disable_amp,
+                    compiled_fn, args, disable_amp=disable_amp, steal_args=True
                 )
+        del args
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
         num_intermediate_bases = runtime_metadata.num_intermediate_bases
@@ -144,7 +163,7 @@ def create_runtime_wrapper(
                 meta = runtime_metadata.input_info[inpt_idx]
                 if not meta.mutates_data and not meta.mutates_metadata:
                     continue
-                original_inpt = args[inpt_idx]
+                original_inpt = orig_inputs[inpt_idx]
                 updated_inpt = updated_inputs[i]
                 if meta.mutates_storage_metadata:
                     # mutates_storage_metadata means our input saw a x.set_(y) call.
@@ -237,14 +256,14 @@ def create_runtime_wrapper(
 
                 o_grad = runtime_metadata.output_info[i].requires_grad
                 if info.output_type == OutputType.alias_of_input:
-                    aliased_base_tensor = args[info.base_idx + num_tokens]  # type: ignore[index]
+                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index]
                     regenerated_out = gen_alias_from_base(
                         aliased_base_tensor, o_, o_grad
                     )
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
                 elif info.output_type == OutputType.is_input:
-                    aliased_base_tensor = args[info.base_idx + num_tokens]  # type: ignore[index]
+                    aliased_base_tensor = orig_inputs[info.base_idx + num_tokens]  # type: ignore[index]
                     regenerated_out = aliased_base_tensor
                     fw_outs_including_aliases.append(regenerated_out)
                     continue
