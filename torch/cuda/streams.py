@@ -1,12 +1,17 @@
 import ctypes
 
 import torch
+from .._utils import _dummy_type
 
 
 if not hasattr(torch._C, "_CudaStreamBase"):
     # Define dummy base classes
-    torch._C.__dict__["_CudaStreamBase"] = torch.Stream
-    torch._C.__dict__["_CudaEventBase"] = torch.Event
+    torch._C.__dict__["_CudaStreamBase"] = _dummy_type(
+        "_CudaStreamBase", base=torch.Stream
+    )
+    torch._C.__dict__["_CudaEventBase"] = _dummy_type(
+        "_CudaEventBase", base=torch.Event
+    )
 
 
 class Stream(torch._C._CudaStreamBase):

@@ -904,7 +904,7 @@ def _get_device_module(device_type: str):
     return device_module
 
 
-def _dummy_type(name: str) -> type:
+def _dummy_type(name: str, *, base: type = object) -> type:
     def get_err_fn(is_init: bool):
         def err_fn(obj, *args, **kwargs):
             if is_init:
@@ -916,7 +916,7 @@ def _dummy_type(name: str) -> type:
         return err_fn
 
     return type(
-        name, (object,), {"__init__": get_err_fn(True), "__new__": get_err_fn(False)}
+        name, (base,), {"__init__": get_err_fn(True), "__new__": get_err_fn(False)}
     )
 
 
