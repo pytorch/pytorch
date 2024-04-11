@@ -71,6 +71,7 @@ from ..utils import (
     clone_input,
     common_constant_types,
     get_fake_value,
+    get_locals_to_steal,
     get_static_address_type,
     is_function_or_wrapper,
     is_namedtuple,
@@ -875,6 +876,51 @@ class VariableBuilder:
             LazyVariableTracker.create(item, source=GetItemSource(self.get_source(), i))
             for i, item in enumerate(value)
         ]
+
+        maybe_gm = self.tx.output.local_scope.get("self")
+        if isinstance(
+            self.source, LocalSource
+        ) and self.source.local_name in get_locals_to_steal(maybe_gm):
+            # The input tensor list to dynamo from compiled autograd may contain activations
+            # which are freed as they are used in inductor. Dynamo's default behavior is to
+            # lift all tensors to the graph inputs, but this will cause dynamo to hold an
+            # extra reference to the activation tensors and increase peak memory usage.
+            # To allow freeing ASAP, we keep the list as graph argument to the dynamo output
+            # graph, and unpack it locally.
+            # e.g. instead of `def forward(self, L_inputs_0_, L_inputs_1_, ...):`, we have
+            # `def forward(self, L_inputs_):`
+            source = self.source
+            assert isinstance(value, list)
+            tensor_list_proxy = self.tx.output.root_tracer.create_graph_input(
+                re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
+            )
+
+            list_variable = wrap_fx_proxy_cls(
+                target_cls=TensorVariable,
+                tx=self.tx,
+                proxy=tensor_list_proxy,
+                example_value=value,
+                subclass_type=None,
+                source=source,
+            )
+
+            guards = []
+            for i, tensor_variable in enumerate(list_variable.items):
+                source_i = GetItemSource(base=source, index=i, index_is_slice=False)
+                # access unpacked tensor from this list instead of from a lifted arg
+                self.tx.output.input_source_to_var[source_i] = tensor_variable
+
+                guard = functools.partial(
+                    GuardBuilder.TENSOR_MATCH, value=TensorWeakRef(value[i])
+                )
+                guards.append(source_i.make_guard(guard))
+
+            install_guard(*guards, skip=1)
+
+            grapharg = GraphArg(
+                source, value, is_unspecialized=False, fake_tensor=None, is_tensor=False
+            )
+            tensor_list_proxy.node.meta["grapharg"] = grapharg
 
         result = BaseListVariable.cls_for_instance(value)(
             output, mutable_local=MutableLocal()
