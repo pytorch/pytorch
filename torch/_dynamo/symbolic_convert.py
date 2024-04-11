@@ -660,6 +660,11 @@ class InstructionTranslatorBase(
         cur_offset = self.current_instruction.offset
         assert self.instruction_pointer is not None
         for inst in self.instructions[self.instruction_pointer :]:
+            # In 3.12, we can have RETURN_VALUE bytecode for the common path for
+            # try .. except or with blocks. So, return False on the first
+            # RETURN_VALUE.
+            if inst.opname == "RETURN_VALUE":
+                return False
             if inst.opname in JUMP_OPNAMES:
                 jump_offset = inst.argval
                 if jump_offset < cur_offset:
