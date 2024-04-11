@@ -1122,6 +1122,9 @@ class AOTInductorModelCache:
 
     @classmethod
     def load(cls, model, example_inputs, device):
+        import torch._inductor
+        import torch.export._trace
+
         key = weakref.ref(model)
         if key not in cls.cache:
             # Register the output dataclass to pytree
@@ -1130,9 +1133,27 @@ class AOTInductorModelCache:
                 # copy.deepcopy is required to prevent any surprising side-effect,
                 # see https://github.com/pytorch/pytorch/issues/113029
                 example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
-            _register_dataclass_output_as_pytree(example_outputs)
 
-            so_path = torch._export.aot_compile(model, example_args, example_kwargs)
+            if pytree._is_namedtuple_instance(example_outputs):
+                typ = type(example_outputs)
+                pytree._register_namedtuple(
+                    typ,
+                    serialized_type_name=f"{typ.__module__}.{typ.__name__}",
+                )
+            else:
+                _register_dataclass_output_as_pytree(example_outputs)
+
+            gm = torch.export._trace._export(
+                model,
+                example_args,
+                example_kwargs,
+                pre_dispatch=True,
+            ).module()
+            with torch.no_grad():
+                so_path = torch._inductor.aot_compile(
+                    gm, example_args, example_kwargs
+                )  # type: ignore[arg-type]
+
             cls.cache[key] = torch._export.aot_load(so_path, device)
 
         return cls.cache[key]
