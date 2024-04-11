@@ -1667,6 +1667,13 @@ void initJITBindings(PyObject* module) {
       });
 
   m.def(
+      "_check_schema_skip_script_object",
+      [](const FunctionSchema& schema, py::args args, py::kwargs kwargs) {
+        return createPyObjectForStack(
+            std::move(checkSchemaSkipScriptObject(schema, args, kwargs)));
+      });
+
+  m.def(
       "_jit_resolve_packet",
       [](const char* op_name, py::args args, py::kwargs kwargs) {
         try {
