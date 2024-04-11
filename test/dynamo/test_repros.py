@@ -1151,7 +1151,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         with torch.no_grad():
             cnt = self._reformer(nopython=True)
         self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(cnt.op_count, 11)
+        self.assertEqual(
+            cnt.op_count, 17 if torch._dynamo.config.use_single_step_graph else 11
+        )
 
     def test_reformer_train(self):
         with torch.enable_grad():
@@ -1202,7 +1204,10 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertExpectedInline(cnt.op_count, """11""")
         else:
             self.assertExpectedInline(cnt.frame_count, """1""")
-            self.assertExpectedInline(cnt.op_count, """12""")
+            self.assertExpectedInline(
+                cnt.op_count,
+                """24""" if torch._dynamo.config.use_single_step_graph else """12""",
+            )
 
     def test_module_in_skipfiles(self):
         model = nn.Linear(10, 10)
@@ -1258,7 +1263,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(opt_model(input), correct))
 
         self.assertEqual(cnt.frame_count, 1)
-        self.assertLessEqual(cnt.op_count, 10)
+        self.assertLessEqual(
+            cnt.op_count, 18 if torch._dynamo.config.use_single_step_graph else 10
+        )
 
     # see: https://github.com/pytorch/pytorch/issues/80067
     # NB: When you remove the expectedFailure, don't forget to
@@ -1616,7 +1623,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_model(inp)
         self.assertEqual(cnt.frame_count, 1)
         self.assertEqual(
-            cnt.op_count, 39 if torch._dynamo.config.use_single_step_graph else 12
+            cnt.op_count, 73 if torch._dynamo.config.use_single_step_graph else 12
         )
 
     def test_exec_import(self):

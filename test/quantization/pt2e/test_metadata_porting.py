@@ -429,6 +429,10 @@ class TestMetaDataPorting(QuantizationTestCase):
             node_tags,
         )
 
+    @unittest.skipIf(
+        torch._dynamo.config.use_single_step_graph,
+        "after decomp adaptive_avg_pool2d node won't exist",
+    )
     def test_no_metadata_porting(self):
         class BackendAQuantizer(Quantizer):
             def annotate(self, gm: torch.fx.GraphModule) -> torch.fx.GraphModule:
