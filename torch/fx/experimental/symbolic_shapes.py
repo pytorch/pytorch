@@ -3522,7 +3522,7 @@ class ShapeEnv:
             # Clamp values of size-like variables
             for x in self.size_like & var_to_range.keys():
                 if var_to_range[x] is not None:
-                    var_to_range[x] &= ValueRanges(2, sympy.oo)
+                    var_to_range[x] = ValueRanges(2, sympy.oo)
         return bound_sympy(expr, var_to_range)
 
     @_lru_cache
@@ -3615,7 +3615,16 @@ class ShapeEnv:
             # variables have to have their value range bounds adjusted as
             # well)
             s = sympy.Symbol(f"shape_{idx}", positive=True, integer=True)
-            offset = lower - 1
+
+            # Note:
+            #   Offset might be a fraction(e.g. aten.split.Tensor), but shapes are always integers.
+            #   Sympy might give unexepected results when comparing an integer with a non-integer
+            #   Therefore, we cast offset to int here.
+            #   For example:
+            #       shape_0 = sympy.Symbol("shape_0", positive=True, integer=True)
+            #       expr = sympy.Eq(shape_0 - 1/3, 4)
+            #       expr.xreplace({}) # False
+            offset = int(lower - 1)
             new_shape_env[k] = s + offset
             new_range_env[s] = SymPyValueRangeAnalysis.add(vr, -offset)
 
@@ -3860,11 +3869,7 @@ class ShapeEnv:
                 return
             elif a in self.size_like:
                 tgt_bound_so = self.bound_sympy(tgt, size_oblivious=True)
-                # This is morally equivalent to self.bound_sympy(a, size_oblivious=True)
-                # but handles substitutions like u0 == 0
-                src_bound_so = self.var_to_range[a]
-                if src_bound_so.upper >= 2:
-                    src_bound_so &= ValueRanges(2, sympy.oo)
+                src_bound_so = self.bound_sympy(a, size_oblivious=True)
                 if not issubset(tgt_bound_so, src_bound_so):
                     self.log.debug("skipped set_replacement %s = %s (%s) "
                                    "[%s not subset of %s (size-oblivious conditions)]", a, tgt, msg, tgt_bound_so, src_bound_so)
@@ -4098,7 +4103,7 @@ class ShapeEnv:
         if is_debug and config.extended_debug_cpp:
             cpp_stack = CapturedTraceback.extract(cpp=True)
             maybe_extra_debug += "\nC++ stack trace:\n" + ''.join(cpp_stack.format())
-        else:
+        elif is_debug:
             maybe_extra_debug += (
                 "\nFor C++ stack trace, run with "
                 "TORCHDYNAMO_EXTENDED_DEBUG_CPP=1"
