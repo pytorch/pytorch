@@ -16,6 +16,7 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
+from torch._higher_order_ops.effects import _EffectType
 from torch._logging import LazyString, trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
@@ -147,7 +148,8 @@ def getattr_recursive(obj, target):
         attr_itr = getattr(attr_itr, atom)
     return attr_itr
 
-def tag_nodes_dislike_padding(g):
+
+def mark_nodes_dislike_padding(g):
     """
     Nodes like convolution/convolution_backward want its input to be contiguous.
     If we pad their inputs, we result in extra calls to copy kernels!  On the other hand, padding usually helps reduction.
@@ -179,23 +181,28 @@ def tag_nodes_dislike_padding(g):
     }
 
     def _get_overload_packet(node):
-        return node.target._overloadpacket if node.op == "call_function" and hasattr(node.target, "_overloadpacket") else None
+        return (
+            node.target._overloadpacket
+            if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
+            else None
+        )
 
     for cur in reversed(g.nodes):
         op = _get_overload_packet(cur)
         if not op:
-            continue;
+            continue
         if op in ops_dislike_padding:
             cur.meta["dislike_padding"] = True
 
         if cur.meta.get("dislike_padding", False):
-            # propagate 
+            # propagate
             for prior in cur.all_input_nodes:
                 prior_op = _get_overload_packet(prior)
                 if not prior_op:
                     continue
                 if prior_op not in ops_like_padding:
                     prior.meta["dislike_padding"] = True
+
 
 class GraphLowering(torch.fx.Interpreter):
     graph_outputs: List[ir.IRNode]
@@ -360,7 +367,7 @@ class GraphLowering(torch.fx.Interpreter):
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
-        tag_nodes_dislike_padding(gm.graph)
+        mark_nodes_dislike_padding(gm.graph)
         self._warned_fallback = {"aten.convolution_backward"}
         self.user_visible_outputs = user_visible_outputs
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
@@ -383,6 +390,8 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.allocated_constant_name if const_module is not None else {}
         )
         self.init_backend_registration()
+
+        self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
 
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
@@ -686,7 +695,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
         # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
-        if not isinstance(buffer, ir.ComputedBuffer) or not buffer.is_zero_elements():
+        if (
+            not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
+            and buffer.get_device() is not None
+        ):
             self.add_device_info(buffer.get_device())
         return name
 
@@ -962,6 +974,7 @@ class GraphLowering(torch.fx.Interpreter):
                     sympy.Expr,
                     sympy.logic.boolalg.Boolean,
                     int,
+                    ir.EffectfulKernel,
                 ),
             )
             for x in result
@@ -1381,6 +1394,8 @@ class GraphLowering(torch.fx.Interpreter):
             self.cpp_wrapper = True
             self.removed_buffers.clear()
             self.inplaced_to_remove.clear()
+            V.graph.sizevars.precomputed_replacements.clear()
+            V.graph.sizevars.inv_precomputed_replacements.clear()
             return self.codegen()
         else:
             # cpu

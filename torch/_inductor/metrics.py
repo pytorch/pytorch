@@ -43,6 +43,8 @@ cpp_to_dtype_count = 0
 # Each element counts the number of inner kernels in each outer loop fusion.
 cpp_outer_loop_fused_inner_counts: List[int] = []
 
+num_comprehensive_padding = 0
+
 
 # reset all counters
 def reset():

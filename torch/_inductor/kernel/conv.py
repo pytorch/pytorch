@@ -487,19 +487,10 @@ def _convolution(
 
 def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
     assert fx_node.target == torch.ops.aten.convolution.default
-
-    # constrain_to_fx_strides only guarantees stride order. For args[0]
-    # we want contiguous tensor
-    args = list(args)
-
-    # XXX adding this cause 3ms slowdown for botnet26t_256, 2ms slowdown
-    # for tinynet_l . I believe it should also slow others.
-    # args[0] = ir.ExternKernel.require_contiguous(args[0])
     if V.graph.layout_opt:
         return args, kwargs
     else:
-        out = constrain_to_fx_strides(fx_node, *args, **kwargs)
-        return out
+        return constrain_to_fx_strides(fx_node, *args, **kwargs)
 
 
 add_layout_constraint(aten.convolution, constrain_conv_to_fx_strides)

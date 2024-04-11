@@ -39,6 +39,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
+from torch._inductor import metrics
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -118,6 +119,7 @@ TensorBox -> View -> StorageBox -> Buffer
 In these cases, the underlying StorageBox/Buffer will be shared with the pre-view TensorBox.
 """
 
+# TODO(shunting): decide the aligment based on dtype
 DEFAULT_ALIGN = 16
 
 
@@ -125,7 +127,9 @@ def validate_ir(node_or_nodes):
     def _check_tensorbox(nodes):
         # Could expand this to check deeper properties
         # (e.g. TensorBox points to View or StorageBox)
-        if isinstance(nodes, (list, tuple)):
+        if nodes is None:
+            pass
+        elif isinstance(nodes, (list, tuple)):
             for node in nodes:
                 _check_tensorbox(node)
         elif isinstance(nodes, dict):
@@ -141,6 +145,7 @@ def validate_ir(node_or_nodes):
                     TensorBox,
                     sympy.logic.boolalg.Boolean,
                     Expr,
+                    EffectfulKernel,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -1800,7 +1805,7 @@ def as_storage_and_layout(
     Try to simplify x into a StorageBox and a Layout.
 
     allow_padding only affect how we apply stride_order. When allow_padding
-    is True, we can add padding when applying the stride_order.
+    is True, we have the freedom to add padding when applying the stride_order.
     """
     if isinstance(x, TensorBox):
         return as_storage_and_layout(
@@ -2590,17 +2595,20 @@ class Layout(IRNode):
     @staticmethod
     def _pad_strides(in_strides, size, align=DEFAULT_ALIGN):
         """
-        The padding does not change stride order but makes sure all non 1 strides
-        are multiple of align.
+        The padding does not change stride order but makes sure all strides larger
+        than the threshold are multiple of align.
         """
         if len(in_strides) == 0:
             return in_strides
 
-        if not config.pad_channels_last and len(in_strides) == 4 and in_strides[1] == 1: # a loose check for channels last
+        # a loose check for channels last
+        if not config.pad_channels_last and len(in_strides) == 4 and in_strides[1] == 1:
             return in_strides
 
         current_fx_node = V.get_current_node()
-        if hasattr(current_fx_node, "meta") and current_fx_node.meta.get("dislike_padding", False):
+        if hasattr(current_fx_node, "meta") and current_fx_node.meta.get(
+            "dislike_padding", False
+        ):
             return in_strides
 
         # get_stride_order does not work with dynamic shape. Also we can not
@@ -2623,13 +2631,13 @@ class Layout(IRNode):
         new_strides[fill_order[0]] = 1
 
         # don't align an too small stride since that cause too much memory increase.
-        # Pick heuristic value 320 since for alignement=16, that results in at most 5% memory increase.
-        #
         # Pad too small stride may also cause perf loss. We may result in many tiny data blocks
         # with gaps in between. That causes less coalesced GPU memory access!
-        # align_stride_threshold = 320
-
-        # Further raise the threshold to 1024 to avoid interfere with persistent reduction.
+        #
+        # Initially we pick 320 as the threshold since for alignement=16,
+        # that results in at most 5% memory cost.
+        #
+        # But later on we raise the threshold to 1024 to avoid interfere with persistent reduction.
         # Let's say a inner reduction has a row size 513. Inductor will generate
         # persistent reduction code.
         # If we do padding, the strides are not contiguous any more. Inductor
@@ -2654,41 +2662,21 @@ class Layout(IRNode):
             # Avoid strides like [25, 5, 5, 1] being padded to equivalent strides
             # [25, 25, 5, 1].
             return in_strides
+
+        metrics.num_comprehensive_padding += 1
         return new_strides
 
-    def need_padding(self, align=DEFAULT_ALIGN):
-        assert self._stride is not None
-        for s in self._stride:
-            if s > 1 and s % align != 0:
-                return True
-        return False
-
     def pad_strides(self):
-        if not config.pad_fixed_layout:
-            assert isinstance(self, FlexibleLayout)
+        assert isinstance(self, FlexibleLayout)
         assert self._stride is not None
         self._stride = self._pad_strides(self._stride, self.size)
 
     def should_pad_strides(self):
-        return config.comprehensive_padding and (
-            config.pad_fixed_layout or isinstance(self, FlexibleLayout)
-        )
+        return config.comprehensive_padding and isinstance(self, FlexibleLayout)
 
     def as_fixed(self):
-        if (
-            config.debug_fixed_layout
-            and isinstance(self, FixedLayout)
-            and self.need_padding()
-        ):
-            import traceback
-
-            trace, instance_cnt = fixed_layout_creation_stack_traces[id(self)]
-            traceback.print_list(trace)
-            print(f"instance_cnt {instance_cnt}")
-            breakpoint()
-        if not config.pad_fixed_layout:
-            if isinstance(self, FixedLayout):
-                return self
+        if isinstance(self, FixedLayout):
+            return self
 
         if self.should_pad_strides():
             self.pad_strides()
@@ -2719,11 +2707,6 @@ class Layout(IRNode):
         return compute_required_storage_length(self.size, self.stride, self.offset)  # type: ignore[arg-type, return-value]
 
 
-if config.debug_fixed_layout:
-    fixed_layout_creation_stack_traces = {}  # type: ignore[var-annotated]
-    fixed_layout_instance_cnt = itertools.count()
-
-
 class FixedLayout(Layout):
     """A Tensor layout we cannot change"""
 
@@ -2744,13 +2727,6 @@ class FixedLayout(Layout):
             stride,
             offset,  # type: ignore[arg-type]
         )
-
-        if config.debug_fixed_layout:
-            instance_count = next(fixed_layout_instance_cnt)
-            fixed_layout_creation_stack_traces[id(self)] = (
-                traceback.extract_stack(),
-                instance_count,
-            )
 
     def make_indexer(self):
         """A closure containing math to read a given element"""
@@ -5530,16 +5506,26 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        device = cls.find_device(tensor_args, example_output)
-        assert device, "Not sure where to find device info"
+        if example_output is None:
+            packed = cls(
+                NoneLayout(None),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+            )
 
-        packed = cls(
-            MultiOutputLayout(device),
-            kernel,
-            tensor_args,
-            non_tensor_args,
-            unflatten_args,
-        )
+        else:
+            device = cls.find_device(tensor_args, example_output)
+            assert device, "Not sure where to find device info"
+
+            packed = cls(
+                MultiOutputLayout(device),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+            )
 
         def generate_output(output, indices):
             if isinstance(output, (list, tuple)):
@@ -6937,9 +6923,9 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 double inv_output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
-                std::string post_op_name,
+                c10::string_view post_op_name,
                 torch::List<c10::optional<at::Scalar>> post_op_args,
-                std::string post_op_algorithm)"""
+                c10::string_view post_op_algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -7494,6 +7480,47 @@ class WhileLoop(ExternKernel):
 
     def codegen(self, wrapper):
         wrapper.codegen_while_loop(self)
+
+
+class EffectfulKernel(FallbackKernel):
+    def __init__(
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+    ):
+        super().__init__(
+            NoneLayout(layout.device),
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+        )
+
+        from torch._higher_order_ops.effects import get_effect_key
+
+        effect_type = get_effect_key(kernel, (*nontensor_args, *tensor_args), kwargs)
+        assert effect_type is not None
+        self.effect_type = effect_type
+        self.prev_effect_buffer = V.graph.effectful_ops.get(effect_type, None)
+        V.graph.effectful_ops[effect_type] = self
+
+    def get_read_writes(self):
+        read_writes = super().get_read_writes()
+
+        if self.prev_effect_buffer is not None:
+            read_writes.reads.add(
+                dependencies.StarDep(self.prev_effect_buffer.get_name())
+            )
+
+        return read_writes
+
+    def has_side_effects(self):
+        return True
 
 
 class InterpreterShim(torch.fx.Interpreter):
