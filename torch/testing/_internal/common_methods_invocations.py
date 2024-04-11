@@ -18915,7 +18915,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_gradgrad=False,
         allow_cow_input_materialize_forward=[0],
-        supports_cow_input_no_materialize_backward=False,
     ),
     OpInfo(
         "nn.functional.multi_head_attention_forward",
@@ -18985,7 +18984,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        supports_cow_input_no_materialize_backward=False,
         dtypes=floating_types_and(torch.float16),
         backward_dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
@@ -19005,7 +19003,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_grid_sample,
         reference_inputs_func=reference_inputs_grid_sample,
         supports_gradgrad=False,
-        supports_cow_input_no_materialize_backward=False,
         gradcheck_nondet_tol=1e-15),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
@@ -19015,7 +19012,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sampler_2d,
         supports_gradgrad=False,
-        supports_cow_input_no_materialize_backward=False,
         gradcheck_nondet_tol=1e-15),
     OpInfo(
         "argwhere",
@@ -19370,7 +19366,6 @@ op_db: List[OpInfo] = [
         "nn.functional.ctc_loss",
         dtypes=floating_types(),
         supports_out=False,
-        supports_cow_input_no_materialize_backward=False,
         sample_inputs_func=sample_inputs_ctc_loss,
         skips=(
             # https://github.com/pytorch/pytorch/issues/67462
@@ -19418,7 +19413,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_jit_shape_analysis=True,
-        supports_cow_input_no_materialize_backward=False,
         skips=(
             # RuntimeError:
             # undefined value tensor:
@@ -19475,7 +19469,6 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
-        supports_cow_input_no_materialize_backward=False,
         sample_inputs_func=sample_inputs_huber_loss,
         error_inputs_func=error_inputs_huber_loss,
         skips=(
@@ -19493,7 +19486,6 @@ op_db: List[OpInfo] = [
         dtypes=floating_types(),
         supports_out=False,
         supports_gradgrad=False,
-        supports_cow_input_no_materialize_backward=False,
         skips=(
             DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
         )
@@ -19677,7 +19669,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
         supports_gradgrad=False,
-        supports_cow_input_no_materialize_backward=False,
         sample_inputs_func=sample_inputs_segment_reduce,
         skips=(
             # FIXME: CUDA driver API confirmed a leak in
@@ -19698,7 +19689,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
         supports_gradgrad=False,
-        supports_cow_input_no_materialize_backward=False,
         sample_inputs_func=partial(sample_inputs_segment_reduce, mode='offsets'),
         skips=(
             # FIXME: CUDA driver API confirmed a leak in
