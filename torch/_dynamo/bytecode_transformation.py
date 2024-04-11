@@ -813,12 +813,37 @@ def remove_jump_if_none(instructions: List[Instruction]) -> None:
                 )
             else:
                 jump_op = create_instruction("POP_JUMP_IF_TRUE", target=inst.target)
+            # update inst.exn_tab_entry.end if necessary
+            if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
+                inst.exn_tab_entry.end = jump_op
+            # preserve exception table entries
+            is_op.exn_tab_entry = copy.copy(inst.exn_tab_entry)
+            jump_op.exn_tab_entry = copy.copy(inst.exn_tab_entry)
             # modify inst in-place to preserve jump target
             inst.opcode = dis.opmap["LOAD_CONST"]
             inst.opname = "LOAD_CONST"
             inst.arg = None
             inst.argval = None
             new_insts.extend([is_op, jump_op])
+    instructions[:] = new_insts
+
+
+def remove_binary_store_slice(instructions: List[Instruction]) -> None:
+    new_insts = []
+    for inst in instructions:
+        new_insts.append(inst)
+        if inst.opname in ("BINARY_SLICE", "STORE_SLICE"):
+            # new instruction
+            subscr_inst = create_instruction(inst.opname.replace("SLICE", "SUBSCR"))
+            if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
+                inst.exn_tab_entry.end = subscr_inst
+            subscr_inst.exn_tab_entry = copy.copy(inst.exn_tab_entry)
+            # modify inst in-place to preserve jump target
+            inst.opcode = dis.opmap["BUILD_SLICE"]
+            inst.opname = "BUILD_SLICE"
+            inst.arg = 2
+            inst.argval = 2
+            new_insts.append(subscr_inst)
     instructions[:] = new_insts
 
 
@@ -1006,15 +1031,25 @@ def fix_vars(instructions: List[Instruction], code_options, varname_from_oparg=N
         elif instructions[i].opname == "LOAD_SUPER_ATTR":
             assert instructions[i].arg is not None
             assert instructions[i].argval is not _NotProvided
-            instructions[i].arg = (names[instructions[i].argval] << 2) + (
-                cast(int, instructions[i].arg) % 4
+            # Copy low bit, force second bit on for explicit super (the "+ 2")
+            instructions[i].arg = (
+                (names[instructions[i].argval] << 2)
+                + (cast(int, instructions[i].arg) % 2)
+                + 2
             )
         elif instructions[i].opcode in HAS_LOCAL:
             if should_compute_arg():
                 instructions[i].arg = varnames[instructions[i].argval]
         elif instructions[i].opcode in HAS_NAME:
             if should_compute_arg():
-                instructions[i].arg = names[instructions[i].argval]
+                name = instructions[i].argval
+                try:
+                    instructions[i].arg = names[name]
+                except KeyError:
+                    # Add a missing item to co_names
+                    instructions[i].arg = names[name] = len(names)
+                    code_options["co_names"] = (*code_options["co_names"], name)
+                    assert len(code_options["co_names"]) == len(names)
         elif instructions[i].opcode in HAS_FREE:
             if should_compute_arg():
                 instructions[i].arg = freenames[instructions[i].argval]
@@ -1116,6 +1151,7 @@ def clean_and_assemble_instructions(
         code_options["co_exceptiontable"] = assemble_exception_table(
             compute_exception_table(instructions)
         )
+
     return instructions, types.CodeType(*[code_options[k] for k in keys])
 
 
@@ -1142,6 +1178,8 @@ def cleaned_instructions(code, safe=False) -> List[Instruction]:
             devirtualize_jumps(instructions)
         if sys.version_info < (3, 12):
             explicit_super(code, instructions)
+        else:
+            remove_binary_store_slice(instructions)
     return instructions
 
 
