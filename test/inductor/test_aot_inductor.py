@@ -269,6 +269,22 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    def test_large_mmaped_weights(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(512, 250112)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(1, 250112, device=self.device),
+            torch.randn(1, 512, device=self.device),
+        )
+        with config.patch({"aot_inductor.force_mmap_weights": True}):
+            self.check_model(Model(), example_inputs)
+
     def test_with_offset(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -2675,10 +2691,11 @@ CPU_TEST_FAILURES = {
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
-    "test_amp_fallback_random": fail_minimal_arrayref_interface(),  # undefined symbol: _Z16aoti_torch_dtypeIN3c108BFloat16EEiv
+    # https://github.com/pytorch/pytorch/issues/123691
+    "test_amp_fallback_random": fail_minimal_arrayref_interface(is_skip=True),
     "test_simple_dynamic": fail_minimal_arrayref_interface(),
-    # https://github.com/pytorch/pytorch/issues/122989
-    "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(
+    # https://github.com/pytorch/pytorch/issues/123691
+    "test_zero_grid_with_unbacked_symbols": fail_minimal_arrayref_interface(
         is_skip=True
     ),
     # failed on MacOS
@@ -2726,6 +2743,7 @@ if TEST_WITH_ROCM:
             "test_bmm_multiple_dynamic": fail_cuda(is_skip=True),
             "test_convolution": fail_cuda(is_skip=True),
             "test_large": fail_cuda(is_skip=True),
+            "test_large_mmaped_weights": fail_cuda(is_skip=True),
             "test_missing_cubin": fail_cuda(is_skip=True),
             "test_multi_device": fail_cuda(is_skip=True),
             "test_poi_multiple_dynamic": fail_cuda(is_skip=True),
@@ -2761,6 +2779,7 @@ if not IS_FBCODE:
             "test_convolution": fail_minimal_arrayref_interface(is_skip=True),
             "test_empty_graph": fail_minimal_arrayref_interface(is_skip=True),
             "test_large": fail_minimal_arrayref_interface(is_skip=True),
+            "test_large_mmaped_weights": fail_minimal_arrayref_interface(is_skip=True),
             "test_missing_output": fail_minimal_arrayref_interface(is_skip=True),
             "test_model_modified_weights": fail_minimal_arrayref_interface(
                 is_skip=True

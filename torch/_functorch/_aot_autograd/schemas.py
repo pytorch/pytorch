@@ -123,6 +123,7 @@ class InputAliasInfo:
             self.mutates_metadata,
             self.mutations_hidden_from_autograd,
             self.mutations_under_no_grad_or_inference_mode,
+            self.mutates_storage_metadata,
             self.requires_grad,
         ):
             return MutationType.MUTATED_IN_GRAPH
@@ -473,7 +474,7 @@ class SubclassMeta:
     # in case we made incorrect assumptions about the subclass-ness of our grad_outputs
     #
     # Optional field because we don't compute for inference graphs
-    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]]
+    grad_input_metas: Optional[List[Union[int, SubclassCreationMeta]]] = None
 
     def __init__(self):
         # The fields in this class get set after its construction.
