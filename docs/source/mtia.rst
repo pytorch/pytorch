@@ -21,6 +21,8 @@ The MTIA backend is implemented out of the tree, only interfaces are be defined 
     set_stream
     stream
     synchronize
+    device
+    DeferredMtiaCallError
 
 Streams and events
 ------------------
