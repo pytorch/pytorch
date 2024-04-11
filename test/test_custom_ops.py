@@ -2192,6 +2192,26 @@ class TestCustomOpAPI(TestCase):
         with self.assertRaisesRegex(NotImplementedError, "Recursive call"):
             Foo.apply(xs)
 
+        # recursive on backward
+        @torch._library.autograd.supports_tensorlist
+        class Bar(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, xs):
+                return [xs[i] + i for i in range(len(xs))]
+
+            @staticmethod
+            def backward(ctx, grads):
+                f1 = Bar.apply(grads[:2])
+                f2 = Bar.apply(grads[2:])
+                return f1 + f2
+
+        xs = [torch.tensor(0., requires_grad=True) for _ in range(5)]
+        ys = Bar.apply(xs)
+        sum(ys).backward()
+        result = [xi.grad for xi in xs]
+        self.assertEqual(result, torch.tensor([1., 2, 1, 2, 3]).unbind(0))
+
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_default_values(self):
         defaults = []
