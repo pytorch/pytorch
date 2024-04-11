@@ -12,7 +12,9 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
+#include <pybind_utils.h>
 #include <limits>
+#include <stdexcept>
 
 namespace torch::jit {
 
@@ -755,6 +757,24 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
 
     return std::make_pair(std::move(found_op), std::move(stack));
   }
+}
+
+// This function is used to check if the schema is valid for the given args and
+// kwargs It skips checking script object to allow FakeScriptObject to be
+// matched. It returns the stack if the arugments matches schema and false
+// otherwise.
+Stack checkSchemaSkipScriptObject(
+    const FunctionSchema& schema,
+    py::args args,
+    const py::kwargs& kwargs) {
+  Stack stack;
+  try {
+    stack = createStackForSchema(
+        schema, std::move(args), kwargs, c10::nullopt, true);
+  } catch (schema_match_error& error) {
+    throw std::runtime_error(error.what());
+  }
+  return stack;
 }
 
 py::object invokeOperatorFromPython(

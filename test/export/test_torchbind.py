@@ -86,6 +86,19 @@ class TestExportTorchbind(TestCase):
                 test.tq_size_counter += 1
                 return len(self.queue)
 
+        self.torch_bind_ops = [
+            torch.ops._TorchScriptTesting.takes_foo,
+            torch.ops._TorchScriptTesting.takes_foo_python_meta,
+            torch.ops._TorchScriptTesting.takes_foo_list_return,
+            torch.ops._TorchScriptTesting.takes_foo_tuple_return,
+            torch.ops._TorchScriptTesting.take_an_instance,
+            torch.ops._TorchScriptTesting.take_an_instance_inferred,
+            torch.ops._TorchScriptTesting.takes_foo_cia,
+            torch.ops._TorchScriptTesting.queue_pop,
+            torch.ops._TorchScriptTesting.queue_push,
+            torch.ops._TorchScriptTesting.queue_size,
+        ]
+
     def tearDown(self):
         torch._library.fake_class_registry.deregister_fake_class(
             "_TorchScriptTesting::_Foo"
@@ -557,18 +570,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(tq1.size(), 0)
 
     def test_identifying_torchbind_ops(self):
-        for op in [
-            torch.ops._TorchScriptTesting.takes_foo,
-            torch.ops._TorchScriptTesting.takes_foo_python_meta,
-            torch.ops._TorchScriptTesting.takes_foo_list_return,
-            torch.ops._TorchScriptTesting.takes_foo_tuple_return,
-            torch.ops._TorchScriptTesting.take_an_instance,
-            torch.ops._TorchScriptTesting.take_an_instance_inferred,
-            torch.ops._TorchScriptTesting.takes_foo_cia,
-            torch.ops._TorchScriptTesting.queue_pop,
-            torch.ops._TorchScriptTesting.queue_push,
-            torch.ops._TorchScriptTesting.queue_size,
-        ]:
+        for op in self.torch_bind_ops:
             self.assertTrue(any(op._overload_has_script_obj_arg.values()))
 
         for op in [
@@ -577,7 +579,67 @@ def forward(self, arg0_1, arg1_1):
         ]:
             self.assertFalse(any(op._overload_has_script_obj_arg.values()))
 
-    def test_make_fx_tensor_queue_operators(self):
+    def test_torchbind_op_register_fallthrough(self):
+        TEST_DISPATCH_KEY = torch._C.DispatchKey.AutocastCPU
+        TEST_DISPATCH_KEY_STR = "AutocastCPU"
+
+        for op_packet in self.torch_bind_ops:
+            op = op_packet.default
+            ns, _ = torch._library.utils.parse_namespace(op_packet._qualified_op_name)
+            with torch.library._scoped_library(ns, "FRAGMENT") as lib:
+                lib.impl(
+                    op.name(), torch.library.fallthrough_kernel, TEST_DISPATCH_KEY_STR
+                )
+                self.assertTrue(
+                    torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
+                        op.name(), TEST_DISPATCH_KEY
+                    )
+                )
+
+    def test_make_fx_schema_checking_script_object(self):
+        class Model(torch.nn.Module):
+            def forward(self, tq, x, foo):
+                torch.ops._TorchScriptTesting.queue_push(foo, x.cos())
+                return tq
+
+        class ModelCallByKW(torch.nn.Module):
+            def forward(self, tq, x, foo):
+                torch.ops._TorchScriptTesting.queue_push(x=x.cos(), foo=foo)
+                return tq
+
+        mod = Model()
+        modkw = ModelCallByKW()
+
+        foo = torch.classes._TorchScriptTesting._Foo(10, 20)
+        x = torch.ones(3, 3)
+        tq = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        ns = "_TorchScriptTesting"
+        with torch.library._scoped_library(ns, "FRAGMENT") as lib:
+            op = torch.ops._TorchScriptTesting.queue_push
+            lib.impl(op.__name__, torch.library.fallthrough_kernel, "AutogradCPU")
+            lib.impl(op.__name__, torch.library.fallthrough_kernel, "ADInplaceOrView")
+            lib.impl(
+                op.__name__,
+                torch.library.fallthrough_kernel,
+                "PythonTLSSnapshot",
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError, "is expected to be a FakeScriptObject"
+            ):
+                _ = make_fx(mod, tracing_mode="fake")(tq, x, foo)
+
+            with self.assertRaisesRegex(
+                RuntimeError, "is expected to be a FakeScriptObject"
+            ):
+                _ = make_fx(modkw, tracing_mode="fake")(tq, x, foo)
+
+    @parametrize("fallthrough_via", ["lib_impl", "py_impl"])
+    def test_make_fx_tensor_queue_operators(self, fallthrough_via):
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -609,7 +671,45 @@ def forward(self, arg0_1, arg1_1):
 
         mod(tq1, x)
 
-        gm = make_fx(mod, tracing_mode="fake")(tq1, x)
+        ops = [
+            torch.ops._TorchScriptTesting.queue_push,
+            torch.ops._TorchScriptTesting.queue_pop,
+            torch.ops._TorchScriptTesting.queue_size,
+        ]
+        if fallthrough_via == "lib_impl":
+            ns = "_TorchScriptTesting"
+            with torch.library._scoped_library(ns, "FRAGMENT") as lib:
+                for op in ops:
+                    lib.impl(
+                        op.__name__, torch.library.fallthrough_kernel, "AutogradCPU"
+                    )
+                    lib.impl(
+                        op.__name__, torch.library.fallthrough_kernel, "ADInplaceOrView"
+                    )
+                    lib.impl(
+                        op.__name__,
+                        torch.library.fallthrough_kernel,
+                        "PythonTLSSnapshot",
+                    )
+
+                gm = make_fx(mod, tracing_mode="fake")(tq1, x)
+        else:
+            for op in ops:
+                op.default.py_impl(torch._C.DispatchKey.AutogradCPU)(
+                    torch.library.fallthrough_kernel
+                )
+                op.default.py_impl(torch._C.DispatchKey.ADInplaceOrView)(
+                    torch.library.fallthrough_kernel
+                )
+                op.default.py_impl(torch._C.DispatchKey.PythonTLSSnapshot)(
+                    torch.library.fallthrough_kernel
+                )
+            gm = make_fx(mod, tracing_mode="fake")(tq1, x)
+            for op in ops:
+                op.default._dispatch_cache.clear()
+                del op.default.py_kernels[torch._C.DispatchKey.AutogradCPU]
+                del op.default.py_kernels[torch._C.DispatchKey.ADInplaceOrView]
+                del op.default.py_kernels[torch._C.DispatchKey.PythonTLSSnapshot]
 
         self.assertExpectedInline(
             gm.code.strip(),
