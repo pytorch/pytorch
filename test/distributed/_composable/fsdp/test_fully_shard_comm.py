@@ -39,7 +39,7 @@ from torch.testing._internal.common_fsdp import (
     patch_reduce_scatter,
     patch_unshard,
 )
-from torch.testing._internal.common_utils import run_tests, wrapSwapTensorsTest
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -583,7 +583,6 @@ class TestFullyShardUnshard(FSDPTest):
         return min(torch.cuda.device_count(), 2)
 
     @skip_if_lt_x_gpu(2)
-    @wrapSwapTensorsTest(True)
     def test_unshard_async(self):
         class ReduceModule(nn.Module):
             def __init__(self, dim: int, mesh: DeviceMesh):
