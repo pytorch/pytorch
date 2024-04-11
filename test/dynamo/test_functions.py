@@ -231,6 +231,16 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return combs
 
     @make_test
+    def test_np_iinfo(a):
+        max_dim = np.iinfo(np.int16).max
+        return a + max_dim
+
+    @make_test
+    def test_np_finfo(a):
+        min_dim = np.finfo(np.float32).min
+        return a + min_dim
+
+    @make_test
     def test_constant1(a, b, c):
         return a - b * c + 1.0
 
