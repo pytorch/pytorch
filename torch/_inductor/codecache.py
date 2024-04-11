@@ -37,9 +37,9 @@ from threading import Thread
 from time import sleep, time
 from types import ModuleType
 from typing import (
-    cast,
     Any,
     Callable,
+    cast,
     Dict,
     List,
     Optional,
@@ -1802,7 +1802,7 @@ class AotCodeCompiler:
             use_mmap_weights = (
                 not cuda and not config.is_fbcode() and consts_size > 2_000_000_000
             )
-            if config._force_mmap_aoti_weights and not cuda:
+            if config.aot_inductor.force_mmap_weights and not cuda:
                 use_mmap_weights = True
             compile_cmd = cpp_compile_command(
                 input=input_path,

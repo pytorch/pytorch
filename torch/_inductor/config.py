@@ -373,9 +373,6 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
     "schedule_comm_wait",
 ]
 
-# Force apending aoti weights at the end of the file
-_force_mmap_aoti_weights = False
-
 
 def decide_compile_threads():
     """
@@ -701,6 +698,10 @@ class aot_inductor:
 
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
+
+    # flag to force weight to be appened to the shared library and mmaped  by the runtime
+    # rather than embedded into the data section. Needed to support 1B+ parameter models
+    force_mmap_weights: bool = False
 
 
 class cuda:

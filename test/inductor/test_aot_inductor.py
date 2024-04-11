@@ -282,7 +282,7 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 250112, device=self.device),
             torch.randn(1, 512, device=self.device),
         )
-        with config.patch({"_force_mmap_aoti_weights": True}):
+        with config.patch({"aot_inductor.force_mmap_weights": True}):
             self.check_model(Model(), example_inputs)
 
     def test_with_offset(self):
