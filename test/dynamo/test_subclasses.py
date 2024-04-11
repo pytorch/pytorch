@@ -1458,7 +1458,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
 
     def test_subclass_gives_static_shapes_when_dynamic_false(self):
         def check_graph(gm, *args):
-            first_node_example_val = next(list(gm.graph.nodes)).meta["example_value"]
+            first_node_example_val = next(iter(gm.graph.nodes)).meta["example_value"]
             # We compiled with dynamic=False, expect no SymInt sizes on our placeholders
             self.assertTrue(
                 all(isinstance(x, int) for x in first_node_example_val.shape)
