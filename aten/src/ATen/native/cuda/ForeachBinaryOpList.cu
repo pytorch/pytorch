@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/native/ForeachUtils.h>
 #include <ATen/native/cuda/ForeachFunctors.cuh>
 #include <ATen/native/cuda/ForeachMinMaxFunctors.cuh>
@@ -369,7 +370,9 @@ struct CopyFunctor {
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
           const auto i = i_start + threadIdx.x + ii * blockDim.x;
-          src_args[ii] = src_ptr[i];
+          if (i < n && i < chunk_size) {
+            src_args[ii] = src_ptr[i];
+          }
         }
 #pragma unroll
         for (int ii = 0; ii < kILP; ii++) {
