@@ -303,7 +303,8 @@ class PersistentCache(CacheBase):
                 callback(cached=hit)
             return hit
 
-        if config.max_autotune or config.max_autotune_gemm:
+        # if config.max_autotune or config.max_autotune_gemm:
+        if True:
             local_cache = self.get_local_cache()
             # check local cache first since it is data specific to the current machine
             if not check_cache(local_cache) and not (
