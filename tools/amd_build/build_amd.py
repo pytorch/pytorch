@@ -13,7 +13,7 @@ sys.path.append(
     )
 )
 
-from hipify import hipify_python  # type: ignore[import]
+from hipify import hipify_python
 
 parser = argparse.ArgumentParser(
     description="Top-level script for HIPifying, filling in most common parameters"
