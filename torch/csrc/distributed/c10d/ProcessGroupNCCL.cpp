@@ -1551,11 +1551,17 @@ void ProcessGroupNCCL::watchdogHandler() {
             lastStatusUpdateTime, std::chrono::steady_clock::now()) >=
             kWorkStatusUpdatePeriodMs) {
       ::c10d::C10dLoggingData data;
+      // logging integers
       data.integers["pg_id"] = uid_;
       data.integers["rank"] = rank_;
       data.integers["global_rank"] = globalRank();
       data.integers["last_enqueued_work"] = lastEnqueuedSeq_;
+      data.integers["last_started_work"] = lastStartedSeq_;
       data.integers["last_completed_work"] = lastCompletedSeq_;
+      // logging strings
+      data.strings["last_enqueued_work_name"] = lastEnqueuedWorkName_;
+      data.strings["last_started_work_name"] = lastStartedWorkName_;
+      data.strings["last_completed_work_name"] = lastCompletedWorkName_;
       logger->log(data);
       lastStatusUpdateTime = std::chrono::steady_clock::now();
     }
@@ -1647,9 +1653,19 @@ void ProcessGroupNCCL::watchdogHandler() {
         }
       }
 
+      // a work could be started but not completed, so we should not update
+      // lastStartedSeq_ and lastStartedOpName_ if the work state is checked
+      // multiple times after the start
+      if (lastStartedSeq_ < static_cast<int64_t>(work.seq_) &&
+          work.isStarted()) {
+        lastStartedSeq_ = work.seq_;
+        lastStartedWorkName_ = opTypeToString(work.opType_);
+      }
+
       // Clean up completed work
       if (work.isCompleted()) {
         lastCompletedSeq_ = work.seq_;
+        lastCompletedWorkName_ = opTypeToString(work.opType_);
         NCCLTraceBuffer::get()->retire_id(work.trace_id_, true);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
@@ -2259,6 +2275,7 @@ void ProcessGroupNCCL::workEnqueue(
     // get deadlock. Here we enqueue work without outputs_.
     workMetaList_.emplace_back(*work);
     lastEnqueuedSeq_ = work->seq_;
+    lastEnqueuedWorkName_ = opTypeToString(work->opType_);
     lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   }
 }
