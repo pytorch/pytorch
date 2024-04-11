@@ -794,7 +794,11 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):
-            # getattr_static doesn't work on these
+            cls_var = inspect.getattr_static(self.value.__class__, name, NO_SUCH_SUBOBJ)
+            if cls_var is not NO_SUCH_SUBOBJ and name not in self.value.__dict__:
+                # maybe user-defined @property that we need to inline
+                return cls_var
+            # this might call torch.nn.Module.__getattr__
             subobj = getattr(self.value, name)
         else:
             subobj = inspect.getattr_static(self.value, name)
