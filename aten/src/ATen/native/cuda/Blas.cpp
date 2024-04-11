@@ -337,9 +337,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.n,
               args.k,
               alpha.to<at::opmath_type<scalar_t>>(),
-              args.mata->data_ptr<scalar_t>(),
+              args.mata->const_data_ptr<scalar_t>(),
               args.lda,
-              args.matb->data_ptr<scalar_t>(),
+              args.matb->const_data_ptr<scalar_t>(),
               args.ldb,
 #if defined(USE_ROCM)
               // This condition is needed for mm case on ROCm for hipblasLt path.
@@ -802,7 +802,7 @@ static bool _scaled_mm_allowed_device() {
 //    - `out_dtype`: the output dtype, can either be a float8 or a higher precision floating point type
 //    - `scale_a`: a scalar tensor with the inverse scale of `mat1`, only needed if `mat1` is a float8 type
 //    - `scale_b`: a scalar tensor with the inverse scale of `mat2`, only needed if `mat2` is a float8 type
-//    - `scale_result`: a scalar tensor with the scale of the output, only needed if the output is a float8 type
+//    - `scale_result`: a scalar tensor with the scale of the output, only set if the output is a float8 type
 //    - `use_fast_accum`: if true, enables fast float8 accumulation
 //    - `out`: a reference to the output tensor
 //    - `amax`: a reference to the amax tensor of the output, only needed if the output is a float8 type and will be updated inplace

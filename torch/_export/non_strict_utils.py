@@ -82,9 +82,9 @@ def fakify(
             symbolic_context.dynamic_sizes[i] = DimDynamic.DYNAMIC
             src = TensorPropertySource(base=source, prop=TensorProperty.SIZE, idx=i)
             sources[(t_id, i)].append(src)
-            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name
+            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.debug_name  # type: ignore[assignment]
     fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
-    mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))
+    mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
     return fake
 
 
@@ -199,8 +199,12 @@ def make_constraints(
     #   - eval_frame.py solves constraints
     #   - _trace.py installs shape metadata in IR.
 
+    inline_constraints = gm.meta.get("inline_constraints", [])
+    range_constraints = {
+        symbol: inline_constraints[symbol] for symbol in inline_constraints
+    }
     if dynamic_shapes == []:
-        return {}
+        return range_constraints
 
     def _is_dynamic_shape_leaf(x):
         if x is None:
@@ -214,6 +218,7 @@ def make_constraints(
     )
 
     shape_env = fake_mode.shape_env
+    assert shape_env.tracked_fakes is not None
     placeholders = [tf.fake for tf in shape_env.tracked_fakes]
     sources = [tf.source for tf in shape_env.tracked_fakes]
     input_contexts = [tf.symbolic_context for tf in shape_env.tracked_fakes]
@@ -256,7 +261,6 @@ def make_constraints(
         if spec.kind == InputKind.USER_INPUT and isinstance(spec.arg, TensorArgument)
     }
 
-    range_constraints = {}
     input_dims = defaultdict(list)
     free_symbols = set()
     input_index = 0

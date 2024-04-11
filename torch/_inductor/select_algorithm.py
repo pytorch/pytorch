@@ -10,7 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -98,6 +98,7 @@ class TritonTemplateKernel(TritonKernel):
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
+        subgraphs=None,
         *,
         index_dtype,
     ):
@@ -124,6 +125,8 @@ class TritonTemplateKernel(TritonKernel):
         self.epilogue_fn = epilogue_fn
         self.render_hooks = dict()
         self.triton_meta: Optional[Dict[str, object]] = None
+        # For Templated Attention
+        self.subgraphs = subgraphs
 
     def need_numel_args(self):
         return False
@@ -157,6 +160,10 @@ class TritonTemplateKernel(TritonKernel):
         triton_meta["configs"] = [config_of(signature)]
         for arg_num in triton_meta["configs"][0].equal_to_1:  # type: ignore[index]
             triton_meta["constants"][arg_num] = 1  # type: ignore[index]
+        matrix_instr_nonkdim = self.meta.get("matrix_instr_nonkdim", 0)
+        if matrix_instr_nonkdim != 0:
+            triton_meta["matrix_instr_nonkdim"] = matrix_instr_nonkdim
+
         self.triton_meta = triton_meta
 
         inductor_meta = {
@@ -260,7 +267,53 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_stride()[index]
         return texpr(self.rename_indexing(val))
 
-    def store_output(self, indices, val, mask):
+    def modification(self, **fixed_inputs) -> str:
+        """This function generates the code body to populate
+        a 'modification' placeholder within a template
+
+        TODO come up with standardized way to modify templates, with
+        potential multiple modifications
+        """
+
+        class PlaceholderSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
+            self.name = "PlaceholderSubstitution"
+
+            def load(self, name: str, index: sympy.Expr):
+                if name not in fixed_inputs:
+                    raise AssertionError(
+                        f"All loads should be coming from fixed inputs - {name}"
+                    )
+                return f"({fixed_inputs[name]})"
+
+            # TODO Doesn't work yet
+            def indirect_indexing(self, index_var, size, check):
+                return self._inner.indirect_indexing(index_var, size, False)
+                # return sympy_symbol(str(index_var))
+
+        # if self.modification_cache is None:
+        with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
+            assert isinstance(
+                self.subgraphs, ir.ComputedBuffer
+            ), "Expected the subgraph to be a ComputedBuffer"
+            if isinstance(self.subgraphs.data, ir.InputBuffer):
+                out = self.subgraphs.data.make_loader()((1,))
+            else:
+                out = self.subgraphs.data.inner_fn((1,))
+
+        self.codegen_body()
+        self.body.writeline(f"{fixed_inputs['out']} = {out.value}")
+
+        body_val = self.body.getvalue()
+        self.body.clear()
+        self.cse.invalidate(set())
+        return body_val
+
+    def store_output(
+        self,
+        indices: Union[List[Any], Tuple[Any]],
+        val: str,
+        mask: Optional[str] = None,
+    ):
         """
         Hook called from template code to store the final output
         (if the buffer hasn't been optimized away), then append any
@@ -268,7 +321,7 @@ class TritonTemplateKernel(TritonKernel):
         """
         assert isinstance(indices, (list, tuple))
         assert isinstance(val, str)
-        assert isinstance(mask, str)
+        assert isinstance(mask, (str, type(None)))
         assert self.template_mask is None
         indices = list(map(TritonPrinter.paren, indices))
         index_symbols = [sympy.Symbol(x) for x in indices]
@@ -353,6 +406,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.stride,
                 self.store_output,
                 self.make_load,
+                self.modification,
             ]
         }
 
@@ -462,6 +516,7 @@ class TritonTemplate(KernelTemplate):
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
+        subgraphs=None,
         **kwargs,
     ):
         assert self.template, "requires jinja2"
@@ -492,6 +547,7 @@ class TritonTemplate(KernelTemplate):
             suffix_args=suffix_args,
             epilogue_fn=epilogue_fn,
             index_dtype="tl.int32",
+            subgraphs=subgraphs,
         )
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
@@ -734,6 +790,9 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
+        if out.numel() == 0:
+            # no need to run the kerrnel of do benchmarking
+            return 0.0
         if self.has_out_variant:
             return super().benchmark(*args, out=out)
         else:

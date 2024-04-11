@@ -18,7 +18,6 @@ from ..source import AttrSource, ConstantSource, DefaultsSource, GetItemSource
 from ..utils import check_constant_args, get_first_attr, identity, istype, make_cell
 from .base import MutableLocal, typestr, VariableTracker
 from .constant import ConstantVariable
-from .distributed import ProcessGroupVariable
 
 if TYPE_CHECKING:
     from torch._guards import Source
@@ -88,9 +87,7 @@ class BaseUserFunctionVariable(VariableTracker):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        return tx.inline_user_function_return(
-            self, list(self.self_args()) + list(args), kwargs
-        )
+        return tx.inline_user_function_return(self, [*self.self_args(), *args], kwargs)
 
     def call_hasattr(self, tx, name: str) -> VariableTracker:
         result = False
@@ -722,7 +719,11 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         if kwargs.get("group") is None or kwargs["group"].value is None:
             kwargs["group"] = ProcessGroupVariable.get_global_pg_variable()
 
-        if self.fn in [dist.all_reduce, dist.reduce_scatter_tensor]:
+        if self.fn in (
+            dist.all_reduce,
+            dist.reduce_scatter_tensor,
+            dist._reduce_scatter_base,
+        ):
             reduce_op_var = kwargs.get("op")
             reduce_op = (
                 reduce_op_var.value

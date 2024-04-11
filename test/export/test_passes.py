@@ -34,19 +34,25 @@ from torch._export.utils import (
     sequential_split,
 )
 from torch._higher_order_ops.auto_functionalize import auto_functionalized
+from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch.export import export
 from torch.export._remove_auto_functionalized_pass import (
     unsafe_remove_auto_functionalized_pass,
 )
+from torch.export._remove_effect_tokens_pass import _remove_effect_tokens
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import impl, _scoped_library
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
+    find_library_location,
     run_tests,
-    skipIfTorchDynamo,
     TestCase,
+    skipIfTorchDynamo,
+    IS_FBCODE,
+    IS_MACOS,
+    IS_SANDCASTLE,
+    IS_WINDOWS,
 )
 from torch.utils import _pytree as pytree
 
@@ -193,6 +199,18 @@ class TestPasses(TestCase):
         super().setUp()
         self.SEQUENTIAL_SPLIT_INLINE_TESTS = _sequential_split_inline_tests()
         self.SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
+
+        if IS_SANDCASTLE or IS_FBCODE:
+            torch.ops.load_library(
+                "//caffe2/test/cpp/jit:test_custom_class_registrations"
+            )
+        elif IS_MACOS:
+            raise unittest.SkipTest("non-portable load_library call used in test")
+        else:
+            lib_file_path = find_library_location('libtorchbind_test.so')
+            if IS_WINDOWS:
+                lib_file_path = find_library_location('torchbind_test.dll')
+            torch.ops.load_library(str(lib_file_path))
 
     def tearDown(self):
         self.SEQUENTIAL_SPLIT_INLINE_TESTS.clear()
@@ -354,6 +372,34 @@ class TestPasses(TestCase):
             if torch.Tag.core in op_overload.tags and is_view_op(op_overload._schema):
                 self.assertIsNotNone(get_view_copy_of_view_op(op_overload._schema))
 
+    def test_custom_obj_tuple_out(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
+
+            def forward(self, x):
+                a = torch.ops._TorchScriptTesting.takes_foo_tuple_return(self.attr, x)
+                y = a[0] + a[1]
+                b = torch.ops._TorchScriptTesting.takes_foo(self.attr, y)
+                return b
+
+        m = MyModule()
+        inputs = (torch.ones(2, 3),)
+        with enable_torchbind_tracing():
+            ep = torch.export.export(m, inputs, strict=False)
+
+        inp = torch.randn(2, 3)
+        orig_res = m(inp)
+        ep_res = ep.module()(inp)
+
+        without_token_ep = _remove_effect_tokens(ep)
+        without_token_ep.verifier().check(without_token_ep)
+        without_token_res = without_token_ep.module()(inp)
+
+        self.assertTrue(torch.allclose(orig_res, ep_res))
+        self.assertTrue(torch.allclose(orig_res, without_token_res))
+
     def test_runtime_assert_inline_constraints_for_item(self) -> None:
         class M(torch.nn.Module):
             def __init__(self):
@@ -494,8 +540,8 @@ class TestPasses(TestCase):
         mod, args = self.SET_GRAD_ENABLED_TESTS["op"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     submod_4 = self.submod_2
@@ -506,8 +552,8 @@ def forward(self, arg_0):
         mod, args = self.SET_GRAD_ENABLED_TESTS["op_under_no_grad"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     submod_4 = self.submod_2
@@ -519,8 +565,8 @@ def forward(self, arg_0):
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add);  add = None
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     submod_3 = self.submod_1
@@ -531,8 +577,8 @@ def forward(self, arg_0):
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_under_no_grad"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     sum_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
     add_1 = torch.ops.aten.add.Tensor(sum_1, 1);  sum_1 = None
@@ -543,8 +589,8 @@ def forward(self, arg_0):
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
     sin = torch.ops.aten.sin.default(add)
     sum_1 = torch.ops.aten.sum.default(sin);  sin = None
     cos = torch.ops.aten.cos.default(add);  add = None
@@ -560,8 +606,8 @@ def forward(self, arg_0):
         mod, args = self.SET_GRAD_ENABLED_TESTS["ctx_manager_multi_dep_no_grad"]
         self.assertExpectedInline(mod.code.strip("\n"), """\
 def forward(self, arg_0):
-    arg0_1, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
+    x, = fx_pytree.tree_flatten_spec(([arg_0], {}), self._in_spec)
+    add = torch.ops.aten.add.Tensor(x, 1);  x = None
     submod_5 = self.submod_1
     wrap_with_set_grad_enabled = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_5, add);  submod_5 = add = None
     sum_1 = wrap_with_set_grad_enabled[0]
@@ -590,8 +636,8 @@ def forward(self, arg_0):
         self.assertEqual(gm(*args), new_gm(*args))
         self.assertExpectedInline(new_gm.code.strip("\n"), """\
 def forward(self, arg_0, arg_1):
-    arg0_1, arg1_1, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
-    submod_1 = self.submod_1(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+    x1, x2, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+    submod_1 = self.submod_1(x1, x2);  x1 = x2 = None
     getitem = submod_1[0]
     getitem_1 = submod_1[1];  submod_1 = None
     submod_2 = self.submod_2(getitem, getitem_1);  getitem = getitem_1 = None
@@ -606,10 +652,10 @@ def forward(self, arg_0, arg_1):
     return pytree.tree_unflatten((getitem_4, getitem_5, getitem_6, getitem_7), self._out_spec)
     """)
         self.assertExpectedInline(new_gm.submod_1.code.strip("\n"), """\
-def forward(self, arg0_1, arg1_1):
+def forward(self, x1, x2):
     _set_grad_enabled = torch._C._set_grad_enabled(True)
-    add = torch.ops.aten.add.Tensor(arg0_1, 1);  arg0_1 = None
-    add_1 = torch.ops.aten.add.Tensor(arg1_1, 1);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(x1, 1);  x1 = None
+    add_1 = torch.ops.aten.add.Tensor(x2, 1);  x2 = None
     return (add, add_1)
     """)
         self.assertExpectedInline(new_gm.submod_2.code.strip("\n"), """\
@@ -722,7 +768,7 @@ def forward(self, sin, cos):
             self.assertEqual(getitems, 2)  # tuple return of len 2
 
             out_specs = inplace_ep.graph_signature.output_specs
-            self.assertEqual(out_specs[0].arg.name, "arg0_1")  # state
+            self.assertEqual(out_specs[0].arg.name, "b_state")  # state
             self.assertEqual(out_specs[1].arg.name, "getitem")  # tuple return 1
             self.assertEqual(out_specs[2].arg.name, "getitem_1")  # tuple return 2
 

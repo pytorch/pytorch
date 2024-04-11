@@ -70,7 +70,7 @@ def initialize_lazy_module(tx, mod, args, kwargs):
 def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
     fully_qualified_name = source.name()
     try:
-        tx.nn_module_stack[module_key] = (fully_qualified_name, type(mod))
+        tx.nn_module_stack[module_key] = (fully_qualified_name, mod.__class__)
         yield
     finally:
         del tx.nn_module_stack[module_key]
@@ -248,7 +248,9 @@ class NNModuleVariable(VariableTracker):
                 assert source
                 return VariableBuilder(tx, source)(subobj.__get__(base))
             else:
-                unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
+                unimplemented(
+                    f"class property {name} - {typestr(base)} {typestr(subobj)}"
+                )
 
         return variables.GetAttrVariable(self, name, source=source)
 
@@ -312,6 +314,14 @@ class NNModuleVariable(VariableTracker):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
+                    # End of fn, this bubbles up and restarts tracing.
+                    self.convert_to_unspecialized(tx)
+
+                # NB: torch.nn.utils.parametrize changes the class type of the
+                # parametrized module such that its __module__ points to the
+                # "torch.nn.utils.parametrize". These modules should be treated
+                # as unspecialized since parametrizations can do arbitrary computation.
+                if mod.__module__ == "torch.nn.utils.parametrize":
                     # End of fn, this bubbles up and restarts tracing.
                     self.convert_to_unspecialized(tx)
 
@@ -669,10 +679,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
     @staticmethod
     @functools.lru_cache(None)
     def _nn_module_method_ids():
+        # Allow __setattr__ to fall through to base class handler
+        supported = {torch.nn.Module.__setattr__}
         return {
             id(x.__code__)
             for x in torch.nn.Module.__dict__.values()
-            if hasattr(x, "__code__")
+            if hasattr(x, "__code__") and x not in supported
         }
 
     def unpack_var_sequence(self, tx):
@@ -883,31 +895,24 @@ def _gen_source(source, name):
     return source
 
 
+def _assert_all_args_kwargs_const():
+    if not all(
+        x.is_python_constant() for x in itertools.chain(args, kwargs.values())
+    ):
+        unimplemented(f"non-const NNModule method {name}")
+
 def _get_kwargs(*names, mod, name, args, kwargs, assert_const=True):
     if assert_const:
-        _assert_all_args_kwargs_const(name, args, kwargs)
-    fn = getattr(mod, name)
-
-    def _get(x):
-        if isinstance(x, NestedUserFunctionVariable):
-            return x.get_function()
-        return x.as_python_constant()
-
+        _assert_all_args_kwargs_const()
+    fn = getattr(module, name)
     bound_args = inspect.signature(fn).bind(
-        *([_get(x) for x in args]),
-        **{k: _get(v) for k, v in kwargs.items()},
+        *([x.as_python_constant() for x in args]),
+        **{k: v.as_python_constant() for k, v in kwargs.items()},
     )
     bound_args.apply_defaults()
     bound_args = bound_args.arguments
-    res = {}
-    for k in names:
-        if k in bound_args:
-            res[k] = bound_args[k]
-    return res
+    return {k: bound_args[k] for k in names}
 
-
-# Breaks tx first convention because meant for functools partial usage, post * args should be
-# same for a given VT
 def _wrap_values(items, *, tx, key, source_cls, source):
     result = []
     for name, submod in items:
@@ -916,29 +921,80 @@ def _wrap_values(items, *, tx, key, source_cls, source):
                 submod,
                 key,
                 name,
-                source=source_cls(_gen_source(source, name)),
+                source=NNModuleSource(gen_source(self.source, name)),
             )
         )
-    return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
+    return ListIteratorVariable(result, mutable_local=MutableLocal())
 
-
-# Breaks tx first convention because meant for functools partial usage, post * args should be
-# same for a given VT
 def _named_embed(name, obj, *, tx, key, source_cls, source):
-    return variables.TupleVariable(
+    return TupleVariable(
         [
-            variables.ConstantVariable.create(name),
+            ConstantVariable.create(name),
             tx.output.register_attr_or_module(
                 obj,
                 key,
                 name,
-                source=source_cls(_gen_source(source, name)),
+                source=NNModuleSource(gen_source(self.source, name)),
             ),
         ]
     )
 
+# def _get_kwargs(*names, mod, name, args, kwargs, assert_const=True):
+#     if assert_const:
+#         _assert_all_args_kwargs_const(name, args, kwargs)
+#     fn = getattr(mod, name)
 
-def _assert_all_args_kwargs_const(name, args, kwargs):
-    for x in itertools.chain(args, kwargs.values()):
-        if not x.is_python_constant():
-            raise unimplemented(f"non-const NNModule method {name}, {x}")
+#     def _get(x):
+#         if isinstance(x, NestedUserFunctionVariable):
+#             return x.get_function()
+#         return x.as_python_constant()
+
+#     bound_args = inspect.signature(fn).bind(
+#         *([_get(x) for x in args]),
+#         **{k: _get(v) for k, v in kwargs.items()},
+#     )
+#     bound_args.apply_defaults()
+#     bound_args = bound_args.arguments
+#     res = {}
+#     for k in names:
+#         if k in bound_args:
+#             res[k] = bound_args[k]
+#     return res
+
+
+# # Breaks tx first convention because meant for functools partial usage, post * args should be
+# # same for a given VT
+# def _wrap_values(items, *, tx, key, source_cls, source):
+#     result = []
+#     for name, submod in items:
+#         result.append(
+#             tx.output.register_attr_or_module(
+#                 submod,
+#                 key,
+#                 name,
+#                 source=source_cls(_gen_source(source, name)),
+#             )
+#         )
+#     return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
+
+
+# # Breaks tx first convention because meant for functools partial usage, post * args should be
+# # same for a given VT
+# def _named_embed(name, obj, *, tx, key, source_cls, source):
+#     return variables.TupleVariable(
+#         [
+#             variables.ConstantVariable.create(name),
+#             tx.output.register_attr_or_module(
+#                 obj,
+#                 key,
+#                 name,
+#                 source=source_cls(_gen_source(source, name)),
+#             ),
+#         ]
+#     )
+
+
+# def _assert_all_args_kwargs_const(name, args, kwargs):
+#     for x in itertools.chain(args, kwargs.values()):
+#         if not x.is_python_constant():
+#             raise unimplemented(f"non-const NNModule method {name}, {x}")
