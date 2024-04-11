@@ -79,10 +79,7 @@ class ASGD(Optimizer):
                 # State initialization
                 if len(state) == 0:
                     state["step"] = torch.zeros((), device=p.device, dtype=_get_scalar_dtype())
-                    if isinstance(group["lr"], torch.Tensor):
-                        state["eta"] = group["lr"].clone().detach().to(device=p.device, dtype=_get_scalar_dtype())
-                    else:
-                        state["eta"] = torch.tensor(group["lr"], device=p.device, dtype=_get_scalar_dtype())
+                    state["eta"] = torch.as_tensor(group["lr"], device=p.device, dtype=_get_scalar_dtype()).clone().detach()
                     state["mu"] = torch.ones((), device=p.device, dtype=_get_scalar_dtype())
                     state["ax"] = torch.zeros_like(
                         p, memory_format=torch.preserve_format
