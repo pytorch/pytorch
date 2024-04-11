@@ -215,7 +215,7 @@ class profile:
             warn(
                 "The attribute `use_cuda` will be deprecated soon, please use ``use_device = 'cuda'`` instead."
             )
-            self.use_device = "cuda"
+            self.use_device: Optional[str] = "cuda"
         else:
             self.use_device: Optional[str] = use_device
         self.function_events: Optional[EventList] = None
@@ -250,6 +250,7 @@ class profile:
             self.use_cuda or self.use_device == "cuda"
         ) and not torch.cuda.is_available():
             warn("CUDA is not available, disabling CUDA profiling")
+            self.use_cuda = False
             self.use_device = None
 
         if self.use_device == "xpu" and not torch.xpu.is_available():  # type: ignore[attr-defined]
@@ -274,7 +275,7 @@ class profile:
                 use_kineto and ProfilerActivity.XPU in _supported_activities()
             ), "Legacy XPU profiling is not supported. Requires use_kineto=True on XPU devices."
             self.kineto_activities.add(ProfilerActivity.XPU)
-        elif self.use_device != "privateuseone":
+        elif self.use_device is not None and self.use_device != "privateuseone":
             if (
                 not use_kineto
                 or ProfilerActivity.PrivateUse1 not in _supported_activities()
