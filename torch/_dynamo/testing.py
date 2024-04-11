@@ -338,6 +338,12 @@ def xfailIfPy311(fn):
     return fn
 
 
+def xfailIfSingleStepGraph(fn):
+    if torch._dynamo.config.use_single_step_graph:
+        return unittest.expectedFailure(fn)
+    return fn
+
+
 # Controls tests generated in test/inductor/test_torchinductor_dynamic_shapes.py
 # and test/dynamo/test_dynamic_shapes.py
 def expectedFailureDynamic(fn):

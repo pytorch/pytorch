@@ -863,9 +863,16 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 seq_nr = seq_nr - min_seq_nr
                 seq_table = seq_table + f"{seq_nr}|{orig_aten}|{mod_name}\n"
 
+        def normalize_seq_table(text):
+            # Truncate the SrcFn's index. For example `l__self___bn1_1` will turn into `l__self___bn1`
+            lines = text.splitlines()
+            processed_lines = [re.sub(r"_(\d+)$", "", line) for line in lines]
+            return "\n".join(processed_lines) + "\n"
+
+        normalized_seq_table = normalize_seq_table(seq_table)
         self.maxDiff = None
         self.assertExpectedInline(
-            seq_table,
+            normalized_seq_table,
             dedent(
                 """\
 SeqNr|OrigAten|SrcFn
