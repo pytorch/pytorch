@@ -253,7 +253,7 @@ def serialize_tensor_meta(t: torch.Tensor) -> TensorMeta:
     )
 
 
-_CURRENT_DESERIALIZER: Optional["GraphModuleDeserializer"] = None
+_CURRENT_DESERIALIZER: List["GraphModuleDeserializer"] = []
 
 
 def _reduce_fake_tensor(fake_tensor: FakeTensor):
@@ -273,9 +273,9 @@ def _reconstruct_fake_tensor(
     tensor_meta = _dict_to_dataclass(TensorMeta, json_tensor_meta)
     # Find the current fake mode
     assert (
-        _CURRENT_DESERIALIZER is not None
+        len(_CURRENT_DESERIALIZER) != 0
     ), "Need access to current deserializer state"
-    fake_tensor = _CURRENT_DESERIALIZER.deserialize_tensor_meta(tensor_meta)
+    fake_tensor = _CURRENT_DESERIALIZER[-1].deserialize_tensor_meta(tensor_meta)
     if is_parameter:
         fake_tensor = torch.nn.Parameter(fake_tensor)  # type: ignore[assignment]
     return fake_tensor
@@ -1692,8 +1692,8 @@ class GraphModuleDeserializer:
         symbol_name_to_range: Optional[Dict[str, symbolic_shapes.ValueRanges]] = None,
     ) -> Result:
         global _CURRENT_DESERIALIZER
-        assert _CURRENT_DESERIALIZER is None
-        _CURRENT_DESERIALIZER = self
+        current_deserializer_state = _CURRENT_DESERIALIZER.copy()
+        _CURRENT_DESERIALIZER.append(self)
         try:
             self.shape_env = symbolic_shapes.ShapeEnv(assume_static_by_default=True)
             self.fake_tensor_mode = FakeTensorMode(
@@ -1736,7 +1736,8 @@ class GraphModuleDeserializer:
                 example_inputs=self.example_inputs,
             )
         finally:
-            _CURRENT_DESERIALIZER = None
+            _CURRENT_DESERIALIZER.pop()
+            assert current_deserializer_state == _CURRENT_DESERIALIZER
 
     def sync_fx_node(self, name: str, fx_node: torch.fx.Node):
         if name in self.serialized_name_to_node:
