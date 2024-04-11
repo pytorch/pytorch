@@ -168,7 +168,7 @@ def efficient_conv_bn_eval_decomp_graph_transform(match: Match, *args, **kwargs)
     if input_node.op != "call_function":  # type: ignore[union-attr]
         return
 
-    input_fn = input_node.target
+    input_fn = input_node.target # type: ignore[arg-type, union-attr]
     supported_convs = [
         torch.ops.aten.linear.default,
         torch.ops.aten.conv1d.default,
@@ -196,18 +196,18 @@ def efficient_conv_bn_eval_decomp_graph_transform(match: Match, *args, **kwargs)
         bn_running_mean = bn_node.args[3]
         bn_running_var = bn_node.args[4]
         bn_eps = bn_node.args[7]
-        assert len(conv_node.args) >= 2
+        assert len(conv_node.args) >= 2 # type: ignore[union-attr]
         conv_input = conv_node.args[0]  # type: ignore[union-attr]
-        conv_weight = conv_node.args[1]
-        conv_bias = conv_node.args[2] if len(conv_node.args) >= 3 else None
-        conv_remainging_args = conv_node.args[3:]
+        conv_weight = conv_node.args[1] # type: ignore[union-attr]
+        conv_bias = conv_node.args[2] if len(conv_node.args) >= 3 else None # type: ignore[union-attr]
+        conv_remainging_args = conv_node.args[3:] # type: ignore[union-attr]
         args = (
             bn_weight,
             bn_bias,
             bn_running_mean,
             bn_running_var,
             bn_eps,
-            conv_node.target,
+            conv_node.target, # type: ignore[union-attr]
             conv_weight,
             conv_bias,
             conv_input,
