@@ -3,6 +3,11 @@ import math
 import sympy
 
 import torch
+from torch.utils._sympy.functions import (
+    OpaqueUnaryFn_exp,
+    OpaqueUnaryFn_log,
+    OpaqueUnaryFn_sqrt,
+)
 
 
 # The sympy interpretation of operators.  It will also sometimes work with
@@ -65,7 +70,10 @@ class ReferenceAnalysis:
 
     @staticmethod
     def mod(x, y):
-        return x % y
+        ret = abs(x) % abs(y)
+        if x < 0:
+            ret *= -1
+        return ret
 
     @staticmethod
     def abs(x):
@@ -111,15 +119,15 @@ class ReferenceAnalysis:
 
     @staticmethod
     def exp(x):
-        return sympy.exp(x)
+        return OpaqueUnaryFn_exp(x)
 
     @staticmethod
     def log(x):
-        return sympy.log(x)
+        return OpaqueUnaryFn_log(x)
 
     @staticmethod
     def sqrt(x):
-        return sympy.sqrt(x)
+        return OpaqueUnaryFn_sqrt(x)
 
     @staticmethod
     def pow(a, b):
