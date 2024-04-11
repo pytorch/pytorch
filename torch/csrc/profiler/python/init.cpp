@@ -1,6 +1,7 @@
 #include <torch/csrc/profiler/python/init.h>
 
 #include <ATen/record_function.h>
+#include <c10/core/impl/PyInterpreter.h>
 #include <c10/util/overloaded.h>
 #include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/autograd/utils/wrap_outputs.h>
@@ -139,7 +140,8 @@ namespace profiler {
 namespace {
 struct RecordFunctionFast {
   PyObject_HEAD PyObject* name;
-  PyObject* inputValues;
+  PyObject* input_values;
+  PyObject* keyword_values;
   std::unique_ptr<at::RecordFunction> guard;
 };
 
@@ -150,7 +152,8 @@ PyObject* RecordFunctionFast_new(
   RecordFunctionFast* self = (RecordFunctionFast*)subtype->tp_alloc(subtype, 0);
   if (self != nullptr) {
     self->name = nullptr;
-    self->inputValues = nullptr;
+    self->input_values = nullptr;
+    self->keyword_values = nullptr;
     self->guard.reset();
   }
   return (PyObject*)self;
@@ -162,17 +165,21 @@ int RecordFunctionFast_init(
     PyObject* kwargs) {
   auto self = (RecordFunctionFast*)selfGeneric;
   // NOLINTNEXTLINE(*-c-arrays*)
-  constexpr const char* kwlist[] = {"name", "inputValues", nullptr};
+  constexpr const char* kwlist[] = {
+      "name", "input_values", "keyword_values", nullptr};
   PyObject* name = nullptr;
-  PyObject* inputValues = nullptr;
+  PyObject* input_values = nullptr;
+  PyObject* keyword_values = nullptr;
   if (!PyArg_ParseTupleAndKeywords(
           args,
           kwargs,
-          "O|O",
+          "O|OO", // name is required PyObject, args and kwargs are optional
+                  // PyObjects
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &name,
-          &inputValues)) {
+          &input_values,
+          &keyword_values)) {
     return -1;
   }
   if (name) {
@@ -182,12 +189,17 @@ int RecordFunctionFast_init(
     Py_INCREF(name);
     self->name = name;
   }
-  if (inputValues) {
+  if (input_values) {
     TORCH_CHECK(
-        PyList_Check(inputValues) || PyTuple_Check(inputValues),
-        "InputValues must be a list or tuple");
-    Py_INCREF(inputValues);
-    self->inputValues = inputValues;
+        PyList_Check(input_values) || PyTuple_Check(input_values),
+        "input_values must be a list or tuple");
+    Py_INCREF(input_values);
+    self->input_values = input_values;
+  }
+  if (keyword_values) {
+    TORCH_CHECK(PyDict_Check(keyword_values), "keyword_values must be dict");
+    Py_INCREF(keyword_values);
+    self->keyword_values = keyword_values;
   }
   return 0;
 }
@@ -195,7 +207,8 @@ int RecordFunctionFast_init(
 void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
   auto self = (RecordFunctionFast*)selfGeneric;
   Py_CLEAR(self->name);
-  Py_CLEAR(self->inputValues);
+  Py_CLEAR(self->input_values);
+  Py_CLEAR(self->keyword_values);
   if (self->guard) {
     self->guard.reset();
   }
@@ -211,20 +224,47 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
         "Trying to enter a new record_function_fast context but the guard is unexpectedly already set");
     self->guard =
         std::make_unique<at::RecordFunction>(at::RecordScope::FUNCTION);
-    if (self->inputValues) {
-      std::vector<at::IValue> ivalues;
+    std::vector<at::IValue> args;
+    std::unordered_map<std::string, at::IValue> kwargs;
+    bool profiler_need_input = torch::autograd::profiler::profilerEnabled() &&
+        torch::autograd::profiler::getProfilerConfig().report_input_shapes;
+    // parse through args if they exist
+    if (self->input_values != NULL && profiler_need_input) {
       THPObjectPtr input_fast(
-          PySequence_Fast(self->inputValues, "input must be a sequence"));
+          PySequence_Fast(self->input_values, "input must be a sequence"));
       PyObject** input_items = PySequence_Fast_ITEMS(input_fast.get());
       for (int i = 0; i < PySequence_Fast_GET_SIZE(input_fast.get()); i++) {
         PyObject* item = input_items[i];
         auto match = torch::jit::tryToInferType(item);
-        ivalues.push_back(torch::jit::toIValue(item, match.type()));
+        if (match.success()) {
+          args.push_back(torch::jit::toIValue(item, match.type()));
+        }
       }
-      self->guard->before(THPUtils_unpackString(self->name), &ivalues);
-    } else {
-      self->guard->before(THPUtils_unpackString(self->name));
     }
+
+    // parse through kwargs if they exist
+    if (self->keyword_values != NULL && profiler_need_input) {
+      Py_ssize_t pos = 0;
+      PyObject *key, *value;
+      while (PyDict_Next(self->keyword_values, &pos, &key, &value)) {
+        // Get the string representation of the key and value
+        std::string key_str = THPUtils_unpackString(key);
+        at::IValue ivalue;
+        if (THPUtils_checkString(value)) {
+          ivalue = at::IValue(THPUtils_unpackString(value));
+        } else {
+          auto match = torch::jit::tryToInferPrimitiveType(value);
+          if (match.success()) {
+            ivalue = torch::jit::toIValue(value, match.type());
+          } else {
+            TORCH_WARN("Unable to infer type of value for keyword: ", key_str);
+            ivalue = at::IValue("NULL");
+          }
+        }
+        kwargs[key_str] = ivalue;
+      }
+    }
+    self->guard->before(THPUtils_unpackString(self->name), &args, &kwargs);
   }
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
