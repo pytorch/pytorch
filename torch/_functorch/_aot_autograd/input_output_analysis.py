@@ -339,16 +339,20 @@ def compute_overlapping_inputs(fwd_inputs, aliased_input_indices):
     max_aliased_inps_w_dyn_shapes = (
         config._max_aliased_inputs_with_dynamic_shapes_enabled
     )
+    definitely_error_on_dyn_shapes = False
+    # If the JK is false / not set, we will fall back to obeying the config above
+    # If it is true, we will always error when there are aliased + mutated inps with dynamic shapes
     if torch._inductor.config.is_fbcode():
-        tmp = torch._utils_internal.justknobs_getval_int(
-            "pytorch/dynamo:_max_aliased_inputs_with_dynamic_shapes_enabled"
+        definitely_error_on_dyn_shapes = torch._utils_internal.justknobs_check(
+            "pytorch/dynamo:disable_aliased_inputs_with_mutation_and_dyn_shapes"
         )
-        if tmp > 0:
-            max_aliased_inps_w_dyn_shapes = tmp
 
     actual_aliased_indices = set()
     num_aliases = len(aliased_input_indices)
-    if num_aliases > max_aliased_inps_w_dyn_shapes:
+    # > 2 check because num_aliases==1 means no aliasing
+    if num_aliases >= 2 and (
+        definitely_error_on_dyn_shapes or num_aliases > max_aliased_inps_w_dyn_shapes
+    ):
         dynamic_shape_indices = set()
         for j in range(num_aliases):
             j_ = aliased_input_indices[j]
@@ -369,6 +373,7 @@ Encountered a graph where:
 - at least one of these inputs is being compiled with dynamic shapes (indices: {str(dynamic_shape_indices)})
 
 Current limit: {str(max_aliased_inps_w_dyn_shapes)}
+Killswitch enabled: {str(definitely_error_on_dyn_shapes)}
 
 The most common way to run into this situation is when your model parameters are allocated as one giant buffer
 and are all mutated by the optimizer, and some of your parameters end up getting compiled with dynamic shapes.
