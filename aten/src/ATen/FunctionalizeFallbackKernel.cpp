@@ -316,14 +316,14 @@ static at::Tensor& set__functionalize(at::Tensor& self, const at::Tensor& src) {
   TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(self) || !at::functionalization::impl::isFunctionalTensor(src),
     "set__functionalize: Tried to mutate a non-functional tensor with a functional tensor, which is not allowed");
 
-  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(src),
-    "set__functionalize: We do not currently support x.set_(y) where y is not a FunctionalTensor. Please file an issue");
-
   // nop case
   if (!at::functionalization::impl::isFunctionalTensor(self) && !at::functionalization::impl::isFunctionalTensor(src)) {
     at::AutoDispatchSkipFunctionalize guard;
     return self.set_(src);
   }
+
+  TORCH_CHECK(at::functionalization::impl::isFunctionalTensor(src),
+    "set__functionalize: We do not currently support x.set_(y) where y is not a FunctionalTensor. Please file an issue");
 
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(self));
   TORCH_INTERNAL_ASSERT(at::functionalization::impl::isFunctionalTensor(src));

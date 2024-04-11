@@ -105,6 +105,7 @@ if [ "$is_main_doc" = true ]; then
     echo undocumented objects found:
     cat build/coverage/python.txt
     echo "Make sure you've updated relevant .rsts in docs/source!"
+    echo "You can reproduce locally by running 'cd docs && make coverage && cat build/coverage/python.txt'"
     exit 1
   fi
 else
