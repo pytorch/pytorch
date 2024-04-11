@@ -12,9 +12,7 @@
 #include <c10/util/irange.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
-#include <pybind_utils.h>
 #include <limits>
-#include <stdexcept>
 
 namespace torch::jit {
 
@@ -763,7 +761,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
 // kwargs It skips checking script object to allow FakeScriptObject to be
 // matched. It returns the stack if the arugments matches schema and false
 // otherwise.
-Stack checkSchemaSkipScriptObject(
+Stack checkSchemaAllowFakeScriptObject(
     const FunctionSchema& schema,
     py::args args,
     const py::kwargs& kwargs) {
