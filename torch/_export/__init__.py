@@ -28,6 +28,8 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._dynamo.source import ConstantSource
 from torch._export.passes.collect_tracepoints_pass import CollectTracepointsPass
+from torch._export.serde.schema import SCHEMA_VERSION
+from torch._export.serde.serialize import SerializedArtifact
 from torch._functorch.aot_autograd import aot_export_module, GraphSignature
 from torch._functorch.eager_transforms import functionalize
 from torch._guards import detect_fake_mode
@@ -208,20 +210,7 @@ def capture_pre_autograd_graph(
     return module
 
 
-def save(
-    ep: ExportedProgram,
-    f: Union[str, os.PathLike, io.BytesIO],
-    *,
-    extra_files: Optional[Dict[str, Any]] = None,
-    opset_version: Optional[Dict[str, int]] = None,
-) -> None:
-    if not isinstance(ep, ExportedProgram):
-        raise TypeError(f"save() expects an ExportedProgram but got {type(ep)}")
-
-    from .serde.serialize import serialize, SerializedArtifact
-    from .serde.schema import SCHEMA_VERSION
-    artifact: SerializedArtifact = serialize(ep, opset_version)
-
+def _export_save_util(f: Union[str, os.PathLike, io.BytesIO], artifact: SerializedArtifact, extra_files: Optional[Dict[str, Any]] = None) -> None:
     if isinstance(f, (str, os.PathLike)):
         f = os.fspath(f)
 
@@ -240,23 +229,27 @@ def save(
             for extra_file_name, content in extra_files.items():
                 encoded_content = content.encode('utf-8')
                 zipf.writestr(f"extra_files/{extra_file_name}", encoded_content)
-
-
-def load(
+def save(
+    ep: ExportedProgram,
     f: Union[str, os.PathLike, io.BytesIO],
     *,
     extra_files: Optional[Dict[str, Any]] = None,
-    expected_opset_version: Optional[Dict[str, int]] = None,
-) -> ExportedProgram:
+    opset_version: Optional[Dict[str, int]] = None,
+) -> None:
+    if not isinstance(ep, ExportedProgram):
+        raise TypeError(f"save() expects an ExportedProgram but got {type(ep)}")
+
+    from .serde.serialize import serialize
+    artifact: SerializedArtifact = serialize(ep, opset_version)
+    _export_save_util(f, artifact, extra_files)
+
+def _export_load_util(f: Union[str, os.PathLike, io.BytesIO],  extra_files: Dict[str, Any]) -> SerializedArtifact:
     if isinstance(f, (str, os.PathLike)):
         f = os.fspath(f)
-
-    extra_files = extra_files or {}
 
     with zipfile.ZipFile(f, 'r') as zipf:
         # Check the version
         version = zipf.read('version').decode().split('.')
-        from .serde.schema import SCHEMA_VERSION
 
         assert len(version) == len(SCHEMA_VERSION)
         if version[0] != str(SCHEMA_VERSION[0]):
@@ -264,8 +257,6 @@ def load(
                 f"Serialized version {version} does not match our current "
                 f"schema version {SCHEMA_VERSION}."
             )
-
-        from .serde.serialize import deserialize, SerializedArtifact
 
         # Load serialized_ep and serialized_state_dict from the zip file
 
@@ -306,10 +297,23 @@ def load(
             serialized_example_inputs,
         )
 
-        # Deserialize ExportedProgram
-        ep = deserialize(artifact, expected_opset_version)
+    return artifact
 
-        return ep
+def load(
+    f: Union[str, os.PathLike, io.BytesIO],
+    *,
+    extra_files: Optional[Dict[str, Any]] = None,
+    expected_opset_version: Optional[Dict[str, int]] = None,
+) -> ExportedProgram:
+
+    extra_files = extra_files or {}
+    artifact: SerializedArtifact = _export_load_util(f, extra_files)
+
+    from .serde.serialize import deserialize
+    # Deserialize ExportedProgram
+    ep = deserialize(artifact, expected_opset_version)
+
+    return ep
 
 
 def aot_compile(
