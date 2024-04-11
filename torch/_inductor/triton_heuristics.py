@@ -738,7 +738,9 @@ class CachingAutotuner(KernelInterface):
             # grid can be a tuple of ints or a lambda.
             # if it is a lambda, then it should have metadata associated that can be used
             # to reconstruct the lambda.
-            grid_info = grid if isinstance(grid, tuple) else getattr(grid, "grid_meta", None)
+            grid_info = (
+                grid if isinstance(grid, tuple) else getattr(grid, "grid_args", None)
+            )
             with torch._C._profiler._RecordFunctionFast(
                 self.inductor_meta.get("kernel_name", "triton kernel"),
                 args,
@@ -1612,7 +1614,7 @@ def grid(*numels):
             z_grid,
         )
 
-    grid_fn.grid_meta = ("grid", *numels)
+    grid_fn.grid_args = ("grid", *numels)  # type: ignore[attr-defined]
 
     return grid_fn
 
@@ -1622,6 +1624,6 @@ def split_scan_grid(xnumel, rnumel):
         assert meta.get("XBLOCK", 1) == 1
         return (ceildiv(rnumel, meta.get("RBLOCK", 1)), xnumel, 1)
 
-    grid_fn.grid_meta = ("split_scan_grid", xnumel, rnumel)
+    grid_fn.grid_args = ("split_scan_grid", xnumel, rnumel)  # type: ignore[attr-defined]
 
     return grid_fn
