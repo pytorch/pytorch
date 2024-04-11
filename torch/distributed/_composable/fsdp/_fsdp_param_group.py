@@ -342,7 +342,6 @@ class FSDPParamGroup:
         if self._post_reduce_view_out_event is not None:
             torch.cuda.current_stream().wait_event(self._post_reduce_view_out_event)
             self._post_reduce_view_out_event = None
-        self._training_state = TrainingState.IDLE
         self._post_forward_indices.clear()
         self.all_forward_output_grad_fns.clear()
 

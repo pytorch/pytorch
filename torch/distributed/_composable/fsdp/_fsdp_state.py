@@ -201,6 +201,9 @@ class FSDPState(_State):
                     # Run post-backward in case forward inputs did not require
                     # gradient so the autograd backward did not run
                     state._fsdp_param_group.post_backward()
+                state._training_state = TrainingState.IDLE
+                if state._fsdp_param_group:
+                    state._fsdp_param_group._training_state = TrainingState.IDLE
                 if self._state_ctx.is_last_backward:
                     state._finalize_backward()
             if self._state_ctx.is_last_backward:
@@ -208,7 +211,6 @@ class FSDPState(_State):
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:
-        self._training_state = TrainingState.IDLE
         for handle in self._pre_backward_hook_handles:
             handle.remove()
         self._pre_backward_hook_handles.clear()
