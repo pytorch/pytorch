@@ -555,27 +555,6 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(tq.size(), 0)
         self.assertEqual(tq1.size(), 0)
 
-    def test_identifying_torchbind_ops(self):
-        for op in [
-            torch.ops._TorchScriptTesting.takes_foo,
-            torch.ops._TorchScriptTesting.takes_foo_python_meta,
-            torch.ops._TorchScriptTesting.takes_foo_list_return,
-            torch.ops._TorchScriptTesting.takes_foo_tuple_return,
-            torch.ops._TorchScriptTesting.take_an_instance,
-            torch.ops._TorchScriptTesting.take_an_instance_inferred,
-            torch.ops._TorchScriptTesting.takes_foo_cia,
-            torch.ops._TorchScriptTesting.queue_pop,
-            torch.ops._TorchScriptTesting.queue_push,
-            torch.ops._TorchScriptTesting.queue_size,
-        ]:
-            self.assertTrue(any(op._overload_has_script_obj_arg.values()))
-
-        for op in [
-            torch.ops.aten.add,
-            torch.ops.aten.cos,
-        ]:
-            self.assertFalse(any(op._overload_has_script_obj_arg.values()))
-
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestRegisterFakeClass(TestCase):

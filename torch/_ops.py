@@ -239,24 +239,6 @@ _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
 ]
 
 
-def _mannually_invoke_dispatch_mode_in_python(curr_mode, op_overload, *args, **kwargs):
-    assert isinstance(curr_mode, TorchDispatchMode)
-    overload_types = []
-    args_flattened, _ = torch.utils._pytree.tree_flatten((args, kwargs.values()))
-    for a in args_flattened:
-        # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
-        # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
-        # where in one case we only include tensors with the python key, and in another
-        # we include **all** tensors.
-        if isinstance(a, torch.Tensor) and torch._C._dispatch_keys(a).has(
-            torch._C.DispatchKey.Python
-        ):
-            overload_types.append(type(a))
-    # TODO: check that I got these args correct (in C++, we pass in "0000"??)
-
-    return curr_mode.__torch_dispatch__(op_overload, overload_types, args, kwargs)
-
-
 class HigherOrderOperator(OperatorBase):
     # The HigherOrderOperator will appear as torch.ops.higher_order.{name}
     #
@@ -730,8 +712,24 @@ class OpOverload(OperatorBase):
                             _set_mode_pre_dispatch(top_mode)
 
                     with _temporarily_pop_modes_from_pre_dispatch() as curr_mode:
-                        return _mannually_invoke_dispatch_mode_in_python(
-                            curr_mode, self, *args, **kwargs
+                        assert isinstance(curr_mode, TorchDispatchMode)
+                        overload_types = []
+                        args_flattened, _ = torch.utils._pytree.tree_flatten(
+                            (args, kwargs.values())
+                        )
+                        for a in args_flattened:
+                            # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
+                            # It's generated in PyInterpreter.cpp, but seems to be generated in two places,
+                            # where in one case we only include tensors with the python key, and in another
+                            # we include **all** tensors.
+                            if isinstance(a, torch.Tensor) and torch._C._dispatch_keys(
+                                a
+                            ).has(torch._C.DispatchKey.Python):
+                                overload_types.append(type(a))
+                        # TODO: check that I got these args correct (in C++, we pass in "0000"??)
+
+                        return curr_mode.__torch_dispatch__(
+                            self, overload_types, args, kwargs
                         )
 
                 # Note [Not Caching Per-Dispatch-Key Mode Handlers]
@@ -784,20 +782,6 @@ class OpOverload(OperatorBase):
     # TODO: add more methods to expose information about input and output arguments
 
 
-# TorchBindOpOverload are those custom ops which have at least one overload's
-# schema consists of torch.ScriptObject (i.e. custom class) input.
-# TorchBindOpOverload will skip C++ dispatcher and purely dispatched in python
-# when its inputs contain FakeScriptObject.
-class TorchBindOpOverload(OpOverload):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._is_torchbind_op = True
-
-
-def _has_script_object_arg(schema: torch.FunctionSchema) -> bool:
-    return any(isinstance(arg.type, torch.ClassType) for arg in schema.arguments)
-
-
 # OpOverloadPacket class contains pointer to a base unresolved operator that doesn't correspond to a specific operator
 # You can obtain an OpOverload object through attribute query.
 class OpOverloadPacket:
@@ -809,15 +793,6 @@ class OpOverloadPacket:
         self._op = op
         self._overload_names = overload_names
         self._dir = []
-        self._schemas = {
-            overload_name: torch._C._get_schema(qualified_op_name, overload_name)
-            for overload_name in self._overload_names
-        }
-
-        self._overload_has_script_obj_arg = {
-            overload_name: _has_script_object_arg(schema)
-            for overload_name, schema in self._schemas.items()
-        }
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
     def __deepcopy__(self, memo=None):
@@ -870,18 +845,8 @@ class OpOverloadPacket:
             op_, op_dk_, tags = torch._C._get_operation_overload(
                 self._qualified_op_name, use_key
             )
-
-            if use_key not in self._schemas:
-                # Raise Runtime error is to be consistant with the error raised by torch._C._get_schema
-                raise RuntimeError(f"Found no matching schema for {use_key}")
-
-            schema = self._schemas[use_key]
-
-            overload = (
-                OpOverload(self, op_, op_dk_, schema, tags)
-                if not self._overload_has_script_obj_arg[use_key]
-                else TorchBindOpOverload(self, op_, op_dk_, schema, tags)
-            )
+            schema = torch._C._get_schema(self._qualified_op_name, use_key)
+            overload = OpOverload(self, op_, op_dk_, schema, tags)
             # cache the overload object
             setattr(self, key, overload)
             self._dir.append(key)
