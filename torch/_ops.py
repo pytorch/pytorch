@@ -280,8 +280,6 @@ class HigherOrderOperator(OperatorBase):
             self_name_space = "." + self.namespace if self.namespace else ""
             self.__module__ = self.__module__ + self_name_space
 
-        # non_fallthrough_keys are used to provide fallthrough implementation
-        # for higher ordero op and torch bind op.
         self.non_fallthrough_keys = torch._C._dispatch_keyset_full()
 
         for dispatch_key in _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
@@ -295,9 +293,6 @@ class HigherOrderOperator(OperatorBase):
         # it to next key. This is only safe to do when PreDispatch key stack has no
         # active modes.
 
-    def fallthrough(self, dispatch_key):
-        self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
-
     def py_impl(self, k):
         if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
             self.non_fallthrough_keys = self.non_fallthrough_keys.add(k)
@@ -306,6 +301,9 @@ class HigherOrderOperator(OperatorBase):
     @property
     def namespace(self):
         return self._ns
+
+    def fallthrough(self, dispatch_key):
+        self.non_fallthrough_keys = self.non_fallthrough_keys.remove(dispatch_key)
 
     def dispatch(self, dispatch_key, *args, **kwargs):
         from torch.utils._python_dispatch import _get_current_dispatch_mode
@@ -799,7 +797,7 @@ class TorchBindOpOverload(OpOverload):
 
     # Note: we automaticallly add implementations for modes that useful for tracing.
     # We only add implementation when we must dispatch in python by checking the inputs.
-    # We cannot do it before seeing the inputs ecause some torch bind ops
+    # We cannot do it before seeing the inputs because some torch bind ops
     # (e.g. profiler record function) might be registered globally
     # with a single default implementation in cpp. We might accidently trace them
     # into graph.
@@ -853,10 +851,10 @@ class TorchBindOpOverload(OpOverload):
         )
 
         # fallthrough keys can be registered at runtime via torch.library.impl
-        # so need to add it to non_fallthrough_keys and re-dispatch.
+        # so need to add it to fallthrough_keys and re-dispatch.
         if isinstance(handler, DispatchKey):
-            if torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
-                self.name(), handler
+            if torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(  # type: ignore[attr-defined]
+                self.name(), dispatch_key
             ):
                 return self._dispatch_in_python(
                     args, kwargs, fallthrough_keys + [dispatch_key]
@@ -867,8 +865,8 @@ class TorchBindOpOverload(OpOverload):
                 f"Please implement it by annotating a python callable with py_impl({handler})."
             )
 
-        # fallthrough keys can be also be registered via op.py_impl
-        # so need to add it to non_fallthrough_keys and re-dispatch.
+        # fallthrough keys can also be registered via op.py_impl
+        # so need to add it to fallthrough_keys and re-dispatch.
         if handler is torch.library.fallthrough_kernel:
             return self._dispatch_in_python(
                 args, kwargs, fallthrough_keys + [dispatch_key]
@@ -1022,15 +1020,16 @@ def _call_overload_packet_from_python(op: OpOverloadPacket, args, kwargs):
     if torch_function_called:
         return ret
 
+    # The following mirrors getOpWithStack.
     # In cpp, we do a schema matching for the arguments, and call ToIValue to
     # to check whether the arguments are valid. But need to do similar things here
-    # and skip the ToIValue check because FakeScriptObject won't convert to IValue.
+    # and allow toIValue FakeScriptObject.
     exceptions = {}
     found_op = None
     for overload_name in op.overloads():
         op_overload = getattr(op, overload_name)
         try:
-            stack = torch._C._check_schema_skip_script_object(
+            _ = torch._C._check_schema_allow_fake_script_object(  # type: ignore[attr-defined]
                 op_overload._schema, *args, **kwargs
             )
             found_op = op_overload
@@ -1039,7 +1038,7 @@ def _call_overload_packet_from_python(op: OpOverloadPacket, args, kwargs):
             exceptions[overload_name] = e
 
     if found_op:
-        return op_overload(*args, **kwargs)
+        return found_op(*args, **kwargs)
 
     err_msg = (
         f"Fail to match any TorchBindOverloads of {op} with following exceptions:\n"
