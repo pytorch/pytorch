@@ -224,16 +224,18 @@ def checkpoint_wrapper(module, config):
         )
 
 
+test_case = "simple_mlp"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
+balanced = False
+mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
+activation_checkpoint = False
+apply_fsdp = False
+
 def init():
     from torch.testing._internal.common_fsdp import MLP
     # simple_mlp + balanced -> works
     # simple_mlp + unbalanced -> works
     # nested_fully_shard + balanced -> works
     # nested_fully_shard + unbalanced -> works
-    test_case = "nested_fully_shard"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
-    balanced = False
-    mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
-    activation_checkpoint = True
     if balanced:
         hidden_dim = 1234
     else:
@@ -247,8 +249,8 @@ def init():
         fsdp_config = {}
     if activation_checkpoint:
         ac_config = ACConfigClass()
-        ac_config.mode = "selective"
-        ac_config.selective_ac_option = "1"
+        ac_config.mode = "full"
+        # ac_config.selective_ac_option = "1"
     mesh = init_device_mesh("cuda", (world_size,))
 
     torch.manual_seed(0)
@@ -262,7 +264,8 @@ def init():
         )
         if activation_checkpoint:
             model = checkpoint_wrapper(model, ac_config)
-        fully_shard(model, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+        if apply_fsdp:
+            fully_shard(model, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
     elif test_case == "simple_seq_module":  # this causes `len(splits) == 1` which is an interesting case for `replace_foreach_all_gather_copy_out_pattern` FX pass.
         class SimpleModule(nn.Module):
             def __init__(self, device: torch.device):
@@ -275,16 +278,18 @@ def init():
         model = nn.Sequential(*[SimpleModule(torch.device("cuda")) for _ in range(1)])
         if activation_checkpoint:
             model = checkpoint_wrapper(model, ac_config)
-        for mod in model:
-            fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
-        fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+        if apply_fsdp:
+            for mod in model:
+                fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+            fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
     elif test_case == "nested_fully_shard":
         model = nn.Sequential(*[MLP(hidden_dim) for _ in range(3)])
         if activation_checkpoint:
             model = checkpoint_wrapper(model, ac_config)
-        for mlp in model:
-            fully_shard(mlp, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
-        fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+        if apply_fsdp:
+            for mlp in model:
+                fully_shard(mlp, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+            fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
     # else:
     #     # FSDP1
     #     fsdp_kwargs = {
@@ -345,8 +350,9 @@ def main_compiled(n_iter):
         torch_log.warning("Compiling autograd?")
         return torch.compile(gm, backend="inductor", fullgraph=True)
 
-    torch._dynamo.config.trace_distributed = True
-    torch._functorch.config.move_view_chain_to_bwd_graph = True
+    if apply_fsdp:
+        torch._dynamo.config.trace_distributed = True
+        torch._functorch.config.move_view_chain_to_bwd_graph = True
     torch._inductor.config.triton.unique_kernel_names = True
 
     # if dist.get_rank() == 0:
