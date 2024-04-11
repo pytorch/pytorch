@@ -162,7 +162,8 @@ class GuardManager:
             for guard in mgr.get_leaf_guards():
                 body.writelines(self.get_guard_lines(guard))
 
-            if istype(mgr, DictGuardManager):
+            # This works for both DictGuardManager and SubclassedDictGuardManager
+            if isinstance(mgr, DictGuardManager):
                 self.construct_dict_manager_string(mgr, body)
 
             # General case of GuardManager/RootGuardManager
