@@ -112,15 +112,12 @@ class TestOptimRenewed(TestCase):
 
             initial_value = closure().item()
             for _ in range(20):
-                if torch._dynamo.is_compiling() and not optim_info.step_requires_closure:
-                    # we disable torch.compile with the closure argument, so in order to actually
-                    # test compiling the optimizer, we separate out the closure here.
-                    # LBFGS requires the closure arg but torch.compile doesn't support LBFGS
-                    # so it's fine to run the disabled path.
+                if optim_info.step_requires_closure:
+                    loss = optimizer.step(closure)
+                else:
                     loss = closure()
                     optimizer.step()
-                else:
-                    loss = optimizer.step(closure)
+
                 for scheduler in schedulers:
                     if isinstance(scheduler, ReduceLROnPlateau):
                         scheduler.step(loss)
@@ -1557,11 +1554,11 @@ class TestOptimRenewed(TestCase):
 
             # Make some state
             for _ in range(3):
-                if torch._dynamo.is_compiling() and not optim_info.step_requires_closure:
+                if optim_info.step_requires_closure:
+                    optimizer.step(closure)
+                else:
                     closure()
                     optimizer.step()
-                else:
-                    optimizer.step(closure)
 
             self.assertEqual(getPublicAttrs(optimizer), getPublicAttrs(deepcopy(optimizer)))
 
