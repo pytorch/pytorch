@@ -5,6 +5,7 @@ from collections import namedtuple
 from typing import Callable
 
 from unittest import expectedFailure, skipUnless
+from unittest.mock import patch
 
 import torch
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -167,6 +168,14 @@ class TestTemplatedSDPA(InductorTestCase):
         value = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device="cuda")
         with self.assertRaisesRegex(ValueError, "NYI: The target sequence length"):
             _templated_attention(query, key, value, _identity_mod)
+
+    @supported_platform
+    @patch.object(torch._inductor.config, "max_autotune", True)
+    def test_max_autotune(self):
+        def score_mod(score, b, h, m, n):
+            return score * 2
+
+        self.run_test(score_mod)
 
 
 common_utils.instantiate_parametrized_tests(TestTemplatedSDPA)
