@@ -42,6 +42,48 @@ def drosenbrock(tensor):
 
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
+    """
+    This test class validates the core optimizers and is structured as the correctness of:
+    - The update algorithms (forloop implementation)
+        * Every optimizer's algorithm is most readably implemented through a big for-loop
+          over all the parameters, which is what we refer to as the forloop or single tensor
+          implementation. These algorithms are manually validated by comparing to the paper
+          and systematically validated by assuring that the loss goes the right direction
+          when the optimizer has been applied.
+        * This implementation should compose with optimizer hyperparameters well, such as
+          supporting Tensor LRs, the capturable API, and sparse and complex parameters.
+    - Each varying implementation
+        * We then have implementations that improve upon the performance of the forloop
+          implementation by leveraging fusion, namely our foreach (mult_tensor) and fused
+          implementations.
+        * These variations are validated numerically by comparing with the forloop version
+          of the optimizer. In fact, we test most variations this way--we see the forloop
+          implementation as the ground truth and expect that improvements to it in any way
+          should be just as correct.
+        * Both params and optimizer states should be validated numerically.
+    - state_dict APIs
+        * The optimizer instance should be serializable
+        * Calling save and load should be deterministic
+        * Moving between devices should be seamless
+        * BC - load_state_dict should be able to handle older optimizer states
+    - Hook APIs (everything should fire in the right order)
+    - LR Scheduler integration (composing should not error + should go the right direction)
+    - Parameter groups (should be equivalent to having multiple optimizers)
+    - Erroring (what should error should error)
+
+    We also cover different ways of generating parameters and grads:
+    - With parameters, we either generate them randomly given specific shapes or we take
+      them from a sample NN module.
+        * Variety is important here because NN modules have type Parameter and randomly
+          generated tensors have type Tensor.
+        * Parameters can be sparse for a subset of the optimizers (check out OptimizerInfo)
+        * Complex parameters should be handled using view_as_real
+        * Parameters can be spread across different devices and different dtypes for any
+          given optimizer
+        * Parameters can be contiguous and noncontiguous
+    - With grads, we follow suit from the parameters.
+        * Grads can also be None, empty, or zero-valued, and this should not disrupt training.
+    """
 
     @onlyCPU
     @optims(optim_db)
