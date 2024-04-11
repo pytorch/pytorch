@@ -268,14 +268,14 @@ class TestAOTAutograd(AOTTestCase):
         inp_: Union[Callable, List[Any]],
         *,
         test_mutation: bool = False,
-        only_keep_inference_mutations: bool = False,
+        keep_inp_mutations: bool = False,
         decompositions: Optional[Dict] = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.
         make_inputs_subclasses: bool = False,
     ):
-        for keep_input_mutations in [True] if only_keep_inference_mutations else [True, False]:
+        for keep_input_mutations in [True] if keep_inp_mutations else [True, False]:
             # Some tests pass in a callable for inp, to generate the inputs
             # (useful if we want to generate complicated aliasing inputs)
             if isinstance(inp_, Callable):
@@ -468,9 +468,9 @@ def forward(self, primals_1):
                 a.set_(b)
             return a * b
         inp = [torch.ones(3, 3, requires_grad=True)]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
         inp = [torch.ones(3, 3, requires_grad=False)]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
 
     def test_set__steals_view_chain(self):
         def f(a, b):
@@ -483,19 +483,19 @@ def forward(self, primals_1):
             a_.view(-1).mul_(2)
             return a_ * b_slice
         inp = [torch.ones(3, 3, requires_grad=False), torch.zeros(3, 9, requires_grad=False)]
-        self.verify_aot_autograd(f, inp)
+        self.verify_aot_autograd(f, inp, keep_inp_mutations=True)
 
     def test_set__and_data_mutation_good(self):
         def f(a, b):
             # The data mutation happens *after* the set_(). This is ok (see the graph below)
             with torch.no_grad():
                 a.set_(b)
-            b.mul_(2)
+                b.mul_(2)
             return a + b
         inp = [torch.ones(3, 3, requires_grad=True), torch.ones(3, 3, requires_grad=True)]
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
         inp = [torch.ones(3, 3, requires_grad=False), torch.zeros(3, 3, requires_grad=False)]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
         # Important things to note:
         # - "return a.set_(b)" desugars into "return b"
         # - Both a and b are recorded as experiencing mutations,
@@ -505,10 +505,11 @@ def forward(self, primals_1):
         # - the runtime epilogue for b is "b.copy_(mul)"
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
-    clone = torch.ops.aten.clone.default(primals_2);  primals_2 = None
-    mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
+    mul = torch.ops.aten.mul.Tensor(primals_2, 2)
     add = torch.ops.aten.add.Tensor(mul, mul)
-    return [mul, mul, add]""")
+    set_ = torch.ops.aten.set_.source_Tensor(primals_1, mul);  primals_1 = None
+    copy_ = torch.ops.aten.copy_.default(primals_2, mul);  primals_2 = mul = None
+    return [add]""")
 
     # This is a (hopefully) extremely rare case that is difficult to handle,
     # so we ban it.
@@ -520,13 +521,25 @@ def forward(self, primals_1, primals_2):
             # will be tracked as graph input mutations.
             with torch.no_grad():
                 a.set_(tmp)
-            # BAD: a_view is now detached from every graph input,
-            # so we won't recognize that this caused an input mutation!
-            a_view.mul_(2)
+                # BAD: a_view is now detached from every graph input,
+                # so we won't recognize that this caused an input mutation!
+                a_view.mul_(2)
             return a + tmp
         inp = [torch.ones(3, 3, requires_grad=True)]
         with self.assertRaisesRegex(RuntimeError, "cannot mutate tensors with frozen storage"):
-            self.verify_aot_autograd(f, inp, test_mutation=True)
+            self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
+
+    def test_set__not_allowed(self):
+        def f(a, b):
+            with torch.no_grad():
+                a.set_(b)
+            # Mutating a will change a's grad_fn, which requires us to replay the mutation outside of the graph.
+            # We currently ban this today, when the input also received a set_() input mutation.
+            a.mul_(2)
+            return a + b
+        inp = [torch.ones(3, 3, requires_grad=True), torch.ones(3, 3, requires_grad=True)]
+        with self.assertRaisesRegex(AssertionError, "prevented us from including it in the graph"):
+            fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
 
     def test_input_mutation_set__nop(self):
         def f(a):
@@ -537,9 +550,9 @@ def forward(self, primals_1, primals_2):
                 a.set_(a_old)
             return a + b.reshape(3, 3)
         inp = [torch.ones(3, 3, requires_grad=True)]
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
         inp = [torch.ones(3, 3, requires_grad=False)]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
         # Things to note:
         # - There are no set_() calls in the graph (we functionalize a.set_(b) into "b")
         # - There is only **1** graph output. We properly realized that the two set_() calls
@@ -679,7 +692,7 @@ def forward(self, primals_1, primals_2, primals_3):
         ]
 
         fw_graph = self.verify_aot_autograd(
-            f, inp, test_mutation=True, only_keep_inference_mutations=True
+            f, inp, test_mutation=True, keep_inp_mutations=True
         )
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, arg0_1, arg1_1):
@@ -732,13 +745,33 @@ def forward(self, arg0_1, arg1_1):
         # by the time it becomes a graph input. Good to test both cases.
         self.verify_aot_autograd(f, inp, test_mutation=True)
 
+    def test_input_mutation_hidden_from_autograd_aliasing(self):
+        def f(a):
+            a_alias = a.view(-1)
+            with torch.no_grad():
+                a_alias.mul_(2)
+            return a + 1
+        inp = [torch.ones(4, requires_grad=True)]
+        # The important bit: we detected that the input mutation is safe
+        # to include **inside** the graph, since it was under no_grad
+        # (so all we need to do is use mark_dirty() on the input to bump the VC)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    view = torch.ops.aten.view.default(primals_1, [-1])
+    mul = torch.ops.aten.mul.Tensor(view, 2);  view = None
+    view_1 = torch.ops.aten.view.default(mul, [4]);  mul = None
+    add = torch.ops.aten.add.Tensor(view_1, 1)
+    copy_ = torch.ops.aten.copy_.default(primals_1, view_1);  primals_1 = view_1 = None
+    return [add]""")
+
     def test_input_mutation_requires_grad_no_grad(self):
         def f(a):
             with torch.no_grad():
                 a.mul_(2)
             return a + 3
         inp = [torch.ones(4, requires_grad=True)]
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, only_keep_inference_mutations=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
         # Even though the input requires_grad, we expect the keep the input mutation in the graph
         # (Even though this is a training graph!)
         self.assertExpectedInline(fw_graph.code.strip(), """\
@@ -755,7 +788,7 @@ def forward(self, primals_1):
                 return a + 3
         inp = [torch.ones(4, requires_grad=True)]
         # Even though the input requires_grad, we expect the keep the input mutation in the graph
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, only_keep_inference_mutations=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
 
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, arg0_1):
@@ -3290,6 +3323,8 @@ def forward(self, arg0_1):
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
         # 9 outputs: 3 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
+        for node in fx_g.graph.nodes:
+            node.meta.pop("stack_trace", None)
         self.assertExpectedInline(fx_g.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
@@ -3347,6 +3382,8 @@ class <lambda>(torch.nn.Module):
         # Also check the inference graph
         # Main important thing here is that there are 5 total outputs: 3 total mutated buffers (from batchnorm), 2 user outputs.
         fx_g_inference, signature_inference = aot_export_module(mod, [inp], trace_joint=False)
+        for node in fx_g_inference.graph.nodes:
+            node.meta.pop("stack_trace", None)
         self.assertExpectedInline(fx_g_inference.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):

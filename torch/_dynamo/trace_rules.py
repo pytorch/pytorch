@@ -197,17 +197,17 @@ manual_torch_name_rule_map = {
     "torch._functorch.eager_transforms._wrap_all_tensors": UserFunctionVariable,
     "torch._functorch.eager_transforms._wrap_tensor_for_grad": UserFunctionVariable,
     # functorch/jacrev
-    "torch._functorch.eager_transforms.jacrev": UserFunctionVariable,
+    "torch._functorch.eager_transforms.jacrev": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms.error_if_complex": UserFunctionVariable,
     "torch._functorch.eager_transforms._chunked_standard_basis_for_": UserFunctionVariable,
     "torch._functorch.eager_transforms._safe_zero_index": UserFunctionVariable,
     # functorch/vjp
-    "torch._functorch.eager_transforms.vjp": UserFunctionVariable,
+    "torch._functorch.eager_transforms.vjp": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms._vjp_with_argnums": UserFunctionVariable,
     "torch._functorch.eager_transforms.assert_non_empty_tensor_output": UserFunctionVariable,
     # functorch/jvp
     "torch._functorch.eager_transforms._jvp_with_argnums": UserFunctionVariable,
-    "torch._functorch.eager_transforms.jvp": UserFunctionVariable,
+    "torch._functorch.eager_transforms.jvp": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms._replace_args": UserFunctionVariable,
     "torch._functorch.eager_transforms.safe_unpack_dual": UserFunctionVariable,
     "torch._functorch.eager_transforms.assert_non_empty_list_of_tensors": UserFunctionVariable,
@@ -217,16 +217,17 @@ manual_torch_name_rule_map = {
     "torch.autograd.forward_ad.make_dual": UserFunctionVariable,
     "torch.autograd.forward_ad.unpack_dual": UserFunctionVariable,
     # functorch/jacfwd
-    "torch._functorch.eager_transforms.jacfwd": UserFunctionVariable,
+    "torch._functorch.eager_transforms.jacfwd": FunctorchHigherOrderVariable,
     "torch._functorch.eager_transforms._construct_standard_basis_for": UserFunctionVariable,
     "torch._functorch.eager_transforms.safe_unflatten": UserFunctionVariable,
     # functorch/hessian
-    "torch._functorch.eager_transforms.hessian": UserFunctionVariable,
+    "torch._functorch.eager_transforms.hessian": FunctorchHigherOrderVariable,
     # functorch/deprecated
     "torch._functorch.deprecated.jvp": UserFunctionVariable,
     "torch._functorch.deprecated.hessian": UserFunctionVariable,
     "torch._functorch.deprecated.jacfwd": UserFunctionVariable,
     "torch._functorch.deprecated.jacrev": UserFunctionVariable,
+    "torch._functorch.deprecated.grad": UserFunctionVariable,
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     #
@@ -1496,7 +1497,9 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._sparse_csr_prod",
         "torch._sparse_csr_sum",
         "torch._sparse_log_softmax_backward_data",
+        "torch._sparse_semi_structured_addmm",
         "torch._sparse_semi_structured_linear",
+        "torch._sparse_semi_structured_mm",
         "torch._sparse_softmax_backward_data",
         "torch._sparse_sparse_matmul",
         "torch._sparse_sum",
@@ -2590,6 +2593,7 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.mps.set_per_process_memory_fraction",
         "torch.mps.set_rng_state",
         "torch.mps.synchronize",
+        "torch.nested._internal.nested_tensor.buffer_from_jagged",
         "torch.nested._internal.nested_tensor.get_tensor_symint",
         "torch.nested._internal.nested_tensor.is_expandable_to",
         "torch.nested._internal.nested_tensor.jagged_from_list",
