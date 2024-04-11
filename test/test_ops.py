@@ -1668,7 +1668,7 @@ class TestCompositeCompliance(TestCase):
                 leaf_results = pytree.tree_leaves(results_raw)
                 results = [r for r in leaf_results if isinstance(r, torch.Tensor) and r.requires_grad]
 
-                all_results_strided = all([is_strided_tensor(result) for result in results])
+                all_results_strided = all(is_strided_tensor(result) for result in results)
 
                 # Only test backward if the results are strided tensors
                 if all_results_strided:
