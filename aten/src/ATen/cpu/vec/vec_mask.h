@@ -134,7 +134,18 @@ class VecMask {
     return VectorizedN<T, N>(VectorizedN<T, N>::loadu(mask));
   }
 
-  void store(bool* b, int count) {
+  static VecMask<T, N> blendv(
+    const VecMask<T, N>& c,
+    const VecMask<T, N>& b,
+    const VecMask<T, N>& a) {
+    VectorizedN<T, N> result = VectorizedN<T, N>::blendv(
+      VectorizedN<T, N>(c),
+      VectorizedN<T, N>(b),
+      VectorizedN<T, N>(a));
+    return result;
+  }
+
+  void store(bool* b, int count = size()) {
     constexpr int L = (VectorizedN<T, N>::size() + Vectorized<bool>::size() - 1)/ Vectorized<bool>::size();
     auto res = this->to<bool, L>();
     res.store(b, count);
