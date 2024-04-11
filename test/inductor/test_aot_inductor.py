@@ -313,25 +313,6 @@ class AOTInductorTestsTemplate:
         self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 1)
         self.assertEqual(counters["inductor"]["scmerge_split_sections_removed"], 1)
 
-    def test_amp_fallback_random(self):
-        def fn(x, w):
-            return torch.functional.F.linear(x, w)
-
-        example_inputs = (
-            torch.randn(10, 10, device=self.device),
-            torch.randn(10, 10, device=self.device),
-        )
-        if self.device == "cuda":
-            ctx = torch.cuda.amp.autocast
-        elif self.device == "cpu":
-            ctx = torch.cpu.amp.autocast
-        else:
-            raise AssertionError("Unsupported device")
-
-        with config.patch({"fallback_random": True}):
-            with ctx():
-                self.check_model(fn, example_inputs)
-
     def test_missing_output(self):
         class Model(torch.nn.Module):
             def __init__(self):
@@ -1493,17 +1474,6 @@ class AOTInductorTestsTemplate:
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
 
-    def test_view_outputs(self):
-        class Model(torch.nn.Module):
-            def forward(self, x):
-                y = torch.sin(x)
-                y_same_size = y.view(*y.shape)
-                y_diff_size = y.view(1, *y.shape)
-                return y, y_same_size, y_diff_size
-
-        example_inputs = (torch.randn(3, 10, device=self.device),)
-        self.check_model(Model(), example_inputs)
-
     @skip_if_no_torchvision
     def test_missing_cubin(self):
         from torchvision.models.resnet import Bottleneck, ResNet
@@ -2551,7 +2521,6 @@ CPU_TEST_FAILURES = {
     "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(is_skip=True),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
-    "test_view_outputs": fail_stack_allocation(is_skip=True),
     "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
     "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
     "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
@@ -2575,7 +2544,6 @@ CPU_TEST_FAILURES = {
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
-    "test_amp_fallback_random": fail_minimal_arrayref_interface(),  # undefined symbol: _Z16aoti_torch_dtypeIN3c108BFloat16EEiv
     "test_simple_dynamic": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/122989
     "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(

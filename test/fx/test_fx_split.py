@@ -1,7 +1,7 @@
 # Owner(s): ["module: fx"]
 
 from collections import defaultdict
-from typing import Dict, List, Tuple
+from typing import List, Tuple, Dict
 
 import torch
 from torch.fx.passes.split_utils import split_by_tags
@@ -39,7 +39,6 @@ class TestFXSplit(TestCase):
             if node.op == "placeholder":
                 self.assertIn("name", node.meta)
                 self.assertEqual(node.meta["name"], node.name)
-
 
 class TestSplitByTags(TestCase):
     class TestModule(torch.nn.Module):
@@ -151,7 +150,6 @@ class TestSplitByTags(TestCase):
             },
             f"{orig_to_split_fqn_mapping=}",
         )
-
 
 class TestSplitOutputType(TestCase):
     class TestModule(torch.nn.Module):

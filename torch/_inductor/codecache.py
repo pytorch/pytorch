@@ -2172,11 +2172,8 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             size_t result_len = cppvec.size();
             PyObject* result = PyList_New(static_cast<Py_ssize_t>(result_len));
             for (size_t i = 0; i < result_len; i++) {
-                PyObject *elem =
-                    cppvec[i] == nullptr
-                        ? Py_None
-                        // Store AtenTensorHandle as PyCapsulate
-                        : PyCapsule_New(reinterpret_cast<void*>(cppvec[i]), NULL, NULL);
+                // Store AtenTensorHandle as PyCapsulate
+                PyObject* elem = PyCapsule_New(reinterpret_cast<void*>(cppvec[i]), NULL, NULL);
                 PyList_SET_ITEM(result, i, elem);
             }
             return result;
