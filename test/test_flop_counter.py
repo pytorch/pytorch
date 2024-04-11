@@ -248,7 +248,7 @@ class TestFlopCounter(TestCase):
 
         self.assertExpectedInline(get_total_flops(mode), """5""")
 
-        def count(*args, out):
+        def count(*args, out_val):
             return out.numel()
         count._get_raw = True
 
