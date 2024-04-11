@@ -7,6 +7,12 @@
 #include <limits>
 #include <omp.h>
 
+// WARNING: be extra careful when including more ATen/c10 header files here!
+// Because AOTInductor generated code will copy-paste this cpp_prefix.h for
+// the CPU backend, we have to make sure the used headers are implemented
+// in a header-only way, i.e. all the function and class definitions are
+// in .h files instead of .cpp files, to avoid ABI backward-compatiblity breakage.
+
 #include <ATen/NumericUtils.h>
 #include <ATen/core/PhiloxRNGEngine.h>
 #include <ATen/native/Math.h>
