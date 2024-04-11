@@ -75,7 +75,6 @@ def _get_allowed_globals():
         "torch.serialization._get_layout": torch.serialization._get_layout,
         "torch.Size": torch.Size,
         "torch.Tensor": torch.Tensor,
-        "torch.optim.lr_scheduler.OneCycleLR.__getattribute__": torch.optim.lr_scheduler.OneCycleLR.__getattribute__,
     }
     # dtype
     for t in [
