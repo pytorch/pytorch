@@ -2562,6 +2562,7 @@ class TritonKernel(Kernel):
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
+                    assert isinstance(const_tensor, torch.Tensor)
                     result.writeline(
                         f"{var_name} = rand_strided({V.graph.sizevars.size_hints(const_tensor.size())}, {V.graph.sizevars.size_hints(const_tensor.stride())}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
@@ -3373,6 +3374,7 @@ class TritonScheduling(BaseScheduling):
                 return V.graph.graph_inputs[name]
             elif name in V.graph.constants:
                 data = V.graph.constants[name]
+                assert isinstance(data, torch.Tensor)
                 return ir.ConstantBuffer(
                     name,
                     ir.FixedLayout(

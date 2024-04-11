@@ -841,14 +841,17 @@ def convert_frame(compiler_fn: CompilerFn, hooks: Hooks):
                 # Log this message in the graph break. Also use the string
                 # "skip: " to tell that the whole frame is falling back to
                 # eager.
-                with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
-                    user_stack = e.real_stack
-                    user_stack_formatted = "".join(traceback.format_list(user_stack))
-                    graph_break_log.debug(
-                        "Graph break: skip: from user code at:\n%s",
-                        user_stack_formatted,
-                        exc_info=True,
-                    )
+                if hasattr(e, "compile_id"):
+                    with compile_context(CompileContext(e.compile_id)):  # type: ignore[attr-defined]
+                        user_stack = e.real_stack
+                        user_stack_formatted = "".join(
+                            traceback.format_list(user_stack)
+                        )
+                        graph_break_log.debug(
+                            "Graph break: skip: from user code at:\n%s",
+                            user_stack_formatted,
+                            exc_info=True,
+                        )
 
             if not config.suppress_errors and not soft_fail:
                 raise
