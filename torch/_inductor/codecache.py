@@ -19,7 +19,6 @@ import re
 import shlex
 import shutil
 import signal
-import struct
 import subprocess
 import sys
 import sysconfig
@@ -39,7 +38,6 @@ from types import ModuleType
 from typing import (
     Any,
     Callable,
-    cast,
     Dict,
     List,
     Optional,
@@ -59,7 +57,12 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.utils import cache_dir, developer_warning, is_linux
+from torch._inductor.utils import (
+    cache_dir,
+    clear_on_fresh_inductor_cache,
+    developer_warning,
+    is_linux,
+)
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
@@ -183,6 +186,7 @@ class CacheBase:
         return system
 
     @staticmethod
+    @clear_on_fresh_inductor_cache
     @functools.lru_cache(None)
     def get_local_cache_path() -> Path:
         return Path(os.path.join(cache_dir(), "cache", CacheBase.get_system()["hash"]))
@@ -202,22 +206,21 @@ class CacheBase:
 
         self.system = CacheBase.get_system()
 
-        self.local_cache_path = CacheBase.get_local_cache_path()
-        self.global_cache_path = CacheBase.get_global_cache_path()
-
     def get_local_cache(self) -> Dict[str, Any]:
-        if not self.local_cache_path.is_file():
+        local_cache_path = self.get_local_cache_path()
+        if not local_cache_path.is_file():
             return {}
-        with open(self.local_cache_path) as local_cache_fp:
+        with open(local_cache_path) as local_cache_fp:
             local_cache = json.load(local_cache_fp)
         return local_cache["cache"]
 
     def update_local_cache(self, local_cache: Dict[str, Any]) -> None:
-        if not os.path.exists(self.local_cache_path.parent):
-            os.makedirs(self.local_cache_path.parent, exist_ok=True)
+        local_cache_path = self.get_local_cache_path()
+        if not os.path.exists(local_cache_path.parent):
+            os.makedirs(local_cache_path.parent, exist_ok=True)
 
         write_atomic(
-            str(self.local_cache_path),
+            str(local_cache_path),
             json.dumps({"system": self.system, "cache": local_cache}, indent=4),
         )
 
@@ -250,9 +253,10 @@ class LocalCache(CacheBase):
 class PersistentCache(CacheBase):
     @functools.lru_cache(None)
     def get_global_cache(self):
-        if self.global_cache_path is None or not self.global_cache_path.is_file():
+        global_cache_path = self.get_global_cache_path()
+        if global_cache_path is None or not global_cache_path.is_file():
             return {}
-        with open(self.global_cache_path) as global_cache_fp:
+        with open(global_cache_path) as global_cache_fp:
             global_cache = json.load(global_cache_fp)
         return global_cache["cache"]
 
@@ -1541,7 +1545,6 @@ def cpp_compile_command(
     aot_mode: bool = False,
     compile_only: bool = False,
     use_absolute_path: bool = False,
-    use_mmap_weights: bool = False,
 ) -> str:
     ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
@@ -1574,9 +1577,6 @@ def cpp_compile_command(
     if compile_only:
         libs, lpaths = "", ""
     inp_name_str = " ".join(inp_name)
-    if use_mmap_weights:
-        macros += " -D USE_MMAP_SELF"
-
     return re.sub(
         r"[ \n]+",
         " ",
@@ -1613,9 +1613,10 @@ def split_aot_inductor_output_path(path: str) -> Tuple[str, str]:
         return path, ""
 
 
+@clear_on_fresh_inductor_cache
 class CudaKernelParamCache:
     cache: Dict[str, Dict[str, str]] = dict()
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
 
     @classmethod
     def set(cls, key: str, params: Dict[str, str], cubin: str) -> None:
@@ -1654,11 +1655,7 @@ class AotCodeCompiler:
         picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
-                "i",
-                "o",
-                vec_isa=picked_vec_isa,
-                cuda=cuda,
-                aot_mode=graph.aot_mode,
+                "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
             )
         )
         fbcode_aot_cpu_re = False
@@ -1703,6 +1700,17 @@ class AotCodeCompiler:
                 cmd = f"{ld_command} -r -b binary -o {consts_o} {consts_path}"
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
+
+            # .data section is between .text and .bss. When the size of .data is large,
+            # during the linking, the relocation of .text against .bss may overflow.
+            # Rename it to .ldata so that it won't be in between the .text and .bss section
+            cmd = (
+                f"{objcopy_command} --rename-section"
+                " .data=.ldata"
+                f" {consts_o} {consts_o}"
+            )
+            log.debug("aot constant rename section command: %s", cmd)
+            run_command_and_check(cmd)
 
             cmd = f"rm {consts_path}"
             log.debug("aot constant bin removal command: %s", cmd)
@@ -1786,17 +1794,6 @@ class AotCodeCompiler:
             )
 
             output_o = os.path.splitext(input_path)[0] + ".o"
-            consts_size = sum(
-                tensor.untyped_storage().nbytes()
-                for (name, tensor) in graph.constants.items()
-                if name not in graph.folded_constants
-            )
-            # TODO: Fix mmap weights with cuda
-            use_mmap_weights = (
-                not cuda and not config.is_fbcode() and consts_size > 2_000_000_000
-            )
-            if config._force_mmap_aoti_weights and not cuda:
-                use_mmap_weights = True
             compile_cmd = cpp_compile_command(
                 input=input_path,
                 output=output_o,
@@ -1805,7 +1802,6 @@ class AotCodeCompiler:
                 aot_mode=graph.aot_mode,
                 compile_only=True,
                 use_absolute_path=use_absolute_path,
-                use_mmap_weights=use_mmap_weights,
             )
             log.debug("aot compilation command: %s", compile_cmd)
             if fbcode_aot_cpu_re:
@@ -1830,19 +1826,11 @@ class AotCodeCompiler:
 
                 return bytes(raw_array.contents)
 
-            serialized_weights = b"".join(
+            aot_constants = b"".join(
                 _to_bytes(graph.get_original_value_of_constant(name))
                 for name in graph.constants.keys()
                 if name not in graph.folded_constants
             )
-            if not use_mmap_weights:
-                aot_constants = serialized_weights
-                magic_number = 0
-            else:
-                magic_number = cast(
-                    int, torch.randint(0, torch.iinfo(torch.int64).max, (1,)).item()
-                )
-                aot_constants = struct.pack("qq", consts_size + 8, magic_number)
             consts_o = {
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
@@ -1863,14 +1851,6 @@ class AotCodeCompiler:
             else:
                 run_command_and_check(link_cmd)
 
-            if use_mmap_weights:
-                with open(output_so, "a+b") as f_so:
-                    so_size = f_so.tell()
-                    # Page align the weights
-                    f_so.write(b" " * (16384 - so_size % 16384))
-                    f_so.write(serialized_weights)
-                    f_so.write(struct.pack("q", magic_number))
-
             # Append cmds to the end of codegen-ed wrapper file
             with open(input_path, "a") as f:
                 f.write("\n")
@@ -1888,6 +1868,7 @@ class AotCodeCompiler:
 # - valid_vec_isa_list()
 # - VecISA.__bool__() <-- takes out a lock
 # - compile_file() <-- imports cpp_prefix_path from cpp, which causes us to try to take out the same lock.
+@clear_on_fresh_inductor_cache
 @functools.lru_cache
 def cpp_prefix_path() -> str:
     path = Path(__file__).parent / "codegen/cpp_prefix.h"
@@ -2000,9 +1981,10 @@ def custom_op_wrapper(op: str, *args):
         return torch._C._aoti.unsafe_alloc_void_ptr_from_tensor(result)
 
 
+@clear_on_fresh_inductor_cache
 class CppCodeCache:
     cache: Dict[str, Union[CDLL, ModuleType]] = {}
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags: Dict[str, Any] = {}
 
     @staticmethod
@@ -2062,9 +2044,10 @@ class CppCodeCache:
 
 
 # Customized Python binding for cpp kernels
+@clear_on_fresh_inductor_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
     cache: Dict[str, Union[CDLL, ModuleType]] = {}
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
         "include_pytorch": False,
@@ -2193,9 +2176,10 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         return getattr(result, cls.entry_function)
 
 
+@clear_on_fresh_inductor_cache
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     cache: Dict[str, Union[CDLL, ModuleType]] = {}
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         "include_pytorch": not config.abi_compatible,
         "shared": True,
@@ -2255,10 +2239,11 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     )
 
 
+@clear_on_fresh_inductor_cache
 class PyCodeCache:
     cache: Dict[str, ModuleType] = dict()
     linemaps: Dict[str, List[Tuple[Any, ...]]] = dict()
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
 
     @classmethod
     def write(cls, source_code: str, extra: str = "") -> Tuple[str, str]:
@@ -2538,6 +2523,7 @@ class DLLWrapper:
         self.close()
 
 
+@clear_on_fresh_inductor_cache
 class CUDACodeCache:
     @dataclasses.dataclass
     class CacheEntry:
@@ -2545,7 +2531,7 @@ class CUDACodeCache:
         output_path: str
 
     cache: Dict[str, CacheEntry] = dict()
-    clear = staticmethod(cache.clear)
+    cache_clear = staticmethod(cache.clear)
     _SOURCE_CODE_SUFFIX = "cu"
 
     @classmethod
