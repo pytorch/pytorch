@@ -1585,19 +1585,6 @@ class TestNestedTensorDeviceType(TestCase):
             torch.nn.functional.softmax(nt_noncontiguous, -1))
 
     def _test_bmm(self, device, dtype):
-        # error case: one is nested but the other is not
-        nt = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
-        t = torch.randn(4, device=device, dtype=dtype)
-        self.assertRaisesRegex(
-            RuntimeError,
-            "Expected both to be nested, but got a nested self and non-nested other",
-            lambda: nt.bmm(t)
-        )
-        self.assertRaisesRegex(
-            RuntimeError,
-            "Expected both to be nested, but got a non-nested self and nested other",
-            lambda: t.bmm(nt)
-        )
         # error case: not 3D tensors
         nt0 = torch.nested.nested_tensor([], device=device, dtype=dtype)
         nt1 = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
@@ -1670,6 +1657,37 @@ class TestNestedTensorDeviceType(TestCase):
         nt1 = torch.nested.nested_tensor([torch.randn((4, 6)), torch.randn((7, 5))], device=device, dtype=dtype)
         actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
         expect = torch.nested.to_padded_tensor(nt0, 0.0).bmm(torch.nested.to_padded_tensor(nt1, 0.0))
+        if dtype == torch.float16:
+            self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
+        else:
+            self.assertEqual(actual, expect)
+
+        # nested tensor bmm normal tensor
+        nt0 = torch.nested.nested_tensor([torch.randn((2, 7)), torch.randn((3, 7))], device=device, dtype=dtype)
+        nt1 = torch.rand(2, 7, 5, dtype=dtype, device=device)
+        actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
+        expect = torch.nested.to_padded_tensor(nt0, 0.0).bmm(nt1)
+        if dtype == torch.float16:
+            self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
+        else:
+            self.assertEqual(actual, expect)
+
+        # nested tensor bmm normal tensor with non-contiguous view
+        nt1 = torch.rand(2, 5, 7, dtype=dtype, device=device)
+        nt1 = nt1.transpose(1, 2)
+        actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
+        expect = torch.nested.to_padded_tensor(nt0, 0.0).bmm(nt1)
+        if dtype == torch.float16:
+            self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
+        else:
+            self.assertEqual(actual, expect)
+
+
+        # normal tensor bmm nested tensor
+        nt0 = torch.rand(2, 5, 7, dtype=dtype, device=device)
+        nt1 = torch.nested.nested_tensor([torch.randn((7, 6)), torch.randn((7, 5))], device=device, dtype=dtype)
+        actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
+        expect = nt0.bmm(torch.nested.to_padded_tensor(nt1, 0.0))
         if dtype == torch.float16:
             self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
         else:
