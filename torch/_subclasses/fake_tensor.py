@@ -336,15 +336,17 @@ def in_kernel_invocation_manager(fake_mode):
     meta_in_tls = torch._C._meta_in_tls_dispatch_include()
     assert meta_in_tls == prev_in_kernel, f"{meta_in_tls}, {prev_in_kernel}"
 
-    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
-    fake_mode.in_kernel_invocation = True
-    torch._C._set_meta_in_tls_dispatch_include(True)
-    try:
-        yield
-    finally:
-        fake_mode.in_kernel_invocation = prev_in_kernel
-        torch._C._set_meta_in_tls_dispatch_include(prev_in_kernel)
-        del guard
+    with torch._C._DisableTorchDispatch():
+        fake_mode.in_kernel_invocation = True
+        # Unfortunately _set_meta_in_tls_dispatch_include(False) can leave
+        # `Dense` turned on (because it's implied by `Meta`)
+        with torch._C._PreserveDispatchKeyGuard():
+            torch._C._set_meta_in_tls_dispatch_include(True)
+            try:
+                yield
+            finally:
+                fake_mode.in_kernel_invocation = prev_in_kernel
+                # torch._C._set_meta_in_tls_dispatch_include(prev_in_kernel)
 
 
 # Return if the function allows Python numbers to bind to Tensors
@@ -1006,6 +1008,9 @@ class FakeTensorMode(TorchDispatchMode):
                     raise _BypassDispatchCache("constant attribute")
                 if arg.is_sparse:
                     raise _BypassDispatchCache("sparse tensor")
+                # sparse tensors don't have storage, so check is after
+                if isinstance(arg.untyped_storage().nbytes(), torch.SymInt):
+                    raise _BypassDispatchCache("symbolic nbytes")
                 if is_sparse_compressed(arg):
                     raise _BypassDispatchCache("sparse compressed tensor")
                 result.append(extract_tensor_metadata(arg))
