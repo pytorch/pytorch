@@ -16833,7 +16833,7 @@ op_db: List[OpInfo] = [
            )),
     OpInfo('unique',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.uint16, torch.uint32, torch.uint64),
            sample_inputs_func=sample_inputs_unique,
            supports_out=False,
            supports_autograd=False,
