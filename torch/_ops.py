@@ -4,7 +4,7 @@ import importlib
 import inspect
 import sys
 import types
-from typing import Any, Callable, Dict, Set, Type, Union
+from typing import Any, Callable, Dict, List, Set, Type, Union
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -800,20 +800,31 @@ class OpOverload(OperatorBase):
 class TorchBindOpOverload(OpOverload):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        for key in [
+        torch._higher_order_ops.effects.register_side_effect_op(self)
+
+    def _fallthrough_keys(self) -> List[DispatchKey]:
+        _DEFAULT_FALLTHROUGH_KEYS = [
             DispatchKey.Autograd,
+            DispatchKey.AutogradCPU,
+            DispatchKey.AutogradCUDA,
             DispatchKey.ADInplaceOrView,
             DispatchKey.PythonTLSSnapshot,
-        ]:
-            self.py_impl(key)(torch.library.fallthrough_kernel)
+            DispatchKey.PythonDispatcher,
+        ]
+        return [
+            key
+            for key in _DEFAULT_FALLTHROUGH_KEYS
+            if key not in self.py_kernels
+            or self.py_kernels[key] is torch.library.fallthrough_kernel
+        ]
 
     # use `self_` to avoid naming collide with arguments that
     # are named "self". This way, they can be called by kwargs.
     def __call__(self_, *args, **kwargs):  # noqa: B902
-        # The path when any inputs are FakeScriptObject, we need to
-        # skip c++ dispatcher and dispatch in python through _get_dispatch of python_dispatcher.
         if _must_dispatch_in_python(args, kwargs):
-            return self_._dispatch_in_python(args, kwargs, [])
+            # When any inputs are FakeScriptObject, we need to
+            # skip c++ dispatcher and dispatch in python through _get_dispatch of python_dispatcher.
+            return self_._dispatch_in_python(args, kwargs, self_._fallthrough_keys())
 
         return self_._op(*args, **kwargs)
 
@@ -831,9 +842,9 @@ class TorchBindOpOverload(OpOverload):
             else self._dispatch_cache[dispatch_key]
         )
 
-        # fallthrough keys can be registered at runtime via torch.library.impl
-        # so need to add it to fallthrough_keys and re-dispatch.
         if isinstance(handler, DispatchKey):
+            # fallthrough keys can be registered at runtime via torch.library.impl
+            # so need to add it to fallthrough_keys and re-dispatch.
             if torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(  # type: ignore[attr-defined]
                 self.name(), dispatch_key
             ):
@@ -844,13 +855,6 @@ class TorchBindOpOverload(OpOverload):
             raise RuntimeError(
                 f"Cannot handle FakeScriptObject with python dispatcher with dispatch key {handler}."
                 f"Please implement it by annotating a python callable with py_impl({handler})."
-            )
-
-        # fallthrough keys can also be registered via op.py_impl
-        # so need to add it to fallthrough_keys and re-dispatch.
-        if handler is torch.library.fallthrough_kernel:
-            return self._dispatch_in_python(
-                args, kwargs, fallthrough_keys + [dispatch_key]
             )
 
         assert isinstance(handler, Callable)  # type: ignore[arg-type]
@@ -886,12 +890,8 @@ class OpOverloadPacket:
             for overload_name in self._overload_names
         }
 
-        self._overload_has_script_obj_arg = {
-            overload_name: _has_script_object_arg(schema)
-            for overload_name, schema in self._schemas.items()
-        }
         self._has_torchbind_op_overload = any(
-            self._overload_has_script_obj_arg.values()
+            _has_script_object_arg(schema) for schema in self._schemas.values()
         )
 
     # it's a no-op since OpOverloadPacket object is immutable and must be unique for a given op.
@@ -954,7 +954,7 @@ class OpOverloadPacket:
 
             overload = (
                 OpOverload(self, op_, op_dk_, schema, tags)
-                if not self._overload_has_script_obj_arg[use_key]
+                if not _has_script_object_arg(schema)
                 else TorchBindOpOverload(self, op_, op_dk_, schema, tags)
             )
             # cache the overload object

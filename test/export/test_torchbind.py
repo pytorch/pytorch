@@ -571,13 +571,13 @@ def forward(self, arg0_1, arg1_1):
 
     def test_identifying_torchbind_ops(self):
         for op in self.torch_bind_ops:
-            self.assertTrue(any(op._overload_has_script_obj_arg.values()))
+            self.assertTrue(op._has_torchbind_op_overload)
 
         for op in [
             torch.ops.aten.add,
             torch.ops.aten.cos,
         ]:
-            self.assertFalse(any(op._overload_has_script_obj_arg.values()))
+            self.assertFalse(op._has_torchbind_op_overload)
 
     def test_torchbind_op_register_fallthrough(self):
         TEST_DISPATCH_KEY = torch._C.DispatchKey.AutocastCPU
