@@ -423,6 +423,109 @@ class TestExport(TestCase):
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_state(self):
+        class M(torch.nn.Module):  # simple with register buffer
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(2, 3), persistent=False)
+
+            def forward(self, x):
+                # x = 2
+                y = self.buf
+                # y = 1
+                w1 = self.buf + 3
+                w2 = self.buf + 4
+                w3 = self.buf + 5
+                self.buf = w1
+                z = self.buf
+                self.buf = w3
+                # z = 4
+                return x + y + z + w2
+
+        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        self.assertEqual(ep.graph_signature.buffers_to_mutate, {"add_2": "buf"})
+        self.assertTrue(
+            torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 12)
+        )
+
+        class M(torch.nn.Module):  # simple without register buffer
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.ones(2, 3)
+
+            def forward(self, x):
+                # x = 2
+                y = self.buf
+                # y = 1
+                self.buf = self.buf + 3
+                z = self.buf
+                # z = 3
+                return x + y + z
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "The attribute self.buf was assigned during export",
+        ):
+            torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+
+        class M(torch.nn.Module):  # complex with register buffer
+            def __init__(self):
+                super().__init__()
+                tensors = [torch.ones(2, 3), torch.ones(2, 3)]
+                for i, tensor in enumerate(tensors):
+                    self.register_buffer(f"buf_{i}", tensor, persistent=False)
+
+            def get_tensor(self, i):
+                return getattr(self, f"buf_{i}")
+
+            def set_tensor(self, i, val):
+                setattr(self, f"buf_{i}", val)
+
+            def forward(self, x):
+                # x = 2
+                y = self.get_tensor(0) + self.get_tensor(1)
+                # y = 1 + 1
+                self.set_tensor(0, torch.ones(2, 3) + 2)
+                self.set_tensor(1, torch.ones(2, 3) + 2)
+                z = self.get_tensor(0) + self.get_tensor(1)
+                # z = 3 + 3
+                return x + y + z
+
+        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        self.assertEqual(
+            ep.graph_signature.buffers_to_mutate, {"add_1": "buf_0", "add_2": "buf_1"}
+        )
+        self.assertTrue(
+            torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 10)
+        )
+
+        class M(torch.nn.Module):  # complex without register buffer
+            def __init__(self):
+                super().__init__()
+                self.tensors = [torch.ones(2, 3), torch.ones(2, 3)]
+
+            def get_tensor(self, i):
+                return self.tensors[i]
+
+            def set_tensor(self, i, val):
+                self.tensors[i] = val
+
+            def forward(self, x):
+                # x = 2
+                y = self.get_tensor(0) + self.get_tensor(1)
+                # y = 1 + 1
+                self.set_tensor(0, torch.ones(2, 3) + 2)
+                self.set_tensor(1, torch.ones(2, 3) + 2)
+                z = self.get_tensor(0) + self.get_tensor(1)
+                # z = 3 + 3
+                return x + y + z
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "The attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
+        ):
+            torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+
     # Predispatch has different expected results
     @testing.expectedFailureSerDerPreDispatch
     def test_torch_fn(self):
