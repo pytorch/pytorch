@@ -385,7 +385,7 @@ class TestModuleContainers(JitTestCase):
                 assert self.moduledict["blah"] == "blah", "this is a keyerror"
 
         with self.assertRaisesRegexWithHighlight(
-            RuntimeError, "Key Error, blah", "self.moduledict['blah'"
+            RuntimeError, "Key Error, blah", 'self.moduledict["blah"'
         ):
             b = BadModule()
             torch.jit.script(b)
