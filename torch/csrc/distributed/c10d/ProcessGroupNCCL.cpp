@@ -1656,7 +1656,8 @@ void ProcessGroupNCCL::watchdogHandler() {
       // a work could be started but not completed, so we should not update
       // lastStartedSeq_ and lastStartedOpName_ if the work state is checked
       // multiple times after the start
-      if (lastStartedSeq_ < work.seq_ && work.isStarted()) {
+      if (lastStartedSeq_ < static_cast<int64_t>(work.seq_) &&
+          work.isStarted()) {
         lastStartedSeq_ = work.seq_;
         lastStartedWorkName_ = opTypeToString(work.opType_);
       }
