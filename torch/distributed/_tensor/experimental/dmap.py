@@ -55,6 +55,7 @@ def dmap(
         `in_placements`.
 
     Example:
+        >>> # xdoctest: +SKIP("distributed")
         >>> def mm_allreduce_forward(device_mesh, W, X):
         >>>     partial_sum_tensor = torch.mm(W, X)
         >>>     reduced_tensor = funcol.all_reduce(partial_sum_tensor, "sum", device_mesh)
