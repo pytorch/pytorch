@@ -821,6 +821,47 @@ class CKGemmOperation:
         return f"ck_devicegemm_xdl_shuffle_v3_{'_'.join([''.join(iter(f)) if hasattr(f, '__iter__') else f for f in fields(self)])}"
 
 class CKGemmTemplate(CKTemplate):
+    gemm_template = r"""
+    {{headers}}
+    {{globals}}
+    {{instance_definition}}
+    extern "C" {
+    {{kernel_definition}} {
+        auto gemm = {{instance_type}} {};
+        auto invoker = gemm.MakeInvoker();
+
+        auto M = {{M}};
+        auto N = {{N}};
+        auto K = {{K}};
+        auto StrideA = -1; // default
+        auto StrideB = -1; // default
+        auto StrideC = -1; // default
+        auto KBatch = 1; // split k into batches
+
+        auto a_element_op = PassThrough {}; // TBD adjust for alpha and beta
+        auto b_element_op = PassThrough {};
+        auto c_element_op = PassThrough {};
+
+        auto argument = gemm.MakeArgument(
+            M,
+            N,
+            K,
+            StrideA,
+            StrideB,
+            StrideC,
+            KBatch,
+            a_element_op,
+            b_element_op,
+            c_element_op
+        );
+        // TBD: check gemm.IsSupportedArgument(argument)
+
+        // run the kernel
+        float elapsed_time = invoker.Run(argument, StreamConfig{stream});
+    } // kernel definition
+    } // extern C
+    """
+
     def __init__(self, 
                  input_nodes: List[Buffer],
                  layout: Layout,
@@ -842,6 +883,8 @@ class CKGemmTemplate(CKTemplate):
 
                 using Row = tensor_layout::gemm::RowMajor;
                 using Col = tensor_layout::gemm::ColumnMajor;
+
+                using cudaStream_t = hipStream_t; 
             """
         )
         return res
@@ -851,10 +894,13 @@ class CKGemmTemplate(CKTemplate):
         return op
 
     def emit_ck_instance(self, op: CKGemmOperation):
-        template = r"""
+        template_definition = r"""
     // Gemm operator {{operation_name}}
     using Operation_{{operation_name}} = 
         ck::tensor_operation::device::DeviceGemm_Xdl_CShuffleV3<{{template_params}}>;
+"""
+        template_type = r"""
+    Operation_{{operation_name}}
 """
         template_params = []
         for f in fields(op):
@@ -862,6 +908,23 @@ class CKGemmTemplate(CKTemplate):
                 template_params.append(f"ck::Sequence<{', '.join(iter(f))}>")
             else:
                 template_params.append(str(f))
-        return self._template_from_string(template).render(
+        return self._template_from_string(template_definition).render(
             operation_name=op.name(),
-            template_params=", ".join(template_params))
+            template_params=", ".join(template_params)), self._template_from_string(template_type).render(operation_name=op.name())
+
+    def render(self, kernel: CUDATemplateKernel, op: CKGemmOperation):
+        instance_definition, instance_type = self.emit_ck_instance(op)
+        X, W = self.input_nodes[0], self.input_nodes[1]
+        Y = self.output_node
+        Bias = None  # TBD support gemm_bias
+
+        return self._template_from_string(self.gemm_template).render(
+            headers=self.header().getvalue(),
+            globals=self.globals().getvalue(),
+            instance_definition=instance_definition,
+            kernel_definition=kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=self.input_reorder),
+            instance_type=instance_type,
+            M=kernel.size(X, -2),
+            K=kernel.size(X, -1),
+            N=kernel.size(W, -1),
+        )

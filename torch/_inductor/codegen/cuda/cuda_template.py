@@ -290,6 +290,8 @@ class CKTemplate(CUDATemplate):
                 // 'ere be globals
                 template <ck::index_t... Is>
                 using S = ck::Sequence<Is...>;
+
+                using PassThrough = ck::tensor_operation::element_wise::PassThrough;
             """
         )
         return res
