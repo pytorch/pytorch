@@ -6161,6 +6161,22 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
     return torch.empty_like(self, dtype=result_dtype)
 
 
+@register_meta(aten.channel_shuffle.default)
+def meta_channel_shuffle(input, groups):
+    # Assume the input shape is (*, C, H, W), where * represents any number of leading dimensions
+    *leading_dims, C, H, W = input.size()
+    # The output shape is the same as the input
+    return torch.empty(
+        *leading_dims,
+        C,
+        H,
+        W,
+        dtype=input.dtype,
+        layout=input.layout,
+        device=input.device,
+    )
+
+
 def _create_unary_float_meta_func(func):
     @register_meta(func)
     @out_wrapper()
