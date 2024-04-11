@@ -198,6 +198,9 @@ _mixed_dtypes_linear(const Tensor& input, const Tensor& weight,
                      const Tensor& scale,
                      const c10::optional<Tensor>& bias_opt,
                      const c10::optional<c10::string_view> activation_opt) {
+  TORCH_WARN_ONCE("_mixed_dtypes_linear is deprecated and will be removed in a "
+                  "future PyTorch release.  Please use _mixed_dtypes_mm or "
+                  "_mixed_dtypes_addmm instead.");
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
   AT_ERROR("_mixed_dtypes_linear: not compiled for this platform");
   return Tensor{};
