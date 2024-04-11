@@ -818,6 +818,30 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         foo(torch.randn(2, requires_grad=True))
         self.assertEqual(cnts.frame_count, 1)
 
+    def test_needs_input_grad(self):
+        cnt = torch._dynamo.testing.CompileCounter()
+
+        class NeedsInputGradFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, foo):
+                result = foo + foo
+                ctx.save_for_backward(result)
+                return result
+
+            @staticmethod
+            @torch.compile(backend=cnt, fullgraph=True)
+            def backward(ctx, grad_output):
+                (result,) = ctx.saved_tensors
+                if ctx.needs_input_grad[0]:
+                    return grad_output * result.sin()
+                return None
+
+        x = torch.randn(10, requires_grad=True)
+        NeedsInputGradFunc.apply(x).sum().backward()
+        self.assertEqual(x.grad.shape, x.shape)
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(cnt.op_count, 2)
+
     def test_repeated_save_for_backward_calls(self):
         from torch.autograd import Function
 

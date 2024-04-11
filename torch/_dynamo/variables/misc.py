@@ -395,7 +395,7 @@ class AutogradFunctionVariable(VariableTracker):
             source = None
 
         fn = self.fn_cls.forward
-        ctx = AutogradFunctionContextVariable.create(tx)
+        ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
         args = [ctx, *args]
         if isinstance(fn, types.FunctionType):
             return variables.UserFunctionVariable(fn, source=source).call_function(
@@ -469,15 +469,23 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         inference=False,
         proxy=None,
         saved_tensors=None,
+        needs_input_grad=None,
         **kwargs,
     ):
         super().__init__(value=value, value_type=value_type, **kwargs)
         self.inference = inference
         self.proxy = proxy
         self.saved_tensors = saved_tensors
+        self.needs_input_grad = needs_input_grad
 
     @staticmethod
-    def create(tx):
+    def create(tx, args=None, kwargs=None):
+        needs_input_grad = None
+        if args and not kwargs:
+            needs_input_grad = tuple(
+                isinstance(x, variables.TensorVariable) and x.requires_grad
+                for x in args
+            )
         proxy = tx.output.create_proxy(
             "call_function", torch.autograd.function.FunctionCtx, tuple(), {}
         )
@@ -489,10 +497,12 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 inference=True,
                 proxy=proxy,
                 saved_tensors=SavedTensorBox(),
+                needs_input_grad=needs_input_grad,
             ),
             {},
         )
         proxy.node.meta["example_value"] = out.value
+
         return out
 
     def as_proxy(self):
@@ -534,6 +544,15 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             )
         if name == "saved_tensors" and self.saved_tensors is not None:
             return variables.TupleVariable(list(self.saved_tensors.tensors))
+        if name == "needs_input_grad":
+            if self.needs_input_grad is not None:
+                return variables.ConstantVariable.create(self.needs_input_grad)
+            if self.source:
+                from .builder import VariableBuilder
+
+                return VariableBuilder(tx, AttrSource(self.source, "needs_input_grad"))(
+                    self.value.needs_input_grad
+                )
         return super().var_getattr(tx, name)
 
 
