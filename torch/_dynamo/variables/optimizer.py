@@ -72,6 +72,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
 
         for group in self.value.param_groups:
+            if "capturable" in group:
+                group["capturable"] = True
+
             for p in group["params"]:
                 mark_static_address(p)
 
@@ -89,7 +92,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """This is an optimization to avoid tracing the very slow initialization of the optimizer"""
         if name == "_init_group":
             try:
-                self.move_step_if_cpu()
                 py_args, py_kwargs = self.get_python_args(*args, **kwargs)
                 ret_val = self.value._init_group(*py_args, **py_kwargs)
                 self.map_sources_and_install_guards(tx)
@@ -129,31 +131,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         if name in ("_init_group", "step"):
             return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
-        if name == "param_groups":
-            self._set_capturable(tx)
-
         return super().var_getattr(tx, name)
-
-    def _set_capturable(self, tx):
-        from . import LazyVariableTracker
-        from .builder import VariableBuilder
-
-        # Set capturable to True
-        for group in self.value.param_groups:
-            if "capturable" in group:
-                group["capturable"] = True
-
-        param_groups_vt = LazyVariableTracker.realize_all(
-            VariableBuilder(tx, AttrSource(self.source, "param_groups"))(
-                self.value.param_groups
-            )
-        )
-        for param_group_vt in param_groups_vt.items:
-            key = ConstDictVariable._HashableTracker(
-                ConstantVariable.create("capturable")
-            )
-            if key in param_group_vt.items:
-                param_group_vt.items[key] = ConstantVariable.create(True)
 
     def get_python_args(self, *args, **kwargs):
         """Get python values equivalent to the variable tracker args"""
@@ -177,16 +155,6 @@ class OptimizerVariable(UserDefinedObjectVariable):
         new_kwargs = {k: map_arg(v) for k, v in kwargs.items()}
 
         return new_args, new_kwargs
-
-    # If users load an old state dictionary,
-    # it's possible that step could be on the cpu
-    # if this is the case, move it to the GPU
-    # corresponding to the parameter
-    # in most cases this is a no-op because the state is empty
-    def move_step_if_cpu(self):
-        for p, state in self.value.state.items():
-            if "step" in state and state["step"].is_cpu:
-                state["step"] = state["step"].to(p.device)
 
     def map_sources_and_install_guards(self, tx):
         from ..decorators import mark_static_address

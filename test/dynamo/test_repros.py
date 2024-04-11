@@ -11,7 +11,6 @@ import inspect
 import itertools
 import random
 import unittest
-import warnings
 import weakref
 from abc import ABC
 from collections import namedtuple
@@ -128,10 +127,6 @@ def _do_paste_mask(masks, boxes, img_h: int, img_w: int, skip_empty: bool = True
         return img_masks[:, 0], (slice(y0_int, y1_int), slice(x0_int, x1_int))
     else:
         return img_masks[:, 0], ()
-
-
-def global_fn(x):
-    return torch.sin(x)
 
 
 def cat(tensors, dim=0):
@@ -4490,8 +4485,9 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 raise NotImplementedError("Empty Instances does not support __len__!")
 
             def set(self, name: str, value: Any) -> None:
-                with warnings.catch_warnings(record=True):
-                    data_len = len(value)
+                # TODO(jansel): support catch_warnings
+                # with warnings.catch_warnings(record=True):
+                data_len = len(value)
                 if len(self._fields):
                     assert (
                         len(self) == data_len
@@ -4503,7 +4499,8 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
             @staticmethod
             def cat(instance_lists: List["Instances"]) -> "Instances":
-                assert all(isinstance(i, Instances) for i in instance_lists)
+                # TODO(jansel): support all isinstance generator
+                # assert all(isinstance(i, Instances) for i in instance_lists)
                 assert len(instance_lists) > 0
                 if len(instance_lists) == 1:
                     return instance_lists[0]
@@ -4532,7 +4529,7 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 return ret
 
         instances = [
-            Instances((16, 16), a=torch.randn(16, 16), b=torch.randn(16, 16))
+            Instances((16, 16), a=[torch.randn(16, 16)], b=[torch.randn(16, 16)])
             for _ in range(3)
         ]
 
@@ -4567,25 +4564,6 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         except Exception as e:
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
-
-    def test_global_fn_mutation(self):
-        def foo(x, y):
-            return global_fn(x) + y
-
-        x = torch.ones(1)
-        y = torch.ones(1)
-
-        opt = torch.compile(foo, fullgraph=True, backend="eager")
-        self.assertEqual(opt(x, y), foo(x, y))
-
-        # Change global_fn
-        global global_fn
-
-        def new_fn(x):
-            return torch.cos(x)
-
-        global_fn = new_fn
-        self.assertEqual(opt(x, y), foo(x, y))
 
 
 if __name__ == "__main__":

@@ -579,7 +579,7 @@ class LargeProtobufONNXProgramSerializer:
     Fallback to serializing as Protobuf with external data for models larger than 2GB.
     """
 
-    _destination_path: Final[str]  # type: ignore[misc]
+    _destination_path: Final[str]
 
     def __init__(self, destination_path: str):
         self._destination_path = destination_path
@@ -652,14 +652,14 @@ class ONNXProgram:
         model_signature: The model signature for the exported ONNX graph.
     """
 
-    _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined, misc]
-    _input_adapter: Final[io_adapter.InputAdapter]  # type: ignore[misc]
-    _output_adapter: Final[io_adapter.OutputAdapter]  # type: ignore[misc]
-    _diagnostic_context: Final[diagnostics.DiagnosticContext]  # type: ignore[misc]
-    _fake_context: Final[Optional[ONNXFakeContext]]  # type: ignore[misc]
-    _export_exception: Final[Optional[Exception]]  # type: ignore[misc]
-    _model_signature: Final[Optional[torch.export.ExportGraphSignature]]  # type: ignore[misc]
-    _model_torch: Final[  # type: ignore[misc]
+    _model_proto: Final[onnx.ModelProto]  # type: ignore[name-defined]
+    _input_adapter: Final[io_adapter.InputAdapter]
+    _output_adapter: Final[io_adapter.OutputAdapter]
+    _diagnostic_context: Final[diagnostics.DiagnosticContext]
+    _fake_context: Final[Optional[ONNXFakeContext]]
+    _export_exception: Final[Optional[Exception]]
+    _model_signature: Final[Optional[torch.export.ExportGraphSignature]]
+    _model_torch: Final[
         Optional[Union[torch.nn.Module, Callable, torch_export.ExportedProgram]]
     ]
 
@@ -1334,7 +1334,7 @@ class OnnxExporterError(RuntimeError):
     access to the partial export results and associated metadata.
     """
 
-    onnx_program: Final[ONNXProgram]  # type: ignore[misc]
+    onnx_program: Final[ONNXProgram]
 
     def __init__(self, onnx_program: ONNXProgram, message: str):
         """

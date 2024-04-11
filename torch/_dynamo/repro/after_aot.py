@@ -143,7 +143,6 @@ def wrap_compiler_debug(unconfigured_compiler_fn, compiler_name: str):
                     inner_compiled_fn,
                     real_inputs,
                     only_fwd=True,
-                    ignore_non_fp=config.repro_ignore_non_fp,
                 )
 
                 if failed:
@@ -710,13 +709,7 @@ def repro_run(options, mod, load_args):
     if options.accuracy != "":
         # We don't really respect --accuracy vs --strict-accuracy here, it
         # seems counterintuitive
-        if not same_two_models(
-            mod,
-            compiled,
-            args,
-            only_fwd=True,
-            ignore_non_fp=config.repro_ignore_non_fp,
-        ):
+        if not same_two_models(mod, compiled, args, only_fwd=True):
             raise AccuracyError("Bad accuracy detected")
     else:
         need_sync = False
