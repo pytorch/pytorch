@@ -73,7 +73,7 @@ def disable_if_config_true(config_attr: str):
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             if getattr(config, config_attr, None):
-                return disable(func)(*args, **kwargs)
+                return disable(func, recursive=True)(*args, **kwargs)
             else:
                 return func(*args, **kwargs)
 

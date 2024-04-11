@@ -289,6 +289,7 @@ optimize_ddp_lazy_compile = False
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
+# Whether to apply torch._dynamo.disable() to per-param FSDP hooks
 skip_fsdp_hooks = False
 
 # Make dynamo skip guarding on hooks on nn modules
@@ -393,9 +394,6 @@ capture_autograd_function = True
 
 # enable/disable dynamo tracing for `torch.func` transforms
 capture_func_transforms = True
-
-# enable/disable user-defined triton kernel optimizations
-optimize_user_defined_triton_kernels = True
 
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
