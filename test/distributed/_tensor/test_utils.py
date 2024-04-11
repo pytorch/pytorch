@@ -167,7 +167,8 @@ class Test2DStridedLocalShard(DTensorTestBase):
     def test_fsdp2_tp_2d_dtensor_local_shards_and_offsets(self):
         # We are mimicking the behavior of FSDP2 + TP.
         # Currently, the 2D DTensor's local shard is incorrect for resharding, since we want to avoid extra communication.
-        # It's incorrect for resharding, since `compute_local_shape_and_global_offset` doesn't know the correct offsets for resharding.
+        # It's incorrect for resharding, since `compute_local_shape_and_global_offset`
+        # doesn't know the correct offsets for resharding.
         # When we have a global_tensor of [0, 1, 2, 3, 4, 5, 6, 7], the local shard of 2D DTensor would be:
         # local tensor -- rank0: [0, 1], rank1: [4, 5], rank2: [2, 3], rank3: [6, 7]
         # current offsets -- rank0: [0, 0], rank1: [1, 0], rank2: [2, 0], rank3: [3, 0]
