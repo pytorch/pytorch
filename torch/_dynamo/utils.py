@@ -95,6 +95,7 @@ import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
@@ -777,35 +778,24 @@ def clone_input(x, *, dtype=None):
         # Handle sparse storage (no stride).
         if x.layout is torch.sparse_coo:
             return torch.sparse_coo_tensor(
-                torch_clone(x._indices()), torch_clone(x._values()), x.shape
+                torch_clone(x._indices()),
+                torch_clone(x._values()),
+                x.shape,
+                is_coalesced=x.is_coalesced()
             )
-        elif x.layout is torch.sparse_csr:
-            return torch.sparse_csr_tensor(
-                torch_clone(x.crow_indices()),
-                torch_clone(x.col_indices()),
+        elif is_sparse_compressed(x):
+            if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                 compressed_indices = x.crow_indices()
+                 plain_indices = x.col_indices()
+            else:
+                 compressed_indices = x.ccol_indices()
+                 plain_indices = x.row_indices()
+            return torch.sparse_compressed_tensor(
+                torch_clone(compressed_indices),
+                torch_clone(plain_indices),
                 torch_clone(x.values()),
-                x.shape
-            )
-        elif x.layout is torch.sparse_csc:
-            return torch.sparse_csc_tensor(
-                torch_clone(x.ccol_indices()),
-                torch_clone(x.row_indices()),
-                torch_clone(x.values()),
-                x.shape
-            )
-        elif x.layout is torch.sparse_bsr:
-            return torch.sparse_bsr_tensor(
-                torch_clone(x.crow_indices()),
-                torch_clone(x.col_indices()),
-                torch_clone(x.values()),
-                x.shape
-            )
-        elif x.layout is torch.sparse_bsc:
-            return torch.sparse_bsc_tensor(
-                torch_clone(x.ccol_indices()),
-                torch_clone(x.row_indices()),
-                torch_clone(x.values()),
-                x.shape
+                x.shape,
+                layout=x.layout
             )
 
         needed_size = sum(
