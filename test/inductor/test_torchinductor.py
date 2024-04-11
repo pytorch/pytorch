@@ -134,10 +134,16 @@ f32 = torch.float32
 i64 = torch.int64
 i32 = torch.int32
 
-def expectedFailureCodegenDynamicIfNotSM80OrLater(fn):
-    if not SM80OrLater:
-        fn._expected_failure_codegen_dynamic = True
-    return fn
+class expectedFailureCodegenDynamicIfCUDAAndNotSM80OrLater:
+    def __init__(self, test_instance):
+        self.test_instance = test_instance
+
+    def __call__(self, fn):
+        def wrapper(slf, *args, **kwargs):
+            fn._expected_failure_codegen_dynamic = self.test_instance.device == "cuda" and not SM80OrLater
+            return fn(slf, *args, **kwargs)
+
+        return wrapper
 
 
 def _large_cumprod_input(shape, dim, dtype, device):
@@ -2425,7 +2431,7 @@ class CommonTemplate:
             check_lowp=False,
         )
 
-    @expectedFailureCodegenDynamicIfNotSM80OrLater
+    @expectedFailureCodegenDynamicIfCUDAAndNotSM80OrLater
     @config.patch(force_mixed_mm=True)
     def test_mixed_mm(self):
         def fn(a, b):
