@@ -1158,7 +1158,7 @@ class WrapperCodeGen(CodeGen):
             unqualified_loads = {
                 inst.argval
                 for inst in dis.Bytecode(cur_kernel.fn)
-                if inst.opcode == dis.LOAD_GLOBAL
+                if inst.opname == "LOAD_GLOBAL"
             }
             for symbol_name in cur_kernel.fn.__code__.co_names:
                 if symbol_name in symbols_included:
