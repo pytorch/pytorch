@@ -87,7 +87,7 @@ static PyObject* THPStream_pynew(
     c10::impl::VirtualGuardImpl impl{static_cast<c10::DeviceType>(device_type)};
     stream = impl.getNewStream(
         c10::Device(static_cast<c10::DeviceType>(device_type), device_index),
-        priority);
+        static_cast<int>(priority));
   } else {
     stream = c10::Stream::unpack3(
         stream_id,
