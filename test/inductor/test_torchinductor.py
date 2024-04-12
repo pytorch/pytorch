@@ -1126,24 +1126,18 @@ class CommonTemplate:
         )
 
     def test__unsafe_masked_index_backward(self):
-        def fn(a, mask, idx):
-            return aten._unsafe_masked_index(a, mask, [idx], 1)
+        def fn(a, mask, idx, values):
+            return aten._unsafe_masked_put_accumulate(a, mask, idx, values)
 
-        inp = [
-            torch.randn(8, device=self.device, requires_grad=True),
-            torch.tensor([True, False, True], device=self.device),
-            torch.tensor([3, 9, -2], device=self.device),
-        ]
-
-        inp_ref = list(inp)
-        inp_ref[0] = inp_ref[0].clone().detach().requires_grad_(True)
-
-        fn_opt = torch._dynamo.optimize("inductor")(fn)
-        out_ref = fn(*inp_ref)
-        out = fn_opt(*inp)
-        out_ref[0].sum().backward()
-        out[0].sum().backward()
-        self.assertEqual(inp[0].grad, inp_ref[0].grad)
+        self.common(
+            fn,
+            (
+                torch.randn(8, device=self.device),
+                torch.tensor([True, False, True], device=self.device),
+                [torch.tensor([3, 9, -2], device=self.device)],
+                torch.randn(3, device=self.device),
+            ),
+        )
 
     def test_sum1(self):
         def fn(a, b):

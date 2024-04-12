@@ -3724,6 +3724,14 @@ def _unsafe_masked_index(x, mask, indices, fill):
         lambda: "tensors used as masks must be bool tensors",
     )
 
+    if x.numel() == 0:
+        new_size = list(x.shape)
+        for i in range(len(indices)):
+            index = indices[i]
+            if index is not None:
+                new_size[i] = index.numel()
+        return x.new_full(new_size, fill)
+
     for i in range(len(indices)):
         index = indices[i]
         if index is not None:
