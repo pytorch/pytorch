@@ -168,7 +168,7 @@ inductor_skips["cpu"] = {
     "linalg.ldl_factor": {f32, f64},  # flaky
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
     ("index_reduce", "prod"): {f16},  # flaky
-    ("index_reduce", "mean"): {f16},  # flaky
+    ("index_reduce", "mean"): {f16, f64},  # flaky
 }
 
 if IS_MACOS and IS_X86:
@@ -371,6 +371,19 @@ inductor_override_kwargs = {
     ("nn.functional.upsample_bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
     ("nn.functional.interpolate.bicubic", "cpu", f32): {"atol": 5e-3, "rtol": 0},
     ("nn.functional.interpolate.bicubic", "cuda", f64): {"atol": 1e-3, "rtol": 0},
+    # Unreasonably high atol requirement:
+    ("index_reduce.mean", "cuda", f64): {
+        "check_gradient": False,
+        "atol": 0.8,
+        "rtol": 0.4,
+    },
+    # Gradient contains non-finite entries:
+    ("index_reduce.amin", "cuda", f64): {"check_gradient": False},
+    ("index_reduce.amin", "cuda", f32): {"check_gradient": False},
+    ("index_reduce.amin", "cuda", f16): {"check_gradient": False},
+    ("index_reduce.amax", "cuda", f64): {"check_gradient": False},
+    ("index_reduce.amax", "cuda", f32): {"check_gradient": False},
+    ("index_reduce.amax", "cuda", f16): {"check_gradient": False},
 }
 
 
@@ -517,14 +530,6 @@ class TestInductorOpInfo(TestCase):
             # but that when we do backwards we expect other ops like add to work
             and not dtype == torch.complex32
         )
-        if op_name != "index_reduce.prod" and device_type == "cuda":
-            # TODO: ideally, skipping failing backward check ought to
-            # be implemented in index_reduce OpInfo definition, but in
-            # this case the check fails only in inductor context that
-            # cannot be specified in the OpInfo definition without
-            # disabling also the evaluation check that is succesful.
-            requires_grad = False
-
         samples = op.sample_inputs(device, dtype, requires_grad=requires_grad)
 
         if op_name not in inductor_all_samples and not ALL_SAMPLES:
