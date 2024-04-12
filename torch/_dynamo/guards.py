@@ -1099,16 +1099,10 @@ class GuardBuilder(GuardBuilderBase):
 
     def NN_MODULE(self, guard: Guard):
         self.ID_MATCH(guard)
-        ref = self.arg_ref(guard)
         val = self.get(guard.name)
-
-        def setup_guard():
+        if hasattr(val, "training"):
             assert istype(val.training, bool)
             self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
-
-        if hasattr(val, "training"):
-            # There are cases where a monkeypatched object has a guard made between __new__ and __init__
-            setup_guard()
         else:
             exc.unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
