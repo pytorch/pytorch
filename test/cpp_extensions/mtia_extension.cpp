@@ -49,7 +49,7 @@ struct MTIAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
   c10::Stream getStream(c10::Device d) const noexcept override {
     return current_streams[d.index()];
   }
-  c10::Stream getNewStream(c10::Device d, int64_t priority = 0) const override {
+  c10::Stream getNewStream(c10::Device d, int priority = 0) const override {
     (void)priority;
     return c10::Stream::unpack3(stream_id_gen++, d.index(), d.type());
   }

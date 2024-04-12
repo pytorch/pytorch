@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: mtia"]
 
 import os
 import shutil
@@ -38,7 +38,7 @@ def remove_build_path():
 )
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCppExtensionMTIABackend(common.TestCase):
-    """Tests Stream and Event with C++ extensions."""
+    """Tests MTIA backend with C++ extensions."""
 
     module = None
 
