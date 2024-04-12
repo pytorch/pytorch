@@ -9,7 +9,10 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensor
 
 from torch.export import ExportedProgram
-from torch.export.exported_program import _rename_without_collisions
+from torch.export.exported_program import (
+    _name_hoo_subgraph_placeholders,
+    _rename_without_collisions,
+)
 from torch.export.graph_signature import ConstantArgument, InputKind, OutputKind
 from torch.utils._pytree import (
     _register_pytree_node,
@@ -527,9 +530,8 @@ def placeholder_naming_pass(
         elif node.name in name_map:
             node.name = name_map[node.name]
 
-    # TODO(pianpwk), in immediate follow-up PR
     # propagate names to higher order op subgraphs
-    # name_hoo_subgraph_placeholders(gm)
+    _name_hoo_subgraph_placeholders(gm)
 
     # re-generate graph module code
     gm.recompile()
