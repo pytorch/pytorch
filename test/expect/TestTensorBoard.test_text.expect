@@ -1,0 +1,17 @@
+value {
+  tag: "dummy/text_summary"
+  tensor {
+    dtype: DT_STRING
+    tensor_shape {
+      dim {
+        size: 1
+      }
+    }
+    string_val: "text 123"
+  }
+  metadata {
+    plugin_data {
+      plugin_name: "text"
+    }
+  }
+}
