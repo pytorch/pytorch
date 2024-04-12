@@ -18,4 +18,3 @@ fsspec
 setuptools ; python_version >= "3.12"
 packaging
 optree>=0.9.1
-lark
