@@ -123,6 +123,16 @@ struct C10_API DeviceGuardImplInterface {
   }
 
   /**
+   * Return a new stream for a given device and priority. The stream will be
+   * copied and shared around, device backend should be able to correctly handle
+   * the lifetime of the stream.
+   */
+  virtual Stream getNewStream(Device, int64_t priority = 0) const {
+    (void)priority;
+    TORCH_CHECK(false, "Backend doesn't support create a new Stream.")
+  }
+
+  /**
    * Set a stream to be the thread local current stream for its device.
    * Return the previous stream for that device. You are NOT required
    * to set the current device to match the device of this stream.
@@ -250,11 +260,12 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
     return Stream(Stream::DEFAULT, Device(D, -1));
   }
 
-  Stream getStreamFromGlobalPool(Device, bool isHighPriority = false)
-      const override {
+  Stream getNewStream(Device, int64_t priority = 0) const override {
     // no-op
+    (void)priority;
     return Stream(Stream::DEFAULT, Device(D, -1));
   }
+
   // NB: These do NOT set the current device
   Stream exchangeStream(Stream) const noexcept override {
     // no-op

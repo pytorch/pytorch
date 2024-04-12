@@ -2021,9 +2021,11 @@ def get_device_module(device: Optional[Union[torch.device, str]] = None):
         device_module_name = device.type
     elif isinstance(device, str):
         device_module_name = torch.device(device).type
-    else:
+    elif device == None:
         # Using default accelerator type. If no accelerator is available, it automatically returns CPU device.
         device_module_name = torch._C._get_accelerator().type
+    else:
+        raise RuntimeError(f"Invalid value of device '{device}', expect torch.device, str, or None")
     device_module = getattr(torch, device_module_name, None)
     if device_module is None:
         raise RuntimeError(
