@@ -11,7 +11,7 @@
 namespace torch {
 namespace aot_inductor {
 
-TEST(DtypeTest, TestBFloat16) {
+TEST(TestDtype, TestBFloat16) {
   c10::BFloat16 a = 1.0f;
   c10::BFloat16 b = 2.0f;
   c10::BFloat16 add = 3.0f;
@@ -25,7 +25,7 @@ TEST(DtypeTest, TestBFloat16) {
   EXPECT_EQ(a / b, div);
 }
 
-TEST(DtypeTest, TestFloat8_e4m3fn) {
+TEST(TestDtype, TestFloat8_e4m3fn) {
   c10::Float8_e4m3fn a = 1.0f;
   c10::Float8_e4m3fn b = 2.0f;
   c10::Float8_e4m3fn add = 3.0f;
@@ -39,7 +39,7 @@ TEST(DtypeTest, TestFloat8_e4m3fn) {
   EXPECT_EQ(a / b, div);
 }
 
-TEST(DtypeTest, TestFloat8_e4m3fuz) {
+TEST(TestDtype, TestFloat8_e4m3fuz) {
   c10::Float8_e4m3fnuz a = 1.0f;
   c10::Float8_e4m3fnuz b = 2.0f;
   c10::Float8_e4m3fnuz add = 3.0f;
@@ -53,7 +53,7 @@ TEST(DtypeTest, TestFloat8_e4m3fuz) {
   EXPECT_EQ(a / b, div);
 }
 
-TEST(DtypeTest, TestFloat8_e5m2) {
+TEST(TestDtype, TestFloat8_e5m2) {
   c10::Float8_e5m2 a = 1.0f;
   c10::Float8_e5m2 b = 2.0f;
   c10::Float8_e5m2 add = 3.0f;
@@ -67,7 +67,7 @@ TEST(DtypeTest, TestFloat8_e5m2) {
   EXPECT_EQ(a / b, div);
 }
 
-TEST(DtypeTest, TestFloat8_e5m2fnuz) {
+TEST(TestDtype, TestFloat8_e5m2fnuz) {
   c10::Float8_e5m2fnuz a = 1.0f;
   c10::Float8_e5m2fnuz b = 2.0f;
   c10::Float8_e5m2fnuz add = 3.0f;
@@ -81,7 +81,7 @@ TEST(DtypeTest, TestFloat8_e5m2fnuz) {
   EXPECT_EQ(a / b, div);
 }
 
-TEST(DtypeTest, TestHalf) {
+TEST(TestDtype, TestHalf) {
   c10::Half a = 1.0f;
   c10::Half b = 2.0f;
   c10::Half add = 3.0f;

@@ -2,8 +2,8 @@ set(AOTI_ABI_CHECK_TEST_ROOT ${TORCH_ROOT}/test/cpp/aoti_abi_check)
 
 # Build the cpp gtest binary containing the cpp-only tests.
 set(AOTI_ABI_CHECK_TEST_SRCS
-  ${AOTI_ABI_CHECK_TEST_ROOT}/test_dtype.cpp
   ${AOTI_ABI_CHECK_TEST_ROOT}/main.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/test_dtype.cpp
 )
 
 add_executable(test_aoti_abi_check
