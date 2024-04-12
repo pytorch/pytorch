@@ -1,0 +1,144 @@
+name: Index PyTorch Tests for Target Determination
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * *'
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  index:
+    runs-on: linux.g5.4xlarge.nvidia.gpu # 1 GPU A10G 24GB each
+    environment: target-determinator-env
+    steps:
+      - name: Clone PyTorch
+        uses: actions/checkout@v3
+        with:
+          path: pytorch
+
+      - name: Setup Linux
+        uses: ./pytorch/.github/actions/setup-linux
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9
+          working-directory: pytorch
+
+      - name: Use following to pull public copy of the image
+        id: print-ghcr-mirror
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        shell: bash
+        run: |
+          tag=${ECR_DOCKER_IMAGE##*/}
+          echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
+
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+
+      - name: Install nvidia driver, nvidia-docker runtime, set GPU_FLAG
+        id: install-nvidia-driver
+        uses: pytorch/test-infra/.github/actions/setup-nvidia@main
+
+      - name: Clone CodeLlama
+        uses: actions/checkout@v3
+        with:
+          repository: osalpekar/codellama
+          ref: 1ec50e0cfc0fadc3b6ceb146617e2119ab26eb34
+          path: codellama
+
+      - name: Clone Target Determination Code
+        uses: actions/checkout@v3
+        with:
+          repository: osalpekar/llm-target-determinator
+          ref: v0.0.2
+          path: llm-target-determinator
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_target_determinator_s3_read_write
+          aws-region: us-east-1
+
+      - name: Download checkpoint
+        shell: bash
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          # Do this outside of docker so I don't have to put env vars in
+          pip3 install awscli==1.29.40
+          cd codellama
+          mkdir "CodeLlama-7b-Python"
+          aws s3 cp \
+            "s3://target-determinator-assets/CodeLlama-7b-Python" \
+            "CodeLlama-7b-Python" \
+            --recursive
+
+      - name: Run indexer
+        shell: bash -l {0}
+        env:
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          # detached container should get cleaned up by teardown_ec2_linux
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e AWS_DEFAULT_REGION \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --tty \
+            --detach \
+            --user jenkins \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}"
+          )
+          chmod +x pytorch/.github/scripts/td_llm_indexer.sh
+          docker exec -t "${container_name}" sh -c 'pytorch/.github/scripts/td_llm_indexer.sh'
+
+      - name: Upload to s3
+        shell: bash -l {0}
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          cd llm-target-determinator/assets
+
+          TIMESTAMP=$(date -Iseconds)
+          ZIP_NAME="indexer-files-${TIMESTAMP}.zip"
+
+          # Create a zipfile with all the generated indices
+          zip -r "${ZIP_NAME}" indexer-files
+
+          # Note that because the below 2 operations are not atomic, there will
+          # be a period of a few seconds between these where there is no index
+          # present in the latest/ folder. To account for this, the retriever
+          # should have some retry logic with backoff to ensure fetching the
+          # index doesn't fail.
+          # Move the old index into the archived/ folder
+          aws s3 mv \
+            "s3://target-determinator-assets/indexes/latest" \
+            "s3://target-determinator-assets/indexes/archived" \
+            --recursive
+
+          # Move the new index into the latestl/ folder
+          aws s3 cp \
+            "${ZIP_NAME}" \
+            "s3://target-determinator-assets/indexes/latest/${ZIP_NAME}"
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
