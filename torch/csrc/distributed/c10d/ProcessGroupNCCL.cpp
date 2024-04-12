@@ -1268,6 +1268,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(EXCEPTION_DUMP)})) {
           int timeOutRank = -1;
+          shouldDump_.store(true);
           try {
             auto vec = globalStore_->get(std::string(EXCEPTION_DUMP));
             TORCH_CHECK_WITH(
@@ -1312,6 +1313,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       if (heartbeat != heartBeatCounter) {
         heartBeatCounter = heartbeat;
       } else {
+        shouldDump_.store(true);
         // No heartbeat increase detected and timeout.
         errorMsg = c10::str(
             logPrefix(),
@@ -1388,7 +1390,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Case two: desync might be slow or get stuck. Or we get stuck in
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
-  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load()) &&
+  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
+       shouldDump_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave another two mins for desync report generation or process group
     // destroy.
@@ -2004,8 +2007,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   }
 
   // Creates the NCCL streams
-  auto streamVal =
-      at::cuda::getStreamFromPool(options_->is_high_priority_stream);
+  bool force_high = getCvarBool(TORCH_NCCL_HIGH_PRIORITY, false);
+  auto streamVal = at::cuda::getStreamFromPool(
+      options_->is_high_priority_stream || force_high);
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
