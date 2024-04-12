@@ -17,5 +17,15 @@ std::vector<at::Tensor> AOTIModelContainerRunnerCpu::run(
   return AOTIModelContainerRunner::run(inputs);
 }
 
+AOTIEagerKernelRunnerCPU::AOTIEagerKernelRunnerCPU(
+    const std::string& kernel_so_path)
+    : AOTIEagerKernelRunner(kernel_so_path) {}
+
+void AOTIEagerKernelRunnerCPU::operator()(
+    AtenTensorHandle* input_handles,
+    AtenTensorHandle* output_handles) {
+  return AOTIEagerKernelRunner::operator()(input_handles, output_handles);
+}
+
 } // namespace torch::inductor
 #endif

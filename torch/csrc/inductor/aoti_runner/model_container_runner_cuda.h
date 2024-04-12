@@ -26,5 +26,15 @@ class TORCH_API AOTIModelContainerRunnerCuda : public AOTIModelContainerRunner {
       at::cuda::CUDAStream cuda_stream);
 };
 
+class TORCH_API AOTIEagerKernelRunnerCuda : public AOTIEagerKernelRunner {
+ public:
+  AOTIEagerKernelRunnerCuda(const std::string& kernel_so_path);
+  ~AOTIEagerKernelRunnerCuda(){};
+
+  void operator()(
+      AtenTensorHandle* input_handles,
+      AtenTensorHandle* output_handles);
+};
+
 } // namespace torch::inductor
 #endif

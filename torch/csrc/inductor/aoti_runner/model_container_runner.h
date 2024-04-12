@@ -80,5 +80,27 @@ class TORCH_API AOTIModelContainerRunner {
   AOTIProxyExecutorHandle proxy_executor_handle_ = nullptr;
 };
 
+typedef void (*AOTIEagerKernelFunc)(AtenTensorHandle*, AtenTensorHandle*);
+
+class TORCH_API AOTIEagerKernelRunner {
+ public:
+  AOTIEagerKernelRunner() = delete;
+  AOTIEagerKernelRunner(const AOTIEagerKernelRunner& other) = delete;
+  AOTIEagerKernelRunner(AOTIEagerKernelRunner&& other) = delete;
+  AOTIEagerKernelRunner& operator=(const AOTIEagerKernelRunner& other) = delete;
+  AOTIEagerKernelRunner& operator=(AOTIEagerKernelRunner&& other) = delete;
+  ~AOTIEagerKernelRunner();
+
+  void operator()(
+      AtenTensorHandle* input_handles,
+      AtenTensorHandle* output_handles);
+
+ protected:
+  AOTIEagerKernelRunner(const std::string& model_so_path);
+
+  std::unique_ptr<at::DynamicLibrary> model_so_;
+  AOTIEagerKernelFunc run_func_;
+};
+
 } // namespace torch::inductor
 #endif
