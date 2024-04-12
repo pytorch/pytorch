@@ -48,7 +48,7 @@ namespace torch::utils {
 namespace {
 const int MAX_DIMS = 128;
 
-thread_local bool kLiftThenH2D = false;
+thread_local bool kOnlyLiftCPUTensors = false;
 
 TensorOptions build_options(
     c10::TensorOptions options,
@@ -455,7 +455,11 @@ Tensor internal_new_from_data(
     // "no observable data dependence".  In an ideal world, we wouldn't trace
     // a to() call but I need to think harder about what exactly we should trace
     // in this case.
-    if (!get_lift_then_h2d()) {
+    if (only_lift_cpu_tensors()) {
+      tensor = tensor.to(
+          inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
+
+    } else {
       tensor = tensor.to(
           device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
     }
@@ -471,14 +475,13 @@ Tensor internal_new_from_data(
     at::AutoDispatchBelowADInplaceOrView guard;
     tensor = at::lift_fresh(tensor);
   }
-  if (get_lift_then_h2d()) {
+  if (only_lift_cpu_tensors() and device.type() != DeviceType::CPU) {
     if (!device.has_index() &&
         !torch::utils::is_device_initialized(device.type())) {
       // Infer device 0 to avoid device init
       device = c10::Device(device.type(), 0);
     }
-    tensor = tensor.to(
-        device, inferred_scalar_type, /*non_blocking=*/false, /*copy=*/false);
+    tensor = tensor.to(device, /*non_blocking=*/false, /*copy=*/false);
   }
   return tensor;
 }
@@ -1803,12 +1806,12 @@ Tensor asarray(
   return tensor;
 }
 
-bool get_lift_then_h2d() {
-  return kLiftThenH2D;
+bool only_lift_cpu_tensors() {
+  return kOnlyLiftCPUTensors;
 }
 
-void set_lift_then_h2d(bool value) {
-  kLiftThenH2D = value;
+void set_only_lift_cpu_tensors(bool value) {
+  kOnlyLiftCPUTensors = value;
 }
 
 } // namespace torch::utils

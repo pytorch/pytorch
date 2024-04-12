@@ -722,6 +722,8 @@ void initDispatchBindings(PyObject* module) {
       c10::impl::ForceDispatchKeyGuard,
       c10::DispatchKeySet,
       c10::DispatchKeySet>(m, "_ForceDispatchKeyGuard");
+  py_context_manager<c10::impl::ForceDispatchKeyGuard>(
+      m, "_PreserveDispatchKeyGuard");
   py_context_manager<c10::impl::IncludeDispatchKeyGuard, c10::DispatchKey>(
       m, "_IncludeDispatchKeyGuard");
   py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
@@ -731,6 +733,8 @@ void initDispatchBindings(PyObject* module) {
 
   py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
       m, "_AutoDispatchBelowAutograd");
+  py_context_manager<at::AutoDispatchBelowADInplaceOrView>(
+      m, "_AutoDispatchBelowADInplaceOrView");
 
   // Prints out the name of every operator that has a kernel registered to the
   // Dispatcher under [dispatch_key]. If no arguments are specified, it'll print
@@ -853,8 +857,21 @@ void initDispatchBindings(PyObject* module) {
         ->set_throw_on_mutable_data_ptr();
   });
 
-  m.def("_get_lift_then_h2d", &torch::utils::get_lift_then_h2d);
-  m.def("_set_lift_then_h2d", &torch::utils::set_lift_then_h2d);
+  // Invariant: you must ONLY call this with FakeTensors.
+  m.def("_set_warn_deprecated_on_mutable_data_ptr", [](const at::Tensor& t) {
+    if (!t.unsafeGetTensorImpl()->has_storage()) {
+      // If the Tensor doesn't have a storage, then accessing .data_ptr()
+      // will already raise an error.
+      return;
+    }
+    t.unsafeGetTensorImpl()
+        ->storage()
+        .unsafeGetStorageImpl()
+        ->set_warn_deprecated_on_mutable_data_ptr();
+  });
+
+  m.def("_only_lift_cpu_tensors", &torch::utils::only_lift_cpu_tensors);
+  m.def("_set_only_lift_cpu_tensors", &torch::utils::set_only_lift_cpu_tensors);
 
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")

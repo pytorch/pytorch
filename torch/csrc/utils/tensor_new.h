@@ -10,8 +10,8 @@ namespace utils {
 
 // NOTE: [torch.tensor, lift_fresh, and device movement]
 //
-// The `lift_then_h2d` flag controls what happens on torch.tensor([1, 2, 3],
-// device="cuda") (or any non-CPU devices).
+// The `only_lift_cpu_tensors` flag controls what happens on torch.tensor([1, 2,
+// 3], device="cuda") (or any non-CPU devices).
 //
 // If false (default):
 // - the data gets moved into a CPU Tensor
@@ -20,15 +20,15 @@ namespace utils {
 // Steps 1 and 2 happen with all modes disabled.
 //
 // If true:
-// - the data gets moved into a CPU Tensor
+// - the data gets moved into a CPU Tensor (with correct dtype)
 // - we call lift_fresh() on it
 // - finally, we move it to cuda (via .to)
 // Step 1 happens with all modes disabled.
 //
-// lift_then_h2d=true is useful to prevent CUDA initialization under
+// lift_then_to=true is useful to prevent CUDA initialization under
 // FakeTensorMode because it avoids moving concrete data to CUDA.
-TORCH_API bool get_lift_then_h2d();
-TORCH_API void set_lift_then_h2d(bool value);
+TORCH_API bool only_lift_cpu_tensors();
+TORCH_API void set_only_lift_cpu_tensors(bool value);
 
 at::Tensor base_tensor_ctor(PyObject* args, PyObject* kwargs);
 at::Tensor legacy_tensor_ctor(
