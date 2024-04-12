@@ -16,6 +16,7 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
+from torch._higher_order_ops.effects import _EffectType
 from torch._logging import LazyString, trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
@@ -66,7 +67,12 @@ from .lowering import (
     unsupported_output_tensor,
 )
 from .sizevars import SizeVarAllocator
-from .utils import convert_shape_to_inductor, gather_origins, get_sympy_Expr_dtype
+from .utils import (
+    convert_shape_to_inductor,
+    gather_origins,
+    get_cloned_parameter_buffer_name,
+    get_sympy_Expr_dtype,
+)
 from .virtualized import V
 
 log = logging.getLogger(__name__)
@@ -192,13 +198,22 @@ class GraphLowering(torch.fx.Interpreter):
         if get_scheduling_for_device("cpu") is None:
             from .codegen.cpp import CppScheduling
 
-            register_backend_for_device("cpu", CppScheduling, WrapperCodeGen)
+            register_backend_for_device(
+                "cpu", CppScheduling, WrapperCodeGen, CppWrapperCpu
+            )
 
         if get_scheduling_for_device("cuda") is None:
             from .codegen.cuda_combined_scheduling import CUDACombinedScheduling
 
             # CUDACombinedScheduling combines Triton and CUDA C++ scheduling for CUDA devices via delegation
-            register_backend_for_device("cuda", CUDACombinedScheduling, WrapperCodeGen)
+            register_backend_for_device(
+                "cuda", CUDACombinedScheduling, WrapperCodeGen, CppWrapperCuda
+            )
+
+        if get_scheduling_for_device("xpu") is None:
+            from .codegen.triton import TritonScheduling
+
+            register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
 
     def __init__(
         self,
@@ -318,6 +333,8 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.allocated_constant_name if const_module is not None else {}
         )
         self.init_backend_registration()
+
+        self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
 
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
@@ -621,7 +638,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
         # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
-        if not isinstance(buffer, ir.ComputedBuffer) or not buffer.is_zero_elements():
+        if (
+            not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
+            and buffer.get_device() is not None
+        ):
             self.add_device_info(buffer.get_device())
         return name
 
@@ -665,6 +685,22 @@ class GraphLowering(torch.fx.Interpreter):
         for user in self.name_to_users[name]:
             user.realize()
 
+    def get_original_value_of_constant(self, name: str):
+        """
+        In AOTI, module buffers may have been mutated during the tracing and compilation.
+        Thus we need to read from previously stored original buffers, to make sure the
+        generated model.so uses correct initial values.
+        """
+        assert name in self.allocated_constant_name and name in self.constants, (
+            "Can not find the original value for " + name
+        )
+        orig_name = get_cloned_parameter_buffer_name(self.allocated_constant_name[name])
+        return (
+            self.module.meta[orig_name]
+            if orig_name in self.module.meta
+            else self.constants[name]
+        )
+
     def add_tensor_constant(self, data, name=None):
         def allocate(name):
             if not config.aot_inductor.use_runtime_constant_folding:
@@ -675,7 +711,8 @@ class GraphLowering(torch.fx.Interpreter):
                         and data.stride() == value.stride()
                         and data.dtype == value.dtype
                         and data.device == value.device
-                        and torch.eq(data, value).all()
+                        and data.untyped_storage().data_ptr()
+                        == value.untyped_storage().data_ptr()
                     ):
                         return constant_name
 
@@ -880,6 +917,7 @@ class GraphLowering(torch.fx.Interpreter):
                     sympy.Expr,
                     sympy.logic.boolalg.Boolean,
                     int,
+                    ir.EffectfulKernel,
                 ),
             )
             for x in result
@@ -1044,6 +1082,8 @@ class GraphLowering(torch.fx.Interpreter):
                 torch.ops.aten.as_strided.default,
                 torch.ops.aten.as_strided_.default,
                 torch.ops.aten.as_strided_scatter.default,
+                torch.ops.aten.resize.default,
+                torch.ops.aten.resize_as.default,
             ]
             is_output = any(user.op == "output" for user in n.users)
             is_input_for_as_strided = any(
@@ -1195,23 +1235,22 @@ class GraphLowering(torch.fx.Interpreter):
         self.cuda = "cuda" in self.device_types
         if self.cpp_wrapper:
             self.validate_can_generate_cpp_wrapper()
-            self.wrapper_code = CppWrapperCuda() if self.cuda else CppWrapperCpu()
-        else:
-            device_types = self.device_types.copy()
-            device_types.discard("cpu")
-            # TODO(Eikan): Only support mixing cpu and other device now.
-            assert len(device_types) <= 1, "Does not support mixing {}".format(
-                "+".join(device_types)
-            )
-            only_cpu = len(device_types) == 0
-            device_type = "cpu" if only_cpu else device_types.pop()
 
-            self.device_ops = get_device_op_overrides(device_type)
-            wrapper_code_gen_cls = get_wrapper_codegen_for_device(device_type)
-            assert (
-                wrapper_code_gen_cls is not None
-            ), f"Device {device_type} not supported"
-            self.wrapper_code = wrapper_code_gen_cls()
+        device_types = self.device_types.copy()
+        device_types.discard("cpu")
+        # TODO(Eikan): Only support mixing cpu and other device now.
+        assert len(device_types) <= 1, "Does not support mixing {}".format(
+            "+".join(device_types)
+        )
+        only_cpu = len(device_types) == 0
+        device_type = "cpu" if only_cpu else device_types.pop()
+
+        self.device_ops = get_device_op_overrides(device_type)
+        wrapper_code_gen_cls = get_wrapper_codegen_for_device(
+            device_type, self.cpp_wrapper
+        )
+        assert wrapper_code_gen_cls is not None, f"Device {device_type} not supported"
+        self.wrapper_code = wrapper_code_gen_cls()
 
         if self.const_module:
             # If we have const module, we could reuse the kernels
@@ -1260,6 +1299,25 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 real_inputs = [materialize(x) for x in V.real_inputs]
 
+            if self.mutated_inputs:
+                from .compile_fx import clone_preserve_strides
+
+                mutated_input_idxs = [
+                    idx
+                    for idx, name in enumerate(self.graph_inputs)
+                    if name in self.mutated_inputs
+                    and isinstance(real_inputs[idx], torch.Tensor)
+                ]
+                for idx in mutated_input_idxs:
+                    # clone mutated Tensor inputs to avoid mutating them in
+                    # the first pass of the CPP wrapper-based compilation, as
+                    # this will lead to a side effect on the example inputs:
+                    # e.g. if torch.compile(f)(x) if called on input-mutating
+                    # f, the inputs x will be mutated twice in the process:
+                    # once here, and again when running the compiled model;
+                    # this will also lead to a numerically incorrect output
+                    real_inputs[idx] = clone_preserve_strides(real_inputs[idx])
+
             with torch.utils._python_dispatch._disable_current_modes():
                 assert self.example_inputs is not None
                 compiled(real_inputs)
@@ -1270,6 +1328,8 @@ class GraphLowering(torch.fx.Interpreter):
             self.cpp_wrapper = True
             self.removed_buffers.clear()
             self.inplaced_to_remove.clear()
+            V.graph.sizevars.precomputed_replacements.clear()
+            V.graph.sizevars.inv_precomputed_replacements.clear()
             return self.codegen()
         else:
             # cpu
@@ -1283,8 +1343,11 @@ class GraphLowering(torch.fx.Interpreter):
         self.scheduler = Scheduler(self.buffers)
         V.debug.draw_orig_fx_graph(self.orig_gm, self.scheduler.nodes)
 
+        self.wrapper_code.push_codegened_graph(self)
         self.scheduler.codegen()
-        return self.wrapper_code.generate(self.is_inference)
+        result = self.wrapper_code.generate(self.is_inference)
+        self.wrapper_code.pop_codegened_graph()
+        return result
 
     def codegen_subgraph(self, parent_graph):
         """
