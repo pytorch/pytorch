@@ -674,14 +674,6 @@ class OpOverload(OperatorBase):
                 add_cached_op(self)
                 return key
 
-            fallback_handler = (
-                lambda mode, *args, **kwargs: torch._library.utils.handle_dispatch_mode(
-                    mode, self, *args, **kwargs
-                )
-                if isinstance(self, TorchBindOpOverload)
-                else lambda mode, *args, **kwargs: self._op_dk(key, *args, **kwargs)
-            )
-
             def handler(*args, **kwargs):
                 from torch.utils._python_dispatch import _get_current_dispatch_mode
 
@@ -693,11 +685,19 @@ class OpOverload(OperatorBase):
                 ), "Illegal invocation of dispatch on torch._C.DispatchKey.Python without a mode."
 
                 if curr_mode not in self.python_key_mode_table:
-                    self.py_impl(curr_mode)(fallback_handler)
+                    if isinstance(self, TorchBindOpOverload):
+                        with torch.utils._python_dispatch._pop_mode_temporarily() as mode:
+                            return torch._library.utils.handle_dispatch_mode(
+                                mode, self, *args, **kwargs
+                            )
+                    else:
+                        return self._op_dk(key, *args, **kwargs)
 
                 with torch.utils._python_dispatch._pop_mode_temporarily() as mode:
                     return self.python_key_mode_table[curr_mode](mode, *args, **kwargs)
 
+            self._dispatch_cache[key] = handler
+            add_cached_op(self)
             return handler
 
         functionality_key = torch._C._to_functionality_key(key)  # type: ignore[attr-defined]
