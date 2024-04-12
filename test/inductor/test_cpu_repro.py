@@ -399,13 +399,19 @@ class CPUReproTests(TestCase):
         # Reproducer from the maml_omniglot model in Torchbench
         in_channel = 1
         out_channel = 3
-        mod = M(in_channel, out_channel).eval()
-        v = torch.randn(5, in_channel, 15, 15)
-        with torch.no_grad():
-            self.common(
-                mod,
-                (v,),
-            )
+        amp_enabled_configs = [False]
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            # When amp is enabled here, the input to Conv is a FlexibleLayout.
+            # While it's disabled, the input is a FixedLayout.
+            amp_enabled_configs.append(True)
+        for amp_enabled in amp_enabled_configs:
+            mod = M(in_channel, out_channel).eval()
+            v = torch.randn(5, in_channel, 15, 15)
+            with torch.no_grad(), torch.cpu.amp.autocast(enabled=amp_enabled):
+                self.common(
+                    mod,
+                    (v,),
+                )
 
     @unittest.skipIf(not torch._C._has_mkldnn, "MKLDNN is not enabled")
     @patch("torch.cuda.is_available", lambda: False)
@@ -2419,6 +2425,20 @@ class CPUReproTests(TestCase):
                 metrics.reset()
                 self.common(fn, (x,))
                 assert metrics.generated_cpp_vec_kernel_count == 0
+
+    def test_outer_loop_fusion(self):
+        def fn(x):
+            max = torch.amax(x, dim=-1, keepdim=True)
+            return x - max
+
+        x = torch.randn(4, 12, 1023, 1022)
+
+        with config.patch({"cpp.simdlen": None}):
+            torch._dynamo.reset()
+            metrics.reset()
+            self.common(fn, (x,))
+            assert len(metrics.cpp_outer_loop_fused_inner_counts) == 1
+            assert metrics.cpp_outer_loop_fused_inner_counts[0] == 2
 
     def test_argmin(self):
         def fn(x):
