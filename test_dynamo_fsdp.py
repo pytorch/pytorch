@@ -94,8 +94,6 @@ def print_perfetto_ui_url(manifold_path: str) -> None:
 import socket
 from datetime import datetime, timedelta
 
-TIME_FORMAT_STR: str = "%b_%d_%H_%M_%S"
-
 # Keep a max of 100,000 alloc/free events in the recorded history
 # leading up to the snapshot.
 MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
@@ -130,6 +128,37 @@ def export_memory_snapshot(file_prefix) -> None:
        print(f"Failed to capture memory snapshot {e}")
        return
 # ======== REMOVE WHEN READY TO MERGE ========
+
+
+
+def count_ops(graph, freqs=None, freqs_ge=None, ops=None):
+    def match_rng_op(node, op):
+        if isinstance(node.target, torch._ops.HigherOrderOperator):
+            if node.name == "run_and_save_rng_state":
+                return node.args[0] == op
+            elif node.name == "run_with_rng_state":
+                return node.args[1] == op
+        return False
+
+    if freqs:
+        for op, freq in zip(ops, freqs):
+            actual_count = 0
+            for node in graph.nodes:
+                if match_rng_op(node, op) or node.target == op:
+                    actual_count += 1
+            err_msg = f"In graph {graph} \n\n Expected {op} to have occurred {freq} times in the graph, but got {actual_count}."
+            assert actual_count == freq, err_msg
+    else:
+        assert freqs_ge is not None
+        for op, freq_ge in zip(ops, freqs_ge):
+            actual_count = 0
+            for node in graph.nodes:
+                if match_rng_op(node, op) or node.target == op:
+                    actual_count += 1
+            assert (
+                actual_count >= freq_ge
+            ), f"In graph {graph}  \n\n Expected {op} to have occurred at least {freq_ge} times in the graph, but got {actual_count}."
+    return graph
 
 
 
@@ -224,11 +253,17 @@ def checkpoint_wrapper(module, config):
         )
 
 
-test_case = "simple_mlp"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
-balanced = False
+test_case = "test_tags_function"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "test_tags_function" / "test_tags_multiple_checkpoints" / "test_compile_selective_checkpoint_gemm_only"
+balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
-activation_checkpoint = False
-apply_fsdp = False
+activation_checkpoint = True
+apply_fsdp = True
+
+def create_input(hidden_dim):
+    torch.manual_seed(0)
+    inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=True)
+    return inp
+
 
 def init():
     from torch.testing._internal.common_fsdp import MLP
@@ -252,6 +287,7 @@ def init():
         ac_config.mode = "full"
         # ac_config.selective_ac_option = "1"
     mesh = init_device_mesh("cuda", (world_size,))
+    backend = "inductor"
 
     torch.manual_seed(0)
     if test_case == "simple_mlp":
@@ -290,6 +326,46 @@ def init():
             for mlp in model:
                 fully_shard(mlp, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
             fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+    elif test_case == "test_tags_function":
+        class TestModule(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.param = torch.nn.Parameter(torch.randn(hidden_dim, hidden_dim, device=device))
+
+            def gn(self, x, y):
+                return torch.sigmoid(torch.matmul(x, y))
+
+            def forward(self, x):
+                return self.gn(x, self.param)
+
+        model = TestModule("cuda")
+        if activation_checkpoint:
+            ac_config = ACConfigClass()
+            ac_config.mode = "full"
+            model = checkpoint_wrapper(model, ac_config)
+        if apply_fsdp:
+            fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+
+        graph_count = 0
+        def count_ops_pass(graph):
+            nonlocal graph_count
+            if graph_count == 0:  # assume the first graph is FWD graph, second is BWD graph
+                count_ops(graph, freqs=[1], ops=[torch.ops.aten.mm.default])
+            elif graph_count == 1:
+                count_ops(graph, freqs=[3], ops=[torch.ops.aten.mm.default])
+            else:
+                raise RuntimeError("Unexpected graph_count")
+            graph_count += 1
+            return graph
+
+        torch._inductor.config.post_grad_custom_post_pass = count_ops_pass
+
+        # fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
+        # bw_compiler = functools.partial(
+        #     count_ops, freq=3, op=torch.ops.aten.mm.default
+        # )  # mm recomputed in the bwd
+        # backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        # self._validate(fn, backend, x, y)
     # else:
     #     # FSDP1
     #     fsdp_kwargs = {
@@ -312,11 +388,6 @@ def printing_eager(gm, inputs):
 
 local_rank = int(os.environ["LOCAL_RANK"])
 world_size = int(os.environ["WORLD_SIZE"])
-
-def create_input(hidden_dim):
-    torch.manual_seed(0)
-    inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
-    return inp
 
 
 def run(model, optim, n_iter, hidden_dim):
@@ -353,6 +424,7 @@ def main_compiled(n_iter):
     if apply_fsdp:
         torch._dynamo.config.trace_distributed = True
         torch._functorch.config.move_view_chain_to_bwd_graph = True
+
     torch._inductor.config.triton.unique_kernel_names = True
 
     # if dist.get_rank() == 0:
@@ -404,7 +476,7 @@ if __name__ == "__main__":
         dist.init_process_group(backend="gloo")
         # torch.set_device(device)
 
-    n_iter = 5
+    n_iter = 3
     losses_compiled = execute_and_profile(
         lambda: main_compiled(n_iter=n_iter),
         "artifacts/compiled_trace.json",

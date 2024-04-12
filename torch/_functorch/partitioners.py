@@ -24,6 +24,7 @@ from . import config
 import functools
 from torch._dynamo.utils import lazy_format_graph_code
 import logging
+import torch.distributed as dist
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
@@ -1006,6 +1007,11 @@ def min_cut_rematerialization_partition(
         for u, nbrs in ((n, nx_graph[n]) for n in reachable):
             cutset.update((u, v) for v in nbrs if v in non_reachable)
 
+        # if dist.get_rank() == 0:
+        #     print(f"reachable: {sorted(list(reachable))}")
+        #     print(f"non_reachable: {sorted(list(non_reachable))}")
+        #     print(f"cutset: {sorted(list(cutset))}")
+
         cut_nodes = set()
         for node_in, node_out in cutset:
             assert node_in[:-3] == node_out[:-4]
@@ -1018,6 +1024,19 @@ def min_cut_rematerialization_partition(
         # save_for_backward on tensors and stashes symints in autograd .ctx
         saved_sym_nodes = list(filter(is_sym_node, saved_values))
         saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
+
+        if dist.get_rank() == 0:
+            # print(f"cut_value: {cut_value}")
+            # print(f"cut_nodes: {cut_nodes}")
+            import pickle
+            filename = "nx_graph.pkl"
+            try:
+                os.remove(filename)
+            except OSError:
+                pass
+            with open(filename, "wb") as file:
+                pickle.dump(nx_graph, file)
+
         return saved_sym_nodes, saved_values
 
     saved_sym_nodes, saved_values = min_cut()
