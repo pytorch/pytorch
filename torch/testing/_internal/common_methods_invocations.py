@@ -15940,8 +15940,6 @@ op_db: List[OpInfo] = [
                     skips=(
                         DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
                         DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit',),
-                        # NYI: The operator 'aten::rsub.Tensor' is not currently implemented for the MPS device
-                        DecorateInfo(unittest.expectedFailure, 'TestConsistency', 'test_output_grad_match'),
                     ),
                     assert_autodiffed=True,
                     autodiff_nonfusible_nodes=['aten::rsub'],),
@@ -16311,8 +16309,6 @@ op_db: List[OpInfo] = [
                        # Ref: https://github.com/pytorch/pytorch/issues/78413
                        DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_small',
                                     dtypes=(torch.bfloat16, torch.float16, torch.float32, torch.float64),),
-                       # NYI: The operator 'aten::angle' is not currently implemented for the MPS device
-                       DecorateInfo(unittest.expectedFailure, 'TestConsistency', 'test_output_grad_match'),
                    )),
     UnaryUfuncInfo('isfinite',
                    ref=np.isfinite,
@@ -19743,8 +19739,6 @@ op_db: List[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
-            # NYI: The operator 'aten::segment_reduce' is not currently implemented for the MPS device
-            DecorateInfo(unittest.expectedFailure, 'TestConsistency', 'test_output_grad_match'),
         ),
     ),
 ]
