@@ -614,7 +614,7 @@ def make_dep_token(
     pin_memory=None,
     memory_format=None,
 ):
-    return torch.empty([], device="meta")
+    return torch.empty(0, device="meta")
 
 
 @register_meta(aten.sym_constrain_range.default)
@@ -3333,6 +3333,29 @@ def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
     torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
     torch._check(
         len(self) == len(tensor1) and len(self) == len(tensor2),
+        lambda: "All input tensor lists must have the same length",
+    )
+
+
+@register_meta(
+    [
+        aten._foreach_addcdiv_.ScalarList,
+        aten._foreach_addcmul_.ScalarList,
+    ]
+)
+def meta__foreach_addcop__scalarlist(self, tensor1, tensor2, scalars):
+    torch._check(
+        all(isinstance(l, List) for l in [self, tensor1, tensor2, scalars]),
+        lambda: (
+            "_foreach_addc*_ op expects arguments of type: List[Tensor], List[Tensor], List[Tensor], List[Scalar], "
+            f"but got {type(self)}, {type(tensor1)}, {type(tensor2)}, and {type(scalars)}"
+        ),
+    )
+    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
+    torch._check(
+        len(self) == len(tensor1)
+        and len(self) == len(tensor2)
+        and len(self) == len(scalars),
         lambda: "All input tensor lists must have the same length",
     )
 
@@ -6136,6 +6159,22 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
     return torch.empty_like(self, dtype=result_dtype)
+
+
+@register_meta(aten.channel_shuffle.default)
+def meta_channel_shuffle(input, groups):
+    # Assume the input shape is (*, C, H, W), where * represents any number of leading dimensions
+    *leading_dims, C, H, W = input.size()
+    # The output shape is the same as the input
+    return torch.empty(
+        *leading_dims,
+        C,
+        H,
+        W,
+        dtype=input.dtype,
+        layout=input.layout,
+        device=input.device,
+    )
 
 
 def _create_unary_float_meta_func(func):

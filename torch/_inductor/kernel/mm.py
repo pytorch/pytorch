@@ -183,7 +183,13 @@ def _is_static_problem(inputs_tensors, layout):
     static_shape = True
     static_size = WrapperCodeGen.statically_known_list_of_ints_or_none(layout.size)
     if static_size is None:
-        return False, True
+        nonzero = True
+        for s in layout.size:
+            sz = WrapperCodeGen.statically_known_int_or_none(s)
+            if sz is not None and sz == 0:
+                nonzero = False
+                break
+        return False, nonzero
     numel = 1
     for dim in static_size:
         numel *= dim
@@ -290,13 +296,17 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             dtype=layout.dtype,
             size=WrapperCodeGen.statically_known_list_of_ints_or_none(layout.size),
         )
-        CUTLASSGemmTemplate.add_cutlass_gemm_choices(
-            choices,
-            out_layout,
-            [mat1, mat2, inp_expanded],
-            alpha=alpha,
-            beta=beta,
-        )
+        if (
+            WrapperCodeGen.statically_known_int_or_none(inp_expanded.layout.stride[-1])
+            != 0
+        ):
+            CUTLASSGemmTemplate.add_cutlass_gemm_choices(
+                choices,
+                out_layout,
+                [mat1, mat2, inp_expanded],
+                alpha=alpha,
+                beta=beta,
+            )
 
     use_aten = use_aten_gemm_kernels()
     if len(choices) == 0 and not use_aten:
