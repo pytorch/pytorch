@@ -8,7 +8,6 @@ from .decorators import (
     allow_in_graph,
     assume_constant_result,
     disable,
-    disable_if_config_true,
     disallow_in_graph,
     forbid_in_graph,
     graph_break,
