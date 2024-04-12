@@ -8729,7 +8729,7 @@ def ___make_guard_fn():
 
             return [t * k for t in yield_from_gen(t_list)]
 
-        t_list = [torch.randn([2, 3])] * 3
+        t_list = [torch.randn([2, 3]) for _ in range(3)]
         eager = yield_from_fn(t_list, 2)
         counter = CompileCounter()
         compiled = torch._dynamo.optimize(counter)(yield_from_fn)(t_list, 2)
@@ -8777,6 +8777,34 @@ def ___make_guard_fn():
         )
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
+
+    def test_yield_from_user_stop_iteration(self):
+        class MyIter:
+            def __init__(self, seq):
+                self.seq = seq
+                self.index = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.index += 1
+                if self.index <= len(self.seq):
+                    return self.seq[self.index - 1]
+                raise StopIteration(self.index)
+
+        def yield_from_iter_fn(seq):
+            def gen(seq):
+                yield from MyIter(seq)
+
+            return [i for i in gen(seq)]
+
+        seq = [torch.randn([2, 3]) for _ in range(3)]
+        eager = yield_from_iter_fn(seq)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(yield_from_iter_fn)(seq)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 0)
 
     def test_yield_send_to_subgenerator_graph_break(self):
         def subgenerator(tensor):
