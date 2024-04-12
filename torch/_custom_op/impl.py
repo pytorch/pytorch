@@ -769,13 +769,13 @@ def validate_function_matches_schema(
     compare(kwargonly, schema.arguments.flat_kwarg_only)
 
 
-def infer_schema(prototype_function: typing.Callable, mutated_args=()) -> str:
+def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
     """Given a function with type hints, parses a schema.
 
     We make some assumptions to make our lives easier that correspond to how people
     write custom ops in real life:
     - none of the outputs alias any of the inputs or each other.
-    - only the args listed in mutated_args are being mutated.
+    - only the args listed in mutates_args are being mutated.
 
     Callers (e.g. the custom ops API) are responsible for checking these assumptions.
     """
@@ -787,6 +787,7 @@ def infer_schema(prototype_function: typing.Callable, mutated_args=()) -> str:
         )
 
     params = []
+    seen_args = set()
     for idx, (name, param) in enumerate(sig.parameters.items()):
         if not supported_param(param):
             error_fn("We do not support positional-only args, varargs, or varkwargs.")
@@ -800,18 +801,28 @@ def infer_schema(prototype_function: typing.Callable, mutated_args=()) -> str:
                 f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
             )
 
-        if param.default is not inspect.Parameter.empty:
-            error_fn(
-                f"Parameter {name} has a default value; this is not supported. "
-                f"If you want to use default values then create a function with "
-                f"default values that invokes the custom op."
-            )
         schema_type = SUPPORTED_PARAM_TYPES[param.annotation]
-        if name in mutated_args:
+        if name in mutates_args:
             if not schema_type.startswith("Tensor"):
                 error_fn(f"Parameter {name} is in mutable_args but only Tensors or collections of Tensors can be mutated")
             schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
-        params.append(f"{schema_type} {name}")
+        seen_args.add(name)
+        if param.default is inspect.Parameter.empty:
+            params.append(f"{schema_type} {name}")
+        else:
+            if param.default is not None and not isinstance(param.default, (int, float, bool)):
+                error_fn(
+                    f"Parameter {name} has an unsupported default value (we only support "
+                    f"int, float, bool, None). Please file an issue on GitHub so we can "
+                    f"prioritize this."
+                )
+            params.append(f"{schema_type} {name}={param.default}")
+    mutates_args_not_seen = set(mutates_args) - seen_args
+    if len(mutates_args_not_seen) > 0:
+        error_fn(f"{mutates_args_not_seen} in mutates_args were not found in "
+                 f"the custom op's signature. "
+                 f"mutates_args should contain the names of all args that the "
+                 f"custom op mutates.")
     ret = parse_return(sig.return_annotation, error_fn)
     return f"({', '.join(params)}) -> {ret}"
 

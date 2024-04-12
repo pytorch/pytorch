@@ -19,6 +19,7 @@ import re
 import shlex
 import shutil
 import signal
+import struct
 import subprocess
 import sys
 import sysconfig
@@ -35,7 +36,19 @@ from pathlib import Path
 from threading import Thread
 from time import sleep, time
 from types import ModuleType
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import (
+    Any,
+    Callable,
+    cast,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    Union,
+)
 
 import torch
 
@@ -55,6 +68,7 @@ from torch._subclasses.fake_tensor import (
 from torch.fx.experimental.symbolic_shapes import has_hint, hint_int, ShapeEnv
 
 if TYPE_CHECKING:
+    from torch._dynamo.device_interface import DeviceInterface
     from torch._inductor.graph import GraphLowering
     from torch._inductor.ir import ChoiceCaller
 
@@ -1527,6 +1541,7 @@ def cpp_compile_command(
     aot_mode: bool = False,
     compile_only: bool = False,
     use_absolute_path: bool = False,
+    use_mmap_weights: bool = False,
 ) -> str:
     ipaths, lpaths, libs, macros, build_arch_flags = get_include_and_linking_paths(
         include_pytorch, vec_isa, cuda, aot_mode
@@ -1559,6 +1574,9 @@ def cpp_compile_command(
     if compile_only:
         libs, lpaths = "", ""
     inp_name_str = " ".join(inp_name)
+    if use_mmap_weights:
+        macros += " -D USE_MMAP_SELF"
+
     return re.sub(
         r"[ \n]+",
         " ",
@@ -1636,7 +1654,11 @@ class AotCodeCompiler:
         picked_vec_isa = pick_vec_isa()
         cpp_command = repr(
             cpp_compile_command(
-                "i", "o", vec_isa=picked_vec_isa, cuda=cuda, aot_mode=graph.aot_mode
+                "i",
+                "o",
+                vec_isa=picked_vec_isa,
+                cuda=cuda,
+                aot_mode=graph.aot_mode,
             )
         )
         fbcode_aot_cpu_re = False
@@ -1682,12 +1704,15 @@ class AotCodeCompiler:
                 run_command_and_check(cmd)
             log.debug("aot constant binary command: %s", cmd)
 
+            # .data section is between .text and .bss. When the size of .data is large,
+            # during the linking, the relocation of .text against .bss may overflow.
+            # Rename it to .ldata so that it won't be in between the .text and .bss section
             cmd = (
                 f"{objcopy_command} --rename-section"
-                " .data=.lrodata,alloc,load,readonly,data,contents"
+                " .data=.ldata"
                 f" {consts_o} {consts_o}"
             )
-            log.debug("aot constant obj command: %s", cmd)
+            log.debug("aot constant rename section command: %s", cmd)
             run_command_and_check(cmd)
 
             cmd = f"rm {consts_path}"
@@ -1716,7 +1741,7 @@ class AotCodeCompiler:
 
         def _compile_consts_darwin(consts: bytes) -> str:
             is_large_consts = len(consts) > 1024
-            consts_asm = "\t.section\t__TEXT,__const\n"
+            consts_asm = "\t.section\t__DATA,__data\n"
             consts_asm += "\t.globl\t__binary_constants_bin_start\n"
             consts_asm += "__binary_constants_bin_start:\n"
             if not is_large_consts:
@@ -1772,6 +1797,17 @@ class AotCodeCompiler:
             )
 
             output_o = os.path.splitext(input_path)[0] + ".o"
+            consts_size = sum(
+                tensor.untyped_storage().nbytes()
+                for (name, tensor) in graph.constants.items()
+                if name not in graph.folded_constants
+            )
+            # TODO: Fix mmap weights with cuda
+            use_mmap_weights = (
+                not cuda and not config.is_fbcode() and consts_size > 2_000_000_000
+            )
+            if config.aot_inductor.force_mmap_weights and not cuda:
+                use_mmap_weights = True
             compile_cmd = cpp_compile_command(
                 input=input_path,
                 output=output_o,
@@ -1780,6 +1816,7 @@ class AotCodeCompiler:
                 aot_mode=graph.aot_mode,
                 compile_only=True,
                 use_absolute_path=use_absolute_path,
+                use_mmap_weights=use_mmap_weights,
             )
             log.debug("aot compilation command: %s", compile_cmd)
             if fbcode_aot_cpu_re:
@@ -1804,11 +1841,19 @@ class AotCodeCompiler:
 
                 return bytes(raw_array.contents)
 
-            aot_constants = b"".join(
-                _to_bytes(tensor)
-                for name, tensor in graph.constants.items()
+            serialized_weights = b"".join(
+                _to_bytes(graph.get_original_value_of_constant(name))
+                for name in graph.constants.keys()
                 if name not in graph.folded_constants
             )
+            if not use_mmap_weights:
+                aot_constants = serialized_weights
+                magic_number = 0
+            else:
+                magic_number = cast(
+                    int, torch.randint(0, torch.iinfo(torch.int64).max, (1,)).item()
+                )
+                aot_constants = struct.pack("qq", consts_size + 8, magic_number)
             consts_o = {
                 "linux": _compile_consts_linux,
                 "darwin": _compile_consts_darwin,
@@ -1828,6 +1873,14 @@ class AotCodeCompiler:
                 os.chmod(output_so, 0o755)
             else:
                 run_command_and_check(link_cmd)
+
+            if use_mmap_weights:
+                with open(output_so, "a+b") as f_so:
+                    so_size = f_so.tell()
+                    # Page align the weights
+                    f_so.write(b" " * (16384 - so_size % 16384))
+                    f_so.write(serialized_weights)
+                    f_so.write(struct.pack("q", magic_number))
 
             # Append cmds to the end of codegen-ed wrapper file
             with open(input_path, "a") as f:
@@ -2180,8 +2233,11 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
             size_t result_len = cppvec.size();
             PyObject* result = PyList_New(static_cast<Py_ssize_t>(result_len));
             for (size_t i = 0; i < result_len; i++) {
-                // Store AtenTensorHandle as PyCapsulate
-                PyObject* elem = PyCapsule_New(reinterpret_cast<void*>(cppvec[i]), NULL, NULL);
+                PyObject *elem =
+                    cppvec[i] == nullptr
+                        ? Py_None
+                        // Store AtenTensorHandle as PyCapsulate
+                        : PyCapsule_New(reinterpret_cast<void*>(cppvec[i]), NULL, NULL);
                 PyList_SET_ITEM(result, i, elem);
             }
             return result;
@@ -2306,17 +2362,18 @@ def _cuda_compiler() -> Optional[str]:
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
     if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
-        return os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc")
+        return os.path.realpath(os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc"))
     return "nvcc"
 
 
 def _cutlass_include_paths() -> List[str]:
     cutlass_path = config.cuda.cutlass_dir
     return [
-        os.path.join(cutlass_path, "include"),
-        os.path.join(cutlass_path, "tools/library/include"),
-        os.path.join(cutlass_path, "tools/library/src"),
-        os.path.join(cutlass_path, "tools/util/include"),
+        # Use realpath to get canonical absolute paths, in order not to mess up cache keys
+        os.path.realpath(os.path.join(cutlass_path, "include")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/library/include")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/library/src")),
+        os.path.realpath(os.path.join(cutlass_path, "tools/util/include")),
     ]
 
 
@@ -2398,13 +2455,17 @@ def cuda_compile_command(
     src_files: List[str],
     dst_file: str,
     dst_file_ext: str,
+    extra_args: Optional[List[str]] = None,
 ) -> str:
+    if extra_args is None:
+        extra_args = []
     include_paths = _cutlass_include_paths()
     cuda_lib_options = _cuda_lib_options()
     nvcc_host_compiler_options = _nvcc_host_compiler_options()
     nvcc_compiler_options = _nvcc_compiler_options()
     options = (
         nvcc_compiler_options
+        + extra_args
         + [
             f"-Xcompiler {opt}" if "=" in opt else f"-Xcompiler={opt}"
             for opt in nvcc_host_compiler_options
@@ -2418,6 +2479,8 @@ def cuda_compile_command(
         res = f"{_cuda_compiler()} {' '.join(options)} -c -o {dst_file} {src_file}"
     elif dst_file_ext == "so":
         options.append("-shared")
+        res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
+    elif dst_file_ext == "exe":
         res = f"{_cuda_compiler()} {' '.join(options)} -o {dst_file} {src_file}"
     else:
         raise NotImplementedError(f"Unsupported output file suffix {dst_file_ext}!")
@@ -2512,12 +2575,13 @@ class CUDACodeCache:
         return key, input_path
 
     @classmethod
-    def compile(cls, source_code, dst_file_ext) -> Tuple[str, str, str]:
+    def compile(
+        cls, source_code, dst_file_ext, extra_args: Optional[List[str]] = None
+    ) -> Tuple[str, str, str]:
         """
         Compiles CUDA source_code into a file with dst_file_ext extension.
         Returns a tuple of dst_file_path, hash_key, source_code_path
         """
-
         key, input_path = cls.write(source_code, dst_file_ext)
         if key not in cls.cache:
             from filelock import FileLock
@@ -2528,14 +2592,25 @@ class CUDACodeCache:
                 output_path = input_path[: -len(cls._SOURCE_CODE_SUFFIX)] + dst_file_ext
                 if not os.path.exists(output_path):
                     cmd = cuda_compile_command(
-                        [input_path], output_path, dst_file_ext
-                    ).split(" ")
+                        [input_path], output_path, dst_file_ext, extra_args
+                    )
+                    start_time = time()
+                    log.debug("CUDA Compilation: %s", cmd)
+                    cmd_parts = cmd.split(" ")
                     try:
                         subprocess.check_output(
-                            cmd, stderr=subprocess.STDOUT, env=os.environ
+                            cmd_parts, stderr=subprocess.STDOUT, env=os.environ
                         )
                     except subprocess.CalledProcessError as error:
-                        raise exc.CUDACompileError(cmd, error.output) from error
+                        raise exc.CUDACompileError(cmd_parts, error.output) from error
+                    end_time = time()
+                    log_duration_msg = f"CUDA Compilation took {end_time-start_time} seconds. Compile command: {cmd}"
+                    log.info(log_duration_msg)
+                else:
+                    log.debug(
+                        "CUDA Compilation skipped: %s since output already exists",
+                        input_path,
+                    )
                 cls.cache[key] = CUDACodeCache.CacheEntry(input_path, output_path)
 
         return (cls.cache[key].output_path, key, input_path)
@@ -2579,9 +2654,12 @@ def _set_triton_ptxas_path() -> None:
 
 
 def _worker_compile(
-    kernel_name: str, source_code: str, cc: int, device: torch.device
+    kernel_name: str,
+    source_code: str,
+    cc: int,
+    device: torch.device,
+    device_interface: Type[DeviceInterface],
 ) -> None:
-    device_interface = get_interface_for_device(device.type)
     device_interface.Worker.set_device(device.index)
     kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile(warm_cache_only_with_cc=cc)
@@ -2744,7 +2822,7 @@ class AsyncCompile:
             device = torch.device(device_str, device_interface.current_device())
             cc = device_interface.get_compute_capability(device)
             future = self.process_pool().submit(
-                _worker_compile, kernel_name, source_code, cc, device
+                _worker_compile, kernel_name, source_code, cc, device, device_interface
             )
             return TritonFuture(kernel_name, source_code, future)
         else:

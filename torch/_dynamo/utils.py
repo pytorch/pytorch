@@ -92,12 +92,12 @@ import importlib
 import torch
 import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
+import torch.utils._pytree as pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map_only
 from torch.utils._triton import has_triton, has_triton_package
 
 
@@ -1780,7 +1780,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:
-        _ = tree_map_only(
+        _ = pytree.tree_map_only(
             torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
         )
     return ret_val
@@ -1889,7 +1889,7 @@ def get_real_value(node, tracer):
 
 
 def assert_no_fake_params_or_buffers(gm):
-    from torch._subclasses.fake_tensor import FakeTensorConfig
+    from torch._subclasses.fake_tensor import FakeTensorConfig, is_fake
 
     def stack_or_hint(t):
         if FakeTensorConfig.debug:
@@ -1900,12 +1900,12 @@ def assert_no_fake_params_or_buffers(gm):
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
     for name, buffer in gm.named_buffers():
-        assert not isinstance(
-            buffer, torch._subclasses.FakeTensor
+        assert not is_fake(
+            buffer
         ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
     for name, param in gm.named_parameters():
-        assert not isinstance(
-            param, torch._subclasses.FakeTensor
+        assert not is_fake(
+            param
         ), f"Unexpected fake param {name} {stack_or_hint(param)}"
 
 
@@ -2625,3 +2625,53 @@ def nn_module_proxy(mod):
     proxy = mod.__class__.__new__(mod.__class__)
     proxy.__dict__ = mod.__dict__
     return proxy
+
+
+class GmWrapper(torch.nn.Module):
+    def __init__(self, gm, spec):
+        super().__init__()
+        self.gm = gm
+        self.spec = spec
+
+    def forward(self, *args):
+        args: List[Any] = list(args)
+        return self.gm(*pytree.tree_unflatten(args, self.spec))
+
+
+def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
+    """
+    Mutate inputs so that they are flat and wrap gm such that it
+    accepts those inputs.  This is needed for graphs that take
+    bumpy inputs.
+    """
+    inputs, spec = pytree.tree_flatten(inputs)
+    compiled_fn = compile_gm(GmWrapper(gm, spec), inputs)
+
+    idx_to_steal = [
+        i
+        for i, node in enumerate(gm.graph.nodes)
+        if node.op == "placeholder" and node.meta.get("steal_arg", False)
+    ]
+
+    def wrapper(*args):
+        # note this doesn't check the spec, assuming it is the same
+        flat_args = pytree.arg_tree_leaves(*args)
+
+        # flat_args is a new list, so we need to clear references from the old list
+        for i in idx_to_steal:
+            args[i].clear()
+
+        # this call is boxed to avoid increasing refcount until we reach aot_module_simplified forward
+        return compiled_fn(flat_args)
+
+    return wrapper
+
+
+def get_locals_to_steal(maybe_gm):
+    if not isinstance(maybe_gm, torch.fx.GraphModule) or not hasattr(maybe_gm, "meta"):
+        return []
+    return maybe_gm.meta.get("locals_to_steal", [])
+
+
+def set_locals_to_steal(gm, locals_to_steal):
+    gm.meta["locals_to_steal"] = locals_to_steal

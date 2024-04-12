@@ -17,6 +17,7 @@ from functorch import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._triton import has_triton
+from torch._inductor.utils import run_and_get_code
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -780,6 +781,81 @@ class TestOpWaitiness(MultiProcessTestCase):
         self.assertEqual(1, ft_c_impl._outstanding_wait_count())
         res = None
         self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+
+@instantiate_parametrized_tests
+class TestFunctionalAutograd(MultiThreadedTestCase):
+    def setUp(self):
+        super().setUp()
+        self._spawn_threads()
+
+    @property
+    def world_size(self):
+        return 2
+
+    @parametrize("compile", [True, False])
+    def test_all_to_all_single(self, compile: bool = True) -> None:
+        group = dist.group.WORLD.group_name
+
+        t = torch.rand((self.world_size, 2), requires_grad=True)
+
+        def my_func(t: torch.Tensor, world_size: int) -> torch.Tensor:
+            sizes = [1] * world_size
+            t = t * 10
+            assert t.requires_grad
+            out = ft_c.all_to_all_single_autograd(
+                t,
+                sizes,
+                sizes,
+                group
+            )
+            out = out + 2
+            return out
+
+        if compile:
+            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
+        else:
+            compiled = my_func
+
+        out = compiled(t, self.world_size)
+        self.assertIsNotNone(out.grad_fn)
+        self.assertTrue(out.requires_grad)
+        loss = out.sum()
+        loss.backward()
+        self.assertIsNotNone(t.grad)
+
+    def test_all_to_all_single_inductor(self) -> None:
+        group = dist.group.WORLD.group_name
+
+        t = torch.rand((self.world_size, 2), requires_grad=True)
+
+        def my_func(t: torch.Tensor, world_size: int) -> torch.Tensor:
+            sizes = [1] * world_size
+            t = t * 10
+            assert t.requires_grad
+            out = ft_c.all_to_all_single_autograd(
+                t,
+                sizes,
+                sizes,
+                group
+            )
+            out = out + 2
+            return out.sum()
+
+        compiled = torch.compile(my_func, fullgraph=True)
+
+        def run_with_backward():
+            out = compiled(t, self.world_size)
+            out.backward()
+
+        res, codes = run_and_get_code(run_with_backward)
+        for code in codes:
+            FileCheck().check_count(
+                "_c10d_functional.all_to_all_single.default", 1, exactly=True
+            ).check_count(
+                "_c10d_functional.wait_tensor.default", 1, exactly=True
+            ).run(code)
+
+        self.assertIsNotNone(t.grad)
 
 
 if __name__ == "__main__":
