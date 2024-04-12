@@ -266,24 +266,24 @@ void Dispatcher::deregisterDef_(
 
 namespace {
 
-using AbstractImplPyStubsType = std::unordered_map<at::OperatorName, std::pair<const char*, const char*>>;
-AbstractImplPyStubsType& abstractImplPyStubsSingleton() {
-  static AbstractImplPyStubsType _data;
+using PyStubsType = std::unordered_map<at::OperatorName, std::pair<const char*, const char*>>;
+PyStubsType& pyStubsSingleton() {
+  static PyStubsType _data;
   return _data;
 }
 
 }
 
-c10::optional<std::pair<const char*, const char*>> Dispatcher::getAbstractImplPyStub(OperatorName op_name) {
+c10::optional<std::pair<const char*, const char*>> Dispatcher::getPyStub(OperatorName op_name) {
   std::lock_guard<std::mutex> lock(guard_->mutex);
-  auto found = abstractImplPyStubsSingleton().find(op_name);
-  if (found == abstractImplPyStubsSingleton().end()) {
+  auto found = pyStubsSingleton().find(op_name);
+  if (found == pyStubsSingleton().end()) {
     return c10::nullopt;
   }
   return found->second;
 }
 
-RegistrationHandleRAII Dispatcher::registerAbstractImplPyStub(
+RegistrationHandleRAII Dispatcher::registerPyStub(
   const OperatorName& op_name,
   const char* pymodule,
   const char* context
@@ -292,28 +292,28 @@ RegistrationHandleRAII Dispatcher::registerAbstractImplPyStub(
   // If there are duplicates, we just let it through and warn about it.
   // Throwing an error during static initialization causes a crash that
   // doesn't give any sign of what happened.
-  auto found = abstractImplPyStubsSingleton().find(op_name);
-  if (found != abstractImplPyStubsSingleton().end()) {
+  auto found = pyStubsSingleton().find(op_name);
+  if (found != pyStubsSingleton().end()) {
     TORCH_WARN(
-        "Tried to register an abstract impl pystub for ", op_name, " ",
+        "Tried to register an python registration stub (pystub) for ", op_name, " ",
         "that specifies the Python module ", pymodule, " "
         "but there already was a pystub that specifies the Python module ",
         found->second.first, ". We will override the existing pystub.");
   }
-  abstractImplPyStubsSingleton()[op_name] = std::make_pair(pymodule, context);
+  pyStubsSingleton()[op_name] = std::make_pair(pymodule, context);
   return RegistrationHandleRAII([guard = this->guard_, op_name] {
     std::lock_guard<std::mutex> lock(guard->mutex);
     if (!guard->alive.load()) {
       return;
     }
-    abstractImplPyStubsSingleton().erase(op_name);
+    pyStubsSingleton().erase(op_name);
   });
 }
 
-void Dispatcher::throwIfHasAbstractImplPyStub(OperatorName op_name) {
+void Dispatcher::throwIfHasPyStub(OperatorName op_name) {
   std::lock_guard<std::mutex> lock(guard_->mutex);
-  auto elt = abstractImplPyStubsSingleton().find(op_name);
-  if (elt == abstractImplPyStubsSingleton().end()) {
+  auto elt = pyStubsSingleton().find(op_name);
+  if (elt == pyStubsSingleton().end()) {
     return;
   }
   const char* pymodule = elt->second.first;

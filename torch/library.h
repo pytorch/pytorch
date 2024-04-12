@@ -611,16 +611,21 @@ class TORCH_API Library final {
   }
 
   /// Declares that for all operators that are subsequently def'ed, their
-  /// abstract impls may be found in the given Python module (pymodule).
-  /// This registers some help text that is used if the abstract impl
+  /// fake impls may be found in the given Python module (pymodule).
+  /// This registers some help text that is used if the fake impl
   /// cannot be found.
   ///
   /// Args:
   /// - pymodule: the python module
   /// - context: We may include this in the error message.
-  Library& impl_abstract_pystub(const char* pymodule, const char* context = "") {
-    impl_abstract_pystub_ = {pymodule, context};
+  Library& has_python_registrations(const char* pymodule, const char* context = "") {
+    pystub_ = {pymodule, context};
     return *this;
+  }
+
+  /// Deprecated; use has_python_registrations instead
+  Library& impl_abstract_pystub(const char* pymodule, const char* context = "") {
+    return has_python_registrations(pymodule, context);
   }
 
   /// Define an operator for a schema and then register an implementation for
@@ -844,7 +849,7 @@ class TORCH_API Library final {
   Kind kind_;
   c10::optional<std::string> ns_;
   c10::optional<c10::DispatchKey> dispatch_key_;
-  c10::optional<std::pair<const char*, const char*>> impl_abstract_pystub_;
+  c10::optional<std::pair<const char*, const char*>> pystub_;
   const char* file_;
   uint32_t line_;
 
