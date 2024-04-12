@@ -1459,7 +1459,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         )
 
         fwd_src = AttrSource(self.parent_source, member="forward")
-        ctx = AutogradFunctionContextVariable.create(tx)
+        ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
         if isinstance(self.fwd_graph, types.FunctionType):
             fwd_fn = UserFunctionVariable(self.fwd_graph, source=fwd_src)
             fwd_args = [ctx, *args]
@@ -1549,10 +1549,9 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # This might be a behavior difference
 
         # Rewrite the output of fwd_graph to (output, stuff_necessary_for_bwd)
-        for node in fwd_graph.nodes:
-            if node.op == "output":
-                fwd_graph.erase_node(node)
-                break
+        for node in fwd_graph.find_nodes(op="output"):
+            fwd_graph.erase_node(node)
+            break
 
         new_fwd_graph_outputs = (fwd_out.as_proxy(), list(bwd_freevars.keys()))
         new_fwd_graph_outputs = pytree.tree_map(lambda x: x.node, new_fwd_graph_outputs)
