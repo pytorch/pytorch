@@ -1794,6 +1794,8 @@ def compile(model: Optional[Callable] = None, *,
             disable: builtins.bool = False) -> Callable:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
+    If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
+    to compile the module inplace without changing its structure.
 
     Concretely, for every frame executed within the compiled region, we will attempt
     to compile it and cache the compiled result on the code object for future
