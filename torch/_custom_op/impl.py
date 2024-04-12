@@ -882,11 +882,6 @@ SUPPORTED_RETURN_TYPES = {
 
 
 def parse_return(annotation, error_fn):
-    if annotation == inspect.Signature.empty:
-        error_fn(
-            "There was no return annotation. Please add one."
-        )
-
     if annotation is None:
         return "()"
 
