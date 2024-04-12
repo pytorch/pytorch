@@ -1,0 +1,8 @@
+BasedOnStyle: Google
+
+AlignOperands: false
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+BreakBeforeTernaryOperators: false
+ColumnLimit: 100
+PointerBindsToType: false

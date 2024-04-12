@@ -1,0 +1,25 @@
+name: Update viable/strict
+
+on:
+  schedule:
+    - cron: 17,47 * * * *
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  do_update_viablestrict:
+    if: ${{ github.repository_owner == 'pytorch' }}
+    runs-on: ubuntu-20.04
+    environment: ${{ (github.event_name == 'schedule') && 'mergebot' || '' }}
+    steps:
+      - name: Update viable/strict
+        uses: pytorch/test-infra/.github/actions/update-viablestrict@main
+        with:
+          repository: pytorch/pytorch
+          stable-branch: viable/strict
+          requires: '[\"pull\", \"trunk\", \"lint\", \"linux-binary\"]'
+          secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
+          rockset-api-key: ${{ secrets.ROCKSET_API_KEY }}
