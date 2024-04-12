@@ -467,7 +467,7 @@ class TestOperators(TestCase):
                 # Reduce into single value for grad
                 if isinstance(result, torch.Tensor):
                     return abs_if_complex(result.sum())
-                result = sum([abs_if_complex(res.sum()) for res in result])
+                result = sum(abs_if_complex(res.sum()) for res in result)
                 return result
 
             result = grad(wrapped_fn, diff_argnums)(*args, **kwargs)

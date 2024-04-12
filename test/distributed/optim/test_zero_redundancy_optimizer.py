@@ -530,7 +530,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             params.append(torch.rand(size, 1))
         o = ZeroRedundancyOptimizer(params, optimizer_class=SGD, lr=LR)
         self.assertEqual(
-            sum([x.numel() for x in o.optim.param_groups[0]["params"]]),
+            sum(x.numel() for x in o.optim.param_groups[0]["params"]),
             sum(sizes),
         )
 
@@ -567,7 +567,7 @@ class TestZeroRedundancyOptimizerDistributed(TestZeroRedundancyOptimizer):
             # all partitions have the same elements
             self.assertEqual(len(o.param_groups), 2)
             self.assertEqual(
-                sum([x.numel() for g in o.optim.param_groups for x in g["params"]]),
+                sum(x.numel() for g in o.optim.param_groups for x in g["params"]),
                 sum(sizes),
             )
             self.assertEqual(len(o.optim.param_groups), 2)

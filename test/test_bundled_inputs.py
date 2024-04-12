@@ -435,7 +435,7 @@ class TestBundledInputs(TestCase):
         # two args which have InflatableArg with fmt_fn
         # 1 * 2 * 2 = 4
         self.assertEqual(
-            sum([method.startswith("_inflate_helper") for method in methods]), 4
+            sum(method.startswith("_inflate_helper") for method in methods), 4
         )
 
 

@@ -715,7 +715,7 @@ class MixtureOfExperts(NestedWrappedModule):
         d_input = 8
         expert = _maybe_cuda(nn.Linear(d_expert, d_shared), self.move_to_cuda)
 
-        self.num_expert_params = sum([p.numel() for p in expert.parameters()])
+        self.num_expert_params = sum(p.numel() for p in expert.parameters())
         for p in expert.parameters():
             p.expert = True  # type: ignore[attr-defined]
 
