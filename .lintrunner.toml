@@ -1375,7 +1375,6 @@ exclude_patterns = [
     'test/test_modules.py',
     'test/test_monitor.py',
     'test/test_mps.py',
-    'test/test_multiprocessing.py',
     'test/test_multiprocessing_spawn.py',
     'test/test_namedtensor.py',
     'test/test_namedtuple_return_api.py',
