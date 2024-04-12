@@ -2666,20 +2666,19 @@ CPU_TEST_FAILURES = {
     # The same issue as https://github.com/pytorch/pytorch/issues/122978
     "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(is_skip=True),
     # the test segfaults
-    "test_repeat_output": fail_stack_allocation(is_skip=True),
     "test_view_outputs": fail_stack_allocation(is_skip=True),
     "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
     "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
     "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
     "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
-    "test_scatter_fallback": fail_stack_allocation(is_skip=True),
+    # GOOD? "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
+    # FIXED "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
     # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    "test_index_put_fallback": fail_stack_allocation(is_skip=True),
+    # FIXED "test_index_put_fallback": fail_stack_allocation(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122984
-    "test_index_put_with_none_index": fail_stack_allocation(is_skip=True),
+    # FIXED "test_index_put_with_none_index": fail_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_constant": fail_stack_allocation(is_skip=True),
     # C++ compile error, need for aoti_torch___scaled_dot_product_flash_attention_for_cpu
