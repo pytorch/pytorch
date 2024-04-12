@@ -7,7 +7,7 @@ import operator
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -103,7 +103,9 @@ def make_boxed_compiler(compiler):
     return f
 
 
-def call_func_at_runtime_with_args(f, args, steal_args=False, disable_amp=False):
+def call_func_at_runtime_with_args(
+    f, args: Union[Tuple[Any], List[Any]], steal_args=False, disable_amp=False
+):
     if not steal_args:
         args = list(args)
     assert isinstance(args, list)
