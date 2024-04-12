@@ -412,6 +412,13 @@ class TestMakeFx(MultiThreadedTestCase):
         super().setUp()
         self._spawn_threads()
 
+    def tearDown(self):
+        super().tearDown()
+
+        # race condition with threads causes is_fx_tracing flag to be set incorrectly.
+        torch.fx._symbolic_trace._is_fx_tracing_flag = False
+        self.assertFalse(torch.fx._symbolic_trace.is_fx_tracing())
+
     @run_with_both_funcol_impls_with_arg
     def test_all_reduce_tracing(self, use_native_funcol):
 
