@@ -307,7 +307,7 @@ class TestLazyModules(TestCase):
                               (32, 2), (192, 16, 50), (16, 32, 2), (32,))
 
     @suppress_warnings
-    def test_lazy_conv_tranpose1d_kwargs(self):
+    def test_lazy_conv_transpose1d_kwargs(self):
         self._check_lazy_conv(nn.ConvTranspose1d, nn.LazyConvTranspose1d, torch.nn.functional.conv_transpose1d,
                               (32, 2), (192, 16, 50), (16, 32, 2), (32,), output_size=(51,))
 
