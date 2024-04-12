@@ -1,10 +1,10 @@
 # mypy: ignore-errors
-
 import collections
 import dataclasses
 import functools
 import inspect
 import itertools
+import re
 import sys
 import types
 from typing import Dict, List
@@ -995,3 +995,65 @@ class StopIterationVariable(VariableTracker):
         codegen.load_import_from("builtins", "StopIteration")
         codegen.foreach(self.args)
         codegen.call_function(len(self.args), True)
+
+
+class ConstantLikeVariable(VariableTracker):
+    """self.value is a compile-time constant, but not a literal"""
+
+    _error_prefix = "ConstantLikeVariable"
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def python_type(self):
+        return type(self.value)
+
+    def as_python_constant(self):
+        return self.value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        try:
+            # we only support constant propagation for methods
+            cargs = [x.as_python_constant() for x in args]
+            ckwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except NotImplementedError:
+            unimplemented(f"{self._error_prefix}.{name}(*{args}, **{kwargs})")
+
+        result = getattr(self.value, name)(*cargs, **ckwargs)
+
+        if variables.ConstantVariable.is_literal(result):
+            return variables.ConstantVariable.create(result)
+        if isinstance(result, re.Match):
+            return ConstantRegexMatchVariable(result)
+
+        unimplemented(f"{self._error_prefix}.{name}() -> {result}")
+
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        result = getattr(self.value, name)
+        if variables.ConstantVariable.is_literal(result):
+            return variables.ConstantVariable.create(result)
+        return GetAttrVariable(self, name)
+
+
+class RegexPatternVariable(ConstantLikeVariable):
+    _error_prefix = "re.Pattern"
+
+
+class ConstantRegexMatchVariable(ConstantLikeVariable):
+    _error_prefix = "re.Match"
+
+
+class TorchVersionVariable(ConstantLikeVariable):
+    _error_prefix = "torch.__version__"
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("value", torch.__version__)
+        assert kwargs["value"] is torch.__version__
+        super().__init__(**kwargs)
