@@ -14,7 +14,6 @@ from torch.testing._internal.common_cuda import SM75OrLater, SM80OrLater, SM90Or
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    skipIfRocm,
 )
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -27,6 +26,11 @@ _CUTLASS_DIR = os.path.join(os.path.dirname(__file__), "../../third_party/cutlas
 
 log = logging.getLogger(__name__)
 
+HAS_CUDA = HAS_CUDA and not torch.version.hip
+SM75OrLater = SM75OrLater and not torch.version.hip
+SM80OrLater = SM80OrLater and not torch.version.hip
+SM90OrLater = SM90OrLater and not torch.version.hip
+
 
 def _get_path_without_sccache() -> str:
     """
@@ -37,7 +41,6 @@ def _get_path_without_sccache() -> str:
     return ":".join(path_envs)
 
 
-@skipIfRocm
 @instantiate_parametrized_tests
 class TestCutlassBackend(TestCase):
     def setUp(self):

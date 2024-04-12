@@ -564,20 +564,18 @@ class TestUtils(TestCase):
         b = torch.rand(10)
 
         with fresh_inductor_cache():
+            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
             res1 = torch.compile(fn)(a, b)
             cache_dir1 = cache_dir()
-            pycodecache_keys1 = list(PyCodeCache.cache.keys())
 
         torch._dynamo.reset()
         with fresh_inductor_cache():
+            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
             res2 = torch.compile(fn)(a, b)
             cache_dir2 = cache_dir()
-            pycodecache_keys2 = list(PyCodeCache.cache.keys())
 
         self.assertEqual(res1, res2)
         self.assertNotEqual(cache_dir1, cache_dir2)
-        self.assertTrue(all(k not in pycodecache_keys2 for k in pycodecache_keys1))
-        self.assertTrue(all(k not in pycodecache_keys1 for k in pycodecache_keys2))
 
 
 if __name__ == "__main__":

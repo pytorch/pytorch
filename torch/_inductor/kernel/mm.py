@@ -183,7 +183,13 @@ def _is_static_problem(inputs_tensors, layout):
     static_shape = True
     static_size = WrapperCodeGen.statically_known_list_of_ints_or_none(layout.size)
     if static_size is None:
-        return False, True
+        nonzero = True
+        for s in layout.size:
+            sz = WrapperCodeGen.statically_known_int_or_none(s)
+            if sz is not None and sz == 0:
+                nonzero = False
+                break
+        return False, nonzero
     numel = 1
     for dim in static_size:
         numel *= dim

@@ -16,6 +16,7 @@ import torch._logging
 import torch.fx
 from torch._decomp import get_decompositions
 from torch._dynamo.utils import defake, dynamo_timed
+from torch._higher_order_ops.effects import _EffectType
 from torch._logging import LazyString, trace_structured
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
@@ -209,6 +210,11 @@ class GraphLowering(torch.fx.Interpreter):
                 "cuda", CUDACombinedScheduling, WrapperCodeGen, CppWrapperCuda
             )
 
+        if get_scheduling_for_device("xpu") is None:
+            from .codegen.triton import TritonScheduling
+
+            register_backend_for_device("xpu", TritonScheduling, WrapperCodeGen)
+
     def __init__(
         self,
         gm: torch.fx.GraphModule,
@@ -327,6 +333,8 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.allocated_constant_name if const_module is not None else {}
         )
         self.init_backend_registration()
+
+        self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
 
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
@@ -630,7 +638,10 @@ class GraphLowering(torch.fx.Interpreter):
         self.buffers.append(buffer)
         self.name_to_buffer[name] = buffer
         # Skip empty CPU tensor so that CUDA graphs can succeed, see https://github.com/pytorch/pytorch/pull/114144
-        if not isinstance(buffer, ir.ComputedBuffer) or not buffer.is_zero_elements():
+        if (
+            not (isinstance(buffer, ir.ComputedBuffer) and buffer.is_zero_elements())
+            and buffer.get_device() is not None
+        ):
             self.add_device_info(buffer.get_device())
         return name
 
@@ -906,6 +917,7 @@ class GraphLowering(torch.fx.Interpreter):
                     sympy.Expr,
                     sympy.logic.boolalg.Boolean,
                     int,
+                    ir.EffectfulKernel,
                 ),
             )
             for x in result
@@ -1287,6 +1299,25 @@ class GraphLowering(torch.fx.Interpreter):
             else:
                 real_inputs = [materialize(x) for x in V.real_inputs]
 
+            if self.mutated_inputs:
+                from .compile_fx import clone_preserve_strides
+
+                mutated_input_idxs = [
+                    idx
+                    for idx, name in enumerate(self.graph_inputs)
+                    if name in self.mutated_inputs
+                    and isinstance(real_inputs[idx], torch.Tensor)
+                ]
+                for idx in mutated_input_idxs:
+                    # clone mutated Tensor inputs to avoid mutating them in
+                    # the first pass of the CPP wrapper-based compilation, as
+                    # this will lead to a side effect on the example inputs:
+                    # e.g. if torch.compile(f)(x) if called on input-mutating
+                    # f, the inputs x will be mutated twice in the process:
+                    # once here, and again when running the compiled model;
+                    # this will also lead to a numerically incorrect output
+                    real_inputs[idx] = clone_preserve_strides(real_inputs[idx])
+
             with torch.utils._python_dispatch._disable_current_modes():
                 assert self.example_inputs is not None
                 compiled(real_inputs)
@@ -1297,6 +1328,8 @@ class GraphLowering(torch.fx.Interpreter):
             self.cpp_wrapper = True
             self.removed_buffers.clear()
             self.inplaced_to_remove.clear()
+            V.graph.sizevars.precomputed_replacements.clear()
+            V.graph.sizevars.inv_precomputed_replacements.clear()
             return self.codegen()
         else:
             # cpu
