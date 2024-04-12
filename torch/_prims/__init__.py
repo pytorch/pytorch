@@ -212,6 +212,11 @@ __all__ = [
     "fft_r2c",
     "fft_c2c",
     "fft_c2r",
+    #
+    # prims for making/sinking tokens
+    #
+    "_make_token",
+    "_sink_tokens",
 ]
 
 
@@ -3026,6 +3031,33 @@ frexp = _make_prim(
     impl_aten=torch.frexp,
     doc="",
 )
+
+
+def _make_token_aten() -> TensorLikeType:
+    return torch.empty(0)
+
+
+_make_token = _make_prim(
+    schema="_make_token() -> Tensor",
+    meta=_make_token_aten,
+    return_type=RETURN_TYPE.NEW,
+    impl_aten=_make_token_aten,
+    doc="Creates a token used for keeping track of side effects.",
+)
+
+
+def _sink_tokens_aten(tokens) -> None:
+    pass
+
+
+_sink_tokens = _make_prim(
+    schema="_sink_tokens(Tensor[] tokens) -> ()",
+    meta=_sink_tokens_aten,
+    return_type=RETURN_TYPE.NONE,
+    impl_aten=_sink_tokens_aten,
+    doc="Sink all of the tokens which were previously used for keeping track of side effects.",
+)
+
 
 register_rng_prims()
 register_debug_prims()
