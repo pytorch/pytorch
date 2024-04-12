@@ -6,7 +6,6 @@ import functools
 import gc
 import importlib
 import itertools
-import json
 import math
 import operator
 import os
@@ -41,7 +40,6 @@ from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
-    cache_dir,
     run_and_get_code,
     run_and_get_triton_code,
 )
@@ -802,14 +800,12 @@ class CommonTemplate:
             for _op_name in op_set:
                 qualified_op_name = f"{namespace_name}::{_op_name}"
                 _, overload_names = torch._C._jit_get_operation(qualified_op_name)
+                fallback_fn = make_elementwise(_op_name)
                 for overload_name in overload_names:
                     try:
                         schema = torch._C._get_schema(qualified_op_name, overload_name)
-                        reg_name = schema.name
-                        if schema.overload_name:
-                            reg_name = f"{reg_name}.{schema.overload_name}"
-                        torch_compile_op_lib_impl._impl_by_aoti(  # noqa: F821
-                            reg_name, make_elementwise(_op_name), dispatch_key
+                        torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
+                            schema.name, schema.overload_name, dispatch_key, fallback_fn
                         )
                     except Exception as e:
                         continue
@@ -821,7 +817,7 @@ class CommonTemplate:
             for unary_op_name in unary_op_set:
                 res_array.append(getattr(torch, unary_op_name)(x))
 
-            self.assertEqual(invoke_count, unary_op_set.__len__())
+            self.assertTrue(invoke_count == 0)
             for ref, res in zip(ref_array, res_array):
                 self.assertEqual(ref, res)
 
@@ -4002,28 +3998,6 @@ class CommonTemplate:
         self.common(fn, (torch.randn([2, 8]),))
         # Unrolled reduction
         self.common(fn, (torch.randn([2, 4]),))
-
-    def test_torch_compile_kernel_wrapper_separation(self):
-        def fn(x):
-            return torch.neg(x)
-
-        x = torch.randn(3, 4)
-        opt_fn = torch.compile(fn)
-        with config.patch(
-            {"aot_inductor.eager_mode": True, "aot_inductor.eager_op_name": "neg"}
-        ):
-            with config.patch({"cpp_wrapper": True}):
-                self.assertEqual(opt_fn(x), fn(x))
-
-                aten_eager_conf = os.path.join(cache_dir(), "aten_eager", "neg.json")
-                self.assertTrue(os.path.exists(aten_eager_conf))
-                with open(aten_eager_conf) as f:
-                    neg_kernel_conf = json.load(f)
-                    self.assertTrue(isinstance(neg_kernel_conf, list))
-                    self.assertTrue(len(neg_kernel_conf) > 0)
-                    self.assertTrue("meta_info" in neg_kernel_conf[0])
-                    self.assertTrue("kernel_path" in neg_kernel_conf[0])
-                    self.assertTrue(os.path.exists(neg_kernel_conf[0]["kernel_path"]))
 
     @config.patch(pick_loop_orders=True)
     def test_transposed_propagates(self):
