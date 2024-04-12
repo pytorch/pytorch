@@ -6,7 +6,7 @@
 #include <torch/csrc/profiler/unwind/unwind.h>
 
 namespace torch {
-namespace unwind {
+namespace torch::unwind {
 
 std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   static std::mutex symbolize_mutex;
@@ -38,7 +38,7 @@ std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   return results;
 }
 
-} // namespace unwind
+} // namespace torch::unwind
 } // namespace torch
 
 #endif

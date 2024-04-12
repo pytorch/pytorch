@@ -1,6 +1,7 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
 #include <torch/csrc/utils/cpp_stacktraces.h>
+#include <unordered_map>
 
 #if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
     !__has_include("ext/stdio_filebuf.h")
@@ -48,10 +49,15 @@ Stats stats() {
 #include <torch/csrc/profiler/unwind/communicate.h>
 #include <torch/csrc/profiler/unwind/dwarf_enums.h>
 #include <torch/csrc/profiler/unwind/eh_frame_hdr.h>
+#include <torch/csrc/profiler/unwind/fast_symbolizer.h>
 #include <torch/csrc/profiler/unwind/fde.h>
 #include <torch/csrc/profiler/unwind/unwinder.h>
 #include <shared_mutex>
 
+extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp);
+extern "C" void unwind_entry(std::vector<void*>* result);
+
+namespace torch::unwind {
 struct UpgradeExclusive {
   UpgradeExclusive(std::shared_lock<std::shared_timed_mutex>& rdlock)
       : rdlock_(rdlock) {
@@ -197,7 +203,7 @@ struct UnwindCache {
     Unwinder unwinder = Unwinder::unknown();
     try {
       unwinder = libraryFor(addr).unwinderFor(addr);
-    } catch (UnwindError& err) {
+    } catch (unwind::UnwindError& err) {
       // because unwinders are cached this will only print
       // once per frame that cannot be unwound.
       TORCH_WARN("Unsupported unwinding pattern: ", err.what());
@@ -276,46 +282,6 @@ struct UnwindCache {
 static UnwindCache unwind_cache;
 static std::shared_timed_mutex cache_mutex_;
 
-extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp);
-extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
-  std::shared_lock lock(cache_mutex_);
-  UnwindState state{};
-  // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  state.rip = *(int64_t*)(rsp);
-  // +8 because we saved rsp after the return address was already pushed
-  // to the stack
-  state.rsp = rsp + 8;
-  state.rbp = rbp;
-  unwind_cache.checkRefresh(lock);
-  while (true) { // unwind for _start sets rip as being undefined
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    result->push_back((void*)state.rip);
-    const Unwinder& uw = unwind_cache.unwinderFor(state.rip, lock);
-    if (uw.terminator()) {
-      if (uw.isUnknown()) {
-        result->push_back(nullptr);
-      }
-      break;
-    }
-    state = uw.run(state);
-  }
-}
-
-extern "C" void unwind_entry(std::vector<void*>* result);
-
-// calling convention puts the first three pointer/int64_t arguments in
-// rdi rsi rdx (all caller-saved)
-// rdi already holds the pointer to the result vector
-// we add arguments for current rsp and rbp and then tail call
-// into unwind_c
-__asm__(
-    ".global unwind_entry\n"
-    "unwind_entry:\n"
-    "mov %rsp, %rsi;\n"
-    "mov %rbp, %rdx;\n"
-    "jmp unwind_c;\n");
-
-namespace torch::unwind {
 std::vector<void*> unwind() {
   std::vector<void*> frames;
   unwind_entry(&frames);
@@ -335,6 +301,15 @@ c10::optional<std::pair<std::string, uint64_t>> libraryFor(void* addr) {
       library_info->name(), (uint64_t)addr - library_info->load_bias());
 }
 
+static std::string dladdr_lookup(void* addr) {
+  Dl_info dlinfo;
+  std::string funcname = "??";
+  if (dladdr(addr, &dlinfo) && dlinfo.dli_sname) {
+    funcname = demangle(dlinfo.dli_sname);
+  }
+  return funcname;
+}
+
 struct Symbolizer {
   Symbolizer() {
     auto envar = std::getenv("TORCH_ADDR2LINE_BINARY");
@@ -345,7 +320,7 @@ struct Symbolizer {
     } else {
       addr2line_binary_ = "addr2line"; // default
     }
-    if (torch::get_disable_addr2line()) {
+    if (torch::get_symbolize_mode() == torch::SymbolizeMode::dladdr) {
       addr2line_binary_ = nullptr;
     }
   }
@@ -368,19 +343,16 @@ struct Symbolizer {
       return;
     }
     if (addr2line_binary_ == nullptr) {
-      Dl_info dlinfo;
-      std::string funcname = "??";
-      if (dladdr(addr, &dlinfo) && dlinfo.dli_sname) {
-        funcname = demangle(dlinfo.dli_sname);
-      }
       frame_map_[addr] = Frame{
-          maybe_library->first, std::move(funcname), maybe_library->second - 1};
+          maybe_library->first, dladdr_lookup(addr), maybe_library->second - 1};
       return;
     }
     has_pending_results_ = true;
     auto& entry = getOrCreate(maybe_library->first);
     entry.queried.push_back(addr);
     auto libaddress = maybe_library->second - 1;
+    std::cout << maybe_library->first << " " << std::hex << libaddress
+              << std::dec << "\n";
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     entry.comm->out() << (void*)libaddress << "\n";
     // we need to make sure we don't write more than 64k bytes to
@@ -448,23 +420,51 @@ struct Symbolizer {
       frame_map_[e.queried[e.completed]] = std::move(frame);
     }
   }
-  std::string demangle(const std::string& mangled_name) {
-    int status = 0;
-    char* realname =
-        abi::__cxa_demangle(mangled_name.c_str(), nullptr, nullptr, &status);
-    if (status == 0) {
-      std::string demangled_name(realname);
-      // NOLINTNEXTLINE
-      free(realname);
-      return demangled_name;
-    } else {
-      return mangled_name;
-    }
-  }
 };
 
-#ifndef FBCODE_CAFFE2
-std::vector<Frame> symbolize(const std::vector<void*>& frames) {
+std::vector<Frame> symbolize_fast(const std::vector<void*>& frames) {
+  static std::mutex cache_mutex;
+  static ska::flat_hash_map<void*, Frame> frame_map;
+
+  std::vector<uint32_t> indices_to_lookup;
+  std::vector<Frame> results;
+  results.reserve(frames.size());
+  {
+    std::lock_guard<std::mutex> lock(cache_mutex);
+    for (auto i : c10::irange(frames.size())) {
+      void* f = frames.at(i);
+      auto it = frame_map.find(f);
+      if (it == frame_map.end()) {
+        indices_to_lookup.push_back(i);
+        results.emplace_back(Frame{"??", "??", 0});
+      } else {
+        results.emplace_back(it->second);
+      }
+    }
+  }
+  if (!indices_to_lookup.empty()) {
+    // do symbolizer work
+    FastSymbolizer symbolizer;
+    for (auto i : indices_to_lookup) {
+      void* addr = frames.at(i);
+      Frame& f = results.at(i);
+      auto library = libraryFor(frames.at(i));
+      if (library) {
+        f = symbolizer.symbolize(library->first, library->second - 1);
+      }
+      if (f.funcname == "??") {
+        f.funcname = dladdr_lookup(addr);
+      }
+    }
+    std::lock_guard<std::mutex> lock(cache_mutex);
+    for (auto i : indices_to_lookup) {
+      frame_map.emplace(frames.at(i), results.at(i));
+    }
+  }
+  return results;
+}
+
+std::vector<Frame> symbolize_addr2line(const std::vector<void*>& frames) {
   auto guard = Symbolizer::guard();
   Symbolizer& s = Symbolizer::get();
   for (auto f : frames) {
@@ -477,6 +477,16 @@ std::vector<Frame> symbolize(const std::vector<void*>& frames) {
   }
   return results;
 }
+
+// fbcode will use llvm symbolize since there is an llvm dependency already
+#ifndef FBCODE_CAFFE2
+std::vector<Frame> symbolize(const std::vector<void*>& frames) {
+  if (torch::get_symbolize_mode() == torch::SymbolizeMode::fast) {
+    return symbolize_fast(frames);
+  }
+  // also handles dladdr mode by no-oping the addr2line call.
+  return symbolize_addr2line(frames);
+}
 #endif
 
 Stats stats() {
@@ -484,4 +494,42 @@ Stats stats() {
 }
 
 } // namespace torch::unwind
+
+extern "C" void unwind_c(std::vector<void*>* result, int64_t rsp, int64_t rbp) {
+  std::shared_lock lock(torch::unwind::cache_mutex_);
+  torch::unwind::UnwindState state{};
+  // NOLINTNEXTLINE(performance-no-int-to-ptr)
+  state.rip = *(int64_t*)(rsp);
+  // +8 because we saved rsp after the return address was already pushed
+  // to the stack
+  state.rsp = rsp + 8;
+  state.rbp = rbp;
+  torch::unwind::unwind_cache.checkRefresh(lock);
+  while (true) { // unwind for _start sets rip as being undefined
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    result->push_back((void*)state.rip);
+    const torch::unwind::Unwinder& uw =
+        torch::unwind::unwind_cache.unwinderFor(state.rip, lock);
+    if (uw.terminator()) {
+      if (uw.isUnknown()) {
+        result->push_back(nullptr);
+      }
+      break;
+    }
+    state = uw.run(state);
+  }
+}
+
+// calling convention puts the first three pointer/int64_t arguments in
+// rdi rsi rdx (all caller-saved)
+// rdi already holds the pointer to the result vector
+// we add arguments for current rsp and rbp and then tail call
+// into unwind_c
+__asm__(
+    ".global unwind_entry\n"
+    "unwind_entry:\n"
+    "mov %rsp, %rsi;\n"
+    "mov %rbp, %rdx;\n"
+    "jmp unwind_c;\n");
+
 #endif

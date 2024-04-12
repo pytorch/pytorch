@@ -1,19 +1,32 @@
 #pragma once
 #include <stdint.h>
 #include <string.h>
+#include <cstdint>
+#include <utility>
 
 #include <torch/csrc/profiler/unwind/dwarf_enums.h>
 #include <torch/csrc/profiler/unwind/unwind_error.h>
 
-struct Lexer {
-  Lexer(void* data, void* base = nullptr)
-      : next_((const char*)data), base_((int64_t)base) {}
+namespace torch::unwind {
+
+template <bool checked>
+struct LexerImpl {
+  LexerImpl(void* data, void* base = nullptr, void* end = nullptr)
+      : next_((const char*)data),
+        base_((int64_t)base),
+        end_((const char*)end) {}
 
   template <typename T>
   T read() {
     T result;
+    auto end = next_ + sizeof(T);
+    UNWIND_CHECK(
+        !checked || end <= end_,
+        "read out of bounds {} >= {}",
+        (void*)end,
+        (void*)end_);
     memcpy(&result, next_, sizeof(T));
-    next_ += sizeof(T);
+    next_ = end;
     return result;
   }
 
@@ -56,8 +69,17 @@ struct Lexer {
   }
   const char* readCString() {
     auto result = next_;
-    next_ += strlen(next_) + 1;
-    return result;
+    if (!checked) {
+      next_ += strlen(next_) + 1;
+      return result;
+    }
+    while (next_ < end_) {
+      if (*next_++ == '\0') {
+        return result;
+      }
+    }
+    UNWIND_CHECK(
+        false, "string is out of bounds {} >= {}", (void*)next_, (void*)end_);
   }
   int64_t readEncoded(uint8_t enc) {
     int64_t r = 0;
@@ -81,17 +103,23 @@ struct Lexer {
     }
     return readEncoded(enc);
   }
+
   int64_t read4or8Length() {
+    return readSectionLength().first;
+  }
+
+  std::pair<int64_t, bool> readSectionLength() {
     int64_t length = read<uint32_t>();
     if (length == 0xFFFFFFFF) {
-      length = read<int64_t>();
+      return std::make_pair(read<int64_t>(), true);
     }
-    return length;
+    return std::make_pair(length, false);
   }
+
   void* loc() const {
     return (void*)next_;
   }
-  Lexer& skip(int64_t bytes) {
+  LexerImpl& skip(int64_t bytes) {
     next_ += bytes;
     return *this;
   }
@@ -121,4 +149,10 @@ struct Lexer {
  private:
   const char* next_;
   int64_t base_;
+  const char* end_;
 };
+
+using Lexer = LexerImpl<false>;
+using CheckedLexer = LexerImpl<true>;
+
+} // namespace torch::unwind

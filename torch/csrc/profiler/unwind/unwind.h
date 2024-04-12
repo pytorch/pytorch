@@ -4,8 +4,7 @@
 #include <string>
 #include <vector>
 
-namespace torch {
-namespace unwind {
+namespace torch::unwind {
 // gather current stack, relatively fast.
 // gets faster once the cache of program counter locations is warm.
 TORCH_API std::vector<void*> unwind();
@@ -36,5 +35,4 @@ struct Stats {
 };
 Stats stats();
 
-} // namespace unwind
-} // namespace torch
+} // namespace torch::unwind

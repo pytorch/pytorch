@@ -47,9 +47,31 @@ bool get_cpp_stacktraces_enabled() {
   return enabled;
 }
 
-bool get_disable_addr2line() {
-  static bool disabled = compute_disable_addr2line();
-  return disabled;
+SymbolizeMode compute_symbolize_mode() {
+  auto envar_c = std::getenv("TORCH_SYMBOLIZE_MODE");
+  if (envar_c) {
+    std::string envar = envar_c;
+    if (envar == "dladdr") {
+      return SymbolizeMode::dladdr;
+    } else if (envar == "addr2line") {
+      return SymbolizeMode::addr2line;
+    } else if (envar == "fast") {
+      return SymbolizeMode::fast;
+    } else {
+      TORCH_CHECK(
+          false,
+          "expected {dladdr, addr2line, fast} for TORCH_SYMBOLIZE_MODE, got ",
+          envar);
+    }
+  } else {
+    return compute_disable_addr2line() ? SymbolizeMode::dladdr
+                                       : SymbolizeMode::fast;
+  }
+}
+
+SymbolizeMode get_symbolize_mode() {
+  static SymbolizeMode mode = compute_symbolize_mode();
+  return mode;
 }
 
 } // namespace torch
