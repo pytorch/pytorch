@@ -119,16 +119,7 @@ class FakeTensorUpdater:
             if new.device != old.device:
                 return False
 
-            if get_storage(new) == get_storage(old):
-                return True
-
-            # This is the case where it returns a completely fresh storage that's used nowhere else.
-            if (
-                existing_storages[get_storage(old)] == 1
-                and get_storage(new) not in existing_storages
-            ):
-                return True
-            return False
+            return True
 
         def should_process_node(node):
             # node.target for nodes returning true from this function
