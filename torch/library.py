@@ -124,18 +124,15 @@ class Library:
         return result
 
     def _impl_with_aoti_compile(self, op_name, op_overload_name, dispatch_key='', fallback_fn=None):
-        r'''Registers the function implementation for an operator defined in the library through aot inductor.
-
-        Register a function implementation for a specific operator,
-        which the AOT inductor attempts to optimize it by generating a specialized kernel. If the AOT inductor
-        fails to generate the required kernel, the fallback_fn will be invoked if it is not NONE.
+        r'''Implements an operator by aoti and registers the aoti implementation for the operator defined in the library.
 
         Args:
-            op_name: operator name (along with the overload) or OpOverload object.
-            fallback_fn: A user-defined function that serves as a backup if the AOT inductor fails to produce a kernel.
-                         This ensures that the operation can still be executed, albeit potentially less efficiently.
+            op_name: operator name
+            op_overload_name: operator overload name
             dispatch_key: dispatch key that the input function should be registered for. By default, it uses
                           the dispatch key that the library was created with.
+            fallback_fn: A user-defined function that serves as a fallback if the AOT inductor fails to produce a kernel.
+                         This ensures that the operation can still be executed, albeit potentially less efficiently.
 
         Example::
             >>> my_lib = Library("aten", "IMPL")
