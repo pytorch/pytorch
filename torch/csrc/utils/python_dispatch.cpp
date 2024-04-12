@@ -341,22 +341,34 @@ void initDispatchBindings(PyObject* module) {
           py::arg("dispatch") = "",
           py::arg("debug") = "impl_t_t")
       .def(
-          "impl_by_aoti",
+          "impl_with_aoti_compile",
           [](const py::object& self,
              const char* ns,
              const char* op_name,
+             const char* op_overload_name,
              c10::DispatchKey dispatch,
              py::object fall_back_func) {
             HANDLE_TH_ERRORS
+            std::string str_op_name(op_name);
+            if (op_overload_name != nullptr) {
+              std::string str_op_overload_name(op_overload_name);
+              if (!str_op_overload_name.empty()) {
+                str_op_name.append(".").append(str_op_overload_name);
+              }
+            }
             auto& lib = self.cast<torch::Library&>();
             lib.impl(
-                op_name,
+                str_op_name.c_str(),
                 torch::dispatch(
                     dispatch,
                     CppFunction::makeFromBoxedFunctor(
                         std::make_unique<
                             torch::inductor::AOTIPythonKernelHolder>(
-                            fall_back_func, dispatch, ns, op_name))),
+                            fall_back_func,
+                            dispatch,
+                            ns,
+                            op_name,
+                            op_overload_name))),
                 register_or_verify());
             python_registrations_[lib._resolve(op_name)].insert_or_assign(
                 dispatch,
@@ -367,6 +379,7 @@ void initDispatchBindings(PyObject* module) {
           "",
           py::arg("ns"),
           py::arg("op_name"),
+          py::arg("op_overload_name"),
           py::arg("dispatch"),
           py::arg("fall_back_func"))
       .def(
