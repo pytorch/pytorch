@@ -21,8 +21,12 @@ class AOTIRunnerUtil:
         dynamic_shapes=None,
         disable_constraint_solver=False,
     ):
-        return torch._inductor.aot_utils._aot_compile(
-            model, example_inputs, options, dynamic_shapes, disable_constraint_solver
+        return torch._export.aot_compile(
+            model,
+            example_inputs,
+            options=options,
+            dynamic_shapes=dynamic_shapes,
+            disable_constraint_solver=disable_constraint_solver,
         )
 
     @classmethod

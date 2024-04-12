@@ -4,7 +4,6 @@
 #include <ATen/ATen.h>
 #include <c10/core/SymIntArrayRef.h>
 
-#include <nlohmann/json.hpp>
 #include <string>
 
 namespace torch::inductor {
@@ -12,12 +11,11 @@ namespace torch::inductor {
 class TensorChecker;
 
 struct TensorMetaInfo {
-  bool is_symbolic;
-  c10::ScalarType dtype;
-  c10::Device device;
-  std::vector<c10::SymInt> sizes;
-  std::vector<c10::SymInt> strides;
-  std::shared_ptr<TensorChecker> tensor_checker;
+  bool is_symbolic_;
+  c10::ScalarType dtype_;
+  c10::Device device_;
+  std::vector<c10::SymInt> sizes_;
+  std::vector<c10::SymInt> strides_;
 
   TensorMetaInfo(const at::Tensor& src_tensor);
   TensorMetaInfo(
@@ -28,9 +26,6 @@ struct TensorMetaInfo {
       std::vector<c10::SymInt> strides);
 
   bool operator==(const TensorMetaInfo& other) const;
-  static bool sanityCheck(const TensorMetaInfo& tensor_meta_info);
-  static std::vector<TensorMetaInfo> loadFromFile(
-      const std::vector<nlohmann::json>&);
 };
 
 struct TensorMetaInfoHash {
