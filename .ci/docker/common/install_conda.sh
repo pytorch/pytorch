@@ -28,7 +28,7 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
   pushd /tmp
-  wget -q "${BASE_URL}/${CONDA_FILE}"
+  wget -q "${BASE_URL}/${CONDA_FILE}" --no-check-certificate
   # NB: Manually invoke bash per https://github.com/conda/conda/issues/10431
   as_jenkins bash "${CONDA_FILE}" -b -f -p "/opt/conda"
   popd
