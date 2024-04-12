@@ -227,6 +227,7 @@ manual_torch_name_rule_map = {
     "torch._functorch.deprecated.hessian": UserFunctionVariable,
     "torch._functorch.deprecated.jacfwd": UserFunctionVariable,
     "torch._functorch.deprecated.jacrev": UserFunctionVariable,
+    "torch._functorch.deprecated.grad": UserFunctionVariable,
     "torch._functorch.deprecated.grad_and_value": UserFunctionVariable,
     "torch._functorch.deprecated.vjp": UserFunctionVariable,
     #
@@ -1496,7 +1497,9 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._sparse_csr_prod",
         "torch._sparse_csr_sum",
         "torch._sparse_log_softmax_backward_data",
+        "torch._sparse_semi_structured_addmm",
         "torch._sparse_semi_structured_linear",
+        "torch._sparse_semi_structured_mm",
         "torch._sparse_softmax_backward_data",
         "torch._sparse_sparse_matmul",
         "torch._sparse_sum",
