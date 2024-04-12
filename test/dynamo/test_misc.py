@@ -9179,6 +9179,28 @@ def ___make_guard_fn():
         self.assertEqual(eager, compiled)
         self.assertEqual(len(counters["graph_break"]), 0)
 
+    def test_is_contiguous(self):
+        def is_transposed(x):
+            return (
+                not x.is_contiguous()
+                and x.stride()[0] == 1
+                and x.stride()[1] == x.size()[0]
+            )
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x, y):
+            if is_transposed(x):
+                x = x.sin()
+            if is_transposed(y):
+                y = y.sin()
+            if is_transposed(y):
+                y = y.sin()
+            return x + y
+
+        x = torch.randn(10, 10)
+        y = torch.randn(10, 10).transpose(0, 1)
+        self.assertEqual(fn(x, y), x + y.sin().sin())
+
     def test_list_iterator_contains(self):
         def fn(x):
             it = iter(["my_weight", "not_my_weight"])
