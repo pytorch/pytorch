@@ -292,7 +292,7 @@ class PerChannelDetector(DetectorBase):
         # get the fully qualified name and check if in list of modules to include and list of modules to ignore
         for fqn, module in model.named_modules():
 
-            is_in_include_list = sum(isinstance(module, x) for x in self.supported_modules) > 0
+            is_in_include_list = any(isinstance(module, x) for x in self.supported_modules)
 
             # check if the module per_channel is supported
             # based on backend
@@ -515,7 +515,7 @@ class DynamicStaticDetector(DetectorBase):
         Returns True if the module is supported by observer, False otherwise
         """
         # check to see if module is of a supported type
-        is_supported_type = sum(isinstance(module, x) for x in self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED) > 0
+        is_supported_type = any(isinstance(module, x) for x in self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED)
 
         # check if it will be supported
         future_supported_type = sum(isinstance(module, x) for x in self.DEFAULT_DYNAMIC_STATIC_FUTURE_SUPPORTED) > 0

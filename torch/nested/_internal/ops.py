@@ -59,7 +59,7 @@ def _wrap_jagged_dims(ndim, dims, op_name):
 
 def check_schema(schema_str: str, func, *args, **kwargs) -> None:
     named_arg_types = schema_str.split(", ")
-    num_optional_args = sum(x.endswith("?") for x in named_arg_types)
+    num_optional_args = [x.endswith("?") for x in named_arg_types].count(True)
     min_args = len(named_arg_types) - num_optional_args
 
     # special case: ellipses allows for any number of unchecked args at the end
