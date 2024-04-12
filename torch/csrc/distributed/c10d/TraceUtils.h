@@ -351,6 +351,18 @@ inline c10::List<c10::IValue> new_list() {
   return c10::List<c10::IValue>(c10::AnyType::get());
 }
 
+inline std::string ranks_str(const std::vector<uint64_t>& ranks) {
+  std::string str;
+  for (const auto& rank : ranks) {
+    if (str.empty()) {
+      str = std::to_string(rank);
+    } else {
+      str += ", " + std::to_string(rank);
+    }
+  }
+  return c10::str("[", str, "]");
+}
+
 struct NCCLTraceBuffer {
   static NCCLTraceBuffer* get() {
     // intentionally leak on exit
@@ -578,7 +590,7 @@ struct NCCLTraceBuffer {
     c10::IValue version_val = "1.1";
 
     c10::IValue pg_id_key = "pg_id";
-    c10::IValue pg_name_key = "process_group_name";
+    c10::IValue pg_name_key = "process_group";
     c10::IValue seq_id_key = "seq_id";
     c10::IValue profiling_name_key = "profiling_name";
     c10::IValue input_sizes_key = "input_sizes";
@@ -665,7 +677,6 @@ struct NCCLTraceBuffer {
       dict.insert(frames_key, frames);
       entries.push_back(dict);
     }
-    auto pg_config = new_dict();
     // convert ncclDumpMap into a dictionary
     auto per_comm_dict = new_dict();
     if (ncclDumpMap.has_value()) {

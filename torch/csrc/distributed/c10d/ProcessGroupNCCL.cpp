@@ -1580,7 +1580,11 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
 }
 
 std::string ProcessGroupNCCL::createLogPrefix() const {
-  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+  if (!pg_desc_.empty() && pg_desc_ != "undefined") {
+    return c10::str("[PG ", pg_name_, " (", pg_desc_, ") Rank ", rank_, "] ");
+  } else {
+    return c10::str("[PG ", pg_name_, " Rank ", rank_, "] ");
+  }
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {
@@ -2079,6 +2083,7 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
     LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
               << ncclComms[i]->ncclComm_ << " on CUDA device: " << deviceIndex;
   }
+  logPrefix_ = createLogPrefix(); // reset log prefix to include group_desc
 
   // At this point NCCL should have been initialized, hence we can accurately
   // get the env value even if NCCL sets it by reading from nccl.conf file

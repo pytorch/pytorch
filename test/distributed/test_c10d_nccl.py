@@ -11,6 +11,7 @@ import tempfile
 import threading
 import pickle
 import time
+import json
 import warnings
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -1332,6 +1333,19 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         # now everyone has split because rank 0 has performed a comm
         self.assertEqual(backend.comm_split_count(), 1)
         self.assertEqual(tensor, original_tensor)
+
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_set_process_group_desc(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f'cuda:{self.rank}')
+        pg_default = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        self.assertEqual(pg_default.group_desc, "default_pg")
+        pg_1 = c10d.new_group([0, 1], group_desc="test_purpose")
+        self.assertEqual(pg_1.group_desc, "test_purpose")
+        pg_2 = c10d.new_group([0, 1])
+        self.assertEqual(pg_2.group_desc, "undefined")
 
 
 class DistributedDataParallelTest(
@@ -3641,7 +3655,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
         t = t['entries']
         self.assertEqual(len(t), 2)
         last = t[-1]
-        self.assertEqual(last['process_group_name'], '0')
+        self.assertEqual(last['process_group'], ('0', 'default_pg'))
         self.assertEqual(last['state'], 'completed')
         s = last['time_discovered_started_ns']
         f = last['time_discovered_completed_ns']
