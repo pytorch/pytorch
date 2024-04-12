@@ -647,6 +647,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         expr.sym_num
                     )
                 )
+            elif isinstance(expr, ConstantVariable):
+                return expr
 
         @register(torch._C._autograd._unsafe_set_version_counter)
         def handle_unsafe_set_version_counter(self, tx, *args, **kwargs):
