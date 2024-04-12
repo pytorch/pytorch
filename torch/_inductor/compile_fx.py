@@ -1,5 +1,6 @@
 import contextlib
 import functools
+import itertools
 import logging
 import os
 import sys
@@ -31,12 +32,11 @@ from torch._dynamo import (
     utils as dynamo_utils,
 )
 from torch._dynamo.utils import (
-    counters,
     detect_fake_mode,
     flatten_graph_inputs,
     lazy_format_graph_code,
-    optimus_scuba_log,
 )
+from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
@@ -46,7 +46,7 @@ from torch._inductor.utils import BoxedBool, count_tangents
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._utils_internal import compiletime_sl_profile_meta, signpost_event
+from torch._utils_internal import compiletime_sl_profile_meta
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -70,7 +70,7 @@ from .utils import (
 from .virtualized import V
 
 if config.is_fbcode():
-    from torch._inductor.fb.utils import time_and_log
+    from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
 else:
     # no-op decorator
     def time_and_log(attr: str, extra_loggings: Optional[Dict[str, str]] = None):
@@ -157,7 +157,7 @@ def _unlift_graph(mod, gm, graph_signature):
             attr_kind=_AttrKind.BUFFER,
         )
 
-    placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    placeholder_nodes = gm.graph.find_nodes(op="placeholder")
     lifted_inputs = []
 
     # In AOTI, module parameters and buffers are not lifted as graph inputs.
@@ -203,7 +203,14 @@ def _unlift_graph(mod, gm, graph_signature):
 
 
 def _get_subgraph_names(gm):
-    for node in gm.graph.nodes:
+    for node in sorted(
+        itertools.chain(
+            gm.graph.find_nodes(op="call_function", target=torch.ops.higher_order.cond),
+            gm.graph.find_nodes(
+                op="call_function", target=torch.ops.higher_order.while_loop
+            ),
+        )
+    ):
         if node.target == torch.ops.higher_order.cond:
             true_subgraph_name = node.args[1].name
             false_subgraph_name = node.args[2].name
@@ -304,15 +311,14 @@ def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
         aten.bmm.default,
         aten.baddbmm.default,
     }
-    for node in gm.graph.nodes:
-        if (
-            node.op == "call_function"
-            and node.target in tf32_ops
-            and isinstance(node.meta.get("val", None), torch.Tensor)
-            and node.meta["val"].dtype == torch.float32
-            and node.meta["val"].device.type == "cuda"
-        ):
-            return True
+    for target in tf32_ops:
+        for node in gm.graph.find_nodes(op="call_function", target=target):
+            if (
+                isinstance(node.meta.get("val", None), torch.Tensor)
+                and node.meta["val"].dtype == torch.float32
+                and node.meta["val"].device.type == "cuda"
+            ):
+                return True
     return False
 
 
@@ -669,13 +675,8 @@ def fx_codegen_and_compile(
             "inductor_post_grad_graph",
             payload_fn=lambda: gm.print_readable(print_output=False),
         )
-        optimus_scuba_log["inductor"] = counters["inductor"]
-        signpost_event(
-            "optimus",
-            "compile_fx",
-            optimus_scuba_log,
-        )
-        log.debug("optimus parameter sent to the scuba: %s", optimus_scuba_log)
+        if config.is_fbcode():
+            log_optimus_to_scuba()
 
     with V.set_fake_mode(fake_mode):
         const_output_index = None
@@ -1367,20 +1368,33 @@ def compile_fx(
     )
 
     if V.aot_compilation is True:
-        gm, graph_signature = aot_export_module(
-            model_, example_inputs_, trace_joint=False, decompositions=decompositions
-        )
+        with functorch_config.patch(unlift_effect_tokens=True):
+            gm, graph_signature = aot_export_module(
+                model_,
+                example_inputs_,
+                trace_joint=False,
+                decompositions=decompositions,
+            )
         unlifted_gm = _unlift_graph(model_, gm, graph_signature)
         if "dynamo_flat_name_to_original_fqn" in model_.meta:
             unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
                 "dynamo_flat_name_to_original_fqn"
             ]
-        with V.set_fake_mode(fake_mode), compiled_autograd.disable():
+
+        # Disable amp as in aot_dispatch_autograd (https://github.com/pytorch/pytorch/pull/86515)
+        # In inference_compiler (fw_compiler_base), _recursive_joint_graph_passes will call into
+        # _sfdp_init() to register patterns.
+        # When fallback_random is set to True, the sdpa patterns will be traced during runtime.
+        # If amp is turned on, the traced FP32 patterns will have prims.convert_element_type which
+        # will be the same as the generated FP16 patterns.
+        disable_amp = torch._C._is_any_autocast_enabled()
+        context = torch._C._DisableAutocast if disable_amp else contextlib.nullcontext
+        with V.set_fake_mode(fake_mode), compiled_autograd.disable(), context():
             return inference_compiler(unlifted_gm, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context
-    ), compiled_autograd.disable():
+    ), compiled_autograd.disable(), functorch_config.patch(unlift_effect_tokens=True):
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
