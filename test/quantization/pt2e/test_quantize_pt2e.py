@@ -1745,6 +1745,18 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_move_exported_model_dropout_inplace(self):
         self._test_move_exported_model_dropout(inplace=True)
 
+    def _get_bn_train_eval_ops(self, is_cuda: bool):
+        if is_cuda:
+            return (
+                torch.ops.aten.cudnn_batch_norm.default,
+                torch.ops.aten.cudnn_batch_norm.default,
+            )
+        else:
+            return (
+                torch.ops.aten._native_batch_norm_legit.default,
+                torch.ops.aten._native_batch_norm_legit_no_training.default,
+            )
+
     def test_move_exported_model_bn(self):
         """
         Test switching batch_norm behavior between train and eval modes using
@@ -1762,15 +1774,12 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         if torch.cuda.is_available():
             m = M().train().cuda()
             example_inputs = (torch.randn(1, 3, 3, 3).cuda(),)
-            m = capture_pre_autograd_graph(m, example_inputs)
-            bn_train_op = torch.ops.aten.cudnn_batch_norm.default
-            bn_eval_op = torch.ops.aten.cudnn_batch_norm.default
+            bn_train_op, bn_eval_op = self._get_bn_train_eval_ops(is_cuda=True)
         else:
             m = M().train()
             example_inputs = (torch.randn(1, 3, 3, 3),)
-            m = capture_pre_autograd_graph(m, example_inputs)
-            bn_train_op = torch.ops.aten._native_batch_norm_legit.default
-            bn_eval_op = torch.ops.aten._native_batch_norm_legit_no_training.default
+            bn_train_op, bn_eval_op = self._get_bn_train_eval_ops(is_cuda=False)
+        m = capture_pre_autograd_graph(m, example_inputs)
 
         # Assert that batch norm op exists and is in train mode
         bn_node = self._get_node(m, bn_train_op)
@@ -1835,20 +1844,22 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 x = self.dropout(x)
                 return x
 
-        example_inputs = (torch.randn(1, 3, 3, 3),)
-        m = M().train()
+        if torch.cuda.is_available():
+            m = M().train().cuda()
+            example_inputs = (torch.randn(1, 3, 3, 3).cuda(),)
+            bn_train_op, bn_eval_op = self._get_bn_train_eval_ops(is_cuda=True)
+        else:
+            m = M().train()
+            example_inputs = (torch.randn(1, 3, 3, 3),)
+            bn_train_op, bn_eval_op = self._get_bn_train_eval_ops(is_cuda=False)
         m = capture_pre_autograd_graph(m, example_inputs)
 
         def _assert_ops_are_correct(m: torch.fx.GraphModule, train: bool):
             targets = [n.target for n in m.graph.nodes]
-            bn_train_target = torch.ops.aten._native_batch_norm_legit.default
-            bn_eval_target = torch.ops.aten._native_batch_norm_legit_no_training.default
-            if train:
-                self.assertTrue(bn_train_target in targets)
-                self.assertTrue(bn_eval_target not in targets)
-            else:
-                self.assertTrue(bn_eval_target in targets)
-                self.assertTrue(bn_train_target not in targets)
+            bn_op = bn_train_op if train else bn_eval_op
+            bn_node = self._get_node(m, bn_op)
+            self.assertTrue(bn_node is not None)
+            self.assertEqual(bn_node.args[5], train)
             dropout_node = self._get_node(m, torch.ops.aten.dropout.default)
             self.assertTrue(dropout_node.args[2] == train)
 

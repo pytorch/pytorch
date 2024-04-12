@@ -143,10 +143,14 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
     # to do this anymore: https://github.com/pytorch/pytorch/pull/119496.
     is_cuda = torch.cuda.is_available()
     bn_train_aten = _get_aten_graph_module_for_pattern(
-        _WrapperModule(bn_train), example_inputs, is_cuda,
+        _WrapperModule(bn_train),
+        example_inputs,
+        is_cuda,
     )
     bn_eval_aten = _get_aten_graph_module_for_pattern(
-        _WrapperModule(bn_eval), example_inputs, is_cuda,
+        _WrapperModule(bn_eval),
+        example_inputs,
+        is_cuda,
     )
 
     if train_to_eval:
