@@ -3,7 +3,6 @@
 #include <ATen/Functions.h>
 #include <ATen/autocast_mode.h>
 #include <c10/cuda/CUDAGuard.h>
-#include <torch/library.h>
 
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
 #else
