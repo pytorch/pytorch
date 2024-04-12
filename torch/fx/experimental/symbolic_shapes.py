@@ -1717,7 +1717,7 @@ class DimConstraints:
                 elif left.isdigit():
                     relation_with_digit(right, flip(op), int(left))
                 else:
-                    assert op == "=="
+                    assert op == "==", t
                     results[left]["eq"] = sympy.sympify(right)
 
             buf = ""
