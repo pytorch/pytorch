@@ -348,7 +348,7 @@ class TestOptimRenewed(TestCase):
 
             solution = torch.tensor([1, 1])
             with torch.no_grad():
-                initial_dist = sum([param.dist(solution) for param in params])
+                initial_dist = sum(param.dist(solution) for param in params)
 
             def get_grad(param, sparse_grad, w):
                 grad = drosenbrock(param)
@@ -410,13 +410,13 @@ class TestOptimRenewed(TestCase):
 
             if not kwargs.get("maximize", False):
                 self.assertLessEqual(
-                    sum([param.dist(solution) for param in params]),
+                    sum(param.dist(solution) for param in params),
                     initial_dist
                 )
             else:
                 self.assertGreaterEqual(
-                    sum([rosenbrock(param) for param in params]),
-                    sum([rosenbrock(param_t) for param_t in params_t]),
+                    sum(rosenbrock(param) for param in params),
+                    sum(rosenbrock(param_t) for param_t in params_t),
                 )
 
 

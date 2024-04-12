@@ -1594,7 +1594,7 @@ class CompileProfiler:
 
         def recompilation_report():
             if len(gf):
-                max_recompiles = max([num_recompiles(code) for code in gf])
+                max_recompiles = max(num_recompiles(code) for code in gf)
                 recomp_table = tabulate(
                     summarized_gf,
                     headers=["Function", "Recompiles", "Recompile Reasons"],

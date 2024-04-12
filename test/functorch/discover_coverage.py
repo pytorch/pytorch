@@ -254,11 +254,11 @@ def get_ops_percentage(torch_threshold, nn_fn_threshold):
 
     # get all operators that are not in the denylist
     all_ops = get_top_ops(999999, 999999)
-    total_op_usages = sum([get_num_usages(op) for op in all_ops])
+    total_op_usages = sum(get_num_usages(op) for op in all_ops)
 
     # get subset of all operators
     subset_ops = get_top_ops(torch_threshold, nn_fn_threshold)
-    subset_op_usages = sum([get_num_usages(op) for op in subset_ops])
+    subset_op_usages = sum(get_num_usages(op) for op in subset_ops)
     return subset_op_usages / total_op_usages
 
 
