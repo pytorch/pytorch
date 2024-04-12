@@ -119,8 +119,10 @@ def config_of(
     equal_to_1 = tuple(
         i
         for i, arg in zip(indices, args)
-        if isinstance(arg, SizeArg)
-        and arg.expr is not None
+        if isinstance(arg, SizeArg) and arg.expr is not None
+        # we include sympy.Expr as a possible type of arg.expr to allow
+        # symbolic expressions that are statically_known_equal to int 1
+        # (as checked in the line below)
         and isinstance(arg.expr, (int, sympy.Expr))
         and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
     )
