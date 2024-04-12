@@ -1928,6 +1928,55 @@ def module_inputs_torch_nn_LayerNorm(module_info, device, dtype, requires_grad, 
             desc='3d_elementwise_affine_no_bias'),
     ]
 
+def module_inputs_torch_nn_RMSNorm(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    def rms_norm_reference_fn(m, p, i):
+        eps = m.eps
+        if eps is None:
+            eps = torch.finfo(i.dtype).eps
+        ndim = i.ndim
+        normalized_shape = m.normalized_shape
+        weight = m.weight
+        dims = [ndim - i - 1 for i in range(len(normalized_shape))]
+        result = i * torch.rsqrt(i.pow(2).mean(dim=dims, keepdim=True) + m.eps)
+        if weight is not None:
+            result *= weight
+        return result
+
+    return [
+        ModuleInput(
+            constructor_input=FunctionInput([5], 1e-3),
+            forward_input=FunctionInput(make_input((4, 5, 5))),
+            desc='1d_elementwise_affine',
+            reference_fn=rms_norm_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput([5], 1e-3),
+            forward_input=FunctionInput(make_input((128, 5, 5))),
+            desc='1d_elementwise_affine_large_batch',
+            reference_fn=rms_norm_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput([5], 1e-3, False),
+            forward_input=FunctionInput(make_input((4, 5, 5))),
+            desc='1d_no_elementwise_affine',
+            reference_fn=rms_norm_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput([2, 2, 5], 1e-3),
+            forward_input=FunctionInput(make_input((4, 2, 2, 5))),
+            desc='3d_elementwise_affine',
+            reference_fn=rms_norm_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput([2, 2, 5], 1e-3, False),
+            forward_input=FunctionInput(make_input((4, 2, 2, 5))),
+            desc='3d_no_elementwise_affine',
+            reference_fn=rms_norm_reference_fn),
+        ModuleInput(
+            constructor_input=FunctionInput([5], 1e-3),
+            forward_input=FunctionInput(make_input((0, 5))),
+            desc='1d_empty_elementwise_affine',
+            reference_fn=rms_norm_reference_fn),
+    ]
+
 
 def module_inputs_torch_nn_LocalResponseNorm(module_info, device, dtype, requires_grad, training, **kwargs):
     make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -4070,6 +4119,9 @@ module_db: List[ModuleInfo] = [
                skips=(
                    # No channels_last support for LayerNorm currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format'),)
+               ),
+    ModuleInfo(torch.nn.RMSNorm,
+               module_inputs_func=module_inputs_torch_nn_RMSNorm,
                ),
     # TransformerEncoder takes the same inputs as TransformerEncoderLayer
     ModuleInfo(torch.nn.TransformerEncoder,
