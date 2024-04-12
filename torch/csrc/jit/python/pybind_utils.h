@@ -1022,7 +1022,6 @@ inline Stack createStackForSchema(
           schema));
     }
     // Use the type information from the schema to convert the PyObject.
-    const auto& argument = schema.arguments().at(arg_idx);
     push(stack, argumentToIValue(schema, stack.size(), arg));
     arg_idx++;
   }

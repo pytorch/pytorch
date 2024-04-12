@@ -486,7 +486,7 @@ void initDispatchBindings(PyObject* module) {
       });
 
   m.def(
-      // Returns whether or not a the kernel for this dispatach key is a
+      // Returns whether or not the kernel for this dispatach key is a
       // fallthrough kernel
       "_dispatch_kernel_for_dispatch_key_is_fallthrough",
       [](const char* name, c10::DispatchKey dispatch) -> bool {
