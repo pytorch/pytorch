@@ -1534,3 +1534,4 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_occurrence,
                     node_list,
                 )
+                self.assertTrue(False)
