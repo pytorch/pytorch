@@ -568,7 +568,6 @@ def _multi_tensor_adam(params: List[Tensor],
         else:
             bias_correction1 = [1 - beta1 ** _get_value(step) for step in device_state_steps]
             bias_correction2 = [1 - beta2 ** _get_value(step) for step in device_state_steps]
-
             step_size = _stack_if_compiling([(lr / bc) * -1 for bc in bias_correction1])
 
             bias_correction2_sqrt = [_dispatch_sqrt(bc) for bc in bias_correction2]
@@ -584,6 +583,13 @@ def _multi_tensor_adam(params: List[Tensor],
 
             torch._foreach_div_(exp_avg_sq_sqrt, bias_correction2_sqrt)
             torch._foreach_add_(exp_avg_sq_sqrt, eps)
+
+            if isinstance(step_size, torch.Tensor):
+                # if we're compiling here (only happens in the rare case
+                # if a user deletes the capturable flag) we can't run addcdiv
+                # with step_size on cuda
+                step_size = step_size.to("cpu")
+
             torch._foreach_addcdiv_(device_params, device_exp_avgs, exp_avg_sq_sqrt, step_size)
 
 
