@@ -9712,6 +9712,7 @@ if HAS_GPU and not TEST_WITH_ASAN:
 
     class TritonCodeGenTests(TestCase):
         from torch._inductor.triton_heuristics import CachingAutotuner
+
         device_type = GPU_TYPE
 
         class NoOpCompilerBackend:
