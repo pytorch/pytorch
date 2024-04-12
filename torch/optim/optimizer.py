@@ -637,8 +637,8 @@ class Optimizer:
         if key == "step":
             if capturable or fused:
                 return value.to(dtype=torch.float32, device=param.device)
-            else:
-                return value.to(device="cpu")
+
+            return value
         else:
             if param.is_floating_point():
                 return value.to(dtype=param.dtype, device=param.device)
