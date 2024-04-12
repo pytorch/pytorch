@@ -894,6 +894,7 @@ class VariableBuilder:
             tensor_list_proxy = self.tx.output.root_tracer.create_graph_input(
                 re.sub(r"[^a-zA-Z0-9]+", "_", self.name), type(value), source=source
             )
+            tensor_list_proxy.node.meta["steal_arg"] = True
 
             list_variable = wrap_fx_proxy_cls(
                 target_cls=TensorVariable,
