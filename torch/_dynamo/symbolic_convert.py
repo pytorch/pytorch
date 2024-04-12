@@ -2637,7 +2637,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def YIELD_VALUE(self, inst: Instruction):
         self.generated_items.append(self.pop())
-        # TODO(jansel): figure out why this is needed, it isn't in the docs for YIELD_VALUE
         self.push(ConstantVariable.create(None))
 
     def GET_YIELD_FROM_ITER(self, inst):
@@ -2650,7 +2649,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
     def YIELD_FROM(self, inst):
         assert len(self.stack) >= 2
         val = self.pop()
-        tos = self.stack[-1].realize()
+        tos = self.stack[-1]
         if not (isinstance(val, ConstantVariable) and val.value is None):
             # invoke send
             # Unreachable code - if you hit this, you are implementing generator support and have
@@ -2662,11 +2661,12 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         try:
             val = tos.next_variable(self)
         except (StopIteration, exc.UserStopIteration) as ex:
+            # The iterator is exhausted. Stop the loop and return.
             self.pop()
             self.push(ConstantVariable.create(ex.value))
         else:
             self.push(val)
-            # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
+            # Add the value to yield into generated_items and replace the top of the stack with None
             self.YIELD_VALUE(inst)
 
             # Repeat the YIELD_FROM instruction in the next eval loop
@@ -2688,6 +2688,12 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
                 try:
                     val = tos.next_variable(self)
                 except (StopIteration, exc.UserStopIteration) as ex:
+                    # To implement SEND, we have to look at the implementation
+                    # when the iterator returns StopIteration. This translates to this code
+                    # 3.11: https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2619
+                    # 3.12: https://github.com/python/cpython/blob/3.12/Python/bytecodes.c#L863-L866
+                    # The implementation is different in 3.11 and 3.12. In 3.12, we rely
+                    # on END_SEND to clean up. In 3.11, SEND does the cleanup as well.
                     if sys.version_info < (3, 12):
                         self.pop()  # Python 3.12 uses new opcode END_SEND
                     self.push(ConstantVariable.create(ex.value))
