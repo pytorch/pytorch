@@ -15,7 +15,7 @@ from torch.fx.graph_module import _assign_attr
 from weakref import WeakKeyDictionary
 from collections import defaultdict
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, unset_fake_temporarily, is_fake
-from torch._dispatch.python import enable_python_dispatcher, enable_pre_dispatch
+from torch._dispatch.python import enable_python_dispatcher
 import torch.fx as fx
 from torch.fx.node import _side_effectful_need_to_be_preserved_pre_dispatch
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
@@ -24,8 +24,11 @@ import inspect
 from dataclasses import dataclass
 import weakref
 import operator
+import traceback
 from torch.utils._stats import count
+from torch.utils._traceback import CapturedTraceback
 import logging
+from torch._library.fake_class_registry import FakeScriptObject
 
 from torch.overrides import TorchFunctionMode
 
@@ -97,7 +100,7 @@ def set_proxy_slot(obj, tracer, proxy):
         # We DO want to clobber proxies whenever we run an inplace operation
         # on a tensor, and it affects the metadata on the proxy.
         tracer.tensor_tracker[obj] = proxy
-    elif isinstance(obj, torch.ScriptObject):
+    elif isinstance(obj, (torch.ScriptObject, FakeScriptObject)):
         # We DO want to clobber proxies, with a similar rationale as for tensors.
         tracer.script_object_tracker[obj] = proxy
     else:
@@ -121,7 +124,7 @@ def has_proxy_slot(obj, tracer):
 def get_proxy_slot(obj, tracer, default=no_default, transform=lambda x: x):
     if isinstance(obj, torch.Tensor):
         tracker = tracer.tensor_tracker
-    elif isinstance(obj, torch.ScriptObject):
+    elif isinstance(obj, (torch.ScriptObject, FakeScriptObject)):
         tracker = tracer.script_object_tracker
     else:
         assert isinstance(obj, py_sym_types), type(obj)
@@ -141,7 +144,7 @@ def extract_val(val):
         return snapshot_fake(val)
     elif isinstance(val, py_sym_types):
         return val
-    elif isinstance(val, torch.ScriptObject):
+    elif isinstance(val, (torch.ScriptObject, FakeScriptObject)):
         return val
     elif isinstance(val, BackwardState):
         return val
@@ -218,7 +221,7 @@ def track_tensor_tree(inner_res, proxy_res, *, constant, tracer):
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e, tracer, lambda: proxy)
-        elif isinstance(e, torch.ScriptObject):
+        elif isinstance(e, (torch.ScriptObject, FakeScriptObject)):
             set_proxy_slot(e, tracer, proxy)
             set_meta(proxy, e)
         elif isinstance(e, (tuple, list)):
@@ -337,7 +340,7 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
     f_flat_args_kwargs = [
         (
             fetch_object_proxy(tracer)(x)
-            if isinstance(x, (torch.Tensor, torch.ScriptObject))
+            if isinstance(x, (torch.Tensor, torch.ScriptObject, FakeScriptObject))
             else x
         )
         for x in flat_args_kwargs
@@ -546,6 +549,12 @@ class PythonKeyTracer(Tracer):
         self.symnode_tracker = _SymNodeDict()  # type: ignore[var-annotated]
         self.script_object_tracker = WeakIdKeyDictionary(dict=None, ref_type=_WeakHashRef)
 
+        # Stores the torch function that was called during tracing
+        self.torch_fn_metadata = None
+        # Stores the counts for every torch function called. This is to help
+        # distinguish between different calls to the same torch function.
+        self.torch_fn_counts = {}
+
     # In general, we don't want to make modules leaves. In principle, users of
     # this tracer might want to override this in order to turn a couple specific
     # modules into leaves in the traced graph.
@@ -585,7 +594,7 @@ class PythonKeyTracer(Tracer):
             return get_proxy_slot(e, self, e, lambda e: e.proxy)
         elif isinstance(e, (torch.SymInt, torch.SymFloat, torch.SymBool)):
             return get_proxy_slot(e, self, e, lambda e: e())
-        elif isinstance(e, torch.ScriptObject):
+        elif isinstance(e, (torch.ScriptObject, FakeScriptObject)):
             return get_proxy_slot(e, self, e)
         else:
             return e
@@ -655,6 +664,11 @@ def wrap_key(f, tensors, tracer, pre_dispatch: bool):
             out
         )
         out = pytree.tree_map_only(
+            (torch.ScriptObject, FakeScriptObject),
+            lambda t: get_proxy_slot(t, tracer, t, lambda x: x),
+            out
+        )
+        out = pytree.tree_map_only(
             (SymInt, SymFloat, SymBool),
             lambda t: get_proxy_slot(t, tracer)(),
             out
@@ -678,6 +692,17 @@ def set_original_aten_op(func):
     else:
         yield
 
+
+class TorchFunctionMetadataMode(TorchFunctionMode):
+
+    def __init__(self, tracer):
+        self.tracer = tracer
+
+    def __torch_function__(self, func, types, args=(), kwargs=None):
+        kwargs = kwargs or {}
+        self.tracer.torch_fn_metadata = func
+        self.tracer.torch_fn_counts[func] = self.tracer.torch_fn_counts.get(func, 0) + 1
+        return func(*args, **kwargs)
 
 
 # This mode is **only** used for pre_dispatch tracing.
@@ -840,6 +865,12 @@ class DecompositionInterpreter(torch.fx.Interpreter):
         if self.decomposition_table is None:
             self.decomposition_table = {}
         self.mode = ProxyTorchDispatchMode(self.tracer, tracing_mode="real")
+
+        # Stores the torch function that was called during tracing
+        self.tracer.torch_fn_metadata = None
+        # Stores the counts for every torch function called. This is to help
+        # distinguish between different calls to the same torch function.
+        self.tracer.torch_fn_counts = {}
 
     def placeholder(self, target, args, kwargs):
         out = super().placeholder(target, args, kwargs)
@@ -1048,12 +1079,52 @@ class _ModuleStackTracer(PythonKeyTracer):
 
     def create_node(self, *args, **kwargs):
         '''
-        Add nn_module_stack metadata here instead of TracerBase,
-        since calls to make_fx() might not want to record module stack metadata
+        Create node and add on metadata.
+        Add nn_module_stack here instead of TracerBase,
+        since calls to make_fx() might not want to record module stack metadata.
+        Add torch_fn by looking at torch_fn_metadata and torch_fn_counts.
+        Add stack_trace by filtering out forward() stack frames.
         '''
         node = super().create_node(*args, **kwargs)
-        if "nn_module_stack" not in node.meta and node.op not in ["placeholder", "output"]:
-            node.meta["nn_module_stack"] = self.module_stack
+
+        # nn_module_stack
+        if node.op not in ["placeholder", "output"]:
+            if "nn_module_stack" not in node.meta:
+                node.meta["nn_module_stack"] = self.module_stack
+            # convert nn_module_stack from Dict[key, (FQN, class)] -> Dict[str, Tuple[str, str]]
+            for key, (fqn, mod_cls) in node.meta["nn_module_stack"].items():
+                if isinstance(mod_cls, type):
+                    node.meta["nn_module_stack"][key] = (fqn, mod_cls.__module__ + "." + mod_cls.__qualname__)
+
+        # torch_fn
+        if node.op == "call_function" and self.torch_fn_metadata is not None and "torch_fn" not in node.meta:
+            node.meta["torch_fn"] = (
+                f"{self.torch_fn_metadata.__name__}_{self.torch_fn_counts[self.torch_fn_metadata]}",
+                f"{self.torch_fn_metadata.__class__.__name__}.{self.torch_fn_metadata.__name__}"
+            )
+
+        # stack_trace
+        if 'stack_trace' not in node.meta and node.op not in ["placeholder", "output"]:
+            user_frame_summary = CapturedTraceback.extract().summary()
+            if user_frame_summary:
+                # we retain frames from forward() calls, or ops
+                # located in torch/__init__.py (e.g. sym_int, sym_constrain_range, vmap)
+                stack_trace = [frame for frame in user_frame_summary if (
+                    frame.name == 'forward'
+                    or frame.filename.endswith('torch/__init__.py')
+                )]
+                # filter out forward() frames from fx/_symbolic_trace.py, export/_trace.py
+                # this is hardcoded, but leads to a much cleaner stack trace
+                stack_trace = [
+                    frame for frame in stack_trace if not (
+                        frame.filename.endswith('fx/_symbolic_trace.py')
+                        or frame.filename.endswith('export/_trace.py')
+                    )
+                ]
+                if stack_trace:  # empty list for strict mode, dynamo should handle stack_trace
+                    stack_trace = traceback.StackSummary.from_list(stack_trace)
+                    node.meta["stack_trace"] = ''.join(stack_trace.format()).strip()
+
         return node
 
 
@@ -1096,21 +1167,25 @@ def make_fx(f,
             import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
             if fake_tensor_mode is None:
-                fake_tensor_mode = FakeTensorMode(
-                    allow_fallback_kernels=True,
-                    allow_non_fake_inputs=_allow_non_fake_inputs,
-                    shape_env=ShapeEnv(),
-                    static_shapes=True,
-                )
+                import torch._functorch.config as _config
+                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                    fake_tensor_mode = FakeTensorMode(
+                        allow_fallback_kernels=True,
+                        allow_non_fake_inputs=_allow_non_fake_inputs,
+                        shape_env=ShapeEnv(),
+                        static_shapes=True,
+                    )
         elif tracing_mode == "symbolic":
             import torch._dynamo
             fake_tensor_mode = torch._dynamo.utils.detect_fake_mode(args)
             if fake_tensor_mode is None:
                 shape_env = ShapeEnv()
-                fake_tensor_mode = FakeTensorMode(
-                    allow_fallback_kernels=False,
-                    allow_non_fake_inputs=_allow_non_fake_inputs,
-                    shape_env=shape_env)
+                import torch._functorch.config as _config
+                with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
+                    fake_tensor_mode = FakeTensorMode(
+                        allow_fallback_kernels=False,
+                        allow_non_fake_inputs=_allow_non_fake_inputs,
+                        shape_env=shape_env)
             else:
                 shape_env = fake_tensor_mode.shape_env
                 assert shape_env is not None, "shape_env should be set if tracing with 'symbolic'"
@@ -1119,13 +1194,10 @@ def make_fx(f,
             raise AssertionError(f"Unexpected tracing type: {tracing_mode}")
 
         python_dispatcher_mode: Any = nullcontext()
-        pre_dispatch_mode: Any = nullcontext()
         # pre-autograd tracing uses per-dispatch-key modes,
         # which requires the python dispatcher
         if tracing_mode == "symbolic" or pre_dispatch:
             python_dispatcher_mode = enable_python_dispatcher()
-        if pre_dispatch:
-            pre_dispatch_mode = enable_pre_dispatch()
 
         proxy_function_mode: Any = nullcontext()
         if pre_dispatch:
@@ -1153,7 +1225,10 @@ def make_fx(f,
             # NB: don't match on bools
             elif type(x) is int and tracing_mode == "symbolic":
                 return shape_env.create_symintnode(shape_env.create_symbol(x, source, positive=None), hint=x, source=source)
+            elif isinstance(x, torch.ScriptObject):
+                return torch._library.fake_class_registry.to_fake_obj(fake_tensor_mode, x)
 
+            assert not isinstance(x, FakeScriptObject), f"ScriptObject {x} has been fakified. Cannot wrap_fake it again."
             return x
 
         sym_mode = proxy_mode.sym_mode
@@ -1172,14 +1247,16 @@ def make_fx(f,
         else:
             func = f
 
+        torch_fn_metadata_mode = TorchFunctionMetadataMode(fx_tracer)
+
         # We disable the autocast cache as the autocast cache causes type conversions on parameters to
         # check a cache, which introduces untracked tensors into the graph
         #
         # We also disable tracing by any other tensor proxy-based tracers except the current. The
         # purpose of `make_fx` is to produce graphmodules as a side effect; its internal execution is
         # thus irrelevant to any external functional trace.
-        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, pre_dispatch_mode, proxy_function_mode, \
-             sym_mode, proxy_mode, disable_autocast_cache():
+        with decompose(decomposition_table), fake_tensor_mode, python_dispatcher_mode, proxy_function_mode, \
+             sym_mode, torch_fn_metadata_mode, proxy_mode, disable_autocast_cache():
             t = dispatch_trace(wrap_key(func, args, fx_tracer, pre_dispatch), tracer=fx_tracer, concrete_args=tuple(phs))
 
         # TODO: kind of a bad way to do it, should maybe figure out a better way
