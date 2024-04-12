@@ -900,7 +900,7 @@ def load_cached_autotuning(
 
 
 def should_use_remote_autotune_cache():
-    if config.use_autotune_remote_cache:
+    if config.autotune_remote_cache:
         return True
     if not config.is_fbcode():
         return False
@@ -941,7 +941,7 @@ def cached_autotune(
         cache_filename = None
         remote_cache = None
         remote_cache_key = None
-        if config.use_autotune_local_cache:
+        if config.autotune_local_cache:
             cache_filename = os.path.splitext(filename)[0] + ".best_config"
         if should_use_remote_autotune_cache():
             backend_hash = inductor_meta.get("backend_hash", None)
