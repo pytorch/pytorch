@@ -13,8 +13,10 @@ import torch.nn as nn
 
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
     check_sharded_parity,
+    FSDPTest,
     FSDPTestMultiThread,
     MLP,
 )
@@ -56,14 +58,10 @@ def two_tensor_fsdp_post_all_gather(
     return two_tensor, tensors_to_free
 
 
-class TestFullyShardAllGatherExtensions(FSDPTestMultiThread):
+class TestFullyShardAllGatherExtensionsCommon:
     @property
     def world_size(self) -> int:
         return 2
-
-    @property
-    def device(self) -> torch.device:
-        return torch.device("cuda:0")
 
     @contextlib.contextmanager
     def _patch_two_tensor_fsdp_all_gather(self):
@@ -71,10 +69,10 @@ class TestFullyShardAllGatherExtensions(FSDPTestMultiThread):
         TwoTensor.fsdp_pre_all_gather = two_tensor_fsdp_pre_all_gather
         TwoTensor.fsdp_post_all_gather = two_tensor_fsdp_post_all_gather
         dist.barrier()
-        torch.cuda.synchronize()
         try:
             yield
         finally:
+            dist.barrier()
             with lock:  # only one thread needs to delete
                 if hasattr(TwoTensor, "fsdp_pre_all_gather"):
                     delattr(TwoTensor, "fsdp_pre_all_gather")
@@ -82,19 +80,23 @@ class TestFullyShardAllGatherExtensions(FSDPTestMultiThread):
                     delattr(TwoTensor, "fsdp_post_all_gather")
 
     def _init_two_tensor_mlp(self) -> nn.Module:
-        torch.manual_seed(42)
-        model = MLP(8)
-        for param in model.parameters():
-            dist.broadcast(param, src=0)
-        model.in_proj.weight = nn.Parameter(
-            TwoTensor(model.in_proj.weight, model.in_proj.weight.clone())
-        )
-        model.out_proj.weight = nn.Parameter(
-            TwoTensor(model.out_proj.weight, model.out_proj.weight.clone())
-        )
+        # Disable bias because the reference model will end up with a bias
+        # gradient that is a `TwoTensor`, whereas the FSDP model does not
+        model = nn.Sequential(*[MLP(8, bias=False) for _ in range(3)])
+        for mlp in model:
+            mlp.in_proj.weight = nn.Parameter(
+                TwoTensor(mlp.in_proj.weight, mlp.in_proj.weight.clone())
+            )
+            mlp.out_proj.weight = nn.Parameter(
+                TwoTensor(mlp.out_proj.weight, mlp.out_proj.weight.clone())
+            )
         return model
 
-    @unittest.skipIf(not TEST_CUDA, "no cuda")
+
+class TestFullyShardAllGatherExtensionsMultiProcess(
+    TestFullyShardAllGatherExtensionsCommon, FSDPTest
+):
+    @skip_if_lt_x_gpu(2)
     def test_all_gather_extensions_train_parity(self):
         with self._patch_two_tensor_fsdp_all_gather():
             self.run_subtests(
@@ -110,10 +112,11 @@ class TestFullyShardAllGatherExtensions(FSDPTestMultiThread):
         fully_shard_fn = functools.partial(
             fully_shard, reshard_after_forward=reshard_after_forward
         )
-        fully_shard_fn(model.in_proj)
-        fully_shard_fn(model.out_proj)
+        for mlp in model:
+            fully_shard_fn(mlp)
         fully_shard_fn(model)
         optim = torch.optim.Adam(model.parameters(), lr=1e-2, foreach=True)
+        check_sharded_parity(self, ref_model, model)
 
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn((2, 8), device="cuda")
@@ -133,6 +136,14 @@ class TestFullyShardAllGatherExtensions(FSDPTestMultiThread):
                 _optim.zero_grad(set_to_none=(iter_idx % 2 == 0))
             check_sharded_parity(self, ref_model, model)
 
+
+class TestFullyShardAllGatherExtensionsMultiThread(
+    TestFullyShardAllGatherExtensionsCommon, FSDPTestMultiThread
+):
+    @property
+    def device(self) -> torch.device:
+        return torch.device("cuda:0")
+
     @unittest.skipIf(not TEST_CUDA, "no cuda")
     def test_all_gather_extensions_end_to_end(self):
         with self._patch_two_tensor_fsdp_all_gather():
@@ -145,13 +156,15 @@ class TestFullyShardAllGatherExtensions(FSDPTestMultiThread):
         # Check that we can run the meta-device initialization flow
         with torch.device("meta"):
             model = self._init_two_tensor_mlp()
+        for param in model.parameters():
+            self.assertEqual(param.device, torch.device("meta"))
         fully_shard_fn = functools.partial(
             fully_shard,
             reshard_after_forward=reshard_after_forward,
             mp_policy=MixedPrecisionPolicy(param_dtype=torch.bfloat16),
         )
-        fully_shard_fn(model.in_proj)
-        fully_shard_fn(model.out_proj)
+        for mlp in model:
+            fully_shard_fn(mlp)
         fully_shard_fn(model)
         model.to_empty(device=self.device)
         for param in model.parameters():
@@ -191,8 +204,8 @@ class TestFullyShardAllGatherExtensions(FSDPTestMultiThread):
 
         with torch.device("meta"):
             model = self._init_two_tensor_mlp()
-        fully_shard(model.in_proj)
-        fully_shard(model.out_proj)
+        for mlp in model:
+            fully_shard(mlp)
         fully_shard(model)
         model.to_empty(device=self.device)
         for param in model.parameters():

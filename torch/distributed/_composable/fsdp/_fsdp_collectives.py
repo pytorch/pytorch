@@ -95,7 +95,7 @@ def foreach_all_gather_copy_out(
     ) = all_gather_result
     if all_gather_event is not None:  # sync op
         torch.cuda.current_stream().wait_event(all_gather_event)
-    if all_gather_work is not None:  # async op
+    if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
         all_gather_work.wait()
     world_size, device = group.size(), all_gather_output.device
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
