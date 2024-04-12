@@ -1759,12 +1759,21 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             def forward(self, x):
                 return self.bn(x)
 
-        example_inputs = (torch.randn(1, 3, 3, 3),)
-        m = M().train()
-        m = capture_pre_autograd_graph(m, example_inputs)
+        if torch.cuda.is_available():
+            m = M().train().cuda()
+            example_inputs = (torch.randn(1, 3, 3, 3).cuda(),)
+            m = capture_pre_autograd_graph(m, example_inputs)
+            bn_train_op = torch.ops.aten.cudnn_batch_norm.default
+            bn_eval_op = torch.ops.aten.cudnn_batch_norm.default
+        else:
+            m = M().train()
+            example_inputs = (torch.randn(1, 3, 3, 3),)
+            m = capture_pre_autograd_graph(m, example_inputs)
+            bn_train_op = torch.ops.aten._native_batch_norm_legit.default
+            bn_eval_op = torch.ops.aten._native_batch_norm_legit_no_training.default
 
         # Assert that batch norm op exists and is in train mode
-        bn_node = self._get_node(m, torch.ops.aten._native_batch_norm_legit.default)
+        bn_node = self._get_node(m, bn_train_op)
         self.assertTrue(bn_node is not None)
         self.assertTrue(bn_node.args[5])
 
@@ -1772,14 +1781,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         torch.ao.quantization.move_exported_model_to_eval(m)
 
         # Assert that batch norm op is now in eval mode
-        bn_node = self._get_node(m, torch.ops.aten._native_batch_norm_legit_no_training.default)
+        bn_node = self._get_node(m, bn_eval_op)
         self.assertTrue(bn_node is not None)
 
         # Move to train
         torch.ao.quantization.move_exported_model_to_train(m)
 
         # Assert that batch norm op is now in train mode again
-        bn_node = self._get_node(m, torch.ops.aten._native_batch_norm_legit.default)
+        bn_node = self._get_node(m, bn_train_op)
         self.assertTrue(bn_node is not None)
         self.assertTrue(bn_node.args[5])
 

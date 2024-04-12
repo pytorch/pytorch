@@ -136,20 +136,25 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
         torch.randn(1),  # bn_running_mean
         torch.randn(1),  # bn_running_var
     )
+
+    # TODO: We shouldn't assume that the model is on cuda just because cuda is
+    # available, but right now there's no other way to differentiate between
+    # the different bn ops. Once batch norm consolidation lands, we won't have
+    # to do this anymore: https://github.com/pytorch/pytorch/pull/119496.
+    is_cuda = torch.cuda.is_available()
+    bn_train_aten = _get_aten_graph_module_for_pattern(
+        _WrapperModule(bn_train), example_inputs, is_cuda,
+    )
+    bn_eval_aten = _get_aten_graph_module_for_pattern(
+        _WrapperModule(bn_eval), example_inputs, is_cuda,
+    )
+
     if train_to_eval:
-        match_pattern = _get_aten_graph_module_for_pattern(
-            _WrapperModule(bn_train), example_inputs
-        )
-        replacement_pattern = _get_aten_graph_module_for_pattern(
-            _WrapperModule(bn_eval), example_inputs
-        )
+        match_pattern = bn_train_aten
+        replacement_pattern = bn_eval_aten
     else:
-        match_pattern = _get_aten_graph_module_for_pattern(
-            _WrapperModule(bn_eval), example_inputs
-        )
-        replacement_pattern = _get_aten_graph_module_for_pattern(
-            _WrapperModule(bn_train), example_inputs
-        )
+        match_pattern = bn_eval_aten
+        replacement_pattern = bn_train_aten
 
     from torch.fx.subgraph_rewriter import replace_pattern_with_filters
 
