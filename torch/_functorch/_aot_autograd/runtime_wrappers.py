@@ -108,8 +108,8 @@ def create_runtime_wrapper(
             old_args.clear()
 
         if dist.get_rank() == 0:
-            for i, arg in enumerate(args):
-                torch_log.warning(f"runtime_wrapper: idx: {i}, sys.getrefcount(arg): {sys.getrefcount(arg)}")
+            for i in range(len(args)):
+                torch_log.warning(f"runtime_wrapper: idx: {i}, sys.getrefcount(args[i]): {sys.getrefcount(args[i])}")
 
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
