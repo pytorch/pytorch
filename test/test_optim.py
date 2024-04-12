@@ -21,7 +21,7 @@ from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_optimizers import (
     optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS)
+    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS, TEST_WITH_ROCM)
 from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase
 
 
@@ -789,7 +789,15 @@ class TestOptimRenewed(TestCase):
                 # RMSprop uses avg and grads
                 nintermediates = 2
 
-            self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)
+            expected_max_mem = st_max_mem + intermediate_size * nintermediates
+            # hipcc currently can't generate efficient code for the small buffer optimization
+            # code path (see Note [small buffer optimization] for details), thus we always
+            # dynamically allocate the tensor metadata for ROCM. Adjusting the expected max
+            # memory usage to account for this.
+            if TEST_WITH_ROCM:
+                expected_max_mem *= 1.02
+
+            self.assertLessEqual(mt_max_mem, expected_max_mem)
 
 
     @onlyCUDA
@@ -1573,6 +1581,36 @@ class TestOptimRenewed(TestCase):
             ) as mocked_foreach_impl:
                 optim.step()
                 self.assertTrue(mocked_foreach_impl.called)
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_non_empty_state(self, device, dtype, optim_info):
+        # There are internal tests that check that the state is not empty
+        optim_cls = optim_info.optim_cls
+        model = torch.nn.Linear(5, 5)
+        model.to(dtype=dtype, device=device)
+        inpt = torch.rand(2, 5, dtype=dtype, device=device)
+
+        for optim_input in optim_info.optim_inputs_func(device=device):
+            optim = optim_cls(model.parameters(), **optim_input.kwargs)
+            optim.zero_grad()
+            output = model(inpt)
+            loss = output.sum()
+            loss.backward()
+
+            if optim_info.only_supports_sparse_grads:
+                for param in model.parameters():
+                    if param.grad is not None:
+                        param.grad = param.grad.to_sparse()
+
+            if optim_info.step_requires_closure:
+                optim.step(lambda: 1.0)
+            else:
+                optim.step()
+
+            for state in optim.state.values():
+                self.assertGreater(len(state), 0)
+
+
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)

@@ -339,6 +339,9 @@ class SymFloat:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
+    def __trunc__(self):
+        raise AssertionError("type stub not overridden")
+
     def __sym_max__(self, other):
         raise AssertionError("type stub not overridden")
 
@@ -465,7 +468,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type, call-overload]
+        return math.trunc(a)
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
@@ -1871,8 +1874,8 @@ def compile(model: Optional[Callable] = None, *,
 
     """
     _C._log_api_usage_once("torch.compile")
-    if sys.version_info >= (3, 12):
-        raise RuntimeError("Dynamo is not supported on Python 3.12+")
+    if sys.version_info >= (3, 13):
+        raise RuntimeError("Dynamo is not supported on Python 3.13+")
 
     # Decorator mode
     if model is None:
