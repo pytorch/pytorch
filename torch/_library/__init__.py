@@ -1,5 +1,5 @@
-import torch._library.abstract_impl
 import torch._library.autograd
+import torch._library.fake_impl
 import torch._library.simple_registry
 import torch._library.utils
 
