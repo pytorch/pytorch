@@ -1473,6 +1473,24 @@ class BuiltinVariable(VariableTracker):
             unimplemented("non-const getattr() name")
 
         if tx.output.side_effects.is_attribute_mutation(obj):
+            if isinstance(obj, variables.UnspecializedNNModuleVariable):
+                if (
+                    name
+                    in (
+                        "named_parameters",
+                        "parameters",
+                        "named_buffers",
+                        "buffers",
+                        "named_modules",
+                        "modules",
+                    )
+                    and obj.is_state_mutated
+                    and tx.output.side_effects.has_pending_mutation(obj)
+                ):
+                    unimplemented(
+                        f"pending mutation on nn module, so graph breaking at {name!r} call"
+                    )
+
             try:
                 # re-read a pending side effect?
                 return tx.output.side_effects.load_attr(obj, name)
