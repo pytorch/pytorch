@@ -36,6 +36,17 @@ class FSDPStateContext:
         self.is_last_backward: bool = True
 
 
+def disable_if_config_true(func):
+    @functools.wraps(func)
+    def fsdp_hook_wrapper(*args, **kwargs):
+        if torch._dynamo.config.skip_fsdp_hooks:
+            return torch._dynamo.disable(func, recursive=True)(*args, **kwargs)
+        else:
+            return func(*args, **kwargs)
+
+    return fsdp_hook_wrapper
+
+
 class FSDPState(_State):
     def __init__(self):
         super().__init__()
@@ -142,6 +153,7 @@ class FSDPState(_State):
             if module in module_to_fsdp_param_group:
                 module_to_fsdp_param_group[module]._module_fqn = module_name
 
+    @disable_if_config_true
     def _pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
@@ -161,6 +173,7 @@ class FSDPState(_State):
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
         return args, kwargs
 
+    @disable_if_config_true
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
         # When composing with module-hook-based activation checkpointing, the
         # post-backward hook is responsible for the reshard
