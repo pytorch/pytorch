@@ -19,6 +19,10 @@
 #include <ATen/cuda/tunable/StreamTimer.h>
 #include <ATen/cuda/tunable/TunableOp.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/Float8_e4m3fn.h>
+#include <c10/util/Float8_e4m3fnuz.h>
+#include <c10/util/Float8_e5m2.h>
+#include <c10/util/Float8_e5m2fnuz.h>
 #include <c10/util/StringUtil.h>
 
 #ifdef USE_ROCM
@@ -141,6 +145,26 @@ inline std::string TypeName(BFloat16 v) {
 template <>
 inline std::string TypeName(Half v) {
   return "Half";
+}
+
+template <>
+inline std::string TypeName(Float8_e4m3fn v) {
+  return "Float8_e4m3fn";
+}
+
+template <>
+inline std::string TypeName(Float8_e5m2 v) {
+  return "Float8_e5m2";
+}
+
+template <>
+inline std::string TypeName(Float8_e4m3fnuz v) {
+  return "Float8_e4m3fnuz";
+}
+
+template <>
+inline std::string TypeName(Float8_e5m2fnuz v) {
+  return "Float8_e5m2fnuz";
 }
 
 template <>
@@ -330,7 +354,11 @@ class ScaledGemmTunableOp : public TunableOp<ScaledGemmParams<CT>, StreamTimer> 
   }
 
   std::string Signature() override {
-    return c10::str("ScaledGemmTunableOp");
+    return c10::str("ScaledGemmTunableOp",
+            "_", TypeName<AT>(AT{}),
+            "_", TypeName<BT>(BT{}),
+            "_", TypeName<CT>(CT{}),
+            "_", BlasOpToString(ALayout), BlasOpToString(BLayout));
   }
 };
 
