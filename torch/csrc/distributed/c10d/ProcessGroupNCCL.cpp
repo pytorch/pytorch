@@ -1976,7 +1976,16 @@ std::vector<std::shared_ptr<NCCLComm>>& ProcessGroupNCCL::getNCCLComm(
   // For point-to-point communication on the same process, don't need broadcast.
   if (!isSendRecvSelf) {
     // Broadcast so that each process can have a unique NCCL ID
+    auto timeStarted = std::chrono::steady_clock::now();
     broadcastUniqueNCCLID(&ncclID, singleP2POp, devicesKey, p2pRank);
+    auto timerDeltaMs =
+        std::chrono::duration_cast<std::chrono::duration<double>>(
+            std::chrono::steady_clock::now() - timeStarted)
+            .count() *
+        1000;
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL broadcast unique ID through store took "
+              << timerDeltaMs << " ms";
   }
 
   at::cuda::OptionalCUDAGuard gpuGuard;
