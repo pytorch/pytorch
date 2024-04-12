@@ -729,6 +729,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       ValueError,
       at::cuda::getNumGPUs() != 0,
       "ProcessGroupNCCL is only supported with GPUs, no GPUs found!");
+  this->setGroupName(options_->group_name);
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
   abortInDestroyProcessGroup_ =
@@ -750,7 +751,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
   coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
-  NCCLTraceBuffer::get()->record_pg_ranks(uid_, groupRanks());
+  NCCLTraceBuffer::get()->record_pg_ranks(pg_name_, groupRanks());
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
   // across different ProcessGroupNCCL(PG) instances. We need to get the
@@ -831,7 +832,7 @@ ProcessGroupNCCL::ProcessGroupNCCL(
             << ", TORCH_NCCL_HEARTBEAT_TIMEOUT_SEC: " << heartbeatTimeoutInSec_
             << ", TORCH_NCCL_TRACE_BUFFER_SIZE: " << ncclTraceBufferSize_
             << ", TORCH_NCCL_COORD_CHECK_MILSEC: " << coordCheckIntervalMilSec_
-            << ", ID=" << this->getID();
+            << ", PG Name: " << options_->group_name;
 
   if (options_->global_ranks_in_group.empty()) {
     this->globalRankStart = 0;
@@ -1267,6 +1268,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(EXCEPTION_DUMP)})) {
           int timeOutRank = -1;
+          shouldDump_.store(true);
           try {
             auto vec = globalStore_->get(std::string(EXCEPTION_DUMP));
             TORCH_CHECK_WITH(
@@ -1311,6 +1313,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       if (heartbeat != heartBeatCounter) {
         heartBeatCounter = heartbeat;
       } else {
+        shouldDump_.store(true);
         // No heartbeat increase detected and timeout.
         errorMsg = c10::str(
             logPrefix(),
@@ -1387,7 +1390,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Case two: desync might be slow or get stuck. Or we get stuck in
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
-  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load()) &&
+  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
+       shouldDump_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave another two mins for desync report generation or process group
     // destroy.
@@ -2003,8 +2007,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   }
 
   // Creates the NCCL streams
-  auto streamVal =
-      at::cuda::getStreamFromPool(options_->is_high_priority_stream);
+  bool force_high = getCvarBool(TORCH_NCCL_HIGH_PRIORITY, false);
+  auto streamVal = at::cuda::getStreamFromPool(
+      options_->is_high_priority_stream || force_high);
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -2207,6 +2212,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     //   between threads
     r->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
+        pg_name_,
         seq_,
         op_id_,
         profilingTitle ? profilingTitle : "",
@@ -2798,6 +2804,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // input/output sizes and profilingTitle per-op in the group.
     auto trace_id = NCCLTraceBuffer::get()->record(
         uid_,
+        pg_name_,
         seq_,
         op_id_,
         profilingTitle,
@@ -2828,6 +2835,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // information it wants.
     work->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
+        pg_name_,
         seq_,
         op_id_,
         profilingTitle,
