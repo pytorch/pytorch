@@ -3859,7 +3859,6 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
-
     def test_clone_sparse_input(self):
         for layout in [
             torch.sparse_coo,
@@ -3878,7 +3877,6 @@ utils_device.CURRENT_DEVICE == None""".split(
                 sparse_copy = torch._dynamo.utils.clone_input(sparse_input)
                 # Make sure sparse clone is successful.
                 self.assertEqual(sparse_input, sparse_copy)
-
 
     @skipIfNotPy311
     def test_linetable_311_writer1(self):
