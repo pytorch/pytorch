@@ -8,7 +8,6 @@ __all__ = [
     "allow_in_graph",
     "list_backends",
     "disable",
-    "disable_if_config_true",
     "cudagraph_mark_step_begin",
     "wrap_numpy",
     "is_compiling",
