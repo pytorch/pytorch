@@ -735,7 +735,6 @@ class X86InductorQuantizer(Quantizer):
             nodes_to_mark_annotated.extend(list(bn_partition.nodes))
             _mark_nodes_as_annotated(nodes_to_mark_annotated)
 
-<<<<<<< HEAD
     def _annotate_conv2d_fusion_pattern(self, model: torch.fx.GraphModule):
         if config := self._get_aten_operator_qconfig(torch.ops.aten.conv2d.default):
             if config.is_qat:
@@ -752,15 +751,6 @@ class X86InductorQuantizer(Quantizer):
             self._annotate_linear_unary(model, config)
             self._annotate_linear(model, config)
             self._annotate_linear(model, config)
-=======
-    def _annotate_conv2d_fusion_pattern(
-        self, model: torch.fx.GraphModule, config: QuantizationConfig
-    ):
-        self._annotate_conv2d_binary_unary(model, config)
-        self._annotate_conv2d_binary(model, config)
-        self._annotate_conv2d_unary(model, config)
-        self._annotate_conv2d(model, config)
->>>>>>> 5b0c65c3a32... [Quant][PT2E] Enable linear-binary(-unary) post-op recipe for X86Inductor quantizer
 
     def _annotate_conv2d_binary_unary(
         self, gm: torch.fx.GraphModule, quantization_config: QuantizationConfig
