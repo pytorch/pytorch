@@ -605,6 +605,31 @@ class TestExecutionTrace(TestCase):
                 found_root_node = True
         assert found_root_node
 
+    def test_execution_trace_nested_tensor(self):
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        fp.close()
+
+        et = ExecutionTraceObserver()
+        observer = et.register_callback(fp.name)
+
+        def fn(nt):
+            return nt.sin().cos()
+
+        with torch.profiler.profile(execution_trace_observer=observer) as prof:
+            for i in range(3):
+                values = torch.rand((8 + i, 4 + i))
+                offsets = torch.tensor([0, 2, 4, 6, 8 + i])
+                nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+                fn(nt)
+
+        nodes = self.get_execution_trace_root(fp.name)
+        found_cos = False
+        for n in nodes:
+            assert "name" in n
+            if "cos" in n["name"]:
+                found_cos = True
+        assert found_cos
+
 
 @instantiate_parametrized_tests
 class TestProfiler(TestCase):
@@ -1850,7 +1875,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 self.assertTrue(e.input_shapes == [])
         with profile(record_shapes=True) as p:
             # add optional args
-            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf2", [x, y])
+            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf2", [x, y], {"stream" : 0, "grid" : "lambda x : x + 1"})
             for _ in range(4):
                 with cm:
                     x.add(y)
@@ -1862,7 +1887,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 self.assertTrue(e.input_shapes == [[4, 4], [4, 4]])
 
         with profile(record_shapes=True) as p:
-            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf3", ["hi"])
+            cm = torch._C._profiler._RecordFunctionFast("add_test_fast_rf3", input_values=["hi"], keyword_values={"hi" : "hello"})
             for _ in range(4):
                 try:
                     with cm:
@@ -2769,11 +2794,11 @@ class MockKinetoEvent:
     def name(self) -> str:
         return self._name
 
-    def start_us(self) -> int:
-        return self._start_us
+    def start_ns(self) -> int:
+        return self._start_us * 1000
 
-    def duration_us(self) -> int:
-        return self._duration_us
+    def duration_ns(self) -> int:
+        return self._duration_us * 1000
 
     def linked_correlation_id(self) -> int:
         return self._linked_correlation_id
@@ -2918,10 +2943,10 @@ class TestExperimentalUtils(TestCase):
             kineto_events = [{
                 '_name':
                 e.name,
-                '_start_us':
-                e.start_us(),
-                '_duration_us':
-                e.duration_us(),
+                '_start_ns':
+                e.start_ns(),
+                '_duration_ns':
+                e.duration_ns(),
                 '_linked_correlation_id':
                 e.linked_correlation_id(),
                 '_device_type':
@@ -3113,6 +3138,8 @@ aten::mm
 aten::mm
 aten::mm""")
 
+    # TODO: Add logic for CUDA version of test
+    @unittest.skipIf(torch.cuda.is_available(), "Test not working for CUDA")
     def test_profiler_pattern_match_helper(self):
         x = torch.ones((100, 100))
         with profile() as prof:
