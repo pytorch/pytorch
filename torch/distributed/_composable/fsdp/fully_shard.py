@@ -116,7 +116,7 @@ def fully_shard(
 
     managed_modules = _get_managed_modules(module)
     params, buffers = _get_managed_states(managed_modules)
-    _move_states_to_device(params, buffers, device, mesh_info)
+    _move_states_to_device(params, buffers, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
             params,

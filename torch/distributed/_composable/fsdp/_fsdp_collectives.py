@@ -34,7 +34,6 @@ def foreach_all_gather(
     device: torch.device,
 ) -> Optional[AllGatherResult]:
     world_size, rank = group.size(), group.rank()
-    # - Copy in
     with torch.cuda.stream(all_gather_copy_in_stream):
         param_all_gather_inputs: List[List[torch.Tensor]] = [
             fsdp_param.all_gather_inputs for fsdp_param in fsdp_params
@@ -63,7 +62,6 @@ def foreach_all_gather(
         del param_all_gather_inputs
     all_gather_stream.wait_stream(all_gather_copy_in_stream)
     with torch.cuda.stream(all_gather_stream):
-        # - All-gather
         all_gather_work = dist.all_gather_into_tensor(
             output_tensor=all_gather_output,
             input_tensor=all_gather_input,
@@ -97,7 +95,7 @@ def foreach_all_gather_copy_out(
     ) = all_gather_result
     if all_gather_event is not None:  # sync op
         torch.cuda.current_stream().wait_event(all_gather_event)
-    if all_gather_work is not None:  # async op
+    if isinstance(all_gather_work, dist.distributed_c10d.Work):  # async op
         all_gather_work.wait()
     world_size, device = group.size(), all_gather_output.device
     for all_gather_input_numels, all_gather_input_dtypes, fsdp_param in zip(
@@ -230,21 +228,10 @@ def foreach_reduce_scatter_copy_in(
     reduce_scatter_input: torch.Tensor,
     world_size: int,
 ) -> None:
-    grad_views: List[torch.Tensor] = []
-    grads_to_copy: List[torch.Tensor] = []
-    padded_grad_slices: List[torch.Tensor] = []
-    for grad in unsharded_grads:
-        grad_size = grad.size()
-        dim0_padded_size = _get_dim0_padded_size(grad_size, world_size)
-        if dim0_padded_size != grad_size:
-            padded_grad = grad.new_empty(dim0_padded_size)
-            padded_grad_slices.append(padded_grad[: grad.size(0)])
-            grads_to_copy.append(grad)
-            grad = padded_grad
-        grad_views.append(grad.view(world_size, -1))
-    if padded_grad_slices:
-        torch._foreach_copy_(padded_grad_slices, grads_to_copy)
-    torch.cat(grad_views, dim=-1, out=reduce_scatter_input.view(world_size, -1))
+    reduce_scatter_input = reduce_scatter_input.view(world_size, -1)
+    torch._chunk_cat(
+        unsharded_grads, dim=0, num_chunks=world_size, out=reduce_scatter_input
+    )
 
 
 def _get_all_gather_input_metadatas(

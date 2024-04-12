@@ -727,7 +727,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Debug level setting. It is parsed once when ProcessGroup is constructed and
   // remains the same across use of this process group.
-  DebugLevel dist_debug_level_;
+  DebugLevel dist_debug_level_{DebugLevel::Off};
 
   // Backend classes for this ProcessGroup
   std::unordered_set<c10::DeviceType> deviceTypes_;

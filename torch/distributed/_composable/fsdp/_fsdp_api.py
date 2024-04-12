@@ -1,14 +1,7 @@
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Tuple
+from typing import Optional
 
 import torch
-
-
-ShardedParamType = torch.Tensor
-UnshardedParamType = torch.Tensor
-AllGatherInputsType = Tuple[torch.Tensor, ...]
-AllGatherOutputsType = Tuple[torch.Tensor, ...]
-MetadataType = Any
 
 
 @dataclass(frozen=True)
@@ -82,19 +75,3 @@ class CPUOffloadPolicy(OffloadPolicy):
     """
 
     pin_memory: bool = True
-
-
-@dataclass(frozen=True)
-class FSDPTensorExtensions:
-    # fsdp_pre_all_gather(sharded_param) -> (all_gather_inputs, metadata)
-    fsdp_pre_all_gather: Callable[
-        [ShardedParamType], Tuple[AllGatherInputsType, MetadataType]
-    ]
-    # fsdp_post_all_gather(all_gather_outputs, metadata, param_dtype, *, out) -> unsharded_param
-    # `param_dtype` is the mixed precision policy's `param_dtype` if specified
-    # or the parameter's original dtype otherwise. This can be useful to set as
-    # a wrapper subclass's dtype for gradient dtypes to match.
-    fsdp_post_all_gather: Callable[
-        [AllGatherOutputsType, MetadataType, torch.dtype, Optional[UnshardedParamType]],
-        UnshardedParamType,
-    ]
