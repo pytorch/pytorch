@@ -39,7 +39,7 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   Stream getStream(Device d) const noexcept override {
     return impl_->getStream(d);
   }
-  Stream getNewStream(Device d, int64_t priority = 0) const override {
+  Stream getNewStream(Device d, int priority = 0) const override {
     return impl_->getNewStream(d, priority);
   }
   Stream getDefaultStream(Device d) const override {

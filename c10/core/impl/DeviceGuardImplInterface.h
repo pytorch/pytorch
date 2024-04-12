@@ -127,7 +127,7 @@ struct C10_API DeviceGuardImplInterface {
    * copied and shared around, device backend should be able to correctly handle
    * the lifetime of the stream.
    */
-  virtual Stream getNewStream(Device, int64_t priority = 0) const {
+  virtual Stream getNewStream(Device, int priority = 0) const {
     (void)priority;
     TORCH_CHECK(false, "Backend doesn't support create a new Stream.")
   }
@@ -260,7 +260,7 @@ struct NoOpDeviceGuardImpl final : public DeviceGuardImplInterface {
     return Stream(Stream::DEFAULT, Device(D, -1));
   }
 
-  Stream getNewStream(Device, int64_t priority = 0) const override {
+  Stream getNewStream(Device, int priority = 0) const override {
     // no-op
     (void)priority;
     return Stream(Stream::DEFAULT, Device(D, -1));
