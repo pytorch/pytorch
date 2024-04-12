@@ -1301,15 +1301,31 @@ class CppWrapperCpu(WrapperCodeGen):
             # See the comment in codegen_reinterpret_view about why having something like
             # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
             # tensor prematurely deallocated, thus this std::vector().data() trick here.
-            indices_str = ("std::vector<AtenTensorHandle>{" + (', '.join([f"convert_arrayref_tensor_to_tensor({ind})" for ind in indices])) + "}.data()")
-            args = [f"convert_arrayref_tensor_to_tensor({x})", indices_str, str(len(indices)), f"convert_arrayref_tensor_to_tensor({values})", accumulate]
-            args.insert(0, f"convert_arrayref_tensor_to_tensor({x})")  # set x as the output tensor, this fallback mutates x.
+            indices_str = (
+                "std::vector<AtenTensorHandle>{"
+                + (
+                    ", ".join(
+                        [f"convert_arrayref_tensor_to_tensor({ind})" for ind in indices]
+                    )
+                )
+                + "}.data()"
+            )
+            args = [
+                f"convert_arrayref_tensor_to_tensor({x})",
+                indices_str,
+                str(len(indices)),
+                f"convert_arrayref_tensor_to_tensor({values})",
+                accumulate,
+            ]
+            args.insert(
+                0, f"convert_arrayref_tensor_to_tensor({x})"
+            )  # set x as the output tensor, this fallback mutates x.
         else:
             indices_str = (
                 f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
             )
             args = [x, indices_str, values, accumulate]
-            args.insert(0, x) # set x as the output tensor, this fallback mutates
+            args.insert(0, x)  # set x as the output tensor, this fallback mutates
 
         self.writeline(self.wrap_kernel_call(kernel, args))
 
