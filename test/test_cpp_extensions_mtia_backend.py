@@ -12,6 +12,7 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_LINUX,
+    skipIfTorchDynamo,
     TEST_CUDA,
     TEST_PRIVATEUSE1,
 )
@@ -75,6 +76,7 @@ class TestCppExtensionMTIABackend(common.TestCase):
             verbose=True,
         )
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_get_device_module(self):
         device = torch.device("mtia:0")
         default_stream = torch.get_device_module(device).current_stream()
@@ -84,6 +86,7 @@ class TestCppExtensionMTIABackend(common.TestCase):
         print(torch._C.Stream.__mro__)
         print(torch.cuda.Stream.__mro__)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_stream_basic(self):
         default_stream = torch.mtia.current_stream()
         user_stream = torch.mtia.Stream()
@@ -98,6 +101,7 @@ class TestCppExtensionMTIABackend(common.TestCase):
         default_stream.synchronize()
         self.assertTrue(default_stream.query())
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_stream_context(self):
         mtia_stream_0 = torch.mtia.Stream(device="mtia:0")
         mtia_stream_1 = torch.mtia.Stream(device="mtia:0")
@@ -113,6 +117,7 @@ class TestCppExtensionMTIABackend(common.TestCase):
             msg = f"current_stream {current_stream} should be {mtia_stream_1}"
             self.assertTrue(current_stream == mtia_stream_1, msg=msg)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_stream_context_different_device(self):
         device_0 = torch.device("mtia:0")
         device_1 = torch.device("mtia:1")
@@ -134,6 +139,7 @@ class TestCppExtensionMTIABackend(common.TestCase):
             self.assertTrue(current_stream == mtia_stream_1, msg=msg)
         self.assertTrue(torch.mtia.current_device() == orig_current_device)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_device_context(self):
         device_0 = torch.device("mtia:0")
         device_1 = torch.device("mtia:1")
