@@ -3,6 +3,7 @@ This module dispatches the graphs to either the forward-only or joint compilatio
 pathways, taking into account the AOTConfig and the collected ViewAndMutationMetadata.
 """
 
+import dataclasses
 from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
@@ -48,6 +49,16 @@ def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
     return fx_g
 
 
+def _root_module_when_exporting_non_strict(flat_fn):
+    # When exporting in non-strict mode, we wrap the root module in a specific pattern.
+    # See `_aot_export_non_strict` in torch.export._trace.py.
+    # We look for that wrapping pattern here.
+    if hasattr(flat_fn, "_orig_mod") and hasattr(flat_fn._orig_mod, "_export_root"):
+        return flat_fn._orig_mod._export_root
+    else:
+        return None
+
+
 def aot_dispatch_base_graph(
     flat_fn,
     flat_args: List[Tensor],
@@ -88,11 +99,67 @@ def aot_dispatch_base_graph(
         fw_only=flat_fn,
     )
 
+    # We track buffer assignments when exporting in non-strict mode.
+    # (In contrast, strict mode errors on any attribute assignment.)
+    mod_when_exporting_non_strict = _root_module_when_exporting_non_strict(flat_fn)
+    if aot_config.is_export and mod_when_exporting_non_strict is not None:
+        # For any buffer that is assigned, we want to associate it to the final proxy node
+        # that it is assigned to. This node can then be added as a buffer mutation output.
+        assigned_buffers = {}
+
+        def _map_assigned_buffer_to_proxy(_mod, name, buffer):
+            # We intercept buffer assignments on the root module through this hook.
+            if _mod._buffers is mod_when_exporting_non_strict._buffers:
+                # The value assigned to a buffer is a functional tensor, which wraps a fake tensor.
+                assert isinstance(
+                    buffer, torch._subclasses.functional_tensor.FunctionalTensor
+                )
+                fake = buffer.from_functional()
+                # The fake tensor in turn is associated with a proxy node.
+                proxy_mode = torch._C._get_dispatch_mode(
+                    torch._C._TorchDispatchModeKey.PROXY
+                )
+                assert proxy_mode is not None
+                proxy = torch.fx.experimental.proxy_tensor.get_proxy_slot(
+                    fake, proxy_mode.tracer
+                ).proxy.node
+                # We map the assigned buffer to this proxy node.
+                assigned_buffers[name] = proxy.name
+            return buffer
+
+        handle = torch.nn.modules.module.register_module_buffer_registration_hook(
+            _map_assigned_buffer_to_proxy
+        )
+
     fw_module = _create_graph(
         fn_to_trace,
         updated_flat_args_subclasses_desugared,
         aot_config=aot_config,
     )
+
+    if aot_config.is_export and mod_when_exporting_non_strict is not None:
+        # We update metadata to consider any assigned buffers as buffer mutations.
+        i = len(dict(mod_when_exporting_non_strict.named_parameters()))
+        for name, _ in mod_when_exporting_non_strict.named_buffers():
+            if name in assigned_buffers and not fw_metadata.input_info[i].mutates_data:  # type: ignore[possibly-undefined]
+                fw_metadata.input_info[i] = dataclasses.replace(
+                    fw_metadata.input_info[i], mutates_data=True
+                )
+                fw_metadata.num_mutated_inp_runtime_indices += 1
+            i += 1
+
+        # We add nodes corresponding to buffer assignments as output nodes in the graph.
+        add_nodes = []
+        output_node = None
+        output_node = list(fw_module.graph.nodes)[-1]
+        for name in assigned_buffers.values():  # type: ignore[possibly-undefined]
+            for node in fw_module.graph.nodes:
+                if node.name == name:
+                    add_nodes.append(node)
+                    node.users[output_node] = None
+        output_node.args = ((*add_nodes, *output_node.args[0]),)
+
+        handle.remove()  # type: ignore[possibly-undefined]
 
     # As long as we opted to remove input mutations, then
     # there should be *NO* mutating ops in the graph at this point.
