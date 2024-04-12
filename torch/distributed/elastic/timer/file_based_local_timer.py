@@ -174,6 +174,7 @@ class FileTimerServer:
         # For test only. Process all requests and stop the server.
         self._run_once = False
         self._log_event = log_event if log_event is not None else lambda name, request: None
+        self._last_progress_time = int(time.time())
 
 
     def start(self) -> None:
@@ -237,6 +238,7 @@ class FileTimerServer:
                     self._run_watchdog(fd)
                     if run_once:
                         break
+                    self._last_progress_time = int(time.time())
                 except Exception:
                     logger.exception("Error running watchdog")
 
@@ -343,3 +345,6 @@ class FileTimerServer:
         except Exception:
             logger.exception("Error terminating pid=%s", worker_pid)
         return False
+
+    def get_last_progress_time(self) -> int:
+        return self._last_progress_time

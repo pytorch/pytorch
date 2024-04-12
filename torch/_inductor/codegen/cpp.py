@@ -562,6 +562,11 @@ class CppPrinter(ExprPrinter):
         r = f"std::floor({self._print(expr.args[0])})"
         return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
 
+    def _print_Trunc(self, expr):
+        assert len(expr.args) == 1
+        r = f"std::trunc({self._print(expr.args[0])})"
+        return f"static_cast<{INDEX_TYPE}>({r})" if expr.is_integer else r
+
     def _print_Pow(self, expr):
         # Uses float constants to perform FP div
         base, exp = expr.args
@@ -1830,8 +1835,8 @@ class CppKernel(Kernel):
                 if cse_var == var:
                     if is_to_lowp_dtype(expr):
                         m = re.search(r"tmp\d+", expr)
-                        assert m
-                        fp32_cse_var_name = m.group()
+                        if m is not None:
+                            fp32_cse_var_name = m.group()
             if fp32_cse_var_name:
                 for cse_var in cache.values():
                     if cse_var.name == fp32_cse_var_name:
