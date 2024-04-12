@@ -3,6 +3,7 @@ import operator
 import copy
 import logging
 from collections import defaultdict, OrderedDict
+from torch.distributed._composable.fsdp import _fsdp_collectives
 
 torch_log = logging.getLogger("torch")
 

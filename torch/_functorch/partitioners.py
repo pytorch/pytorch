@@ -1025,17 +1025,17 @@ def min_cut_rematerialization_partition(
         saved_sym_nodes = list(filter(is_sym_node, saved_values))
         saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
 
-        if dist.get_rank() == 0:
-            # print(f"cut_value: {cut_value}")
-            # print(f"cut_nodes: {cut_nodes}")
-            import pickle
-            filename = "nx_graph.pkl"
-            try:
-                os.remove(filename)
-            except OSError:
-                pass
-            with open(filename, "wb") as file:
-                pickle.dump(nx_graph, file)
+        # if dist.get_rank() == 0:
+        #     # print(f"cut_value: {cut_value}")
+        #     # print(f"cut_nodes: {cut_nodes}")
+        #     import pickle
+        #     filename = "nx_graph.pkl"
+        #     try:
+        #         os.remove(filename)
+        #     except OSError:
+        #         pass
+        #     with open(filename, "wb") as file:
+        #         pickle.dump(nx_graph, file)
 
         return saved_sym_nodes, saved_values
 
