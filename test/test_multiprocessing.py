@@ -8,7 +8,6 @@ import time
 import unittest
 import copy
 from sys import platform
-import warnings
 
 import torch
 import torch.cuda
