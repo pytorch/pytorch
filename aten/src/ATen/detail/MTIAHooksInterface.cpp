@@ -10,7 +10,6 @@ namespace detail {
 
 const MTIAHooksInterface& getMTIAHooks() {
   static std::unique_ptr<MTIAHooksInterface> mtia_hooks = nullptr;
-#if !defined C10_MOBILE
   static c10::once_flag once;
   c10::call_once(once, [] {
     mtia_hooks = MTIAHooksRegistry()->Create("MTIAHooks", MTIAHooksArgs{});
@@ -18,11 +17,6 @@ const MTIAHooksInterface& getMTIAHooks() {
       mtia_hooks = std::make_unique<MTIAHooksInterface>();
     }
   });
-#else
-  if (mtia_hooks == nullptr) {
-    mtia_hooks = std::make_unique<MTIAHooksInterface>();
-  }
-#endif
   return *mtia_hooks;
 }
 

@@ -12,6 +12,7 @@ import torch.utils.cpp_extension
 from torch.testing._internal.common_utils import (
     IS_ARM64,
     IS_LINUX,
+    skipIfTorchDynamo,
     TEST_CUDA,
     TEST_PRIVATEUSE1,
 )
@@ -64,9 +65,10 @@ class TestCppExtensionStreamAndEvent(common.TestCase):
         remove_build_path()
         build_dir = tempfile.mkdtemp()
         # Load the fake device guard impl.
+        src = f"{os.path.abspath(os.path.dirname(__file__))}/cpp_extensions/mtia_extension.cpp"
         cls.module = torch.utils.cpp_extension.load(
             name="mtia_extension",
-            sources=["cpp_extensions/mtia_extension.cpp"],
+            sources=[src],
             build_directory=build_dir,
             extra_include_paths=[
                 "cpp_extensions",
@@ -77,6 +79,7 @@ class TestCppExtensionStreamAndEvent(common.TestCase):
             verbose=True,
         )
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     def test_stream_event(self):
         s = torch.Stream()
         self.assertTrue(s.device_type, int(torch._C._autograd.DeviceType.MTIA))
