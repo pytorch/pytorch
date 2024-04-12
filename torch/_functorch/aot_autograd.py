@@ -954,10 +954,29 @@ def aot_module_simplified(
             aot_config,
         )
 
+    if isinstance(mod, torch._dynamo.utils.GmWrapper):
+        # This function is called by the flatten_graph_inputs wrapper, which boxes
+        # the inputs so that they can be freed before the end of this scope.
+        # For overhead reasons, this is not the default wrapper, see comment:
+        # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
+        def boxed_forward(runtime_args: List[Any]):
+            flat_args = []
+            flat_args.extend(params_flat)
+            flat_args.extend(runtime_args)
+            runtime_args.clear()
+            return compiled_fn(flat_args)
+
+        # Just for convenience
+        boxed_forward.zero_grad = mod.zero_grad
+        boxed_forward.named_parameters = mod.named_parameters
+        boxed_forward.named_buffers = mod.named_buffers
+        return boxed_forward
+
     # TODO: There is something deeply wrong here; compiled_fn running with
     # the boxed calling convention, but aot_module_simplified somehow
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
+    # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
     def forward(*runtime_args: Tuple[Any]):
         full_args = []
         full_args.extend(params_flat)
