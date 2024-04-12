@@ -761,18 +761,17 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
 // kwargs It skips checking script object to allow FakeScriptObject to be
 // matched. It returns the stack if the arugments matches schema and false
 // otherwise.
-Stack checkSchemaAllowFakeScriptObject(
+bool checkSchemaAllowFakeScriptObject(
     const FunctionSchema& schema,
     py::args args,
     const py::kwargs& kwargs) {
-  Stack stack;
+  bool match = false;
   try {
-    stack = createStackForSchema(
-        schema, std::move(args), kwargs, c10::nullopt, true);
+    match = matchSchemaAllowFakeScriptObject(schema, std::move(args), kwargs);
   } catch (schema_match_error& error) {
     throw std::runtime_error(error.what());
   }
-  return stack;
+  return match;
 }
 
 py::object invokeOperatorFromPython(

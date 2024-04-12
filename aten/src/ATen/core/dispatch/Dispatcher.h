@@ -403,7 +403,7 @@ public:
     return operatorDef_->op.hasKernelForDispatchKey(k);
   }
 
-  bool isKernelFallBackKernel(DispatchKey k) const {
+  bool isKernelFallthroughKernel(DispatchKey k) const {
     return operatorDef_->op.kernelForDispatchKey(k).isFallthrough();
   }
 
