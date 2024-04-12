@@ -638,7 +638,6 @@ def choose_qparams_per_token_meta(
     )
 
 
-# TODO: move this to https://github.com/pytorch/pytorch/blob/main/torch/ao/quantization/fx/_decomposed.py
 quantized_decomposed_lib.define(
     "choose_qparams_per_token_asymmetric(Tensor input, ScalarType dtype) -> (Tensor, Tensor)"
 )
@@ -647,7 +646,7 @@ quantized_decomposed_lib.define(
 @impl(
     quantized_decomposed_lib,
     "choose_qparams_per_token_asymmetric",
-    "CompositeExplicitAutograd",
+    "CompositeImplicitAutograd",
 )
 def choose_qparams_per_token_asymmetric(
     input: torch.Tensor,
@@ -690,21 +689,6 @@ def choose_qparams_per_token_asymmetric(
     zero_point = torch.clamp(zero_point, qmin, qmax).round()
 
     return scale.to(torch.float32), zero_point.to(torch.float32)
-
-
-@impl(
-    quantized_decomposed_lib,
-    "choose_qparams_per_token_asymmetric",
-    "Meta",
-)
-def choose_qparams_per_token_asymmetric_meta(
-    input: torch.Tensor,
-    dtype: torch.dtype,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    size = (1, input.size(-1))
-    return torch.empty(size, dtype=torch.double, device=input.device), torch.empty(
-        size, dtype=torch.int64, device=input.device
-    )
 
 
 def _per_token_quant_qparam_dim_check(input, scales, zero_points):
