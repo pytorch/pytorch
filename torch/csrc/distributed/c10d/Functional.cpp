@@ -3,6 +3,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/DispatchKey.h>
+#include <torch/csrc/autograd/custom_function.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
@@ -360,5 +361,76 @@ TORCH_LIBRARY(_c10d_functional, m) {
       "wait_tensor(Tensor tensor) -> Tensor",
       torch::dispatch(
           c10::DispatchKey::CompositeExplicitAutograd, ::wait_tensor),
+      {at::Tag::pt2_compliant_tag});
+}
+
+namespace {
+class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
+ public:
+  static torch::autograd::Variable forward(
+      torch::autograd::AutogradContext* ctx,
+      const at::Tensor& input,
+      std::vector<int64_t> output_split_sizes,
+      std::vector<int64_t> input_split_sizes,
+      std::string group_name) {
+    // swap sizes for backwards pass
+    ctx->saved_data["output_split_sizes"] = input_split_sizes;
+    ctx->saved_data["input_split_sizes"] = output_split_sizes;
+    ctx->saved_data["group_name"] = group_name;
+
+    return c10::Dispatcher::singleton()
+        .findSchemaOrThrow("_c10d_functional::all_to_all_single", "")
+        .typed<decltype(all_to_all_single)>()
+        .call(input, output_split_sizes, input_split_sizes, group_name);
+  }
+
+  static torch::autograd::variable_list backward(
+      torch::autograd::AutogradContext* ctx,
+      torch::autograd::variable_list grad_out_list) {
+    const std::vector<int64_t>& output_split_sizes =
+        ctx->saved_data["output_split_sizes"].toIntVector();
+    const std::vector<int64_t>& input_split_sizes =
+        ctx->saved_data["input_split_sizes"].toIntVector();
+    const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
+
+    DCHECK(grad_out_list.size() == 1);
+    auto grad_out = grad_out_list[0];
+
+    auto out =
+        c10::Dispatcher::singleton()
+            .findSchemaOrThrow("_c10d_functional::all_to_all_single", "")
+            .typed<decltype(all_to_all_single)>()
+            .call(grad_out, output_split_sizes, input_split_sizes, group_name);
+
+    // do an explicit wait to avoid cuda stream issues
+    // TODO: track active cuda stream in wait
+    out = c10::Dispatcher::singleton()
+              .findSchemaOrThrow("_c10d_functional::wait_tensor", "")
+              .typed<decltype(wait_tensor)>()
+              .call(out);
+
+    return {out, at::Tensor(), at::Tensor(), at::Tensor()};
+  }
+};
+
+at::Tensor all_to_all_single_autograd(
+    const at::Tensor& input,
+    std::vector<int64_t> output_split_sizes,
+    std::vector<int64_t> input_split_sizes,
+    std::string group_name) {
+  return AllToAllSingle::apply(
+      input, output_split_sizes, input_split_sizes, group_name)[0];
+}
+
+} // namespace
+
+TORCH_LIBRARY(_c10d_functional_autograd, m) {
+  m.def(
+      "all_to_all_single("
+      "Tensor input, "
+      "SymInt[] output_split_sizes, "
+      "SymInt[] input_split_sizes, "
+      "str group_name) -> Tensor",
+      torch::dispatch(c10::DispatchKey::Autograd, ::all_to_all_single_autograd),
       {at::Tag::pt2_compliant_tag});
 }
