@@ -2778,6 +2778,67 @@ def forward(self, tangents_1):
         with self.assertRaisesRegex(Exception, "Can't call metadata"):
             make_fx(m, tracing_mode="symbolic", _allow_non_fake_inputs=True)(inp)
 
+    def _compile_and_erase_bases(self, *output_view_indices):
+        # Overrides _base and _view_func tensor attributes, so as to avoid the view-replay
+        # execution path when reconstructing views.
+        class NoViewReplayTensor(torch.Tensor):
+            @property
+            def _base(self):
+                return None
+
+            @property
+            def _view_func(self):
+                return None
+
+        # Wraps the outputs that are views of the FX graph 'g' with NoViewReplayTensor,
+        # since they are the only ones that will get reconstructed.
+        def wrapper(g, *args, **kwargs):
+            outs = g(*args, **kwargs)
+            for i in output_view_indices:
+                outs[i] = NoViewReplayTensor(outs[i])
+            return outs
+
+        return lambda f: aot_function(f, fw_compiler=lambda g, _: partial(wrapper, g))
+
+    def test_output_aliases_input_view_meta_replay(self):
+        @self._compile_and_erase_bases(0)
+        def f(a):
+            return a.view(-1)
+
+        inp = torch.ones(2, 2, requires_grad=True)
+        out = f(inp)
+
+        self.assertIsNotNone(out.grad_fn)
+        self.assertExpectedInline(str(out.grad_fn.__class__), """<class 'ViewBackward0'>""")
+
+    def test_output_aliases_intermediate_view_meta_replay(self):
+        @self._compile_and_erase_bases(0, 1)
+        def f(a):
+            b = a.clone()
+            return b.view(-1), b.view(-1)
+
+        inp = torch.ones(2, 2, requires_grad=True)
+        out1, out2 = f(inp)
+
+        self.assertIsNotNone(out1.grad_fn)
+        self.assertExpectedInline(str(out1.grad_fn.__class__), """<class 'ViewBackward0'>""")
+
+        self.assertIsNotNone(out2.grad_fn)
+        self.assertExpectedInline(str(out2.grad_fn.__class__), """<class 'ViewBackward0'>""")
+
+    def test_output_aliases_output_view_meta_replay(self):
+        @self._compile_and_erase_bases(1)
+        def f(a):
+            b = a.add(10)
+            return b, b.view(-1)
+
+        inp = torch.ones(2, 2, requires_grad=True)
+        out1, out2 = f(inp)
+
+        self.assertEqual(out1.untyped_storage(), out2.untyped_storage())
+        self.assertIsNotNone(out2.grad_fn)
+        self.assertExpectedInline(str(out2.grad_fn.__class__), """<class 'ViewBackward0'>""")
+
 
 def extract_graph(fx_g, _, graph_cell):
     graph_cell[0] = fx_g
