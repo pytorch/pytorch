@@ -59,7 +59,12 @@ from torch._dynamo.device_interface import (
 from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor import config, exc, metrics
 from torch._inductor.codegen.cuda import cuda_env
-from torch._inductor.utils import cache_dir, clear_on_fresh_inductor_cache, is_linux
+from torch._inductor.utils import (
+    cache_dir,
+    clear_on_fresh_inductor_cache,
+    developer_warning,
+    is_linux,
+)
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
@@ -2016,7 +2021,7 @@ def custom_op_wrapper(op: str, *args):
 
 @clear_on_fresh_inductor_cache
 class CppCodeCache:
-    cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
+    cache: Dict[str, Union[CDLL, ModuleType]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags: Dict[str, Any] = {}
 
@@ -2027,17 +2032,13 @@ class CppCodeCache:
     @classmethod
     def _load_library(cls, path: str, key: str) -> Union[CDLL, ModuleType]:
         try:
-            result = cls._load_library_inner(path, key)
-            result.key = key  # type: ignore[union-attr]
-            return result
+            return cls._load_library_inner(path, key)
         except (ImportError, OSError) as e:
             if "gomp" in str(e) and os.path.exists("/usr/lib64/libgomp.so.1"):
                 # hacky workaround for fbcode/buck
                 global _libgomp
                 _libgomp = cdll.LoadLibrary("/usr/lib64/libgomp.so.1")
-                result = cls._load_library_inner(path, key)
-                result.key = key  # type: ignore[union-attr]
-                return result
+                return cls._load_library_inner(path, key)
             if "failed to map segment from shared object" in str(e):
                 raise OSError(
                     f"{e}.  The most common reason this may occur is if the {tempfile.gettempdir()} folder "
@@ -2048,68 +2049,42 @@ class CppCodeCache:
             raise
 
     @classmethod
-    def load_async(cls, source_code: str, cuda=False, submit_fn=None):
-        compile_command = {
-            **cls.cpp_compile_command_flags,
-            "cuda": cuda,
-            "vec_isa": pick_vec_isa(),
-        }
-        cpp_command = repr(cpp_compile_command("i", "o", **compile_command))
+    def load(cls, source_code: str, cuda: bool = False) -> Union[CDLL, ModuleType]:
+        cls.cpp_compile_command_flags.update({"cuda": cuda})
+        picked_vec_isa = pick_vec_isa()
+        cpp_command = repr(
+            cpp_compile_command(
+                "i", "o", vec_isa=picked_vec_isa, **cls.cpp_compile_command_flags
+            )
+        )
         key, input_path = write(source_code, "cpp", extra=cpp_command)
-
         if key not in cls.cache:
             from filelock import FileLock
 
-            lock_path = os.path.join(get_lock_dir(), key + ".lock")
-            output_path = input_path[:-3] + "so"
-            future: Optional[Future[Any]] = None
-            lib = None
-            worker_fn = functools.partial(
-                _worker_compile_cpp,
-                lock_path,
-                input_path,
-                output_path,
-                cpp_compile_command(
-                    input=input_path, output=output_path, **compile_command
-                ),
-            )
-
-            def load_fn():
-                nonlocal lib
-                if lib is None:
-                    if future is not None:
-                        future.result()
-                    worker_fn()
-                    lib = cls._load_library(output_path, key)
-                    assert lib is not None
-                return lib
-
-            if submit_fn is not None:
-                with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-                    if not os.path.exists(output_path):
-                        future = submit_fn(worker_fn)
-
-            cls.cache[key] = load_fn
+            lock_dir = get_lock_dir()
+            lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+            with lock:
+                output_path = input_path[:-3] + "so"
+                if not os.path.exists(output_path):
+                    cmd = shlex.split(
+                        cpp_compile_command(
+                            input=input_path,
+                            output=output_path,
+                            vec_isa=picked_vec_isa,
+                            **cls.cpp_compile_command_flags,
+                        )
+                    )
+                    compile_file(input_path, output_path, cmd)
+                cls.cache[key] = cls._load_library(output_path, key)
+                cls.cache[key].key = key  # type: ignore[union-attr]
 
         return cls.cache[key]
-
-    @classmethod
-    def load(cls, source_code: str, cuda: bool = False):
-        return cls.load_async(source_code, cuda)()
-
-
-def _worker_compile_cpp(lock_path, input_path, output_path, cmd):
-    from filelock import FileLock
-
-    with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-        if not os.path.exists(output_path):
-            compile_file(input_path, output_path, shlex.split(cmd))
 
 
 # Customized Python binding for cpp kernels
 @clear_on_fresh_inductor_cache
 class CppPythonBindingsCodeCache(CppCodeCache):
-    cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
+    cache: Dict[str, Union[CDLL, ModuleType]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         # kernels have no dependency on libtorch
@@ -2201,13 +2176,12 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         return module
 
     @classmethod
-    def load_pybinding_async(
+    def load_pybinding(
         cls,
         argtypes: List[str],
         source_code: str,
         cuda: bool = False,
         num_outputs: int = -1,
-        submit_fn=None,
     ) -> Any:
         """
         Wrap a C++ function in fast Python bindings.
@@ -2235,26 +2209,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
             cls.entry_function,
             cls.entry_function,
         )
-        get_result = cls.load_async(source_code + suffix, cuda, submit_fn=submit_fn)
-        result = None
-
-        def future():
-            nonlocal result
-            if result is None:
-                result = get_result()
-                assert isinstance(result, ModuleType)
-            return getattr(result, cls.entry_function)
-
-        return future
-
-    @classmethod
-    def load_pybinding(cls, *args, **kwargs) -> Any:
-        return cls.load_pybinding_async(*args, **kwargs)()
+        result = cls.load(source_code + suffix, cuda)
+        assert isinstance(result, ModuleType)
+        return getattr(result, cls.entry_function)
 
 
 @clear_on_fresh_inductor_cache
 class CppWrapperCodeCache(CppPythonBindingsCodeCache):
-    cache: Dict[str, Callable[[], Union[CDLL, ModuleType]]] = {}
+    cache: Dict[str, Union[CDLL, ModuleType]] = {}
     cache_clear = staticmethod(cache.clear)
     cpp_compile_command_flags = {
         "include_pytorch": not config.abi_compatible,
@@ -2315,10 +2277,6 @@ class CppWrapperCodeCache(CppPythonBindingsCodeCache):
     )
 
 
-def _reload_python_module_in_subproc(key, path):
-    return PyCodeCache.load_by_key_path(key, path)
-
-
 @clear_on_fresh_inductor_cache
 class PyCodeCache:
     cache: Dict[str, ModuleType] = dict()
@@ -2372,11 +2330,6 @@ class PyCodeCache:
                     for k, v in attrs.items():
                         setattr(mod, k, v)
 
-                if not (linemap or attrs):
-                    mod._reload_in_subproc = functools.partial(  # type: ignore[attr-defined]
-                        _reload_python_module_in_subproc, key, path
-                    )
-
         return cls.cache[key]
 
     @classmethod
@@ -2408,25 +2361,11 @@ class PyCodeCache:
         return parse_stack_trace(entry)
 
 
-def _reload_triton_kernel_in_subproc(reload_module, kernel_name):
-    return TritonCodeCache._mod_to_kernel(reload_module(), kernel_name)
-
-
 class TritonCodeCache:
     @classmethod
     def load(cls, kernel_name: str, source_code: str) -> ModuleType:
         mod = PyCodeCache.load(source_code)
-        return cls._mod_to_kernel(mod, kernel_name)
-
-    @classmethod
-    def _mod_to_kernel(cls, mod, kernel_name):
-        kernel = getattr(mod, kernel_name)
-        kernel._reload_in_subproc = functools.partial(
-            _reload_triton_kernel_in_subproc,
-            mod._reload_in_subproc,
-            kernel_name,
-        )
-        return kernel
+        return getattr(mod, kernel_name)
 
 
 def _cuda_compiler() -> Optional[str]:
@@ -2713,7 +2652,6 @@ def caching_device_properties():
             device_interface.Worker.get_device_properties()
 
 
-@functools.lru_cache(None)
 def _set_triton_ptxas_path() -> None:
     if os.environ.get("TRITON_PTXAS_PATH") is not None:
         return
@@ -2728,50 +2666,54 @@ def _set_triton_ptxas_path() -> None:
         warnings.warn(f"{ptxas_path} exists but is not an executable")
 
 
-def _worker_compile_triton(
-    load_kernel: Callable[[], Any],
+def _worker_compile(
+    kernel_name: str,
+    source_code: str,
     cc: int,
     device: torch.device,
     device_interface: Type[DeviceInterface],
-):
-    _set_triton_ptxas_path()
+) -> None:
     device_interface.Worker.set_device(device.index)
-    kernel = load_kernel()
+    kernel = TritonCodeCache.load(kernel_name, source_code)
     kernel.precompile(warm_cache_only_with_cc=cc)
 
 
-class CodeCacheFuture:
-    def result(self):
-        raise NotImplementedError()
+def _load_kernel(kernel_name: str, source_code: str) -> ModuleType:
+    _set_triton_ptxas_path()
+    kernel = TritonCodeCache.load(kernel_name, source_code)
+    kernel.precompile()
+    return kernel
 
 
-class TritonFuture(CodeCacheFuture):
+class TritonFuture:
     kernel: ModuleType
 
     def __init__(
         self,
-        kernel: Any,
-        future: Optional[Future[Any]],
+        kernel_name: str,
+        source_code: str,
+        future: Future[Any],
     ) -> None:
-        self.kernel = kernel
+        self.kernel_name = kernel_name
+        self.source_code = source_code
         self.future = future
 
     # @dynamo_utils.dynamo_timed
     def result(self) -> ModuleType:
-        if self.future is not None:
-            # If the worker failed this will throw an exception.
-            self.future.result()
-            self.future = None
-            self.kernel.precompile()
-        return self.kernel
-
-
-class LambdaFuture(CodeCacheFuture):
-    def __init__(self, result_fn):
-        self.result_fn = result_fn
-
-    def result(self):
-        return self.result_fn()
+        t0 = time()
+        if hasattr(self, "kernel"):
+            return self.kernel
+        # If the worker failed this will throw an exception.
+        self.future.result()
+        kernel = self.kernel = _load_kernel(self.kernel_name, self.source_code)
+        latency = time() - t0
+        if latency > 50:
+            developer_warning(
+                f"Detected long compilation time of {latency} seconds for kernel name {self.kernel_name}"
+            )
+            developer_warning(self.source_code)
+        del self.kernel_name, self.source_code, self.future
+        return kernel
 
 
 # If this process dies abnormally (e.g. segfault)
@@ -2805,21 +2747,10 @@ _pool_set: Set[ProcessPoolExecutor] = set()
 
 def shutdown_compile_workers() -> None:
     """Shut down all outstanding compile-worker pools."""
+    global _pool_set
     for pool in _pool_set:
         pool.shutdown()
-    after_fork()
-
-
-def after_fork():
-    """Reset pools to initial state without shutting them down"""
     _pool_set.clear()
-    AsyncCompile.process_pool.cache_clear()
-
-
-try:
-    os.register_at_fork(after_in_child=after_fork)
-except AttributeError:
-    pass  # register_at_fork does not exists on windows
 
 
 class AsyncCompile:
@@ -2894,26 +2825,21 @@ class AsyncCompile:
             return task()
         return cls.pool().submit(task)
 
-    def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
+    def triton(
+        self, kernel_name: str, source_code: str, device_str: str = "cuda"
+    ) -> Union[TritonFuture, ModuleType]:
         _compile_start()
-        _set_triton_ptxas_path()
 
-        kernel = TritonCodeCache.load(kernel_name, source_code)
         if config.compile_threads > 1:
             device_interface = get_interface_for_device(device_str)
             device = torch.device(device_str, device_interface.current_device())
             cc = device_interface.get_compute_capability(device)
             future = self.process_pool().submit(
-                _worker_compile_triton,
-                kernel._reload_in_subproc,
-                cc,
-                device,
-                device_interface,
+                _worker_compile, kernel_name, source_code, cc, device, device_interface
             )
-            return TritonFuture(kernel, future)
+            return TritonFuture(kernel_name, source_code, future)
         else:
-            kernel.precompile()
-            return kernel
+            return _load_kernel(kernel_name, source_code)
 
     def multi_kernel(self, *args, **kwargs) -> Any:
         from torch._inductor.codegen.multi_kernel import MultiKernelCall
@@ -2921,21 +2847,18 @@ class AsyncCompile:
         # no need to call this in parallel since the sub-kernels are already parallel tasks
         return MultiKernelCall(*args, **kwargs)
 
-    def cpp(self, source_code: str):
-        if config.compile_threads <= 1:
+    def cpp(self, source_code: str) -> ModuleType:
+        def task():
             return CppCodeCache.load(source_code).kernel
-        else:
-            get_result = CppCodeCache.load_async(source_code, submit_fn=self.submit)
-            return LambdaFuture(lambda: get_result().kernel)
 
-    def cpp_pybinding(self, argtypes: List[str], source_code: str):
-        if config.compile_threads <= 1:
-            return CppPythonBindingsCodeCache.load_pybinding(argtypes, source_code)
-        else:
-            get_result = CppPythonBindingsCodeCache.load_pybinding_async(
-                argtypes, source_code, submit_fn=self.submit
+        return self.submit(task)
+
+    def cpp_pybinding(self, argtypes: List[str], source_code: str) -> ModuleType:
+        return self.submit(
+            functools.partial(
+                CppPythonBindingsCodeCache.load_pybinding, argtypes, source_code
             )
-            return LambdaFuture(get_result)
+        )
 
     def cuda(self, source_code, dst_file_ext):
         def task():
@@ -2948,7 +2871,7 @@ class AsyncCompile:
             [
                 value
                 for key, value in scope.items()
-                if isinstance(value, (Future, CodeCacheFuture))
+                if isinstance(value, (Future, TritonFuture))
             ]
         )
         pbar = tqdm(
@@ -2961,18 +2884,18 @@ class AsyncCompile:
             for key, result in scope.items():
                 if config.verbose_progress and not isinstance(pbar, _Faketqdm):
                     pbar.set_postfix_str(key)
-                if isinstance(result, (Future, CodeCacheFuture)):
+                if isinstance(result, (Future, TritonFuture)):
                     scope[key] = result.result()
                     pbar.update(1)
 
         _compile_end()
 
 
-if (
-    os.environ.get("TORCH_TNT_IN_USE", "0") == "1"
-    or os.environ.get("TORCH_WARM_POOL", "1") != "1"
-):
-    pass
+if os.environ.get("TORCH_TNT_IN_USE", "0") == "1":
+    # When TorchTNT is used, calling warm_pool() here will cause the
+    # compile workers created not being able to be shut down inside
+    # shutdown_compile_workers(). This may cause significant QPS drop.
+    log.info("Do not call AsyncCompile.warm_pool() because TorchTNT is in use.")
 elif sys.version_info >= (3, 12):
     log.info("AsyncCompile.warm_pool() is broken on 3.12+.")
 else:
