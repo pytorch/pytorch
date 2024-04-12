@@ -3861,11 +3861,13 @@ utils_device.CURRENT_DEVICE == None""".split(
 
 
     def test_clone_sparse_input(self):
-        for layout in [torch.sparse_coo,
-                       torch.sparse_csr,
-                       torch.sparse_csc,
-                       torch.sparse_bsr,
-                       torch.sparse_bsc ]:
+        for layout in [
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        ]:
             for sparse_input in self.generate_simple_inputs(
                 layout,
                 device="cpu",
