@@ -678,6 +678,9 @@ class ListIteratorVariable(VariableTracker):
             ]
         )
 
+    def is_exhausted(self):
+        return self.index >= len(self.items)
+
 
 class TupleIteratorVariable(ListIteratorVariable):
     pass
