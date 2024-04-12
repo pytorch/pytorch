@@ -650,7 +650,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
 
         # crappy version of dispatcher
         # TODO: Do this properly
-        if needs_autograd:
+        if needs_autograd and not aot_config.pre_dispatch:
             # For now, aot_dispatch_autograd knows to explicitly return a graph
             # when run with export, and an opaque callable otherwise.
             # In theory we could factor these out, but I wanted to let the dust
@@ -1110,7 +1110,8 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
         ctx = nullcontext
     else:
         # Run under no_grad, so our tracing machinery only traces an inference graph.
-        ctx = torch.no_grad
+        # However if pre_dispatch=True, we want to correctly trace set_grad_enabled calls for training.
+        ctx = nullcontext if pre_dispatch else torch.no_grad
         fn_to_trace = functional_call
 
     full_args = []
