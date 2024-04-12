@@ -295,8 +295,7 @@ main()
             ]
             self.assertTrue(len(matches) == 1)
 
-            return code
-
+        torch._dynamo.reset()
         handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
         try:
             compiled_fn(inputs=[param, activ], sizes=(), hooks=())
