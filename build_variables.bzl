@@ -823,6 +823,7 @@ libtorch_python_core_sources = [
     "torch/csrc/mps/Module.cpp",
     "torch/csrc/inductor/aoti_runner/pybind.cpp",
     "torch/csrc/inductor/aoti_eager/kernel_holder.cpp",
+    "torch/csrc/inductor/aoti_eager/kernel_meta_info.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
