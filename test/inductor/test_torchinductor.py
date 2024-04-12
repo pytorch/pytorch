@@ -9115,6 +9115,98 @@ class CommonTemplate:
                     elif node.target == "output":
                         self.assertEqual(get_data_type(node), torch.bfloat16)
 
+    @unittest.skipIf(not HAS_CPU, "requires C++ compiler")
+    def test_full_bits_lowp(self):
+        from torch._dynamo.utils import detect_fake_mode
+        from torch._inductor.codegen.cpp import CppKernelProxy, KernelGroup
+        from torch._inductor.compile_fx import _shape_env_from_inputs
+        from torch._inductor.debug import DebugContext
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.virtualized import V
+        from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
+        def check_use_full_bits(func, shapes, dtype, mixed):
+            example_inputs = [torch.randn(shape, dtype=dtype) for shape in shapes]
+            if mixed:
+                example_inputs[0] = example_inputs[0].float()
+            self.common(func, example_inputs)
+            gm, _ = torch._dynamo.export(func)(*example_inputs)
+            gm = torch.fx.symbolic_trace(gm)
+            shape_env = _shape_env_from_inputs(example_inputs)
+            fake_mode = detect_fake_mode(example_inputs)
+            if not fake_mode:
+                fake_mode = torch._subclasses.FakeTensorMode()
+                FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
+            else:
+                FakeTensorProp(gm, mode=fake_mode).propagate_dont_convert_inputs(
+                    *example_inputs
+                )
+
+            with V.set_fake_mode(fake_mode):
+                graph = GraphLowering(
+                    gm,
+                    shape_env=shape_env,
+                    num_static_inputs=0,
+                )
+                with V.set_graph_handler(graph), V.set_debug_handler(DebugContext()):
+                    graph.run(*example_inputs)
+                    code, _ = graph.codegen()
+                    scheduler_node = graph.scheduler.nodes[0]
+                    nodes = scheduler_node.get_nodes()
+                    kernel_group = KernelGroup()
+                    cpp_kernel_proxy = CppKernelProxy(kernel_group)
+                    cpp_kernel_proxy.legalize_lowp_fp_dtype(nodes)
+                    cpp_kernel_proxy.data_type_propagation(nodes)
+                    first_node = nodes[0]
+                    vec_dtype = (
+                        first_node._lowp_fp_type
+                        if all(
+                            hasattr(_node, "_lowp_fp_type")
+                            and _node._lowp_fp_type == first_node._lowp_fp_type
+                            for _node in nodes
+                        )
+                        else torch.float
+                    )
+                    self.assertEqual(vec_dtype, dtype)
+                    self.assertTrue(
+                        "at::vec::VectorizedN" in code
+                        or "at::vec::convert<float,2" in code
+                    )
+
+        funcs = []
+
+        def func0(arg0, arg1):
+            return torch.ops.aten.sum(
+                torch.ops.aten.add(torch.ops.aten.atanh(arg0), arg1), (2, 3)
+            )
+
+        funcs.append(func0)
+
+        def func1(arg0):
+            v = torch.ops.prims.convert_element_type.default(arg0, torch.float)
+            v = torch.ops.aten.add(torch.ops.aten.atanh(arg0), v)
+            return torch.ops.prims.convert_element_type.default(v, arg0.dtype)
+
+        funcs.append(func1)
+
+        def func2(arg0, arg1):
+            v = torch.ops.aten.atanh(arg0)
+            v = torch.ops.aten.add(v, arg1)
+            return torch.ops.prims.convert_element_type.default(v, arg1.dtype)
+
+        funcs.append(func2)
+
+        example_shapes = [
+            [(10, 32, 20, 20), (10, 32, 20, 20)],
+            [(10, 32, 20, 20)],
+            [(10, 32, 20, 20), (10, 32, 20, 20)],
+        ]
+        mixed_types = [False, False, True]
+
+        for dtype in [torch.bfloat16, torch.float16]:
+            for func, shapes, mixed in zip(funcs, example_shapes, mixed_types):
+                check_use_full_bits(func, shapes, dtype, mixed)
+
     # Calling div only torch.SymInt arguments is not yet supported.
     # To support this behavior, we need to allow const-propping tensors that store symint data.
     # For now, dynamo will explicitly graph break when it encounters user code with this behavior.

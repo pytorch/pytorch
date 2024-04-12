@@ -9,7 +9,7 @@ import sys
 from copy import copy, deepcopy
 from enum import Enum
 from typing import Any, cast, Dict, List, Optional, Set, Tuple, Union
-
+import warnings
 import sympy
 
 import torch
@@ -2340,9 +2340,6 @@ class CppVecKernel(CppKernel):
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
             if is_welford_reduction(reduction_type):
-                assert (
-                    self._get_num_vectors(dtype) == 1
-                ), "Welford reduction does not support VectorizedN (N>1)"
                 next_value = f"welford_vec_reduce_all({acc_vec})"
             else:
                 reduce_all_body = (
@@ -2370,6 +2367,8 @@ class CppVecKernel(CppKernel):
         var = self.args.output(name)
         out_dtype = V.graph.get_dtype(name)
         dtype = torch.float if out_dtype.is_floating_point else torch.int64
+        out_num_vectors = V.kernel._get_num_vectors(out_dtype)
+        src_num_vectors = V.kernel._get_num_vectors(dtype)
         code = IndentedBuffer()
         if self.tiling_idx >= self.reduction_depth:
             # Horizontal reduction
@@ -2380,9 +2379,15 @@ class CppVecKernel(CppKernel):
             # Vertical reduction
             if out_dtype != dtype:
                 converted_value = f"{DTYPE_TO_CPP[out_dtype]}_{value}"
-                code.writeline(
-                    f"auto {converted_value} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value});"
-                )
+                if src_num_vectors == out_num_vectors == 1:
+                    code.writeline(
+                        f"auto {converted_value} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]}>({value});"
+                    )
+                else:
+                    code.writeline(
+                        f"auto {converted_value} = at::vec::convert<{DTYPE_TO_CPP[out_dtype]},"
+                        f"{out_num_vectors},{DTYPE_TO_CPP[dtype]},{src_num_vectors}>({value});"
+                    )
                 value = converted_value
             code.splice(self._get_store_line(value, var, index, out_dtype))
         self.reduction_suffix.splice(code.map(lambda x: DeferredLine(name, x)))
@@ -2929,6 +2934,7 @@ class CppKernelProxy(CppKernel):
         sub_blocks = [scheduler_node._body.root_block] + list(
             scheduler_node._body.subblocks.values()
         )
+        all_node_support_lowp: bool = True
         for sub_block in sub_blocks:
             for _node in sub_block.graph.nodes:
                 # TODO(Eikan): Regarding get_index and index_expr, we should conclude the
@@ -2947,24 +2953,26 @@ class CppKernelProxy(CppKernel):
                     "neg",
                     "output",
                 ]:
-                    return False
+                    all_node_support_lowp = False
 
                 if hasattr(_node, "meta") and _node.meta:
                     assert OptimizationContext.key in _node.meta
                     opt_ctx: OptimizationContext = _node.meta[OptimizationContext.key]
                     if not opt_ctx.dtype or opt_ctx.dtype not in DTYPE_LOWP_FP:
-                        return False
-                    if _lowp_fp_type:
-                        assert (
-                            _lowp_fp_type == opt_ctx.dtype
-                        ), "scheduler node do not support bf16/fp16 mix"
+                        all_node_support_lowp = False
+                    elif _lowp_fp_type:
+                        if _lowp_fp_type != opt_ctx.dtype:
+                            warnings.warn(
+                                "bf16 and fp16 are mixed in the scheduler node. "
+                                f"Will use the first encountered {_lowp_fp_type}."
+                            )
                     else:
                         _lowp_fp_type = opt_ctx.dtype
+                        scheduler_node._lowp_fp_type = _lowp_fp_type  # type: ignore[attr-defined]
                 else:
-                    return False
+                    all_node_support_lowp = False
 
-        scheduler_node._lowp_fp_type = _lowp_fp_type  # type: ignore[attr-defined]
-        return True
+        return all_node_support_lowp
 
     def legalize_lowp_fp_dtype(self, nodes):
         def add_to_dtype(sub_graph: torch.fx.Graph):
@@ -3240,6 +3248,20 @@ class CppKernelProxy(CppKernel):
             tiling_factor = self.picked_vec_isa.nelements(dtype=dtype)
             tiling_indices = select_tiling_indices(tiling_factor)
             if tiling_indices:
+                if dtype in DTYPE_LOWP_FP:
+                    select_new_vec_dtype = False
+                    for var_sizes in var_sizes_list:
+                        for var_size in var_sizes:
+                            if len(var_size) > max(tiling_indices):
+                                for tiling_indice in tiling_indices:
+                                    if var_size[tiling_indice] < tiling_factor or var_size[tiling_indice] >= tiling_factor / 2:
+                                        select_new_vec_dtype = True
+
+                    if select_new_vec_dtype:
+                        tiling_factor = self.picked_vec_isa.nelements(dtype=torch.float)
+                        tiling_indices = select_tiling_indices(tiling_factor)
+                        dtype = torch.float
+
                 could_vec = True
                 for tiling_indice in tiling_indices:
                     with CppVecKernelChecker(
@@ -3254,17 +3276,17 @@ class CppKernelProxy(CppKernel):
                             break
                 if could_vec:
                     if len(tiling_indices) == 1:
-                        return [tiling_factor], tiling_indices
+                        return [tiling_factor], tiling_indices, dtype
                     if len(tiling_indices) == 2:
-                        return [tiling_factor, tiling_factor], tiling_indices
-            return [], []
+                        return [tiling_factor, tiling_factor], tiling_indices, dtype
+            return [], [], dtype
 
         # Kernels share the same global contexts like V.graph.wrapper_code, V.kernel.args.
         # But the generated scalar kernel has updated these global contexts. Hence, the other kernels
         # should not do this again to avoid context conflict. By now, we only control the
         # config.inplace_buffers. In the future, we could maintain more contexts.
         with torch._inductor.config.patch(inplace_buffers=False):
-            tiling_factors, tiling_indices = select_tiling(vec_dtype)
+            tiling_factors, tiling_indices, vec_dtype = select_tiling(vec_dtype)
             assert len(tiling_factors) == len(tiling_indices)
             if len(tiling_indices) == 1:
                 vec_kernel = codegen_kernel(
