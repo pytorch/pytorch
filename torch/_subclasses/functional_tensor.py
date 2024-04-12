@@ -1,7 +1,7 @@
 import contextlib
 import warnings
 from abc import ABC, abstractmethod
-from typing import Any, Callable, ContextManager, Dict, Optional, Tuple
+from typing import Any, Callable, ContextManager, Dict, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -120,6 +120,7 @@ class FunctionalTensor(torch.Tensor):
             False,  # dispatch_layout
             extra_dispatch_keys,  # _extra_dispatch_keys
         )
+        torch._C._set_throw_on_mutable_data_ptr(out)
         out.elem = elem
         return out
 
@@ -510,7 +511,9 @@ class BaseFunctionalizeAPI(ABC):
         pass
 
     @abstractmethod
-    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def unwrap_tensors(
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         pass
 
     @abstractmethod
@@ -552,7 +555,9 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
                 torch.Tensor, FunctionalTensor.to_functional, args
             )
 
-    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def unwrap_tensors(
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         return torch.utils._pytree.tree_map_only(
             FunctionalTensor, FunctionalTensor.from_functional, args
         )
@@ -592,7 +597,9 @@ class CppFunctionalizeAPI(BaseFunctionalizeAPI):
 
         return _wrap_all_tensors_to_functional(args, level=0)
 
-    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def unwrap_tensors(
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )
@@ -629,7 +636,9 @@ class FunctorchFunctionalizeAPI(BaseFunctionalizeAPI):
 
         return _wrap_all_tensors_to_functional(args, level=self.interpreter.level())
 
-    def unwrap_tensors(self, args: Tuple[Any]) -> Tuple[Any]:
+    def unwrap_tensors(
+        self, args: Union[torch.Tensor, Tuple[torch.Tensor, ...]]
+    ) -> Union[torch.Tensor, Tuple[torch.Tensor, ...]]:
         from torch._functorch.eager_transforms import (
             _unwrap_all_tensors_from_functional,
         )

@@ -30,7 +30,7 @@ static std::unordered_map<std::string, ParameterType> type_map = {
     {"double", ParameterType::DOUBLE},
     {"complex", ParameterType::COMPLEX},
     {"TensorList", ParameterType::TENSOR_LIST},
-    {"c10::List<c10::optional<Tensor>>", ParameterType::TENSOR_LIST},
+    {"c10::List<::std::optional<Tensor>>", ParameterType::TENSOR_LIST},
     {"IntArrayRef", ParameterType::INT_LIST},
     {"SymIntArrayRef", ParameterType::SYM_INT_LIST},
     {"ArrayRef<double>", ParameterType::FLOAT_LIST},
