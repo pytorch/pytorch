@@ -785,6 +785,8 @@ class TorchBindOpOverload(OpOverload):
         torch._higher_order_ops.effects.register_side_effect_op(self)
 
     def _fallthrough_keys(self) -> List[DispatchKey]:
+        # TODO: we should be calling the fallback for these, but a fallthrough is almost close
+        # enough to the fallback in most cases that we care about.
         _DEFAULT_FALLTHROUGH_KEYS = [
             DispatchKey.Autograd,
             DispatchKey.AutogradCPU,
@@ -793,11 +795,25 @@ class TorchBindOpOverload(OpOverload):
             DispatchKey.PythonTLSSnapshot,
             DispatchKey.PythonDispatcher,
         ]
+
+        def _may_use_fallthrough_instead_of_fallback(key: DispatchKey):
+            _fallthrough_in_cpp_dispatcher = (
+                torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), key)
+                and torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
+                    self.name(), key
+                )
+            )
+
+            _fallthrough_in_python_dispatcher = (
+                key not in self.py_kernels
+                or self.py_kernels[key] is torch.library.fallthrough_kernel
+            )
+            return _fallthrough_in_cpp_dispatcher or _fallthrough_in_python_dispatcher
+
         return [
             key
             for key in _DEFAULT_FALLTHROUGH_KEYS
-            if key not in self.py_kernels
-            or self.py_kernels[key] is torch.library.fallthrough_kernel
+            if _may_use_fallthrough_instead_of_fallback(key)
         ]
 
     # use `self_` to avoid naming collide with arguments that
@@ -827,7 +843,7 @@ class TorchBindOpOverload(OpOverload):
         if isinstance(handler, DispatchKey):
             # fallthrough keys can be registered at runtime via torch.library.impl
             # so need to add it to fallthrough_keys and re-dispatch.
-            if torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(  # type: ignore[attr-defined]
+            if torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
                 self.name(), dispatch_key
             ):
                 return self._dispatch_in_python(
@@ -867,11 +883,6 @@ class OpOverloadPacket:
         self._op = op
         self._overload_names = overload_names
         self._dir = []
-        self._schemas = {
-            overload_name: torch._C._get_schema(qualified_op_name, overload_name)
-            for overload_name in self._overload_names
-        }
-
         self._has_torchbind_op_overload = any(
             _has_script_object_arg(schema) for schema in self._schemas.values()
         )
@@ -894,6 +905,13 @@ class OpOverloadPacket:
     @property
     def op(self):
         return self._op
+
+    @property
+    def _schemas(self):
+        return {
+            overload_name: torch._C._get_schema(self._qualified_op_name, overload_name)
+            for overload_name in self._overload_names
+        }
 
     def __getattr__(self, key):
         # It is not a valid op_name when __file__ is passed in
@@ -927,13 +945,7 @@ class OpOverloadPacket:
             op_, op_dk_, tags = torch._C._get_operation_overload(
                 self._qualified_op_name, use_key
             )
-
-            if use_key not in self._schemas:
-                # Raise Runtime error is to be consistant with the error raised by torch._C._get_schema
-                raise RuntimeError(f"Found no matching schema for {use_key}")
-
-            schema = self._schemas[use_key]
-
+            schema = torch._C._get_schema(self._qualified_op_name, use_key)
             overload = (
                 OpOverload(self, op_, op_dk_, schema, tags)
                 if not _has_script_object_arg(schema)
@@ -976,7 +988,7 @@ class OpOverloadPacket:
 # _jit_get_operations, which calls _get_operation_for_overload_or_packet.
 def _call_overload_packet_from_python(op: OpOverloadPacket, args, kwargs):
     # Re-use the torch function handling logic in cpp
-    torch_function_called, ret = torch._C._maybe_call_torch_function_for_op_packet(  # type: ignore[attr-defined]
+    torch_function_called, ret = torch._C._maybe_call_torch_function_for_op_packet(
         op, *args, **kwargs
     )
 
@@ -992,7 +1004,7 @@ def _call_overload_packet_from_python(op: OpOverloadPacket, args, kwargs):
     for overload_name in op.overloads():
         op_overload = getattr(op, overload_name)
         try:
-            _ = torch._C._check_schema_allow_fake_script_object(  # type: ignore[attr-defined]
+            _ = torch._C._check_schema_allow_fake_script_object(
                 op_overload._schema, *args, **kwargs
             )
             found_op = op_overload
@@ -1004,7 +1016,7 @@ def _call_overload_packet_from_python(op: OpOverloadPacket, args, kwargs):
         return found_op(*args, **kwargs)
 
     err_msg = (
-        f"Fail to match any TorchBindOverloads of {op} with following exceptions:\n"
+        f"Fail to match any TorchBindOverload of {op} with following exceptions:\n"
     )
     for i, (key, msg) in enumerate(exceptions.items()):
         err_msg += f"Overload name {key}:\n {msg}\n"

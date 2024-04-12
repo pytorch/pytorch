@@ -492,7 +492,7 @@ void initDispatchBindings(PyObject* module) {
       [](const char* name, c10::DispatchKey dispatch) -> bool {
         auto op =
             c10::Dispatcher::singleton().findOp(torch::jit::parseName(name));
-        return op->isKernelFallBackKernel(dispatch);
+        return op->isKernelFallthroughKernel(dispatch);
       });
 
   m.def(
