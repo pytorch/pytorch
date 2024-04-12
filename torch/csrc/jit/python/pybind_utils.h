@@ -898,12 +898,96 @@ inline IValue fakeScriptObjectToIValue(
   return toIValue(object, PyObjectType::get());
 }
 
+inline bool matchSchemaAllowFakeScriptObject(
+    const FunctionSchema& schema,
+    const tuple_slice& args,
+    const py::kwargs& kwargs) {
+  size_t all_arguments = args.size() + kwargs.size();
+  if (all_arguments > schema.arguments().size()) {
+    throw schema_match_error(c10::str(
+        schema.name(),
+        "() expected at most ",
+        schema.arguments().size(),
+        " argument(s) but received ",
+        all_arguments,
+        " argument(s). Declaration: ",
+        schema));
+  }
+
+  int64_t arg_idx = 0;
+  auto fake_class_registry =
+      py::module::import("torch._library.fake_class_registry");
+
+  // First push all positional args.
+  for (const auto& arg : args) {
+    // ...but refuse to do it if the schema says that this was supposed
+    // to be keyword only
+    if (schema.arguments()[arg_idx].kwarg_only()) {
+      throw schema_match_error(c10::str(
+          schema.name(),
+          "() takes ",
+          arg_idx,
+          " positional argument(s) but ",
+          args.size(),
+          " was/were given.  Declaration: ",
+          schema));
+    }
+    // Use the type information from the schema to convert the PyObject.
+    const auto& argument = schema.arguments().at(arg_idx);
+    if (argument.real_type()->kind() == TypeKind::ClassType &&
+        py::isinstance(arg, fake_class_registry.attr("FakeScriptObject"))) {
+      fakeScriptObjectToIValue(schema, arg_idx, arg);
+    } else {
+      argumentToIValue(schema, arg_idx, arg);
+    }
+
+    arg_idx++;
+  }
+
+  // Now for every remaining non-positional argument in the schema, look for it
+  // in the kwargs dict and push it if found, or use its default value if it
+  // has one.
+  size_t consumed_kwargs = 0;
+  for (size_t i = arg_idx; i < schema.arguments().size(); ++i) {
+    const auto& arg = schema.arguments()[i];
+    if (kwargs.contains(arg.name().c_str())) {
+      auto cur_kwarg = kwargs[arg.name().c_str()];
+      if (arg.real_type()->kind() == TypeKind::ClassType &&
+          py::isinstance(
+              cur_kwarg, fake_class_registry.attr("FakeScriptObject"))) {
+        fakeScriptObjectToIValue(schema, i, cur_kwarg);
+      } else {
+        argumentToIValue(schema, i, cur_kwarg);
+      }
+      consumed_kwargs += 1;
+    } else if (arg.default_value()) {
+      continue;
+    } else {
+      throw schema_match_error(c10::str(
+          schema.name(),
+          "() is missing value for argument '",
+          arg.name(),
+          "'. Declaration: ",
+          schema));
+    }
+  }
+
+  if (consumed_kwargs != kwargs.size()) {
+    std::vector<std::string> names;
+    for (const auto& kwarg : kwargs) {
+      names.emplace_back(py::cast<std::string>(kwarg.first));
+    }
+    throw schema_match_error(schema.findErrorInKwargs(names));
+  }
+
+  return true;
+}
+
 inline Stack createStackForSchema(
     const FunctionSchema& schema,
     const tuple_slice& args,
     const py::kwargs& kwargs,
-    c10::optional<IValue> self,
-    bool allow_fake_script_object = false) {
+    c10::optional<IValue> self) {
   size_t all_arguments = (self ? 1 : 0) + args.size() + kwargs.size();
   if (all_arguments > schema.arguments().size()) {
     throw schema_match_error(c10::str(
@@ -939,13 +1023,7 @@ inline Stack createStackForSchema(
     }
     // Use the type information from the schema to convert the PyObject.
     const auto& argument = schema.arguments().at(arg_idx);
-    if (allow_fake_script_object &&
-        argument.real_type()->kind() == TypeKind::ClassType) {
-      push(stack, fakeScriptObjectToIValue(schema, stack.size(), arg));
-    } else {
-      push(stack, argumentToIValue(schema, stack.size(), arg));
-    }
-
+    push(stack, argumentToIValue(schema, stack.size(), arg));
     arg_idx++;
   }
 
@@ -956,14 +1034,7 @@ inline Stack createStackForSchema(
   for (size_t i = stack.size(); i < schema.arguments().size(); ++i) {
     const auto& arg = schema.arguments()[i];
     if (kwargs.contains(arg.name().c_str())) {
-      if (allow_fake_script_object &&
-          arg.real_type()->kind() == TypeKind::ClassType) {
-        push(
-            stack,
-            fakeScriptObjectToIValue(schema, i, kwargs[arg.name().c_str()]));
-      } else {
-        push(stack, argumentToIValue(schema, i, kwargs[arg.name().c_str()]));
-      }
+      push(stack, argumentToIValue(schema, i, kwargs[arg.name().c_str()]));
       consumed_kwargs += 1;
     } else if (arg.default_value()) {
       push(stack, *arg.default_value());
@@ -1195,7 +1266,7 @@ TORCH_PYTHON_API py::tuple _maybe_handle_torch_function(
     py::args args,
     const py::kwargs& kwargs);
 
-TORCH_PYTHON_API Stack checkSchemaAllowFakeScriptObject(
+TORCH_PYTHON_API bool checkSchemaAllowFakeScriptObject(
     const FunctionSchema& schema,
     py::args args,
     const py::kwargs& kwargs);
