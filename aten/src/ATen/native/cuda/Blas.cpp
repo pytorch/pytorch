@@ -252,6 +252,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
            scalar_type == at::ScalarType::Half ||
            scalar_type == at::ScalarType::BFloat16) &&
 #endif
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12010 && !defined(USE_ROCM))
+          mat2_sizes[0] > 1 && mat2_sizes[1] > 1;
+#else
           mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
           mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
           mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
@@ -264,6 +267,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
            (mat2.strides()[1] == 1 && mat2.strides()[0] == mat2_sizes[1]) ||
            (scalar_type != at::ScalarType::Half &&
             scalar_type != at::ScalarType::BFloat16));
+#endif
     }
 #endif
     if (!useLtInterface) {
@@ -337,9 +341,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
               args.n,
               args.k,
               alpha.to<at::opmath_type<scalar_t>>(),
-              args.mata->data_ptr<scalar_t>(),
+              args.mata->const_data_ptr<scalar_t>(),
               args.lda,
-              args.matb->data_ptr<scalar_t>(),
+              args.matb->const_data_ptr<scalar_t>(),
               args.ldb,
 #if defined(USE_ROCM)
               // This condition is needed for mm case on ROCm for hipblasLt path.
@@ -802,7 +806,7 @@ static bool _scaled_mm_allowed_device() {
 //    - `out_dtype`: the output dtype, can either be a float8 or a higher precision floating point type
 //    - `scale_a`: a scalar tensor with the inverse scale of `mat1`, only needed if `mat1` is a float8 type
 //    - `scale_b`: a scalar tensor with the inverse scale of `mat2`, only needed if `mat2` is a float8 type
-//    - `scale_result`: a scalar tensor with the scale of the output, only needed if the output is a float8 type
+//    - `scale_result`: a scalar tensor with the scale of the output, only set if the output is a float8 type
 //    - `use_fast_accum`: if true, enables fast float8 accumulation
 //    - `out`: a reference to the output tensor
 //    - `amax`: a reference to the amax tensor of the output, only needed if the output is a float8 type and will be updated inplace
@@ -908,9 +912,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 
 #if defined(USE_ROCM) && ROCM_VERSION >= 60000
   // rocm's hipblaslt does not yet support amax, so calculate separately
-  auto out_float32 = out.to(kFloat);
-  out_float32.abs_();
-  amax = at::max(out_float32);
+  amax = at::max(at::abs(out));
 #endif
 
   return {out, amax};

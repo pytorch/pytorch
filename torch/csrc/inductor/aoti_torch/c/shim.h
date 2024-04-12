@@ -424,6 +424,23 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_mm_out(
     AtenTensorHandle self,
     AtenTensorHandle mat2);
 
+// This will soon be deprecated after ao_quantization is complete.
+// Please refrain from using this or increasing callsites.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cpu_wrapped_fbgemm_pack_gemm_matrix_fp16(
+    AtenTensorHandle weight,
+    AtenTensorHandle* out);
+
+// This will soon be deprecated after ao_quantization is complete.
+// Please refrain from using this or increasing callsites.
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cpu_wrapped_fbgemm_linear_fp16_weight(
+    AtenTensorHandle input,
+    AtenTensorHandle weight,
+    AtenTensorHandle bias,
+    int64_t out_channel,
+    AtenTensorHandle* out);
+
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_nonzero(AtenTensorHandle self, AtenTensorHandle* out);
 
@@ -545,7 +562,7 @@ AOTI_TORCH_EXPORT void aoti_torch_check(
 } // extern "C"
 
 template <typename T>
-int32_t aoti_torch_dtype();
+int32_t aoti_torch_dtype() = delete;
 
 #define DEFINE_DTYPE_SPECIALIZATION(ctype, typename) \
   template <>                                        \
@@ -553,10 +570,13 @@ int32_t aoti_torch_dtype();
     return aoti_torch_dtype_##typename();            \
   }
 
-// REVIEW: bfloat16 and half don't seem to actually build? Do I have
-// the wrong types?
-//  DEFINE_DTYPE_SPECIALIZATION(__bfloat16, bfloat16)
-//  DEFINE_DTYPE_SPECIALIZATION(half, float16)
+namespace c10 {
+struct BFloat16;
+struct Half;
+} // namespace c10
+
+DEFINE_DTYPE_SPECIALIZATION(c10::BFloat16, bfloat16)
+DEFINE_DTYPE_SPECIALIZATION(c10::Half, float16)
 DEFINE_DTYPE_SPECIALIZATION(float, float32)
 DEFINE_DTYPE_SPECIALIZATION(double, float64)
 DEFINE_DTYPE_SPECIALIZATION(uint8_t, uint8)

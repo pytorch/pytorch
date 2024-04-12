@@ -1,3 +1,4 @@
+import argparse
 import csv
 import dataclasses
 import itertools
@@ -29,21 +30,21 @@ class Experiment:
     target: float
 
 
-all_experiments = [
-    Experiment(
+all_experiments = {
+    "llama-7b-fp16": Experiment(
         "Llama-2-7b-chat-hf", LLaMA, "bfloat16", LLaMAWeightOnlyInt8QuantHandler, 104
     ),
-    Experiment(
+    "llama-7b-int8": Experiment(
         "Llama-2-7b-chat-hf", LLaMA, "int8", LLaMAWeightOnlyInt8QuantHandler, 155
     ),
-    Experiment(
+    "mixtral-int8": Experiment(
         "Mixtral-8x7B-v0.1",
         MixtralMoE,
         "int8",
         MixtralMoEWeightOnlyInt8QuantHandler,
         97,
     ),
-]
+}
 
 output_filename = "gpt_fast_benchmark.csv"
 
@@ -154,18 +155,21 @@ def generate(
 
 
 def _load_model(x: Experiment, device="cuda", precision=torch.bfloat16):
-    model = x.module.from_name(x.name)
+    with torch.device("meta"):
+        model = x.module.from_name(x.name)
+    model = model.to(dtype=precision)
 
     if x.mode == "int8":
         print("Using int8 weight-only quantization!")
         model = x.quantizer(model).convert_for_runtime()
 
-    for param in model.parameters():
-        param = torch.nn.Parameter(
-            torch.randn(param.size(), device=param.device, dtype=param.dtype)
+    state_dict = model.state_dict()
+    for k, v in state_dict.items():
+        state_dict[k] = torch.nn.Parameter(
+            torch.randn(v.shape, device=device).to(dtype=v.dtype),
+            requires_grad=v.requires_grad,
         )
-
-    model = model.to(device=device, dtype=precision)
+    model.load_state_dict(state_dict, assign=True)
     return model.eval()
 
 
@@ -241,18 +245,34 @@ def output_csv(filename, headers, row):
             writer.writerow(list(line) + ["0"] * (len(headers) - len(line)))
 
 
-def main():
+def main(experiments=None):
     results = []
-    for x in all_experiments:
+
+    if experiments is None:
+        experiments = all_experiments
+    else:
+        experiments = {k: v for k, v in all_experiments.items() if k in experiments}
+
+    for x in experiments.values():
         actual = run_experiment(x)
         percentage = f"{actual / x.target * 100:.2f}%"
         results.append((x, actual, percentage))
 
     headers = ["name", "mode", "target", "actual", "percentage"]
     rows = [[x[0].name, x[0].mode, x[0].target, x[1], x[2]] for x in results]
+
     for row in rows:
         output_csv(output_filename, headers, row)
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="Run experiments.")
+    parser.add_argument(
+        "--experiments",
+        nargs="*",
+        default=None,
+        help="Experiment names to run (default: all)",
+    )
+    args = parser.parse_args()
+
+    main(experiments=args.experiments)
