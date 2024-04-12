@@ -2508,6 +2508,7 @@ class DLLWrapper:
         lib_path: str,
     ):
         self.lib_path = lib_path
+        self.is_open = False
         self.DLL = cdll.LoadLibrary(lib_path)
         self.is_open = True
 
