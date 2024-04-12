@@ -394,7 +394,7 @@ def _maybe_call_torch_function_for_op_packet(
     args: Any,
     kwargs: Any,
 ) -> Any: ...
-torch._C._check_schema_allow_fake_script_object(
+def _check_schema_allow_fake_script_object(
     schema: FunctionSchema,
     args: Any,
     kwargs: Any,
