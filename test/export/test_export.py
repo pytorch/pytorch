@@ -423,6 +423,109 @@ class TestExport(TestCase):
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
+    def test_state(self):
+        class M(torch.nn.Module):  # simple with register buffer
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.ones(2, 3), persistent=False)
+
+            def forward(self, x):
+                # x = 2
+                y = self.buf
+                # y = 1
+                w1 = self.buf + 3
+                w2 = self.buf + 4
+                w3 = self.buf + 5
+                self.buf = w1
+                z = self.buf
+                self.buf = w3
+                # z = 4
+                return x + y + z + w2
+
+        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        self.assertEqual(ep.graph_signature.buffers_to_mutate, {"add_2": "buf"})
+        self.assertTrue(
+            torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 12)
+        )
+
+        class M(torch.nn.Module):  # simple without register buffer
+            def __init__(self):
+                super().__init__()
+                self.buf = torch.ones(2, 3)
+
+            def forward(self, x):
+                # x = 2
+                y = self.buf
+                # y = 1
+                self.buf = self.buf + 3
+                z = self.buf
+                # z = 3
+                return x + y + z
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "The attribute self.buf was assigned during export",
+        ):
+            torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+
+        class M(torch.nn.Module):  # complex with register buffer
+            def __init__(self):
+                super().__init__()
+                tensors = [torch.ones(2, 3), torch.ones(2, 3)]
+                for i, tensor in enumerate(tensors):
+                    self.register_buffer(f"buf_{i}", tensor, persistent=False)
+
+            def get_tensor(self, i):
+                return getattr(self, f"buf_{i}")
+
+            def set_tensor(self, i, val):
+                setattr(self, f"buf_{i}", val)
+
+            def forward(self, x):
+                # x = 2
+                y = self.get_tensor(0) + self.get_tensor(1)
+                # y = 1 + 1
+                self.set_tensor(0, torch.ones(2, 3) + 2)
+                self.set_tensor(1, torch.ones(2, 3) + 2)
+                z = self.get_tensor(0) + self.get_tensor(1)
+                # z = 3 + 3
+                return x + y + z
+
+        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        self.assertEqual(
+            ep.graph_signature.buffers_to_mutate, {"add_1": "buf_0", "add_2": "buf_1"}
+        )
+        self.assertTrue(
+            torch.allclose(ep.module()(torch.ones(2, 3) + 1), torch.ones(2, 3) * 10)
+        )
+
+        class M(torch.nn.Module):  # complex without register buffer
+            def __init__(self):
+                super().__init__()
+                self.tensors = [torch.ones(2, 3), torch.ones(2, 3)]
+
+            def get_tensor(self, i):
+                return self.tensors[i]
+
+            def set_tensor(self, i, val):
+                self.tensors[i] = val
+
+            def forward(self, x):
+                # x = 2
+                y = self.get_tensor(0) + self.get_tensor(1)
+                # y = 1 + 1
+                self.set_tensor(0, torch.ones(2, 3) + 2)
+                self.set_tensor(1, torch.ones(2, 3) + 2)
+                z = self.get_tensor(0) + self.get_tensor(1)
+                # z = 3 + 3
+                return x + y + z
+
+        with self.assertRaisesRegex(
+            ValueError,
+            "The attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
+        ):
+            torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+
     # Predispatch has different expected results
     @testing.expectedFailureSerDerPreDispatch
     def test_torch_fn(self):
@@ -1085,6 +1188,36 @@ class TestExport(TestCase):
         list_tensor_map = Module()
         inps = (torch.ones(6, 4), torch.tensor(5), torch.tensor(4))
         self._test_export_same_as_eager(list_tensor_map, inps)
+
+    @unittest.expectedFailure
+    def test_crop_like(self):
+        # https://fb.workplace.com/groups/1405155842844877/posts/8195050017188725/
+
+        # Minimal crop code copied from https://github.com/pytorch/vision/blob/main/torchvision/transforms/v2/functional
+        class CropLike(torch.nn.Module):
+            def forward(self, image, crop_height, crop_width):
+                c, image_height, image_width = image.shape
+                crop_top = int(round((image_height - crop_height) / 2.0))
+                crop_left = int(round((image_width - crop_width) / 2.0))
+                return image[
+                    ...,
+                    crop_top : crop_top + crop_height,
+                    crop_left : crop_left + crop_width,
+                ]
+
+        crop = CropLike()
+        imagew = Dim("width")
+        imageh = Dim("height")
+        dynamic_dims = {
+            "image": {0: None, 1: imageh, 2: imagew},
+            "crop_height": None,
+            "crop_width": None,
+        }
+        args = (torch.rand(3, 512, 512), 150, 150)
+        ecrop = export(crop, args=args, dynamic_shapes=dynamic_dims)
+
+        args = (torch.rand(3, 700, 700), 150, 150)
+        self.assertEqual(ecrop.module()(*args), ecrop(*args))
 
     def test_export_func_with_kwargs(self):
         class Module(torch.nn.Module):
@@ -3777,19 +3910,19 @@ def forward(self, b_pred, b_t, x, y):
         self.assertExpectedInline(
             str(exported_program.graph_module.true_graph_0.code.strip()),
             """\
-def forward(self, arg1_1, arg0_1, arg2_1):
+def forward(self, b_t, x, y):
     submod_3 = self.submod_1
-    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_3, arg1_1, arg0_1, arg2_1);  submod_3 = arg1_1 = arg0_1 = arg2_1 = None
+    add_1 = torch._higher_order_ops.wrap.wrap_with_set_grad_enabled(True, submod_3, b_t, x, y);  submod_3 = b_t = x = y = None
     return (add_1,)""",
         )
 
         self.assertExpectedInline(
             str(exported_program.graph_module.true_graph_0.submod_1.code.strip()),
             """\
-def forward(self, arg1_1, arg0_1, arg2_1):
-    sub = torch.ops.aten.sub.Tensor(arg1_1, 1);  arg1_1 = None
-    add = torch.ops.aten.add.Tensor(sub, arg0_1);  sub = arg0_1 = None
-    add_1 = torch.ops.aten.add.Tensor(add, arg2_1);  add = arg2_1 = None
+def forward(self, b_t, x, y):
+    sub = torch.ops.aten.sub.Tensor(b_t, 1);  b_t = None
+    add = torch.ops.aten.add.Tensor(sub, x);  sub = x = None
+    add_1 = torch.ops.aten.add.Tensor(add, y);  add = y = None
     return add_1""",
         )
 
@@ -4122,6 +4255,83 @@ def forward(self, x):
         ]
         real_names_and_ops = [(node.name, node.op) for node in ep.graph.nodes]
         self.assertEqual(expected_names_and_ops, real_names_and_ops)
+
+    @testing.expectedFailureRetraceability
+    def test_placeholder_naming_collisions_hoo_subgraphs(self):
+        # test collisions between user inputs, top-level nodes, and HOO subgraph nodes
+        class Foo(torch.nn.Module):
+            def forward(self, x, mul, mul_1):
+                _mul = x * x
+                y = cond(
+                    _mul.sum() > 0,
+                    lambda x, y, z: x * y * z,
+                    lambda x, y, z: x + y + z,
+                    [_mul, mul, mul_1],
+                )
+                with torch.enable_grad():
+                    y = y * y
+                return y
+
+        with torch.no_grad():
+            ep = torch.export._trace._export(
+                Foo(),
+                (torch.randn(4), torch.randn(4), torch.randn(4)),
+                pre_dispatch=True,
+            )
+        # test cond subgraph
+        expected_names_and_ops = [
+            ("mul_2", "placeholder"),
+            ("mul", "placeholder"),
+            ("mul_1", "placeholder"),
+            ("mul_3", "call_function"),
+            ("mul_4", "call_function"),
+            ("output", "output"),
+        ]
+        real_names_and_ops = [
+            (node.name, node.op) for node in ep.graph_module.true_graph_0.graph.nodes
+        ]
+        self.assertEqual(expected_names_and_ops, real_names_and_ops)
+        # test set_grad_enabled subgraph
+        expected_names_and_ops = [
+            ("getitem", "placeholder"),
+            ("mul_1", "call_function"),
+            ("output", "output"),
+        ]
+        real_names_and_ops = [
+            (node.name, node.op) for node in ep.graph_module.submod_1.graph.nodes
+        ]
+        self.assertEqual(expected_names_and_ops, real_names_and_ops)
+
+        # test collisions between user inputs & higher order op subgraphs
+        # (please never do this)
+        class Foo(torch.nn.Module):
+            def forward(self, input, true_graph, body_graph):
+                def map_body(x, y):
+                    return x + y
+
+                x = map(map_body, input, body_graph[0])
+                x = x + true_graph[0] + true_graph[1]
+                x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
+                x = cond(x.sum() > 0, lambda x: x * 2.0, lambda x: x + 2.0, [x])
+                return x
+
+        inputs = (
+            torch.randn(10, 4),
+            (torch.randn(4), torch.randn(4)),
+            (torch.randn(4),),
+        )
+        ep = export(Foo(), inputs)
+        expected_getattr_names = [
+            "body_graph_1",
+            "true_graph_2",
+            "false_graph_0",
+            "true_graph_3",
+            "false_graph_1",
+        ]
+        real_getattr_names = [
+            node.name for node in ep.graph.nodes if node.op == "get_attr"
+        ]
+        self.assertEqual(expected_getattr_names, real_getattr_names)
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
