@@ -31,6 +31,7 @@ MAX_WAITING_TIME_IN_SECONDS = 30
 TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.platform != 'darwin' and \
     sys.platform != 'win32' and \
+    not IS_JETSON and \ 
     not TEST_WITH_ROCM  # https://github.com/pytorch/pytorch/issues/90940
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
 
@@ -941,8 +942,4 @@ if __name__ == "__main__":
 
 
 if __name__ == '__main__':
-    # multiprocessing ipc use case not supported on Jetson
-    if IS_JETSON:
-        warnings.warn("skipping multiprocessing tests for Jetson since multiprocessing ipc use case is not supported")
-    else:
-        run_tests()
+    run_tests()
