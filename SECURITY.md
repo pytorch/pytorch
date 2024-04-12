@@ -12,13 +12,17 @@
 **Consider Pythor models as programs**. Machine Learning models are mathematical vectors and weights in their essence, but as they grow in complexity they can require privileges or be partially composed by programmatic code. That said, running untrusted models is equivelent to running untrusted code.
 
 ### Untrusted models
-Be careful when running untrusted models. This classification includes models created by unknown developers or utilizing data obtained from unknown sources.
+Be careful when running untrusted models. This classification includes models created by unknown developers or utilizing data obtained from unknown sources[^data-poisoning-sources].
 
 **Prefer to execute untrusted models within a secure, isolated environment such as a sandbox** (e.g., containers, virtual machines). This helps protect your system from potentially malicious code. You can find further details and instructions in [this page](https://developers.google.com/code-sandboxing).
 
 **Be mindful of risky model formats**. Give preference to run models with `.safetensors` format, and if you need to run load models on the [picle](https://docs.python.org/3/library/pickle.html) format, make sure to use the `weights_only` option to `torch.load`.
 
 Important Note: The trustworthiness of a model is not binary. You must always determine the proper level of caution depending on the specific model and how it matches your use case and risk tolerance.
+
+[^data-poisoning-sources]: To understand risks of utilization of data from unknown sources, read the following Cornell papers on Data poisoning:
+    https://arxiv.org/abs/2312.04748
+    https://arxiv.org/abs/2401.05566
 
 ### Untrusted inputs during training and prediction
 
