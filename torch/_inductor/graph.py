@@ -151,7 +151,7 @@ def getattr_recursive(obj, target):
 
 def mark_nodes_dislike_padding(g):
     """
-    Nodes like convolution/convolution_backward want its input to be contiguous.
+    Nodes like convolution/convolution_backward want its input to be dense.
     If we pad their inputs, we result in extra calls to copy kernels!  On the other hand, padding usually helps reduction.
 
     The pass finds nodes that dislike padding. These are nodes that can be reached
