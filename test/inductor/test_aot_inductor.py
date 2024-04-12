@@ -2672,14 +2672,6 @@ CPU_TEST_FAILURES = {
     "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
     "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
-    # GOOD? "test_scatter_fallback": fail_stack_allocation(is_skip=True),
-    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    # FIXED "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
-    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    # FIXED "test_index_put_fallback": fail_stack_allocation(is_skip=True),
-    # https://github.com/pytorch/pytorch/issues/122984
-    # FIXED "test_index_put_with_none_index": fail_stack_allocation(is_skip=True),
-    # FIXME: failed with Segfault while exiting the Python runtime
     "test_constant": fail_stack_allocation(is_skip=True),
     # C++ compile error, need for aoti_torch___scaled_dot_product_flash_attention_for_cpu
     # https://github.com/pytorch/pytorch/issues/122986
