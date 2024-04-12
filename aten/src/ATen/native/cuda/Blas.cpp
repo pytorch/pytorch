@@ -886,8 +886,8 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
   cublasCommonArgs args(mat1, mat2, out);
   const auto out_dtype_ = args.result->scalar_type();
   TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
-  auto tuning_ctx = at::cuda::tunable::getTuningContext();
 #ifdef USE_ROCM
+  auto tuning_ctx = at::cuda::tunable::getTuningContext();
   if (tuning_ctx->IsTunableOpEnabled()) {
 #define TUNABLE_DISPATCH(BLASOP_A, BLASOP_B)                            \
         if (mat1.scalar_type() == ScalarType::Float8_e4m3fnuz) {        \
