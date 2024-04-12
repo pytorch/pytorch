@@ -11,7 +11,7 @@ extern PyObject* THPEventClass;
 TORCH_API extern PyTypeObject THPEventType;
 
 TORCH_API void THPEvent_init(PyObject* module);
-TORCH_API PyObject* THPEvent_New(
+TORCH_API PyObject* THPEvent_new(
     c10::DeviceType device_type,
     c10::EventFlag flag);
 inline bool THPEvent_Check(PyObject* obj) {

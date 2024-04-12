@@ -219,7 +219,7 @@ static PyObject* THPStream_record_event(
     Py_INCREF(_event);
     _new_event = _event;
   } else {
-    _new_event = THPEvent_New(
+    _new_event = THPEvent_new(
         static_cast<c10::DeviceType>(self->device_type),
         c10::EventFlag::PYTORCH_DEFAULT);
   }
