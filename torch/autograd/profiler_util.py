@@ -598,7 +598,7 @@ class FunctionEvent(FormattedTimesMixin):
                 [child.privateuse1_time_total for child in self.cpu_children]
             )
         else:
-            assert self.device_type == DeviceType.CUDA
+            assert self.device_type == DeviceType.PrivateUse1
             return self.privateuse1_time_total
 
     @property
@@ -867,7 +867,10 @@ def _build_table(
         event.self_privateuse1_memory_usage > 0 for event in events
     )
     use_device = events[0].use_device
-    if not use_device and (has_privateuse1_mem or has_privateuse1_time):
+    # Running on PrivateUse1 device with profiler but not enable
+    # ProfilerActivity.PrivateUse1 can also catch privateuse1 memory usage.
+    # Here only need to check has_privateuse1_time if not use_device.
+    if not use_device and has_privateuse1_time:
         raise RuntimeError(
             "use_device is None, but there is private device performance data."
         )
@@ -951,7 +954,7 @@ def _build_table(
                     "Self CUDA Mem",
                 ]
             )
-        if has_privateuse1_mem:
+        if use_device and has_privateuse1_mem:
             privateuse1 = use_device.upper()
             headers.extend(
                 [
@@ -1132,7 +1135,7 @@ def _build_table(
                         _format_memory(evt.self_cuda_memory_usage),
                     ]
                 )
-            if has_privateuse1_mem:
+            if use_device and has_privateuse1_mem:
                 row_values.extend(
                     [
                         # PrivateUse1 Mem Total
