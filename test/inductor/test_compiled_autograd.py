@@ -1191,6 +1191,43 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
 
         self.check_output_and_recompiles(fn, 3)
 
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_free_activation_memory(self):
+        self.assertTrue(torch.cuda.memory_allocated() == 0)
+
+        # Use an op to check that the memory is freed by the time the op is executed
+        def assertion_impl(to_clone):
+            mem_allocated = torch.cuda.memory_allocated()
+            self.assertTrue(
+                mem_allocated < 4000000, "activations should have been freed"
+            )
+            return to_clone.clone()
+
+        with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
+            lib.define(
+                "assertion_op(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,)
+            )
+            lib.impl("assertion_op", assertion_impl, "CPU")
+            lib.impl("assertion_op", lambda x: x.clone(), "Meta")
+
+            # Create a graph that allows inputs stealing
+            def forward(activations):
+                add = activations[0] + 1
+                out = add.cpu()
+                cloned_out = torch.ops.test_compiled_autograd.assertion_op(out)
+                return (cloned_out,)
+
+            gm = torch.fx.symbolic_trace(forward)
+            torch._dynamo.utils.set_locals_to_steal(gm, ["activations"])
+            compiled_fn = torch.compile(gm)
+
+            # allocate at least 4,000,000 bytes (1,000,000 * 4 bytes)
+            activations = [torch.ones(1000000, dtype=torch.float32, device="cuda")]
+            self.assertTrue(torch.cuda.memory_allocated() > 4000000)
+
+            out = compiled_fn(activations)
+            self.assertTrue(len(activations) == 0)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent
@@ -1362,6 +1399,7 @@ known_failing_tests = {
     "test_save_for_backward_inputs_are_namedtuple",  # torch._dynamo.exc.Unsupported: 'skip function
     "test_autograd_function_backed_op",  # RuntimeError: compiled_args not implemented
     "test_setitem",  # AssertionError: Tensor-likes are not close!
+    "test_grad_nonleaf_register_hook",  # IndexError: list index out of range (NB: x.grad = y where both x and y are input tensors)
 }
 
 if not HAS_CUDA:

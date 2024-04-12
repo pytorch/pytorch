@@ -99,8 +99,9 @@ def create_runtime_wrapper(
             assert num_tokens == 0
         elif num_tokens > 0:
             # Pass in effect tokens (See Note [Side-Effectful Tokens in AOTAutograd])
-            # NOTE: this keeps an extra reference to the old args until the end of this function
+            old_args = args
             args = [[None] * num_tokens, *args]
+            old_args.clear()
 
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
