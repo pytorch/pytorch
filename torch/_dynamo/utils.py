@@ -781,21 +781,21 @@ def clone_input(x, *, dtype=None):
                 torch_clone(x._indices()),
                 torch_clone(x._values()),
                 x.shape,
-                is_coalesced=x.is_coalesced()
+                is_coalesced=x.is_coalesced(),
             )
         elif is_sparse_compressed(x):
             if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
-                 compressed_indices = x.crow_indices()
-                 plain_indices = x.col_indices()
+                compressed_indices = x.crow_indices()
+                plain_indices = x.col_indices()
             else:
-                 compressed_indices = x.ccol_indices()
-                 plain_indices = x.row_indices()
+                compressed_indices = x.ccol_indices()
+                plain_indices = x.row_indices()
             return torch.sparse_compressed_tensor(
                 torch_clone(compressed_indices),
                 torch_clone(plain_indices),
                 torch_clone(x.values()),
                 x.shape,
-                layout=x.layout
+                layout=x.layout,
             )
 
         needed_size = sum(
