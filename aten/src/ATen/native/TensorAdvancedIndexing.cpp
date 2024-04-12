@@ -680,6 +680,19 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
     return at::clamp(*index, -size, size - 1);
   };
 
+  if (self.numel() == 0) {
+    std::vector<int64_t> new_size(self.dim());
+    auto get_size = [](const c10::optional<Tensor>&index, auto size) -> int64_t {
+      if (!index) {
+        return size;
+      } else {
+        return index->numel();
+      }
+    };
+    std::transform(indices.begin(), indices.end(), self.sizes().begin(), new_size.begin(), get_size);
+    return self.new_full(new_size, fill);
+  }
+
   torch::List<c10::optional<Tensor>> clamped_indices(indices);
   std::transform(indices.begin(), indices.end(), self.sizes().begin(), clamped_indices.begin(), clamp);
 
