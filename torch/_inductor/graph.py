@@ -1238,6 +1238,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         device_types = self.device_types.copy()
         device_types.discard("cpu")
+        device_types.discard("meta")
         # TODO(Eikan): Only support mixing cpu and other device now.
         assert len(device_types) <= 1, "Does not support mixing {}".format(
             "+".join(device_types)
