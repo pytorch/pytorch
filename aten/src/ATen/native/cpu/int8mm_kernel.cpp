@@ -182,6 +182,46 @@ inline void tinygemm_kernel(
 
 #endif
 
+#if !defined(C10_MOBILE) && defined(__aarch64__)
+#include <arm_neon.h>
+
+static inline float reduce(float32x4_t x) {
+        auto sum = vpaddq_f32(x, x);
+        return vgetq_lane_f32(vpaddq_f32(sum, sum), 0);
+}
+
+template <int BLOCK_M, int BLOCK_N>
+inline void tinygemm_kernel(
+    const Half* RESTRICT A,
+    const int8_t* RESTRICT B,
+    const Half* RESTRICT scales,
+    Half* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K) {
+
+  for (const auto m : c10::irange(BLOCK_M)) {
+    for (const auto n : c10::irange(BLOCK_N)) {
+      float32x4_t c_val = vdupq_n_f32(0.0);
+      for (int k = 0; k < K; k += 8) {
+        float16x8_t a_val = vld1q_f16(reinterpret_cast<const float16_t *>(A) + m * lda + k);
+        int16x8_t b_val = vmovl_s8(vld1_s8(B + n * ldb + k));
+        auto a_val_low = vcvt_f32_f16(vget_low_f16(a_val));
+        auto a_val_high = vcvt_f32_f16(vget_high_f16(a_val));
+        auto b_val_low = vcvtq_f32_s32(vmovl_s16(vget_low_s16(b_val)));
+        auto b_val_high = vcvtq_f32_s32(vmovl_s16(vget_high_s16(b_val)));
+        c_val = vaddq_f32(c_val, vmulq_f32(a_val_low, b_val_low));
+        // c_val = vfmaq_f32(c_val, a_val_high, b_val_high); but it's slower
+        c_val = vaddq_f32(c_val, vmulq_f32(a_val_high, b_val_high));
+      }
+      float scale_val = static_cast<float>(scales[n]);
+      C[m * ldc + n] = reduce(c_val) * scale_val;
+    }
+  }
+}
+#endif
+
 // non-vectorized version
 template <int BLOCK_M, int BLOCK_N, typename T>
 inline void tinygemm_kernel(
