@@ -98,17 +98,6 @@ def disable(fn=None, recursive=True):
 
     return torch._dynamo.disable(fn, recursive)
 
-def disable_if_config_true(config_attr: str):
-    """
-    If `torch._dynamo.config.config_attr` is `True`, the decorator will disable compilation
-    It's executed when calling `func`. In contrast, `torch.compile.disable` is executed when defining function
-
-    Args:
-        config_attr (str): config name in `torch._dynamo.config`
-    """
-    import torch._dynamo
-    return torch._dynamo.disable_if_config_true(config_attr)
-
 def cudagraph_mark_step_begin():
     """
     Indicates that a new iteration of inference or training is about to begin.
