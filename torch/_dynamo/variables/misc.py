@@ -777,8 +777,9 @@ class NumpyVariable(VariableTracker):
         if not config.trace_numpy:
             unimplemented(f"numpy.{self.value}()")
 
-        from ..utils import numpy_to_tensor_wrapper
+        import numpy as np
 
+        from ..utils import numpy_to_tensor_wrapper
         from .tensor import NumpyNdarrayVariable
 
         # lookup method name in tnp. Things like np.dtype(float) are not supported yet.
@@ -786,6 +787,18 @@ class NumpyVariable(VariableTracker):
             unimplemented(
                 f"numpy dtype function is not supported yet. Got type {type(self.value)}."
             )
+        elif self.value in (np.iinfo, np.finfo):
+            try:
+                return NumpyTypeInfoVariable(
+                    self.value(
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    )
+                )
+            except NotImplementedError:
+                unimplemented(
+                    f"{self.value.__name__} with non-const args: {args} {kwargs}"
+                )
         else:  # We are dealing with a callable.
             func = get_np_to_tnp_map().get(self.value)
             if func is None:
@@ -1001,6 +1014,10 @@ class ConstantLikeVariable(VariableTracker):
     """self.value is a compile-time constant, but not a literal"""
 
     _error_prefix = "ConstantLikeVariable"
+    try:
+        from numpy import floating as np_floating
+    except ImportError:
+        np_floating = type("invalid_type", (), {})
 
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
@@ -1037,6 +1054,8 @@ class ConstantLikeVariable(VariableTracker):
 
     def var_getattr(self, tx, name: str) -> VariableTracker:
         result = getattr(self.value, name)
+        if isinstance(result, self.np_floating):
+            result = float(result)
         if variables.ConstantVariable.is_literal(result):
             return variables.ConstantVariable.create(result)
         return GetAttrVariable(self, name)
@@ -1057,3 +1076,7 @@ class TorchVersionVariable(ConstantLikeVariable):
         kwargs.setdefault("value", torch.__version__)
         assert kwargs["value"] is torch.__version__
         super().__init__(**kwargs)
+
+
+class NumpyTypeInfoVariable(ConstantLikeVariable):
+    _error_prefix = "np.iinfo/np.finfo"
