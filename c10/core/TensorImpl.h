@@ -2435,8 +2435,22 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return is_non_overlapping_and_dense_default();
   }
 
+  // if this returns true, then it is guaranteed that this tensor has symbolic
+  // sizes/strides
   bool has_symbolic_sizes_strides() const {
     return has_symbolic_sizes_strides_;
+  }
+
+  // if this returns true, then it is guaranteed that this tensor does NOT have
+  // symbolic sizes/strides. This is different from the above, because it's
+  // possible that has_symbolic_sizes_strides() returns false, but we do
+  // not have symbolic sizes/strides. This exists for the case of
+  // Nested Tensor python subclass, where the sizes are implemented in python
+  // (TODO: clean this up and just implement sizes in nested tensor without a
+  // python implementation)
+  bool does_not_have_symbolic_sizes_strides() const {
+    return !has_symbolic_sizes_strides() &&
+        !matches_policy(SizesStridesPolicy::CustomStrides);
   }
 
  private:
