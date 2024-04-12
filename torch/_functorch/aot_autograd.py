@@ -5,6 +5,10 @@ from contextlib import nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
+import sys
+import logging
+torch_log = logging.getLogger("torch")
+import torch.distributed as dist
 
 import torch
 import torch.nn as nn
@@ -924,6 +928,9 @@ def aot_module_simplified(
         # For overhead reasons, this is not the default wrapper, see comment:
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
         def boxed_forward(runtime_args: List[Any]):
+            if dist.get_rank() == 0:
+                for idx, arg in enumerate(runtime_args):
+                    torch_log.warning(f"boxed_forward: idx: {idx}, sys.getrefcount(arg): {sys.getrefcount(arg)}")
             flat_args = []
             flat_args.extend(params_flat)
             flat_args.extend(runtime_args)

@@ -10,6 +10,10 @@ import collections
 import pprint
 from functools import wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+import torch.distributed as dist
+import sys
+import logging
+torch_log = logging.getLogger("torch")
 
 import torch
 import torch.utils.dlpack
@@ -102,6 +106,10 @@ def create_runtime_wrapper(
             old_args = args
             args = [[None] * num_tokens, *args]
             old_args.clear()
+
+        if dist.get_rank() == 0:
+            for i, arg in enumerate(args):
+                torch_log.warning(f"runtime_wrapper: idx: {i}, sys.getrefcount(arg): {sys.getrefcount(arg)}")
 
         # stash a ref to each input tensor we plan to use after the compiled function
         orig_inputs = {i: args[i] for i in epilogue_args_idx}
