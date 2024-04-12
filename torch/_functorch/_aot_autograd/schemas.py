@@ -123,6 +123,7 @@ class InputAliasInfo:
             self.mutates_metadata,
             self.mutations_hidden_from_autograd,
             self.mutations_under_no_grad_or_inference_mode,
+            self.mutates_storage_metadata,
             self.requires_grad,
         ):
             return MutationType.MUTATED_IN_GRAPH
