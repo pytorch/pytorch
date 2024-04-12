@@ -1590,11 +1590,11 @@ class CPUReproTests(TestCase):
         if pre_var:
             os.environ.pop("ATEN_CPU_CAPABILITY")
 
-        with config.patch({"cpp.simdlen": None}):
-            isa = codecache.pick_vec_isa()
-            self.assertTrue(isa == zvec)
-
         try:
+            with config.patch({"cpp.simdlen": None}):
+                isa = codecache.pick_vec_isa()
+                self.assertTrue(isa == zvec)
+
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "avx2"
                 isa = codecache.pick_vec_isa()
@@ -1656,11 +1656,11 @@ class CPUReproTests(TestCase):
         if pre_var:
             os.environ.pop("ATEN_CPU_CAPABILITY")
 
-        with config.patch({"cpp.simdlen": None}):
-            isa = codecache.pick_vec_isa()
-            self.assertTrue(isa == vec_neon)
-
         try:
+            with config.patch({"cpp.simdlen": None}):
+                isa = codecache.pick_vec_isa()
+                self.assertTrue(isa == vec_neon)
+
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "avx2"
                 isa = codecache.pick_vec_isa()
@@ -1706,17 +1706,6 @@ class CPUReproTests(TestCase):
         self.assertTrue(vec_avx512.nelements(torch.bfloat16) == 32)
         self.assertTrue(vec_avx2.nelements(torch.bfloat16) == 16)
 
-        pre_var = os.getenv("ATEN_CPU_CAPABILITY")
-        if pre_var:
-            os.environ.pop("ATEN_CPU_CAPABILITY")
-
-        with config.patch({"cpp.simdlen": None}):
-            isa = codecache.pick_vec_isa()
-            if vec_avx512 in codecache.valid_vec_isa_list():
-                self.assertTrue(isa == vec_avx512)
-            else:
-                self.assertTrue(isa == vec_avx2)
-
         with config.patch({"cpp.simdlen": 0}):
             isa = codecache.pick_vec_isa()
             self.assertFalse(isa)
@@ -1746,7 +1735,18 @@ class CPUReproTests(TestCase):
                 isa = codecache.pick_vec_isa()
                 self.assertTrue(isa == vec_avx2)
 
+        pre_var = os.getenv("ATEN_CPU_CAPABILITY")
+        if pre_var:
+            os.environ.pop("ATEN_CPU_CAPABILITY")
+
         try:
+            with config.patch({"cpp.simdlen": None}):
+                isa = codecache.pick_vec_isa()
+                if vec_avx512 in codecache.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512)
+                else:
+                    self.assertTrue(isa == vec_avx2)
+
             with config.patch({"cpp.simdlen": None}):
                 os.environ["ATEN_CPU_CAPABILITY"] = "avx2"
                 isa = codecache.pick_vec_isa()
