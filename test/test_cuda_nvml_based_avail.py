@@ -34,7 +34,7 @@ class TestExtendedCUDAIsAvail(TestCase):
 
     def setUp(self):
         super().setUp()
-        torch.cuda.device_count.cache_clear()  # clear the lru_cache on this method before our test
+        torch.cuda._cached_device_count = None  # clear the lru_cache on this method before our test
 
     @staticmethod
     def in_bad_fork_test() -> bool:

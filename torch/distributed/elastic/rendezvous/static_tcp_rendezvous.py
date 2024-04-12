@@ -15,7 +15,7 @@ from torch.distributed import Store, TCPStore, PrefixStore
 from torch.distributed.elastic.rendezvous import RendezvousHandler, RendezvousParameters
 from torch.distributed.elastic.rendezvous.utils import parse_rendezvous_endpoint
 
-log = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 _default_timeout_seconds = 600
 
@@ -49,7 +49,7 @@ class StaticTCPRendezvous(RendezvousHandler):
         return "static"
 
     def next_rendezvous(self) -> Tuple[Store, int, int]:
-        log.info("Creating TCPStore as the c10d::Store implementation")
+        logger.info("Creating TCPStore as the c10d::Store implementation")
         if not self._store:
             is_master = self.rank == 0
             self._store = TCPStore(  # type: ignore[call-arg]
