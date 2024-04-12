@@ -2010,6 +2010,24 @@ class CppKernel(Kernel):
         par_depth = self.decide_parallel_depth(
             self.call_ranges[: loop_nest.max_parallel_depth()], threads
         )
+
+        def has_outer_loop_fused_kernel(loop_nest):
+            if loop_nest.root and len(loop_nest.root) == 1:
+                # OuterLoopFusedKernel has no main/tail loop split at any outer loop fusion depth
+                kernels = loop_nest.root[0].get_kernels()
+                if isinstance(kernels[0], OuterLoopFusedKernel):
+                    assert len(kernels) == 1
+                    return True
+            return False
+
+        if (
+            has_outer_loop_fused_kernel(loop_nest)
+            and par_depth < loop_nest.max_parallel_depth()
+        ):
+            # Force the parallel depth as the outer loop fusion depth
+            # Assume it can bring the performance benefit.
+            par_depth = loop_nest.max_parallel_depth()
+
         with contextlib.ExitStack() as stack:
             if par_depth:
                 if loop_nest.is_reduction_only():
