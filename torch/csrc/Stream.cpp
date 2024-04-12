@@ -84,9 +84,9 @@ static PyObject* THPStream_pynew(
   c10::Stream stream(c10::Stream::DEFAULT, c10::Device(c10::DeviceType::CPU));
   if (r.idx == 0) {
     c10::impl::VirtualGuardImpl impl{static_cast<c10::DeviceType>(device_type)};
-    stream = impl.getStreamFromGlobalPool(
+    stream = impl.getNewStream(
         c10::Device(static_cast<c10::DeviceType>(device_type), device_index),
-        priority > 0);
+        priority);
   } else {
     stream = c10::Stream::unpack3(
         stream_id,
