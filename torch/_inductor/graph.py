@@ -280,7 +280,7 @@ class GraphLowering(torch.fx.Interpreter):
         graph_id=None,
         cpp_wrapper=False,
         aot_mode=False,
-        user_visible_outputs=frozenset(),
+        user_visible_outputs=None,
         layout_opt=None,
         extern_node_serializer=None,
         is_inference=False,
@@ -369,7 +369,9 @@ class GraphLowering(torch.fx.Interpreter):
         )
         mark_nodes_dislike_padding(gm.graph)
         self._warned_fallback = {"aten.convolution_backward"}
-        self.user_visible_outputs = user_visible_outputs
+        self.user_visible_outputs = (
+            user_visible_outputs if user_visible_outputs is not None else {}
+        )
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[

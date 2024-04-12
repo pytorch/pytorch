@@ -64,6 +64,7 @@ from .ops_handler import OpCounterCSE
 from .utils import (
     argsort,
     cache_on_self,
+    ceildiv,
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
@@ -2535,12 +2536,13 @@ class Layout(IRNode):
     def is_contiguous(self):
         return is_contiguous_strides_for_shape(self.stride, self.size)
 
-    def is_channels_last_contiguous(self):
-        ndim = len(self.size)
-        if ndim not in [4, 5]:
+    @staticmethod
+    def is_channels_last_contiguous(shape, strides):
+        ndim = len(shape)
+        if ndim not in [4, 5] or shape[1] == 1:
             return False
         for left, right, size in zip(
-            self.stride, make_channels_last_strides_for(self.size), self.size  # type: ignore[arg-type]
+            strides, make_channels_last_strides_for(shape), shape  # type: ignore[arg-type]
         ):
             if size != 1 and left != right:
                 return False
@@ -2601,8 +2603,9 @@ class Layout(IRNode):
         if len(in_strides) == 0:
             return in_strides
 
-        # a loose check for channels last
-        if not config.pad_channels_last and len(in_strides) == 4 and in_strides[1] == 1:
+        if not config.pad_channels_last and Layout.is_channels_last_contiguous(
+            size, in_strides
+        ):
             return in_strides
 
         current_fx_node = V.get_current_node()
@@ -2626,11 +2629,11 @@ class Layout(IRNode):
         fill_order = stride_order2fill_order(stride_order)
 
         new_strides = [0 for _ in range(len(in_strides))]
-        # since way pad when the layout is flexible, we can decide the
+        # since we pad when the layout is flexible, we can decide the
         # smallest stride to be 1.
         new_strides[fill_order[0]] = 1
 
-        # don't align an too small stride since that cause too much memory increase.
+        # Don't align a too small stride since that causes too much memory increase.
         # Pad too small stride may also cause perf loss. We may result in many tiny data blocks
         # with gaps in between. That causes less coalesced GPU memory access!
         #
@@ -2638,13 +2641,13 @@ class Layout(IRNode):
         # that results in at most 5% memory cost.
         #
         # But later on we raise the threshold to 1024 to avoid interfere with persistent reduction.
-        # Let's say a inner reduction has a row size 513. Inductor will generate
+        # Let's say an inner reduction has a row size 513. Inductor will generate
         # persistent reduction code.
         # If we do padding, the strides are not contiguous any more. Inductor
-        # uses a much smaller threshold for persistent reduction this case and
-        # generate potentially worse non-persistent reduction code.
+        # uses a much smaller threshold for persistent reduction in this case and
+        # generates potentially worse non-persistent reduction code.
         #
-        # This change turnes HF AllenaiLongformerBase amp training from a loss of 1.09x to a win of 1.05x.
+        # This change turns HF AllenaiLongformerBase amp training from a loss of 1.09x to a win of 1.05x.
         # (baseline: 71.09ms, padding w/o this change: 77.38ms, padding with this change: 67.77ms)
         align_stride_threshold = 1024
         padded = False
@@ -2653,7 +2656,7 @@ class Layout(IRNode):
             stride = new_strides[prev_idx] * size[prev_idx]
 
             if stride > align_stride_threshold and stride % align != 0:
-                stride = (stride + align - 1) // align * align
+                stride = ceildiv(stride, align) * align
                 padded = True
             new_strides[idx] = stride
 
@@ -3834,10 +3837,9 @@ class ConcatKernel(NopKernel):
             x = inputs[i]
             if is_storage_and_layout(x):
                 layout = x.get_layout()
-                if (
-                    isinstance(layout, FixedLayout)
-                    and layout.is_channels_last_contiguous()
-                ):
+                if isinstance(
+                    layout, FixedLayout
+                ) and Layout.is_channels_last_contiguous(layout.size, layout.stride):
                     # use CL stride for the output
                     output_stride = make_channels_last_strides_for(new_size)
                     break

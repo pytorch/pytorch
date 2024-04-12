@@ -620,6 +620,17 @@ class PaddingTest(TestCaseBase):
         )
         self.do_profiling(lambda: f(x), lambda: opt_f(x), "Eager Cat", "Compiled Cat")
 
+    def test_pad_channels_last(self):
+        t = torch.randn(2, 3, 5, 1025)
+        in_strides = t.stride()
+        out_strides = ir.Layout._pad_strides(in_strides, t.shape)
+        self.assertTrue(in_strides != out_strides)
+
+        t = t.to(memory_format=torch.channels_last)
+        in_strides = t.stride()
+        out_strides = ir.Layout._pad_strides(in_strides, t.shape)
+        self.assertTrue(in_strides == out_strides)
+
 
 if __name__ == "__main__":
     if HAS_CUDA:
