@@ -1,8 +1,6 @@
 #include <gtest/gtest.h>
 
-#ifdef USE_CUDA
 #include <torch/cuda.h>
-#endif
 
 #include <iostream>
 #include <string>
@@ -21,7 +19,6 @@ std::string add_negative_flag(const std::string& flag) {
 int main(int argc, char* argv[]) {
   ::testing::InitGoogleTest(&argc, argv);
 
-#ifdef USE_CUDA
   if (!torch::cuda::is_available()) {
     std::cout << "CUDA not available. Disabling CUDA and MultiCUDA tests"
               << std::endl;
@@ -31,7 +28,6 @@ int main(int argc, char* argv[]) {
               << std::endl;
     ::testing::GTEST_FLAG(filter) = add_negative_flag("*_MultiCUDA");
   }
-#endif
 
   return RUN_ALL_TESTS();
 }

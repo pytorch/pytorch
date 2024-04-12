@@ -3,17 +3,17 @@ set(AOTI_ABI_CHECK_TEST_ROOT ${TORCH_ROOT}/test/cpp/aoti_abi_check)
 # Build the cpp gtest binary containing the cpp-only tests.
 set(AOTI_ABI_CHECK_TEST_SRCS
   ${AOTI_ABI_CHECK_TEST_ROOT}/test_dtype.cpp
+  ${AOTI_ABI_CHECK_TEST_ROOT}/main.cpp
 )
 
 add_executable(test_aoti_abi_check
-  ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${AOTI_ABI_CHECK_TEST_SRCS}
 )
 
 # TODO temporary until we can delete the old gtest polyfills.
 target_compile_definitions(test_aoti_abi_check PRIVATE USE_GTEST)
 
-# WARNING: DO NOT ADD A DEPENDENCY TO torch
+# WARNING: DO NOT LINK torch!!!
 # The purpose is to check if the used aten/c10 headers are writtern in a header-only way
 target_link_libraries(test_aoti_abi_check PRIVATE gtest)
 target_include_directories(test_aoti_abi_check PRIVATE ${ATen_CPU_INCLUDE})

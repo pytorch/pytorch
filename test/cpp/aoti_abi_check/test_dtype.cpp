@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
+#include <c10/util/BFloat16.h>
 #include <c10/util/Float8_e4m3fn.h>
 #include <c10/util/Float8_e4m3fnuz.h>
 #include <c10/util/Float8_e5m2.h>
