@@ -78,9 +78,10 @@ static PyObject* THPStream_pynew(
 
   THPStream* self = (THPStream*)ptr.get();
 
-  // If torch.Stream is not created from existing Stream, retrieve one from the
-  // stream pool. It requires other device backends override
-  // getStreamFromGlobalPool method.
+  // If torch.Stream is not created from existing Stream, then create a new one.
+  // It requires other device backends override getNewStream method. How the new
+  // stream is created is backend specific. Backend should be able to correct
+  // manage the lifetime of streams.
   c10::Stream stream(c10::Stream::DEFAULT, c10::Device(c10::DeviceType::CPU));
   if (r.idx == 0) {
     c10::impl::VirtualGuardImpl impl{static_cast<c10::DeviceType>(device_type)};
