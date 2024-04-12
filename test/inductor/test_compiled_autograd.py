@@ -257,6 +257,57 @@ main()
         self.assertNotEqual(grads[1], None)
         self.assertNotEqual(grads[2], None)
 
+    def test_inputs_aliasing_bytecode(self):
+        # Freeze compiled autograd graph
+        compiler = torch._dynamo.compiled_autograd.AutogradCompilerInstance(compiler_fn)
+        param = torch.ones(100)
+        activ = torch.ones(100) * 2
+        inputs = [param, activ]
+        proxies, _ = compiler.begin_capture(inputs=inputs, sizes=[])
+        param_proxy, activ_proxy = proxies
+        buf = activ_proxy * 2
+        torch.ops.inductor.accumulate_grad_.default(param_proxy, buf)
+        compiled_fn = compiler.end_capture(buf)
+
+        def bytecode_hook(code, out_code):
+            import dis
+            import sys
+
+            if sys.version_info < (3, 11):
+                call_op = "CALL_FUNCTION"
+            else:
+                call_op = "CALL"
+
+            insts = list(dis.get_instructions(out_code))
+            call_graph_idx = next(
+                i for i, inst in enumerate(insts) if inst.opname == call_op
+            )
+            # pre-graph should alias: inputs_ref_0 = inputs[0]
+            matches = [
+                inst
+                for inst in insts[:call_graph_idx]
+                if inst.opname == "STORE_FAST" and inst.argval == "inputs_ref_0"
+            ]
+            self.assertTrue(len(matches) == 1)
+            # post-graph should access inputs_ref_0 instead of inputs
+            matches = [
+                inst for inst in insts[call_graph_idx:] if inst.argval == "inputs"
+            ]
+            self.assertTrue(len(matches) == 0)
+            matches = [
+                inst
+                for inst in insts[call_graph_idx:]
+                if inst.opname == "LOAD_FAST" and inst.argval == "inputs_ref_0"
+            ]
+            self.assertTrue(len(matches) == 1)
+
+        torch._dynamo.reset()
+        handle = torch._dynamo.convert_frame.register_bytecode_hook(bytecode_hook)
+        try:
+            compiled_fn(inputs=[param, activ], sizes=(), hooks=())
+        finally:
+            handle.remove()
+
     def test_implicit_add(self):
         def fn():
             y = torch.randn(1, 4, requires_grad=True)
