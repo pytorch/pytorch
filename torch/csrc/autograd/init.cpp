@@ -332,6 +332,9 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
     }
+    if (c10::get_privateuse1_backend() != "privateuseone") {
+      activities.insert(torch::profiler::impl::ActivityType::PrivateUse1);
+    }
 #endif
     return activities;
   });
