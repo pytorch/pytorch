@@ -282,7 +282,7 @@ class AOTInductorTestsTemplate:
             torch.randn(1, 250112, device=self.device),
             torch.randn(1, 512, device=self.device),
         )
-        with config.patch({"_force_mmap_aoti_weights": True}):
+        with config.patch({"aot_inductor.force_mmap_weights": True}):
             self.check_model(Model(), example_inputs)
 
     def test_with_offset(self):
@@ -338,6 +338,25 @@ class AOTInductorTestsTemplate:
         self.assertEqual(counters["inductor"]["scmerge_split_removed"], 1)
         self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 1)
         self.assertEqual(counters["inductor"]["scmerge_split_sections_removed"], 1)
+
+    def test_amp_fallback_random(self):
+        def fn(x, w):
+            return torch.functional.F.linear(x, w)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        if self.device == "cuda":
+            ctx = torch.cuda.amp.autocast
+        elif self.device == "cpu":
+            ctx = torch.cpu.amp.autocast
+        else:
+            raise AssertionError("Unsupported device")
+
+        with config.patch({"fallback_random": True}):
+            with ctx():
+                self.check_model(fn, example_inputs)
 
     def test_missing_output(self):
         class Model(torch.nn.Module):
@@ -2672,9 +2691,11 @@ CPU_TEST_FAILURES = {
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
+    # https://github.com/pytorch/pytorch/issues/123691
+    "test_amp_fallback_random": fail_minimal_arrayref_interface(is_skip=True),
     "test_simple_dynamic": fail_minimal_arrayref_interface(),
-    # https://github.com/pytorch/pytorch/issues/122989
-    "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(
+    # https://github.com/pytorch/pytorch/issues/123691
+    "test_zero_grid_with_unbacked_symbols": fail_minimal_arrayref_interface(
         is_skip=True
     ),
     # failed on MacOS
