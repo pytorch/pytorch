@@ -128,6 +128,7 @@ def run_torchrec_row_wise_even_sharding_example(rank, world_size):
     num_embeddings = 8
     embedding_dim = 16
     emb_table_shape = torch.Size([num_embeddings, embedding_dim])
+    # tensor shape
     local_shard_shape = torch.Size(
         [num_embeddings // world_size, embedding_dim]  # (local_rows, local_cols)
     )
@@ -209,21 +210,21 @@ def run_torchrec_row_wise_uneven_sharding_example(rank, world_size):
         else torch.Size([3, embedding_dim])
     )
     # tensor offset
-    local_shard_offset = (rank // 2 * 4 + rank % 2 * 1, embedding_dim)
+    local_shard_offset = torch.Size((rank // 2 * 4 + rank % 2 * 1, embedding_dim))
     # tensor
     local_tensor = torch.randn(local_shard_shape, device=device)
     # local shards
     # row-wise sharding: one shard per rank
-    local_shards = [TensorShard(local_tensor, local_shard_shape, local_shard_offset)]
+    # create the local shards wrapper
+    local_shards_wrapper = LocalShardsWrapper(
+        local_shards=[local_tensor],
+        offsets=[local_shard_offset],
+    )
 
     ###########################################################################
     # example 1: transform local_shards into DTensor
     # create the DTensorMetadata which torchrec should provide
     row_wise_sharding_placements: List[Placement] = [Shard(0)]
-    dtensor_metadata = DTensorMetadata(device_mesh, row_wise_sharding_placements)
-
-    # create the local shards wrapper
-    local_shards_wrapper = LocalShardsWrapper(local_shards)
 
     # note: for uneven sharding, we need to specify the shape and stride because
     # DTensor would assume even sharding and compute shape/stride based on the
@@ -231,8 +232,8 @@ def run_torchrec_row_wise_uneven_sharding_example(rank, world_size):
     # shape/stride are global tensor's shape and stride
     dtensor = DTensor.from_local(
         local_shards_wrapper,  # a torch.Tensor subclass
-        dtensor_metadata.device_mesh,  # DeviceMesh
-        dtensor_metadata.placements,  # List[Placement]
+        device_mesh,  # DeviceMesh
+        row_wise_sharding_placements,  # List[Placement]
         run_check=False,
         shape=emb_table_shape,  # this is required for uneven sharding
         stride=(embedding_dim, 1),
@@ -249,10 +250,10 @@ def run_torchrec_row_wise_uneven_sharding_example(rank, world_size):
     # note: DTensor.to_local() always returns a LocalShardsWrapper
     dtensor_local_shards = dtensor.to_local()
     assert isinstance(dtensor_local_shards, LocalShardsWrapper)
-    dtensor_shard = dtensor_local_shards[0]
-    assert torch.equal(dtensor_shard.tensor, local_tensor)  # unwrap tensor
-    assert dtensor_shard.shard_size == local_shard_shape  # unwrap shape
-    assert dtensor_shard.shard_offset == local_shard_offset  # unwrap offset
+    shard_tensor = dtensor_local_shards.shards[0]
+    assert torch.equal(shard_tensor, local_tensor)
+    assert dtensor_local_shards.shard_sizes[0] == local_shard_shape  # unwrap shape
+    assert dtensor_local_shards.shard_offsets[0] == local_shard_offset  # unwrap offset
 
 
 def run_torchrec_table_wise_sharding_example(rank, world_size):
