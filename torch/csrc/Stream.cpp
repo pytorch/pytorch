@@ -80,7 +80,7 @@ static PyObject* THPStream_pynew(
 
   // If torch.Stream is not created from existing Stream, then create a new one.
   // It requires other device backends override getNewStream method. How the new
-  // stream is created is backend specific. Backend should be able to correct
+  // stream is created is backend specific. Backend should be able to correctly
   // manage the lifetime of streams.
   c10::Stream stream(c10::Stream::DEFAULT, c10::Device(c10::DeviceType::CPU));
   if (r.idx == 0) {
