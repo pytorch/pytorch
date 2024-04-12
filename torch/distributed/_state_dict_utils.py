@@ -1,6 +1,6 @@
+import copy
 import io
 import math
-import copy
 from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING
 
 import torch
