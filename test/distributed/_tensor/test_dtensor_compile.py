@@ -12,6 +12,7 @@ import torch._dynamo.testing
 import torch.distributed as dist
 import torch.nn as nn
 from torch._C import FileCheck
+from torch._dynamo.testing import CompileCounter
 from torch._inductor.utils import run_and_get_triton_code
 from torch.distributed._tensor import (
     DeviceMesh,
@@ -360,6 +361,26 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
         )
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
+
+    def test_dynamo_dtensor_recompile(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in DTensor as inputs/outputs and run some tensor computation
+        def fn(x):
+            return torch.mul(x, x)
+
+        x = DTensor.from_local(torch.rand(2, 2), mesh, [Shard(0)], run_check=False)
+        x2 = DTensor.from_local(torch.rand(2, 2), mesh, [Shard(0)], run_check=False)
+        x3 = DTensor.from_local(torch.rand(2, 2), mesh, [Shard(1)], run_check=False)
+
+        cnt = CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True, dynamic=False)
+        self.assertEqual(fn(x), opt_fn(x))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x2), opt_fn(x2))
+        self.assertEqual(cnt.frame_count, 1)
+        self.assertEqual(fn(x3), opt_fn(x3))
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_dtensor_dynamo_device_mesh_attrs(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))

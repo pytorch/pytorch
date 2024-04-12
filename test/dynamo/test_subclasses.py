@@ -196,6 +196,11 @@ def _recompiles_for_inputs(fn, inputs1, inputs2, dynamic=True):
     return compile_count[0] > 1
 
 
+def _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles):
+    actual_recompiles = _recompiles_for_inputs(fn, inputs1, inputs2)
+    self.assertEqual(actual_recompiles, expected_recompiles)
+
+
 class SubclassTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -816,6 +821,76 @@ class GraphModule(torch.nn.Module):
             self.assertEqual(ref0, res0)
             self.assertEqual(ref1, res1)
 
+    def test_tensor_subclass_ctx_guards(self):
+        from torch.utils._python_dispatch import return_and_correct_aliasing
+
+        class SubclassTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, a, constant):
+                shape = a.shape
+                kwargs = {}
+                kwargs["strides"] = a.stride()
+                kwargs["storage_offset"] = a.storage_offset()
+                kwargs["device"] = a.device
+                kwargs["layout"] = a.layout
+                kwargs["requires_grad"] = a.requires_grad
+                kwargs["dtype"] = a.dtype
+                out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
+                return out
+
+            def __init__(self, a, constant):
+                self.a = a
+                self.constant = constant
+
+            def __repr__(self):
+                a_repr = repr(self.a)
+                return f"SubclassTensor({a_repr})"
+
+            def __tensor_flatten__(self):
+                return ["a"], (self.constant,)
+
+            @staticmethod
+            def __tensor_unflatten__(inner_tensors, meta, sizes, strides):
+                constant = meta[0]
+                a = inner_tensors["a"]
+                return SubclassTensor(a, constant)
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args, kwargs):
+                if kwargs is None:
+                    kwargs = {}
+                biggest_constant = max(
+                    [
+                        x.constant
+                        for x in pytree.tree_flatten(args)[0]
+                        if isinstance(x, SubclassTensor)
+                    ]
+                )
+                args_a = pytree.tree_map(
+                    lambda x: x.a if isinstance(x, SubclassTensor) else x, args
+                )
+                kwargs_a = pytree.tree_map(
+                    lambda x: x.a if isinstance(x, SubclassTensor) else x, kwargs
+                )
+                out_a = func(*args_a, **kwargs_a)
+                out = pytree.tree_map(
+                    lambda x: SubclassTensor(x, biggest_constant)
+                    if isinstance(x, torch.Tensor)
+                    else x,
+                    out_a,
+                )
+
+                if func == torch.ops.aten.mul.Tensor:
+                    out = out + out.constant
+
+                return return_and_correct_aliasing(func, args, kwargs, out)
+
+        x = SubclassTensor(torch.ones(2), 3)
+        x2 = SubclassTensor(torch.ones(2), 3)
+        x3 = SubclassTensor(torch.ones(2), 4)
+        _check_recompiles(self, lambda x: x * x, (x,), (x2,), False)
+        _check_recompiles(self, lambda x: x * x, (x,), (x3,), True)
+
     def test_wrapper_subclass_guards_on_inner_tensor(self):
         # Holds an inner tensor, that has a distinct shape from the outer wrapper tensor.
         # Also adds additional guards on the inner tensor's sizes.
@@ -1230,14 +1305,10 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         )
         return jagged_from_tensor_and_lengths(values_tensor, starts, lengths)
 
-    def _check_recompiles(self, fn, inputs1, inputs2, expected_recompiles):
-        actual_recompiles = _recompiles_for_inputs(fn, inputs1, inputs2)
-        self.assertEqual(actual_recompiles, expected_recompiles)
-
     def test_unary_does_not_recompile(self):
         nt1, _ = self._get_jagged_tensor(((2, 3, 4), 3), None)
         nt2, _ = self._get_jagged_tensor(((3, 4, 5, 6), 4), None)
-        self._check_recompiles(lambda nt1: nt1.sin(), (nt1,), (nt2,), False)
+        _check_recompiles(lambda nt1: nt1.sin(), (nt1,), (nt2,), False)
 
     def test_binary_does_not_recompile(self):
         def binary(nt1, nt2):
@@ -1253,7 +1324,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), offsets)
         nt3, offsets = self._get_jagged_tensor(((3, 4, 5), 4), None)
         nt4, _ = self._get_jagged_tensor(((3, 4, 5), 4), offsets)
-        self._check_recompiles(binary, (nt1, nt2), (nt3, nt4), False)
+        _check_recompiles(binary, (nt1, nt2), (nt3, nt4), False)
 
     def test_binary_recompiles(self):
         def binary(nt1, nt2):
@@ -1266,7 +1337,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt1, offsets = self._get_jagged_tensor(((2, 3, 4), 5), None)
         nt2, _ = self._get_jagged_tensor(((2, 3, 4), 5), offsets)
         nt3, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
-        self._check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
+        _check_recompiles(binary, (nt1, nt2), (nt1, nt3), True)
 
     # TODO: cannot parametrize this test class with device for some reason
     def _test_autograd(self, backend):
@@ -1358,8 +1429,8 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         # length of the offsets is different. (2) we don't recompile if the
         # length of the offsets is the same, even if the size of the constituent
         # tensors are different.
-        self._check_recompiles(fn, (nt,), (nt2,), False)
-        self._check_recompiles(fn, (nt,), (nt3,), True)
+        _check_recompiles(fn, (nt,), (nt2,), False)
+        _check_recompiles(fn, (nt,), (nt3,), True)
 
     def _get_views(self):
         # Test all cases with both an NT base and a dense base
