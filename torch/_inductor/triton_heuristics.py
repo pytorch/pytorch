@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import torch
 
 import torch.autograd.profiler as autograd_profiler
-from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
 from torch._dynamo.utils import dynamo_timed, get_first_attr
 from torch.utils._triton import has_triton_package
 
@@ -165,7 +165,7 @@ class CachingAutotuner(KernelInterface):
         self.device_type = (
             triton_meta["device_type"] if "device_type" in triton_meta else "cuda"
         )
-        self.gpu_device = get_interface_for_device(self.device_type)
+        self.device_interface = get_interface_for_device(self.device_type)
 
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
@@ -217,7 +217,7 @@ class CachingAutotuner(KernelInterface):
 
             seen_configs = set(self.configs)
 
-            device_prop = self.gpu_device.Worker.get_device_properties(
+            device_prop = self.device_interface.Worker.get_device_properties(
                 self.triton_meta["device"]
             )
             if (
@@ -318,7 +318,7 @@ class CachingAutotuner(KernelInterface):
             device_type = self.device_type if torch.version.hip is None else "cuda"
             device_id = compile_meta["device"]
             device = torch.device(device_type, device_id)
-            cc = self.gpu_device.get_compute_capability(device)
+            cc = self.device_interface.get_compute_capability(device)
 
         compile_meta["cc"] = cc
 
@@ -353,9 +353,9 @@ class CachingAutotuner(KernelInterface):
             )
 
         # load binary to the correct device
-        with self.gpu_device.device(compile_meta["device"]):  # type: ignore[attr-defined]
+        with DeviceGuard(self.device_interface, compile_meta["device"]):  # type: ignore[attr-defined]
             # need to initialize context
-            self.gpu_device.synchronize(self.gpu_device.current_device())
+            self.device_interface.synchronize(self.device_interface.current_device())
 
             try:
                 binary = triton.compile(*compile_args, **compile_kwargs)
@@ -528,8 +528,8 @@ class CachingAutotuner(KernelInterface):
             )
             return float("inf")
 
-        stream = self.gpu_device.get_raw_stream(  # type: ignore[call-arg]
-            self.gpu_device.current_device()
+        stream = self.device_interface.get_raw_stream(  # type: ignore[call-arg]
+            self.device_interface.current_device()
         )
 
         def kernel_call():
