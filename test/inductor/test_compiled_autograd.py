@@ -271,10 +271,16 @@ main()
 
         def bytecode_hook(code, out_code):
             import dis
+            import sys
+
+            if sys.version_info < (3, 11):
+                call_op = "CALL_FUNCTION"
+            else:
+                call_op = "CALL"
 
             insts = list(dis.get_instructions(out_code))
             call_graph_idx = next(
-                i for i, inst in enumerate(insts) if inst.opname == "CALL_FUNCTION"
+                i for i, inst in enumerate(insts) if inst.opname == call_op
             )
             # pre-graph should alias: inputs_ref_0 = inputs[0]
             matches = [
