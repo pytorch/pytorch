@@ -5229,11 +5229,10 @@ def sample_inputs_index_reduce(op_info, device, dtype, requires_grad, **kwargs):
 
     shapes = [((), ()), ((1,), (1,)), ((S, S), (S, M)), ((S, S, S), (S, M, S))]
     include_selfs = (True, False)
-    reduces = ('prod', 'mean', 'amin', 'amax')
+    reduce = op_info.variant_test_name
+    assert reduce in ('prod', 'mean', 'amin', 'amax')
 
-    for shape, include_self, reduce in product(shapes, include_selfs, reduces):
-        if op_info.variant_test_name and op_info.variant_test_name != reduce:
-            continue
+    for shape, include_self in product(shapes, include_selfs):
         self_shape, src_shape = shape
         # dim. We handle the scalar case
         dim = 1 if len(self_shape) >= 2 else 0
@@ -5245,7 +5244,7 @@ def sample_inputs_index_reduce(op_info, device, dtype, requires_grad, **kwargs):
                           kwargs={'include_self' : include_self})
 
     # Sample inputs to test edge cases for backward
-    if requires_grad:
+    if requires_grad and reduce == 'prod':
         # Check that gradients are propagated correctly for prod when zeros in self/src are reduced
         # This sample tests gradients for the following cases
         # (a) 1 zero reduced (from source (self[0, 1]), from self (self[0, 0]))
@@ -5257,10 +5256,9 @@ def sample_inputs_index_reduce(op_info, device, dtype, requires_grad, **kwargs):
         src = torch.tensor([[2, 0], [0, 0], [2, 3], [2, 2]], dtype=dtype, device=device, requires_grad=requires_grad)
         idx = torch.tensor([0, 1, 2, 0], dtype=torch.long, device=device)
 
-        if not op_info.variant_test_name or op_info.variant_test_name == 'prod':
-            yield SampleInput(input,
-                              args=(0, idx, src, 'prod'),
-                              kwargs={'include_self': True})
+        yield SampleInput(input,
+                          args=(0, idx, src, reduce),
+                          kwargs={'include_self': True})
 
 def sample_inputs_mode(op_info, device, dtype, requires_grad, **kwargs):
     args = (
@@ -16766,7 +16764,8 @@ op_db: List[OpInfo] = [
                               'TestInductorOpInfo', 'test_comprehensive'),
              ),
              supports_out=True,
-             sample_inputs_func=sample_inputs_index_reduce) for reduction_type in ('mean', 'prod', 'amin', 'amax')),
+             sample_inputs_func=sample_inputs_index_reduce,
+             ) for reduction_type in ('mean', 'prod', 'amin', 'amax')),
     OpInfo('__getitem__',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16, torch.chalf),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
