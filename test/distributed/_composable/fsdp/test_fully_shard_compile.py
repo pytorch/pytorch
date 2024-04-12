@@ -1,14 +1,18 @@
 # Owner(s): ["oncall: distributed"]
 
 
+import unittest
+
 import torch
 from torch.distributed._composable.fsdp import fully_shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import FSDPTest, MLP
 from torch.testing._internal.common_utils import run_tests
+from torch.utils._triton import has_triton
 
 
 class TestFullyShardCompileCompute(FSDPTest):
+    @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     def test_disable_compiling_hooks(self):
         self.run_subtests(
