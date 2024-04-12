@@ -4658,6 +4658,30 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
 
+    def test_partially_initialized_module_property(self):
+        class Matrix(torch.nn.Module):
+            def __init__(self, data):
+                super().__init__()
+                self._data = data
+                self.foo = 10 * self.blocking
+
+            @property
+            def data(self):
+                return self._data
+
+            @property
+            def blocking(self):
+                return self.data.shape[1]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return Matrix(torch.randn(10, 20))
+
+        v = fn()
+        self.assertEqual(v.foo, 200)
+        self.assertEqual(v.data.shape, (10, 20))
+        self.assertEqual(type(v), Matrix)
+
     def test_global_fn_mutation(self):
         def foo(x, y):
             return global_fn(x) + y

@@ -1067,17 +1067,20 @@ class FSDPTest(MultiProcessTestCase):
 
             raise
 
+        device_ids = None
         if torch.cuda.is_available() and torch.cuda.device_count():
-            torch.cuda.set_device(self.rank % torch.cuda.device_count())
+            device_id = self.rank % torch.cuda.device_count()
+            torch.cuda.set_device(device_id)
+            device_ids = [device_id]
 
         # Execute barrier prior to running test to ensure that every process
         # has finished initialization and that the following test
         # immediately exiting due to a skip doesn't cause flakiness.
-        dist.barrier()
+        dist.barrier(device_ids=device_ids)
 
         self.run_test(test_name, pipe)
 
-        dist.barrier()
+        dist.barrier(device_ids=device_ids)
 
         dist.destroy_process_group()
 
