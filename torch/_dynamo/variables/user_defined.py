@@ -7,6 +7,7 @@ import importlib
 import inspect
 import itertools
 import random
+import re
 import sys
 import threading
 import types
@@ -247,6 +248,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return BuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
+        elif name == "__eq__" and len(args) == 1 and hasattr(args[0], "value"):
+            return variables.ConstantVariable(self.value == args[0].value)
+        elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
+            return variables.ConstantVariable(self.value != args[0].value)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -603,6 +608,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 return self.odict_getitem(tx, args[0])
 
+            if (
+                method in (object.__ne__, object.__eq__)
+                and len(args) == 1
+                and not kwargs
+                and hasattr(args[0], "value")
+            ):
+                return ConstantVariable(
+                    (self.value is args[0].value) is (method is object.__eq__)
+                )
+
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
                 source = (
@@ -868,6 +883,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 (
                     torch.Tensor,
                     torch.nn.Module,
+                    re.Pattern,
                 ),
             )
         ):
@@ -879,7 +895,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if (
             name not in getattr(value, "__dict__", {})
-            and type(value).__module__.startswith("torch.")
+            and (
+                type(value).__module__.startswith("torch.")
+                or isinstance(subobj, re.Pattern)
+            )
             and "torch.optim" not in type(value).__module__
             and not callable(value)
             and not isinstance(subobj, types.MethodDescriptorType)
