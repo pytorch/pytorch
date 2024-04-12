@@ -1661,7 +1661,7 @@ TEST(TestAutogradNotImplementedFallback, TensorlistOp) {
 
   ASSERT_THROWS_WITH(
       torch::autograd::grad({out}, {vec[0]}),
-      "One of the differentiated Tensors does not require grad");
+      "element 0 of the input tensors does not require grad");
   ASSERT_THROWS_WITH(
       torch::autograd::grad({out}, {vec[1]}), "is not implemented");
 
