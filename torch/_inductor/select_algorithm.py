@@ -761,6 +761,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 layout=self.layout,
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
+                debug_extra=self.debug_extra,
             )
         )
 
@@ -1117,6 +1118,8 @@ class AlgorithmSelectorCache(PersistentCache):
             return result
 
         def benchmark_in_current_process(choices):
+            from triton.runtime.autotuner import OutOfResources
+
             timings = {}
             for choice in choices:
                 try:
@@ -1131,12 +1134,16 @@ class AlgorithmSelectorCache(PersistentCache):
                     msg = str(e)
                     if "invalid argument" in msg:
                         msg += "\n\nThis may mean this GPU is too small for max_autotune mode.\n\n"
-                    elif "illegal memory access" in msg:
-                        msg += "\n\nEither error in template or triton bug.\n"
+                    else:
+                        if "illegal memory access" in msg:
+                            msg += "\n\nEither error in template or triton bug.\n"
                     log.error(
                         "Runtime error during autotuning: \n%s. \nIgnoring this choice.",
                         msg,
                     )
+                    timing = float("inf")
+                except OutOfResources as e:
+                    log.warning(e)
                     timing = float("inf")
                 except AssertionError as e:
                     raise AssertionError(  # noqa: TRY200
