@@ -751,7 +751,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
   coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
-  NCCLTraceBuffer::get()->record_pg_ranks(pg_name_, groupRanks());
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
   // across different ProcessGroupNCCL(PG) instances. We need to get the
@@ -1494,7 +1493,11 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
 }
 
 std::string ProcessGroupNCCL::createLogPrefix() const {
-  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+  if (!pg_desc_.empty() && pg_desc_ != "undefined") {
+    return c10::str("[PG ", pg_name_, " (", pg_desc_, ") Rank ", rank_, "] ");
+  } else {
+    return c10::str("[PG ", pg_name_, " Rank ", rank_, "] ");
+  }
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {
@@ -2045,6 +2048,10 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   }
 #endif
 
+  logPrefix_ = createLogPrefix(); // reset log prefix to include group_desc
+  NCCLTraceBuffer::get()->record_pg_ranks(
+      std::make_tuple(pg_name_, pg_desc_), groupRanks());
+
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
             << ncclComm->ncclComm_ << " on CUDA device: " << deviceIndex;
 
@@ -2228,7 +2235,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     //   between threads
     r->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
-        pg_name_,
+        std::make_tuple(pg_name_, pg_desc_),
         seq_,
         op_id_,
         profilingTitle ? profilingTitle : "",
@@ -2821,7 +2828,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // input/output sizes and profilingTitle per-op in the group.
     auto trace_id = NCCLTraceBuffer::get()->record(
         uid_,
-        pg_name_,
+        std::make_tuple(pg_name_, pg_desc_),
         seq_,
         op_id_,
         profilingTitle,
@@ -2852,7 +2859,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // information it wants.
     work->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
-        pg_name_,
+        std::make_tuple(pg_name_, pg_desc_),
         seq_,
         op_id_,
         profilingTitle,
