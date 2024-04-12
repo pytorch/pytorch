@@ -1014,6 +1014,44 @@ def forward(self, x_1, output_1):
 
     @requires_cuda
     @skipIfRocm
+    def test_triton_kernel_equal_to_1_float_arg(self):
+        @triton.jit
+        def add_kernel_with_scaling(
+            in_ptr0,
+            in_ptr1,
+            out_ptr,
+            n_elements,
+            scaling_factor,
+            BLOCK_SIZE: "tl.constexpr",
+        ):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr0 + offsets, mask=mask)
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = (x + y) * scaling_factor
+            tl.store(out_ptr + offsets, output, mask=mask)
+
+        def f(x, y):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            add_kernel_with_scaling[(n_elements,)](
+                x, y, out, n_elements, 1.0, BLOCK_SIZE=16
+            )
+            return out
+
+        x = torch.randn(2, device="cuda")
+        y = torch.randn(2, device="cuda")
+        eager_out = f(x, y)
+        compiled_out, sources = run_and_get_code(torch.compile(f), x, y)
+
+        # float 1.0 should not be in equal_to_1
+        self.assertTrue("equal_to_1=()" in sources[0])
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
     def test_triton_kernel_with_imported_symbol(self):
         @triton.jit
         def add_kernel_with_imported_symbol(

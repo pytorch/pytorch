@@ -1,5 +1,7 @@
 from typing import Any, Dict, List, Optional
 
+import sympy
+
 import torch
 
 from .. import config
@@ -119,6 +121,7 @@ def config_of(
         for i, arg in zip(indices, args)
         if isinstance(arg, SizeArg)
         and arg.expr is not None
+        and isinstance(arg.expr, (int, sympy.Expr))
         and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
     )
     # ids_of_folded_args is set from equal_to_1
