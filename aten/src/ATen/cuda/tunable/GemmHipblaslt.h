@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/tunable/TunableOp.h>
@@ -299,47 +300,6 @@ static size_t GetHipblasltWorkspaceSize() {
   return workspace_size;
 }
 
-template <typename T, cublasStatus_t (*destructor)(T*)>
-struct HipBlasLtDeleter {
-  void operator()(T* x) {
-    if (x != nullptr) {
-      TORCH_CUDABLAS_CHECK(destructor(x));
-    }
-  }
-};
-
-template <typename T, hipblasStatus_t (*destructor)(T*)>
-class HipBlasLtDescriptor {
- public:
-  T* descriptor() const {
-    return descriptor_.get();
-  }
-  T* descriptor() {
-    return descriptor_.get();
-  }
-
- protected:
-  std::unique_ptr<T, HipBlasLtDeleter<T, destructor>> descriptor_;
-};
-
-class HipBlasLtMatmulDescriptor : public HipBlasLtDescriptor<
-                                     hipblasLtMatmulDescOpaque_t,
-                                     &hipblasLtMatmulDescDestroy> {
- public:
-  HipBlasLtMatmulDescriptor(
-      hipblasComputeType_t compute_type,
-      hipDataType scale_type) {
-    hipblasLtMatmulDesc_t raw_descriptor = nullptr;
-    TORCH_HIPBLASLT_CHECK(
-        hipblasLtMatmulDescCreate(&raw_descriptor, compute_type, scale_type));
-    descriptor_.reset(raw_descriptor);
-  }
-  template <typename T>
-  inline void setAttribute(hipblasLtMatmulDescAttributes_t attr, const T value) {
-    TORCH_HIPBLASLT_CHECK(::hipblasLtMatmulDescSetAttribute(descriptor(), attr, &value, sizeof(T)));
-  }
-};
-
 template <typename AT, typename BT, typename CT, BlasOp ALayout, BlasOp BLayout, typename ParamsT>
 class HipblasltGemmOp : public Callable<ParamsT> {
   public:
@@ -360,20 +320,9 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       float beta = GetBetaFromParams<CT>(params);
       //bool use_fast_accum = GetFastAccuModeFromParams<CT>(params);
 
-      hipblasLtMatrixLayout_t mat_a, mat_b, mat_c;
-      if (opa == HIPBLAS_OP_N) {
-        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_a, a_datatype, params->m, params->k, params->lda));
-      }
-      else {
-        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_a, a_datatype, params->k, params->m, params->lda));
-      }
-      if (opb == HIPBLAS_OP_N) {
-        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_b, b_datatype, params->k, params->n, params->ldb));
-      }
-      else {
-        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_b, b_datatype, params->n, params->k, params->ldb));
-      }
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&mat_c, in_out_datatype, params->m, params->n, params->ldc));
+      at::cuda::blas::CuBlasLtMatrixLayout mat_a(a_datatype, params->m, params->k, params->lda, opa == HIPBLAS_OP_N);
+      at::cuda::blas::CuBlasLtMatrixLayout mat_b(b_datatype, params->k, params->n, params->ldb, opb == HIPBLAS_OP_N);
+      at::cuda::blas::CuBlasLtMatrixLayout mat_c(in_out_datatype, params->m, params->n, params->ldc);
 
       // specific to batched gemmm
       int batch = GetBatchFromParams<CT>(params);
@@ -381,21 +330,15 @@ class HipblasltGemmOp : public Callable<ParamsT> {
         int64_t stride_a = GetStrideAFromParams<CT>(params);
         int64_t stride_b = GetStrideBFromParams<CT>(params);
         int64_t stride_c = GetStrideCFromParams<CT>(params);
-        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(
-            mat_a, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch, sizeof(batch)));
-        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(
-            mat_a, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride_a, sizeof(stride_a)));
-        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(
-            mat_b, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch, sizeof(batch)));
-        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(
-            mat_b, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride_b, sizeof(stride_b)));
-        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(
-            mat_c, HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, &batch, sizeof(batch)));
-        TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(
-            mat_c, HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, &stride_c, sizeof(stride_c)));
+        mat_a.setAttribute(HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, batch);
+        mat_b.setAttribute(HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, batch);
+        mat_c.setAttribute(HIPBLASLT_MATRIX_LAYOUT_BATCH_COUNT, batch);
+        mat_a.setAttribute(HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stride_a);
+        mat_b.setAttribute(HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stride_b);
+        mat_c.setAttribute(HIPBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stride_c);
       }
 
-      HipBlasLtMatmulDescriptor matmul(COMPUTE_TYPE_32, DATA_TYPE_R_32);
+      at::cuda::blas::CuBlasLtMatmulDescriptor matmul(COMPUTE_TYPE_32, DATA_TYPE_R_32);
       matmul.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSA, opa);
       matmul.setAttribute(HIPBLASLT_MATMUL_DESC_TRANSB, opb);
 
@@ -425,11 +368,11 @@ class HipblasltGemmOp : public Callable<ParamsT> {
       auto status = hipblaslt_ext::matmulIsAlgoSupported(op_handle,
           matmul.descriptor(),
           &alpha,
-          mat_a,
-          mat_b,
+          mat_a.descriptor(),
+          mat_b.descriptor(),
           &beta,
-          mat_c,
-          mat_c,
+          mat_c.descriptor(),
+          mat_c.descriptor(),
           algo_,
           ret_workspace_size);
 
@@ -453,23 +396,19 @@ class HipblasltGemmOp : public Callable<ParamsT> {
             matmul.descriptor(),
             &alpha,
             params->a,
-            mat_a,
+            mat_a.descriptor(),
             params->b,
-            mat_b,
+            mat_b.descriptor(),
             &beta,
             params->c,
-            mat_c,
+            mat_c.descriptor(),
             params->c,
-            mat_c,
+            mat_c.descriptor(),
             &algo_,
             workspace_buffer,
             workspace_size,
             at::cuda::getCurrentCUDAStream()));
 
-      //TORCH_HIPBLASLT_CHECK(hipblasLtMatmulDescDestroy(matmul));
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_a));
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_b));
-      TORCH_HIPBLASLT_CHECK(hipblasLtMatrixLayoutDestroy(mat_c));
       if (workspace_size > 0) {
         c10::cuda::CUDACachingAllocator::raw_delete(workspace_buffer);
       }
@@ -489,8 +428,7 @@ auto GetHipBlasLtTypeStringAndOps() {
   auto in_out_datatype = HipBlasDataTypeFor<CT>();
   std::vector<hipblasLtMatmulHeuristicResult_t> heuristic_result;
 
-  hipblasLtHandle_t handle;
-  TORCH_HIPBLASLT_CHECK(hipblasLtCreate(&handle));
+  auto handle = at::cuda::getCurrentCUDABlasLtHandle();
   TORCH_HIPBLASLT_CHECK(hipblaslt_ext::getAllAlgos(handle,
         hipblaslt_ext::GemmType::HIPBLASLT_GEMM,
         transa_outer,
@@ -501,7 +439,6 @@ auto GetHipBlasLtTypeStringAndOps() {
         in_out_datatype,
         COMPUTE_TYPE_32,
         heuristic_result));
-  TORCH_HIPBLASLT_CHECK(hipblasLtDestroy(handle));
 
   // Sort heuristic_result by algo index to make sure the order of returned algos is deterministic.
   std::sort(heuristic_result.begin(),
