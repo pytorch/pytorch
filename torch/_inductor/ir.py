@@ -2478,12 +2478,6 @@ def is_contiguous_strides_for_shape(stride, shape):
     )
 
 
-def is_contiguous_or_transposed(sizes, strides):
-    return (strides[-1] == 1 and (sizes[-2] == 1 or strides[-2] >= sizes[-1])) or (
-        strides[-2] == 1 and (sizes[-1] == 1 or strides[-1] >= sizes[-2])
-    )
-
-
 @dataclasses.dataclass
 class Layout(IRNode):
     def __init__(
