@@ -512,8 +512,6 @@ class CppWrapperCpu(WrapperCodeGen):
                     else:
                         # Weights are promoted in the JIT mode
                         num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
-                        # release GIL to support multiple instances inference (in different threads of the same process)
-                        self.prefix.splice("pybind11::gil_scoped_release release;")
 
                     if config.abi_compatible:
                         self.prefix.splice(
@@ -522,6 +520,8 @@ class CppWrapperCpu(WrapperCodeGen):
                             """
                         )
                     else:
+                        # release GIL to support multiple instances inference (in different threads of the same process)
+                        self.prefix.splice("pybind11::gil_scoped_release release;")                          
                         # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
                         self.prefix.splice(
                             f"""
