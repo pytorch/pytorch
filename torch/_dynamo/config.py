@@ -393,9 +393,6 @@ capture_autograd_function = True
 # enable/disable dynamo tracing for `torch.func` transforms
 capture_func_transforms = True
 
-# enable/disable user-defined triton kernel optimizations
-optimize_user_defined_triton_kernels = True
-
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 
