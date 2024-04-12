@@ -1,7 +1,7 @@
 # Owner(s): ["module: nn"]
+import pickle
 from copy import deepcopy
 from itertools import product
-import pickle
 
 import torch
 
@@ -10,12 +10,18 @@ import torch.nn.functional as F
 import torch.nn.init as init
 import torch.nn.utils.parametrize as parametrize
 from torch.nn import Parameter
-from torch.testing._internal.common_utils import run_tests, skipIfNoLapack, \
-    TemporaryFileName, instantiate_parametrized_tests, set_default_dtype, skipIfTorchDynamo
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import gradcheck
+from torch.testing._internal.common_utils import (
+    gradcheck,
+    instantiate_parametrized_tests,
+    run_tests,
+    set_default_dtype,
+    skipIfNoLapack,
+    skipIfTorchDynamo,
+    TemporaryFileName,
+)
 
 
 class TestNNParametrization(NNTestCase):
@@ -31,6 +37,7 @@ class TestNNParametrization(NNTestCase):
         on a parameter or a buffer and that removing them restores the initial state
         It also tests that backpropagating through them works as expected
         """
+
         # Define a couple matrix parametrizations
         class Skew(nn.Module):
             def forward(self, X):
@@ -71,8 +78,13 @@ class TestNNParametrization(NNTestCase):
         initial_model = deepcopy(model)
 
         # Test unsafe flag
-        with self.assertRaisesRegex(ValueError, "Registering a parametrization may not change the shape of the tensor"):
-            parametrize.register_parametrization(model, "weight", Resize())  # default unsafe = False
+        with self.assertRaisesRegex(
+            ValueError,
+            "Registering a parametrization may not change the shape of the tensor",
+        ):
+            parametrize.register_parametrization(
+                model, "weight", Resize()
+            )  # default unsafe = False
             model(torch.ones(8, 8))
 
         # One parametrization with unsafe=True
@@ -171,9 +183,11 @@ class TestNNParametrization(NNTestCase):
         self.assertTrue(parametrize.is_parametrized(model))
         self.assertTrue(parametrize.is_parametrized(model, "weight"))
         self.assertTrue(parametrize.is_parametrized(model, "bias"))
-        self.assertEqual(model.bias[0].item(), 0.)
-        self.assertEqual(model.bias[-1].item(), 0.)
-        self.assertEqual(len(list(model.parameters())), 2)  # Nothing weird has happpened
+        self.assertEqual(model.bias[0].item(), 0.0)
+        self.assertEqual(model.bias[-1].item(), 0.0)
+        self.assertEqual(
+            len(list(model.parameters())), 2
+        )  # Nothing weird has happpened
         # Should not throw
 
         sgd = torch.optim.SGD(model.parameters(), lr=0.01)
@@ -189,14 +203,18 @@ class TestNNParametrization(NNTestCase):
         # Remove first parametrization.
         # Check that the model is still parametrized and so is the second parameter
         parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
-        self.assertTrue(parametrize.is_parametrized(model))             # Still parametrized
-        self.assertFalse(parametrize.is_parametrized(model, "weight"))  # Parametrization removed
-        self.assertTrue(parametrize.is_parametrized(model, "bias"))     # Still parametrized
-        self.assertEqual(model.bias[0].item(), 0.)                      # Still parametrized
-        self.assertEqual(model.bias[-1].item(), 0.)                     # Still parametrized
-        self.assertNotEqual(model.weight, initial_model.weight)         # Has been updated
-        self.assertEqual(id(model.weight), initial_weight_id)           # Keeps the same id
-        self.assertEqual(len(list(model.parameters())), 2)              # Nothing weird has happened
+        self.assertTrue(parametrize.is_parametrized(model))  # Still parametrized
+        self.assertFalse(
+            parametrize.is_parametrized(model, "weight")
+        )  # Parametrization removed
+        self.assertTrue(
+            parametrize.is_parametrized(model, "bias")
+        )  # Still parametrized
+        self.assertEqual(model.bias[0].item(), 0.0)  # Still parametrized
+        self.assertEqual(model.bias[-1].item(), 0.0)  # Still parametrized
+        self.assertNotEqual(model.weight, initial_model.weight)  # Has been updated
+        self.assertEqual(id(model.weight), initial_weight_id)  # Keeps the same id
+        self.assertEqual(len(list(model.parameters())), 2)  # Nothing weird has happened
         # Should not throw
         weight_copy = model.weight.clone()
         bias_copy = model.bias.clone()
@@ -210,13 +228,15 @@ class TestNNParametrization(NNTestCase):
         # Check that the module is not parametrized
         parametrize.remove_parametrizations(model, "bias", leave_parametrized=False)
         self.assertFalse(parametrize.is_parametrized(model))  # Not parametrized
-        self.assertNotEqual(model.bias, initial_model.bias)   # Has been updated
-        self.assertNotEqual(model.bias[0].item(), 0.)         # Not parametrized
-        self.assertNotEqual(model.bias[-1].item(), 0.)        # Not parametrized
-        self.assertEqual(id(model.bias), initial_bias_id)     # Keeps the same id
-        self.assertFalse(hasattr(model, "parametrizations"))  # Not parametrized the module
-        self.assertEqual(model.__class__, nn.Linear)          # Resores the previous class
-        self.assertEqual(len(list(model.parameters())), 2)    # Nothing weird has happeed
+        self.assertNotEqual(model.bias, initial_model.bias)  # Has been updated
+        self.assertNotEqual(model.bias[0].item(), 0.0)  # Not parametrized
+        self.assertNotEqual(model.bias[-1].item(), 0.0)  # Not parametrized
+        self.assertEqual(id(model.bias), initial_bias_id)  # Keeps the same id
+        self.assertFalse(
+            hasattr(model, "parametrizations")
+        )  # Not parametrized the module
+        self.assertEqual(model.__class__, nn.Linear)  # Resores the previous class
+        self.assertEqual(len(list(model.parameters())), 2)  # Nothing weird has happeed
 
         # Should not throw things are updated
         weight_copy = model.weight.clone()
@@ -231,7 +251,9 @@ class TestNNParametrization(NNTestCase):
         for _ in range(2):
             parametrize.register_parametrization(model, "weight", Skew())
             parametrize.register_parametrization(model, "weight", Orthogonal())
-            parametrize.remove_parametrizations(model, "weight", leave_parametrized=True)
+            parametrize.remove_parametrizations(
+                model, "weight", leave_parametrized=True
+            )
             # We didn't change the dtype nor had multiple inputs, so the id should be the same
             self.assertEqual(id(model.weight), initial_weight_id)
             self.assertEqual(id(model.bias), initial_bias_id)
@@ -249,6 +271,7 @@ class TestNNParametrization(NNTestCase):
         r"""Test that it is possible to nest the parametrizations
         meaning that the original param is parametrized again
         """
+
         class Skew(nn.Module):
             def forward(self, X):
                 X = X.tril(-1)
@@ -282,7 +305,9 @@ class TestNNParametrization(NNTestCase):
         self.assertEqual(A, -A.T)
 
         # Remove nested param and check consistency
-        parametrize.remove_parametrizations(param_mod, "original", leave_parametrized=False)
+        parametrize.remove_parametrizations(
+            param_mod, "original", leave_parametrized=False
+        )
         self.assertFalse(hasattr(param_mod, "parametrizations"))
         self.assertEqual(param_mod.__class__, parametrize.ParametrizationList)
 
@@ -293,6 +318,7 @@ class TestNNParametrization(NNTestCase):
 
     def test_register_and_remove_buffer_parametrization(self):
         r"""Test that it is possible to add and remove parametrizations on buffers"""
+
         # Define a couple vector parametrizations
         class FirstZero(nn.Module):
             def forward(self, x):
@@ -311,8 +337,8 @@ class TestNNParametrization(NNTestCase):
         parametrize.register_parametrization(model, "bias", LastZero())
         self.assertTrue(parametrize.is_parametrized(model))
         self.assertTrue(parametrize.is_parametrized(model, "bias"))
-        self.assertEqual(model.bias[0].item(), 0.)
-        self.assertEqual(model.bias[-1].item(), 0.)
+        self.assertEqual(model.bias[0].item(), 0.0)
+        self.assertEqual(model.bias[-1].item(), 0.0)
         self.assertTrue((model.bias[1:-1] == torch.ones(6)).all())
         self.assertEqual(len(list(model.parameters())), 1)
 
@@ -320,8 +346,8 @@ class TestNNParametrization(NNTestCase):
         parametrize.remove_parametrizations(model, "bias", leave_parametrized=True)
         self.assertFalse(parametrize.is_parametrized(model))
         self.assertFalse(parametrize.is_parametrized(model, "bias"))
-        self.assertEqual(model.bias[0].item(), 0.)
-        self.assertEqual(model.bias[-1].item(), 0.)
+        self.assertEqual(model.bias[0].item(), 0.0)
+        self.assertEqual(model.bias[-1].item(), 0.0)
         self.assertTrue((model.bias[1:-1] == torch.ones(6)).all())
         self.assertEqual(len(list(model.parameters())), 1)
 
@@ -330,6 +356,7 @@ class TestNNParametrization(NNTestCase):
     @skipIfNoLapack
     def test_serialization_parametrization(self):
         r"""Test that it is possible to serialize a parametrized model via state_dict"""
+
         # A stateful parametrization
         class Orthogonal(nn.Module):
             def __init__(self, n):
@@ -378,8 +405,9 @@ class TestNNParametrization(NNTestCase):
     @skipIfNoLapack
     def test_initialization_parametrization(self):
         r"""Test that it is possible to initialize a parametrization when it
-            implements a `right_inverse` method
+        implements a `right_inverse` method
         """
+
         class Skew(nn.Module):
             def forward(self, X):
                 A = X.triu(1)
@@ -474,7 +502,9 @@ class TestNNParametrization(NNTestCase):
         parametrize.register_parametrization(module, "weight", Sum())
         # Cannot remove a parametrization with several outputs with `leave_parametrized=False`
         with self.assertRaisesRegex(ValueError, "leave_parametrized=False"):
-            parametrize.remove_parametrizations(module, "weight", leave_parametrized=False)
+            parametrize.remove_parametrizations(
+                module, "weight", leave_parametrized=False
+            )
         parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
 
         # A parametrization with an incorrect number of outputs
@@ -509,7 +539,9 @@ class TestNNParametrization(NNTestCase):
                 return None, z
 
         with self.assertRaisesRegex(ValueError, "of the sequence with type"):
-            parametrize.register_parametrization(module, "weight", WrongRightInverseSequence())
+            parametrize.register_parametrization(
+                module, "weight", WrongRightInverseSequence()
+            )
         self.assertFalse(parametrize.is_parametrized(module))
 
         # A parametrization from one tensor to one tensor that changes the dtype
@@ -521,7 +553,9 @@ class TestNNParametrization(NNTestCase):
                 return w.bool()
 
         # For parametrizations that return one tensor, right_inverse may not change the dtype
-        with self.assertRaisesRegex(ValueError, "outputs one tensor, it may not change the dtype"):
+        with self.assertRaisesRegex(
+            ValueError, "outputs one tensor, it may not change the dtype"
+        ):
             parametrize.register_parametrization(module, "weight", ChangeDtypeInverse())
         self.assertFalse(parametrize.is_parametrized(module))
 
@@ -579,7 +613,7 @@ class TestNNParametrization(NNTestCase):
         parametrize.register_parametrization(module, "weight", SequenceLen1())
         self.assertTrue(hasattr(module.parametrizations.weight, "original0"))
         self.assertFalse(hasattr(module.parametrizations.weight, "original1"))
-        _ = module.weight   # Does not throw
+        _ = module.weight  # Does not throw
         self.assertTrue(parametrize.is_parametrized(module))
         parametrize.remove_parametrizations(module, "weight", leave_parametrized=True)
 
@@ -707,7 +741,9 @@ class TestNNParametrization(NNTestCase):
 
         with self.assertRaisesRegex(ValueError, "leave_parametrized=False"):
             # Cannot remove a parametrization with multiple inputs and not leave it parametrized
-            parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+            parametrize.remove_parametrizations(
+                model, "weight", leave_parametrized=False
+            )
         # Remove parametrization and check consistency
         parametrize.remove_parametrizations(model, "weight", leave_parametrized=True)
         self.assertFalse(hasattr(model, "parametrizations"))
@@ -742,7 +778,9 @@ class TestNNParametrization(NNTestCase):
         # Same drill as before, removing should work as expected
         with self.assertRaisesRegex(ValueError, "leave_parametrized=False"):
             # Cannot remove a parametrization with multiple inputs and not leave it parametrized
-            parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
+            parametrize.remove_parametrizations(
+                model, "weight", leave_parametrized=False
+            )
         # Remove parametrization and check consistency
         parametrize.remove_parametrizations(model, "weight", leave_parametrized=True)
         self.assertFalse(hasattr(model, "parametrizations"))
@@ -767,6 +805,7 @@ class TestNNParametrization(NNTestCase):
     @skipIfNoLapack
     def test_caching_parametrization(self):
         r"""Test the caching system of a parametrization"""
+
         # Define a couple matrix parametrizations
         class Skew(nn.Module):
             def forward(self, X):
@@ -793,6 +832,7 @@ class TestNNParametrization(NNTestCase):
     @skipIfNoLapack
     def test_caching_parametrization_with_transfer_parametrizations_and_params(self):
         r"""Test that transferring parametrizations doesn't cause issues with caching"""
+
         class Skew(nn.Module):
             def forward(self, X):
                 X = X.tril(-1)
@@ -824,6 +864,7 @@ class TestNNParametrization(NNTestCase):
 
     def test_parametrization_same_training_mode(self):
         r"""Test training mode updated on parametrization registration"""
+
         class Identity(nn.Module):
             def forward(self, X):
                 return X
@@ -864,8 +905,12 @@ class TestNNParametrization(NNTestCase):
         class ModelWithoutDeepcopy(nn.Module):
             def __init__(self):
                 super().__init__()
-                self.weight = nn.Parameter(torch.tensor([1., 1., 1., 1.]), requires_grad=True)
-                self.bias = nn.Parameter(torch.tensor([0., 0., 0., 0.]), requires_grad=True)
+                self.weight = nn.Parameter(
+                    torch.tensor([1.0, 1.0, 1.0, 1.0]), requires_grad=True
+                )
+                self.bias = nn.Parameter(
+                    torch.tensor([0.0, 0.0, 0.0, 0.0]), requires_grad=True
+                )
                 self.attr = [1.0, 2.0, 3.0, 4.0]
 
         class ActualModel(ModelWithoutDeepcopy):
@@ -879,8 +924,16 @@ class TestNNParametrization(NNTestCase):
         def check_deepcopy(m1: nn.Module, m2: nn.Module):
             w1 = m1.parametrizations.weight.original
             w2 = m2.parametrizations.weight.original
-            b1 = m1.parametrizations.bias.original if parametrize.is_parametrized(m1, "bias") else m1.bias
-            b2 = m2.parametrizations.bias.original if parametrize.is_parametrized(m2, "bias") else m2.bias
+            b1 = (
+                m1.parametrizations.bias.original
+                if parametrize.is_parametrized(m1, "bias")
+                else m1.bias
+            )
+            b2 = (
+                m2.parametrizations.bias.original
+                if parametrize.is_parametrized(m2, "bias")
+                else m2.bias
+            )
             # Weights, biases and attributes should be equal but they must be different objects.
             self.assertEqual(m1.__dict__.keys(), m2.__dict__.keys())
             self.assertIsNot(m1, m2)
@@ -1109,47 +1162,49 @@ class TestNNParametrization(NNTestCase):
             self.assertEqual(spectral_norm_m._u.size(), torch.Size([m.weight.size(0)]))
 
             # .parametrizations.weight.original should be trainable
-            self.assertTrue(hasattr(m.parametrizations.weight, 'original'))
-            self.assertTrue('original' in m.parametrizations.weight._parameters)
+            self.assertTrue(hasattr(m.parametrizations.weight, "original"))
+            self.assertTrue("original" in m.parametrizations.weight._parameters)
 
             # u should be just a reused buffer
-            self.assertTrue(hasattr(spectral_norm_m, '_u'))
-            self.assertTrue('_u' in spectral_norm_m._buffers)
-            self.assertTrue('_v' in spectral_norm_m._buffers)
+            self.assertTrue(hasattr(spectral_norm_m, "_u"))
+            self.assertTrue("_u" in spectral_norm_m._buffers)
+            self.assertTrue("_v" in spectral_norm_m._buffers)
 
             # weight should be a plain attribute, not counted as a buffer or a param
             self.assertIsNotNone(m.weight)
-            self.assertFalse('weight' in m._buffers)
-            self.assertFalse('weight' in m._parameters)
+            self.assertFalse("weight" in m._buffers)
+            self.assertFalse("weight" in m._parameters)
 
             # it should also be sharing storage as `weight_orig`
             # self.assertEqual(m.parametrizations.weight.original.storage(), m.weight.storage())
             self.assertEqual(m.parametrizations.weight.original.size(), m.weight.size())
-            self.assertEqual(m.parametrizations.weight.original.stride(), m.weight.stride())
+            self.assertEqual(
+                m.parametrizations.weight.original.stride(), m.weight.stride()
+            )
 
-            m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
+            m = torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
 
             # spectral_norm is the only parametrization
-            self.assertFalse(hasattr(m, 'parametrizations'))
-            self.assertTrue('weight' in m._parameters)
+            self.assertFalse(hasattr(m, "parametrizations"))
+            self.assertTrue("weight" in m._parameters)
 
             # We can register spectral_norm multiple times on the same parameter
             # and on multiple parameters in the same module
-            m = torch.nn.utils.parametrizations.spectral_norm(m, 'weight')
-            m = torch.nn.utils.parametrizations.spectral_norm(m, 'weight')
-            m = torch.nn.utils.parametrizations.spectral_norm(m, 'bias')
+            m = torch.nn.utils.parametrizations.spectral_norm(m, "weight")
+            m = torch.nn.utils.parametrizations.spectral_norm(m, "weight")
+            m = torch.nn.utils.parametrizations.spectral_norm(m, "bias")
 
             # If we remove the parametrization on bias, weight is still parametrized
             # Removing a parametrization runs forward in eval mode if leave_parametrized=True
-            m = torch.nn.utils.parametrize.remove_parametrizations(m, 'bias')
-            self.assertTrue('bias' in m._parameters)
-            self.assertTrue(hasattr(m, 'parametrizations'))
-            self.assertFalse('weight' in m._parameters)
+            m = torch.nn.utils.parametrize.remove_parametrizations(m, "bias")
+            self.assertTrue("bias" in m._parameters)
+            self.assertTrue(hasattr(m, "parametrizations"))
+            self.assertFalse("weight" in m._parameters)
 
-            m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
+            m = torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
             # Neither weight and bias are parametrized
-            self.assertFalse(hasattr(m, 'parametrizations'))
-            self.assertTrue('weight' in m._parameters)
+            self.assertFalse(hasattr(m, "parametrizations"))
+            self.assertTrue("weight" in m._parameters)
             self.assertFalse(torch.nn.utils.parametrize.is_parametrized(m))
 
             # test correctness in training/eval modes and cpu/multi-gpu settings
@@ -1157,17 +1212,19 @@ class TestNNParametrization(NNTestCase):
                 if apply_dp:
                     if not TEST_MULTIGPU:
                         continue
-                    device = torch.device('cuda:0')
+                    device = torch.device("cuda:0")
 
                     def maybe_wrap(m):
                         return torch.nn.DataParallel(m, [0, 1])
+
                 else:
-                    device = torch.device('cpu')
+                    device = torch.device("cpu")
 
                     def maybe_wrap(m):
                         return m
 
                 for requires_grad in (True, False):
+
                     def get_modules():
                         m = nn.Linear(3, 4).to(device)
                         m.weight.requires_grad_(requires_grad)
@@ -1180,7 +1237,7 @@ class TestNNParametrization(NNTestCase):
 
                     m, wrapped_m, spectral_norm_m = get_modules()
 
-                    self.assertTrue(hasattr(spectral_norm_m, '_u'))
+                    self.assertTrue(hasattr(spectral_norm_m, "_u"))
                     u0 = spectral_norm_m._u.clone()
                     v0 = spectral_norm_m._v.clone()
 
@@ -1203,7 +1260,9 @@ class TestNNParametrization(NNTestCase):
                     # can't use gradcheck because the function changes as we
                     # activate through it in training mode
                     if requires_grad:
-                        torch.autograd.grad(out.sum(), m.parametrizations.weight.original)
+                        torch.autograd.grad(
+                            out.sum(), m.parametrizations.weight.original
+                        )
 
                     # test backward works with multiple forwards
                     # it uses training mode so we need to reset `u` and `v` vectors
@@ -1221,7 +1280,9 @@ class TestNNParametrization(NNTestCase):
                     # Make sure we can compute gradients wrt to all the parameters in the case
                     # of double forward
                     fn(input.clone().requires_grad_()).sum().backward()
-                    gradcheck(fn, (input.clone().requires_grad_(),), check_batched_grad=False)
+                    gradcheck(
+                        fn, (input.clone().requires_grad_(),), check_batched_grad=False
+                    )
 
                     # test removing
                     # spectral norm module needs to be in eval mode if we'd like to
@@ -1229,14 +1290,14 @@ class TestNNParametrization(NNTestCase):
                     m, wrapped_m, _ = get_modules()
                     pre_remove_out = wrapped_m(input)
                     m.eval()
-                    m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
+                    m = torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
                     self.assertEqual(wrapped_m(input), pre_remove_out)
 
                     torch.nn.utils.parametrizations.spectral_norm(m)
                     for _ in range(3):
                         pre_remove_out = wrapped_m(input)
                     m.eval()
-                    m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
+                    m = torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
                     self.assertEqual(wrapped_m(input), pre_remove_out)
 
                     # TEST EVAL BEHAVIOR
@@ -1285,6 +1346,7 @@ class TestNNParametrization(NNTestCase):
 
                     # assert that backprop reaches weight_orig in eval
                     if requires_grad:
+
                         def fn(weight):
                             return wrapped_m(input)
 
@@ -1301,38 +1363,47 @@ class TestNNParametrization(NNTestCase):
                 snm(inp)
 
             state_dict = deepcopy(snm.state_dict())
-            self.assertEqual({
-                'parametrizations.weight.original',
-                'bias',
-                'parametrizations.weight.0._v',
-                'parametrizations.weight.0._u'
-            }, set(state_dict.keys()))
+            self.assertEqual(
+                {
+                    "parametrizations.weight.original",
+                    "bias",
+                    "parametrizations.weight.0._v",
+                    "parametrizations.weight.0._u",
+                },
+                set(state_dict.keys()),
+            )
 
             # test that non-strict loading works
             non_strict_state_dict = deepcopy(state_dict)
-            non_strict_state_dict['nonsense'] = 'nonsense'
-            with self.assertRaisesRegex(RuntimeError, r'Unexpected key\(s\) in state_dict: "nonsense"'):
+            non_strict_state_dict["nonsense"] = "nonsense"
+            with self.assertRaisesRegex(
+                RuntimeError, r'Unexpected key\(s\) in state_dict: "nonsense"'
+            ):
                 snm.load_state_dict(non_strict_state_dict, strict=True)
             snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict['parametrizations.weight.original']
+            del non_strict_state_dict["parametrizations.weight.original"]
             snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict['parametrizations.weight.0._u']
+            del non_strict_state_dict["parametrizations.weight.0._u"]
             snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict['parametrizations.weight.0._v']
+            del non_strict_state_dict["parametrizations.weight.0._v"]
             snm.load_state_dict(non_strict_state_dict, strict=False)
-            non_strict_state_dict['weight'] = snm.weight.detach().clone()     # set W as a buffer
+            non_strict_state_dict[
+                "weight"
+            ] = snm.weight.detach().clone()  # set W as a buffer
             snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict._metadata['parametrizations.weight.0']  # remove metadata info
+            del non_strict_state_dict._metadata[
+                "parametrizations.weight.0"
+            ]  # remove metadata info
             snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict['weight']                               # remove W buffer
+            del non_strict_state_dict["weight"]  # remove W buffer
             snm.load_state_dict(non_strict_state_dict, strict=False)
-            del non_strict_state_dict['bias']
+            del non_strict_state_dict["bias"]
             snm.load_state_dict(non_strict_state_dict, strict=False)
 
             # normal state_dict
 
             # test that re-wrapping does not matter
-            m = torch.nn.utils.parametrize.remove_parametrizations(snm, 'weight')
+            m = torch.nn.utils.parametrize.remove_parametrizations(snm, "weight")
             snm = torch.nn.utils.parametrizations.spectral_norm(m)
 
             snm.load_state_dict(state_dict)
@@ -1346,7 +1417,7 @@ class TestNNParametrization(NNTestCase):
                 out3_eval = snm(inp)
 
             # test that re-wrapping does not matter
-            m = torch.nn.utils.parametrize.remove_parametrizations(snm, 'weight')
+            m = torch.nn.utils.parametrize.remove_parametrizations(snm, "weight")
             snm = torch.nn.utils.parametrizations.spectral_norm(m)
 
             # Test normal loading
@@ -1368,7 +1439,9 @@ class TestNNParametrization(NNTestCase):
         # this should not run into incompatible shapes
         x = m(inp)
         # check that u refers to the same dimension
-        self.assertEqual(snm._u.shape, m.parametrizations.weight.original[0, :, 0, 0].shape)
+        self.assertEqual(
+            snm._u.shape, m.parametrizations.weight.original[0, :, 0, 0].shape
+        )
 
     def test_new_spectral_norm_forward(self):
         input = torch.randn(3, 5)
@@ -1412,9 +1485,11 @@ class TestNNParametrization(NNTestCase):
             if n < k:
                 X = X.mT
                 n, k = k, n
-            Id = torch.eye(k, dtype=X.dtype, device=X.device).expand(*(X.size()[:-2]), k, k)
+            Id = torch.eye(k, dtype=X.dtype, device=X.device).expand(
+                *(X.size()[:-2]), k, k
+            )
             eps = 10 * n * torch.finfo(X.dtype).eps
-            torch.testing.assert_close(X.mH @ X, Id, atol=eps, rtol=0.)
+            torch.testing.assert_close(X.mH @ X, Id, atol=eps, rtol=0.0)
 
         def assert_weight_allclose_Q(weight, W):
             # Test that weight is equal to the Q part of the QR decomposition of W
@@ -1426,11 +1501,13 @@ class TestNNParametrization(NNTestCase):
             Q *= R.diagonal(dim1=-2, dim2=-1).sgn().unsqueeze(-2)
             if wide_matrix:
                 Q = Q.mT
-            torch.testing.assert_close(Q, weight, atol=1e-5, rtol=0.)
+            torch.testing.assert_close(Q, weight, atol=1e-5, rtol=0.0)
 
-        for shape, dtype, use_linear in product(((4, 4), (5, 3), (3, 5)),  # square/ tall / wide
-                                                (torch.float32, torch.complex64),
-                                                (True, False)):
+        for shape, dtype, use_linear in product(
+            ((4, 4), (5, 3), (3, 5)),  # square/ tall / wide
+            (torch.float32, torch.complex64),
+            (True, False),
+        ):
             # Conv2d does not support complex yet
             if not use_linear:
                 continue
@@ -1440,8 +1517,9 @@ class TestNNParametrization(NNTestCase):
             else:
                 input = torch.randn(2, 2, shape[0] + 2, shape[1] + 1, dtype=dtype)
 
-            for parametrization, use_trivialization in product(("matrix_exp", "cayley", "householder"),
-                                                               (False, True)):
+            for parametrization, use_trivialization in product(
+                ("matrix_exp", "cayley", "householder"), (False, True)
+            ):
                 # right_inverse for Cayley and matrix_exp not implemented for use_trivialization=False
                 # See Note [right_inverse expm cayley]
                 can_initialize = use_trivialization or parametrization == "householder"
@@ -1458,17 +1536,18 @@ class TestNNParametrization(NNTestCase):
                 if parametrization == "householder" and m.weight.is_complex():
                     msg = "householder parametrization does not support complex tensors"
                     with self.assertRaisesRegex(ValueError, msg):
-                        torch.nn.utils.parametrizations.orthogonal(m,
-                                                                   "weight",
-                                                                   parametrization,
-                                                                   use_trivialization=use_trivialization)
+                        torch.nn.utils.parametrizations.orthogonal(
+                            m,
+                            "weight",
+                            parametrization,
+                            use_trivialization=use_trivialization,
+                        )
                     continue
 
                 wide_matrix = w_init.size(-2) < w_init.size(-1)
-                torch.nn.utils.parametrizations.orthogonal(m,
-                                                           "weight",
-                                                           parametrization,
-                                                           use_trivialization=use_trivialization)
+                torch.nn.utils.parametrizations.orthogonal(
+                    m, "weight", parametrization, use_trivialization=use_trivialization
+                )
                 # Forwards works as expected
                 self.assertEqual(w_init.shape, m.weight.shape)
                 assert_is_orthogonal(m.weight)
@@ -1484,9 +1563,11 @@ class TestNNParametrization(NNTestCase):
                     w_new = w_new.mT
                 if can_initialize:
                     m.weight = w_new
-                    torch.testing.assert_close(w_new, m.weight, atol=1e-5, rtol=0.)
+                    torch.testing.assert_close(w_new, m.weight, atol=1e-5, rtol=0.0)
                 else:
-                    msg = "assign to the matrix exponential or the Cayley parametrization"
+                    msg = (
+                        "assign to the matrix exponential or the Cayley parametrization"
+                    )
                     with self.assertRaisesRegex(NotImplementedError, msg):
                         m.weight = w_new
 
@@ -1496,7 +1577,9 @@ class TestNNParametrization(NNTestCase):
                     m.weight = w_new
                     assert_weight_allclose_Q(m.weight, w_new)
                 else:
-                    msg = "assign to the matrix exponential or the Cayley parametrization"
+                    msg = (
+                        "assign to the matrix exponential or the Cayley parametrization"
+                    )
                     with self.assertRaisesRegex(NotImplementedError, msg):
                         m.weight = w_new
 
@@ -1550,7 +1633,7 @@ class TestNNParametrization(NNTestCase):
     def test_weight_norm_pickle(self):
         m = nn.Linear(4, 5)
         m = torch.nn.utils.parametrizations.weight_norm(m)
-        with self.assertRaisesRegex(RuntimeError, 'state_dict'):
+        with self.assertRaisesRegex(RuntimeError, "state_dict"):
             pickle.dumps(m)
 
     def test_weight_norm_deepcopy(self):
@@ -1570,7 +1653,9 @@ class TestNNParametrizationDevice(NNTestCase):
 
             # add weight normalization
             m = torch.nn.utils.parametrizations.weight_norm(m)
-            self.assertEqual(m.parametrizations.weight.original1.size(), m.weight.size())
+            self.assertEqual(
+                m.parametrizations.weight.original1.size(), m.weight.size()
+            )
             self.assertEqual(m.parametrizations.weight.original0.size(), (5, 1))
             self.assertEqual(m(input), expected_output)
 
@@ -1581,7 +1666,9 @@ class TestNNParametrizationDevice(NNTestCase):
 
             # test with dim=1
             m = torch.nn.utils.parametrizations.weight_norm(m, dim=1)
-            self.assertEqual(m.parametrizations.weight.original1.size(), m.weight.size())
+            self.assertEqual(
+                m.parametrizations.weight.original1.size(), m.weight.size()
+            )
             self.assertEqual(m.parametrizations.weight.original0.size(), (1, 4))
             self.assertEqual(m(input), expected_output)
 
@@ -1592,10 +1679,9 @@ class TestNNParametrizationDevice(NNTestCase):
             self.assertEqual(m(input), expected_output)
 
 
-
 only_for = ("cpu", "cuda")
 instantiate_device_type_tests(TestNNParametrizationDevice, globals(), only_for=only_for)
 instantiate_parametrized_tests(TestNNParametrization)
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
