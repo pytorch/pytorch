@@ -1776,12 +1776,16 @@ class TestCompositeCompliance(TestCase):
                     if isinstance(r, torch.Tensor) and r.requires_grad
                 ]
 
-                all_results_strided = all(is_strided_tensor(result) for result in results)
+                all_results_strided = all(
+                    is_strided_tensor(result) for result in results
+                )
 
                 # Only test backward if the results are strided tensors
                 if all_results_strided:
                     output_grads_raw = [
-                        torch.ones(r.shape, device=r.device, dtype=r.dtype) for r in results]
+                        torch.ones(r.shape, device=r.device, dtype=r.dtype)
+                        for r in results
+                    ]
                     output_grads_copy = []
                     output_grads = []
 
@@ -1795,7 +1799,8 @@ class TestCompositeCompliance(TestCase):
                         leaf_tensors,
                         output_grads,
                         allow_unused=True,
-                        retain_graph=True)
+                        retain_graph=True,
+                    )
 
                     # Check that COW inputs remain COW after the backward op is executed
                     for idx, arg in enumerate(args):
@@ -1803,20 +1808,21 @@ class TestCompositeCompliance(TestCase):
                             arg,
                             args_copy[idx],
                             idx,
-                            backward_or_forward='backward',
+                            backward_or_forward="backward",
                             supports_cow_input_no_materialize=op.supports_cow_input_no_materialize_backward,
-                            allow_list=op.allow_cow_input_materialize_backward)
+                            allow_list=op.allow_cow_input_materialize_backward,
+                        )
 
                     # Check that COW inputs remain COW after the backward op is executed
                     for idx, output_grad in enumerate(output_grads):
                         check_cow_input(
                             output_grad,
                             output_grads_copy[idx],
-                            f'output grad {idx}',
-                            backward_or_forward='backward',
+                            f"output grad {idx}",
+                            backward_or_forward="backward",
                             supports_cow_input_no_materialize=op.supports_cow_input_no_materialize_backward,
-                            allow_list=op.allow_cow_input_materialize_backward)
-
+                            allow_list=op.allow_cow_input_materialize_backward,
+                        )
 
     @ops(op_db, allowed_dtypes=(torch.float,))
     def test_view_replay(self, device, dtype, op):
