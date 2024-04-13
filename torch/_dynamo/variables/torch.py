@@ -552,6 +552,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         if DistributedVariable.is_available():
             from torch.distributed._tensor import DTensor
             from torch.distributed.distributed_c10d import (
+                _get_group_rank_by_name,
                 _get_group_size_by_name,
                 _get_group_tag,
                 _rank_not_in_group,
@@ -560,6 +561,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
 
             @register(
+                _get_group_rank_by_name,
                 _get_group_size_by_name,
                 _get_group_tag,
                 _rank_not_in_group,
