@@ -251,3 +251,11 @@ def do_auto_functionalize(
         ctx.sync(orig_arg)
 
     return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
+
+
+@auto_functionalized.py_functionalize_impl
+def auto_functionalized_func(ctx, _mutable_op, **kwargs):
+    unwrapped_kwargs = ctx.unwrap_tensors(kwargs)
+    with ctx.redispatch_to_next():
+        result = auto_functionalized(_mutable_op, **unwrapped_kwargs)
+    return ctx.wrap_tensors(result)

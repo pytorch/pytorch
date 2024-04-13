@@ -3,6 +3,7 @@
 
 #include <c10/util/Logging.h>
 #include <fmt/format.h>
+#include <string_view>
 
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
@@ -13,7 +14,7 @@
 
 namespace c10d {
 
-static ProcessGroup::BackendType strToBackendType(std::string backend) {
+static ProcessGroup::BackendType strToBackendType(std::string_view backend) {
   if (backend == "undefined") {
     return ProcessGroup::BackendType::UNDEFINED;
   } else if (backend == "gloo") {
@@ -111,7 +112,7 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   }
 
   // Get the backend type associated with the device
-  ProcessGroup::BackendType backendType;
+  ProcessGroup::BackendType backendType{ProcessGroup::BackendType::UNDEFINED};
   try {
     backendType = deviceTypeToBackendType_.at(deviceType);
   } catch (const std::out_of_range& e) {
@@ -142,8 +143,8 @@ ProcessGroup::ProcessGroup(
     : store_(store),
       rank_(rank),
       size_(size),
-      options_(options),
-      backendType_(strToBackendType(options->backend)),
+      options_(std::move(options)),
+      backendType_(strToBackendType(options_->backend)),
       dist_debug_level_(debug_level()) {
   C10_LOG_API_USAGE_ONCE("c10d.process_group");
 }
@@ -159,13 +160,25 @@ void ProcessGroup::init() {
 }
 
 const std::string& ProcessGroup::getGroupName() const {
-  TORCH_CHECK(deviceTypeToBackend_.size(), "ProcessGroup name not set");
+  TORCH_CHECK(!deviceTypeToBackend_.empty(), "ProcessGroup name not set");
   return deviceTypeToBackend_.begin()->second->getGroupName();
 }
 
 void ProcessGroup::setGroupName(const std::string& name) {
   for (auto& kv : deviceTypeToBackend_) {
     kv.second->setGroupName(name);
+  }
+}
+
+const std::string& ProcessGroup::getGroupDesc() const {
+  return pg_desc_;
+}
+
+void ProcessGroup::setGroupDesc(const std::string& name) {
+  pg_desc_ = name;
+  // Also set the group desc for all backends
+  for (auto& kv : deviceTypeToBackend_) {
+    kv.second->setGroupDesc(name);
   }
 }
 

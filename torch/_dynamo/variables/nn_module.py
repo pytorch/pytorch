@@ -70,14 +70,19 @@ def initialize_lazy_module(tx, mod, args, kwargs):
 def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
     fully_qualified_name = source.name()
     try:
-        tx.nn_module_stack[module_key] = (fully_qualified_name, type(mod))
+        tx.nn_module_stack[module_key] = (fully_qualified_name, mod.__class__)
         yield
     finally:
         del tx.nn_module_stack[module_key]
 
 
 class NNModuleVariable(VariableTracker):
-    _nonvar_fields = {"module_type", "module_key", *VariableTracker._nonvar_fields}
+    _nonvar_fields = {
+        "module_type",
+        "module_key",
+        "module",
+        *VariableTracker._nonvar_fields,
+    }
 
     def __init__(
         self, module_type: type, module_key: str, module: torch.nn.Module, **kwargs
@@ -237,7 +242,9 @@ class NNModuleVariable(VariableTracker):
                 # Support possibly common cases of class members
                 return VariableBuilder(tx, NNModuleSource(source))(subobj)
             else:
-                unimplemented(f"class property {typestr(base)} {typestr(subobj)}")
+                unimplemented(
+                    f"class property {name} - {typestr(base)} {typestr(subobj)}"
+                )
 
         return variables.GetAttrVariable(self, name, source=source)
 
@@ -301,6 +308,14 @@ class NNModuleVariable(VariableTracker):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
                 ):
+                    # End of fn, this bubbles up and restarts tracing.
+                    self.convert_to_unspecialized(tx)
+
+                # NB: torch.nn.utils.parametrize changes the class type of the
+                # parametrized module such that its __module__ points to the
+                # "torch.nn.utils.parametrize". These modules should be treated
+                # as unspecialized since parametrizations can do arbitrary computation.
+                if mod.__module__ == "torch.nn.utils.parametrize":
                     # End of fn, this bubbles up and restarts tracing.
                     self.convert_to_unspecialized(tx)
 
@@ -418,7 +433,7 @@ class NNModuleVariable(VariableTracker):
             if not all(
                 x.is_python_constant() for x in itertools.chain(args, kwargs.values())
             ):
-                raise unimplemented(f"non-const NNModule method {name}")
+                unimplemented(f"non-const NNModule method {name}")
 
         def get_kwargs(*names):
             assert_all_args_kwargs_const()
@@ -634,7 +649,11 @@ class NNModuleVariable(VariableTracker):
 
 
 class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
-    _nonvar_fields = {"value_type", *UserDefinedObjectVariable._nonvar_fields}
+    _nonvar_fields = {
+        "value_type",
+        "is_state_mutated",
+        *UserDefinedObjectVariable._nonvar_fields,
+    }
 
     """
     The above class will specialize on the id() of a module and place
@@ -660,14 +679,17 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 kwargs["value_type"] = type(value)
 
         super().__init__(value=value, **kwargs)
+        self.is_state_mutated = False
 
     @staticmethod
     @functools.lru_cache(None)
     def _nn_module_method_ids():
+        # Allow __setattr__ to fall through to base class handler
+        supported = {torch.nn.Module.__setattr__}
         return {
             id(x.__code__)
             for x in torch.nn.Module.__dict__.values()
-            if hasattr(x, "__code__")
+            if hasattr(x, "__code__") and x not in supported
         }
 
     def unpack_var_sequence(self, tx):
@@ -770,6 +792,44 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
             if id(method.__code__) in self._nn_module_method_ids():
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
+
+            # "_parameters" in self.value.__dict__ checks that module is initialized
+            if name == "__setattr__" and "_parameters" in self.value.__dict__:
+                # Record if mutations happens on parameters/buffers/modules. The
+                # mutations on these are not tracked by base class
+                # UserDefinedObject vt. This will be used later to graph break
+                # on seeing a paramters() and family calls.
+                # TODO(anijain2305) - This might not be needed if we let Dynamo
+                # inline both getattr and setattr. In that case, it should see
+                # the lowest level dicts - _parameters and family and
+                # automatically track mutations on those. Investigate if that
+                # can be done.
+                attr_name = args[0].as_python_constant()
+                value = args[1]
+
+                # This is reverse engineered by looking at nn module __setattr__
+                # logic.
+                if (
+                    isinstance(value, variables.TensorVariable)
+                    and value.python_type() is torch.nn.Parameter
+                ) or attr_name in self.value.__dict__["_parameters"]:
+                    # Handle parameters
+                    self.is_state_mutated = True
+                elif attr_name in self.value.__dict__["_buffers"]:
+                    # Handle buffers
+                    self.is_state_mutated = True
+                elif (
+                    isinstance(
+                        value,
+                        (
+                            variables.NNModuleVariable,
+                            variables.UnspecializedNNModuleVariable,
+                        ),
+                    )
+                    or attr_name in self.value.__dict__["_modules"]
+                ):
+                    # Handle submodules
+                    self.is_state_mutated = True
 
         return super().call_method(tx, name, args, kwargs)
 

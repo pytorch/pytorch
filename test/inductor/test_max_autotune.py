@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
+import json
 import os
+import unittest
 
 from typing import Callable, List, Optional
 
@@ -14,16 +16,15 @@ from torch._inductor.autotune_process import (
     TuningProcessPool,
 )
 from torch._inductor.graph import GraphLowering
-from torch._inductor.ir import Buffer, FixedLayout
+from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
 from torch._inductor.select_algorithm import (
     AlgorithmSelectorCache,
-    ChoiceCaller,
     TritonTemplateCaller,
 )
 from torch._inductor.test_case import run_tests, TestCase
 
-from torch._inductor.utils import run_and_get_code
+from torch._inductor.utils import fresh_inductor_cache, run_and_get_code
 from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
@@ -252,26 +253,28 @@ class TestMaxAutotune(TestCase):
             def get(self, filenames):
                 nonlocal cache
                 nonlocal num_get
-                ret = {file: cache[file] for file in filenames if file in cache}
+                ret = {
+                    file: json.loads(cache[file]) for file in filenames if file in cache
+                }
                 num_get += len(ret)
                 return ret
 
             def put(self, filename, data):
                 nonlocal cache
                 nonlocal num_put
-                cache[filename] = data
+                cache[filename] = json.dumps(data)
                 num_put += 1
 
         cache_module = (
-            "triton.runtime.fb_memcache.FbMemcacheRemoteCacheBackend"
+            "triton.runtime.fb_memcache.FbMemcacheRemoteAutotuneCacheBackend"
             if config.is_fbcode()
             else "triton.runtime.cache.RedisRemoteCacheBackend"
         )
 
         with config.patch(
             {
-                "use_autotune_local_cache": False,
-                "use_autotune_remote_cache": True,
+                "autotune_local_cache": False,
+                "autotune_remote_cache": True,
             }
         ), patch.dict(os.environ), patch(cache_module, MyCache, create=True):
             os.environ.pop("TRITON_CACHE_MANAGER", None)
@@ -520,6 +523,51 @@ class TestMaxAutotune(TestCase):
         if N <= 8:
             print(f"ref\n{ref}\nact\n{act}")
         torch.testing.assert_close(ref, act, atol=1e-1, rtol=1e-1)
+
+    @config.patch(
+        max_autotune_gemm=True,
+    )
+    @unittest.skipIf(
+        torch.cuda.device_count() < 2, "Need at least 2 devices for this test"
+    )
+    def test_autotune_device_guard(self):
+        x = torch.randn(1024, 1024, device="cuda:1")
+        y = torch.randn(1024, 1024, device="cuda:1")
+
+        def f(x, y):
+            return x @ y
+
+        with fresh_inductor_cache():
+            act = torch.compile(f)(x, y)
+        ref = f(x, y)
+        self.assertTrue(torch.allclose(act, ref, atol=4 * 1e-3, rtol=4 * 1e-3))
+
+    @config.patch(max_autotune=True)
+    def test_empty_conv_input(self, kernel_size=3):
+        x = torch.randn(0, 256, 14, 14, device="cuda")
+        weight = torch.randn(256, 256, kernel_size, kernel_size, device="cuda")
+
+        def f(x, weight):
+            return torch.convolution(
+                x,
+                weight,
+                bias=None,
+                stride=[1, 1],
+                padding=[0, 0],
+                dilation=[1, 1],
+                transposed=False,
+                output_padding=[0, 0],
+                groups=1,
+            )
+
+        opt_f = torch.compile(f)
+        ref = f(x, weight)
+        act = opt_f(x, weight)
+        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+
+    @config.patch(max_autotune=True)
+    def test_empty_conv_input_with_1x1_kernel(self):
+        self.test_empty_conv_input(kernel_size=1)
 
 
 class TestBenchmarkRequest(BenchmarkRequest):

@@ -1078,9 +1078,11 @@ std::vector<Tensor> cat_tensors_backward(
     }
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
-    if (shape == std::vector<c10::SymInt>({c10::SymInt(0)})) {
-      grad_inputs[i] = at::zeros({0}, grad_val.options());
-      continue;
+    if (shape.size() == 1) {
+      if (TORCH_GUARD_SIZE_OBLIVIOUS(shape[0].sym_eq(0))) {
+        grad_inputs[i] = at::zeros({0}, grad_val.options());
+        continue;
+      }
     }
     const auto& size = shape[dim];
     accumulate += size;
@@ -3235,12 +3237,11 @@ Tensor as_strided_scatter_backward(
   // take the perf hit and contiguify grad for now.
   auto grad_ = grad.contiguous();
   auto grad_slice = grad_.as_strided_symint(sizes, strides, storage_offset);
-  auto result =
-      grad_.new_zeros_symint(input_geometry.sym_sizes())
-          .as_strided_symint(
-              input_geometry.sym_sizes(), input_geometry.sym_strides());
-  auto result_slice =
-      result.as_strided_symint(sizes, strides, std::move(storage_offset));
+  auto result_buffer = grad_.new_zeros_symint(input_geometry.sym_sizes());
+  auto result = result_buffer.as_strided_symint(
+      input_geometry.sym_sizes(), input_geometry.sym_strides());
+  auto result_slice = result_buffer.as_strided_symint(
+      sizes, strides, std::move(storage_offset));
   result_slice.copy_(grad_slice);
   return result;
 }
@@ -6943,8 +6944,7 @@ Tensor take_backward(
   // For Composite Compliance,
   // if `grad` and `indices` are CCT but `grad_self` is not
   // then we use the out-of-place variant of `put`.
-  if (!isTensorSubclassLike(grad_self) &&
-      areAnyTensorSubclassLike({grad, indices})) {
+  if (areAnyTensorSubclassLike({grad, indices})) {
     return grad_self.put(indices, grad, true);
   }
   return grad_self.put_(indices, grad, true);

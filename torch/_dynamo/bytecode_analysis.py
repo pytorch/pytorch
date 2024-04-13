@@ -17,6 +17,8 @@ if sys.version_info >= (3, 11):
     TERMINAL_OPCODES.add(dis.opmap["JUMP_FORWARD"])
 else:
     TERMINAL_OPCODES.add(dis.opmap["JUMP_ABSOLUTE"])
+if sys.version_info >= (3, 12):
+    TERMINAL_OPCODES.add(dis.opmap["RETURN_CONST"])
 JUMP_OPCODES = set(dis.hasjrel + dis.hasjabs)
 JUMP_OPNAMES = {dis.opname[opcode] for opcode in JUMP_OPCODES}
 HASLOCAL = set(dis.haslocal)
@@ -242,8 +244,8 @@ def stacksize_analysis(instructions) -> Union[int, float]:
             stack_size = stack_sizes[inst]
             print(stack_size.low, stack_size.high, inst)
 
-    low = min([x.low for x in stack_sizes.values()])
-    high = max([x.high for x in stack_sizes.values()])
+    low = min(x.low for x in stack_sizes.values())
+    high = max(x.high for x in stack_sizes.values())
 
     assert fixed_point.value, "failed to reach fixed point"
     assert low >= 0

@@ -7,6 +7,7 @@ from torch.fx import (
     GraphModule,
     Node,
 )
+import torch.nn.functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_weights
 from typing import Any, Callable, Dict, Optional, Tuple, List, Union
 from torch.utils._pytree import LeafSpec
@@ -166,8 +167,8 @@ def _is_supported_batch_norm_for_training(node: Node):
     ]
     return node.target in supported_ops
 
-# TODO: rename this to _is_conv_node
-def _is_conv(n: Node):
+# TODO: move this to torch/ao/quantization/utils.py
+def _is_conv_node(n: Node):
     """
     Return whether the node refers to an aten conv op.
     """
@@ -176,15 +177,25 @@ def _is_conv(n: Node):
         torch.ops.aten.conv2d.default,
     ]
 
-# TODO: rename this to _is_conv_transpose_node
-def _is_conv_transpose(n: Node):
+def _is_conv_transpose_node(n: Node):
     """
     Return whether the node refers to an aten conv_transpose op.
     """
     return n.op == "call_function" and n.target in [
         torch.ops.aten.conv_transpose1d,
+        torch.ops.aten.conv_transpose1d.default,
         torch.ops.aten.conv_transpose2d,
+        torch.ops.aten.conv_transpose2d.input,
     ]
+
+def _is_conv_or_conv_transpose_node(n: Node):
+    """
+    Return whether the node refers to an aten conv or conv transpose op.
+    """
+    return _is_conv_node(n) or _is_conv_transpose_node(n)
+
+def _is_conv_transpose_fn(conv_fn: Callable):
+    return conv_fn in [F.conv_transpose1d, F.conv_transpose2d]
 
 def _is_bn_node(n: Node):
     return _is_supported_batch_norm_for_training(n) or n.target == torch.ops.aten._native_batch_norm_legit_no_training.default
@@ -199,7 +210,7 @@ def fold_bn_weights_into_conv_node(
     # conv args: input, weight, bias, stride, padding, dilation, ...
     conv_w = _get_tensor_constant_from_node(conv_weight_node, m)
     conv_b = _get_tensor_constant_from_node(conv_bias_node, m)
-    transpose = _is_conv_transpose(conv_node)
+    transpose = _is_conv_transpose_node(conv_node)
 
     # eval bn args: input, weight, bias, running mean, running var, momentum, eps
     # train bn args: input, weight, bias, running mean, running var, training, momentum, eps
@@ -270,7 +281,7 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
             continue
         bn_node = n
         n = bn_node.args[0]
-        if not _is_conv(n):
+        if not _is_conv_or_conv_transpose_node(n):
             continue
         conv_node = n
         conv_weight_node = conv_node.args[1]
