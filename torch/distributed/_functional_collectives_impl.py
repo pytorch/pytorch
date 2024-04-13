@@ -42,17 +42,8 @@ else:
     def native_funcol_enabled():
         global _use_native_funcol
         if _use_native_funcol is None:
-            try:
-                # Disable native funcol when torch_xla is installed. This check
-                # will be removed once torch_xla adopts the native_funcol IR.
-                import torch_xla  # noqa: F401
-
-                _use_native_funcol = False
-            except Exception:
-                # When TORCH_DISABLE_NATIVE_FUNCOL is set, fallback to py funcol
-                _use_native_funcol = (
-                    os.environ.get("TORCH_DISABLE_NATIVE_FUNCOL") != "1"
-                )
+            # When TORCH_DISABLE_NATIVE_FUNCOL is set, fallback to py funcol
+            _use_native_funcol = os.environ.get("TORCH_DISABLE_NATIVE_FUNCOL") != "1"
         if not _use_native_funcol:
             warning_once(
                 logger,
