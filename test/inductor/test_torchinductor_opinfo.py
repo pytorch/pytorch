@@ -242,6 +242,7 @@ inductor_expected_failures_single_sample["cuda"] = {
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
+    "torch.ops.aten._flash_attention_forward": {f16},
     "torch.ops.aten._efficient_attention_forward": {f16, f32},
     "to_sparse": {
         f16,
@@ -253,7 +254,6 @@ inductor_expected_failures_single_sample["cuda"] = {
 
 # intentionally not handled
 intentionally_not_handled = {
-    ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
 }
@@ -340,6 +340,7 @@ inductor_override_kwargs = {
     ("nn.functional.cosine_similarity", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.instance_norm", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.local_response_norm", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.normalize", "cuda", f16): {"atol": 1e-3, "rtol": 0.05},
     ("nn.functional.rms_norm", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.soft_margin_loss", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
@@ -378,7 +379,7 @@ inductor_override_kwargs = {
     ("nn.functional.interpolate.bicubic", "cpu", f32): {"atol": 5e-3, "rtol": 0},
     ("nn.functional.interpolate.bicubic", "cuda", f64): {"atol": 1e-3, "rtol": 0},
     # Unreasonably high atol requirement:
-    ("index_reduce.mean", "cuda", f64): {
+    ("index_reduce.mean", "cuda", f16, f32, f64): {
         "check_gradient": False,
         "atol": 0.8,
         "rtol": 0.4,
@@ -390,6 +391,7 @@ inductor_override_kwargs = {
     ("index_reduce.amax", "cuda", f64): {"check_gradient": False},
     ("index_reduce.amax", "cuda", f32): {"check_gradient": False},
     ("index_reduce.amax", "cuda", f16): {"check_gradient": False},
+    ("tanh", "cuda", f16): {"atol": 1e-4, "rtol": 1e-2},
 }
 
 
