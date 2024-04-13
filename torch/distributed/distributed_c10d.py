@@ -1136,7 +1136,7 @@ def get_node_local_rank() -> int:
 
     """
     if "LOCAL_RANK" in os.environ:
-        return int(os.getenv("LOCAL_RANK"))
+        return int(os.environ["LOCAL_RANK"])
     raise RuntimeError(
         "LOCAL_RANK is not in the environment, so `get_node_local_rank` can't be used. "
         "Consider using torchrun or updating your process launcher to specify LOCAL_RANK."
