@@ -751,7 +751,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       getCvarInt(TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC, 60 * 1000 /*60 Sec*/);
   coordCheckIntervalMilSec_ = getCvarInt(TORCH_NCCL_COORD_CHECK_MILSEC, 1000);
   ncclTraceBufferSize_ = getCvarInt(TORCH_NCCL_TRACE_BUFFER_SIZE, 0);
-  NCCLTraceBuffer::get()->record_pg_ranks(pg_name_, groupRanks());
   enableCollecticeHashDebug_ = (dist_debug_level_ >= DebugLevel::Detail);
   // store_ usually is wrapped with PrefixStore and the prefix is different
   // across different ProcessGroupNCCL(PG) instances. We need to get the
@@ -1268,6 +1267,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
         lastTimePollStore = currentTime;
         if (globalStore_->check({std::string(EXCEPTION_DUMP)})) {
           int timeOutRank = -1;
+          shouldDump_.store(true);
           try {
             auto vec = globalStore_->get(std::string(EXCEPTION_DUMP));
             TORCH_CHECK_WITH(
@@ -1312,6 +1312,7 @@ void ProcessGroupNCCL::heartbeatMonitor() {
       if (heartbeat != heartBeatCounter) {
         heartBeatCounter = heartbeat;
       } else {
+        shouldDump_.store(true);
         // No heartbeat increase detected and timeout.
         errorMsg = c10::str(
             logPrefix(),
@@ -1388,7 +1389,8 @@ void ProcessGroupNCCL::heartbeatMonitor() {
   // Case two: desync might be slow or get stuck. Or we get stuck in
   // destructors, we will sleep for some time before calling std::abort() to
   // kill the whole process.
-  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load()) &&
+  if ((terminateProcessGroup_.load() || collectiveDebugInfoMode_.load() ||
+       shouldDump_.load()) &&
       !terminateHeartbeatMonitorThread_.load()) {
     // Leave another two mins for desync report generation or process group
     // destroy.
@@ -1491,7 +1493,11 @@ std::string ProcessGroupNCCL::getNCCLWatchdogDebugInfo() {
 }
 
 std::string ProcessGroupNCCL::createLogPrefix() const {
-  return c10::str("[PG ", uid_, " Rank ", rank_, "] ");
+  if (!pg_desc_.empty() && pg_desc_ != "undefined") {
+    return c10::str("[PG ", pg_name_, " (", pg_desc_, ") Rank ", rank_, "] ");
+  } else {
+    return c10::str("[PG ", pg_name_, " Rank ", rank_, "] ");
+  }
 }
 
 const std::string& ProcessGroupNCCL::logPrefix() const {
@@ -1548,11 +1554,17 @@ void ProcessGroupNCCL::watchdogHandler() {
             lastStatusUpdateTime, std::chrono::steady_clock::now()) >=
             kWorkStatusUpdatePeriodMs) {
       ::c10d::C10dLoggingData data;
+      // logging integers
       data.integers["pg_id"] = uid_;
       data.integers["rank"] = rank_;
       data.integers["global_rank"] = globalRank();
       data.integers["last_enqueued_work"] = lastEnqueuedSeq_;
+      data.integers["last_started_work"] = lastStartedSeq_;
       data.integers["last_completed_work"] = lastCompletedSeq_;
+      // logging strings
+      data.strings["last_enqueued_work_name"] = lastEnqueuedWorkName_;
+      data.strings["last_started_work_name"] = lastStartedWorkName_;
+      data.strings["last_completed_work_name"] = lastCompletedWorkName_;
       logger->log(data);
       lastStatusUpdateTime = std::chrono::steady_clock::now();
     }
@@ -1644,9 +1656,19 @@ void ProcessGroupNCCL::watchdogHandler() {
         }
       }
 
+      // a work could be started but not completed, so we should not update
+      // lastStartedSeq_ and lastStartedOpName_ if the work state is checked
+      // multiple times after the start
+      if (lastStartedSeq_ < static_cast<int64_t>(work.seq_) &&
+          work.isStarted()) {
+        lastStartedSeq_ = work.seq_;
+        lastStartedWorkName_ = opTypeToString(work.opType_);
+      }
+
       // Clean up completed work
       if (work.isCompleted()) {
         lastCompletedSeq_ = work.seq_;
+        lastCompletedWorkName_ = opTypeToString(work.opType_);
         NCCLTraceBuffer::get()->retire_id(work.trace_id_, true);
         if (onCompletionHook_) {
           // Move Work object to completedWorkList_ to be consumed by the hook
@@ -2026,6 +2048,10 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   }
 #endif
 
+  logPrefix_ = createLogPrefix(); // reset log prefix to include group_desc
+  NCCLTraceBuffer::get()->record_pg_ranks(
+      std::make_tuple(pg_name_, pg_desc_), groupRanks());
+
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
             << ncclComm->ncclComm_ << " on CUDA device: " << deviceIndex;
 
@@ -2209,7 +2235,7 @@ c10::intrusive_ptr<ProcessGroupNCCL::WorkNCCL> ProcessGroupNCCL::initWork(
     //   between threads
     r->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
-        pg_name_,
+        std::make_tuple(pg_name_, pg_desc_),
         seq_,
         op_id_,
         profilingTitle ? profilingTitle : "",
@@ -2256,6 +2282,7 @@ void ProcessGroupNCCL::workEnqueue(
     // get deadlock. Here we enqueue work without outputs_.
     workMetaList_.emplace_back(*work);
     lastEnqueuedSeq_ = work->seq_;
+    lastEnqueuedWorkName_ = opTypeToString(work->opType_);
     lastWorkListUpdateTime_ = std::chrono::steady_clock::now();
   }
 }
@@ -2801,7 +2828,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // input/output sizes and profilingTitle per-op in the group.
     auto trace_id = NCCLTraceBuffer::get()->record(
         uid_,
-        pg_name_,
+        std::make_tuple(pg_name_, pg_desc_),
         seq_,
         op_id_,
         profilingTitle,
@@ -2832,7 +2859,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::pointToPoint(
     // information it wants.
     work->trace_id_ = NCCLTraceBuffer::get()->record(
         uid_,
-        pg_name_,
+        std::make_tuple(pg_name_, pg_desc_),
         seq_,
         op_id_,
         profilingTitle,
