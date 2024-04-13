@@ -825,8 +825,8 @@ Tensor mkldnn_convolution_backward_input(
     bool is_channels_last) {
   auto grad_input = at::empty({0}, grad_output.options());
 
-  auto grad_y = itensor_from_tensor(grad_output);
-  auto w = itensor_view_from_dense(weight);
+  auto grad_y = itensor_from_tensor(grad_output, /*from_const_data_ptr*/true);
+  auto w = itensor_view_from_dense(weight, /*from_const_data_ptr*/true);
 
   ideep::tensor grad_x;
   if (is_channels_last) {
@@ -865,8 +865,8 @@ std::tuple<Tensor, Tensor> mkldnn_convolution_backward_weights(
     int64_t groups,
     bool bias_defined,
     bool is_channels_last) {
-  const ideep::tensor grad_y = itensor_from_tensor(grad_output);
-  const ideep::tensor x = itensor_from_tensor(input);
+  const ideep::tensor grad_y = itensor_from_tensor(grad_output, /*from_const_data_ptr*/true);
+  const ideep::tensor x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
 
   ideep::tensor grad_w, grad_b;
   if (bias_defined) {
@@ -975,8 +975,8 @@ Tensor mkldnn_convolution_transpose_backward_input(
     bool is_channels_last) {
   auto grad_input = at::empty({0}, grad_output.options());
 
-  auto grad_y = itensor_from_tensor(grad_output);
-  auto w = itensor_view_from_dense(weight).transpose_(0, 1);
+  auto grad_y = itensor_from_tensor(grad_output, /*from_const_data_ptr*/true);
+  auto w = itensor_view_from_dense(weight, /*from_const_data_ptr*/true).transpose_(0, 1);
 
   ideep::tensor grad_x;
   if (is_channels_last) {
@@ -1016,8 +1016,8 @@ std::tuple<Tensor,Tensor> mkldnn_convolution_transpose_backward_weights(
     int64_t groups,
     bool bias_defined,
     bool is_channels_last) {
-  auto grad_y = itensor_from_tensor(grad_output);
-  auto x = itensor_from_tensor(input);
+  auto grad_y = itensor_from_tensor(grad_output, /*from_const_data_ptr*/true);
+  auto x = itensor_from_tensor(input, /*from_const_data_ptr*/true);
 
   ideep::tensor grad_w, grad_b;
   if (bias_defined) {
