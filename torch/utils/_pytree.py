@@ -655,15 +655,12 @@ def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -
     ) not in SUPPORTED_NODES
 
 
-SLOTS = {"slots": True} if sys.version_info >= (3, 10) else {}
-
-
 # A TreeSpec represents the structure of a pytree. It holds:
 # "type": the type of root Node of the pytree
 # context: some context that is useful in unflattening the pytree
 # children_specs: specs for each child of the root Node
 # num_leaves: the number of leaves
-@dataclasses.dataclass(init=True, frozen=True, eq=True, repr=False, **SLOTS)
+@dataclasses.dataclass
 class TreeSpec:
     type: Any
     context: Context
@@ -674,12 +671,9 @@ class TreeSpec:
     num_children: int = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
-        num_nodes = 1 + sum(spec.num_nodes for spec in self.children_specs)
-        num_leaves = sum(spec.num_leaves for spec in self.children_specs)
-        num_children = len(self.children_specs)
-        object.__setattr__(self, "num_nodes", num_nodes)
-        object.__setattr__(self, "num_leaves", num_leaves)
-        object.__setattr__(self, "num_children", num_children)
+        self.num_nodes = 1 + sum(spec.num_nodes for spec in self.children_specs)
+        self.num_leaves = sum(spec.num_leaves for spec in self.children_specs)
+        self.num_children = len(self.children_specs)
 
     def __repr__(self, indent: int = 0) -> str:
         repr_prefix: str = f"TreeSpec({self.type.__name__}, {self.context}, ["
@@ -807,17 +801,14 @@ class TreeSpec:
         return unflatten_fn(child_pytrees, self.context)
 
 
-del SLOTS
-
-
 class LeafSpec(TreeSpec):
     def __init__(self) -> None:
         super().__init__(None, None, [])
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "num_nodes", 1)
-        object.__setattr__(self, "num_leaves", 1)
-        object.__setattr__(self, "num_children", 0)
+        self.num_nodes = 1
+        self.num_leaves = 1
+        self.num_children = 0
 
     def __repr__(self, indent: int = 0) -> str:
         return "*"
