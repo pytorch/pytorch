@@ -14,7 +14,8 @@
 #define CUTLASS_STATUS_CHECK(status)                                      \
   {                                                                       \
     TORCH_CHECK(status == cutlass::Status::kSuccess,                      \
-                "Got CUTLASS error: ", cutlassGetStatusString(status));   \
+                __func__, " : Got CUTLASS error: ",                       \
+                cutlassGetStatusString(status));                          \
   }
 #endif
 
@@ -47,7 +48,7 @@ void mdtgemm_cutlass(
 
   // Check for current CUTLASS limitations w.r.t. problem sizes.
   TORCH_CHECK(length_m % 16 == 0 && length_k % 16 == 0 && length_n % 16 == 0,
-              "mdtgemm_cutlass: Number of rows/columns of the operands must be "
+              __func__, " : Number of rows/columns of the operands must be "
               "divisible by ", 16);
 
   using ElementC = ElementInputA;
@@ -356,7 +357,7 @@ _mixed_dtypes_mad_op(const Tensor& mat1, const Tensor& mat2,
                      const Tensor& mat2_scale, const Tensor& input,
                      const Scalar& alpha, const Scalar& beta) {
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
-  AT_ERROR("_mixed_dtypes_mad_op: ROCm doesn't support CUTLASS");
+  AT_ERROR(__func__ " : ROCm doesn't support CUTLASS");
   return Tensor{};
 #else
 
@@ -364,27 +365,27 @@ _mixed_dtypes_mad_op(const Tensor& mat1, const Tensor& mat2,
   const auto dprops = at::cuda::getCurrentDeviceProperties();
   const auto is_sm8x = dprops->major == 8;
   TORCH_CHECK(is_sm8x,
-              "_mixed_dtypes_mad_op: Supported only on GPUs with compute "
-              "capability 8.x");
+              __func__, " : Supported only on GPUs with compute capability "
+              "8.x");
 
   // Validate datatypes of input tensors.
   TORCH_CHECK(mat1.dtype() == at::kHalf ||
               mat1.dtype() == at::kBFloat16,
-              "_mixed_dtypes_mad_op: The mat1 datatype ", mat1.dtype(),
-              " is not supported");
+              __func__, " : The mat1 datatype ", mat1.dtype(),
+              " not supported");
   TORCH_CHECK(mat2.dtype() == at::kChar ||
               mat2.dtype() == at::kByte,
-              "_mixed_dtypes_mad_op: The mat2 datatype ", mat2.dtype(),
-              " is not supported");
+              __func__, " : The mat2 datatype ", mat2.dtype(),
+              " not supported");
   if (input.numel() != 0) {
     TORCH_CHECK(input.dtype() == mat1.dtype(),
-                "_mixed_dtypes_mad_op: Expected input datatype ", mat1.dtype(),
-                " but got", input.dtype());
+                __func__, " : Expected input datatype ", mat1.dtype(), ", got",
+                input.dtype());
   }
   if (mat2_scale.numel() != 0) {
     TORCH_CHECK(mat2_scale.dtype() == mat1.dtype(),
-                "_mixed_dtypes_mad_op: Expected mat2_scale datatype ",
-                mat1.dtype(), " but got", mat2_scale.dtype());
+                __func__, " : Expected mat2_scale datatype ", mat1.dtype(),
+                ", got", mat2_scale.dtype());
   }
 
   // Squash the batch dimensions of the mat1 tensor with its
@@ -394,66 +395,64 @@ _mixed_dtypes_mad_op(const Tensor& mat1, const Tensor& mat2,
 
   // Validate layouts of input tensors.
   TORCH_CHECK(mat1_2d.layout() == Layout::Strided,
-              "_mixed_dtypes_mad_op: Expected mat1 argument to be strided, but "
-              "got layout ", mat1_2d.layout());
+              __func__, " : Expected mat1 argument to be strided, got layout ",
+              mat1_2d.layout());
   TORCH_CHECK(mat1_2d.dim() == 2,
-              "_mixed_dtypes_mad_op: Expected mat1 argument to be 2D tensor, "
-              "got ", mat1_2d.dim(), " dims");
+              __func__, " : Expected mat1 argument to be 2D tensor, got ",
+              mat1_2d.dim(), " dims");
   const auto mat1_strides = mat1_2d.strides();
   TORCH_CHECK(mat1_strides[0] >= 1 && mat1_strides[1] == 1,
-              "_mixed_dtypes_mad_op: Invalid strides for mat1 argument: row "
-              "stride = ", mat1_strides[0], ", column stride = ",
-              mat1_strides[1]);
+              __func__, " : Invalid strides for mat1 argument: row stride = ",
+              mat1_strides[0], ", column stride = ", mat1_strides[1]);
   TORCH_CHECK(mat2.layout() == Layout::Strided,
-              "_mixed_dtypes_mad_op: Expected mat1 argument to be strided, but "
-              "got layout ", mat2.layout());
+              __func__, " : Expected mat1 argument to be strided, got layout ",
+              mat2.layout());
   TORCH_CHECK(mat2.dim() == 2,
-              "_mixed_dtypes_mad_op: Expected mat2 argument to be 2D tensor, "
-              " got ", mat2.dim(), " dims");
+              __func__, " : Expected mat2 argument to be 2D tensor, got ",
+              mat2.dim(), " dims");
   const auto mat2_strides = mat2.strides();
   TORCH_CHECK(mat2_strides[0] == 1 && mat2_strides[1] >= 1,
-              "_mixed_dtypes_mad_op: Invalid strides for mat2 argument: row "
-              "stride = ", mat2_strides[0], ", column stride = ",
-              mat2_strides[1]);
+              __func__, " : Invalid strides for mat2 argument: row stride = ",
+              mat2_strides[0], ", column stride = ", mat2_strides[1]);
   if (mat2_scale.numel() != 0) {
     TORCH_CHECK(mat2_scale.layout() == Layout::Strided,
-              "_mixed_dtypes_mad_op: Expected mat2_scale argument to be "
-              "strided, but got layout ", mat2_scale.layout());
+                __func__, " : Expected mat2_scale argument to be strided, got "
+                "layout ", mat2_scale.layout());
     TORCH_CHECK(mat2_scale.dim() == 1,
-                "_mixed_dtypes_mad_op: Expected mat2_scale argument to be 1D ",
-                "tensor, got ", mat2_scale.dim(), " dims");
+                __func__, " : Expected mat2_scale argument to be 1D tensor, "
+                "got ", mat2_scale.dim(), " dims");
     const auto mat2_scale_strides = mat2_scale.strides();
     TORCH_CHECK(mat2_scale_strides[0] == 1,
-              "_mixed_dtypes_mad_op: Invalid strides for mat2_scale argument: "
-              "element stride = ", mat2_scale_strides[0]);
+                __func__, " : Invalid strides for mat2_scale argument: element "
+                "stride = ", mat2_scale_strides[0]);
   }
   if (input.numel() != 0) {
     TORCH_CHECK(input.layout() == Layout::Strided,
-              "_mixed_dtypes_mad_op: Expected input argument to be strided, "
-              "but got layout ", input.layout());
+                __func__, " : Expected input argument to be strided, got "
+                "layout ", input.layout());
     TORCH_CHECK(input.dim() == 1,
-                "_mixed_dtypes_mad_op: Expected input argument to be 1D "
-                "tensor, got ", input.dim(), " dims");
+                __func__, " : Expected input argument to be 1D tensor, got ",
+                input.dim(), " dims");
     const auto input_strides = input.strides();
     TORCH_CHECK(input_strides[0] == 1,
-              "_mixed_dtypes_mad_op: Invalid strides for input argument: "
-              "element stride = ", input_strides[0]);
+                __func__, " : Invalid strides for input argument: element "
+                "stride = ", input_strides[0]);
   }
 
   // Validate sizes of input tensors.
   TORCH_CHECK(mat1_2d.size(1) == mat2.size(0),
-              "_mixed_dtypes_mad_op: Expected mat1 argument to have ",
-              mat2.size(0), " columns, but got ", mat1_2d.size(1));
+              __func__, " : Expected mat1 argument to have ", mat2.size(0),
+              " columns, but got ", mat1_2d.size(1));
   if (mat2_scale.numel() != 0) {
     TORCH_CHECK(mat2_scale.numel() == mat2.size(1),
-                "_mixed_dtypes_mad_op: Expected mat2_scale argument to have ",
+                __func__, " : Expected mat2_scale argument to have ",
                 mat2.size(1), " elements, got ", mat2_scale.numel(),
                 " elements");
   }
   if (input.numel() != 0) {
     TORCH_CHECK(input.numel() == mat2.size(1),
-                "_mixed_dtypes_mad_op: Expected input argument to have ",
-                mat2.size(1), " elements, got ", input.numel(), " elements");
+                __func__, " : Expected input argument to have ", mat2.size(1),
+                " elements, got ", input.numel(), " elements");
   }
 
   // Introduce alias names for arguments, according to the CUTLASS
