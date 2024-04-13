@@ -202,22 +202,28 @@ inline void tinygemm_kernel(
     int K) {
 
   for (const auto m : c10::irange(BLOCK_M)) {
-    for (const auto n : c10::irange(BLOCK_N)) {
-      float32x4_t c_val = vdupq_n_f32(0.0);
-      for (int k = 0; k < K; k += 8) {
-        float16x8_t a_val = vld1q_f16(reinterpret_cast<const float16_t *>(A) + m * lda + k);
-        int16x8_t b_val = vmovl_s8(vld1_s8(B + n * ldb + k));
-        auto a_val_low = vcvt_f32_f16(vget_low_f16(a_val));
-        auto a_val_high = vcvt_f32_f16(vget_high_f16(a_val));
+    float32x4_t c_val[BLOCK_N];
+    c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+        c_val[i] = vdupq_n_f32(0.0);
+    });
+    for (int k = 0; k < K; k += 8) {
+      float16x8_t a_val = vld1q_f16(reinterpret_cast<const float16_t *>(A) + m * lda + k);
+      auto a_val_low = vcvt_f32_f16(vget_low_f16(a_val));
+      auto a_val_high = vcvt_f32_f16(vget_high_f16(a_val));
+      c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+        int16x8_t b_val = vmovl_s8(vld1_s8(B + i * ldb + k));
         auto b_val_low = vcvtq_f32_s32(vmovl_s16(vget_low_s16(b_val)));
         auto b_val_high = vcvtq_f32_s32(vmovl_s16(vget_high_s16(b_val)));
-        c_val = vaddq_f32(c_val, vmulq_f32(a_val_low, b_val_low));
-        // c_val = vfmaq_f32(c_val, a_val_high, b_val_high); but it's slower
-        c_val = vaddq_f32(c_val, vmulq_f32(a_val_high, b_val_high));
-      }
-      float scale_val = static_cast<float>(scales[n]);
-      C[m * ldc + n] = reduce(c_val) * scale_val;
+        // c_val[i] = vfmaq_f32(c_val[i], a_val_high, b_val_high); but it's slower
+        c_val[i] = vaddq_f32(c_val[i], vmulq_f32(a_val_low, b_val_low));
+        c_val[i] = vaddq_f32(c_val[i], vmulq_f32(a_val_high, b_val_high));
+      });
     }
+
+    float32x4_t scale_val = vcvt_f32_f16(vld1_f16(reinterpret_cast<const float16_t *>(scales)));
+    c10::ForcedUnroll<BLOCK_N>{}([&](auto i) {
+      C[m * ldc + i] = reduce(c_val[i]) * vgetq_lane_f32(scale_val, i);
+    });
   }
 }
 #endif
