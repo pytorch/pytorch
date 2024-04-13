@@ -199,7 +199,7 @@ def decode_device(device: Union[Optional[torch.device], str]) -> torch.device:
         return torch.tensor(0.0).device  # default device
     if isinstance(device, str):
         device = torch.device(device)
-    if device.type != "cpu" and device.index is None:
+    if device.type not in ("cpu", "meta") and device.index is None:
         device_interface = get_interface_for_device(device.type)
         return torch.device(device.type, index=device_interface.Worker.current_device())
     return device
@@ -1546,6 +1546,7 @@ def load_aoti_eager_cache(
                     "FALSE"
                 ], "Only support static shape for now"
                 meta_info["is_dynamic"] = meta_info["is_dynamic"].upper() == "TRUE"
+                meta_info["device_index"] = ast.literal_eval(meta_info["device_index"])
                 # Convert string to list for sizes and strides to make C++ vector parser easier
                 meta_info["sizes"] = ast.literal_eval(meta_info["sizes"])
                 meta_info["strides"] = ast.literal_eval(meta_info["strides"])
@@ -1585,55 +1586,59 @@ def aot_compile_with_persistent_cache(
         os.environ,
         {"TORCHINDUCTOR_CACHE_DIR": persistent_cache_lib.absolute().as_posix()},
     ):
-        kernel_lib_path = torch._export.aot_compile(
-            f,
-            args,
-            kwargs,
-            dynamic_shapes=dynamic_shapes,
-            options=options,
-            remove_runtime_assertions=remove_runtime_assertions,
-            disable_constraint_solver=disable_constraint_solver,
-        )
-
-    kernel_meta_info_items = []
-    for input_tensor in flattened_inputs:
-        # TODO(Eiakn): To add dynamic support
-        meta_info_item = {}
-        meta_info_item["is_dynamic"] = f"{dynamic}"
-        meta_info_item["device_type"] = f"{input_tensor.device.type}"
-        meta_info_item["dtype"] = f"{input_tensor.dtype}"
-        meta_info_item["sizes"] = f"{list(input_tensor.size())}"
-        meta_info_item["strides"] = f"{list(input_tensor.stride())}"
-        kernel_meta_info_items.append(meta_info_item)
-
-    kernel_meta_info: Dict[str, Any] = {}
-    kernel_meta_info["meta_info"] = kernel_meta_info_items
-    kernel_meta_info["kernel_path"] = (
-        Path(kernel_lib_path).relative_to(persistent_cache).as_posix()
-    )
-
-    json_data = []
-    update_json = True
-    op_overload_name = op_overload_name if op_overload_name else "default"
-    op_conf = os.path.join(persistent_cache, f"{op_func_name}.{op_overload_name}.json")
-    mode = "r" if os.path.exists(op_conf) else "w"
-    with open(op_conf, mode) as f:
         try:
-            json_data = json.load(f)
-        except Exception as e:
+            kernel_lib_path = torch._export.aot_compile(
+                f,
+                args,
+                kwargs,
+                dynamic_shapes=dynamic_shapes,
+                options=options,
+                remove_runtime_assertions=remove_runtime_assertions,
+                disable_constraint_solver=disable_constraint_solver,
+            )
+
+            kernel_meta_info_items = []
+            for input_tensor in flattened_inputs:
+                # TODO(Eiakn): To add dynamic support
+                meta_info_item = {}
+                meta_info_item["is_dynamic"] = f"{dynamic}"
+                meta_info_item["device_type"] = f"{input_tensor.device.type}"
+                meta_info_item["device_index"] = f"{input_tensor.device.index}"
+                meta_info_item["dtype"] = f"{input_tensor.dtype}"
+                meta_info_item["sizes"] = f"{list(input_tensor.size())}"
+                meta_info_item["strides"] = f"{list(input_tensor.stride())}"
+                kernel_meta_info_items.append(meta_info_item)
+
+            kernel_meta_info: Dict[str, Any] = {}
+            kernel_meta_info["meta_info"] = kernel_meta_info_items
+            kernel_meta_info["kernel_path"] = (
+                Path(kernel_lib_path).relative_to(persistent_cache).as_posix()
+            )
+
             json_data = []
+            update_json = True
+            op_overload_name = op_overload_name if op_overload_name else "default"
+            op_conf = persistent_cache / f"{op_func_name}.{op_overload_name}.json"
+            mode = "r" if op_conf.exists() else "w"
+            with open(op_conf, mode) as op_conf_file:
+                try:
+                    json_data = json.load(op_conf_file)
+                except Exception as e:
+                    json_data = []
 
-        assert isinstance(json_data, list)
-        for item in json_data:
-            assert isinstance(item, dict)
-            # Same kernel meta info already exists in the json file
-            if item["meta_info"] == kernel_meta_info_items:
-                update_json = False
-                break
+                assert isinstance(json_data, list)
+                for item in json_data:
+                    assert isinstance(item, dict)
+                    # Same kernel meta info already exists in the json file
+                    if item["meta_info"] == kernel_meta_info_items:
+                        update_json = False
+                        break
 
-    if update_json:
-        json_data.append(kernel_meta_info)
-        with open(op_conf, "w") as f:
-            json.dump(json_data, f, indent=4)
+            if update_json:
+                json_data.append(kernel_meta_info)
+                with open(op_conf, "w") as op_conf_file:
+                    json.dump(json_data, op_conf_file, indent=4)
 
-    return kernel_lib_path
+            return kernel_lib_path
+        except Exception as e:
+            return ""

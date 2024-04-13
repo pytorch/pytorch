@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
+    TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
 from torch.utils._pytree import (
@@ -3851,23 +3852,6 @@ def forward(self, p_bar_linear_weight, p_bar_linear_bias, x):
 
     def test_predispatch_cond(self):
         class Model(torch.nn.Module):
-            def forward(self, x, y):
-                with torch.enable_grad():
-                    x = x - y
-                return x + y
-
-        model = Model()
-        with torch.no_grad():
-            exported_program = torch.export._trace._export(
-                model,
-                (torch.tensor(10), torch.tensor(12)),
-                {},
-                dynamic_shapes=None,
-                pre_dispatch=True,
-                strict=False,
-            )
-
-        class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.register_buffer("pred", torch.tensor(False))
@@ -3925,6 +3909,56 @@ def forward(self, b_t, x, y):
     add_1 = torch.ops.aten.add.Tensor(add, y);  add = y = None
     return add_1""",
         )
+
+    def test_predispatch_grad_wrappers(self):
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                with torch.enable_grad():
+                    x = x - y
+                with torch.no_grad():
+                    x = x + y
+                return x
+
+        # no grad
+        model = Model()
+        with torch.no_grad():
+            ep_nograd = torch.export._trace._export(
+                model,
+                (torch.tensor(10), torch.tensor(12)),
+                {},
+                dynamic_shapes=None,
+                pre_dispatch=True,
+                strict=False,
+            )
+        # check that only sub op is wrapped with grad_enabled
+        getattr_nodes = [
+            node for node in ep_nograd.graph.nodes if node.op == "get_attr"
+        ]
+        self.assertEqual(len(getattr_nodes), 1)
+        grad_subgraph = getattr(ep_nograd.graph_module, getattr_nodes[0].target)
+        op_node = [
+            node for node in grad_subgraph.graph.nodes if node.op == "call_function"
+        ][0]
+        self.assertEqual(op_node.target._name, "aten::sub.Tensor")
+
+        # enable grad
+        model = Model()
+        ep_grad = torch.export._trace._export(
+            model,
+            (torch.tensor(10), torch.tensor(12)),
+            {},
+            dynamic_shapes=None,
+            pre_dispatch=True,
+            strict=False,
+        )
+        # check that only add op is wrapped with grad_enabled
+        getattr_nodes = [node for node in ep_grad.graph.nodes if node.op == "get_attr"]
+        self.assertEqual(len(getattr_nodes), 1)
+        grad_subgraph = getattr(ep_grad.graph_module, getattr_nodes[0].target)
+        op_node = [
+            node for node in grad_subgraph.graph.nodes if node.op == "call_function"
+        ][0]
+        self.assertEqual(op_node.target._name, "aten::add.Tensor")
 
     def test_non_persistent_buffer(self):
         class MyModule(torch.nn.Module):
@@ -4557,6 +4591,31 @@ def forward(self, x):
                 logger.debug(x1)
                 x2 = x1 * x1
                 logger.info(1, 2, 3)
+                x3 = x2 + x2
+                return (x1, x3)
+
+        gm = export(M(), (torch.randn(3, 3),)).graph_module
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    add = torch.ops.aten.add.Tensor(x, x);  x = None
+    mul = torch.ops.aten.mul.Tensor(add, add)
+    add_1 = torch.ops.aten.add.Tensor(mul, mul);  mul = None
+    return (add, add_1)""",
+        )
+
+    @unittest.skipIf(not TEST_TRANSFORMERS, "No transformers")
+    def test_hf_logging_logger(self):
+        import transformers
+
+        logger = transformers.utils.logging.get_logger(__name__)
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                logger.warning_once("start")
+                x1 = x + x
+                x2 = x1 * x1
                 x3 = x2 + x2
                 return (x1, x3)
 
