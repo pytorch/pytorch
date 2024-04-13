@@ -536,11 +536,17 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
             self.outer_loop_fusion_depth,
         )
         # Set each kernels' parallel depth to OuterLoopFusedKernel
-        outer_loop_fused_cpp_kernel_proxy = cpp_kernel_proxy_list[0]
-        outer_loop_fused_cpp_kernel_proxy.loop_nest.get_outer_loop_fused_kernel().set_internal_kernels_par_depth(
+        fused_cpp_kernel_proxy = cpp_kernel_proxy_list[0]
+        fused_loop_nest = fused_cpp_kernel_proxy.loop_nest
+        fused_loop_nest.get_outer_loop_fused_kernel().set_internal_kernels_par_depth(
             kernels_par_depth
         )
-        return outer_loop_fused_cpp_kernel_proxy
+        # Clear the cache of max_parallel_depth since the loop nest has a OuterLoopFusedKernel now
+        if clear_cache := getattr(
+            fused_loop_nest.max_parallel_depth, "clear_cache", None
+        ):
+            clear_cache(fused_loop_nest)
+        return fused_cpp_kernel_proxy
 
 
 class CppPrinter(ExprPrinter):
