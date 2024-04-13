@@ -3859,6 +3859,25 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_clone_sparse_input(self):
+        for layout in [
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        ]:
+            for sparse_input in self.generate_simple_inputs(
+                layout,
+                device="cpu",
+                dtype=torch.float64,
+                index_dtype=torch.int64,
+            ):
+                # Invoke the dynamo clone input method directly.
+                sparse_copy = torch._dynamo.utils.clone_input(sparse_input)
+                # Make sure sparse clone is successful.
+                self.assertEqual(sparse_input, sparse_copy)
+
     @skipIfNotPy311
     def test_linetable_311_writer1(self):
         def fn():
@@ -9118,6 +9137,18 @@ def ___make_guard_fn():
 
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_packaging_version_parse(self):
+        from packaging import version
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            x = torch.zeros(1)
+            if version.parse(torch.__version__) >= version.parse("2.0.0"):
+                return x + 1
+            return x
+
+        self.assertEqual(fn().item(), 1)
 
     def test_itertools_accumulate_tensors_user_defined(self):
         def udo_fn_0(a, b):
