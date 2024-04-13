@@ -1,5 +1,6 @@
 import base64
 import copy
+import copyreg
 import dataclasses
 import heapq
 import inspect
@@ -8,9 +9,8 @@ import json
 import logging
 import math
 import operator
-import typing
-import copyreg
 import re
+import typing
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -20,6 +20,7 @@ from typing import (
     Callable,
     cast,
     Dict,
+    final,
     Iterator,
     List,
     Optional,
@@ -55,9 +56,9 @@ from .schema import (  # type: ignore[attr-defined]
     InputSpec,
     InputToBufferSpec,
     InputToCustomObjSpec,
+    InputTokenSpec,
     InputToParameterSpec,
     InputToTensorConstantSpec,
-    InputTokenSpec,
     Layout,
     LossOutputSpec,
     MemoryFormat,
@@ -379,7 +380,16 @@ class GraphState:
     custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
 
 
-class GraphModuleSerializer:
+class Final(type):
+    def __new__(metacls, name, bases, classdict):
+        for b in bases:
+            if isinstance(b, Final):
+                raise TypeError(f"type '{b.__name__}' is not an acceptable base type")
+        return type.__new__(metacls, name, bases, dict(classdict))
+
+
+@final
+class GraphModuleSerializer(metaclass=Final):
     def __init__(
         self,
         graph_signature: ep.ExportGraphSignature,
@@ -1230,7 +1240,8 @@ class GraphModuleSerializer:
         )
 
 
-class ExportedProgramSerializer:
+@final
+class ExportedProgramSerializer(metaclass=Final):
     def __init__(self, opset_version: Optional[Dict[str, int]] = None):
         self.opset_version: Dict[str, int] = {}
         if opset_version:
@@ -1285,7 +1296,8 @@ class ExportedProgramSerializer:
         )
 
 
-class GraphModuleDeserializer:
+@final
+class GraphModuleDeserializer(metaclass=Final):
     @dataclasses.dataclass
     class Result:
         graph_module: torch.fx.GraphModule
@@ -2055,7 +2067,8 @@ class GraphModuleDeserializer:
         ]
 
 
-class ExportedProgramDeserializer:
+@final
+class ExportedProgramDeserializer(metaclass=Final):
     def __init__(self, expected_opset_version: Optional[Dict[str, int]] = None):
         self.expected_opset_version: Dict[str, int] = {}
         if expected_opset_version:

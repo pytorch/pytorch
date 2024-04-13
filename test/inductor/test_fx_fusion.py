@@ -30,7 +30,7 @@ def chain_passes(*passes: PassFunc) -> PassFunc:
 
 def count_call(module: torch.fx.GraphModule, op: str, target_op: Any) -> int:
     return sum(
-        [1 if (n.op == op and n.target == target_op) else 0 for n in module.graph.nodes]
+        1 if (n.op == op and n.target == target_op) else 0 for n in module.graph.nodes
     )
 
 
