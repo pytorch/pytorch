@@ -155,6 +155,9 @@ class ConstantFolder(torch.fx.Interpreter):
         out = super().run_node(node)
 
         if node.op != "get_attr" and isinstance(out, torch.Tensor):
+            if out.device.type == "meta":
+                return out
+
             if not self.insertable_tensor_check(out):
                 return out
 
