@@ -1,4 +1,5 @@
 import collections
+import collections.abc
 import contextlib
 import copy
 import dataclasses
@@ -36,6 +37,7 @@ from .bytecode_transformation import (
     create_call_function,
     create_instruction,
     create_jump_absolute,
+    get_code_keys,
     Instruction,
     is_generator,
     unique_id,
@@ -323,7 +325,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         self.pop()
 
         if_next = self.create_call_resume_at(self.next_instruction)
-        push and self.push(value)
+        if push:
+            self.push(value)
         if_jump = self.create_call_resume_at(inst.target)
 
         self.output.add_output_instructions(
@@ -391,7 +394,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
 
         if value.is_python_constant():
             if truth_fn(value.as_python_constant()):
-                push and self.push(value)
+                if push:
+                    self.push(value)
                 self.jump(inst)
         elif (
             isinstance(value, (TensorVariable)) and self.should_compile_partial_graph()
@@ -401,7 +405,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # Equivalent of "self.nn_module is not None"
             mod = self.output.get_submodule(value.module_key)
             if truth_fn(mod):
-                push and self.push(value)
+                if push:
+                    self.push(value)
                 self.jump(inst)
         elif isinstance(value, UserDefinedObjectVariable):
             x = value.var_getattr(self, "__bool__")
@@ -416,7 +421,8 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     result.value, (bool, int)
                 ):
                     if truth_fn(result.value):
-                        push and self.push(value)
+                        if push:
+                            self.push(value)
                         self.jump(inst)
                 else:
                     unimplemented(
@@ -425,13 +431,15 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
             # __bool__ or __len__ is non-function or not existed in the user defined object
             else:
                 if truth_fn(True):
-                    push and self.push(value)
+                    if push:
+                        self.push(value)
                     self.jump(inst)
         elif not isinstance(value, TensorVariable) and value.has_unpack_var_sequence(
             self
         ):
             if truth_fn(len(value.unpack_var_sequence(self))):
-                push and self.push(value)
+                if push:
+                    self.push(value)
                 self.jump(inst)
         elif isinstance(value, SymNodeVariable):
             try:
@@ -441,18 +449,21 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
                     return jump_graph_break(self, inst, value, extra_msg=f"\n{e}")
                 raise
             if truth_fn(eval_result):
-                push and self.push(value)
+                if push:
+                    self.push(value)
                 self.jump(inst)
         elif isinstance(value, variables.BackwardHookVariable):
             if truth_fn(True):
-                push and self.push(value)
+                if push:
+                    self.push(value)
                 self.jump(inst)
         else:
             from .source import is_constant_source
 
             if value.source is not None and is_constant_source(value.source):
                 if truth_fn(value.get_real_value()):  # type: ignore[attr-defined]
-                    push and self.push(value)
+                    if push:
+                        self.push(value)
                     self.jump(inst)
             else:
                 # TODO link the torch.cond doc later
@@ -786,7 +797,11 @@ class InstructionTranslatorBase(
                     # in the same block, but the NOPs are not covered by an
                     # exception table entry. In this case, assume that we
                     # are still in the same block.
-                    if self.block_stack and inst.opname != "NOP":
+                    # In 3.12+, JUMP_BACKWARD might also not be covered by
+                    # an exception table entry, so we also assume that we
+                    # are still in the same block. It is probably safe to do
+                    # this in 3.11, even though we haven't encountered this case before.
+                    if self.block_stack and inst.opname not in ("NOP", "JUMP_BACKWARD"):
                         # If we really escape from a block and the current
                         # instruction is not in another block, then there
                         # should be no other nested blocks that we are in.
@@ -1107,7 +1122,11 @@ class InstructionTranslatorBase(
         val = self.f_builtins[inst.argval]
 
         if callable(val):
-            self.push(VariableBuilder(self, GlobalSource(inst.argval))(val))
+            builtins_source = GlobalSource(
+                self.output.name_of_builtins_dict_key_in_fglobals
+            )
+            var_source = GetItemSource(builtins_source, inst.argval)
+            self.push(VariableBuilder(self, var_source)(val))
         else:
             assert is_builtin_constant(val)
             self.push(ConstantVariable.create(value=val))
@@ -1161,7 +1180,7 @@ class InstructionTranslatorBase(
         # Python 3.8 only
         addr = self.indexof[self.next_instruction]
         self.push(ConstantVariable.create(addr))
-        self.instruction_pointer = self.indexof[inst.target]
+        self.jump(inst)
 
     def END_FINALLY(self, inst):
         # Python 3.8 only
@@ -1877,17 +1896,8 @@ class InstructionTranslatorBase(
         self.append_prefix_inst(inst)
 
     # 3.12 opcodes
-    def BINARY_SLICE(self, inst):
-        # BUILD_SLICE
-        items = self.popn(2)
-        self.push(SliceVariable(items))
-        self.BINARY_SUBSCR(inst)
-
-    def STORE_SLICE(self, inst):
-        # BUILD SLICE
-        items = self.popn(2)
-        self.push(SliceVariable(items))
-        self.STORE_SUBSCR(inst)
+    # BINARY/STORE_SLICE opcodes are broken down into
+    # BUILD_SLICE 2 and BINARY/STORE_SUBSCR
 
     def END_FOR(self, inst):
         self.popn(2)
@@ -1905,8 +1915,7 @@ class InstructionTranslatorBase(
         self.symbolic_locals[inst.argval] = NullVariable()
 
     def LOAD_SUPER_ATTR(self, inst):
-        super_vt, cls_vt, self_vt = self.popn(3)
-        self.call_function(super_vt, [cls_vt, self_vt], {})
+        self.CALL_FUNCTION(dataclasses.replace(inst, argval=2))
         if inst.arg & 1:
             self.LOAD_METHOD(inst)
         else:
@@ -2151,8 +2160,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                 if k in f_locals
             }
 
-            self._throw_if_unsupported_optimizer_step()
-
             self.debug_locals: List[Tuple[VariableTracker, List[VariableTracker]]] = []
             if export:
                 # export gets confused if we never realize unused inputs
@@ -2165,13 +2172,6 @@ class InstructionTranslator(InstructionTranslatorBase):
             for name in self.code_options["co_freevars"]:
                 if name in f_locals:
                     self._freevars_ids[name] = id(f_locals[name])
-
-    def _throw_if_unsupported_optimizer_step(self):
-        from .variables import OptimizerVariable
-
-        OptimizerVariable.throw_if_unsupported_step(
-            self.symbolic_locals, self.code_options["co_name"]
-        )
 
     def _throw_if_in_functorch(self):
         # Fallback to eager in case of a graph break inside vmap
@@ -2424,16 +2424,18 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         code: types.CodeType = func.get_code()
         if code.co_name in ("__setitem__", "__setattr__") and not (
-            args is not None
-            and len(args) > 0
-            and isinstance(args[0], variables.CustomizedDictVariable)
+            args
+            and isinstance(
+                args[0],
+                (variables.CustomizedDictVariable, variables.UserDefinedObjectVariable),
+            )
         ):
             unimplemented(f"inline {code.co_name}")
 
         suffix = ""
         # TODO: mlazos, add support for enabling multiple artifact logs
         # with a single alias
-        if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
+        if torch._logging._internal.log_state.is_artifact_enabled("bytecode"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
         if sys.version_info >= (3, 11):
             cur_inst = parent.current_instruction
@@ -2525,7 +2527,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             symbolic_locals=symbolic_locals,
             symbolic_globals=symbolic_globals,
             instructions=instructions,
-            code_options={k: getattr(code, k) for k in dir(code)},
+            code_options={k: getattr(code, k) for k in get_code_keys()},
             f_code=code,
             export=parent.export,
             inline_depth=parent.inline_depth + 1,
@@ -2635,7 +2637,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def YIELD_VALUE(self, inst: Instruction):
         self.generated_items.append(self.pop())
-        # TODO(jansel): figure out why this is needed, it isn't in the docs for YIELD_VALUE
         self.push(ConstantVariable.create(None))
 
     def GET_YIELD_FROM_ITER(self, inst):
@@ -2644,33 +2645,61 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.pop()
             res = BuiltinVariable(iter).call_function(self, [tos], {})
             self.push(res)
-        return self.YIELD_FROM(inst)
 
     def YIELD_FROM(self, inst):
-        while True:
-            tos = self.stack[-1].realize()
-            if isinstance(tos, ConstantVariable) and tos.value is None:
-                self.pop()
-                return
-            try:
-                val = tos.next_variable(self)
-                self.push(val)
-                # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
-                self.YIELD_VALUE(inst)
-                self.pop()
-                self.push(tos)
-            except (StopIteration, exc.UserStopIteration):
-                # TODO(jansel): do we need a self.pop() here?
-                return
+        assert len(self.stack) >= 2
+        val = self.pop()
+        tos = self.stack[-1]
+        if not (isinstance(val, ConstantVariable) and val.value is None):
+            # invoke send
+            # Unreachable code - if you hit this, you are implementing generator support and have
+            # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
+            # subgenerator and lines up with this line in Python 3.10
+            # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L2599
+            unimplemented("Unreachable sub-generator code")
+
+        try:
+            val = tos.next_variable(self)
+        except (StopIteration, exc.UserStopIteration) as ex:
+            # The iterator is exhausted. Stop the loop and return.
+            self.pop()
+            self.push(ConstantVariable.create(ex.value))
+        else:
+            self.push(val)
+            # Add the value to yield into generated_items and replace the top of the stack with None
+            self.YIELD_VALUE(inst)
+
+            # Repeat the YIELD_FROM instruction in the next eval loop
+            assert (
+                isinstance(self.instruction_pointer, int)
+                and self.instruction_pointer > 0
+            )
+            self.instruction_pointer -= 1
 
     def SEND(self, inst):
         assert len(self.stack) >= 2
         val = self.pop()
         tos = self.stack[-1]
-        if isinstance(tos, ListIteratorVariable):
+        if isinstance(tos, ListIteratorVariable) or (
+            isinstance(tos, UserDefinedObjectVariable)
+            and isinstance(tos.value, collections.abc.Iterator)
+        ):
             if isinstance(val, ConstantVariable) and val.value is None:
-                self.push(val)
-                self.instruction_pointer = self.indexof[inst.target]
+                try:
+                    val = tos.next_variable(self)
+                except (StopIteration, exc.UserStopIteration) as ex:
+                    # To implement SEND, we have to look at the implementation
+                    # when the iterator returns StopIteration. This translates to this code
+                    # 3.11: https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2619
+                    # 3.12: https://github.com/python/cpython/blob/3.12/Python/bytecodes.c#L863-L866
+                    # The implementation is different in 3.11 and 3.12. In 3.12, we rely
+                    # on END_SEND to clean up. In 3.11, SEND does the cleanup as well.
+                    if sys.version_info < (3, 12):
+                        self.pop()  # Python 3.12 uses new opcode END_SEND
+                    self.push(ConstantVariable.create(ex.value))
+                    self.jump(inst)
+                else:
+                    self.push(val)
             else:
                 # invoke send
                 # Unreachable code - if you hit this, you are implementing generator support and have
