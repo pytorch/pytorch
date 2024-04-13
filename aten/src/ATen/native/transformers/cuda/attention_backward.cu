@@ -341,12 +341,12 @@ _efficient_attention_backward(
     TORCH_INTERNAL_ASSERT(delta.size(2) == M);
 
     typename Kernel::Params p;
-    p.query_ptr = (scalar_t*)query.data_ptr();
-    p.key_ptr = (scalar_t*)key.data_ptr();
-    p.value_ptr = (scalar_t*)value.data_ptr();
-    p.logsumexp_ptr = (typename Kernel::lse_scalar_t*)logsumexp.data_ptr();
-    p.output_ptr = (scalar_t*)out.data_ptr();
-    p.grad_output_ptr = (scalar_t*)grad_out.data_ptr();
+    p.query_ptr = (const scalar_t*)query.const_data_ptr();
+    p.key_ptr = (const scalar_t*)key.const_data_ptr();
+    p.value_ptr = (const scalar_t*)value.const_data_ptr();
+    p.logsumexp_ptr = (typename Kernel::lse_scalar_t const *)logsumexp.const_data_ptr();
+    p.output_ptr = (const scalar_t*)out.const_data_ptr();
+    p.grad_output_ptr = (const scalar_t*)grad_out.const_data_ptr();
     p.grad_query_ptr = (scalar_t*)grad_q.data_ptr();
     p.grad_key_ptr = (scalar_t*)grad_k.data_ptr();
     p.grad_value_ptr = (scalar_t*)grad_v.data_ptr();
@@ -360,8 +360,8 @@ _efficient_attention_backward(
     p.custom_mask_type = custom_mask_type;
     p.scale = sdp::calculate_scale(query, scale).as_float_unchecked();
     if (cu_seqlens_q.has_value()) {
-      p.cu_seqlens_q_ptr = (int32_t*)cu_seqlens_q->data_ptr();
-      p.cu_seqlens_k_ptr = (int32_t*)cu_seqlens_k->data_ptr();
+      p.cu_seqlens_q_ptr = (const int32_t*)cu_seqlens_q->const_data_ptr();
+      p.cu_seqlens_k_ptr = (const int32_t*)cu_seqlens_k->const_data_ptr();
     }
     if (window_size.has_value()) {
       p.window_size = *window_size;
