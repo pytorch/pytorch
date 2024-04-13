@@ -1014,21 +1014,31 @@ def forward(self, x_1, output_1):
 
     @requires_cuda
     @skipIfRocm
-    def test_triton_kernel_equal_to_1_float_arg(self):
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_triton_kernel_equal_to_1_float_arg(self, dynamic):
         def f(x, y):
             out = torch.empty_like(x)
             n_elements = x.numel()
+            scaling_factor = (n_elements**0) / 1.0
             add_kernel_with_scaling[(n_elements,)](
-                x, y, out, n_elements, 1.0, BLOCK_SIZE=16
+                x,
+                y,
+                out,
+                n_elements,
+                scaling_factor,
+                BLOCK_SIZE=16,
             )
             return out
 
         x = torch.randn(2, device="cuda")
         y = torch.randn(2, device="cuda")
         eager_out = f(x, y)
-        compiled_out, sources = run_and_get_code(torch.compile(f), x, y)
+        compiled_out, sources = run_and_get_code(
+            torch.compile(f, dynamic=dynamic), x, y
+        )
 
-        # float 1.0 should not be in equal_to_1
+        # float 1.0 (both literal or symbolic)
+        # should not be added to equal_to_1
         self.assertTrue("equal_to_1=()" in sources[0])
         self.assertEqual(compiled_out, eager_out)
 

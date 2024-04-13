@@ -1065,7 +1065,7 @@ class WrapperCodeGen(CodeGen):
                     signature.append(SizeArg(key, arg))
                     if (
                         arg is not None
-                        and isinstance(arg, (int, sympy.Expr))
+                        and isinstance(arg, (int, sympy.Integer))
                         and V.graph.sizevars.statically_known_equals(
                             arg, 1
                         )  # type: ignore[arg-type]
