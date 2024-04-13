@@ -1301,9 +1301,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """2""")
+            self.assertExpectedInline(cnt.frame_count, """4""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """3""")
+            self.assertExpectedInline(cnt.frame_count, """5""")
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -4657,6 +4657,30 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         except Exception as e:
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
+
+    def test_partially_initialized_module_property(self):
+        class Matrix(torch.nn.Module):
+            def __init__(self, data):
+                super().__init__()
+                self._data = data
+                self.foo = 10 * self.blocking
+
+            @property
+            def data(self):
+                return self._data
+
+            @property
+            def blocking(self):
+                return self.data.shape[1]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return Matrix(torch.randn(10, 20))
+
+        v = fn()
+        self.assertEqual(v.foo, 200)
+        self.assertEqual(v.data.shape, (10, 20))
+        self.assertEqual(type(v), Matrix)
 
     def test_global_fn_mutation(self):
         def foo(x, y):
