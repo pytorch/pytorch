@@ -675,7 +675,7 @@ class TreeSpec:
     num_children: int = dataclasses.field(init=False)
 
     def __post_init__(self) -> None:
-        num_nodes = 1 + sum(spec.num_nodes for spec in self.children_specs)
+        num_nodes = sum((spec.num_nodes for spec in self.children_specs), start=1)
         num_leaves = sum(spec.num_leaves for spec in self.children_specs)
         num_children = len(self.children_specs)
         object.__setattr__(self, "num_nodes", num_nodes)
