@@ -140,13 +140,10 @@ class expectedFailureCodegenDynamicIfCUDAAndNotSM80OrLater:
         self.test_instance = test_instance
 
     def __call__(self, fn):
-        def wrapper(slf, *args, **kwargs):
-            fn._expected_failure_codegen_dynamic = (
-                self.test_instance.device == "cuda" and not SM80OrLater
-            )
-            return fn(slf, *args, **kwargs)
-
-        return wrapper
+        self.test_instance._expected_failure_codegen_dynamic = (
+            fn.device == "cuda" and not SM80OrLater
+        )
+        return fn
 
 
 def _large_cumprod_input(shape, dim, dtype, device):
