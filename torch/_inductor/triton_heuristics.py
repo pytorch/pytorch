@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import torch
 
 import torch.autograd.profiler as autograd_profiler
-from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
 from torch._dynamo.utils import dynamo_timed, get_first_attr
 from torch.utils._triton import has_triton_package
 
@@ -165,7 +165,7 @@ class CachingAutotuner(KernelInterface):
         self.device_type = (
             triton_meta["device_type"] if "device_type" in triton_meta else "cuda"
         )
-        self.gpu_device = get_interface_for_device(self.device_type)
+        self.device_interface = get_interface_for_device(self.device_type)
 
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
@@ -188,11 +188,6 @@ class CachingAutotuner(KernelInterface):
         self.size_hints = size_hints
         self.coordesc_tuner = CoordescTuner(
             is_mm=False, name=self.fn.__name__, size_hints=size_hints
-        )
-
-        # pre-create the profiler context manager to reduce latency
-        self.record_function_ctx = torch._C._profiler._RecordFunctionFast(
-            self.inductor_meta.get("kernel_name", "triton kernel")
         )
 
     def precompile(self, warm_cache_only_with_cc=None):
@@ -222,7 +217,7 @@ class CachingAutotuner(KernelInterface):
 
             seen_configs = set(self.configs)
 
-            device_prop = self.gpu_device.Worker.get_device_properties(
+            device_prop = self.device_interface.Worker.get_device_properties(
                 self.triton_meta["device"]
             )
             if (
@@ -323,7 +318,7 @@ class CachingAutotuner(KernelInterface):
             device_type = self.device_type if torch.version.hip is None else "cuda"
             device_id = compile_meta["device"]
             device = torch.device(device_type, device_id)
-            cc = self.gpu_device.get_compute_capability(device)
+            cc = self.device_interface.get_compute_capability(device)
 
         compile_meta["cc"] = cc
 
@@ -358,9 +353,9 @@ class CachingAutotuner(KernelInterface):
             )
 
         # load binary to the correct device
-        with self.gpu_device.device(compile_meta["device"]):  # type: ignore[attr-defined]
+        with DeviceGuard(self.device_interface, compile_meta["device"]):  # type: ignore[attr-defined]
             # need to initialize context
-            self.gpu_device.synchronize(self.gpu_device.current_device())
+            self.device_interface.synchronize(self.device_interface.current_device())
 
             try:
                 binary = triton.compile(*compile_args, **compile_kwargs)
@@ -533,8 +528,8 @@ class CachingAutotuner(KernelInterface):
             )
             return float("inf")
 
-        stream = self.gpu_device.get_raw_stream(  # type: ignore[call-arg]
-            self.gpu_device.current_device()
+        stream = self.device_interface.get_raw_stream(  # type: ignore[call-arg]
+            self.device_interface.current_device()
         )
 
         def kernel_call():
@@ -732,13 +727,15 @@ class CachingAutotuner(KernelInterface):
                 {**dict(zip(self.arg_names, args)), **launcher.config.kwargs, **kwargs}
             )
 
-        # guard the record_function_ctx and only call it if profiling is currently
+        # guard the record function and only call it if profiling is currently
         # in progress, to reduce latency when profiler is not turned on. Note that
         # the "if" statement (instead of, say, a contextlib.nullcontext) is intentional;
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
-            with self.record_function_ctx:
+            with torch._C._profiler._RecordFunctionFast(
+                self.inductor_meta.get("kernel_name", "triton kernel"), args
+            ):
                 return launcher(
                     *args,
                     **kwargs,
@@ -848,13 +845,13 @@ class DebugAutotuner(CachingAutotuner):
             if num_gb is None:
                 num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
             gb_per_s = num_gb / (ms / 1e3)
-            self.cached = (ms, num_gb, gb_per_s, kernel_name)
-        else:
-            ms, num_gb, gb_per_s, kernel_name = self.cached
-        collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
-        print(
-            create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
-        )
+            self.cached = ms, num_gb, gb_per_s, kernel_name
+            collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
+            print(
+                create_bandwidth_info_str(
+                    ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}"
+                )
+            )
 
 
 def hash_configs(configs: List[Config]):
@@ -903,7 +900,7 @@ def load_cached_autotuning(
 
 
 def should_use_remote_autotune_cache():
-    if config.use_autotune_remote_cache:
+    if config.autotune_remote_cache:
         return True
     if not config.is_fbcode():
         return False
@@ -944,7 +941,7 @@ def cached_autotune(
         cache_filename = None
         remote_cache = None
         remote_cache_key = None
-        if config.use_autotune_local_cache:
+        if config.autotune_local_cache:
             cache_filename = os.path.splitext(filename)[0] + ".best_config"
         if should_use_remote_autotune_cache():
             backend_hash = inductor_meta.get("backend_hash", None)
