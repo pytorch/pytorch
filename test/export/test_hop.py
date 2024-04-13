@@ -84,6 +84,11 @@ class TestHOP(TestCase):
             kwargs = inp.kwargs
             ep = export(model, args, kwargs)
             self._compare(model, ep, args, kwargs)
+        # Mannually resetting dynamo state to avoid memory leak warning.
+        # Note that even though TestCase.tearDown calls reset, the
+        # memory leak checks when PYTORCH_TEST_CUDA_MEM_LEAK_CHECK=1
+        # checks memory leaks before that.
+        torch._dynamo.reset()
 
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_pre_dispatch_export(self, device, dtype, op):
@@ -99,6 +104,7 @@ class TestHOP(TestCase):
             kwargs = inp.kwargs
             ep = _export(model, args, kwargs, pre_dispatch=True)
             self._compare(model, ep, args, kwargs)
+        torch._dynamo.reset()
 
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_retrace_export(self, device, dtype, op):
@@ -115,6 +121,7 @@ class TestHOP(TestCase):
             ep = _export(model, args, kwargs, pre_dispatch=True)
             ep = ep.run_decompositions()
             self._compare(model, ep, args, kwargs)
+        torch._dynamo.reset()
 
     @ops(hop_tests, allowed_dtypes=(torch.float,))
     def test_serialize_export(self, device, dtype, op):
@@ -143,6 +150,7 @@ class TestHOP(TestCase):
                     self._compare(model, ep, args, kwargs)
             else:
                 self._compare(model, ep, args, kwargs)
+        torch._dynamo.reset()
 
 
 instantiate_device_type_tests(TestHOP, globals())
