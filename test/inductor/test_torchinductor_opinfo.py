@@ -379,11 +379,9 @@ inductor_override_kwargs = {
     ("nn.functional.interpolate.bicubic", "cpu", f32): {"atol": 5e-3, "rtol": 0},
     ("nn.functional.interpolate.bicubic", "cuda", f64): {"atol": 1e-3, "rtol": 0},
     # Unreasonably high atol requirement:
-    ("index_reduce.mean", "cuda", f16, f32, f64): {
-        "check_gradient": False,
-        "atol": 0.8,
-        "rtol": 0.4,
-    },
+    ("index_reduce.mean", "cuda", f16): {"check_gradient": False},
+    ("index_reduce.mean", "cuda", f32): {"check_gradient": False},
+    ("index_reduce.mean", "cuda", f64): {"check_gradient": False},
     # Gradient contains non-finite entries:
     ("index_reduce.amin", "cuda", f64): {"check_gradient": False},
     ("index_reduce.amin", "cuda", f32): {"check_gradient": False},
