@@ -1,5 +1,3 @@
-#include <shared_mutex>
-
 #include <ATen/ATen.h>
 #include <ATen/core/op_registration/op_registration.h>
 #include <c10/core/DispatchKey.h>
@@ -8,6 +6,7 @@
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
+#include <utility>
 
 namespace {
 
@@ -15,7 +14,7 @@ class WorkRegistry {
  public:
   void register_work(
       const at::Tensor& tensor,
-      c10::intrusive_ptr<c10d::Work> work) {
+      const c10::intrusive_ptr<c10d::Work>& work) {
     const auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
     auto [it, inserted] = registry_.emplace(storage, work);
@@ -51,8 +50,8 @@ class WorkRegistry {
           "is invoked on all tensors returned from c10d_functional collective "
           "ops before they are used.");
     }
-    for (auto it = registry_.begin(); it != registry_.end(); ++it) {
-      it->second.release();
+    for (auto& it : registry_) {
+      it.second.release();
     }
   }
 
@@ -68,7 +67,7 @@ static WorkRegistry process_registry;
 
 void register_work(
     const at::Tensor& tensor,
-    c10::intrusive_ptr<c10d::Work> work) {
+    const c10::intrusive_ptr<c10d::Work>& work) {
   if (c10d::get_thread_isolation_mode()) {
     c10d::RankLocal<WorkRegistry>::get().register_work(tensor, work);
   } else {
@@ -168,6 +167,7 @@ std::vector<at::Tensor> all_gather_into_tensor_coalesced(
     int64_t group_size,
     std::string group_name) {
   std::vector<at::Tensor> outputs;
+  outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
     outputs.push_back(allocate_all_gather_output(tensor, group_size));
   }
@@ -212,6 +212,7 @@ std::vector<at::Tensor> reduce_scatter_tensor_coalesced(
   c10d::ReduceScatterOptions opts;
   opts.reduceOp = to_reduce_op(reduce_op);
   std::vector<at::Tensor> outputs;
+  outputs.reserve(inputs.size());
   for (const auto& tensor : inputs) {
     outputs.push_back(allocate_reduce_scatter_output(tensor, group_size));
   }
@@ -241,8 +242,8 @@ at::Tensor all_to_all_single(
     std::vector<int64_t> input_split_sizes,
     std::string group_name) {
   std::vector<int64_t> output_sizes = input.sizes().vec();
-  output_sizes[0] =
-      std::accumulate(output_split_sizes.begin(), output_split_sizes.end(), 0);
+  output_sizes[0] = std::accumulate(
+      output_split_sizes.begin(), output_split_sizes.end(), int64_t(0));
   auto output = input.new_empty(output_sizes);
 
   auto group = c10d::resolve_process_group(group_name);
