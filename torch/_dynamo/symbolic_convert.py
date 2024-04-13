@@ -18,7 +18,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
@@ -648,6 +648,7 @@ class InstructionTranslatorBase(
     current_speculation: Optional[SpeculationEntry]
     dispatch_table: List[Any]
     exec_recorder: Optional[ExecutionRecorder]
+    strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -2006,12 +2007,16 @@ class InstructionTranslatorBase(
         return None
 
     @contextlib.contextmanager
-    def strict_translation_mode(self):
-        self.strict_checks_enabled = True
+    def strict_translation_mode(self, check_fn: Callable[[VariableTracker], bool]):
+        """
+        Strict mode is enabled on a per-VariableTracker level depending on the return value of check_fn(node).
+        """
+        prior = self.strict_checks_fn
+        self.strict_checks_fn = check_fn
         try:
             yield
         finally:
-            self.strict_checks_enabled = False
+            self.strict_checks_fn = prior
 
     def speculate(self) -> SpeculationEntry:
         return self.speculation_log.next(
@@ -2078,7 +2083,7 @@ class InstructionTranslatorBase(
 
         self.current_speculation = None
 
-        self.strict_checks_enabled = False
+        self.strict_checks_fn = None
 
         if sys.version_info >= (3, 10):
             from .resume_execution import (
@@ -2508,8 +2513,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
 
         strict_ctx: Any = contextlib.nullcontext()
-        if parent.strict_checks_enabled:
-            strict_ctx = tracer.strict_translation_mode()
+        if parent.strict_checks_fn:
+            strict_ctx = tracer.strict_translation_mode(parent.strict_checks_fn)
         try:
             with strict_ctx:
                 tracer.run()

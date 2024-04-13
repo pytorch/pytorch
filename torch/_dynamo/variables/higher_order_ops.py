@@ -21,6 +21,7 @@ from torch._guards import Source
 from torch._ops import HigherOrderOperator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
+from .. import variables
 
 from ..exc import UncapturedHigherOrderOpError, unimplemented, Unsupported
 from ..source import AttrSource
@@ -1505,9 +1506,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # bwd tracer a child of the fwd tracer, because backward may rely on
         # tensors/attrs created in the fwd tracer.
 
-        from .lists import BaseListVariable
-
-        if isinstance(fwd_out, BaseListVariable):
+        if isinstance(fwd_out, variables.BaseListVariable):
             bwd_args = [ctx, *fwd_out.items]
         else:
             bwd_args = [ctx, fwd_out]
@@ -1525,7 +1524,15 @@ class AutogradFunctionApplyVariable(VariableTracker):
         else:
             unimplemented("non-function or method")
 
-        with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode():
+        def is_strict_for(v: VariableTracker):
+            if isinstance(v, variables.TensorVariable):
+                # we can be more lax for stuff from forward
+                return v.proxy.tracer is not fwd_tracer
+            return True
+
+        with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode(
+            is_strict_for
+        ):
             (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
                 tx,
                 bwd_fn,

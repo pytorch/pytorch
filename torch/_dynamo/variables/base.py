@@ -330,6 +330,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def next_variable(self, tx):
         unimplemented(f"next({self})")
 
+    def is_strict_mode(self, tx):
+        return tx.strict_checks_fn and tx.strict_checks_fn(self)
+
     def __init__(
         self,
         *,
