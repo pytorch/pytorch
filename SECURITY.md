@@ -26,10 +26,15 @@ Important Note: The trustworthiness of a model is not binary. You must always de
 
 ### Untrusted inputs during training and prediction
 
-Some models accept various input formats (text, images, audio, etc.) and pre-process them by modifying and/or converting the input. Most of this work is done by a variaty of libraries that provide different levels of security. Based on the security history of these libraries, it's considered safe to work with untrusted inputs for PNG, BMP, GIF, WAV, RAW, RAW_PADDED, CSV and PROTO formats. If you process untrusted data in any other format, we you should employ the following recommendations:
+If you plan to open your model to untrusted inputs, be aware that inputs can also be used as vectors by malicious agents. To minimize risks, make sure to give your model only the permisisons strictly required, and keep your libraries updated with the lates security patches. 
 
-* Sandboxing: Isolate the model process. You can follow the same instructions as given on the section [Untrusted models](#untrusted-models).
-* Updates: Keep your model and libraries updated with the latest security patches.
+If applicable, prepare your model against bad inputs and prompt injections. Some recommendations:
+- Pre-analysis: check how the model performs by default when exposed to prompt injection (e.g. using fuzzing for prompt injection).
+- Input Sanitation: Before feeding data to the model, sanitize inputs rigorously. This involves techniques such as:
+    - Validation: Enforce strict rules on allowed characters and data types.
+    - Filtering: Remove potentially malicious scripts or code fragments.
+    - Encoding: Convert special characters into safe representations.
+    - Verification: Run tooling that identifies potential script injections (e.g. [models that detect prompt injection attempts](https://python.langchain.com/docs/guides/safety/hugging_face_prompt_injection)).
 
 ### Data privacy
 
