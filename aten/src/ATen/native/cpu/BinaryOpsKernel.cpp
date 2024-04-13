@@ -417,7 +417,7 @@ void bitwise_xor_kernel(TensorIteratorBase& iter) {
 }
 
 void lshift_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "lshift_cpu", [&]() {
+  AT_DISPATCH_INTEGRAL_TYPES_AND(kUInt64, iter.dtype(), "lshift_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
@@ -488,7 +488,7 @@ void logical_xor_kernel(TensorIterator& iter) {
 }
 
 void rshift_kernel(TensorIteratorBase& iter) {
-  AT_DISPATCH_INTEGRAL_TYPES(iter.dtype(), "rshift_cpu", [&]() {
+  AT_DISPATCH_INTEGRAL_TYPES_AND(kUInt64, iter.dtype(), "rshift_cpu", [&]() {
     cpu_kernel_vec(
         iter,
         [](scalar_t a, scalar_t b) -> scalar_t {
