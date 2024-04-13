@@ -7025,7 +7025,7 @@ def fn():
 
     def test_variable_access_in_exception(self):
         def fn():
-            x = torch.ones(3, 3)
+            x = torch.ones(1)
             try:
                 raise RuntimeError("bad")
             except RuntimeError:
@@ -7033,7 +7033,87 @@ def fn():
             return x
 
         opt_fn = torch._dynamo.optimize("eager")(fn)
-        torch.allclose(opt_fn(), torch.tensor([3.0]))
+        self.assertEqual(opt_fn(), torch.tensor([2.0]))
+
+    def test_nested_sequential_with(self):
+        def fn(x):
+            with torch.set_grad_enabled(True):
+                with torch.set_grad_enabled(False):
+                    x = x + 1
+                with torch.set_grad_enabled(True):
+                    x = x + 1
+                return x
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
+
+    def test_nested_sequential_try(self):
+        def fn(x):
+            try:
+                try:
+                    x = x + 1
+                except:
+                    pass
+                try:
+                    try:
+                        x = x + 1
+                    except:
+                        pass
+                except:
+                    pass
+            except:
+                pass
+            return x
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
+
+    def test_nested_sequential_try_with(self):
+        def fn(x):
+            with torch.set_grad_enabled(True):
+                try:
+                    x = x + 1
+                except:
+                    pass
+                try:
+                    with torch.set_grad_enabled(False):
+                        x = x + 1
+                except:
+                    pass
+            return x
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
+
+    def test_nested_sequential_try_with_graph_break(self):
+        def fn(x, n):
+            with torch.set_grad_enabled(True):
+                with torch.set_grad_enabled(False):
+                    x = x + 1
+                    torch._dynamo.graph_break()
+                try:
+                    with torch.set_grad_enabled(False):
+                        x = x + 1
+                        if n == 0:
+                            torch._dynamo.graph_break()
+                except:
+                    pass
+                with torch.set_grad_enabled(False):
+                    x = x + 1
+                    torch._dynamo.graph_break()
+                x = x + 1
+            return x
+
+        counter = CompileCounter()
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+        self.assertEqual(opt_fn(torch.ones(1), 0), torch.tensor([5.0]))
+        self.assertEqual(counter.frame_count, 1)
+
+        torch._dynamo.reset()
+        counter = CompileCounter()
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+        self.assertEqual(opt_fn(torch.ones(1), 1), torch.tensor([5.0]))
+        self.assertEqual(counter.frame_count, 3)
 
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict
