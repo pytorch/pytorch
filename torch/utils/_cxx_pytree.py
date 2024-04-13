@@ -349,13 +349,11 @@ def tree_iter(
     Returns:
         An iterator over the leaf values.
     """
-    return iter(
-        optree.tree_leaves(
-            tree,
-            is_leaf=is_leaf,
-            none_is_leaf=True,
-            namespace="torch",
-        ),
+    return optree.tree_iter(
+        tree,
+        is_leaf=is_leaf,
+        none_is_leaf=True,
+        namespace="torch",
     )
 
 
