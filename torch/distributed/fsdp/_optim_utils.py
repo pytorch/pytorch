@@ -688,6 +688,11 @@ def _flatten_optim_state(
                 unflat_param_names,
             )
 
+    # Move the tensors to GPU
+    for k, v in flat_state.items():
+        if isinstance(v, torch.Tensor):
+            flat_state[k] = flat_state[k].to(fsdp_state.compute_device)
+
     return flat_state
 
 
