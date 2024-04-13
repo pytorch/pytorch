@@ -482,6 +482,17 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
         self,
         cpp_kernel_proxy_list,
     ):
+        # Record the original parallel depth for each kernel
+        kernels_par_depth = [
+            cpp_kernel_proxy.decide_parallel_depth(
+                cpp_kernel_proxy.call_ranges[
+                    : cpp_kernel_proxy.loop_nest.max_parallel_depth()
+                ],
+                parallel_num_threads(),
+            )
+            for cpp_kernel_proxy in cpp_kernel_proxy_list
+        ]
+
         loop_nest_list: List[LoopNestWithSplit] = [
             kernel.loop_nest for kernel in cpp_kernel_proxy_list
         ]
@@ -524,7 +535,12 @@ class OuterLoopFusedSchedulerNode(FusedSchedulerNode):
             [_loop_nest.root for _loop_nest in loop_nest_list],  # type: ignore[misc]
             self.outer_loop_fusion_depth,
         )
-        return cpp_kernel_proxy_list[0]
+        # Set each kernels' parallel depth to OuterLoopFusedKernel
+        outer_loop_fused_cpp_kernel_proxy = cpp_kernel_proxy_list[0]
+        outer_loop_fused_cpp_kernel_proxy.loop_nest.get_outer_loop_fused_kernel().set_internal_kernels_par_depth(
+            kernels_par_depth
+        )
+        return outer_loop_fused_cpp_kernel_proxy
 
 
 class CppPrinter(ExprPrinter):
@@ -2007,26 +2023,16 @@ class CppKernel(Kernel):
     def codegen_loops_impl(self, loop_nest, code, worksharing):
         threads = parallel_num_threads()
         assert self.call_ranges is not None
-        par_depth = self.decide_parallel_depth(
-            self.call_ranges[: loop_nest.max_parallel_depth()], threads
-        )
-
-        def has_outer_loop_fused_kernel(loop_nest):
-            if loop_nest.root and len(loop_nest.root) == 1:
-                # OuterLoopFusedKernel has no main/tail loop split at any outer loop fusion depth
-                kernels = loop_nest.root[0].get_kernels()
-                if isinstance(kernels[0], OuterLoopFusedKernel):
-                    assert len(kernels) == 1
-                    return True
-            return False
-
-        if (
-            has_outer_loop_fused_kernel(loop_nest)
-            and par_depth < loop_nest.max_parallel_depth()
-        ):
-            # Force the parallel depth as the outer loop fusion depth
-            # Assume it can bring the performance benefit.
-            par_depth = loop_nest.max_parallel_depth()
+        if kernel := loop_nest.get_outer_loop_fused_kernel():
+            assert isinstance(kernel, OuterLoopFusedKernel)
+            par_depth = min(
+                loop_nest.max_parallel_depth(),
+                max(kernel.get_internal_kernels_par_depth()),
+            )
+        else:
+            par_depth = self.decide_parallel_depth(
+                self.call_ranges[: loop_nest.max_parallel_depth()], threads
+            )
 
         with contextlib.ExitStack() as stack:
             if par_depth:
@@ -3582,6 +3588,17 @@ class OuterLoopFusedKernel(CppKernel):
     def __init__(self, kernel_group):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.inner: List["LoopLevel"] = []
+        self.kernels_par_depth: List[int] = []
+
+    def set_internal_kernels_par_depth(self, kernels_par_depth: List[int]):
+        # Set the original parallel depth for each of the internal kernel
+        assert len(kernels_par_depth) == len(self.inner)
+        self.kernels_par_depth = kernels_par_depth
+
+    def get_internal_kernels_par_depth(self) -> List[int]:
+        # Get the original parallel depth for each of the internal kernel
+        assert len(self.kernels_par_depth) == len(self.inner)
+        return self.kernels_par_depth
 
 
 class ReasonFusedNodes(Enum):
@@ -4309,3 +4326,13 @@ class LoopNestWithSplit:
         if depth == 0:
             self.root = split_loops
         return split_loops
+
+    def get_outer_loop_fused_kernel(self):
+        # Since OuterLoopFusedKernel has no main/tail loop split at any
+        # outer loop fusion depth, len(loop_nest.root) must equal to 1.
+        if self.root and len(self.root) == 1:
+            kernels = self.root[0].get_kernels()
+            if any(isinstance(kernel, OuterLoopFusedKernel) for kernel in kernels):
+                assert len(kernels) == 1
+                return kernels[0]
+        return None
