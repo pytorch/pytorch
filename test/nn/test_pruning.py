@@ -892,11 +892,11 @@ class TestPruningNN(NNTestCase):
 
         # Pruning one of them causes one of the weights to become a tensor
         prune.l1_unstructured(l, "weight_ih_l0", 0.5)
-        assert sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights]) == 3
+        assert sum(isinstance(p, torch.nn.Parameter) for p in l._flat_weights) == 3
 
         # Removing the pruning reparametrization restores the Parameter
         prune.remove(l, "weight_ih_l0")
-        assert sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights]) == 4
+        assert sum(isinstance(p, torch.nn.Parameter) for p in l._flat_weights) == 4
 
         # Make sure that, upon removal of the reparametrization, the
         # `._parameters` and `.named_parameters` contain the right params.
