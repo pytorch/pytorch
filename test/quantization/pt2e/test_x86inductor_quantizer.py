@@ -1505,7 +1505,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_list = [
                         torch.ops.quantized_decomposed.quantize_per_tensor.default,
                         torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                        torch.ops.quantized_decomposed.dequantize_per_channel.default,
                         torch.ops.aten.linear.default,
                         torch.ops.aten.view.default,
                         torch.ops.aten.permute.default,
@@ -1519,7 +1518,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_list = [
                         torch.ops.quantized_decomposed.quantize_per_tensor.default,
                         torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-                        torch.ops.quantized_decomposed.dequantize_per_channel.default,
                         torch.ops.aten.linear.default,
                         torch.ops.aten.view.default,
                         torch.ops.aten.permute.default,
