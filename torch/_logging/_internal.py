@@ -137,13 +137,16 @@ class LogState:
     log_qname_to_level: Dict[str, str] = field(default_factory=dict)
 
     # the set of currently enabled artifacts
-    artifact_names: Set[str] = field(default_factory=set)
+    artifact_name_to_level: Dict[str, int] = field(default_factory=dict)
 
-    def enable_artifact(self, artifact_name):
-        self.artifact_names.add(artifact_name)
+    def enable_artifact(self, artifact_name: str, log_level: int = logging.DEBUG):
+        self.artifact_name_to_level[artifact_name] = log_level
 
-    def is_artifact_enabled(self, name):
-        return name in self.artifact_names
+    def is_artifact_enabled(self, name: str):
+        return name in self.artifact_name_to_level
+
+    def get_artifact_log_level(self, name: str):
+        return self.artifact_name_to_level[name]
 
     def enable_log(self, log_qnames, log_level):
         if isinstance(log_qnames, str):
@@ -167,7 +170,7 @@ class LogState:
 
     def clear(self):
         self.log_qname_to_level.clear()
-        self.artifact_names.clear()
+        self.artifact_name_to_level.clear()
 
 
 log_registry = LogRegistry()
@@ -545,7 +548,8 @@ def configure_artifact_log(log):
 
     # enable artifact logging when explicitly enabled
     if log_state.is_artifact_enabled(log.artifact_name):
-        log.setLevel(logging.DEBUG)
+        level = _get_log_state().get_artifact_log_level(log.artifact_name)
+        log.setLevel(level)
         log.propagate = True
 
 
@@ -674,7 +678,7 @@ def _parse_log_settings(settings):
             log_qnames = log_registry.log_alias_to_log_qnames[name]
             log_state.enable_log(log_qnames, level)
         elif log_registry.is_artifact(name):
-            log_state.enable_artifact(name)
+            log_state.enable_artifact(name, level)
         elif _is_valid_module(name):
             if not _has_registered_parent(name):
                 log_registry.register_log(name, name)
