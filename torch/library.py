@@ -124,7 +124,7 @@ class Library:
         return result
 
     def _impl_with_aoti_compile(self, op_name, op_overload_name, dispatch_key='', fallback_fn=None):
-        r'''Implements an operator by aoti and registers the aoti implementation for the operator defined in the library.
+        r'''Registers the AOT-compiled implementation for the operator defined in the library.
 
         Args:
             op_name: operator name
@@ -132,7 +132,7 @@ class Library:
             dispatch_key: dispatch key that the input function should be registered for. By default, it uses
                           the dispatch key that the library was created with.
             fallback_fn: A user-defined function that serves as a fallback if the AOT inductor fails to produce a kernel.
-                         This ensures that the operation can still be executed, albeit potentially less efficiently.
+                         This ensures that the operation can still be executed.
 
         Example::
             >>> my_lib = Library("aten", "IMPL")
@@ -147,9 +147,6 @@ class Library:
         assert hasattr(self.m, impl_fn_name)
         impl_fn = getattr(self.m, impl_fn_name)
         assert callable(impl_fn)
-        assert op_name.find("::") > 0, (f"Invalid format: ${op_name}. Please ensure the operation to be registered "
-                                        "follows the pattern: ${{name_space}}::${{op_name}}.${{overload_name}}.")
-
         op_name_with_overload = op_name.split("::")[-1]
         if op_overload_name:
             op_name_with_overload = op_name_with_overload + "." + op_overload_name
