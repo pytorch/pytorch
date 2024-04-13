@@ -1526,10 +1526,8 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         def is_strict_for(v: VariableTracker):
             if isinstance(v, variables.TensorVariable):
-                # we can be more lax for forward args
-                return not (
-                    v.proxy.tracer is fwd_tracer and v.proxy.node.op == "placeholder"
-                )
+                # we can be more lax for stuff from forward
+                return v.proxy.tracer is not fwd_tracer
             return True
 
         with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode(

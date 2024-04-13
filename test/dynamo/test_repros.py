@@ -4271,6 +4271,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(lengths)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_overlapping_inputs_with_dynamic_shapes_error(self):
+        @torch.compile(backend="aot_eager")
+        def fn(a, b, c, d, e, f):
+            a.mul_(2)
+            b.mul_(2)
+            c.mul_(2)
+            d.mul_(2)
+            e.mul_(2)
+            f.mul_(2)
+
+            base = torch.ones(2, 20)
+            a = base[:, 0:2]
+            b = base[:, 2:4]
+            c = base[:, 4:6]
+            d = base[:, 6:8]
+            e = base[:, 8:10]
+            f = base[:, 10:12]
+            f2 = base[:, 10:14]
+            out = fn(a, b, c, d, e, f)
+            with self.assertRaisesRegex(
+                AssertionError, "is being compiled with dynamic shapes"
+            ):
+                out2 = fn(a, b, c, d, e, f2)
+
     def test_user_ctor_ctx_manager_custom_init(self):
         class UserCtxManager:
             def __init__(self, x):
@@ -4413,6 +4437,51 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # This should recompile
         T = IncByTwo
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_contains_range_constprop(self):
+        def fn(x):
+            # dynamo should const prop to False
+            if 3 in range(0, 10):
+                return x + 1
+            else:
+                return x + 2
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.zeros(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    # https://github.com/pytorch/pytorch/issues/104505
+    def test_as_strided_on_base_with_mutation_works(self):
+        def foo(a):
+            f = a.as_strided((2,), (1,), 0)
+            f.add_(1.0)
+            return a
+
+        a = torch.randn(2, 4)
+        a_ref = a.clone()
+        out_ref = foo(a_ref)
+        f_compiled = torch.compile(foo, backend="aot_eager")
+        out = f_compiled(a)
+        self.assertEqual(out_ref, out)
+        self.assertEqual(a_ref, a)
+
+    # https://github.com/pytorch/pytorch/issues/104505
+    def test_as_strided_on_existing_view_banned(self):
+        def foo(a):
+            e = a.diagonal()
+            f = e.as_strided((2,), (1,), 0)
+            f.add_(1.0)
+            return a
+
+        a = torch.randn(2, 4)
+        a_ref = a.clone()
+        out_ref = foo(a_ref)
+        f_compiled = torch.compile(foo, backend="aot_eager")
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "encountered a mutation on a view chain of length 2, where view 1 was an as_strided",
+        ):
+            out = f_compiled(a)
 
     def test_dont_aggressively_write_assert(self):
         record_graph = torch._dynamo.testing.EagerAndRecordGraphs()
@@ -4590,8 +4659,8 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         self.assertEqual(orig_str, compiled_str)
 
     def test_stk_sdd_is_transposed(self):
-        # based on https://github.com/stanford-futuredata/stk/blob/
-        # e5c47f6516bb3398fb6a7f451c1f67da6ba2ecb5/stk/backend/sputnik.py#L234-L299
+        trigger_graph_break = False
+
         def _is_transposed(x):
             return (
                 not x.is_contiguous()
@@ -4618,6 +4687,9 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
                 drhs = None
                 if ctx.needs_input_grad[1]:
                     drhs = torch.full_like(rhs, 1.0 if trans_b else 2.0)
+                if trigger_graph_break:
+                    if _is_transposed(dy):
+                        return dlhs + 1, drhs + 1, None, None
                 return dlhs, drhs, None, None
 
         x1 = torch.randn((8, 8), requires_grad=True)
@@ -4635,6 +4707,10 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(x1.grad, x2.grad)
         self.assertEqual(y1.grad, y2.grad)
+
+        trigger_graph_break = True
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            fn().sum().backward()
 
     def test_partially_initialized_module_property(self):
         class Matrix(torch.nn.Module):
