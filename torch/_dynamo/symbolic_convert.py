@@ -1,4 +1,5 @@
 import collections
+import collections.abc
 import contextlib
 import copy
 import dataclasses
@@ -305,7 +306,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         if not self.should_compile_partial_graph():
             unimplemented("should_compile_partial_graph=False")
         # compile a partial subgraph prefix then jump into user code
-        if self.has_backedge():
+        if self.maybe_has_backedge():
             msg = (
                 "Skipping frame because there is a graph break in a for/while loop\n"
                 f"{self.frame_summary()}"
@@ -537,7 +538,7 @@ def break_graph_if_unsupported(*, push):
                         *frame_loc,
                     )
 
-                if self.has_backedge():
+                if self.maybe_has_backedge():
                     msg = (
                         "Skipping frame because there is a graph break in a for/while loop\n"
                         f"{self.frame_summary()}"
@@ -656,10 +657,31 @@ class InstructionTranslatorBase(
         """
         self.inconsistent_side_effects = True
 
-    def has_backedge(self):
+    def maybe_has_backedge(self):
+        # This function employs a heuristic. It does not reliably detect a backedge.
+        # The heuristic is straightforward: starting from the current instruction and
+        # continuing to the end, if any jump instruction targets an instruction before
+        # the current one, there might be a backedge.
+
+        # Python 3.12 introduced changes to bytecode that group common paths in
+        # blockstacks (with or try...else) and allow for early returns. Consequently,
+        # there can be multiple RETURN_VALUE instructions. Another heuristic is to
+        # halt detection upon encountering the first RETURN_VALUE or RETURN_CONST.
+
+        # These heuristics can result in both false positives and negatives, but
+        # in either case, the Dynamo code remains valid. For false positives
+        # (where an edge is incorrectly marked as a backedge), Dynamo will
+        # perform a SkipFrame instead of potentially applying optimizations. For
+        # false negatives (where an edge that should be marked as a backedge
+        # isn't), multiple graphs may be generated if there's a break in the
+        # graph during a for loop. In general, its better to have fewer false
+        # negatives so that Dynamo does not skip the whole frame.
+
         cur_offset = self.current_instruction.offset
         assert self.instruction_pointer is not None
         for inst in self.instructions[self.instruction_pointer :]:
+            if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
+                return False
             if inst.opname in JUMP_OPNAMES:
                 jump_offset = inst.argval
                 if jump_offset < cur_offset:
@@ -1179,7 +1201,7 @@ class InstructionTranslatorBase(
         # Python 3.8 only
         addr = self.indexof[self.next_instruction]
         self.push(ConstantVariable.create(addr))
-        self.instruction_pointer = self.indexof[inst.target]
+        self.jump(inst)
 
     def END_FINALLY(self, inst):
         # Python 3.8 only
@@ -2636,7 +2658,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def YIELD_VALUE(self, inst: Instruction):
         self.generated_items.append(self.pop())
-        # TODO(jansel): figure out why this is needed, it isn't in the docs for YIELD_VALUE
         self.push(ConstantVariable.create(None))
 
     def GET_YIELD_FROM_ITER(self, inst):
@@ -2645,61 +2666,61 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.pop()
             res = BuiltinVariable(iter).call_function(self, [tos], {})
             self.push(res)
-        return self.YIELD_FROM(inst)
 
     def YIELD_FROM(self, inst):
-        while True:
-            tos = self.stack[-1].realize()
-            if isinstance(tos, ConstantVariable) and tos.value is None:
-                self.pop()
-                return
-            try:
-                val = tos.next_variable(self)
+        assert len(self.stack) >= 2
+        val = self.pop()
+        tos = self.stack[-1]
+        if not (isinstance(val, ConstantVariable) and val.value is None):
+            # invoke send
+            # Unreachable code - if you hit this, you are implementing generator support and have
+            # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
+            # subgenerator and lines up with this line in Python 3.10
+            # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L2599
+            unimplemented("Unreachable sub-generator code")
 
-                # TODO(anijain2305,jansel) - The last pop is because
-                # YIELD_FROM. If we remove it from there, we don't need to
-                # pop it here.
-                self.push(val)
-                self.YIELD_VALUE(inst)
-                self.pop()
+        try:
+            val = tos.next_variable(self)
+        except (StopIteration, exc.UserStopIteration) as ex:
+            # The iterator is exhausted. Stop the loop and return.
+            self.pop()
+            self.push(ConstantVariable.create(ex.value))
+        else:
+            self.push(val)
+            # Add the value to yield into generated_items and replace the top of the stack with None
+            self.YIELD_VALUE(inst)
 
-                # Pop the old iter and push the new iter
-                self.pop()
-                self.push(tos)
-            except (StopIteration, exc.UserStopIteration):
-                return
+            # Repeat the YIELD_FROM instruction in the next eval loop
+            assert (
+                isinstance(self.instruction_pointer, int)
+                and self.instruction_pointer > 0
+            )
+            self.instruction_pointer -= 1
 
     def SEND(self, inst):
         assert len(self.stack) >= 2
         val = self.pop()
         tos = self.stack[-1]
-        if isinstance(tos, ListIteratorVariable):
-            # We handle yield in a very differnt way than CPython does. Instead
-            # of returning to the parent frame on a yield, TorchDynamo instead
-            # just collects the generated_items and proceed to the next
-            # instruction in the same frame. From bytecode tracing stanpoint,
-            # this means that the iterator returned from the child funtion on
-            # `yield from ...` will always be exhausted.
-
-            # Therefore to implement SEND, we have to look at the implementation
-            # when the iterator returns StopIteration. This translates to this code
-            # 3.11 - https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2618
-            # 3.12 - https://github.com/python/cpython/blob/3.12/Python/bytecodes.c#L863-L865
-            # The implementation is different in 3.11 and 3.12. In 3.12, we rely
-            # on END_SEND to clean up. In 3.11, SEND does the cleanup as well.
-
-            if sys.version_info >= (3, 12):
-                # Do not pop, we will rely on END_SEND to pop the iterator
-                pass
-            else:
-                # Check that the iterator is exhausted. It should be because of
-                # how we implement yields.
-                assert tos.is_exhausted()
-                self.pop()
-
+        if isinstance(tos, ListIteratorVariable) or (
+            isinstance(tos, UserDefinedObjectVariable)
+            and isinstance(tos.value, collections.abc.Iterator)
+        ):
             if isinstance(val, ConstantVariable) and val.value is None:
-                self.push(val)
-                self.instruction_pointer = self.indexof[inst.target]
+                try:
+                    val = tos.next_variable(self)
+                except (StopIteration, exc.UserStopIteration) as ex:
+                    # To implement SEND, we have to look at the implementation
+                    # when the iterator returns StopIteration. This translates to this code
+                    # 3.11: https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2619
+                    # 3.12: https://github.com/python/cpython/blob/3.12/Python/bytecodes.c#L863-L866
+                    # The implementation is different in 3.11 and 3.12. In 3.12, we rely
+                    # on END_SEND to clean up. In 3.11, SEND does the cleanup as well.
+                    if sys.version_info < (3, 12):
+                        self.pop()  # Python 3.12 uses new opcode END_SEND
+                    self.push(ConstantVariable.create(ex.value))
+                    self.jump(inst)
+                else:
+                    self.push(val)
             else:
                 # invoke send
                 # Unreachable code - if you hit this, you are implementing generator support and have

@@ -67,6 +67,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TestCase,
+    skipIfTorchDynamo,
 )
 
 Json = Dict[str, Any]
@@ -3016,10 +3017,9 @@ class TestExperimentalUtils(TestCase):
         for event_key, event_metrics in metrics.items():
             self.assertEqual(
                 event_metrics.self_time_ns,
-                event_key.event.duration_time_ns - sum([
+                event_key.event.duration_time_ns - sum(
                     child.duration_time_ns
-                    for child in event_key.event.children
-                ]))
+                    for child in event_key.event.children))
 
     def test_utils_intervals_overlap(self):
         event = _utils.EventKey(MockProfilerEvent("Event 1", 1, 5, 5))
@@ -3282,6 +3282,7 @@ aten::mm""")
         num_matched = len(pattern.matched_events())
         self.assertEqual(num_matched, 1)
 
+    @skipIfTorchDynamo("pattern checks for aten::_zero op which might not be there with torch.compile'd graph")
     def test_profiler_grad_not_set_to_none_pattern(self):
         x = torch.ones((100, 100))
         model = nn.Sequential(
