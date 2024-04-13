@@ -165,7 +165,7 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
       op_name_(std::string(op_name)),
       op_overload_name_(std::string(op_overload_name)),
       is_symbolic_(is_symbolic),
-      is_fall_back_(func.ptr() == Py_None),
+      has_fall_back_(func.ptr() != Py_None),
       device_(c10::Device(c10::dispatchKeyToDeviceType(dispatch_key_), 0)),
       pyinterpreter_(getPyInterpreter()) {
   auto pos = op_name_.find("::");
@@ -361,6 +361,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       // Access the fields of each meta_info dict
       auto is_dynamic = meta_info_dict["is_dynamic"].cast<bool>();
       auto device_type = meta_info_dict["device_type"].cast<std::string>();
+      auto device_index = meta_info_dict["device_index"].cast<std::string>();
       auto dtype = meta_info_dict["dtype"].cast<std::string>();
       auto sizes = meta_info_dict["sizes"].cast<std::vector<int64_t>>();
       auto strides = meta_info_dict["strides"].cast<std::vector<int64_t>>();
@@ -422,36 +423,46 @@ void AOTIPythonKernelHolder::cache_miss(
     const c10::OperatorHandle& op,
     const c10::DispatchKeySet& keyset,
     torch::jit::Stack* stack) {
-  auto kernel_lib_path = produce_aoti_kernel_lib(op, keyset, stack);
-  if (!kernel_lib_path.empty()) {
-    auto device_type = c10::dispatchKeyToDeviceType(dispatch_key_);
-    auto device_index = 0; // TODO: Get device index from other tensors.
-    auto device = c10::Device(device_type, device_index);
+  auto device_type = c10::dispatchKeyToDeviceType(dispatch_key_);
+  TORCH_CHECK(
+      (device_type == c10::DeviceType::CPU) ||
+          (device_type == c10::DeviceType::CUDA),
+      "Unsupported device type");
 
-    std::shared_ptr<AOTIModelContainerRunner> kernel =
-        load_aoti_model_runner(kernel_lib_path);
-    if (kernel) {
-      std::vector<at::Tensor> inputs;
-      if (unpackTensors(*stack, device_, inputs)) {
-        auto outputs = kernel->run(inputs);
-        if (outputs.size() > 0) {
-          torch::jit::drop(*stack, op.schema().arguments().size());
-          // TODO: Check output spec
-          for (auto& output : outputs) {
-            torch::jit::push(*stack, std::move(output));
-          }
-          return;
-        }
-      }
-    }
+  auto kernel_lib_path = produce_aoti_kernel_lib(op, keyset, stack);
+  if (kernel_lib_path.empty()) {
+    TORCH_CHECK(
+        has_fall_back_,
+        "Failed to produce kernel libarary by using AOTI and no fall back");
+    python_kernel_holder_(op, keyset, stack);
+    return;
   }
 
-  if (is_fall_back_) {
-    python_kernel_holder_(op, keyset, stack);
+  auto device_index = 0; // TODO: Get device index from other tensors.
+  auto device = c10::Device(device_type, device_index);
+
+  std::shared_ptr<AOTIModelContainerRunner> kernel = nullptr;
+  if (device_type == c10::DeviceType::CPU) {
+    kernel = std::make_shared<AOTIModelContainerRunnerCpu>(kernel_lib_path);
   } else {
-    TORCH_INTERNAL_ASSERT(
-        false,
-        "Failed to produce or load AOTI kernel and no fallback function.");
+#ifdef USE_CUDA
+    kernel = std::make_shared<AOTIModelContainerRunnerCuda>(kernel_lib_path);
+#else
+    TORCH_CHECK(false, "Unsupported CUDA device type");
+#endif
+  }
+
+  std::vector<at::Tensor> inputs;
+  if (unpackTensors(*stack, device, inputs)) {
+    auto outputs = kernel->run(inputs);
+    if (outputs.size() > 0) {
+      torch::jit::drop(*stack, op.schema().arguments().size());
+      // TODO: Get the output type of this operation and then convert to the
+      // output type.
+      for (auto& output : outputs) {
+        torch::jit::push(*stack, std::move(output));
+      }
+    }
   }
 }
 
@@ -463,7 +474,8 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
 
   const auto& schema = op.schema();
   const auto& qualified_name = op.operator_name().name;
-  const auto& overload_name = schema.overload_name();
+  const auto& overload_name =
+      schema.overload_name().empty() ? "default" : schema.overload_name();
   auto pos = qualified_name.find("::");
   TORCH_INTERNAL_ASSERT(pos != std::string::npos, qualified_name);
   std::string ns_str(qualified_name.begin(), qualified_name.begin() + pos);
@@ -474,7 +486,6 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
 
   py::gil_scoped_acquire gil;
   py::handle op_py_func = op.getPythonOp(pyinterpreter_, [&]() -> PyObject* {
-    // Parse the name into namespace and name (no overload_name)
     py::handle torch_api_function = py::module::import("torch")
                                         .attr("ops")
                                         .attr(ns_str.c_str())
@@ -486,17 +497,26 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
     }
   });
 
-  if (op_py_func.ptr() == nullptr) {
+  if (op_py_func.ptr() == nullptr || op_py_func.ptr() == Py_None) {
+    TORCH_WARN(
+        "Failed to get python operation. Operator Name is ",
+        op.operator_name().name,
+        ", Overload Name is ",
+        overload_name);
     return kernel_lib_path;
   }
 
   py::handle aot_compile_function =
       py::module::import("torch._inductor.utils")
           .attr("aot_compile_with_persistent_cache");
-  if (aot_compile_function.ptr() == nullptr) {
+  if (aot_compile_function.ptr() == nullptr ||
+      aot_compile_function.ptr() == Py_None) {
+    TORCH_WARN("Failed to import - torch._export.aot_compile");
     return kernel_lib_path;
   }
 
+  // Pass the python operation to the AOT Inductor to generate the kernel
+  // library.
   auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments.vec());
   auto result = py::reinterpret_steal<py::object>(PyObject_CallFunctionObjArgs(
       aot_compile_function.ptr(),
@@ -509,8 +529,25 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
       args_kwargs.first.ptr(),
       args_kwargs.second.ptr(),
       nullptr));
-  if (result.ptr() != nullptr) {
+  if (result.ptr() != nullptr && result.ptr() != Py_None) {
     kernel_lib_path = py::cast<std::string>(result);
+    if (kernel_lib_path.empty()) {
+      TORCH_WARN(
+          "Kernel library is not generated by AOTI for ",
+          c10::DeviceTypeName(device_.type()),
+          ". Operator Name is ",
+          op.operator_name().name,
+          ", Overload Name is ",
+          overload_name);
+    }
+  } else {
+    TORCH_WARN(
+        "AOTI kernel library is not generated for ",
+        c10::DeviceTypeName(device_.type()),
+        ". Operator Name is ",
+        op.operator_name().name,
+        ", Overload Name is ",
+        overload_name);
   }
 
   return kernel_lib_path;
