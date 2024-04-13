@@ -306,7 +306,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         if not self.should_compile_partial_graph():
             unimplemented("should_compile_partial_graph=False")
         # compile a partial subgraph prefix then jump into user code
-        if self.has_backedge():
+        if self.maybe_has_backedge():
             msg = (
                 "Skipping frame because there is a graph break in a for/while loop\n"
                 f"{self.frame_summary()}"
@@ -538,7 +538,7 @@ def break_graph_if_unsupported(*, push):
                         *frame_loc,
                     )
 
-                if self.has_backedge():
+                if self.maybe_has_backedge():
                     msg = (
                         "Skipping frame because there is a graph break in a for/while loop\n"
                         f"{self.frame_summary()}"
@@ -657,10 +657,31 @@ class InstructionTranslatorBase(
         """
         self.inconsistent_side_effects = True
 
-    def has_backedge(self):
+    def maybe_has_backedge(self):
+        # This function employs a heuristic. It does not reliably detect a backedge.
+        # The heuristic is straightforward: starting from the current instruction and
+        # continuing to the end, if any jump instruction targets an instruction before
+        # the current one, there might be a backedge.
+
+        # Python 3.12 introduced changes to bytecode that group common paths in
+        # blockstacks (with or try...else) and allow for early returns. Consequently,
+        # there can be multiple RETURN_VALUE instructions. Another heuristic is to
+        # halt detection upon encountering the first RETURN_VALUE or RETURN_CONST.
+
+        # These heuristics can result in both false positives and negatives, but
+        # in either case, the Dynamo code remains valid. For false positives
+        # (where an edge is incorrectly marked as a backedge), Dynamo will
+        # perform a SkipFrame instead of potentially applying optimizations. For
+        # false negatives (where an edge that should be marked as a backedge
+        # isn't), multiple graphs may be generated if there's a break in the
+        # graph during a for loop. In general, its better to have fewer false
+        # negatives so that Dynamo does not skip the whole frame.
+
         cur_offset = self.current_instruction.offset
         assert self.instruction_pointer is not None
         for inst in self.instructions[self.instruction_pointer :]:
+            if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
+                return False
             if inst.opname in JUMP_OPNAMES:
                 jump_offset = inst.argval
                 if jump_offset < cur_offset:
