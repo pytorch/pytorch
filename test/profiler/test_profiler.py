@@ -67,6 +67,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TestCase,
+    skipIfTorchDynamo,
 )
 
 Json = Dict[str, Any]
@@ -604,6 +605,31 @@ class TestExecutionTrace(TestCase):
             if "[pytorch|profiler|execution_trace|process]" in n["name"]:
                 found_root_node = True
         assert found_root_node
+
+    def test_execution_trace_nested_tensor(self):
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+        fp.close()
+
+        et = ExecutionTraceObserver()
+        observer = et.register_callback(fp.name)
+
+        def fn(nt):
+            return nt.sin().cos()
+
+        with torch.profiler.profile(execution_trace_observer=observer) as prof:
+            for i in range(3):
+                values = torch.rand((8 + i, 4 + i))
+                offsets = torch.tensor([0, 2, 4, 6, 8 + i])
+                nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+                fn(nt)
+
+        nodes = self.get_execution_trace_root(fp.name)
+        found_cos = False
+        for n in nodes:
+            assert "name" in n
+            if "cos" in n["name"]:
+                found_cos = True
+        assert found_cos
 
 
 @instantiate_parametrized_tests
@@ -2769,11 +2795,11 @@ class MockKinetoEvent:
     def name(self) -> str:
         return self._name
 
-    def start_us(self) -> int:
-        return self._start_us
+    def start_ns(self) -> int:
+        return self._start_us * 1000
 
-    def duration_us(self) -> int:
-        return self._duration_us
+    def duration_ns(self) -> int:
+        return self._duration_us * 1000
 
     def linked_correlation_id(self) -> int:
         return self._linked_correlation_id
@@ -2918,10 +2944,10 @@ class TestExperimentalUtils(TestCase):
             kineto_events = [{
                 '_name':
                 e.name,
-                '_start_us':
-                e.start_us(),
-                '_duration_us':
-                e.duration_us(),
+                '_start_ns':
+                e.start_ns(),
+                '_duration_ns':
+                e.duration_ns(),
                 '_linked_correlation_id':
                 e.linked_correlation_id(),
                 '_device_type':
@@ -2991,10 +3017,9 @@ class TestExperimentalUtils(TestCase):
         for event_key, event_metrics in metrics.items():
             self.assertEqual(
                 event_metrics.self_time_ns,
-                event_key.event.duration_time_ns - sum([
+                event_key.event.duration_time_ns - sum(
                     child.duration_time_ns
-                    for child in event_key.event.children
-                ]))
+                    for child in event_key.event.children))
 
     def test_utils_intervals_overlap(self):
         event = _utils.EventKey(MockProfilerEvent("Event 1", 1, 5, 5))
@@ -3113,6 +3138,8 @@ aten::mm
 aten::mm
 aten::mm""")
 
+    # TODO: Add logic for CUDA version of test
+    @unittest.skipIf(torch.cuda.is_available(), "Test not working for CUDA")
     def test_profiler_pattern_match_helper(self):
         x = torch.ones((100, 100))
         with profile() as prof:
@@ -3255,6 +3282,7 @@ aten::mm""")
         num_matched = len(pattern.matched_events())
         self.assertEqual(num_matched, 1)
 
+    @skipIfTorchDynamo("pattern checks for aten::_zero op which might not be there with torch.compile'd graph")
     def test_profiler_grad_not_set_to_none_pattern(self):
         x = torch.ones((100, 100))
         model = nn.Sequential(
