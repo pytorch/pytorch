@@ -1063,13 +1063,11 @@ class WrapperCodeGen(CodeGen):
                     )
                 else:
                     signature.append(SizeArg(key, arg))
-                    if (
-                        arg is not None
-                        and isinstance(arg, (int, sympy.Integer))
-                        and V.graph.sizevars.statically_known_equals(
-                            arg, 1
-                        )  # type: ignore[arg-type]
-                    ):
+                    if isinstance(
+                        arg, (int, sympy.Integer)
+                    ) and V.graph.sizevars.statically_known_equals(
+                        arg, 1
+                    ):  # type: ignore[arg-type]
                         equal_to_1_arg_idx.append(idx)
         index_dtype = "tl.int32"
         triton_meta = {
