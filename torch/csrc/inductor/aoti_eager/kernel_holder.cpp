@@ -7,16 +7,15 @@
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
-#include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
-#include <torch/csrc/jit/frontend/function_schema_parser.h>
-
-#include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 #ifdef USE_CUDA
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
+#include <torch/csrc/jit/frontend/function_schema_parser.h>
+
 #include <ATen/core/jit_type.h>
+#include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
+#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
 namespace torch::inductor {
 
@@ -185,14 +184,14 @@ void AOTIPythonKernelHolder::operator()(
     c10::DispatchKeySet keyset,
     torch::jit::Stack* stack) {
   AOTIKernelState kernel_state;
-  if (detect_cache(op, keyset, stack, kernel_state)) {
+  if (cache_lookup(op, keyset, stack, kernel_state)) {
     cache_hit(kernel_state, op, keyset, stack);
   } else {
     cache_miss(op, keyset, stack);
   }
 }
 
-bool AOTIPythonKernelHolder::detect_cache(
+bool AOTIPythonKernelHolder::cache_lookup(
     const c10::OperatorHandle& op,
     const c10::DispatchKeySet& keyset,
     const torch::jit::Stack* stack,
@@ -426,7 +425,7 @@ void AOTIPythonKernelHolder::cache_miss(
   auto kernel_lib_path = produce_aoti_kernel_lib(op, keyset, stack);
   if (!kernel_lib_path.empty()) {
     auto device_type = c10::dispatchKeyToDeviceType(dispatch_key_);
-    auto device_index = 0;
+    auto device_index = 0; // TODO: Get device index from other tensors.
     auto device = c10::Device(device_type, device_index);
 
     std::shared_ptr<AOTIModelContainerRunner> kernel =

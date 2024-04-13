@@ -349,11 +349,14 @@ void initDispatchBindings(PyObject* module) {
              c10::DispatchKey dispatch,
              py::object fall_back_func) {
             HANDLE_TH_ERRORS
-            std::string str_op_name(op_name);
+            std::string reg_op_name(op_name);
+            if (reg_op_name.find("::") == std::string::npos) {
+              reg_op_name = std::string(ns).append("::").append(op_name);
+            }
             if (op_overload_name != nullptr) {
               std::string str_op_overload_name(op_overload_name);
               if (!str_op_overload_name.empty()) {
-                str_op_name.append(".").append(str_op_overload_name);
+                reg_op_name.append(".").append(str_op_overload_name);
               }
             }
             auto& lib = self.cast<torch::Library&>();
@@ -365,7 +368,7 @@ void initDispatchBindings(PyObject* module) {
               }
             }
             lib.impl(
-                str_op_name.c_str(),
+                reg_op_name.c_str(),
                 torch::dispatch(
                     dispatch,
                     CppFunction::makeFromBoxedFunctor(
