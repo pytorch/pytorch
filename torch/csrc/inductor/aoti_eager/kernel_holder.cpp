@@ -7,7 +7,9 @@
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
+#ifdef USE_CUDA
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
+#endif
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 
 namespace torch::inductor {
@@ -129,18 +131,18 @@ void AOTIPythonKernelHolder::operator()(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet keyset,
     torch::jit::Stack* stack) {
-  if (detect_cache(op, keyset, stack)) {
+  if (cache_lookup(op, keyset, stack)) {
     cache_hit(op, keyset, stack);
   } else {
     cache_miss(op, keyset, stack);
   }
 }
 
-bool AOTIPythonKernelHolder::detect_cache(
+bool AOTIPythonKernelHolder::cache_lookup(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet keyset,
     torch::jit::Stack* stack) {
-  // TODO(Eikan): Add detailed implementation
+  // TODO: Add detailed implementation
   return false;
 }
 
@@ -159,21 +161,23 @@ void AOTIPythonKernelHolder::cache_miss(
   auto kernel_lib_path = produce_aot_kernel_lib(op, keyset, stack);
   if (!kernel_lib_path.empty()) {
     auto device_type = c10::dispatchKeyToDeviceType(dispatch_key_);
-    auto device_index = 0;
+    auto device_index = 0; // TODO: Get device index from other tensors.
     auto device = c10::Device(device_type, device_index);
 
     std::shared_ptr<AOTIModelContainerRunner> kernel = nullptr;
     if (device_type == c10::DeviceType::CPU) {
       kernel = std::make_shared<AOTIModelContainerRunnerCpu>(kernel_lib_path);
     } else if (device_type == c10::DeviceType::CUDA) {
+#ifdef USE_CUDA
       kernel = std::make_shared<AOTIModelContainerRunnerCuda>(kernel_lib_path);
+#endif
     } else {
       TORCH_WARN("Unsupported device type");
     }
 
     if (kernel) {
       std::vector<at::Tensor> inputs;
-      if (unpackTensors(*stack, device_opt_.value(), inputs)) {
+      if (unpackTensors(*stack, device, inputs)) {
         auto outputs = kernel->run(inputs);
         if (outputs.size() > 0) {
           torch::jit::drop(*stack, op.schema().arguments().size());
