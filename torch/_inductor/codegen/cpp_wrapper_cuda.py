@@ -198,6 +198,8 @@ class CppWrapperCuda(CppWrapperCpu):
             var_name = f"var_{next(self.arg_var_id)}"
             if isinstance(arg, (sympy.Integer, sympy.Symbol, SymbolicCallArg)):
                 self.writeline(f"auto {var_name} = {arg};")
+            elif isinstance(arg, sympy.Float):
+                self.writeline(f"float {var_name} = {self.expr_printer(arg)};")
             elif isinstance(arg, sympy.Expr):
                 self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
             elif is_int(arg):

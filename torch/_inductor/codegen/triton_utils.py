@@ -1,5 +1,7 @@
 from typing import Any, Dict, List, Optional
 
+import sympy
+
 import torch
 
 from .. import config
@@ -36,7 +38,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: str) -> str:
             # From triton/runtime/jit.py
             # `None` is nullptr.  Implicitly convert to *i8.
             return "*i8"
-        elif isinstance(arg.expr, float):
+        elif isinstance(arg.expr, (float, sympy.Float)):
             return "fp32"
         if size_dtype == "tl.int32":
             return "i32"
@@ -118,7 +120,7 @@ def config_of(
         i
         for i, arg in zip(indices, args)
         if isinstance(arg, SizeArg)
-        and arg.expr is not None
+        and isinstance(arg.expr, (int, sympy.Integer))
         and V.graph.sizevars.statically_known_equals(arg.expr, 1)  # type: ignore[arg-type]
     )
     # ids_of_folded_args is set from equal_to_1
