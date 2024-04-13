@@ -279,7 +279,12 @@ class TorchBenchmarkRunner(BenchmarkRunner):
                 extra_args=extra_args,
             )
         model, example_inputs = benchmark.get_module()
-        if model_name in ["basic_gnn_edgecnn", "basic_gnn_gcn", "basic_gnn_sage"]:
+        if model_name in [
+            "basic_gnn_edgecnn",
+            "basic_gnn_gcn",
+            "basic_gnn_sage",
+            "basic_gnn_gin",
+        ]:
             _reassign_parameters(model)
 
         # Models that must be in train mode while training

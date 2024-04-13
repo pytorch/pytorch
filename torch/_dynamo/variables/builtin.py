@@ -518,6 +518,14 @@ class BuiltinVariable(VariableTracker):
             def compare_set_items(tx, left, right):
                 return ConstantVariable(op(left.set_items, right.set_items))
 
+            def compare_via_method(tx, left, right):
+                return left.call_method(tx, f"__{op.__name__}__", [right], {})
+
+            if op.__name__.startswith("is_"):
+                compare_user_defined = compare_by_value
+            else:
+                compare_user_defined = compare_via_method
+
             op_var = BuiltinVariable(op)
             result.extend(
                 [
@@ -546,14 +554,13 @@ class BuiltinVariable(VariableTracker):
                         list_compare_check,
                     ),
                     ((has_set_items, has_set_items), compare_set_items),
-                    # TODO(jansel): UserDefinedObjectVariable is wrong and could invoke user code
                     (
                         (UserDefinedObjectVariable, UserDefinedObjectVariable),
-                        compare_by_value,
+                        compare_user_defined,
                     ),
                     (
                         (UserDefinedClassVariable, UserDefinedClassVariable),
-                        compare_by_value,
+                        compare_user_defined,
                     ),
                     (
                         (
@@ -1550,14 +1557,13 @@ class BuiltinVariable(VariableTracker):
     def call_setattr(
         self, tx, obj: VariableTracker, name_var: VariableTracker, val: VariableTracker
     ):
-        from .distributed import PlacementVariable
-
         if isinstance(
             obj,
             (
                 variables.DataClassVariable,
                 variables.CustomizedDictVariable,
-                PlacementVariable,
+                variables.PlacementVariable,
+                variables.UserDefinedObjectVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
@@ -1602,7 +1608,7 @@ class BuiltinVariable(VariableTracker):
 
                     # Step 3 - drop the version counter - this is a step required to get
                     # .data setting to play correctly with the autograd engine.
-                    # Esentially, dynamo is trying to faithful preserve the (absurd)
+                    # Essentially, dynamo is trying to faithfully preserve the (absurd)
                     # behavior of .data= from eager mode
                     def _lower_version_count_by_1(x):
                         version = x._version
