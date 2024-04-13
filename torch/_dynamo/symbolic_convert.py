@@ -1,4 +1,5 @@
 import collections
+import collections.abc
 import contextlib
 import copy
 import dataclasses
@@ -1179,7 +1180,7 @@ class InstructionTranslatorBase(
         # Python 3.8 only
         addr = self.indexof[self.next_instruction]
         self.push(ConstantVariable.create(addr))
-        self.instruction_pointer = self.indexof[inst.target]
+        self.jump(inst)
 
     def END_FINALLY(self, inst):
         # Python 3.8 only
@@ -2434,7 +2435,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         suffix = ""
         # TODO: mlazos, add support for enabling multiple artifact logs
         # with a single alias
-        if torch._logging._internal.log_state.is_artifact_enabled("output_code"):
+        if torch._logging._internal.log_state.is_artifact_enabled("bytecode"):
             suffix = f"\n{dis.Bytecode(code).dis()}"
         if sys.version_info >= (3, 11):
             cur_inst = parent.current_instruction
@@ -2636,7 +2637,6 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
 
     def YIELD_VALUE(self, inst: Instruction):
         self.generated_items.append(self.pop())
-        # TODO(jansel): figure out why this is needed, it isn't in the docs for YIELD_VALUE
         self.push(ConstantVariable.create(None))
 
     def GET_YIELD_FROM_ITER(self, inst):
@@ -2645,33 +2645,61 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
             self.pop()
             res = BuiltinVariable(iter).call_function(self, [tos], {})
             self.push(res)
-        return self.YIELD_FROM(inst)
 
     def YIELD_FROM(self, inst):
-        while True:
-            tos = self.stack[-1].realize()
-            if isinstance(tos, ConstantVariable) and tos.value is None:
-                self.pop()
-                return
-            try:
-                val = tos.next_variable(self)
-                self.push(val)
-                # TODO(voz): Unclear if we need the push None in YIELD_VALUE?
-                self.YIELD_VALUE(inst)
-                self.pop()
-                self.push(tos)
-            except (StopIteration, exc.UserStopIteration):
-                # TODO(jansel): do we need a self.pop() here?
-                return
+        assert len(self.stack) >= 2
+        val = self.pop()
+        tos = self.stack[-1]
+        if not (isinstance(val, ConstantVariable) and val.value is None):
+            # invoke send
+            # Unreachable code - if you hit this, you are implementing generator support and have
+            # lifted the `unimplemented("generator")` in frame conversion. This codepath handles
+            # subgenerator and lines up with this line in Python 3.10
+            # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L2599
+            unimplemented("Unreachable sub-generator code")
+
+        try:
+            val = tos.next_variable(self)
+        except (StopIteration, exc.UserStopIteration) as ex:
+            # The iterator is exhausted. Stop the loop and return.
+            self.pop()
+            self.push(ConstantVariable.create(ex.value))
+        else:
+            self.push(val)
+            # Add the value to yield into generated_items and replace the top of the stack with None
+            self.YIELD_VALUE(inst)
+
+            # Repeat the YIELD_FROM instruction in the next eval loop
+            assert (
+                isinstance(self.instruction_pointer, int)
+                and self.instruction_pointer > 0
+            )
+            self.instruction_pointer -= 1
 
     def SEND(self, inst):
         assert len(self.stack) >= 2
         val = self.pop()
         tos = self.stack[-1]
-        if isinstance(tos, ListIteratorVariable):
+        if isinstance(tos, ListIteratorVariable) or (
+            isinstance(tos, UserDefinedObjectVariable)
+            and isinstance(tos.value, collections.abc.Iterator)
+        ):
             if isinstance(val, ConstantVariable) and val.value is None:
-                self.push(val)
-                self.instruction_pointer = self.indexof[inst.target]
+                try:
+                    val = tos.next_variable(self)
+                except (StopIteration, exc.UserStopIteration) as ex:
+                    # To implement SEND, we have to look at the implementation
+                    # when the iterator returns StopIteration. This translates to this code
+                    # 3.11: https://github.com/python/cpython/blob/3.11/Python/ceval.c#L2613-L2619
+                    # 3.12: https://github.com/python/cpython/blob/3.12/Python/bytecodes.c#L863-L866
+                    # The implementation is different in 3.11 and 3.12. In 3.12, we rely
+                    # on END_SEND to clean up. In 3.11, SEND does the cleanup as well.
+                    if sys.version_info < (3, 12):
+                        self.pop()  # Python 3.12 uses new opcode END_SEND
+                    self.push(ConstantVariable.create(ex.value))
+                    self.jump(inst)
+                else:
+                    self.push(val)
             else:
                 # invoke send
                 # Unreachable code - if you hit this, you are implementing generator support and have
