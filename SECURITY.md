@@ -1,12 +1,25 @@
 # Security Policy
 
+ - [**Reporting a Vulnerability**](#reporting-a-vulnerability)
  - [**Using Pytorch Securely**](#using-pytorch-securely)
    - [Untrusted models](#untrusted-models)
    - [Untrusted inputs](#untrusted-inputs)
    - [Data privacy](#data-privacy)
    - [Untrusted environments or networks](#untrusted-environments-or-networks)
    - [Multi-Tenant environments](#multi-tenant-environments)
- - [**Reporting a Vulnerability**](#reporting-a-vulnerability)
+
+## Reporting Security Issues
+
+Beware that none of the topics under [Using Pytorch Securely](#using-pytorch-securely) are considered vulnerabilities of Pytorch.
+
+However, if you believe you have found a security vulnerability in PyTorch, we encourage you to let us know right away. We will investigate all legitimate reports and do our best to quickly fix the problem.
+
+Please report security issues using https://github.com/pytorch/pytorch/security/advisories/new
+
+Please refer to the following page for our responsible disclosure policy, reward guidelines, and those things that should not be reported:
+
+https://www.facebook.com/whitehat
+
 
 ## Using Pytorch Securely
 **Consider Pythor models as programs**. Machine Learning models are mathematical vectors and weights in their essence, but as they grow in complexity they can require privileges or be partially composed by programmatic code. That said, running untrusted models is equivelent to running untrusted code.
@@ -61,15 +74,3 @@ Separating networks is also a big part of isolation. If you keep model network t
 #### Hardware Attacks
 
 Besides the virtual environment, the hardware (GPUs or TPUs) can also be attacked. [Research](https://scholar.google.com/scholar?q=gpu+side+channel) has shown that side channel attacks on GPUs are possible, which can make data leak from other models or processes running on the same system at the same time.
-
-## Reporting Security Issues
-
-Beware that none of the topics under [Using Pytorch Securely](#using-pytorch-securely) are considered vulnerabilities of Pytorch.
-
-However, if you believe you have found a security vulnerability in PyTorch, we encourage you to let us know right away. We will investigate all legitimate reports and do our best to quickly fix the problem.
-
-Please report security issues using https://github.com/pytorch/pytorch/security/advisories/new
-
-Please refer to the following page for our responsible disclosure policy, reward guidelines, and those things that should not be reported:
-
-https://www.facebook.com/whitehat
