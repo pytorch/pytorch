@@ -676,12 +676,14 @@ template <>
 void bgemm_internal<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>))
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
-#ifdef USE_ROCM
-    // hipblaslt does not support complex gemm yet
+    // cublaslt returned CUBLAS_STATUS_INVALID_VALUE when calling cublasLtMatrixLayoutSetAttribute
+    // for either CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT or CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET
+    // but only for complex inputs. This wasn't debugged further to determine which attr failed.
+    //
+    // Similarly, hipblaslt does not support complex gemm yet.
+    //
+    // Until these libraries work for complex, fall back to cublas/hipblas.
     bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
-#else
-    bgemm_internal_cublaslt<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
-#endif
   }
   else {
     bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
@@ -692,12 +694,8 @@ template <>
 void bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>))
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
-#ifdef USE_ROCM
-    // hipblaslt does not support complex gemm yet
+    // see note above for complex not working for cublaslt and hipblaslt
     bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
-#else
-    bgemm_internal_cublaslt<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
-#endif
   }
   else {
     bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
