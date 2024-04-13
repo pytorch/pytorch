@@ -137,7 +137,7 @@ def validate_args_and_maybe_create_graph_inputs(
     set_subgraph_inputs,
     description,
 ):
-    from . import AutogradFunctionContextVariable, EnumVariable
+    from . import AutogradFunctionContextVariable
     from .builder import wrap_fx_proxy_cls
 
     assert tracer.parent is not None
@@ -166,7 +166,7 @@ def validate_args_and_maybe_create_graph_inputs(
                 args.append(a)
                 continue
 
-            if isinstance(a, (ConstantVariable, EnumVariable)):
+            if a.is_python_constant():
                 # This arg is not used in the body of the higher order op.
                 # Currently, this new input is added to make the calls
                 # happy, which expect a fixed number of arguments. In
@@ -1459,7 +1459,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         )
 
         fwd_src = AttrSource(self.parent_source, member="forward")
-        ctx = AutogradFunctionContextVariable.create(tx)
+        ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
         if isinstance(self.fwd_graph, types.FunctionType):
             fwd_fn = UserFunctionVariable(self.fwd_graph, source=fwd_src)
             fwd_args = [ctx, *args]
