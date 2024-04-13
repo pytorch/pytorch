@@ -28,7 +28,7 @@ from .traced_function_transforms import (
     fn_input_mutations_to_outputs,
     fn_prepped_for_autograd,
 )
-from .utils import unlift_tokens
+from .utils import root_module_when_exporting_non_strict, unlift_tokens
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 
@@ -47,16 +47,6 @@ def _create_graph(f, args, *, aot_config: AOTConfig) -> torch.fx.GraphModule:
         )(*args)
 
     return fx_g
-
-
-def _root_module_when_exporting_non_strict(flat_fn):
-    # When exporting in non-strict mode, we wrap the root module in a specific pattern.
-    # See `_aot_export_non_strict` in torch.export._trace.py.
-    # We look for that wrapping pattern here.
-    if hasattr(flat_fn, "_orig_mod") and hasattr(flat_fn._orig_mod, "_export_root"):
-        return flat_fn._orig_mod._export_root
-    else:
-        return None
 
 
 def aot_dispatch_base_graph(
@@ -107,7 +97,7 @@ def aot_dispatch_base_graph(
 
     # We track buffer assignments when exporting in non-strict mode.
     # (In contrast, strict mode errors on any attribute assignment.)
-    mod_when_exporting_non_strict = _root_module_when_exporting_non_strict(flat_fn)
+    mod_when_exporting_non_strict = root_module_when_exporting_non_strict(flat_fn)
     if aot_config.is_export and mod_when_exporting_non_strict is not None:
         # For any buffer that is assigned, we want to associate it to the final proxy node
         # that it is assigned to. This node can then be added as a buffer mutation output.

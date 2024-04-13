@@ -424,7 +424,7 @@ class TestExport(TestCase):
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
-    def test_state(self):
+    def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self):
                 super().__init__()
@@ -465,7 +465,7 @@ class TestExport(TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "The attribute self.buf was assigned during export",
+            "The tensor attribute self.buf was assigned during export",
         ):
             torch.export.export(M(), (torch.randn(2, 3),), strict=False)
 
@@ -523,9 +523,28 @@ class TestExport(TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "The attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
+            "The tensor attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
         ):
             torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+
+    def test_state_primitives(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = 1
+                self.y = {"k": 2}
+                self.z = (3,)
+
+            def forward(self, x):
+                self.x = self.x + 4
+                self.y["k"] = self.y["k"] + 5
+                self.z = (self.z[0] + 6,)
+                return x + self.x + self.y["k"] + self.z[0]
+
+        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        self.assertTrue(
+            torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
+        )
 
     # Predispatch has different expected results
     @testing.expectedFailureSerDerPreDispatch
