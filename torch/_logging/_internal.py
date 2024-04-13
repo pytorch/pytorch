@@ -139,7 +139,7 @@ class LogState:
     # the set of currently enabled artifacts
     artifact_name_to_level: Dict[str, int] = field(default_factory=dict)
 
-    def enable_artifact(self, artifact_name: str, log_level: int = logging.DEBUG):
+    def enable_artifact(self, artifact_name: str, log_level: int):
         self.artifact_name_to_level[artifact_name] = log_level
 
     def is_artifact_enabled(self, name: str):
@@ -426,7 +426,7 @@ def set_logs(
                     )
 
                 if val:
-                    log_state.enable_artifact(alias)
+                    log_state.enable_artifact(alias, logging.DEBUG)
             elif log_registry.is_log(alias) or alias in log_registry.child_log_qnames:
                 if val not in logging._levelToName:
                     raise ValueError(
