@@ -334,9 +334,7 @@ class TestForeach(TestCase):
                             [rhs_arg, tensors], is_cuda=False, expect_fastpath=False
                         )
                     ).mean().backward()
-                    sum(
-                        [ref.func(ref_rhs_arg, t) for t in ref_tensors]
-                    ).mean().backward()
+                    sum(ref.func(ref_rhs_arg, t) for t in ref_tensors).mean().backward()
                     self.assertEqual(
                         [t.grad for t in tensors], [t.grad for t in ref_tensors]
                     )
