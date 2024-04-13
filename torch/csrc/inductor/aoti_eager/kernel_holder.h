@@ -38,7 +38,7 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
       torch::jit::Stack* stack);
 
  private:
-  bool detect_cache(
+  bool cache_lookup(
       const c10::OperatorHandle& op,
       c10::DispatchKeySet keyset,
       torch::jit::Stack* stack);
