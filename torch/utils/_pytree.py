@@ -16,6 +16,7 @@ To improve the performance we can move parts of the implementation to C++.
 """
 
 import dataclasses
+import functools
 import importlib
 import json
 import sys
@@ -1056,7 +1057,7 @@ def map_only(
         raise TypeError("Argument must be a type, a tuple of types, or a callable.")
 
     def wrapper(func: Callable[[T], Any]) -> Callable[[Any], Any]:
-        # @functools.wraps(func)  # torch dynamo doesn't support this yet
+        @functools.wraps(func)
         def wrapped(x: T) -> Any:
             if pred(x):
                 return func(x)
