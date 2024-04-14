@@ -25,6 +25,7 @@ class AdamW(Optimizer):
         capturable: bool = False,
         differentiable: bool = False,
         fused: Optional[bool] = None,
+        offload_to_cpu: bool = False,
     ):
         if not 0.0 <= lr:
             raise ValueError(f"Invalid learning rate: {lr}")
@@ -51,6 +52,7 @@ class AdamW(Optimizer):
             fused=fused,
         )
         super().__init__(params, defaults)
+        self._offload_to_cpu = offload_to_cpu
 
         if fused:
             if differentiable:
@@ -70,6 +72,12 @@ class AdamW(Optimizer):
                                    f"supported devices: {fused_supported_devices}.")
             if foreach:
                 raise RuntimeError("`fused` and `foreach` cannot be `True` together.")
+
+        if offload_to_cpu:
+            for state in self.state.values():
+                for k, v in state.items():
+                    if isinstance(v, torch.Tensor):
+                        state[k] = v.cpu()
 
     def __setstate__(self, state):
         super().__setstate__(state)
@@ -184,6 +192,11 @@ class AdamW(Optimizer):
                 max_exp_avg_sqs,
                 state_steps,
             )
+            param_devices = []
+            if self._offload_to_cpu:
+                for i,p in enumerate(params_with_grad):
+                    p.data = p.data.cpu()
+                    param_device.append(p.device)
 
             adamw(
                 params_with_grad,
@@ -207,6 +220,10 @@ class AdamW(Optimizer):
                 found_inf=getattr(self, "found_inf", None),
                 has_complex=has_complex,
             )
+            if self._offload_to_cpu:
+                for i,p in enumerate(params_with_grad):
+                    p.data = p.data.to(param_device[i])
+
 
         return loss
 
