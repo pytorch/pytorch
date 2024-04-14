@@ -180,15 +180,15 @@ inline void tinygemm_kernel(
   c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
 
-#else
+#endif
 
 // non-vectorized version
-template <int BLOCK_M, int BLOCK_N>
+template <int BLOCK_M, int BLOCK_N, typename T>
 inline void tinygemm_kernel(
-    const BFloat16* RESTRICT A,
+    const T* RESTRICT A,
     const int8_t* RESTRICT B,
-    const BFloat16* RESTRICT scales,
-    BFloat16* RESTRICT C,
+    const T* RESTRICT scales,
+    T* RESTRICT C,
     int lda,
     int ldb,
     int ldc,
@@ -207,8 +207,6 @@ inline void tinygemm_kernel(
     }
   }
 }
-
-#endif
 
 #define LAUNCH_TINYGEMM_KERNEL(MB_SIZE, NB_SIZE)                 \
   tinygemm_kernel<MB_SIZE, NB_SIZE>(                             \
@@ -234,16 +232,17 @@ inline void tinygemm_kernel(
       break;                                                     \
   }
 
-void int8pack_mm_kernel(
+template<typename T>
+void int8pack_mm_kernel_(
     const Tensor& C,
     const Tensor& A,
     const Tensor& B,
     const Tensor& scales) {
 
-  const auto* A_data = A.data_ptr<BFloat16>();
+  const auto* A_data = A.data_ptr<T>();
   const auto* B_data = B.data_ptr<int8_t>();
-  auto* C_data = C.data_ptr<BFloat16>();
-  const auto* S_data = scales.data_ptr<BFloat16>();
+  auto* C_data = C.data_ptr<T>();
+  const auto* S_data = scales.data_ptr<T>();
 
   int M = A.size(0);
   int N = B.size(0);
@@ -293,6 +292,18 @@ void int8pack_mm_kernel(
       data_index_step(mb, MB, nb, NB);
     }
   });
+}
+
+void int8pack_mm_kernel(
+    const Tensor& C,
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& scales) {
+  if (C.dtype() == kHalf) {
+     int8pack_mm_kernel_<Half>(C, A, B, scales);
+  } else {
+     int8pack_mm_kernel_<BFloat16>(C, A, B, scales);
+  }
 }
 
 } // anonymous namespace
