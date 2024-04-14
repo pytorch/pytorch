@@ -64,6 +64,7 @@ KERNEL_COUNT_OVERRIDES = {
     "test_adam_tensor_lr_amsgrad_capturable_cuda": 6,
     "test_adam_amsgrad_capturable_cuda": 6,
     "test_adadelta_tensor_lr_capturable_cuda": 6,
+    "test_rmsprop_tensor_lr_capturable_cuda": 6,
     "test_adadelta_tensor_lr_capturable_foreach_cuda": 4,
     "test_adadelta_foreach_weight_decay_maximize_cpu": 12,
     "test_adadelta_foreach_rho_weight_decay_cpu": 12,
@@ -78,19 +79,24 @@ KERNEL_COUNT_OVERRIDES = {
     "test_sgd_momentum_nesterov_weight_decay_foreach_cuda": 2,
     "test_sgd_cuda": 4,
     "test_sgd_cpu": 4,
+    "test_rmsprop_tensor_lr_capturable_foreach_cuda": 4,
+    "test_adagrad_initial_accumulator_value_weight_decay_foreach_cuda": 3,
+    "test_adagrad_lr_decay_weight_decay_foreach_cuda": 3,
+    "test_adagrad_weight_decay_foreach_cuda": 3,
+    "test_adagrad_weight_decay_maximize_foreach_cuda": 3,
 }
 
 # also tracks currently supported optimizers
 KERNEL_COUNTS = {
     Adam: KernelCounts(multitensor=2, singletensor=8),
     AdamW: KernelCounts(multitensor=2, singletensor=8),
-    NAdam: KernelCounts(multitensor=2, singletensor=12),
-    Rprop: KernelCounts(multitensor=1, singletensor=4),
-    RMSprop: KernelCounts(multitensor=1, singletensor=4),
+    NAdam: KernelCounts(multitensor=2, singletensor=11),
+    Rprop: KernelCounts(multitensor=2, singletensor=8),
+    RMSprop: KernelCounts(multitensor=2, singletensor=8),
     Adadelta: KernelCounts(multitensor=2, singletensor=8),
-    Adagrad: KernelCounts(multitensor=5, singletensor=8),
-    ASGD: KernelCounts(multitensor=2, singletensor=12),
+    Adagrad: KernelCounts(multitensor=2, singletensor=8),
     SGD: KernelCounts(multitensor=1, singletensor=8),
+    ASGD: KernelCounts(multitensor=2, singletensor=11),
     RAdam: KernelCounts(multitensor=2, singletensor=8),
     Adamax: KernelCounts(multitensor=2, singletensor=8),
 }
@@ -205,16 +211,13 @@ def check_optim(
 
     self.assertEqual(list(params_eager), list(params_compiled), atol=atol, rtol=rtol)
 
-    # currently we don't mutate step properly until we resolve
-    # https://github.com/pytorch/pytorch/issues/115679
-    if optim_cls not in (Rprop, RMSprop):
-        for p_eager, p_compiled in zip(params_eager, params_compiled):
-            self.assertEqual(
-                state_eager[p_eager],
-                state_compiled[p_compiled],
-                atol=atol,
-                rtol=rtol,
-            )
+    for p_eager, p_compiled in zip(params_eager, params_compiled):
+        self.assertEqual(
+            state_eager[p_eager],
+            state_compiled[p_compiled],
+            atol=atol,
+            rtol=rtol,
+        )
 
 
 def make_test(
@@ -307,8 +310,16 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
             # perturb state to force recompile
             # Adagrad doesn't reinitialize state on each step
-            if optim_cls is Adagrad:
+            # SGD has an empty state
+            if optim_cls in (Adagrad, SGD):
                 opt_compiled.param_groups[0]["lr"] = 0.02
+            elif optim_cls is Adam:  # ensure we are guarding on the data_ptr of states
+                state_tensor = opt_compiled.state[
+                    opt_compiled.param_groups[0]["params"][0]
+                ]["exp_avg"]
+                opt_compiled.state[opt_compiled.param_groups[0]["params"][0]][
+                    "exp_avg"
+                ] = torch.zeros_like(state_tensor)
             else:
                 opt_compiled.state.clear()
 
@@ -424,17 +435,15 @@ class CompiledOptimizerTests(TestCase):
     test_adamw_recompile = make_recompile_test(AdamW, lr=0.01)
     test_adamax_recompile = make_recompile_test(Adamax, lr=0.01)
     test_nadam_recompile = make_recompile_test(NAdam, lr=0.01)
-    test_rprop_recompile = make_recompile_test(Rprop, kernel_count=1, lr=0.01)
-    test_rmsprop_recompile = make_recompile_test(RMSprop, kernel_count=1, lr=0.01)
+    test_rprop_recompile = make_recompile_test(Rprop, lr=0.01)
+    test_rmsprop_recompile = make_recompile_test(RMSprop, lr=0.01)
     test_adadelta_recompile = make_recompile_test(Adadelta, lr=0.01)
-    test_adagrad_recompile = make_recompile_test(Adagrad, kernel_count=5, lr=0.01)
-    test_asgd_recompile_default = make_recompile_test(ASGD, kernel_count=2, lr=0.01)
+    test_adagrad_recompile = make_recompile_test(Adagrad, lr=0.01)
+    test_asgd_recompile_default = make_recompile_test(ASGD, lr=0.01)
     test_asgd_recompile_single = make_recompile_test(
-        ASGD, kernel_count=12, lr=0.01, foreach=False
+        ASGD, kernel_count=11, lr=0.01, foreach=False
     )
-    test_asgd_recompile_foreach = make_recompile_test(
-        ASGD, kernel_count=2, lr=0.01, foreach=True
-    )
+    test_asgd_recompile_foreach = make_recompile_test(ASGD, lr=0.01, foreach=True)
     test_sgd_recompile_single = make_recompile_test(
         SGD, kernel_count=4, lr=0.01, foreach=False
     )
@@ -599,6 +608,19 @@ class CompiledOptimizerTests(TestCase):
         loop(optimizer_c, closure_c)
 
         self.assertEqual(param, param_c)
+
+    def test_get_value_on_static_address(self):
+        from torch._dynamo.decorators import mark_static_address
+        from torch.optim.optimizer import _get_value
+
+        compiled = torch.compile(_get_value)
+
+        x = torch.ones(2, 2)
+        mark_static_address(x)
+
+        ret_val = compiled(x)
+
+        self.assertEqual(ret_val, x)
 
 
 for optim_cls, name, kwargs in COMPILED_OPT_KWARG_DB:
