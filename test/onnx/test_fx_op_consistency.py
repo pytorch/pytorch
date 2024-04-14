@@ -1588,14 +1588,6 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
         model_type=pytorch_test_common.TorchModelType.TORCH_NN_MODULE,
     ),
     xfail(
-        "nonzero",
-        model_type=pytorch_test_common.TorchModelType.TORCH_EXPORT_EXPORTEDPROGRAM,
-        reason=onnx_test_common.reason_onnx_script_does_not_support(
-            "aten::_assert_async.msg",
-            "https://github.com/pytorch/pytorch/issues/112443",
-        ),
-    ),
-    xfail(
         "scatter_add",
         matcher=lambda sample: len(sample.input.shape) == 0,
         reason="fixme: Rank(0) input will lead ORT failed due to different rank(result) in if-else branch",
