@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
     TEST_WITH_ASAN,
@@ -3464,6 +3465,9 @@ aten::mm""",
         num_matched = len(pattern.matched_events())
         self.assertEqual(num_matched, 1)
 
+    @skipIfTorchDynamo(
+        "pattern checks for aten::_zero op which might not be there with torch.compile'd graph"
+    )
     def test_profiler_grad_not_set_to_none_pattern(self):
         x = torch.ones((100, 100))
         model = nn.Sequential(
