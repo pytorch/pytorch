@@ -183,9 +183,6 @@ class CacheBase:
         )
 
     def __init__(self) -> None:
-        if not torch.cuda.is_available():
-            return
-
         self.system = CacheBase.get_system()
 
         self.local_cache_path = CacheBase.get_local_cache_path()

@@ -662,17 +662,19 @@ class ExternKernelChoice:
         has_out_variant=True,
         op_overload=None,
         use_fallback_kernel=False,
+        kernel_creator=None,
     ):
         super().__init__()
         name = name or kernel.__name__
         assert callable(kernel)
-        assert not hasattr(extern_kernels, name), "duplicate extern kernel"
+        assert not hasattr(extern_kernels, name), f"duplicate extern kernel: {name}"
         self.name = name
         self.cpp_kernel_name = cpp_kernel
         self.has_out_variant = has_out_variant
         setattr(extern_kernels, name, kernel)
         self.op_overload = op_overload
         self.use_fallback_kernel = use_fallback_kernel
+        self.kernel_creator = kernel_creator
 
     def to_callable(self):
         return getattr(extern_kernels, self.name)
@@ -831,6 +833,8 @@ class ExternKernelCaller(ChoiceCaller):
             inner = ir.FallbackKernel.create(
                 self.choice.op_overload, *self.input_nodes, **self.kwargs
             )
+        elif self.choice.kernel_creator is not None:
+            inner = self.choice.kernel_creator(*self.input_nodes, **self.kwargs)
         else:
             cls = ir.ExternKernelOut if self.has_out_variant else ir.ExternKernelAlloc
             inner = cls(
@@ -1033,8 +1037,11 @@ class AlgorithmSelectorCache(PersistentCache):
         unique_example_inputs = {
             x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
             for i, x in enumerate(input_nodes)
+            if isinstance(x, ir.IRNode)
         }
-        example_inputs = list(unique_example_inputs.values())
+        example_inputs = list(unique_example_inputs.values()) + [
+            x for x in input_nodes if not isinstance(x, ir.IRNode)
+        ]
         example_inputs_extern = [
             torch.as_strided(
                 unique_example_inputs[input_node.get_name()],
@@ -1051,6 +1058,8 @@ class AlgorithmSelectorCache(PersistentCache):
                     fallback=config.unbacked_symint_fallback,
                 ),
             )
+            if isinstance(input_node, ir.IRNode)
+            else input_node
             for input_node in input_nodes
         ]
 
@@ -1076,7 +1085,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 "inputs = [",
             ]
             for x in example_inputs:
-                lines.append(f"    {tensor_repr(x)},")
+                lines.append(
+                    f"    {tensor_repr(x) if isinstance(x, torch.Tensor) else x},"
+                )
             lines += ["]", f"out = {tensor_repr(out)}", ""]
             return "\n".join(lines)
 
@@ -1226,20 +1237,24 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         sizevars = V.graph.sizevars
         return (
-            node.get_device().type,
-            str(node.get_dtype()),
-            *sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            *sizevars.size_hints(
-                node.get_stride(),
-                fallback=config.unbacked_symint_fallback,
-            ),
-            sizevars.size_hint(
-                node.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,
-            ),
+            (
+                node.get_device().type,
+                str(node.get_dtype()),
+                *sizevars.size_hints(
+                    node.get_size(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                *sizevars.size_hints(
+                    node.get_stride(),
+                    fallback=config.unbacked_symint_fallback,
+                ),
+                sizevars.size_hint(
+                    node.get_layout().offset,
+                    fallback=config.unbacked_symint_fallback,
+                ),
+            )
+            if isinstance(node, ir.IRNode)
+            else str(node)
         )
 
 
