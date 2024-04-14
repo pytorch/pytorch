@@ -18,7 +18,7 @@ import traceback
 import types
 import typing
 import weakref
-from typing import Any, Dict, List, Optional, Set, Tuple, Type
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Type
 from unittest.mock import patch
 
 import torch
@@ -306,7 +306,7 @@ def generic_jump(truth_fn: typing.Callable[[object], bool], push: bool):
         if not self.should_compile_partial_graph():
             unimplemented("should_compile_partial_graph=False")
         # compile a partial subgraph prefix then jump into user code
-        if self.has_backedge():
+        if self.maybe_has_backedge():
             msg = (
                 "Skipping frame because there is a graph break in a for/while loop\n"
                 f"{self.frame_summary()}"
@@ -538,7 +538,7 @@ def break_graph_if_unsupported(*, push):
                         *frame_loc,
                     )
 
-                if self.has_backedge():
+                if self.maybe_has_backedge():
                     msg = (
                         "Skipping frame because there is a graph break in a for/while loop\n"
                         f"{self.frame_summary()}"
@@ -648,6 +648,7 @@ class InstructionTranslatorBase(
     current_speculation: Optional[SpeculationEntry]
     dispatch_table: List[Any]
     exec_recorder: Optional[ExecutionRecorder]
+    strict_checks_fn: Optional[Callable[[VariableTracker], bool]]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -657,10 +658,31 @@ class InstructionTranslatorBase(
         """
         self.inconsistent_side_effects = True
 
-    def has_backedge(self):
+    def maybe_has_backedge(self):
+        # This function employs a heuristic. It does not reliably detect a backedge.
+        # The heuristic is straightforward: starting from the current instruction and
+        # continuing to the end, if any jump instruction targets an instruction before
+        # the current one, there might be a backedge.
+
+        # Python 3.12 introduced changes to bytecode that group common paths in
+        # blockstacks (with or try...else) and allow for early returns. Consequently,
+        # there can be multiple RETURN_VALUE instructions. Another heuristic is to
+        # halt detection upon encountering the first RETURN_VALUE or RETURN_CONST.
+
+        # These heuristics can result in both false positives and negatives, but
+        # in either case, the Dynamo code remains valid. For false positives
+        # (where an edge is incorrectly marked as a backedge), Dynamo will
+        # perform a SkipFrame instead of potentially applying optimizations. For
+        # false negatives (where an edge that should be marked as a backedge
+        # isn't), multiple graphs may be generated if there's a break in the
+        # graph during a for loop. In general, its better to have fewer false
+        # negatives so that Dynamo does not skip the whole frame.
+
         cur_offset = self.current_instruction.offset
         assert self.instruction_pointer is not None
         for inst in self.instructions[self.instruction_pointer :]:
+            if inst.opname in ("RETURN_VALUE", "RETURN_CONST"):
+                return False
             if inst.opname in JUMP_OPNAMES:
                 jump_offset = inst.argval
                 if jump_offset < cur_offset:
@@ -1985,12 +2007,16 @@ class InstructionTranslatorBase(
         return None
 
     @contextlib.contextmanager
-    def strict_translation_mode(self):
-        self.strict_checks_enabled = True
+    def strict_translation_mode(self, check_fn: Callable[[VariableTracker], bool]):
+        """
+        Strict mode is enabled on a per-VariableTracker level depending on the return value of check_fn(node).
+        """
+        prior = self.strict_checks_fn
+        self.strict_checks_fn = check_fn
         try:
             yield
         finally:
-            self.strict_checks_enabled = False
+            self.strict_checks_fn = prior
 
     def speculate(self) -> SpeculationEntry:
         return self.speculation_log.next(
@@ -2057,7 +2083,7 @@ class InstructionTranslatorBase(
 
         self.current_speculation = None
 
-        self.strict_checks_enabled = False
+        self.strict_checks_fn = None
 
         if sys.version_info >= (3, 10):
             from .resume_execution import (
@@ -2487,8 +2513,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             )
 
         strict_ctx: Any = contextlib.nullcontext()
-        if parent.strict_checks_enabled:
-            strict_ctx = tracer.strict_translation_mode()
+        if parent.strict_checks_fn:
+            strict_ctx = tracer.strict_translation_mode(parent.strict_checks_fn)
         try:
             with strict_ctx:
                 tracer.run()
