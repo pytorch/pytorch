@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import copyreg
+import ctypes
 import dataclasses
 import functools
 import hashlib
@@ -77,6 +78,8 @@ from torch.hub import _Faketqdm, tqdm
 _HERE = os.path.abspath(__file__)
 _TORCH_PATH = os.path.dirname(os.path.dirname(_HERE))
 _LINKER_SCRIPT = os.path.join(_TORCH_PATH, "_inductor/script.ld")
+
+_IS_WINDOWS = sys.platform == "win32"
 
 if config.is_fbcode():
     from triton.fb import build_paths
@@ -1095,6 +1098,8 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)
     def __bool__(self) -> bool:
+        from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppTorchOptions
+
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
 
@@ -1107,20 +1112,18 @@ cdll.LoadLibrary("__lib_path__")
         lock_dir = get_lock_dir()
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
-            output_path = input_path[:-3] + "so"
-            build_cmd = shlex.split(
-                cpp_compile_command(
-                    input_path, output_path, warning_all=False, vec_isa=self
-                )
+            output_dir = os.path.dirname(input_path)
+            x86_isa_help_builder = CppBuilder(
+                key, [input_path], CppTorchOptions(self), output_dir
             )
             try:
                 # Check build result
-                compile_file(input_path, output_path, build_cmd)
+                status, target_file = x86_isa_help_builder.build()
                 subprocess.check_call(
                     [
                         sys.executable,
                         "-c",
-                        VecISA._avx_py_load.replace("__lib_path__", output_path),
+                        VecISA._avx_py_load.replace("__lib_path__", target_file),
                     ],
                     stderr=subprocess.DEVNULL,
                     env={**os.environ, "PYTHONPATH": ":".join(sys.path)},
@@ -1148,7 +1151,11 @@ class VecNEON(VecISA):
 class VecAVX512(VecISA):
     _bit_width = 512
     _macro = "-DCPU_CAPABILITY_AVX512"
-    _arch_flags = "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+    _arch_flags = (
+        "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
+        if not _IS_WINDOWS
+        else "/arch:AVX512"
+    )  # TODO: use cflags
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
 
     def __str__(self) -> str:
@@ -1161,7 +1168,9 @@ class VecAVX512(VecISA):
 class VecAVX2(VecISA):
     _bit_width = 256
     _macro = "-DCPU_CAPABILITY_AVX2"
-    _arch_flags = "-mavx2 -mfma"
+    _arch_flags = (
+        "-mavx2 -mfma" if not _IS_WINDOWS else "/arch:AVX2"
+    )  # TODO: use cflags
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
@@ -1198,6 +1207,61 @@ class InvalidVecISA(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
 
+def x86_isa_checker() -> List[str]:
+    from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppOptions
+    from torch._inductor.jit_builder.isa_help_code_store import get_x86_isa_detect_code
+
+    supported_isa: List[str] = []
+
+    def _check_and_append_supported_isa(
+        dest: List[str], isa_supported: bool, isa_name: str
+    ):
+        if isa_supported is True:
+            dest.append(isa_name)
+
+    Arch = platform.machine()
+    """
+    Arch value is x86_64 on Linux, and the value is AMD64 on Windows.
+    """
+    if Arch != "x86_64" and Arch != "AMD64":
+        return supported_isa
+
+    cpp_code = get_x86_isa_detect_code()
+
+    key, input_path = write(cpp_code, "cpp")
+
+    from filelock import FileLock
+
+    lock_dir = get_lock_dir()
+    lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
+    with lock:
+        output_dir = os.path.dirname(input_path)
+        x86_isa_help_builder = CppBuilder(key, [input_path], CppOptions(), output_dir)
+        status, target_file = x86_isa_help_builder.build()
+
+        # 1. open the shared library
+        isa_help_lib = ctypes.CDLL(target_file)
+
+        # 2. tell Python the argument and result types of function
+        isa_help_lib.check_avx2_feature.restype = ctypes.c_bool
+        isa_help_lib.check_avx2_feature.argtypes = []
+
+        isa_help_lib.check_avx512_feature.restype = ctypes.c_bool
+        isa_help_lib.check_avx512_feature.argtypes = []
+
+        # 3. call cpp backend and get result
+        avx2 = isa_help_lib.check_avx2_feature()
+        avx512 = isa_help_lib.check_avx512_feature()
+
+        _check_and_append_supported_isa(supported_isa, avx2, "avx2")
+        _check_and_append_supported_isa(supported_isa, avx512, "avx512")
+
+        # Remove after all feature completed.
+        # print(f"!!! x86 isa --> avx2: {avx2}, avx512: {avx512}")
+
+        return supported_isa
+
+
 invalid_vec_isa = InvalidVecISA()
 supported_vec_isa_list = [VecAVX512(), VecAVX2()]
 
@@ -1210,26 +1274,29 @@ def valid_vec_isa_list() -> List[VecISA]:
     if sys.platform == "darwin" and platform.processor() == "arm":
         return [VecNEON()]
 
-    if sys.platform != "linux":
+    cur_os = sys.platform
+    if cur_os != "linux" and cur_os != "win32":
         return []
 
     if platform.machine() == "s390x":
         return [VecZVECTOR()]
 
     isa_list = []
-    with open("/proc/cpuinfo") as _cpu_info:
-        _cpu_info_content = _cpu_info.read()
-        for isa in supported_vec_isa_list:
-            if str(isa) in _cpu_info_content and isa:
-                isa_list.append(isa)
-        return isa_list
+    _cpu_supported_isa = x86_isa_checker()
+    for isa in supported_vec_isa_list:
+        if str(isa) in _cpu_supported_isa:
+            isa_list.append(isa)
+    return isa_list
+
+
+# valid_vec_isa_list only need setup once.
+_valid_vec_isa_list = valid_vec_isa_list()
 
 
 def pick_vec_isa() -> VecISA:
     if config.is_fbcode():
         return VecAVX2()
 
-    _valid_vec_isa_list: List[VecISA] = valid_vec_isa_list()
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
@@ -2050,8 +2117,16 @@ class CppCodeCache:
             "cuda": cuda,
             "vec_isa": pick_vec_isa(),
         }
-        cpp_command = repr(cpp_compile_command("i", "o", **compile_command))
-        key, input_path = write(source_code, "cpp", extra=cpp_command)
+
+        from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppTorchOptions
+
+        picked_vec_isa = pick_vec_isa()
+        isa_seed = CppBuilder("i", ["o"], CppTorchOptions(picked_vec_isa))
+        # write will calc source_code hash, but we need split same code with different
+        # ISAs. get a command_line which contains isa parameters as a seed, what make
+        # hash value different with multiple Isa.
+        hash_seed = isa_seed.get_command_line()
+        key, input_path = write(source_code, "cpp", extra=hash_seed)
 
         if key not in cls.cache:
             from filelock import FileLock
