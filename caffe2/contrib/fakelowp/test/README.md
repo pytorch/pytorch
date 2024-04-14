@@ -41,7 +41,7 @@ sudo apt-get install libgflags-dev
 
 Once you have all the dependency libs installed, build PyTorch with FakeLowP op support
 ```
-USE_CUDA=0 USE_ROCM=0 USE_FAKELOWP=ON DEBUG=1 CMAKE_BUILD_TYPE=Debug USE_GFLAGS=1 USE_GLOG=1 USE_MKLDNN=0 BUILD_TEST=0 python setup.py install
+USE_CUDA=0 USE_ROCM=0 USE_FAKELOWP=ON DEBUG=1 CMAKE_BUILD_TYPE=Debug USE_GFLAGS=1 USE_GLOG=1 USE_MKLDNN=0 BUILD_TEST=0 python -m pip install .
 ```
 The key options here are `USE_FAKELOWP=ON` which enables building of FakeLowP operators and `USE_GFLAGS=1` which enables gflags as we
 use gflags in Glow to pass options. Other flags are mostl for fast build time and debug purpose.

@@ -31,12 +31,12 @@ build-deps: clone-deps
 		typing-extensions requests protobuf numba cython scikit-learn
 	conda install -y -c pytorch magma-cuda116
 	conda install -y -c conda-forge librosa
-	(cd ../../../torchvision && python setup.py clean && python setup.py develop)
-	(cd ../../../torchdata && python setup.py install)
-	(cd ../../../torchtext && python setup.py clean && python setup.py develop)
-	(cd ../../../torchaudio && python setup.py clean && python setup.py develop)
-	(cd ../../../FBGEMM/fbgemm_gpu && pip install -r requirements.txt && python setup.py clean && python setup.py develop)
-	(cd ../../../torchrec && python setup.py clean && python setup.py develop)
-	(cd ../../../detectron2  && python setup.py clean && python setup.py develop)
+	(cd ../../../torchvision && python setup.py clean && python -m pip install -e .)
+	(cd ../../../torchdata && python -m pip install .)
+	(cd ../../../torchtext && python setup.py clean && python -m pip install -e .)
+	(cd ../../../torchaudio && python setup.py clean && python -m pip install -e .)
+	(cd ../../../FBGEMM/fbgemm_gpu && pip install -r requirements.txt && python setup.py clean && python -m pip install -e .)
+	(cd ../../../torchrec && python setup.py clean && python -m pip install -e .)
+	(cd ../../../detectron2  && python setup.py clean && python -m pip install -e .)
 	(cd ../../../torchbenchmark && python install.py --continue_on_fail)
 	pip uninstall -y torchrec-nightly fbgemm-gpu-nightly

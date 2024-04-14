@@ -17,4 +17,5 @@ fsspec
 # setuptools was removed from default python install
 setuptools ; python_version >= "3.12"
 packaging
+wheel
 optree>=0.9.1

@@ -173,7 +173,7 @@ def main():
         build_run = subprocess.run(
             f"source activate {env_path} && "
             f"cd {git_root} && "
-            "python setup.py install --cmake",
+            "python -m pip install --config-settings '--global-option=--cmake' .",
             shell=True,
             capture_output=True,
             check=True,

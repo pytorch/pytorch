@@ -35,32 +35,32 @@ wget https://github.com/pytorch/pytorch/pull/39744.diff
 
 source activate ref_39850
 git checkout 766889b6bfeb9802f892fa0782d629554b2c71b4
-python setup.py install
+python -m pip install .
 conda deactivate
 
 source activate pr_39850
 git apply 39850.diff
-python setup.py install
+python -m pip install .
 git checkout .
 conda deactivate
 
 source activate ref_39967
 git checkout c4fc278fa8cbd0fb45b8130a679c62f673087484
-python setup.py install
+python -m pip install .
 conda deactivate
 
 source activate pr_39967
 git checkout 7a3c223bbb711c7a93910ce406a0126b8000b43b
-python setup.py install
+python -m pip install .
 conda deactivate
 
 source activate ref_39744
 git checkout 541814f2b7eacabacdc87ccb1b4495bf486f501a
-python setup.py install
+python -m pip install .
 conda deactivate
 
 source activate pr_39744
 git apply 39744.diff
-python setup.py install
+python -m pip install .
 git checkout .
 conda deactivate

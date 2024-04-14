@@ -552,10 +552,10 @@ except ImportError:
                 of the PyTorch repository rather than the C extensions which
                 are expected in the `torch._C` namespace. This can occur when
                 using the `install` workflow. e.g.
-                    $ python setup.py install && python -c "import torch"
+                    $ python -m pip install . && python -c "import torch"
 
-                This error can generally be solved using the `develop` workflow
-                    $ python setup.py develop && python -c "import torch"  # This should succeed
+                This error can generally be solved using the `editable` workflow
+                    $ python -m pip install -e . && python -c "import torch"  # This should succeed
                 or by running Python from a different directory.
             ''').strip()) from None
     raise  # If __file__ is not None the cause is unknown, so just re-raise.

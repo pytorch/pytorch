@@ -13,7 +13,8 @@ conda install pytorch torchvision -c pytorch
 # Install the latest pytorch master from source.
 # It should supersede the installation from the release binary.
 cd $PYTORCH_HOME
-python setup.py build develop
+python setup.py build
+python -m pip install -e .
 
 # Check the pytorch installation version
 python -c "import torch; print(torch.__version__)"

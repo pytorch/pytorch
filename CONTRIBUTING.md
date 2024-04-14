@@ -70,14 +70,14 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
 
 * If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
 
-* When installing with `python setup.py develop` (in contrast to `python setup.py install`) Python runtime will use
+* When installing with `python -m pip install -e .` (in contrast to `python -m pip install .`) Python runtime will use
   the current local source-tree when importing `torch` package. (This is done by creating [`.egg-link`](https://wiki.python.org/moin/PythonPackagingTerminology#egg-link) file in `site-packages` folder)
   This way you do not need to repeatedly install after modifying Python files (`.py`).
   However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or
    non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
 
-  One way to avoid running `python setup.py develop` every time one makes a change to C++/CUDA/ObjectiveC files on Linux/Mac,
+  One way to avoid running `python -m pip install -e .` every time one makes a change to C++/CUDA/ObjectiveC files on Linux/Mac,
   is to create a symbolic link from `build` folder to `torch/lib`, for example, by issuing following:
   ```bash
    pushd torch/lib; sh -c "ln -sf ../../build/lib/libtorch_cpu.* ."; popd
@@ -105,7 +105,7 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
   [skip all build / test steps](https://github.blog/changelog/2021-02-08-github-actions-skip-pull-request-and-push-workflows-with-skip-ci/).
   Note that changing the pull request body or title on GitHub itself has no effect.
 
-* If you run into errors when running `python setup.py develop`, here are some debugging steps:
+* If you run into errors when running `python -m pip install -e .`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
   2. Nuke your `build` directory. The `setup.py` script compiles binaries into the `build` folder and caches many
@@ -118,12 +118,12 @@ Follow the instructions for [installing PyTorch from source](https://github.com/
       git clean -xdf
       python setup.py clean
       git submodule update --init --recursive # very important to sync the submodules
-      python setup.py develop                 # then try running the command again
+      python -m pip install -e .                 # then try running the command again
       ```
-  4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
+  4. The main step within `python -m pip install -e .` is running `make` from the `build` directory. If you want to
     experiment with some environment variables, you can pass them into the command:
       ```bash
-      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
+      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python -m pip install -e .
       ```
 
 * If you run into issue running `git submodule update --init --recursive`. Please try the following:
@@ -624,7 +624,7 @@ can be selected interactively with your mouse to zoom in on a particular part of
 the program execution timeline. The `--native` command-line option tells
 `py-spy` to record stack frame entries for PyTorch C++ code. To get line numbers
 for C++ code it may be necessary to compile PyTorch in debug mode by prepending
-your `setup.py develop` call to compile PyTorch with `DEBUG=1`. Depending on
+your `python pip install -e .` call to compile PyTorch with `DEBUG=1`. Depending on
 your operating system it may also be necessary to run `py-spy` with root
 privileges.
 
@@ -634,7 +634,7 @@ details.
 
 ## Managing multiple build trees
 
-One downside to using `python setup.py develop` is that your development
+One downside to using `python -m pip install -e .` is that your development
 version of PyTorch will be installed globally on your account (e.g., if
 you run `import torch` anywhere else, the development version will be
 used.
@@ -648,7 +648,7 @@ specific build of PyTorch. To set one up:
 conda create -n pytorch-myfeature
 source activate pytorch-myfeature
 # if you run python now, torch will NOT be installed
-python setup.py develop
+python -m pip install -e .
 ```
 
 ## C++ development tips
@@ -687,7 +687,7 @@ variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `USE_FLASH_ATTEN
 For example:
 
 ```bash
-DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python setup.py develop
+DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python -m pip install -e .
 ```
 
 For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
@@ -697,7 +697,7 @@ options.
 
 ### Code completion and IDE support
 
-When using `python setup.py develop`, PyTorch will generate
+When using `python -m pip install -e .`, PyTorch will generate
 a `compile_commands.json` file that can be used by many editors
 to provide command completion and error highlighting for PyTorch's
 C++ code. You need to `pip install ninja` to generate accurate
@@ -759,7 +759,7 @@ If not, you can define these variables on the command line before invoking `setu
 export CMAKE_C_COMPILER_LAUNCHER=ccache
 export CMAKE_CXX_COMPILER_LAUNCHER=ccache
 export CMAKE_CUDA_COMPILER_LAUNCHER=ccache
-python setup.py develop
+python -m pip install -e .
 ```
 
 #### Use a faster linker
@@ -786,7 +786,7 @@ setting `USE_PRECOMPILED_HEADERS=1` either on first setup, or in the
 `CMakeCache.txt` file.
 
 ```sh
-USE_PRECOMPILED_HEADERS=1 python setup.py develop
+USE_PRECOMPILED_HEADERS=1 python -m pip install -e .
 ```
 
 This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
@@ -809,7 +809,7 @@ A compiler-wrapper to fix this is provided in `tools/nvcc_fix_deps.py`. You can 
 this as a compiler launcher, similar to `ccache`
 ```bash
 export CMAKE_CUDA_COMPILER_LAUNCHER="python;`pwd`/tools/nvcc_fix_deps.py;ccache"
-python setup.py develop
+python -m pip install -e .
 ```
 
 ### Rebuild few files with debug information
@@ -1197,7 +1197,7 @@ build_with_asan()
   CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
   USE_CUDA=0 USE_OPENMP=0 BUILD_CAFFE2_OPS=0 USE_DISTRIBUTED=0 DEBUG=1 \
-  python setup.py develop
+  python -m pip install -e .
 }
 
 run_with_asan()
