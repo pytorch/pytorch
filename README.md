@@ -181,6 +181,112 @@ If you want to compile with ROCm support, install
 If you want to disable ROCm support, export the environment variable `USE_ROCM=0`.
 Other potentially useful environment variables may be found in `setup.py`.
 
+---
+## Comprehensive Tutorial: Compiling PyTorch from Source and Installing CUDA Deep Learning Libraries on Ubuntu WSL2
+This tutorial provides a step-by-step guide to compiling PyTorch from source and installing CUDA deep learning libraries on Ubuntu 20.04. It includes instructions on updating and upgrading Ubuntu, installing Anaconda, setting up a Python environment, and installing NVIDIA CUDA and cuDNN.
+### Prerequisites
+- Ubuntu OS
+- NVIDIA GPU
+- Basic knowledge of using the terminal
+### Step 1: Update and Upgrade Ubuntu
+Update and upgrade your Ubuntu system to ensure you have the latest packages and security updates.
+```bash
+sudo apt update
+sudo apt dist-upgrade
+```
+### Step 2: Set Up Downloads Directory (Optional)
+Create a symbolic link to your Downloads directory if you have one on your Windows system.
+```bash
+ln -s /mnt/c/Users/<user>/Downloads Downloads
+```
+Replace `<user>` with your Windows username.
+### Step 3: Install Anaconda
+Download Anaconda and install it. Make sure to give execute permissions to the downloaded Anaconda script.
+```bash
+wget https://repo.anaconda.com/archive/Anaconda3-2024.02-1-Linux-x86_64.sh
+chmod +x /home/<user>/Downloads/Anaconda3-2024.02-1-Linux-x86_64.sh
+./home/<user>/Downloads/Anaconda3-2024.02-1-Linux-x86_64.sh
+```
+Activate the newly installed Anaconda environment and create a new environment for PyTorch development.
+```bash
+exec bash
+conda create --name pytorch-dev python=3.11
+conda activate pytorch-dev
+```
+Install necessary Python packages for PyTorch.
+```bash
+conda install astunparse numpy ninja pyyaml mkl mkl-include setuptools cmake cffi typing_extensions future six requests dataclasses
+```
+### Step 4: Install NVIDIA CUDA Toolkit
+Install CUDA on your Windows machine from the 12.4.1 repo. Then, download and install the NVIDIA CUDA toolkit on Ubuntu.
+```bash
+wget https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt-get update
+sudo apt-get -y install cuda
+```
+### Step 5: Set CUDA Paths
+Set the CUDA paths to enable CUDA in your system. I've added these lines to my `.bashrc` file, so they persist after a reboot see below instuctions.
+```bash
+export PATH=/usr/local/cuda/bin/:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+```
+Verify the CUDA installation. If this line does not give an output, it means the paths are not set correctly from the export commands above. You may not have linked the binaries with the export commands or updated the source to reflect the changes in the `.bashrc` file. A simple reboot may solve it.
+```bash
+nvcc --version
+```
+### Step 6: Install cuDNN
+Download and install cuDNN from the NVIDIA repository.
+```bash
+wget https://developer.download.nvidia.com/compute/cudnn/9.1.0/local_installers/cudnn-local-repo-ubuntu2004-9.1.0_1.0-1_amd64.deb
+sudo dpkg -i cudnn-local-repo-ubuntu2004-9.1.0_1.0-1_amd64.deb
+sudo cp /var/cudnn-local-repo-ubuntu2004-9.1.0/cudnn-*-keyring.gpg /usr/share/keyrings/
+sudo apt-get update
+sudo apt-get -y install cudnn-cuda-12
+```
+### Step 7: Update `.bashrc` for Permanent Paths
+Add the CUDA paths to your `~/.bashrc` file to make them permanent.
+```bash
+nano ~/.bashrc
+```
+Add the following lines at the end of the file:
+```bash
+export PATH=/usr/local/cuda/bin/:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+```
+Save and close the file: `Ctrl + X`, then `Y`, then `Enter`. Then, reload the `~/.bashrc` file.
+```bash
+source ~/.bashrc
+```
+### Step 8: Reboot Your System
+Reboot your system to apply all the changes.
+```bash
+sudo reboot
+```
+### Step 9: Installing PyTorch
+Now, it is ready to use; we just have to clone the PyTorch directory. Navigate to a suitable directory and run the following commands:
+```bash
+cd ~
+git clone https://github.com/pytorch/pytorch
+cd pytorch
+```
+Let’s update our submodule using:
+```bash
+git submodule sync
+git submodule update --init --recursive
+```
+One more step to go! Install PyTorch on Linux by running the following command:
+```bash
+export CMAKE_PREFIX_PATH=${CONDA_PREFIX:-"$(dirname $(which conda))/../"}
+python3 setup.py develop
+```
+### Step 10: Reboot Your System Again
+Reboot your system once more to finalize the installation.
+```bash
+sudo reboot
+```
+Now you have successfully installed PyTorch from source and CUDA deep learning libraries on your Ubuntu system! You can start developing and running deep learning applications using PyTorch and CUDA. End of compile from source.
+
 #### Install Dependencies
 
 **Common**
