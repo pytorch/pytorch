@@ -214,9 +214,8 @@ inline void tinygemm_kernel(
         int16x8_t b_val = vmovl_s8(vld1_s8(B + i * ldb + k));
         auto b_val_low = vcvtq_f32_s32(vmovl_s16(vget_low_s16(b_val)));
         auto b_val_high = vcvtq_f32_s32(vmovl_s16(vget_high_s16(b_val)));
-        // c_val[i] = vfmaq_f32(c_val[i], a_val_high, b_val_high); but it's slower
-        c_val[i] = vaddq_f32(c_val[i], vmulq_f32(a_val_low, b_val_low));
-        c_val[i] = vaddq_f32(c_val[i], vmulq_f32(a_val_high, b_val_high));
+        c_val[i] = vfmaq_f32(c_val[i], a_val_high, b_val_high);
+        c_val[i] = vfmaq_f32(c_val[i], a_val_low, b_val_low);
       });
     }
 
