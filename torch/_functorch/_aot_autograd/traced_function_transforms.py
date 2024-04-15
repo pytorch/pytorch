@@ -678,12 +678,24 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
         import sympy
 
         result = super().run_node(n)
-        # TODO: handle Tensor returns
+        scalar_types = (torch.SymInt, torch.SymFloat, torch.SymBool, int, float, bool)
+
+        def check_consistent(new, old):
+            if isinstance(new, torch.Tensor):
+                assert isinstance(old, torch.Tensor)
+                torch._check(old.dim() == new.dim())
+                # Do this manually so that each individual test is irrefutable
+                # (TODO: should be a helper for this, maybe sym_eq?  That
+                # gives us a compound expression and I'm not sure it
+                # simplifies right now)
+                for i, j in zip(old.shape, new.shape):
+                    torch._check(i == j)
+            elif isinstance(new, scalar_types):
+                assert isinstance(old, scalar_types)
+                torch._check(old == new)
+
         if "example_value" in n.meta:
-            if isinstance(result, torch.SymInt) and isinstance(
-                result.node.expr, sympy.Symbol
-            ):
-                torch._check(result == n.meta["example_value"])
+            pytree.tree_map_(check_consistent, result, n.meta["example_value"])
 
         return result
 
