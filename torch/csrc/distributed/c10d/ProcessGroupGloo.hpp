@@ -157,7 +157,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
         const std::vector<std::vector<char>>& values) override {
       std::vector<std::vector<uint8_t>> u_values;
       u_values.reserve(values.size());
-for (auto& value : values) {
+      for (auto& value : values) {
         u_values.emplace_back(value.begin(), value.end());
       }
       store_->multiSet(keys, u_values);
