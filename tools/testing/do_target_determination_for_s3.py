@@ -56,6 +56,9 @@ def main() -> None:
 
     test_prioritizations = aggregated_heuristics.get_aggregated_priorities()
 
+    print("Aggregated Heuristics")
+    print(test_prioritizations.get_info_str(verbose=False))
+
     if os.getenv("CI") == "true":
         print("Emitting metrics")
         # Split into 3 due to size constraints
