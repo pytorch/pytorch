@@ -1031,7 +1031,7 @@ def _register_quantized_cat_lowering(
 
 
 _raw_dequantize_per_tensor_activation_pattern = CallFunction(
-    quantized_decomposed.dequantize_per_tensor,
+    quantized_decomposed.dequantize_per_tensor.default,
     Arg(),
     Arg(),
     Arg(),
