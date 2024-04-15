@@ -3180,7 +3180,7 @@ class TestExperimentalUtils(TestCase):
             self.assertEqual(
                 event_metrics.self_time_ns,
                 event_key.event.duration_time_ns
-                - sum([child.duration_time_ns for child in event_key.event.children]),
+                - sum(child.duration_time_ns for child in event_key.event.children),
             )
 
     def test_utils_intervals_overlap(self):
