@@ -233,6 +233,9 @@ class SymNode:
     def round(self, ndigits=None) -> "SymNode":
         return self._round(ndigits)  # type: ignore[attr-defined]
 
+    def trunc(self) -> "SymNode":
+        return self._trunc()  # type: ignore[attr-defined]
+
     def add(self, other) -> "SymNode":
         return self._add(other)  # type: ignore[attr-defined]
 
@@ -454,6 +457,7 @@ METHOD_TO_OPERATOR = {
     "ceil": math.ceil,
     "eq": operator.eq,
     "floor": math.floor,
+    "trunc": math.trunc,
     "floordiv": operator.floordiv,
     "ge": operator.ge,
     "gt": operator.gt,
@@ -486,6 +490,7 @@ unary_magic_methods = {
     "neg",
     "sym_not",
     "pos",
+    "trunc",
 }
 
 
@@ -548,7 +553,7 @@ for name in math_op_names:
     always_float_magic_methods.add(sym_name)
 
 
-always_int_magic_methods = {"ceil", "floor"}
+always_int_magic_methods = {"ceil", "floor", "trunc"}
 always_bool_magic_methods = {
     "eq",
     "ne",
@@ -651,6 +656,12 @@ def _sympy_floor(a):
     import sympy
 
     return _floor_ceil_helper(a, sympy.floor)
+
+
+def _sympy_trunc(a):
+    from torch.utils._sympy.functions import Trunc
+
+    return Trunc(a)
 
 
 def _sympy_ceil(a):
@@ -774,6 +785,7 @@ magic_methods = {
     "le": _sympy_le,
     "ge": _sympy_ge,
     "floor": _sympy_floor,
+    "trunc": _sympy_trunc,
     "sym_float": _sympy_sym_float,
     "ceil": _sympy_ceil,
     "neg": operator.neg,
