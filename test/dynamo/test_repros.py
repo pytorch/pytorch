@@ -4658,6 +4658,60 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
 
+    def test_stk_sdd_is_transposed(self):
+        trigger_graph_break = False
+
+        def _is_transposed(x):
+            return (
+                not x.is_contiguous()
+                and x.stride()[0] == 1
+                and x.stride()[1] == x.size()[0]
+            )
+
+        class SDD(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, lhs, rhs):
+                ctx.save_for_backward(lhs, rhs)
+                out = torch.full_like(lhs, 1.0, dtype=lhs.dtype, device=lhs.device)
+                return out
+
+            @staticmethod
+            def backward(ctx, dy):
+                saved_tensors = ctx.saved_tensors
+                lhs, rhs = saved_tensors[:2]
+                trans_a = _is_transposed(lhs)
+                trans_b = _is_transposed(rhs)
+                dlhs = None
+                if ctx.needs_input_grad[0]:
+                    dlhs = torch.full_like(lhs, 1.0 if trans_a else 2.0)
+                drhs = None
+                if ctx.needs_input_grad[1]:
+                    drhs = torch.full_like(rhs, 1.0 if trans_b else 2.0)
+                if trigger_graph_break:
+                    if _is_transposed(dy):
+                        return dlhs + 1, drhs + 1, None, None
+                return dlhs, drhs, None, None
+
+        x1 = torch.randn((8, 8), requires_grad=True)
+        y1 = torch.randn((8, 8)).transpose(0, 1).requires_grad_(True)
+        x2 = torch.randn((8, 8), requires_grad=True)
+        y2 = torch.randn((8, 8)).transpose(0, 1).requires_grad_(True)
+
+        SDD.apply(x1, y1).sum().backward()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return SDD.apply(x2, y2)
+
+        fn().sum().backward()
+
+        self.assertEqual(x1.grad, x2.grad)
+        self.assertEqual(y1.grad, y2.grad)
+
+        trigger_graph_break = True
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            fn().sum().backward()
+
     def test_partially_initialized_module_property(self):
         class Matrix(torch.nn.Module):
             def __init__(self, data):
