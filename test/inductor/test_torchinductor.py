@@ -1125,9 +1125,9 @@ class CommonTemplate:
             ),
         )
 
-    def test__unsafe_masked_index_backward(self):
+    def test__unsafe_masked_index_put_accumulate(self):
         def fn(a, mask, idx, values):
-            return aten._unsafe_masked_put_accumulate(a, mask, idx, values)
+            return aten._unsafe_masked_index_put_accumulate(a, mask, idx, values)
 
         self.common(
             fn,
