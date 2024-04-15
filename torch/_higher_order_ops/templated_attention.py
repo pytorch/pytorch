@@ -44,7 +44,7 @@ def math_attention(
     value: torch.Tensor,
     score_mod: Callable,
     *other_buffers: torch.Tensor,
-):
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """Eager implementation
 
     This implementation uses vmap to vectorize the score_mod function over the batch, head, m, and n dimensions.
@@ -75,8 +75,16 @@ def math_attention(
 
     scores = score_mod(scores, b, h, m, n, *other_buffers)
 
+    # Logsumexp of the scores is needed for the backward pass
+    if any(t.requires_grad for t in (query, key, value)):
+        logsumexp = scores.logsumexp(dim=-1)
+        logsumexp = logsumexp.view(-1, logsumexp.size(-1))
+    else:
+        logsumexp = query.new_empty(0)
+
     scores = scores.softmax(dim=-1)
-    return scores @ value
+
+    return scores @ value, logsumexp
 
 
 @templated_attention.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -86,8 +94,10 @@ def sdpa_dense(
     value: torch.Tensor,
     score_mod: Callable,
     *other_buffers: torch.Tensor,
-):
-    return math_attention(query, key, value, score_mod, *other_buffers).contiguous()
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    out, lse = math_attention(query, key, value, score_mod, *other_buffers)
+    out = out.contiguous()
+    return out, lse
 
 
 # TODO We need to implement an autograd function for this, there is some complexity to do this generically
@@ -103,7 +113,7 @@ def trace_templated_attention(
     value: torch.Tensor,
     score_mod: Callable,
     *other_buffers: torch.Tensor,
-):
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """Traces the templated_attention operator with the given score_mod function and other_buffers.
 
     Trace SDPA will call make_fx with "fake" example vals and then trace the score_mod function
@@ -135,7 +145,7 @@ def templated_attention_proxy_torch_dispatch_mode(
     value: torch.Tensor,
     score_mod: Callable,
     *other_buffers: torch.Tensor,
-):
+) -> Tuple[torch.Tensor, torch.Tensor]:
     assert mode is not None, "Mode should always be enabled for python fallback key"
     if mode.enable_tracing:
         return trace_templated_attention(
@@ -153,7 +163,7 @@ def templated_attention_functionalize(
     value: torch.Tensor,
     score_mod: Callable,
     *other_buffers: torch.Tensor,
-):
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """Defines the functionalization rules for the templated_attention operator.
 
     Write now we are unwrapping each tensor and then redispatching to the next, however we want to
@@ -193,7 +203,7 @@ def templated_attention_functionalize(
             functional_score_mod,
             *other_buffers_unwrapped,
         )
-    return ctx.wrap_tensors(out)
+    return ctx.wrap_tensors(out)  # type: ignore[return-value]
 
 
 @templated_attention.py_impl(FakeTensorMode)
@@ -204,6 +214,14 @@ def templated_attention_fake_tensor_mode(
     value: torch.Tensor,
     score_mod: Callable,
     *other_buffers: Tuple[torch.Tensor, ...],
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    any_requires_grad = any(t.requires_grad for t in (query, key, value))
     with mode:
-        return torch.empty_like(query, memory_format=torch.contiguous_format)
+        if any_requires_grad:
+            batch_size, num_heads, seq_len_q, _ = query.shape
+            logsumexp = query.new_empty(batch_size, num_heads, seq_len_q).view(
+                -1, seq_len_q
+            )
+        else:
+            logsumexp = query.new_empty(0)
+        return torch.empty_like(query, memory_format=torch.contiguous_format), logsumexp
