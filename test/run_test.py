@@ -1511,7 +1511,6 @@ def run_test_module(
         maybe_set_hip_visible_devies()
 
         test_name = test.name
-        start = time.time()
 
         # Printing the date here can help diagnose which tests are slow
         print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
@@ -1520,9 +1519,6 @@ def run_test_module(
         assert isinstance(return_code, int) and not isinstance(
             return_code, bool
         ), f"While running {str(test)} got non integer return code {return_code}"
-        print(
-            f"TIME INFO: Took {time.time() - start:.2f}s to run {str(test)}, expected time {test.time}s"
-        )
         if return_code == 0:
             return None
 
