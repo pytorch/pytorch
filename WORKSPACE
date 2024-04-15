@@ -206,8 +206,8 @@ py_repositories()
 load("@rules_python//python:repositories.bzl", "python_register_toolchains")
 
 python_register_toolchains(
-    name = "python3_8",
-    python_version = "3.8",
+    name = "python3_10",
+    python_version = "3.10",
 )
 
 load("@python3_8//:defs.bzl", "interpreter")
