@@ -391,7 +391,7 @@ def decide_compile_threads():
     """
     if "TORCHINDUCTOR_COMPILE_THREADS" in os.environ:
         return int(os.environ["TORCHINDUCTOR_COMPILE_THREADS"])
-    elif sys.platform == "win32" or is_fbcode():
+    elif sys.platform == "win32" or is_fbcode() or True:
         return 1
     else:
         cpu_count = (
