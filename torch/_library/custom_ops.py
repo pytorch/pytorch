@@ -391,7 +391,7 @@ class CustomOpDef:
 
         lib._register_fake(self._name, fake_impl)
 
-        autograd_impl = _library.autograd.make_autograd_impl(self)
+        autograd_impl = _library.autograd.make_autograd_impl(self._opoverload, self)
         lib.impl(self._name, autograd_impl, "Autograd")
 
         schema = self._opoverload._schema

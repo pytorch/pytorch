@@ -1,3 +1,4 @@
+import dataclasses
 from typing import Any, Callable, Optional
 
 from .. import _C, autograd, Tensor
@@ -6,21 +7,27 @@ from ..utils import _pytree
 from . import utils
 
 
-def make_autograd_impl(opdef: Any) -> Callable:
-    name: str = f"GeneratedBackwardFor_{opdef._namespace}_{opdef._name}"
+@dataclasses.dataclass
+class Info:
+    _setup_context_fn: Optional[Callable]
+    _backward_fn: Optional[Callable]
+
+
+def make_autograd_impl(op, info) -> Callable:
+    name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
     def forward(ctx, *args):
         with _C._AutoDispatchBelowAutograd():
-            result = opdef._opoverload(*args)
-            if opdef._setup_context_fn:
-                opdef._setup_context_fn(ctx, args, result)
+            result = op(*args)
+            if info._setup_context_fn:
+                info._setup_context_fn(ctx, args, result)
             return result
 
     def backward(ctx, *grads):
-        if opdef._backward_fn:
-            return opdef._backward_fn(ctx, *grads)
+        if info._backward_fn:
+            return info._backward_fn(ctx, *grads)
         raise RuntimeError(
-            f"Trying to backward through {opdef} but no autograd "
+            f"Trying to backward through {op} but no autograd "
             f"formula was registered. "
             f"Please use register_autograd to add one."
         )
@@ -34,7 +41,7 @@ def make_autograd_impl(opdef: Any) -> Callable:
         },
     )
 
-    schema = opdef._opoverload._schema
+    schema = op._schema
     if any(
         utils.is_tensorlist_like_type(a.type)
         for a in (*schema.arguments, *schema.returns)
