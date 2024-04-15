@@ -385,7 +385,9 @@ class CachingAutotuner(KernelInterface):
             "bin": binary,
             "launch_enter_hook": binary.launch_enter_hook,
             "launch_exit_hook": binary.launch_exit_hook,
-            "metadata": binary.packed_metadata if hasattr(binary, "packed_metadata") else binary.metadata,
+            "metadata": binary.packed_metadata
+            if hasattr(binary, "packed_metadata")
+            else binary.metadata,
             "shared": binary_shared,
         }
 
@@ -446,6 +448,7 @@ class CachingAutotuner(KernelInterface):
         # we want to burn None in to the launch args with zero overhead.
         # See https://github.com/pytorch/pytorch/issues/123597
         if binary.launch_enter_hook:
+
             def get_launch_args_with_kernel_launch_metadata(
                 grid,
                 grid_0,
@@ -477,7 +480,9 @@ class CachingAutotuner(KernelInterface):
                     launch_enter_hook,
                     launch_exit_hook,
                 )
+
         else:
+
             def get_launch_args_with_kernel_launch_metadata(
                 grid,
                 grid_0,
