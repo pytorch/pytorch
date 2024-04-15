@@ -5,6 +5,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Set
 
+import requests
+
 from github_utils import gh_fetch_json_dict, gh_graphql
 from gitutils import GitRepo
 
@@ -270,5 +272,45 @@ def delete_branches() -> None:
         delete_branch(git_repo, branch)
 
 
+def delete_old_ciflow_tags() -> None:
+    # Deletes ciflow tags if they are associated with a closed PR or a specific commit
+    github_token = os.environ.get("GITHUB_TOKEN")
+    headers = {
+        "Authorization": f"token {github_token}",
+        "Accept": "application/vnd.github.v3+json",
+    }
+    def delete_tag(tag):
+        print(f"Deleting tag {tag}")
+        # requests.request(
+        #     "DELETE",
+        #     f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/git/refs/tags/{tag}",
+        #     headers=headers
+        # )
+
+    git_repo = GitRepo(str(REPO_ROOT), "origin", debug=True)
+    tags = git_repo._run_git("tag").splitlines()
+    for tag in tags:
+        try:
+            if not tag.startswith("ciflow/"):
+                continue
+            re_match_pr = re.match(r"^ciflow/[^\d]+/(\d+){5,6}$", tag)
+            re_match_sha = re.match(r"^ciflow/[^\d]+/([0-9a-f]{40})$", tag)
+            if re_match_pr:
+                pr_number = int(re_match_pr.group(1))
+                state = requests.request(
+                    "GET",
+                    f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/pulls/{pr_number}",
+                    headers=headers
+                ).json()["state"]
+                ESTIMATED_TOKENS[0] += 1
+                if state == "closed":
+                    delete_tag(tag)
+            elif re_match_sha:
+                delete_tag(tag)
+        except Exception as e:
+            print(f"Failed to check tag {tag}: {e}")
+
+
 if __name__ == "__main__":
-    delete_branches()
+    # delete_branches()
+    delete_old_ciflow_tags()
