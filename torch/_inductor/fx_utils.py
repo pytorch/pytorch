@@ -161,7 +161,35 @@ class FakeTensorUpdater:
                 new_fake_tensor, node.meta["val"]
             ):
                 continue
+
+            scalar_types = (
+                torch.SymInt,
+                torch.SymFloat,
+                torch.SymBool,
+                int,
+                float,
+                bool,
+            )
+
+            from torch.fx.experimental.symbolic_shapes import rename_unbacked_to
+
+            def check_consistent(new, old):
+                if isinstance(new, torch.Tensor):
+                    assert isinstance(old, torch.Tensor)
+                    torch._check(old.dim() == new.dim())
+                    # Do this manually so that each individual test is irrefutable
+                    # (TODO: should be a helper for this, maybe sym_eq?  That
+                    # gives us a compound expression and I'm not sure it
+                    # simplifies right now)
+                    for i, j in zip(old.shape, new.shape):
+                        rename_unbacked_to(i, j)
+                elif isinstance(new, scalar_types):
+                    assert isinstance(old, scalar_types)
+                    rename_unbacked_to(old, new)
+
             node.meta["val"] = new_fake_tensor
+            if new_fake_tensor is not None:
+                pytree.tree_map_(check_consistent, new_fake_tensor, node.meta["val"])
 
             existing_storages[get_node_storage(node)] += 1
 

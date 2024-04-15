@@ -706,7 +706,7 @@ def expect_true(a, skip: int = 0):
     assert type(a) is bool, a
     return a
 
-def rename_unbacked_to(orig: SymInt, new: SymInt):
+def rename_unbacked_to(orig, new):
     """
     Rename an unbacked SymInt into a new one.
 
@@ -719,8 +719,16 @@ def rename_unbacked_to(orig: SymInt, new: SymInt):
     Inductor.  This is all very delicate, TODO find a better way.
     """
     # orig is eliminated, new is preserved
-    shape_env = orig.node.shape_env
-    assert shape_env is new.node.shape_env
+    if isinstance(orig, torch.SymInt):
+        shape_env = orig.node.shape_env
+        if isinstance(new, torch.SymInt):
+            assert shape_env is new.node.shape_env
+    elif isinstance(new, torch.SymInt):
+        shape_env = new.node.shape_env
+    else:
+        torch._check(orig == new)
+        return
+
     shape_env._rename_unbacked_to(orig, new)
 
 def guard_bool(a):
@@ -2226,15 +2234,14 @@ class ShapeEnv:
 
     @record_shapeenv_event()
     def _rename_unbacked_to(self, orig: SymInt, new: SymInt):
-        if not isinstance(orig.node.expr, sympy.Symbol):
-            return
-        if not isinstance(new.node.expr, sympy.Symbol):
-            return
-        if orig.node.expr == new.node.expr:
-            return
-        if not self.is_unbacked_symint(orig.node.expr):
-            return
-        if not self.is_unbacked_symint(new.node.expr):
+        if (
+            not isinstance(orig.node.expr, sympy.Symbol) or
+            not isinstance(new.node.expr, sympy.Symbol) or
+            orig.node.expr == new.node.expr or
+            not self.is_unbacked_symint(orig.node.expr) or
+            not self.is_unbacked_symint(new.node.expr)
+        ):
+            torch._check(orig == new)
             return
         orig_s = orig.node.expr
         self._set_replacement(orig_s, new.node.expr, "rename_unbacked_to")
