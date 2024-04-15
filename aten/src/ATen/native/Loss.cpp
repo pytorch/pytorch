@@ -273,8 +273,12 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
       .add_owned_const_input(at::squeeze(target))
       .build();
 
-    AT_DISPATCH_FLOATING_TYPES_AND(
-        ScalarType::BFloat16, loss.scalar_type(), "binary_cross_entropy", [&] {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        ScalarType::Half,
+        ScalarType::BFloat16,
+        loss.scalar_type(),
+        "binary_cross_entropy",
+        [&] {
           at::native::cpu_kernel(
               iter, [](scalar_t input_val, scalar_t target_val) {
                 TORCH_CHECK(
@@ -327,7 +331,8 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
       .add_owned_const_input(at::squeeze(target))
       .build();
 
-    AT_DISPATCH_FLOATING_TYPES_AND(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        ScalarType::Half,
         ScalarType::BFloat16,
         grad_input.scalar_type(),
         "binary_cross_entropy_backward",
