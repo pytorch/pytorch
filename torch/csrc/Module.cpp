@@ -785,7 +785,7 @@ PyObject* THPModule_userEnabledCuDNN(PyObject* _unused, PyObject* noargs) {
 }
 
 PyObject* THPModule_setUserForceCuDNN(PyObject* _unused, PyObject* arg) {
-  THPUtils_assert(
+  TORCH_CHECK(
       PyBool_Check(arg),
       "set_force_cudnn expects a bool, "
       "but got %s",
