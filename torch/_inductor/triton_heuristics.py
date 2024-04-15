@@ -387,7 +387,9 @@ class CachingAutotuner(KernelInterface):
             "bin": binary,
             "launch_enter_hook": binary.launch_enter_hook,
             "launch_exit_hook": binary.launch_exit_hook,
-            "metadata": binary.metadata,
+            "metadata": binary.packed_metadata
+            if hasattr(binary, "packed_metadata")
+            else binary.metadata,
             "shared": binary_shared,
         }
 
