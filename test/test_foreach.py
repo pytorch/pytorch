@@ -65,6 +65,13 @@ class RegularFuncWrapper:
         if len(inputs) == 2 and isinstance(inputs[1], (Number, torch.Tensor)):
             # binary op with tensorlist and scalar.
             inputs[1] = [inputs[1] for _ in range(len(inputs[0]))]
+        if (
+            len(inputs) == 3
+            and (isinstance(inputs[1], Number) or inputs[1] is None)
+            and (isinstance(inputs[2], Number) or inputs[2] is None)
+        ):
+            inputs[1] = [inputs[1] for _ in range(len(inputs[0]))]
+            inputs[2] = [inputs[2] for _ in range(len(inputs[0]))]
         return [self.func(*i, **kwargs) for i in zip(*inputs)]
 
 
@@ -548,7 +555,10 @@ class TestForeach(TestCase):
         self.assertEqual(res, expected)
 
     @ops(
-        filter(lambda op: op.supports_out, foreach_binary_op_db),
+        filter(
+            lambda op: op.supports_out and op.name != "_foreach_clamp",
+            foreach_binary_op_db,
+        ),
         allowed_dtypes=[torch.float],
     )
     def test_binary_op_scalar_with_different_tensor_dtypes(self, device, dtype, op):
@@ -566,7 +576,10 @@ class TestForeach(TestCase):
 
     @skipIfTorchDynamo("Different error msgs, TODO")
     @ops(
-        filter(lambda op: op.supports_out, foreach_binary_op_db),
+        filter(
+            lambda op: op.supports_out and op.name != "_foreach_clamp",
+            foreach_binary_op_db,
+        ),
         dtypes=OpDTypes.supported,
     )
     def test_binary_op_list_error_cases(self, device, dtype, op):
@@ -656,7 +669,10 @@ class TestForeach(TestCase):
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not found")
     @ops(
-        filter(lambda op: op.supports_out, foreach_binary_op_db),
+        filter(
+            lambda op: op.supports_out and op.name != "_foreach_clamp",
+            foreach_binary_op_db,
+        ),
         dtypes=OpDTypes.supported,
     )
     def test_binary_op_list_slow_path(self, device, dtype, op):
@@ -770,7 +786,10 @@ class TestForeach(TestCase):
         )
 
     @ops(
-        filter(lambda op: op.supports_out, foreach_binary_op_db),
+        filter(
+            lambda op: op.supports_out and op.name != "_foreach_clamp",
+            foreach_binary_op_db,
+        ),
         dtypes=floating_types_and(torch.half, torch.bfloat16),
     )
     def test_binary_op_float_inf_nan(self, device, dtype, op):
@@ -837,7 +856,12 @@ class TestForeach(TestCase):
                 self.assertEqual([torch.zeros_like(t) for t in tensors], tensors)
 
     @onlyCUDA
-    @ops(filter(lambda op: op.supports_out, foreach_binary_op_db))
+    @ops(
+        filter(
+            lambda op: op.supports_out and op.name != "_foreach_clamp",
+            foreach_binary_op_db,
+        )
+    )
     def test_binary_op_tensors_on_different_devices(self, device, dtype, op):
         # `tensors1`: ['cuda', 'cpu']
         # `tensors2`: ['cuda', 'cpu']
