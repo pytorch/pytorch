@@ -367,6 +367,7 @@ class GraphLowering(torch.fx.Interpreter):
 
         return sorted_tensors[min_index] if min_index < len(sorted_tensors) else None
 
+    @torch.utils._python_dispatch._disable_current_modes()
     def get_sorted_tensors_for_benchmark_use(
         self, gm: torch.fx.GraphModule
     ) -> Dict[torch.device, List[torch.Tensor]]:
