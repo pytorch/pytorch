@@ -139,7 +139,7 @@ class CustomOpDef:
         return f"<CustomOpDef({self._qualname})>"
 
     def register_impl(
-        self, device_types: device_types_t, fn: Optional[Callable] = None
+        self, device_types: device_types_t, fn: Optional[Callable] = None, /
     ) -> Callable:
         """Register an implementation for a device type for this operator.
 
@@ -233,7 +233,7 @@ class CustomOpDef:
             return inner
         return inner(fn)
 
-    def register_fake(self, fn: Callable) -> Callable:
+    def register_fake(self, fn: Callable, /) -> Callable:
         r"""Register a FakeTensor implementation for this custom op.
 
         This is necessary to get the operator to work efficiently with torch.compile.
