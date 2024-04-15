@@ -13,6 +13,7 @@ class TensorChecker;
 struct TensorMetaInfo {
   bool is_symbolic_;
   c10::ScalarType dtype_;
+  c10::IValue scalar_value_;
   c10::Device device_;
   std::vector<c10::SymInt> sizes_;
   std::vector<c10::SymInt> strides_;
@@ -21,6 +22,13 @@ struct TensorMetaInfo {
   TensorMetaInfo(
       bool is_symbolic,
       c10::ScalarType dtype,
+      c10::Device device,
+      std::vector<c10::SymInt> sizes,
+      std::vector<c10::SymInt> strides);
+  TensorMetaInfo(
+      bool is_symbolic,
+      c10::ScalarType dtype,
+      c10::IValue scalar_value,
       c10::Device device,
       std::vector<c10::SymInt> sizes,
       std::vector<c10::SymInt> strides);

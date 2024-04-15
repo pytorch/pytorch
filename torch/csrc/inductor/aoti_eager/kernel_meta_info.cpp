@@ -37,6 +37,24 @@ TensorMetaInfo::TensorMetaInfo(
     std::vector<c10::SymInt> strides)
     : is_symbolic_(is_symbolic),
       dtype_(dtype),
+      scalar_value_((float)1.0),
+      device_(device),
+      sizes_(sizes),
+      strides_(strides) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(
+      !is_symbolic_, "Not support symbolic shape now");
+}
+
+TensorMetaInfo::TensorMetaInfo(
+    bool is_symbolic,
+    c10::ScalarType dtype,
+    c10::IValue scalar_value,
+    c10::Device device,
+    std::vector<c10::SymInt> sizes,
+    std::vector<c10::SymInt> strides)
+    : is_symbolic_(is_symbolic),
+      dtype_(dtype),
+      scalar_value_(scalar_value),
       device_(device),
       sizes_(sizes),
       strides_(strides) {
@@ -49,6 +67,7 @@ bool TensorMetaInfo::operator==(const TensorMetaInfo& other) const {
       !is_symbolic_, "Not support symbolic shape now");
   return this->is_symbolic_ == other.is_symbolic_ &&
       this->dtype_ == other.dtype_ &&
+      this->scalar_value_ == other.scalar_value_ &&
       this->device_.type() == other.device_.type() &&
       this->sizes_ == other.sizes_ && this->strides_ == other.strides_;
 }
@@ -58,6 +77,8 @@ size_t TensorMetaInfoHash::operator()(
   auto hash = std::hash<bool>()(tensor_meta_info.is_symbolic_);
   hash = c10::hash_combine(
       hash, std::hash<c10::ScalarType>()(tensor_meta_info.dtype_));
+  hash = c10::hash_combine(
+      hash, c10::IValue::hash(tensor_meta_info.scalar_value_));
   hash = c10::hash_combine(
       hash, std::hash<c10::DeviceType>()(tensor_meta_info.device_.type()));
 
