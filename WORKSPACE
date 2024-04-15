@@ -210,7 +210,7 @@ python_register_toolchains(
     python_version = "3.10",
 )
 
-load("@python3_8//:defs.bzl", "interpreter")
+load("@python3_10//:defs.bzl", "interpreter")
 load("@rules_python//python:pip.bzl", "pip_parse")
 
 pip_parse(
