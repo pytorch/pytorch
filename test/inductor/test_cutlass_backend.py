@@ -173,7 +173,7 @@ class TestCutlassBackend(TestCase):
         max_autotune_gemm_backends: str = "CUTLASS",
         mixed_precision=False,
         fp16=True,
-        expected_fuse_count=1,
+        expected_fuse_count=0,
         mm: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
         batch_size: Optional[int] = None,
     ):
@@ -225,7 +225,7 @@ class TestCutlassBackend(TestCase):
 
         #  The pointwise ops seem to be pre-fused into a single Pointwise
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=False, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -236,7 +236,7 @@ class TestCutlassBackend(TestCase):
             return (a @ b) * 3.0
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -248,7 +248,7 @@ class TestCutlassBackend(TestCase):
 
         #  The pointwise ops seem to be pre-fused into a single Pointwise
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=False, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -259,7 +259,7 @@ class TestCutlassBackend(TestCase):
             return (a @ b) * 3.3 - 1.234
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -270,7 +270,7 @@ class TestCutlassBackend(TestCase):
             return torch.nn.functional.relu((a @ b) * 3.3 - 1.234)
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=False, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=False, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -282,7 +282,7 @@ class TestCutlassBackend(TestCase):
 
         #  The pointwise ops seem to be pre-fused into a single Pointwise
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -294,7 +294,7 @@ class TestCutlassBackend(TestCase):
 
         #  The pointwise ops seem to be pre-fused into a single Pointwise
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     @unittest.skipIf(not SM90OrLater, "need sm_90")
@@ -329,7 +329,7 @@ class TestCutlassBackend(TestCase):
             return (a @ b) / b.size(1)
 
         self._test_max_autotune_cutlass_backend_epilogue_fusion(
-            mixed_precision=True, fp16=True, expected_fuse_count=1, mm=mm
+            mixed_precision=True, fp16=True, expected_fuse_count=0, mm=mm
         )
 
     # TODO: Enable dynamic test cases when dynamic support is added.

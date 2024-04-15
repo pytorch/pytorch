@@ -1,3 +1,6 @@
+import os
+
+os.environ["CUDA_LAUNCH_BLOCKING"] = "1"
 import functools
 import logging
 from typing import Any, Dict, List, Optional
