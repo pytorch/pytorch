@@ -2356,9 +2356,9 @@ class BenchmarkRunner:
             else:
                 dst_dir = os.path.join(os.getcwd(), "test", "test-reports")
                 os.makedirs(dst_dir, exist_ok=True)
-                archive = os.path.join(dst_dir, name + ".zip")
+                archive = os.path.join(dst_dir, name + "-torchinductor")
                 shutil.make_archive(archive, "zip", cache_dir)
-                log.warrning("Copied inductor cache to: %s", archive)
+                log.warning("Copied inductor cache to: %s.zip", archive)
         except OSError:
             log.exception("Failed to save torchinductor cache dir")
 
