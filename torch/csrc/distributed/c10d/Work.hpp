@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <chrono>
 #include <mutex>
 #include <vector>
 
