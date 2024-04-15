@@ -1244,7 +1244,9 @@ def cat(inputs, dim=0):
         any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
 
         if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
-            return pointwise_cat(inputs, dim)
+            out = pointwise_cat(inputs, dim)
+            out.realize()
+            return out
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
