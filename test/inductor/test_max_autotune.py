@@ -328,7 +328,8 @@ class TestMaxAutotune(TestCase):
             inputs: str,
             benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
         ) -> Dict[ChoiceCaller, float]:
-            return benchmark(choices)
+            if benchmark is not None:
+                return benchmark(choices)
 
         asc = AlgorithmSelectorCache()
 
