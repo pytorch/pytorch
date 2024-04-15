@@ -97,6 +97,10 @@ struct TORCH_API FunctionalTensorWrapper : public c10::TensorImpl {
         ->are_all_mutations_under_no_grad_or_inference_mode();
   }
 
+  // Runs the forward_fn of every ViewMeta collected in the current instance
+  // to some other base.
+  Tensor apply_view_metas(const Tensor& base);
+
   // Sync's the underlying tensor with its alias, if it's out of date. This
   // involves two steps: 1) Apply any pending updates/mutations to the alias 2)
   // Replay the views (if any) to regenerate the current tensor off of the
