@@ -3285,10 +3285,6 @@ fallback__unsafe_masked_index_put_accumulate = fallback_handler(
 
 @register_lowering(aten._unsafe_masked_index, type_promotion_kind=None)
 def _unsafe_masked_index(self, mask, indices, fill):
-    if torch.version.hip is not None:
-        # Avoid a triton compiler failure
-        return fallback__unsafe_masked_index(self, mask, indices, fill)
-
     ranges, _unsafe_index_fn = index_impl_helper(self, indices, check=False)
     mask_loader = mask.make_loader()
 
