@@ -1149,7 +1149,7 @@ class DeviceCachingAllocator {
           "CUDA out of memory. Tried to allocate ",
           format_size(alloc_size),
           ". GPU ",
-          device,
+          static_cast<int>(device),
           " has a total capacity of ",
           format_size(device_total),
           " of which ",
