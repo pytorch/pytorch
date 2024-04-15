@@ -1262,7 +1262,13 @@ class OutputGraph:
 
         with self.restore_global_state():
             compiled_fn = self.call_user_compiler(gm)
-        compiled_fn = disable(compiled_fn)
+
+        if isinstance(compiled_fn, torch.nn.Module):
+            # We handle nn modules using OptimizedModule in eval_frame.py. To
+            # avoid infinite recursion, only disable __call__.
+            compiled_fn.__call__ = disable(compiled_fn.__call__)
+        else:
+            compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
         # This is safe because we pre-process name to be unique
