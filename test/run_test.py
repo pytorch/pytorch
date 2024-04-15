@@ -1716,7 +1716,7 @@ def main():
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
     if IS_CI:
-        gen_ci_artifact([x.to_json() for x in exclude])
+        gen_ci_artifact([x.to_json() for x in include], [x.to_json() for x in exclude])
 
     print_to_stderr(test_batch)
     print_to_stderr(test_batch_exclude)
