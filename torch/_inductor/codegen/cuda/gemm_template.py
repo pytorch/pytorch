@@ -286,9 +286,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             beta (float): The scaling factor applied to the output matrix.
             input_reorder (Optional[List[int]]): Specifies the reordering of the input nodes. If not provided,
                             no reordering is performed. Defaults to None.
-            can_fuse_epilogue (Optional[bool]): If set to True, only operators capable of flexible epilogue fusions are
-                                listed and used. If set to False, such operators are not used. If set to None, both
-                                types of operators may be listed, but it does not allow fusions. Defaults to None.
         """
         super().__init__("cutlass_gemm", input_nodes, layout, input_reorder)
         self.alpha = alpha

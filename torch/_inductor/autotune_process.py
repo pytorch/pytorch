@@ -54,6 +54,10 @@ class Pong:
     pass
 
 
+class NonzeroWorkspaceNotSupportedError(Exception):
+    pass
+
+
 @contextlib.contextmanager
 def set_cuda_visible_device(device: Optional[int]):
     """
@@ -503,8 +507,11 @@ class BenchmarkRequest:
         if debug:
             create_tensor_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
-
-        fn = self.make_run_fn(*input_tensors, output_tensor=output_tensor)
+        try:
+            fn = self.make_run_fn(*input_tensors, output_tensor=output_tensor)
+        except NonzeroWorkspaceNotSupportedError:
+            # Skipping all ops with nonzero workspace requirements
+            return float("inf")
 
         if debug:
             load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -765,6 +772,8 @@ class CUDABenchmarkRequest(BenchmarkRequest):
             self.extra_args,
         )
         self._workspace_size_updated = True
+        if self.workspace_size > 0:
+            raise NonzeroWorkspaceNotSupportedError()
 
     def ensure_dll_loaded(self):
         if self.DLL is None:
