@@ -188,6 +188,7 @@ class TestPublicBindings(TestCase):
             "NumberType",
             "OperatorInfo",
             "OptionalType",
+            "OutOfMemoryError",
             "ParameterDict",
             "parse_ir",
             "parse_schema",
