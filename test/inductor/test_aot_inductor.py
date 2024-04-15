@@ -43,6 +43,7 @@ if HAS_CUDA:
         add_kernel_2d_autotuned,
         add_kernel_autotuned,
         add_kernel_with_optional_param,
+        add_kernel_with_scaling,
     )
 
 if IS_WINDOWS and IS_CI:
@@ -1845,6 +1846,44 @@ class AOTInductorTestsTemplate:
         )
 
         self.check_model(Model(), example_inputs)
+
+    @skipIfRocm
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_triton_kernel_equal_to_1_float_arg(self, dynamic):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                n_elements = x.numel()
+                scaling_factor = (n_elements**0) / 1.0
+                add_kernel_with_scaling[(n_elements,)](
+                    x,
+                    y,
+                    out,
+                    n_elements,
+                    scaling_factor,
+                    BLOCK_SIZE=16,
+                )
+                return out
+
+        dynamic_shapes = None
+        if dynamic:
+            dim0_xy = Dim("s0", min=2, max=1024)
+            dynamic_shapes = {
+                "x": {0: dim0_xy, 1: None},
+                "y": {0: dim0_xy, 1: None},
+            }
+        example_inputs = (
+            torch.randn(2, device=self.device),
+            torch.randn(2, device=self.device),
+        )
+        self.check_model(
+            Model(),
+            example_inputs,
+            dynamic_shapes=dynamic_shapes,
+        )
 
     def test_shifted_constraint_ranges(self):
         class Model(torch.nn.Module):
