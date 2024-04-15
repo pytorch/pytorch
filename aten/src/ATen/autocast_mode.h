@@ -541,8 +541,8 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 
 #define ADD_NS(RAW_OP) at::RAW_OP
 
-#define _KERNEL_NARG_IMPL(_0, _1, _2, N, ...) N
-#define _KERNEL_NARG(...) _KERNEL_NARG_IMPL(__VA_ARGS__, 2, 1)
+#define _KERNEL_OVERLOAD_NARG_IMPL(_0, _1, _2, N, ...) N
+#define _KERNEL_OVERLOAD_NARG(...) _KERNEL_OVERLOAD_NARG_IMPL(__VA_ARGS__, 2, 1)
 
 // Common cases where registration signature matches redispatch signature
 // (that's why SIGNATURE is repeated in the WrapFunction instantiation)
@@ -570,7 +570,7 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
   C10_CONCATENATE(KERNEL, NARG)(DISPATCHKEY, __VA_ARGS__)
 
 #define _KERNEL_IMPL(DISPATCHKEY, ...) \
-  _KERNEL_DISPATCH(DISPATCHKEY, _KERNEL_NARG(__VA_ARGS__), __VA_ARGS__)
+  _KERNEL_DISPATCH(DISPATCHKEY, _KERNEL_OVERLOAD_NARG(__VA_ARGS__), __VA_ARGS__)
 
 // It will dispatch to KERNEL1 or KERNEL2 based on its inputs.
 #define KERNEL(DISPATCHKEY, ...) _KERNEL_IMPL(DISPATCHKEY, __VA_ARGS__)
