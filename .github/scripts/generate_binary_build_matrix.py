@@ -13,13 +13,13 @@ architectures:
 import os
 from typing import Dict, List, Optional, Tuple
 
-CUDA_ARCHES = ["11.8", "12.1"]
+CUDA_ARCHES = ["11.8", "12.1", "12.4"]
 
 
-CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.1": "12.1.1"}
+CUDA_ARCHES_FULL_VERSION = {"11.8": "11.8.0", "12.1": "12.1.1", "12.4": "12.4.0"}
 
 
-CUDA_ARCHES_CUDNN_VERSION = {"11.8": "8", "12.1": "8"}
+CUDA_ARCHES_CUDNN_VERSION = {"11.8": "8", "12.1": "8", "12.4": "8"}
 
 
 ROCM_ARCHES = ["5.7", "6.0"]
@@ -135,6 +135,7 @@ WHEEL_CONTAINER_IMAGES = {
     "cpu": f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
     "cpu-aarch64": f"pytorch/manylinuxaarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
+    "cuda-aarch64": f"pytorch/manylinuxcuda_aarch64-builder:cuda-aarch64-{DEFAULT_TAG}",
 }
 
 CONDA_CONTAINER_IMAGES = {
@@ -309,7 +310,7 @@ def generate_wheels_matrix(
         elif os == "linux-aarch64":
             # Only want the one arch as the CPU type is different and
             # uses different build/test scripts
-            arches = ["cpu-aarch64"]
+            arches = ["cpu-aarch64", "cuda-aarch64"]
 
     ret: List[Dict[str, str]] = []
     for python_version in python_versions:
@@ -320,11 +321,12 @@ def generate_wheels_matrix(
                 if arch_version == "cpu"
                 or arch_version == "cpu-cxx11-abi"
                 or arch_version == "cpu-aarch64"
+                or arch_version == "cuda-aarch64"
                 else arch_version
             )
 
             # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
-            if arch_version in ["12.1", "11.8"] and os == "linux":
+            if arch_version in ["12.4", "12.1", "11.8"] and (os == "linux" or os == "linux-aarch64"):
                 ret.append(
                     {
                         "python_version": python_version,
