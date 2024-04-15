@@ -131,7 +131,7 @@ class _KinetoProfile:
             self.use_device = "cuda"
         elif ProfilerActivity.XPU in self.activities:
             self.use_device = "xpu"
-        else:
+        elif ProfilerActivity.PrivateUse1 in self.activities:
             self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
@@ -149,9 +149,7 @@ class _KinetoProfile:
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
             use_mtia=(ProfilerActivity.MTIA in self.activities),
-            use_device=self.use_device
-            if (ProfilerActivity.PrivateUse1 in self.activities)
-            else None,
+            use_device=self.use_device,
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
