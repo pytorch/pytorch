@@ -26,7 +26,7 @@ from torch._prims_common import (
     type_to_dtype,
 )
 
-from . import config
+from . import config, inductor_prims
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
