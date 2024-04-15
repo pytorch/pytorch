@@ -336,6 +336,7 @@ class GraphLowering(torch.fx.Interpreter):
         )
         self.init_backend_registration()
         self.module_storages_in_benchmark_use: Set[StorageDataPtr] = set()
+        self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
         self.tensors_for_benchmark_use: Dict[
             torch.device, List[torch.Tensor]
         ] = self.get_sorted_tensors_for_benchmark_use(gm)
@@ -404,8 +405,6 @@ class GraphLowering(torch.fx.Interpreter):
             device_tensors.sort(key=lambda x: x.untyped_storage().nbytes())
 
         return tensors_by_device
-
-        self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
 
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
