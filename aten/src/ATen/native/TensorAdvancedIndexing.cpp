@@ -677,24 +677,27 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
     auto dtype = index->scalar_type();
     TORCH_CHECK(dtype == kLong || dtype == kInt,
                 "_unsafe_masked_index found unexpected index type ", dtype);
-    return at::clamp(*index, -size, size - 1);
+    return at::clamp(*index, -size, std::max(size - 1, 0L));
   };
-
-  if (self.numel() == 0) {
-    std::vector<int64_t> new_size(self.dim());
-    auto get_size = [](const c10::optional<Tensor>&index, auto size) -> int64_t {
-      if (!index) {
-        return size;
-      } else {
-        return index->numel();
-      }
-    };
-    std::transform(indices.begin(), indices.end(), self.sizes().begin(), new_size.begin(), get_size);
-    return self.new_full(new_size, fill);
-  }
 
   torch::List<c10::optional<Tensor>> clamped_indices(indices);
   std::transform(indices.begin(), indices.end(), self.sizes().begin(), clamped_indices.begin(), clamp);
+
+  if (self.numel() == 0) {
+    std::vector<int64_t> new_sizes(self.dim());
+    auto compute_new_size = [](const c10::optional<Tensor>& index, auto size) -> int64_t {
+    if (index && size == 0) {
+        return 1;
+    } else {
+        return size;
+    }
+
+    };
+    std::transform(indices.begin(), indices.end(), self.sizes().begin(), new_sizes.begin(), compute_new_size);
+
+    auto result = at::_unsafe_index(self.new_empty(new_sizes), clamped_indices);
+    return result.masked_fill(at::logical_not(mask), fill);
+  }
 
   auto result = at::_unsafe_index(self, clamped_indices);
   return result.masked_fill(at::logical_not(mask), fill);
