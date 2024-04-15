@@ -619,16 +619,17 @@ def _export_non_strict(
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
 
-    # prettify names for placeholder nodes
-    placeholder_naming_pass(
-        gm,
-        export_graph_signature,
-        mod,
-        fake_args,
-        fake_kwargs,
-        fake_params_buffers,
-        constants,
-    )
+    # FIXME(ycao): Skipping this because traced modules do not have signature yet
+    # # prettify names for placeholder nodes
+    # placeholder_naming_pass(
+    #     gm,
+    #     export_graph_signature,
+    #     mod,
+    #     fake_args,
+    #     fake_kwargs,
+    #     fake_params_buffers,
+    #     constants,
+    # )
 
     @dataclasses.dataclass
     class _ExportedProgramNonStrict:

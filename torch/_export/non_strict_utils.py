@@ -124,15 +124,17 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
         if constraint.shared is not None:
             t_constraints[constraint.shared.t_id][constraint.shared.dim] = constraint
 
-    code = nn_module.forward.__code__
-    co_fields = {
-        "co_name": code.co_name,
-        "co_filename": code.co_filename,
-        "co_firstlineno": code.co_firstlineno,
-    }
+# TODO(ycao): torch._C.ScriptMethod doesn't have a __code__ attribute, we should add
+# one and it should ideally point to the original code object of traced module.
+#    code = nn_module.forward.__code__
+#    co_fields = {
+#        "co_name": code.co_name,
+#        "co_filename": code.co_filename,
+#        "co_firstlineno": code.co_firstlineno,
+#    }
 
     fake_mode = FakeTensorMode(
-        shape_env=ShapeEnv(tracked_fakes=[], co_fields=co_fields),
+        shape_env=ShapeEnv(tracked_fakes=[]),
         allow_non_fake_inputs=True,
     )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
@@ -142,8 +144,11 @@ def make_fake_inputs(nn_module, args, kwargs, dynamic_shapes):
             "please initialize it like: FakeTensorMode(shape_env=ShapeEnv(tracked_fakes=[]))"
         )
 
+
     with fake_mode:
-        original_signature = inspect.signature(nn_module.forward)
+        # original_signature = inspect.signature(nn_module.forward)
+        # FIXME(ycao) ScriptMethod doesn't have signature, I am using an empty one to unblock
+        original_signature = None
         sources: Dict[Tuple[int, int], List[Source]] = defaultdict(list)
         fake_args, fake_kwargs = tree_map_with_path(
             lambda kp, val: fakify(fake_mode, kp, val, t_constraints, sources),
@@ -245,9 +250,11 @@ def make_constraints(
     dim_constraints.solve()
     dim_constraints.remove_redundant_dynamic_results()
     forced_specializations = dim_constraints.forced_specializations()
-    msg = dim_constraints.prettify_results(
-        original_signature, constraint_violation_error, forced_specializations
-    )
+    # msg = dim_constraints.prettify_results(
+    #     original_signature, constraint_violation_error, forced_specializations
+    # )
+    # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
+    msg = "dummy constraint violation message"
     if constraint_violation_error:
         constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
     elif forced_specializations:
