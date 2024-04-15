@@ -820,32 +820,25 @@ class CommonTemplate:
     def test_torch_compile_override_registration(self):
         dynamic = False
         namespace_name = "aten"
-        dispatch_keys = ["CPU"]
-        devices = [torch.device("cpu")]
-        if torch.cuda.is_available():
-            dispatch_keys.append("CUDA")
-            devices.append(torch.device("cuda"))
+        dispatch_key = "CPU"
+        device = torch.device("cpu")
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = torch.device("cuda")
 
         unary_op_set = ["abs", "acos"]
 
         def fn(x, op_name=""):
             return getattr(torch, op_name)(x)
 
-        device_ref = {}
-        device_input = {}
-
         # Invoke torch.compile directly to get referent results
-        for _, device in zip(dispatch_keys, devices):
-            x = torch.randn(3, 4, device=device)
+        x = torch.randn(3, 4, device=device)
 
-            ref_array = []
-            for unary_op_name in unary_op_set:
-                opt_fn = torch.compile(functools.partial(fn, op_name=unary_op_name))
-                ref = opt_fn(x)
-                ref_array.append(ref)
-
-            device_ref[device.type] = ref_array
-            device_input[device.type] = x
+        ref_array = []
+        for unary_op_name in unary_op_set:
+            opt_fn = torch.compile(functools.partial(fn, op_name=unary_op_name))
+            ref = opt_fn(x)
+            ref_array.append(ref)
 
         class WrapperFn:
             def __init__(self, op_name) -> None:
@@ -878,17 +871,14 @@ class CommonTemplate:
                         continue
 
         with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
-            for dispatch_key, device in zip(dispatch_keys, devices):
-                register_ops(unary_op_set, dispatch_key, torch_compile_op_lib_impl)
+            register_ops(unary_op_set, dispatch_key, torch_compile_op_lib_impl)
 
-                x = device_input[device.type]
+            res_array = []
+            for unary_op_name in unary_op_set:
+                res_array.append(getattr(torch, unary_op_name)(x))
 
-                res_array = []
-                for unary_op_name in unary_op_set:
-                    res_array.append(getattr(torch, unary_op_name)(x))
-
-                for ref, res in zip(device_ref[device.type], res_array):
-                    self.assertEqual(ref, res)
+            for ref, res in zip(ref_array, res_array):
+                self.assertEqual(ref, res)
 
     def test_add_const_int(self):
         def fn(a):
