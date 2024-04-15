@@ -1526,6 +1526,7 @@ def load_aoti_eager_cache(
     ns: str, op_func_name: str, op_overload_name: str, device_type: str
 ):
     device_kernel_cache = aoti_eager_cache_dir() / ns.lower() / device_type.lower()
+    op_overload_name = op_overload_name if op_overload_name else "default"
     op_conf = device_kernel_cache / f"{op_func_name}.{op_overload_name}.json"
     if not op_conf.exists():
         return None
@@ -1546,7 +1547,12 @@ def load_aoti_eager_cache(
                     "FALSE"
                 ], "Only support static shape for now"
                 meta_info["is_dynamic"] = meta_info["is_dynamic"].upper() == "TRUE"
-                meta_info["device_index"] = ast.literal_eval(meta_info["device_index"])
+                if meta_info["device_type"].upper() == "CPU":
+                    meta_info["device_index"] = -1
+                else:
+                    meta_info["device_index"] = ast.literal_eval(
+                        meta_info["device_index"]
+                    )
                 # Convert string to list for sizes and strides to make C++ vector parser easier
                 meta_info["sizes"] = ast.literal_eval(meta_info["sizes"])
                 meta_info["strides"] = ast.literal_eval(meta_info["strides"])
@@ -1554,7 +1560,7 @@ def load_aoti_eager_cache(
         return json_data
 
 
-def aot_compile_with_persistent_cache(
+def aoti_compile_with_persistent_cache(
     ns: str,
     op_func_name: str,
     op_overload_name: str,
@@ -1569,6 +1575,9 @@ def aot_compile_with_persistent_cache(
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
 ):
+    """
+    Compile the given function with persistent cache for AOTI eager mode.
+    """
     flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
     assert all(
         isinstance(input, torch.Tensor) for input in flattened_inputs
@@ -1603,7 +1612,10 @@ def aot_compile_with_persistent_cache(
                 meta_info_item = {}
                 meta_info_item["is_dynamic"] = f"{dynamic}"
                 meta_info_item["device_type"] = f"{input_tensor.device.type}"
-                meta_info_item["device_index"] = f"{input_tensor.device.index}"
+                if is_cpu_device([input_tensor]):
+                    meta_info_item["device_index"] = "-1"
+                else:
+                    meta_info_item["device_index"] = f"{input_tensor.device.index}"
                 meta_info_item["dtype"] = f"{input_tensor.dtype}"
                 meta_info_item["sizes"] = f"{list(input_tensor.size())}"
                 meta_info_item["strides"] = f"{list(input_tensor.stride())}"

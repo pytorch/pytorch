@@ -259,10 +259,16 @@ AOTIKernelMetaInfo AOTIPythonKernelHolder::get_inputs_meta_info(
     const std::vector<at::Tensor>& inputs) {
   AOTIKernelMetaInfo inputs_meta_info;
   for (const auto& input : inputs) {
+    auto device = input.device();
+    if (device.is_cpu()) {
+      // If the device is CPU, set the device index to -1.
+      device = c10::Device(device.type(), -1);
+    }
+
     inputs_meta_info.emplace_back(
         is_symbolic_,
         input.scalar_type(),
-        input.device(),
+        device,
         input.sym_sizes().vec(),
         input.sym_strides().vec());
   }
@@ -361,7 +367,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       // Access the fields of each meta_info dict
       auto is_dynamic = meta_info_dict["is_dynamic"].cast<bool>();
       auto device_type = meta_info_dict["device_type"].cast<std::string>();
-      auto device_index = meta_info_dict["device_index"].cast<std::string>();
+      auto device_index = meta_info_dict["device_index"].cast<int8_t>();
       auto dtype = meta_info_dict["dtype"].cast<std::string>();
       auto sizes = meta_info_dict["sizes"].cast<std::vector<int64_t>>();
       auto strides = meta_info_dict["strides"].cast<std::vector<int64_t>>();
@@ -383,7 +389,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       tensor_meta_info_list.emplace_back(
           is_dynamic,
           parse_dtype(dtype),
-          c10::Device(device_type),
+          c10::Device(c10::Device(device_type).type(), device_index),
           sym_sizes,
           sym_strides);
       tensor_checks.emplace_back(
@@ -391,7 +397,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
           nullptr,
           uint64_t(c10::DispatchKeySet(dispatch_key_).raw_repr()),
           parse_dtype(dtype),
-          c10::DeviceIndex(0),
+          c10::DeviceIndex(device_index),
           sym_optional_sizes,
           sym_optional_strides);
     }
@@ -508,7 +514,7 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
 
   py::handle aot_compile_function =
       py::module::import("torch._inductor.utils")
-          .attr("aot_compile_with_persistent_cache");
+          .attr("aoti_compile_with_persistent_cache");
   if (aot_compile_function.ptr() == nullptr ||
       aot_compile_function.ptr() == Py_None) {
     TORCH_WARN("Failed to import - torch._export.aot_compile");
