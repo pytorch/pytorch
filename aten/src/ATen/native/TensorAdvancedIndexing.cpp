@@ -693,7 +693,7 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
     };
     std::transform(indices.begin(), indices.end(), self.sizes().begin(), new_sizes.begin(), compute_new_size);
 
-    auto result = at::meta::index(self.new_empty(new_sizes), clamped_indices);
+    auto result = at::meta::index(self.new_empty(new_sizes), indices);
     return self.new_full(result.sizes(), fill);
   }
 
