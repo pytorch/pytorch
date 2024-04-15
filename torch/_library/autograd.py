@@ -16,16 +16,20 @@ class Info:
 def make_autograd_impl(op, info) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
-    def forward(ctx, *args):
+    def forward(ctx, keyset, *args):
         with _C._AutoDispatchBelowAutograd():
-            result = op(*args)
+            result = op.redispatch(keyset, *args)
             if info._setup_context_fn:
                 info._setup_context_fn(ctx, args, result)
             return result
 
     def backward(ctx, *grads):
         if info._backward_fn:
-            return info._backward_fn(ctx, *grads)
+            result = info._backward_fn(ctx, *grads)
+            if isinstance(result, tuple):
+                return (None, *result)
+            else:
+                return (None, result)
         raise RuntimeError(
             f"Trying to backward through {op} but no autograd "
             f"formula was registered. "
@@ -48,8 +52,8 @@ def make_autograd_impl(op, info) -> Callable:
     ):
         Generated = supports_tensorlist(Generated)
 
-    def autograd_impl(*args):
-        result = Generated.apply(*args)  # type: ignore[attr-defined]
+    def autograd_impl(keyset, *args):
+        result = Generated.apply(keyset & _C._after_autograd_keyset, *args)  # type: ignore[attr-defined]
         return result
 
     return autograd_impl

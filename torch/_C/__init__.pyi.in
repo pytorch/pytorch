@@ -1430,6 +1430,9 @@ class _DispatchModule:
     def define(self, schema: str, alias: str = "") -> _DispatchModule: ...
     def fallback_fallthrough(self, dispatch: str = "") -> _DispatchModule: ...
 
+_after_ADInplaceOrView_keyset: DispatchKeySet
+_after_autograd_keyset: DispatchKeySet
+
 def _dispatch_library(
     kind: str,
     name: str,

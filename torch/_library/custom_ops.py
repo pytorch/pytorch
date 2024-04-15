@@ -392,12 +392,12 @@ class CustomOpDef:
         lib._register_fake(self._name, fake_impl)
 
         autograd_impl = _library.autograd.make_autograd_impl(self._opoverload, self)
-        lib.impl(self._name, autograd_impl, "Autograd")
+        lib.impl(self._name, autograd_impl, "Autograd", dispatcher_convention=True)
 
         schema = self._opoverload._schema
         if schema.is_mutable:
 
-            def adinplaceorview_impl(*args, **kwargs):
+            def adinplaceorview_impl(keyset, *args, **kwargs):
                 for arg, val in _library.utils.zip_schema(schema, args, kwargs):
                     if not arg.alias_info:
                         continue
@@ -410,9 +410,16 @@ class CustomOpDef:
                             if isinstance(v, Tensor):
                                 autograd.graph.increment_version(v)
                 with _C._AutoDispatchBelowADInplaceOrView():
-                    return self._opoverload(*args, **kwargs)
+                    return self._opoverload.redispatch(
+                        keyset & _C._after_ADInplaceOrView_keyset, *args, **kwargs
+                    )
 
-            lib.impl(self._name, adinplaceorview_impl, "ADInplaceOrView")
+            lib.impl(
+                self._name,
+                adinplaceorview_impl,
+                "ADInplaceOrView",
+                dispatcher_convention=True,
+            )
 
     def __call__(self, *args, **kwargs):
         return self._opoverload(*args, **kwargs)
