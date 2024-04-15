@@ -298,6 +298,7 @@ class TestFxGraphCache(TestCase):
         """
         Verify that we bypass the cache when we have higher order ops.
         """
+
         def fn(x, y):
             output = torch.zeros_like(x)
             n_elements = output.numel()
