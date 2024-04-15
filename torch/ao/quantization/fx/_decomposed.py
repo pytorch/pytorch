@@ -9,6 +9,8 @@ from torch.library import custom_op, Library, impl
 # Note: decomposed means decomposed quantized tensor, using decomposed so that the
 # name is not too long
 ns = "quantized_decomposed"
+quantized_decomposed_lib = Library(ns, "DEF")
+
 
 _DTYPE_TO_QVALUE_BOUNDS = {
     torch.uint8: (0, 255),
@@ -586,8 +588,16 @@ def _(
     )
 
 
-# TODO: move this to https://github.com/pytorch/pytorch/blob/main/torch/ao/quantization/fx/_decomposed.py
-@custom_op(f"{ns}::choose_qparams_per_token_asymmetric", mutates_args=())
+quantized_decomposed_lib.define(
+    "choose_qparams_per_token_asymmetric(Tensor input, ScalarType dtype) -> (Tensor, Tensor)"
+)
+
+
+@impl(
+    quantized_decomposed_lib,
+    "choose_qparams_per_token_asymmetric",
+    "CompositeImplicitAutograd",
+)
 def choose_qparams_per_token_asymmetric(
     input: torch.Tensor,
     dtype: torch.dtype,
@@ -606,7 +616,8 @@ def choose_qparams_per_token_asymmetric(
     """
     # Based on https://github.com/google/XNNPACK/blob/df156f0cf3db5a4576cc711123eeb54915f82ffc/src/xnnpack/quantization.h#L18
     qmin, qmax = -128, 127
-    min_val, max_val = torch.aminmax(input, dim=-1, keepdim=True)
+    min_val = torch.amin(input, dim=-1, keepdim=True)
+    max_val = torch.amax(input, dim=-1, keepdim=True)
     min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
     max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
     eps = torch.finfo(torch.float32).eps  # use xnnpack eps?
@@ -628,17 +639,6 @@ def choose_qparams_per_token_asymmetric(
     zero_point = torch.clamp(zero_point, qmin, qmax).round()
 
     return scale.to(torch.float32), zero_point.to(torch.float32)
-
-
-@choose_qparams_per_token_asymmetric.register_fake
-def _(
-    input: torch.Tensor,
-    dtype: torch.dtype,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    size = (1, input.size(-1))
-    return torch.empty(size, dtype=torch.double, device=input.device), torch.empty(
-        size, dtype=torch.int64, device=input.device
-    )
 
 
 def _per_token_quant_qparam_dim_check(input, scales, zero_points):
@@ -851,7 +851,18 @@ def dequantize_per_channel_group(
     Returns:
        dequantized Tensor with dtype `output_dtype`
     """
+    return _dequantize_per_channel_group_impl(w_int8, scales, zero_points, quant_min, quant_max, dtype, group_size, output_dtype)
 
+def _dequantize_per_channel_group_impl(
+    w_int8: torch.Tensor,
+    scales: torch.Tensor,
+    zero_points: Optional[torch.Tensor],
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+    group_size: int,
+    output_dtype: torch.dtype,
+) -> torch.Tensor:
     assert group_size > 1
     # needed for GPTQ single column dequantize
     if group_size > w_int8.shape[-1] and scales.shape[-1] == 1:
@@ -868,8 +879,7 @@ def dequantize_per_channel_group(
     w_dq = w_int8_grouped.sub(zp).mul(scales).reshape_as(w_int8).to(output_dtype)
     return w_dq
 
-
-quantized_decomposed_lib = Library(ns, "DEF")
+dequantize_per_channel_group.register_fake(_dequantize_per_channel_group_impl)
 
 # TODO: Migrate this to the new torch.library.custom_ops API. This requires a refactor
 # of the autograd.Function. We leave this work to the future.
