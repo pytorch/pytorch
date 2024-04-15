@@ -9,6 +9,7 @@ from itertools import chain, product
 from typing import Any, Callable, cast, Iterable, List, Optional, Tuple, Union
 
 import torch
+import torch._meta_registrations
 import torch._prims as prims
 import torch._prims_common as utils
 import torch.nn.functional as F
@@ -3725,12 +3726,8 @@ def _unsafe_masked_index(x, mask, indices, fill):
     )
 
     if x.numel() == 0:
-        new_size = list(x.shape)
-        for i in range(len(indices)):
-            index = indices[i]
-            if index is not None:
-                new_size[i] = index.numel()
-        return x.new_full(new_size, fill)
+        meta_result = torch._meta_registrations.meta_index_Tensor(x, indices)
+        return x.new_full(meta_result.shape, fill)
 
     for i in range(len(indices)):
         index = indices[i]
