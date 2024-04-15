@@ -37,6 +37,10 @@ from torch.utils._triton import has_triton
 
 HAS_TRITON = has_triton()
 
+if HAS_TRITON:
+    import triton
+    from torch.testing._internal.triton_utils import add_kernel
+
 requires_gpu = functools.partial(unittest.skipIf, not HAS_GPU, "requires gpu")
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 
@@ -288,6 +292,33 @@ class TestFxGraphCache(TestCase):
         self.assertEqual(fn2(a), compiled_fn2(a))
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+    @requires_gpu()
+    @requires_triton()
+    @config.patch({"fx_graph_cache": True})
+    def test_higher_order_op_bypass(self):
+        """
+        Verify that we bypass the cache when we have higher order ops.
+        """
+
+        def fn(x, y):
+            output = torch.zeros_like(x)
+            n_elements = output.numel()
+            grid = lambda meta: (  # noqa: E731
+                triton.cdiv(n_elements, meta["BLOCK_SIZE"]),
+            )
+            add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=4)
+            return output
+
+        compiled_fn = torch.compile(fn, fullgraph=True)
+
+        x = torch.randn(4, device="cuda")
+        y = torch.randn(4, device="cuda")
+        compiled_fn(x, y)
+
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+        self.assertGreater(counters["inductor"]["fxgraph_cache_bypass"], 0)
 
     @config.patch({"fx_graph_cache": True})
     def test_generated_kernel_count(self):
