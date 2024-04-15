@@ -2003,16 +2003,22 @@ class CppWrapperCpu(WrapperCodeGen):
                 output_args,
             )
 
+    def generate_scoped_gil_acquire(self, declarations_before_scope, lines_in_scope):
+        scoped_lines = IndentedBuffer()
+        for declaration in declarations_before_scope:
+            scoped_lines.writeline(declaration)
+
+        scoped_lines.writeline("{")
+        with scoped_lines.indent():
+            scoped_lines.writeline("py::gil_scoped_acquire acquire;")
+            scoped_lines.writelines(lines_in_scope.split("\n"))
+        scoped_lines.writelines("}")
+        return scoped_lines._lines
+
     def load_custom_op_wrapper(self):
         # TODO: need to support control flow
         if self.custom_op_wrapper_loaded:
             return
-
-        custom_op_load_lines = IndentedBuffer()
-        # Use ptr here because RAIIPyObject does not have a default constructor
-        custom_op_load_lines.writeline(
-            "std::unique_ptr<RAIIPyObject> custom_op_wrapper_ptr;"
-        )
 
         lines = """
 RAIIPyObject codecache_module(PyImport_ImportModule("torch._inductor.codecache"));
@@ -2023,12 +2029,15 @@ custom_op_wrapper_ptr = std::make_unique<RAIIPyObject>(PyObject_GetAttrString(co
 if (custom_op_wrapper_ptr.get()->get() == NULL) {
     throw std::runtime_error("Failed to load torch._inductor.codecache.custom_op_wrapper");
 }"""
-        custom_op_load_lines.writeline("{")
-        with custom_op_load_lines.indent():
-            custom_op_load_lines.writeline("py::gil_scoped_acquire acquire;")
-            custom_op_load_lines.writelines(lines.split("\n"))
-        custom_op_load_lines.writelines("}")
-        self.writelines(custom_op_load_lines._lines)
+
+        # Use ptr here because RAIIPyObject does not have a default constructor
+        declarations_before_scope = [
+            "std::unique_ptr<RAIIPyObject> custom_op_wrapper_ptr;"
+        ]
+        scope_gil_acquire = self.generate_scoped_gil_acquire(
+            declarations_before_scope, lines
+        )
+        self.writelines(scope_gil_acquire)
 
         self.custom_op_wrapper_loaded = True
 
@@ -2100,11 +2109,6 @@ if (custom_op_wrapper_ptr.get()->get() == NULL) {
             # to invoke this custom op.
             self.load_custom_op_wrapper()
 
-            custom_op_lines = IndentedBuffer()
-            # Declare the output outside of the GIL acquisition scope
-            for idx, output_arg in enumerate(output_args):
-                custom_op_lines.writeline(f"RAIIAtenTensorHandle {output_arg};")
-
             assert output_args is not None, "output_args should not be None"
             num_args = len(raw_args)
             py_args_var = f"py_args_{next(self.arg_var_id)}"
@@ -2143,14 +2147,14 @@ if (py_{buf_name}.get() == NULL) {{
 {output_arg} =
     reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));"""
 
-            # Acquire the GIL before interacting with Python and release it when the scope ends
-            custom_op_lines.writeline("{")
-            with custom_op_lines.indent():
-                custom_op_lines.writeline("py::gil_scoped_acquire acquire;")
-                custom_op_lines.writelines(lines.split("\n"))
-            custom_op_lines.writelines("}")
-
-            self.writelines(custom_op_lines._lines)
+            declarations_before_scope = [
+                f"RAIIAtenTensorHandle {output_arg};"
+                for idx, output_arg in enumerate(output_args)
+            ]
+            scope_gil_acquire = self.generate_scoped_gil_acquire(
+                declarations_before_scope, lines
+            )
+            self.writelines(scope_gil_acquire)
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
         self,
