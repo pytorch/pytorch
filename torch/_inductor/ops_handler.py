@@ -317,6 +317,9 @@ class OpsHandler(Protocol[T]):
     def log10(self, x0: T) -> T:
         ...
 
+    def log2(self, x0: T) -> T:
+        ...
+
     def nextafter(self, x0: T, x1: T) -> T:
         ...
 

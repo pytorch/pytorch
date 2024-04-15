@@ -1,5 +1,6 @@
 import base64
 import copy
+import copyreg
 import dataclasses
 import heapq
 import inspect
@@ -8,8 +9,8 @@ import json
 import logging
 import math
 import operator
+import re
 import typing
-import copyreg
 
 from contextlib import contextmanager
 from dataclasses import dataclass, field
@@ -19,6 +20,7 @@ from typing import (
     Callable,
     cast,
     Dict,
+    final,
     Iterator,
     List,
     Optional,
@@ -54,9 +56,9 @@ from .schema import (  # type: ignore[attr-defined]
     InputSpec,
     InputToBufferSpec,
     InputToCustomObjSpec,
+    InputTokenSpec,
     InputToParameterSpec,
     InputToTensorConstantSpec,
-    InputTokenSpec,
     Layout,
     LossOutputSpec,
     MemoryFormat,
@@ -378,7 +380,16 @@ class GraphState:
     custom_obj_values: Dict[str, CustomObjArgument] = field(default_factory=dict)
 
 
-class GraphModuleSerializer:
+class Final(type):
+    def __new__(metacls, name, bases, classdict):
+        for b in bases:
+            if isinstance(b, Final):
+                raise TypeError(f"type '{b.__name__}' is not an acceptable base type")
+        return type.__new__(metacls, name, bases, dict(classdict))
+
+
+@final
+class GraphModuleSerializer(metaclass=Final):
     def __init__(
         self,
         graph_signature: ep.ExportGraphSignature,
@@ -1229,7 +1240,8 @@ class GraphModuleSerializer:
         )
 
 
-class ExportedProgramSerializer:
+@final
+class ExportedProgramSerializer(metaclass=Final):
     def __init__(self, opset_version: Optional[Dict[str, int]] = None):
         self.opset_version: Dict[str, int] = {}
         if opset_version:
@@ -1284,7 +1296,8 @@ class ExportedProgramSerializer:
         )
 
 
-class GraphModuleDeserializer:
+@final
+class GraphModuleDeserializer(metaclass=Final):
     @dataclasses.dataclass
     class Result:
         graph_module: torch.fx.GraphModule
@@ -1440,13 +1453,17 @@ class GraphModuleDeserializer:
             class_fqn=script_obj_meta.class_fqn,
         )
 
-    def deserialize_graph_output(self, output) -> torch.fx.Node:
+    def deserialize_graph_output(self, output) -> Optional[Union[torch.fx.Node, int]]:
         if output.type == "as_tensor":
             return self.serialized_name_to_node[output.as_tensor.name]
         elif output.type == "as_sym_int":
             return self.serialized_name_to_node[output.as_sym_int.as_name]
         elif output.type == "as_sym_bool":
             return self.serialized_name_to_node[output.as_sym_bool.as_name]
+        elif output.type == "as_int":
+            return output.as_int
+        elif output.type == "as_none":
+            return None
         else:
             raise SerializeError(f"Unable to deserialize output node {output}")
 
@@ -1474,6 +1491,9 @@ class GraphModuleDeserializer:
             if input_.type in ("as_tensor", "as_sym_int", "as_custom_obj"):
                 node_name = input_.value.name
                 placeholder_node = self.graph.placeholder(node_name)
+                # FX might declare a name illegal (e.g. some nn.Modules use "input" as forward() arguments)
+                # we will overwrite it
+                placeholder_node.name = node_name
                 self.sync_fx_node(node_name, placeholder_node)
             elif input_.type in (
                 "as_int",
@@ -1516,7 +1536,8 @@ class GraphModuleDeserializer:
             output_node.meta["val"] = output_node.args[0].meta["val"]
         else:
             output_node.meta["val"] = tuple(
-                arg.meta["val"] for arg in output_node.args[0]
+                arg.meta["val"] if isinstance(arg, torch.fx.Node) else arg
+                for arg in output_node.args[0]
             )
 
         return self.graph
@@ -1576,6 +1597,8 @@ class GraphModuleDeserializer:
             )
 
         fx_node.meta.update(self.deserialize_metadata(serialized_node.metadata))
+        if fx_node.op not in ["placeholder", "output"] and "nn_module_stack" not in fx_node.meta:
+            fx_node.meta["nn_module_stack"] = {}  # serialization throws away empty dicts
 
     def deserialize_input_spec(self, i: InputSpec) -> ep.InputSpec:
         if i.type == "user_input":
@@ -1976,8 +1999,20 @@ class GraphModuleDeserializer:
             def import_nn_module_stack(key, path, ty):
                 return key, (path, ty)
 
+            # Helper function that splits strings by commas except for those
+            # encapsulated by parens, which are valid traces.
+            # TODO: Currently this is needed due to indexing Sequential
+            # layers introducing names in the form "layer.slice(1, None, None)".
+            # If that naming is improved, this fancier splitting can probably be
+            # reverted to a simple split by comma.
+            def metadata_split(metadata):
+                # Remove the parentheses and commas inside them
+                metadata = re.sub(r'\(.*?\)', '', metadata)
+                # Split the string by comma, except for those inside parentheses
+                return re.split(r'(?<!\()\s*,\s*(?!\()', metadata)
+
             nn_module_stack = dict(
-                import_nn_module_stack(*item.split(","))
+                import_nn_module_stack(*metadata_split(item))
                 for item in nn_module_stack_str.split(ST_DELIMITER)
             )
             ret["nn_module_stack"] = nn_module_stack
@@ -2032,7 +2067,8 @@ class GraphModuleDeserializer:
         ]
 
 
-class ExportedProgramDeserializer:
+@final
+class ExportedProgramDeserializer(metaclass=Final):
     def __init__(self, expected_opset_version: Optional[Dict[str, int]] = None):
         self.expected_opset_version: Dict[str, int] = {}
         if expected_opset_version:
