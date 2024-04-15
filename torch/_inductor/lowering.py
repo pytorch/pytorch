@@ -1244,7 +1244,9 @@ def cat(inputs, dim=0):
         any_pointwise_inputs = any(should_lower_cat_input(inp) for inp in inputs)
 
         if all_pointwise_inputs or (any_pointwise_inputs and pointwise_uses):
-            return pointwise_cat(inputs, dim)
+            out = pointwise_cat(inputs, dim)
+            out.realize()
+            return out
 
     return TensorBox(ir.ConcatKernel.create(inputs, dim))
 
@@ -3642,16 +3644,12 @@ def max_pool2d_with_indices_backward(
     new_size = list(x.get_size())
 
     h_window_size = max(
-        [
-            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
-            for h in range(kernel_size[0] * 2)
-        ]
+        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        [
-            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
-            for w in range(kernel_size[1] * 2)
-        ]
+        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        for w in range(kernel_size[1] * 2)
     )
 
     window_size = h_window_size * w_window_size
@@ -4353,16 +4351,12 @@ def avg_pool2d_backward(
     dtype = x.get_dtype()
 
     h_window_size = max(
-        [
-            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
-            for h in range(kernel_size[0] * 2)
-        ]
+        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        [
-            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
-            for w in range(kernel_size[1] * 2)
-        ]
+        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        for w in range(kernel_size[1] * 2)
     )
 
     window_size = h_window_size * w_window_size
