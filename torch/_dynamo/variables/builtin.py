@@ -956,6 +956,7 @@ class BuiltinVariable(VariableTracker):
             assert len(args) == 3
             assert len(kwargs) == 0
             obj, name_var, val = args
+            obj = obj.realize()
             if (
                 isinstance(obj, UserDefinedObjectVariable)
                 and tx.output.side_effects.is_attribute_mutation(obj)
