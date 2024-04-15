@@ -152,7 +152,7 @@ class TestExportTorchbind(TestCase):
             ep.module().code.strip(),
             """\
 def forward(self, arg_0, arg_1):
-    x, arg1_1, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
+    x, n, = fx_pytree.tree_flatten_spec(([arg_0, arg_1], {}), self._in_spec)
     attr = self.attr
     call_torchbind = torch.ops.higher_order.call_torchbind(attr, 'add_tensor', x);  attr = None
     add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
@@ -161,7 +161,7 @@ def forward(self, arg_0, arg_1):
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
-def forward(self, obj_attr, x, arg1_1):
+def forward(self, obj_attr, x, n):
     call_torchbind = torch.ops.higher_order.call_torchbind(obj_attr, 'add_tensor', x);  obj_attr = None
     add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return (add,)""",
