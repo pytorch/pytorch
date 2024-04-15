@@ -38,6 +38,7 @@ from torch._ops import DispatchKey
 import itertools
 import functools
 from functools import partial
+import re
 import unittest
 
 aten = torch.ops.aten
@@ -629,6 +630,45 @@ class TestDecomp(TestCase):
         var = torch.randn(3, device=device)
         res = torch._decomp.decompositions.native_batch_norm(input, weight, bias, mean, var, False, 1, 1e-05)
         self.assertEqual(shape, res[0].shape)
+
+    def test_arange_graph(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def func(x, start):
+            le = x.shape[-1]
+            if start is None:
+                a = torch.arange(le, dtype=torch.float32, device=x.device)
+            else:
+                a = torch.arange(start, le, dtype=torch.float32, device=x.device)
+            return a
+
+        pattern = r", device = device\(.+\), requires_grad = False"
+
+        cfunc = make_fx(func, decomposition_table=decomposition_table)
+        fx_g = cfunc(torch.rand(10, device=device), None)
+        fx_g_code = fx_g.code.strip()
+        # Remove device and requires_grad
+        fx_g_code = re.sub(pattern, "", fx_g_code)
+        self.assertExpectedInline(fx_g_code, """\
+def forward(self, x_1, start_1):
+    iota = torch.ops.prims.iota.default(10, start = 0, step = 1, dtype = torch.int64)
+    mul = torch.ops.prims.mul.default(iota, 1);  iota = None
+    add = torch.ops.prims.add.default(mul, 0);  mul = None
+    convert_element_type = torch.ops.prims.convert_element_type.default(add, torch.float32);  add = None
+    return convert_element_type""")
+
+        fx_g = cfunc(torch.rand(10, device=device), 1)
+        fx_g_code = fx_g.code.strip()
+        # Remove device and requires_grad
+        fx_g_code = re.sub(pattern, "", fx_g_code)
+        self.assertExpectedInline(fx_g_code, """\
+def forward(self, x_1, start_1):
+    iota = torch.ops.prims.iota.default(9, start = 0, step = 1, dtype = torch.int64)
+    mul = torch.ops.prims.mul.default(iota, 1);  iota = None
+    add = torch.ops.prims.add.default(mul, 1);  mul = None
+    convert_element_type = torch.ops.prims.convert_element_type.default(add, torch.float32);  add = None
+    return convert_element_type""")
+
 
     class DecompCrossRefMode(TorchDispatchMode):
         def __init__(self, test_case, saved_precision, saved_rel_tol, dtype, run_all):
