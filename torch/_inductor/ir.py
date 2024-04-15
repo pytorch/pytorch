@@ -3069,7 +3069,7 @@ class Buffer(IRNode):
             symbols_to_define.remove(s)
         assert (
             not symbols_to_define
-        ), f"unbacked symint {s} not written out, check comment above"
+        ), f"unbacked symint {symbols_to_define} not written out, check comment above"
 
     def realize(self):
         pass
