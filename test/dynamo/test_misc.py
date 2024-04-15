@@ -9381,11 +9381,11 @@ def ___make_guard_fn():
         gm, _ = torch._dynamo.export(TestModule(), torch.randn(3, 4))
         self.assertIn("dynamo_flat_name_to_original_fqn", gm.meta)
         expected_fqn = {
-            "L__self___test_param": "test_param",
-            "L__self___test_buf": "test_buf",
-            "getattr_L__self___foo_bar___0__": "foo_bar.0",
-            "L__self___foo_bar_test_param": "foo_bar.test_param",
-            "L__self___foo_bar_test_buf": "foo_bar.test_buf",
+            "L__fn___test_param": "test_param",
+            "L__fn___test_buf": "test_buf",
+            "getattr_L__fn___foo_bar___0__": "foo_bar.0",
+            "L__fn___foo_bar_test_param": "foo_bar.test_param",
+            "L__fn___foo_bar_test_buf": "foo_bar.test_buf",
         }
         self.assertEqual(expected_fqn, gm.meta["dynamo_flat_name_to_original_fqn"])
 
