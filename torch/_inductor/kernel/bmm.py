@@ -95,7 +95,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
             if not ir.is_storage_and_layout(t):
                 return True
             _, layout = ir.as_storage_and_layout(t, freeze=False)
-            return not isinstance(layout, ir.FixedLayout)
+            return isinstance(layout, ir.FlexibleLayout)
 
         def is_preferred_layout_as_bmm_input(sizes, strides):
             # contiguous on one of the last two dims
