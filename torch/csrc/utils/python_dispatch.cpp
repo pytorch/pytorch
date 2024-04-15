@@ -133,7 +133,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
       const auto& cur_torch_dispatch_mode_state =
           c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
       cur_torch_dispatch_mode_state->pyinterpreter()
-          ->python_op_registration_trampoline(op, dispatch_key_, stack);
+          ->python_op_registration_trampoline(
+              op, dispatch_key_, keyset, stack, dispatcher_convention_);
       return;
     }
 
@@ -150,7 +151,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
             ivalue.unsafeToTensorImpl()->key_set().has(
                 at::DispatchKey::Python)) {
           (*interpreter)
-              ->python_op_registration_trampoline(op, dispatch_key_, stack);
+              ->python_op_registration_trampoline(
+                  op, dispatch_key_, keyset, stack, dispatcher_convention_);
           return;
         }
       } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
@@ -165,7 +167,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
           if (interpreter &&
               nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
             (*interpreter)
-                ->python_op_registration_trampoline(op, dispatch_key_, stack);
+                ->python_op_registration_trampoline(
+                    op, dispatch_key_, keyset, stack, dispatcher_convention_);
             return;
           }
         }
@@ -270,8 +273,6 @@ void initDispatchBindings(PyObject* module) {
           });
 
   m.def("_dispatch_call_boxed", &ophandle_call_boxed);
-  m.attr("_after_autograd_keyset") = c10::after_autograd_keyset;
-  m.attr("_after_ADInplaceOrView_keyset") = c10::after_ADInplaceOrView_keyset;
 
   // TODO: figure out how to do chaining
   py::class_<torch::Library>(m, "_DispatchModule")
@@ -699,6 +700,10 @@ void initDispatchBindings(PyObject* module) {
   m.attr("_additional_keys_to_prop_for_wrapper_tensors") =
       py::cast(at::functorch::kKeysToPropagateToWrapper);
 
+  m.attr("_after_autograd_keyset") = py::cast(c10::after_autograd_keyset);
+  m.attr("_after_ADInplaceOrView_keyset") =
+      py::cast(c10::after_ADInplaceOrView_keyset);
+
   m.def("_dispatch_has_backend_fallback", [](c10::DispatchKey t) {
     return c10::Dispatcher::singleton().hasBackendFallbackForDispatchKey(t);
   });
@@ -909,7 +914,9 @@ void initDispatchBindings(PyObject* module) {
 void python_op_registration_trampoline_impl(
     const c10::OperatorHandle& op,
     c10::DispatchKey key,
-    torch::jit::Stack* stack) {
+    c10::DispatchKeySet keyset,
+    torch::jit::Stack* stack,
+    bool dispatcher_convention) {
   auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
   py::gil_scoped_acquire g;
   auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
@@ -917,8 +924,10 @@ void python_op_registration_trampoline_impl(
   TORCH_INTERNAL_ASSERT(func != nullptr);
   auto* pyobj = func->ptr(getPyInterpreter());
   TORCH_INTERNAL_ASSERT(pyobj != nullptr);
-  auto obj = py::reinterpret_steal<py::object>(
-      PyObject_Call(pyobj, args_kwargs.first.ptr(), args_kwargs.second.ptr()));
+  auto callable = py::reinterpret_borrow<py::object>(pyobj);
+  auto obj = dispatcher_convention
+      ? callable(keyset, *args_kwargs.first, **args_kwargs.second)
+      : callable(*args_kwargs.first, **args_kwargs.second);
   if (!obj) {
     throw python_error();
   }
