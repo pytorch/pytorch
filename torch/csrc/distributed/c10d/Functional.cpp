@@ -15,9 +15,9 @@ class WorkRegistry {
   void register_work(
       const at::Tensor& tensor,
       const c10::intrusive_ptr<c10d::Work>& work) {
-    const auto storage = tensor.storage().getWeakStorageImpl();
+    auto storage = tensor.storage().getWeakStorageImpl();
     std::unique_lock lock(lock_);
-    auto [it, inserted] = registry_.emplace(storage, work);
+    auto [it, inserted] = registry_.try_emplace(std::move(storage), work);
     TORCH_CHECK(
         inserted || it->second != work,
         "The tensor storage is already associated with another work.");
