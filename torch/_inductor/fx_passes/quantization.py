@@ -53,9 +53,9 @@ def _get_pattern_output_dtype(match: Match):
 
 
 def _may_generate_pattern_with_dtype_convert(
-    pattern, dtype=Arg(), dtype_convert=True, users=1
+    pattern, dtype=Arg(), with_dtype_convert=True, users=1
 ):
-    if dtype_convert:
+    if with_dtype_convert:
         return CallFunction(
             prims.convert_element_type.default,
             pattern,
@@ -97,7 +97,7 @@ def _generate_linear_t_pattern(
 def _unary_fusion_pattern(unary_fusion, call_fn, users, is_bf16):
     # only insert to_dtype if is_bf16 is True
     computation_call = _may_generate_pattern_with_dtype_convert(
-        call_fn, dtype=KeywordArg("to_float"), dtype_convert=is_bf16, users=users
+        call_fn, dtype=KeywordArg("to_float"), with_dtype_convert=is_bf16, users=users
     )
     return unary_fusion(computation_call)
 
@@ -310,9 +310,8 @@ def _register_quantized_conv_lowering(
             kwargs["dilation"],
             kwargs["groups"],
         )
-
         output_dtype = _get_pattern_output_dtype(match)
-
+        assert output_dtype in [None, torch.float32, torch.bfloat16]
         # Output QParams
         o_inv_scale = kwargs["o_inv_scale"] if output_dtype is None else 1.0
         o_zero_point = kwargs["o_zp"] if output_dtype is None else 0
@@ -380,7 +379,6 @@ def _register_quantized_linear_lowering(
     )
     def qlinear(match: Match, *args, **kwargs):
         output_dtype = _get_pattern_output_dtype(match)
-
         # Activation QParams
         x, x_scale, x_zp = (
             kwargs["x"],
@@ -437,7 +435,6 @@ def _is_valid_quantized_conv_binary_optimization_pattern():
     #   connected to the compute node.
     def fn(match):
         output_dtype = _get_pattern_output_dtype(match)
-
         compute_node = filter_nodes(match.nodes, torch.ops.onednn.qconv2d_pointwise)[0]
         # qconv2d_pointwise should only have one user
         if len(compute_node.users) != 1:
@@ -514,7 +511,6 @@ def _register_quantized_conv_binary_lowering(
     )
     def qconv_binary(match: Match, *args, **kwargs):
         output_dtype = _get_pattern_output_dtype(match)
-
         x, x_scale, x_zp = kwargs["x"], kwargs["x_scale"], kwargs["x_zp"]
         accum = (
             kwargs["accum"] if output_dtype is None else kwargs["accum_after_dequant"]
@@ -996,7 +992,7 @@ def _is_input_output_same_scale_zp(check_node):
             match.nodes, quantized_decomposed.dequantize_per_tensor.default
         )
         zero_points = [node.args[2] for node in dequant_nodes]
-        # Get quant nodes at input
+        # Get quant nodes at output
         quant_nodes = filter_nodes(
             match.nodes, quantized_decomposed.quantize_per_tensor.default
         )
@@ -1245,11 +1241,11 @@ def _is_valid_dequant_promotion_pattern(dtype=torch.float32):
             )
         else:
             dequant_node = (
-                dequant_pattern_end_node  # pattern: linear <- mul
+                dequant_pattern_end_node  # pattern: linear <- dequant
                 if dtype == torch.float32
                 else dequant_pattern_end_node.args[
                     0
-                ]  # pattern: linear <- to_bf16 <- mul
+                ]  # pattern: linear <- to_bf16 <- dequant
             )
 
         if (
