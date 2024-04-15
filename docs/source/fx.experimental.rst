@@ -41,4 +41,5 @@ torch.fx.experimental.symbolic_shapes
     constrain_unify
     canonicalize_bool_expr
     statically_known_true
+    lru_cache
     rename_unbacked_to
