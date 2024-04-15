@@ -4,6 +4,7 @@ import sys
 from typing import Any, Callable, Dict, Iterable, Tuple
 
 import torch
+import torch._utils_internal as _utils_internal
 from torch import _C
 
 
@@ -189,3 +190,14 @@ def can_generate_trivial_fake_impl(op: torch._ops.OpOverload) -> bool:
         return False
     # If the op returns nothing, then it has a trivial fake impl.
     return True
+
+
+def requires_pystub() -> bool:
+    """If an op was defined in C++ and extended from Python using the
+    torch.library APIs, returns if we require that there have been a
+    m.has_python_registration("mylib.ops") call from C++ that associates
+    the C++ op with a python module.
+    """
+    return getattr(
+        _utils_internal, "REQUIRE_PYTHON_REGISTRATION_STUB_FOR_CPP_OPS", True
+    )

@@ -164,3 +164,4 @@ USE_GLOBAL_DEPS = True
 # USE_RTLD_GLOBAL_WITH_LIBTORCH controls whether __init__.py tries to load
 # _C.so with RTLD_GLOBAL during the call to dlopen.
 USE_RTLD_GLOBAL_WITH_LIBTORCH = False
+REQUIRE_PYTHON_REGISTRATION_STUB_FOR_CPP_OPS = False
