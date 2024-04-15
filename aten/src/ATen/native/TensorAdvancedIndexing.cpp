@@ -106,6 +106,7 @@
 #include <ATen/ops/index_copy_native.h>
 #include <ATen/ops/index_fill_native.h>
 #include <ATen/ops/index_meta.h>
+#include <ATen/ops/index_meta_dispatch.h>
 #include <ATen/ops/index_native.h>
 #include <ATen/ops/index_put_native.h>
 #include <ATen/ops/index_reduce_meta.h>
@@ -695,8 +696,8 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
     };
     std::transform(indices.begin(), indices.end(), self.sizes().begin(), new_sizes.begin(), compute_new_size);
 
-    auto result = at::_unsafe_index(self.new_empty(new_sizes), clamped_indices);
-    return result.masked_fill(at::logical_not(mask), fill);
+    auto result = at::meta::index(self.new_empty(new_sizes), clamped_indices);
+    return self.new_full(result.sizes(), fill);
   }
 
   auto result = at::_unsafe_index(self, clamped_indices);
