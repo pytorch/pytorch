@@ -120,9 +120,6 @@ TensorBox -> View -> StorageBox -> Buffer
 In these cases, the underlying StorageBox/Buffer will be shared with the pre-view TensorBox.
 """
 
-# TODO(shunting): decide the aligment based on dtype
-DEFAULT_ALIGN = 16
-
 
 def validate_ir(node_or_nodes):
     def _check_tensorbox(nodes):
@@ -2498,6 +2495,15 @@ def is_contiguous_strides_for_shape(stride, shape):
     )
 
 
+def get_align_for_dtype(dtype):
+    """
+    CUDA max memory transaction size is 128 bytes for a warp.
+    We pick `128 // dtype.itemsize` as alighment so GPU can do coalesced
+    memory access.
+    """
+    return 128 // dtype.itemsize
+
+
 @dataclasses.dataclass
 class Layout(IRNode):
     def __init__(
@@ -2595,11 +2601,12 @@ class Layout(IRNode):
         return self.is_stride_ordered(order)
 
     @staticmethod
-    def _pad_strides(in_strides, size, align=DEFAULT_ALIGN):
+    def _pad_strides(in_strides, size, dtype):
         """
         The padding does not change stride order but makes sure all strides larger
         than the threshold are multiple of align.
         """
+        align = get_align_for_dtype(dtype)
         if len(in_strides) == 0:
             return in_strides
 
@@ -2672,7 +2679,7 @@ class Layout(IRNode):
     def pad_strides(self):
         assert isinstance(self, FlexibleLayout)
         assert self._stride is not None
-        self._stride = self._pad_strides(self._stride, self.size)
+        self._stride = self._pad_strides(self._stride, self.size, self.dtype)
 
     def should_pad_strides(self):
         return config.comprehensive_padding and isinstance(self, FlexibleLayout)
@@ -2829,7 +2836,7 @@ class FlexibleLayout(Layout):
     def as_stride_order(self, order, allow_padding=False):
         new_stride = self.stride_ordered(self.size, order)
         if self.should_pad_strides() and allow_padding:
-            new_stride = self._pad_strides(new_stride, self.size)
+            new_stride = self._pad_strides(new_stride, self.size, self.dtype)
 
         return FixedLayout(
             self.device,
@@ -2842,7 +2849,7 @@ class FlexibleLayout(Layout):
     def as_fill_order(self, order):
         new_stride = self.fill_ordered(self.size, order)
         if self.should_pad_strides():
-            new_stride = self._pad_strides(new_stride, self.size)
+            new_stride = self._pad_strides(new_stride, self.size, self.dtype)
         return FixedLayout(
             self.device,
             self.dtype,
@@ -2854,7 +2861,7 @@ class FlexibleLayout(Layout):
     def as_same_order(self, stride):
         new_stride = self.same_ordered(self.size, stride)
         if self.should_pad_strides():
-            new_stride = self._pad_strides(new_stride, self.size)
+            new_stride = self._pad_strides(new_stride, self.size, self.dtype)
         return FixedLayout(
             self.device,
             self.dtype,

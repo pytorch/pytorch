@@ -22,11 +22,7 @@ from torch.distributed.distributed_c10d import (
     is_nccl_available,
     ProcessGroup,
 )
-from torch.testing._internal.common_distributed import run_with_both_funcol_impls
-from torch.testing._internal.common_utils import (
-    instantiate_parametrized_tests,
-    run_tests,
-)
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     skip_unless_torch_gpu,
@@ -54,13 +50,11 @@ def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0):
     os.environ["RANK"] = f"{rank}"
 
 
-@instantiate_parametrized_tests
 class DeviceMeshTest(DTensorTestBase):
     @property
     def world_size(self):
         return 4
 
-    @run_with_both_funcol_impls
     def test_init_process_group(self):
         device_type = _get_device_type(self.world_size)
         mesh_tensor = torch.arange(4).reshape(2, 2)
@@ -78,7 +72,6 @@ class DeviceMeshTest(DTensorTestBase):
             device_mesh = DeviceMesh(self.device_type, mesh)
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_get_group(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
@@ -99,7 +92,6 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(mesh_2d.get_group("tp"), tp_mesh.get_group())
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_get_local_rank_raises_exception(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
@@ -113,7 +105,6 @@ class DeviceMeshTest(DTensorTestBase):
             local_rank = mesh_2d.get_local_rank()
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_get_local_rank(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
@@ -128,7 +119,6 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(tp_mesh.get_local_rank(), mesh_2d.get_local_rank("tp"))
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_device_mesh_2d(self):
         mesh_tensor = torch.arange(4).reshape(2, 2)
         # construct a cuda device mesh
@@ -153,7 +143,6 @@ class DeviceMeshTest(DTensorTestBase):
             )
             self.assertEqual(global_ranks, current_rank_expected_group_ranks)
 
-    @run_with_both_funcol_impls
     def test_fake_pg_device_mesh(self):
         fake_store = FakeStore()
         init_process_group("fake", store=fake_store, rank=0, world_size=self.world_size)
@@ -173,7 +162,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
         return 8
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_device_mesh_nd(self):
         # construct a cuda device mesh
         mesh_tensor = torch.arange(8).reshape(2, 2, 2)
@@ -197,7 +185,6 @@ class DeviceMeshTestNDim(DTensorTestBase):
                     self.assertEqual(global_ranks, ranks.tolist())
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_device_mesh_hash(self):
         mesh_tensor_2d = torch.arange(8).reshape(4, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor_2d)
@@ -215,7 +202,6 @@ class InitDeviceMeshTest(DTensorTestBase):
         return 8
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_init_device_mesh(self):
         mesh_shape = (2, 4)
         ref_mesh = DeviceMesh(self.device_type, torch.arange(8).view(mesh_shape))
@@ -233,7 +219,6 @@ class InitDeviceMeshTest(DTensorTestBase):
         self.assertEqual(mesh_2d, ref_mesh)
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_raises_duplicate_mesh_dim_names(self):
         with self.assertRaisesRegex(
             RuntimeError,
@@ -246,7 +231,6 @@ class InitDeviceMeshTest(DTensorTestBase):
             )
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_raises_mesh_shape_mesh_dim_names_mismatch(self):
         with self.assertRaisesRegex(
             RuntimeError,
@@ -259,21 +243,18 @@ class InitDeviceMeshTest(DTensorTestBase):
             )
 
 
-@instantiate_parametrized_tests
 class TestDeviceMeshGetItem(DTensorTestBase):
     @property
     def world_size(self):
         return 8
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_raises_no_mesh_dim_found(self):
         with self.assertRaisesRegex(KeyError, "No `mesh_dim_names` found."):
             mesh = init_device_mesh(self.device_type, (2, 4))
             child_mesh = mesh["DP"]
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_raises_invalid_mesh_dim_name(self):
         child_mesh_dim_name = "PP"
         with self.assertRaisesRegex(
@@ -286,7 +267,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             child_mesh = mesh[child_mesh_dim_name]
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_get_item(self):
         mesh_shape = (2, 4)
         mesh_dim_names = ("DP", "TP")
@@ -310,7 +290,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(mesh_2d["DP"].mesh, pg_ranks_by_dim_name["DP"][dp_group_idx])
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_get_item_1d(self):
         mesh = init_device_mesh(self.device_type, (8,), mesh_dim_names=("dp",))
         # Make sure slicing out 1D mesh from a 1D mesh works.
@@ -322,7 +301,6 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             dp_mesh = mesh["dim0"]
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_cache_and_reuse_submesh_slice_result(self):
         mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
 
@@ -340,10 +318,8 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertTrue(_world.group_count > ref_pg_count)
 
 
-@instantiate_parametrized_tests
 class TestMeshEnv(DTensorTestBase):
     @with_comms
-    @run_with_both_funcol_impls
     def test_get_parent_mesh(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_dim_names = ("DP", "TP")
@@ -363,7 +339,6 @@ class TestMeshEnv(DTensorTestBase):
         self.assertEqual(_mesh_resources.get_parent_mesh(mesh_1_3), None)
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_get_parent_mesh_dim_exist(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_dim_names = ("DP", "TP")
@@ -375,7 +350,6 @@ class TestMeshEnv(DTensorTestBase):
         self.assertEqual(_mesh_resources.get_parent_mesh_dim(mesh_2d["TP"]), 1)
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_get_parent_mesh_dim_not_exist(self):
         mesh_shape = (self.world_size,)
         mesh = init_device_mesh(self.device_type, mesh_shape)
@@ -383,7 +357,6 @@ class TestMeshEnv(DTensorTestBase):
         self.assertEqual(_mesh_resources.get_parent_mesh_dim(mesh), None)
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_get_mesh_dim_by_name(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_dim_names = ("DP", "TP")
@@ -395,14 +368,12 @@ class TestMeshEnv(DTensorTestBase):
         self.assertEqual(_mesh_resources.get_mesh_dim_by_name(mesh_2d, "TP"), 1)
 
 
-@instantiate_parametrized_tests
 class DeviceMeshCollectiveTest(DTensorTestBase):
     @property
     def world_size(self):
         return 8
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_broadcast_1d(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         local_tensor = torch.ones(3, 3, device=self.device_type) * self.rank
@@ -410,7 +381,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         self.assertEqual(local_tensor, torch.zeros(3, 3))
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_scatter_1d(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         scatter_tensor_shape = [3, 3, 3]
@@ -429,7 +399,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             self.assertEqual(recv_tensor, splitted_list[mesh.get_rank()])
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_scatter_uneven(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         my_rank = device_mesh.get_rank()
@@ -475,7 +444,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 self.assertEqual(scattered_tensor, tensor_splitted_list[my_rank])
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_all_gather_uneven(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         my_rank = device_mesh.get_rank()
@@ -514,7 +482,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             self.assertEqual(all_gathered_tensor, tensor_to_split)
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_reduce_scatter_contiguous(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         my_rank = device_mesh.get_rank()
@@ -557,7 +524,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
         self.assertEqual(new_tensor_local, expected_tensor)
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_reduce_scatter_uneven(self):
         device_mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
         my_rank = device_mesh.get_rank()
@@ -620,7 +586,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 )
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_broadcast_nd(self):
         mesh_tensor = torch.arange(8).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
@@ -639,7 +604,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             self.assertEqual(cloned_local_tensor, torch.ones(3, 3) * res_num)
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_scatter_nd(self):
         mesh_tensor = torch.arange(8).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)
@@ -662,7 +626,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_all_to_all_1d(self):
         # transpose on a 2D tensor distributed over N nodes:
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -690,7 +653,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             self.assertEqual(output_tensor, expected_tensor)
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_all_to_all_nd(self):
         mesh_tensor = torch.arange(8).reshape(2, 2, 2)
         mesh = DeviceMesh(self.device_type, mesh_tensor)

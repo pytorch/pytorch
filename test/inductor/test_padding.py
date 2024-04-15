@@ -516,7 +516,7 @@ class PaddingTest(TestCaseBase):
         """
         sizes = [2, 16, 2047]
         in_strides = [2047 * 16, 2047, 1]
-        out_strides = list(ir.Layout._pad_strides(in_strides, sizes))
+        out_strides = list(ir.Layout._pad_strides(in_strides, sizes, torch.float32))
         expected_strides = [2048 * 16, 2048, 1]
         self.assertEqual(
             expected_strides, out_strides, f"{expected_strides} v.s. {out_strides}"
@@ -526,10 +526,10 @@ class PaddingTest(TestCaseBase):
         """
         The padding is skipped to avoid too much memory overhead.
         """
-        sizes = [2, 16, 127]
-        in_strides = [2032, 127, 1]
-        out_strides = list(ir.Layout._pad_strides(in_strides, sizes))
-        expected_strides = [2032, 127, 1]
+        sizes = [2, 32, 127]
+        in_strides = [4064, 127, 1]
+        out_strides = list(ir.Layout._pad_strides(in_strides, sizes, torch.float32))
+        expected_strides = [4064, 127, 1]
         self.assertEqual(
             expected_strides, out_strides, f"{expected_strides} v.s. {out_strides}"
         )
@@ -561,7 +561,7 @@ class PaddingTest(TestCaseBase):
         x_shape = (1, 128, 640, 959)
         x1 = torch.randn(*x_shape)
 
-        padded_stride = ir.Layout._pad_strides(x1.stride(), x1.shape)
+        padded_stride = ir.Layout._pad_strides(x1.stride(), x1.shape, torch.float32)
         x2 = rand_strided(x_shape, padded_stride, device="cuda")
         x2.copy_(x1)
 
@@ -623,12 +623,12 @@ class PaddingTest(TestCaseBase):
     def test_pad_channels_last(self):
         t = torch.randn(2, 3, 5, 1025)
         in_strides = t.stride()
-        out_strides = ir.Layout._pad_strides(in_strides, t.shape)
+        out_strides = ir.Layout._pad_strides(in_strides, t.shape, torch.float32)
         self.assertTrue(in_strides != out_strides)
 
         t = t.to(memory_format=torch.channels_last)
         in_strides = t.stride()
-        out_strides = ir.Layout._pad_strides(in_strides, t.shape)
+        out_strides = ir.Layout._pad_strides(in_strides, t.shape, torch.float32)
         self.assertTrue(in_strides == out_strides)
 
 

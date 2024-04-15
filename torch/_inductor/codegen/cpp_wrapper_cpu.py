@@ -16,7 +16,7 @@ from ..codecache import CudaKernelParamCache
 from ..utils import cache_on_self, sympy_product
 from ..virtualized import V
 from .common import IndentedBuffer
-from .wrapper import EnterSubgraphLine, ExitSubgraphLine, pexpr, WrapperCodeGen
+from .wrapper import EnterSubgraphLine, ExitSubgraphLine, WrapperCodeGen
 
 
 class CppWrapperCpu(WrapperCodeGen):
@@ -1540,7 +1540,7 @@ class CppWrapperCpu(WrapperCodeGen):
             tmp_name = f"tmp_tensor_handle_{next(self.tmp_tensor_id)}"
             args = [
                 name,
-                pexpr(offset),  # bytes not numel
+                self.expr_printer(offset),  # bytes not numel
                 self.codegen_dtype(dtype),
                 str(len(shape)),
                 self.codegen_int_array_var(
@@ -1561,7 +1561,7 @@ class CppWrapperCpu(WrapperCodeGen):
             ", ".join(
                 [
                     name,
-                    pexpr(offset),  # bytes not numel
+                    self.expr_printer(offset),  # bytes not numel
                     self.codegen_dtype(dtype),
                     self.codegen_shape_tuple(shape),
                     self.codegen_shape_tuple(stride),
