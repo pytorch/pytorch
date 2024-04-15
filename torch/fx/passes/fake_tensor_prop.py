@@ -54,8 +54,9 @@ class FakeTensorProp(torch.fx.Interpreter):
                     # should be running under the mode...
                     return snapshot_fake(self._mode.from_tensor(new, static_shapes=True))
             elif isinstance(new, scalar_types):
-                assert isinstance(old, scalar_types)
-                torch._check(old == new)
+                if old is not nil:
+                    assert isinstance(old, scalar_types)
+                    torch._check(old == new)
                 return new
             else:
                 return None
