@@ -2275,6 +2275,8 @@ class InstructionTranslator(InstructionTranslatorBase):
             for k in self.symbolic_locals.keys()
             if k in reads and k not in self.cell_and_freevars()
         )
+        # NOTE: isinstance check on lazy VT's with NullVariable will NOT
+        # realize the lazy VT.
         argnames = tuple(
             k
             for k in all_argnames
