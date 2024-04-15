@@ -257,7 +257,7 @@ class Guard:
         try:
             return self.create_fn(builder, self)
         except Exception:
-            log.error("Error while creating guard:\n%s", str(self).rstrip())
+            log.exception("Error while creating guard:\n%s", str(self).rstrip())
             if self.stack:
                 log.error("Created at:\n%s", "".join(self.stack.format()[-4:]).rstrip())
             raise
@@ -615,6 +615,8 @@ class TracingContext:
         self.loc_in_frame = None
         # this is only set after aot_autograd
         self.fw_metadata = None
+        # this is only set after aot_autograd
+        self.aot_graph_name = None
         self.params_flat = None
         # this is for extended return calling convention from backend
         # compiler to aot_autograd
