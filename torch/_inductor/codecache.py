@@ -261,7 +261,7 @@ class PersistentCache(CacheBase):
         choices: List[ChoiceCaller],
         op: str,
         inputs: str,
-        benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
+        benchmark: Optional[Callable[[Any], Dict[ChoiceCaller, float]]],
     ) -> Dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
@@ -269,7 +269,7 @@ class PersistentCache(CacheBase):
 
             1. Check global_cache[op][inputs][choice][precision], return benchmark if cached.
             2. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
-            3.
+            3. If benchmark is not None:
                 a. `max_autotune_gemm=True`: benchmark the choice, update
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
@@ -302,9 +302,13 @@ class PersistentCache(CacheBase):
         if config.max_autotune or config.max_autotune_gemm:
             local_cache = self.get_local_cache()
             # check local cache first since it is data specific to the current machine
-            if not check_cache(local_cache) and not (
-                use_global_cache()
-                and check_cache(self.get_global_cache(), callback=log_stats)
+            if (
+                not check_cache(local_cache)
+                and not (
+                    use_global_cache()
+                    and check_cache(self.get_global_cache(), callback=log_stats)
+                )
+                and benchmark is not None
             ):
                 try:
                     # re-benchmark everything to try to get consistent numbers from the same machine
