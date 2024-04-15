@@ -3270,7 +3270,9 @@ def forward(self, tangents_1):
         out = f(inp)
 
         self.assertIsNotNone(out.grad_fn)
-        self.assertExpectedInline(str(out.grad_fn.__class__), """<class 'ViewBackward0'>""")
+        self.assertExpectedInline(
+            str(out.grad_fn.__class__), """<class 'ViewBackward0'>"""
+        )
 
     def test_output_aliases_intermediate_view_meta_replay(self):
         @self._compile_and_erase_bases(0, 1)
@@ -3282,10 +3284,14 @@ def forward(self, tangents_1):
         out1, out2 = f(inp)
 
         self.assertIsNotNone(out1.grad_fn)
-        self.assertExpectedInline(str(out1.grad_fn.__class__), """<class 'ViewBackward0'>""")
+        self.assertExpectedInline(
+            str(out1.grad_fn.__class__), """<class 'ViewBackward0'>"""
+        )
 
         self.assertIsNotNone(out2.grad_fn)
-        self.assertExpectedInline(str(out2.grad_fn.__class__), """<class 'ViewBackward0'>""")
+        self.assertExpectedInline(
+            str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
+        )
 
     def test_output_aliases_output_view_meta_replay(self):
         @self._compile_and_erase_bases(1)
@@ -3298,7 +3304,9 @@ def forward(self, tangents_1):
 
         self.assertEqual(out1.untyped_storage(), out2.untyped_storage())
         self.assertIsNotNone(out2.grad_fn)
-        self.assertExpectedInline(str(out2.grad_fn.__class__), """<class 'ViewBackward0'>""")
+        self.assertExpectedInline(
+            str(out2.grad_fn.__class__), """<class 'ViewBackward0'>"""
+        )
 
 
 def extract_graph(fx_g, _, graph_cell):
@@ -3407,7 +3415,9 @@ def forward(self, arg0_1, arg1_1):
 
         with torch.no_grad():
             gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
-        self.assertExpectedInline(str(gm.code).strip(), """\
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
 def forward(self, arg0_1, arg1_1):
     add = torch.ops.aten.add.Tensor(arg1_1, 2)
     _set_grad_enabled = torch._C._set_grad_enabled(False)
@@ -3430,7 +3440,9 @@ def forward(self, arg0_1, arg1_1):
 
         with torch.no_grad():
             gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
-        self.assertExpectedInline(str(gm.code).strip(), """\
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
 def forward(self, arg0_1, arg1_1):
     _set_grad_enabled = torch._C._set_grad_enabled(True)
     matmul = torch.ops.aten.matmul.default(arg1_1, arg1_1)
@@ -3585,7 +3597,9 @@ def forward(self, arg0_1, arg1_1):
 
         with torch.no_grad():
             gm, _ = aot_export_module(mod, [inp], trace_joint=False, pre_dispatch=True)
-        self.assertExpectedInline(str(gm.code).strip(), """\
+        self.assertExpectedInline(
+            str(gm.code).strip(),
+            """\
 def forward(self, arg0_1, arg1_1):
     _set_grad_enabled = torch._C._set_grad_enabled(True)
     add = torch.ops.aten.add.Tensor(arg1_1, 5)
