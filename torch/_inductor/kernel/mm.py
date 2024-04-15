@@ -193,6 +193,14 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     if m * n == 0 or not use_max_autotune():
+        # Use a FlexibleLayout if we are not autotuning.
+        # This allows padding strides for the output.
+        from torch._inductor.ir import FixedLayout, FlexibleLayout
+
+        if isinstance(layout, FixedLayout):
+            layout = FlexibleLayout(
+                device=layout.device, dtype=layout.dtype, size=layout.size
+            )
         choices = (
             [
                 aten_addmm.bind(
