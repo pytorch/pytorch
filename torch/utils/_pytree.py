@@ -656,15 +656,12 @@ def _is_leaf(tree: PyTree, is_leaf: Optional[Callable[[PyTree], bool]] = None) -
     ) not in SUPPORTED_NODES
 
 
-SLOTS = {"slots": True} if sys.version_info >= (3, 10) else {}
-
-
 # A TreeSpec represents the structure of a pytree. It holds:
 # "type": the type of root Node of the pytree
 # context: some context that is useful in unflattening the pytree
 # children_specs: specs for each child of the root Node
 # num_leaves: the number of leaves
-@dataclasses.dataclass(init=True, frozen=True, eq=True, repr=False, **SLOTS)
+@dataclasses.dataclass(init=True, frozen=True, eq=True, repr=False)
 class TreeSpec:
     type: Any
     context: Context
@@ -806,9 +803,6 @@ class TreeSpec:
             start = end
 
         return unflatten_fn(child_pytrees, self.context)
-
-
-del SLOTS
 
 
 class LeafSpec(TreeSpec):
