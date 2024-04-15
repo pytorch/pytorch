@@ -352,7 +352,6 @@ class FSDPParamGroup:
             if fsdp_param.grad_offload_event is not None:
                 fsdp_param.grad_offload_event.synchronize()
                 fsdp_param.grad_offload_event = None
-        self._training_state = TrainingState.IDLE
         self._post_forward_indices.clear()
         self.all_forward_output_grad_fns.clear()
 
