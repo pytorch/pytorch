@@ -1659,7 +1659,7 @@ static at::Tensor _quantized_convolution_onednn(
   ideep::convolution_forward::prepare(
       params, src, packed_weight, expected_bias, dst_dims, dst,
       stride.vec(), dilation.vec(), padding.vec(), padding.vec(), groups,
-      src_scales, weights_scales, ideep::scale_t(1, inv_output_scale),
+      src_scales, weights_scales, ideep::scale_t(1, 1.0 / inv_output_scale),
       src_zero_points, dst_zero_points,
       op_attr, dnnl::algorithm::convolution_direct,
       dnnl::prop_kind::forward_inference,
