@@ -38,7 +38,7 @@ runs:
       run: |
         # Remove any previous test reports if they exist
         rm -f test-reports-*.zip
-        zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml' -i '*.csv' -i '*.zip'
+        zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml' -i '*.csv'
 
     - name: Zip usage log for upload
       if: runner.os != 'Windows' && !inputs.use-gha
@@ -55,6 +55,18 @@ runs:
         fi
         if ls test/**/*.log 1> /dev/null 2>&1; then
             zip -r "logs-${FILE_SUFFIX}.zip" test -i '*.log'
+        fi
+
+    - name: Zip inductor artifacts for upload
+      if: runner.os != 'Windows' && !inputs.use-gha
+      shell: bash
+      env:
+        FILE_SUFFIX: ${{ inputs.file-suffix }}
+      run: |
+        # Remove any previous cache artifacts if they exist
+        rm -f inductor-artifacts-*.zip
+        if [ -d 'test/inductor-artifacts' ]; then
+          zip -r "inductor-artifacts-${FILE_SUFFIX}.zip" test/inductor-artifacts
         fi
 
     # Windows zip
@@ -74,7 +86,7 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # -ir => recursive include all files in pattern
-        7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml' -ir'!test\*.csv' -ir'!test\*.zip'
+        7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml' -ir'!test\*.csv'
 
     - name: Zip usage log for upload
       if: runner.os == 'Windows' && !inputs.use-gha
@@ -121,6 +133,18 @@ runs:
         if-no-files-found: ignore
         path: logs-*.zip
 
+    - name: Store Inductor Artifacts on S3
+      uses: seemethere/upload-artifact-s3@v5
+      if: ${{ !inputs.use-gha }}
+      continue-on-error: true
+      with:
+        s3-bucket: ${{ inputs.s3-bucket }}
+        s3-prefix: |
+          ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
+        retention-days: 14
+        if-no-files-found: ignore
+        path: inductor-artifacts-*.zip
+
     # GHA upload
     - name: Store Test Downloaded JSONs on Github
       uses: actions/upload-artifact@v3
@@ -146,7 +170,6 @@ runs:
         path: |
           test/**/*.xml
           test/**/*.csv
-          test/**/*.zip
 
     - name: Store Usage Logs on Github
       uses: actions/upload-artifact@v3

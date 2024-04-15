@@ -2354,9 +2354,9 @@ class BenchmarkRunner:
             if not cache_dir:
                 log.error("INDUCTOR_CACHE_DIR is not set")
             else:
-                dst_dir = os.path.join(os.getcwd(), "test", "test-reports")
+                dst_dir = os.path.join(os.getcwd(), "test", "inductor-artifacts")
                 os.makedirs(dst_dir, exist_ok=True)
-                archive = os.path.join(dst_dir, name + "-torchinductor")
+                archive = os.path.join(dst_dir, name)
                 shutil.make_archive(archive, "zip", cache_dir)
                 log.warning("Copied inductor cache to: %s.zip", archive)
         except OSError:
@@ -2590,7 +2590,8 @@ class BenchmarkRunner:
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
         # TESTING: delete me
-        accuracy_status = "fail_accuracy"
+        if name in CI_SAVE_CACHE_DIR:
+            accuracy_status = "fail_accuracy"
 
         return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
