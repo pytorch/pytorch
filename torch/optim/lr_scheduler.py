@@ -1781,8 +1781,9 @@ class OneCycleLR(LRScheduler):
         step_num = self.last_epoch
 
         if step_num > self.total_steps:
-            raise ValueError("Tried to step {} times. The specified number of total steps is {}"
-                             .format(step_num, self.total_steps))
+            raise ValueError(
+                f"Tried to step {step_num} times. The specified number of total steps is {self.total_steps}"  # noqa: UP032
+            )
 
         for group in self.optimizer.param_groups:
             start_step = 0
