@@ -140,7 +140,7 @@ class Library:
             >>> my_lib = Library("aten", "IMPL")
             >>> def div_cpu(self, other):
             >>>     return self * (1 / other)
-            >>> my_lib._impl_with_aoti_compile("div", "Tensor", "CPU", div_cpu)
+            >>> my_lib._impl_with_aoti_compile("aten::div", "Tensor", "CPU", div_cpu)
         '''
         impl_fn_name = "impl_with_aoti_compile"
 
