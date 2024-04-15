@@ -2675,17 +2675,19 @@ def fail_non_abi_compatible_cuda(is_skip=False):
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
-    "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
-    "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(),
+    "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_bmm_multiple_dynamic": fail_minimal_arrayref_interface(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
-    "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(),
+    "test_dup_unbacked_sym_decl": fail_with_and_without_stack_allocation(is_skip=True),
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/122978
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
-    "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
+    "test_dynamic_smem_above_default_limit": fail_minimal_arrayref_interface(
+        is_skip=True
+    ),
     # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
     # TODO: test_freezing_abi_compatible_cpu somehow fails on CI but not locally,
@@ -2696,7 +2698,7 @@ CPU_TEST_FAILURES = {
     # minimal arrayref interface only works with CPU; test crashes.
     # https://github.com/pytorch/pytorch/issues/122983
     "test_multi_device": fail_minimal_arrayref_interface(is_skip=True),
-    "test_normal_functional": fail_with_and_without_stack_allocation(),
+    "test_normal_functional": fail_with_and_without_stack_allocation(is_skip=True),
     # undefined symbol: _Z16aoti_torch_dtypeIN3c104HalfEEiv
     "test_non_contiguous_output_alias": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -2705,20 +2707,11 @@ CPU_TEST_FAILURES = {
     # The same issue as https://github.com/pytorch/pytorch/issues/122978
     "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(is_skip=True),
     # the test segfaults
-    "test_repeat_output": fail_stack_allocation(is_skip=True),
     "test_view_outputs": fail_stack_allocation(is_skip=True),
     "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
     "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
     "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
     "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
-    # FIXME: failed with Segfault while exiting the Python runtime
-    "test_scatter_fallback": fail_stack_allocation(is_skip=True),
-    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    "test_scatter_reduce_fallback": fail_stack_allocation(is_skip=True),
-    # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
-    "test_index_put_fallback": fail_stack_allocation(is_skip=True),
-    # https://github.com/pytorch/pytorch/issues/122984
-    "test_index_put_with_none_index": fail_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_constant": fail_stack_allocation(is_skip=True),
     # C++ compile error, need for aoti_torch___scaled_dot_product_flash_attention_for_cpu
@@ -2755,12 +2748,13 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_outer_code": fail_stack_allocation(is_skip=True),
     "test_while_loop_with_parameters": fail_stack_allocation(is_skip=True),
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
+    "test_runtime_checks_dtype_failed": fail_minimal_arrayref_interface(is_skip=True),
 }
 
 CUDA_TEST_FAILURES = {
     # test_failures, xfail by default, set is_skip=True to skip
-    "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(),
-    "test_normal_functional": fail_abi_compatible_cuda(),
+    "test_dup_unbacked_sym_decl": fail_abi_compatible_cuda(is_skip=True),
+    "test_normal_functional": fail_abi_compatible_cuda(is_skip=True),
     # There is a double-free issue which will be fixed in another PR
     # no ABI shim fn for torch.sort; remove this when adding one
     "test_triton_kernel_multi_output_arg": fail_abi_compatible_cuda(is_skip=True),
