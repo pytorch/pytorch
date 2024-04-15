@@ -4,8 +4,8 @@ import torch.fx
 from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
-from torch.fx.experimental.proxy_tensor import py_sym_types, snapshot_fake
-from torch.fx.node import map_aggregate
+from torch.fx.experimental.proxy_tensor import snapshot_fake
+from torch.utils._pytree import tree_map
 
 __all__ = ['FakeTensorProp']
 
@@ -30,35 +30,45 @@ class FakeTensorProp(torch.fx.Interpreter):
         self._mode = mode
 
     def run_node(self, n: Node):
-        import sympy
-        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
         result = super().run_node(n)
-        sym = None
-        if (
-            'val' in n.meta and
-            isinstance(v := n.meta['val'], torch.SymInt) and
-            isinstance(v.node.expr, sympy.Symbol) and free_unbacked_symbols(v)
-        ):
-            sym = v
 
-        def extract_val(obj):
-            if isinstance(obj, FakeTensor):
-                return snapshot_fake(obj)
-            elif isinstance(obj, torch.Tensor):
-                # TODO: How is it possible that we get a non fake tensor?  We
-                # should be running under the mode...
-                return snapshot_fake(self._mode.from_tensor(obj, static_shapes=True))
-            elif isinstance(obj, py_sym_types):
-                return obj
+        nil = object()
+        scalar_types = (torch.SymInt, torch.SymFloat, torch.SymBool, int, float, bool)
+
+        def check_consistent(new, old=nil):
+            if isinstance(new, torch.Tensor):
+                if old is not nil:
+                    assert isinstance(old, torch.Tensor)
+                    torch._check(old.dim() == new.dim())
+                    # Do this manually so that each individual test is irrefutable
+                    # (TODO: should be a helper for this, maybe sym_eq?  That
+                    # gives us a compound expression and I'm not sure it
+                    # simplifies right now)
+                    for i, j in zip(old.shape, new.shape):
+                        torch._check(i == j)
+                if isinstance(new, FakeTensor):
+                    return snapshot_fake(new)
+                else:
+                    # TODO: How is it possible that we get a non fake tensor?  We
+                    # should be running under the mode...
+                    return snapshot_fake(self._mode.from_tensor(new, static_shapes=True))
+            elif isinstance(new, scalar_types):
+                if old is not nil:
+                    assert isinstance(old, scalar_types)
+                    torch._check(old == new)
+                return new
             else:
                 return None
 
-        meta = map_aggregate(result, extract_val)
+        meta_arg = []
+        if 'val' in n.meta:
+            meta_arg = [n.meta['val']]
+
+        meta = tree_map(check_consistent, result, *meta_arg)
         if meta is not None:
             n.meta['val'] = meta
-            if sym is not None:
-                torch._check(meta == v)
+
         return result
 
     def propagate(self, *args):

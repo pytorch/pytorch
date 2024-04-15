@@ -8431,6 +8431,16 @@ def ___make_guard_fn():
             RuntimeError, lambda: fn(torch.randn(2, 3), torch.tensor([1]))
         )
 
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
+    def test_aot_autograd_propagate_unbacked_symints_shape(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return torch.nonzero(x)
+
+        f(torch.tensor([1, 0, 3, 2, 0]))
+
     def test_simple_set_usage(self):
         def foo(x, y):
             setty = {x, y}
