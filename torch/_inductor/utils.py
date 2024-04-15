@@ -1556,6 +1556,10 @@ def load_aoti_eager_cache(
                 # Convert string to list for sizes and strides to make C++ vector parser easier
                 meta_info["sizes"] = ast.literal_eval(meta_info["sizes"])
                 meta_info["strides"] = ast.literal_eval(meta_info["strides"])
+                if "scalar_value" in meta_info:
+                    meta_info["scalar_value"] = ast.literal_eval(
+                        meta_info["scalar_value"]
+                    )
 
         return json_data
 
@@ -1578,11 +1582,25 @@ def aoti_compile_with_persistent_cache(
     """
     Compile the given function with persistent cache for AOTI eager mode.
     """
-    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
-    assert all(
-        isinstance(input, torch.Tensor) for input in flattened_inputs
-    ), "Only support static shape for now"
     assert not dynamic, "Only support static shape for now"
+    flattened_inputs = pytree.arg_tree_leaves(*args, **kwargs)
+    for idx, input in enumerate(flattened_inputs):
+        if isinstance(input, int):
+            flattened_inputs[idx] = torch.scalar_tensor(
+                input, dtype=torch.int32, device=device_type.lower()
+            )
+        elif isinstance(input, float):
+            flattened_inputs[idx] = torch.scalar_tensor(
+                input, dtype=torch.float, device=device_type.lower()
+            )
+        elif isinstance(input, bool):
+            flattened_inputs[idx] = torch.scalar_tensor(
+                input, dtype=torch.bool, device=device_type.lower()
+            )
+        elif isinstance(input, torch.Tensor):
+            pass
+        else:
+            raise NotImplementedError("Only support tensor, int, float, bool for now")
 
     persistent_cache = aoti_eager_cache_dir() / ns.lower() / device_type.lower()
     persistent_cache.mkdir(parents=True, exist_ok=True)
@@ -1617,8 +1635,14 @@ def aoti_compile_with_persistent_cache(
                 else:
                     meta_info_item["device_index"] = f"{input_tensor.device.index}"
                 meta_info_item["dtype"] = f"{input_tensor.dtype}"
-                meta_info_item["sizes"] = f"{list(input_tensor.size())}"
-                meta_info_item["strides"] = f"{list(input_tensor.stride())}"
+                if input_tensor.ndim == 0:
+                    # Scalar tensor
+                    meta_info_item["sizes"] = "[]"
+                    meta_info_item["strides"] = "[]"
+                    meta_info_item["scalar_value"] = f"{input_tensor.item()}"
+                else:
+                    meta_info_item["sizes"] = f"{list(input_tensor.size())}"
+                    meta_info_item["strides"] = f"{list(input_tensor.stride())}"
                 kernel_meta_info_items.append(meta_info_item)
 
             kernel_meta_info: Dict[str, Any] = {}
