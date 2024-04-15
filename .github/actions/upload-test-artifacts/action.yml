@@ -38,7 +38,7 @@ runs:
       run: |
         # Remove any previous test reports if they exist
         rm -f test-reports-*.zip
-        zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml' -i '*.csv'
+        zip -r "test-reports-${FILE_SUFFIX}.zip" test -i '*.xml' -i '*.csv' -i '*.zip'
 
     - name: Zip usage log for upload
       if: runner.os != 'Windows' && !inputs.use-gha
@@ -74,7 +74,7 @@ runs:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # -ir => recursive include all files in pattern
-        7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml' -ir'!test\*.csv'
+        7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\*.xml' -ir'!test\*.csv' -ir'!test\*.zip'
 
     - name: Zip usage log for upload
       if: runner.os == 'Windows' && !inputs.use-gha
@@ -146,6 +146,7 @@ runs:
         path: |
           test/**/*.xml
           test/**/*.csv
+          test/**/*.zip
 
     - name: Store Usage Logs on Github
       uses: actions/upload-artifact@v3

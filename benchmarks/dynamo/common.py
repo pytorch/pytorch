@@ -2352,14 +2352,15 @@ class BenchmarkRunner:
         try:
             cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
             if not cache_dir:
-                log.error("INDUCTOR_CACHE_DIR is unset")
+                log.error("INDUCTOR_CACHE_DIR is not set")
             else:
-                dst_dir = os.path.join(os.getcwd(), "test", "test-reports", "torchinductor")
+                dst_dir = os.path.join(os.getcwd(), "test", "test-reports")
                 os.makedirs(dst_dir, exist_ok=True)
-                archive = os.path.join(dst_dir, name + ".tgz")
-                shutil.make_archive(archive, "gztar", cache_dir)
-        except OSError as e:
-            log.error(f"Failed to save torchinductor cache dir: {e}")
+                archive = os.path.join(dst_dir, name + ".zip")
+                shutil.make_archive(archive, "zip", cache_dir)
+                log.warrning("Copied inductor cache to: %s", archive)
+        except OSError:
+            log.exception("Failed to save torchinductor cache dir")
 
     def check_accuracy(
         self, name, model, example_inputs, optimize_ctx, experiment, tag
@@ -2705,7 +2706,16 @@ class BenchmarkRunner:
         model = self.deepcopy_and_maybe_parallelize(model)
 
         self.init_optimizer(name, current_device, model.parameters())
-        with self.pick_grad(name, self.args.training):
+
+        # The self.autocast context is needed for the model we export with aot_compile,
+        # similar to what we do in the check_accuracy function
+        ctx = (
+            self.autocast(**self.autocast_arg)
+            if self.args.export_aot_inductor
+            else contextlib.nullcontext()
+        )
+
+        with self.pick_grad(name, self.args.training), ctx:
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
             if tag is not None:
