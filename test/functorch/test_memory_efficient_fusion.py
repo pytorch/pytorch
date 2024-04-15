@@ -13,10 +13,6 @@ from functorch.compile import memory_efficient_fusion
 from torch._functorch.compile_utils import fx_graph_cse
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import TestCase, run_tests, serialTest, TEST_CUDA
-import inspect
-import random
-from typing import Callable
-import unittest
 
 HAS_CUDA = torch.cuda.is_available()
 
