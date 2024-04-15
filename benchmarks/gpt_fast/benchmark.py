@@ -194,10 +194,8 @@ def run_experiment(
 
     torch.manual_seed(1234)
     model_size = sum(
-        [
-            p.numel() * p.dtype.itemsize
-            for p in itertools.chain(model.parameters(), model.buffers())
-        ]
+        p.numel() * p.dtype.itemsize
+        for p in itertools.chain(model.parameters(), model.buffers())
     )
 
     aggregate_metrics = {"tokens_per_sec": []}
