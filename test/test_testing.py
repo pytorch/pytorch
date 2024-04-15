@@ -2055,7 +2055,7 @@ class TestTestParametrizationDeviceType(TestCase):
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = (name == 'test_op_param_test_op_x_2_cpu_float64' or
                             ('test_other' in name and 'y_5' in name) or
-                            ('test_three' in name and name.endswith('int16')))
+                            ('test_three' in name and name.endswith('_int16')))
             self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
 
     def test_modules_decorator_applies_module_and_param_specific_decorators(self, device):
