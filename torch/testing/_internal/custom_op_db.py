@@ -16,7 +16,6 @@ from torch.testing._internal.autograd_function_db import (
 from torch import Tensor
 from torch.types import Number
 from typing import *  # noqa: F403
-import torch._custom_ops as custom_ops
 
 # Note: [custom op db]
 #
@@ -152,25 +151,21 @@ def sample_inputs_numpy_nonzero(opinfo, device, dtype, requires_grad, **kwargs):
 
     yield SampleInput(result, args=())
 
-@custom_ops.custom_op('_torch_testing::numpy_view_copy')
+@torch.library.custom_op("_torch_testing::numpy_view_copy", mutates_args=())
 def numpy_view_copy(x: Tensor, shape: Sequence[int]) -> Tensor:
-    raise NotImplementedError()
-
-@custom_ops.impl('_torch_testing::numpy_view_copy')
-def numpy_view_copy_impl(x, shape) -> Tensor:
     return torch.tensor(np.copy(to_numpy(x).reshape(shape)), device=x.device)
 
-@custom_ops.impl_abstract('_torch_testing::numpy_view_copy')
-def numpy_view_copy_abstract(x, shape) -> Tensor:
+@numpy_view_copy.register_fake
+def _(x, shape) -> Tensor:
     return x.clone().view(shape).clone()
 
-@custom_ops.impl_save_for_backward('_torch_testing::numpy_view_copy')
-def numpy_view_copy_save_for_backward(inputs, output) -> Tensor:
-    return inputs.x.shape
+def numpy_view_copy_setup_context(ctx, inputs, output) -> None:
+    ctx.x_shape = inputs[0].shape
 
-@custom_ops.impl_backward('_torch_testing::numpy_view_copy')
-def numpy_view_copy_backward(ctx, x_shape, grad_out) -> Dict[str, Tensor]:
-    return {'x': torch.ops._torch_testing.numpy_view_copy(grad_out, x_shape)}
+def numpy_view_copy_backward(ctx, grad_out):
+    return torch.ops._torch_testing.numpy_view_copy(grad_out, ctx.x_shape), None
+
+numpy_view_copy.register_autograd(numpy_view_copy_setup_context, numpy_view_copy_backward)
 
 def sample_inputs_numpy_view_copy(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
@@ -259,12 +254,8 @@ def numpy_split_copy_with_int_backward(ctx, grad_out, _):
 
 numpy_split_copy_with_int.register_autograd(numpy_split_copy_with_int_setup_context, numpy_split_copy_with_int_backward)
 
-@custom_ops.custom_op('_torch_testing::numpy_nms')
+@torch.library.custom_op("_torch_testing::numpy_nms", mutates_args=())
 def numpy_nms(boxes: Tensor, scores: Tensor, iou_threshold: Number) -> Tensor:
-    raise NotImplementedError()
-
-@custom_ops.impl('_torch_testing::numpy_nms')
-def numpy_nms_impl(boxes, scores, iou_threshold):
     # Adapted from Ross Girshick's fast-rcnn implementation at
     # https://github.com/rbgirshick/fast-rcnn/blob/master/lib/utils/nms.py
     assert boxes.device == scores.device
@@ -307,8 +298,8 @@ def numpy_nms_impl(boxes, scores, iou_threshold):
     assert result.size(0) >= 2
     return result
 
-@custom_ops.impl_abstract('_torch_testing::numpy_nms')
-def numpy_nms_abstract(boxes, scores, iou_threshold):
+@numpy_nms.register_fake
+def _(boxes, scores, iou_threshold):
     assert boxes.device == scores.device
     N = boxes.shape[0]
     assert boxes.shape == (N, 4)
