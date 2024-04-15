@@ -492,7 +492,7 @@ BatchNormBackend _select_batch_norm_backend(
   bool cudnn_enabled = ctx.userEnabledCuDNN();
 
   if (
-      input.is_cuda() 
+      input.is_cuda()
       && (at::globalContext().userForceCuDNN() ||
       (input.scalar_type() != at::kBFloat16 && weight.scalar_type() != at::kBFloat16
       && (input.scalar_type() != at::kHalf
