@@ -326,7 +326,7 @@ def generate_wheels_matrix(
             )
 
             # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
-            if arch_version in ["12.4", "12.1", "11.8"] and (os == "linux" or os == "linux-aarch64"):
+            if arch_version in ["12.1", "11.8"] and os == "linux":
                 ret.append(
                     {
                         "python_version": python_version,
