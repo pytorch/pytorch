@@ -2270,11 +2270,21 @@ class InstructionTranslator(InstructionTranslatorBase):
             return [create_instruction("RETURN_CONST", argval=inst.argval)]
 
         reads = livevars_analysis(self.instructions, inst)
-        argnames = tuple(
+        all_argnames = tuple(
             k
             for k in self.symbolic_locals.keys()
             if k in reads and k not in self.cell_and_freevars()
         )
+        argnames = tuple(
+            k
+            for k in all_argnames
+            if not isinstance(self.symbolic_locals[k], NullVariable)
+        )
+        argnames_null = tuple(
+            k for k in all_argnames if isinstance(self.symbolic_locals[k], NullVariable)
+        )
+        if sys.version_info < (3, 12):
+            assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
 
         cg = PyCodegen(self)
 
@@ -2312,6 +2322,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             tuple(b.target.offset for b in self.block_stack),
             stack_len,
             argnames,
+            argnames_null,
             tuple(b.resume_fn() for b in self.block_stack),
             tuple(null_idxes),
         )

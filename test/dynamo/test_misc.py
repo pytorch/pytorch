@@ -10161,6 +10161,17 @@ fn
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(torch.randn(3, 3))
 
+    def test_load_fast_and_clear_graph_break(self):
+        # Can result in a segfault in 3.12+ if LOAD_FAST_AND_CLEAR
+        # is not handled properly in a graph break
+        def fn():
+            out = torch.cat([torch.randn(r, 5) for r in range(3)])
+            torch._dynamo.graph_break()
+            out = torch.cat([torch.randn(r, 5) for r in range(3)])
+            return out
+
+        self.assertEqual(torch._dynamo.optimize("eager")(fn)().shape, (3, 5))
+
     def test_raises_importerror1(self):
         @torch.compile(backend="eager")
         def fn(x):
