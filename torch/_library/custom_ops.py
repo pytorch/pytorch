@@ -130,6 +130,7 @@ class CustomOpDef:
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
+        OPDEFS[self._qualname] = self
 
     @property
     def _qualname(self) -> str:
@@ -441,6 +442,7 @@ class CustomOpDef:
 
 
 OPDEF_TO_LIB: Dict[str, "library.Library"] = {}
+OPDEFS: Dict[str, CustomOpDef] = {}
 
 
 def get_library_allowing_overwrite(namespace: str, name: str) -> "library.Library":
@@ -468,3 +470,11 @@ def iter_tensors(
         yield from check(arg)
     for kwarg in kwargs.values():
         yield from check(kwarg)
+
+
+def _maybe_get_opdef(qualname):
+    if isinstance(qualname, CustomOpDef):
+        return qualname
+    if isinstance(qualname, str) and qualname in OPDEFS:
+        return OPDEFS[qualname]
+    return None

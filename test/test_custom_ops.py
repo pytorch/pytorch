@@ -2284,6 +2284,73 @@ class TestCustomOpAPI(TestCase):
             self.assertGreater(after, prev)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_fake(self):
+        for mode in ["function", "qualname", "opoverload"]:
+
+            @torch.library.custom_op("_torch_testing::add", mutates_args=())
+            def add(x: Tensor, y: float) -> Tensor:
+                x_np = x.cpu().numpy()
+                out_np = x_np + y
+                return torch.from_numpy(out_np).to(x.device)
+
+            called = False
+
+            if mode == "function":
+                dec = torch.library.register_fake(add)
+            elif mode == "qualname":
+                dec = torch.library.register_fake("_torch_testing::add")
+            elif mode == "opoverload":
+                dec = torch.library.register_fake(torch.ops._torch_testing.add.default)
+
+            @dec
+            def _(x, y):
+                nonlocal called
+                called = True
+                return torch.empty_like(x)
+
+            with torch._subclasses.fake_tensor.FakeTensorMode():
+                x = torch.randn(3)
+                y = 3.14
+                z = add(x, y)
+                self.assertEqual(z.shape, x.shape)
+                self.assertTrue(called)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_fake_low_level(self):
+        for mode in ["qualname", "opoverload"]:
+            with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+                lib.define("add3(Tensor x, float y) -> Tensor")
+
+                def add(x: Tensor, y: float) -> Tensor:
+                    x_np = x.cpu().numpy()
+                    out_np = x_np + y
+                    return torch.from_numpy(out_np).to(x.device)
+
+                lib.impl("add3", add, "CPU")
+
+                called = False
+
+                if mode == "qualname":
+                    dec = torch.library.register_fake("_torch_testing::add3", lib=lib)
+                elif mode == "opoverload":
+                    dec = torch.library.register_fake(
+                        torch.ops._torch_testing.add3.default, lib=lib
+                    )
+
+                @dec
+                def _(x, y):
+                    nonlocal called
+                    called = True
+                    return torch.empty_like(x)
+
+                with torch._subclasses.fake_tensor.FakeTensorMode():
+                    x = torch.randn(3)
+                    y = 3.14
+                    z = torch.ops._torch_testing.add3(x, y)
+                    self.assertEqual(z.shape, x.shape)
+                    self.assertTrue(called)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_fake(self):
         @torch.library.custom_op("_torch_testing::add", mutates_args=())
         def add(x: Tensor, y: float) -> Tensor:
