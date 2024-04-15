@@ -2518,7 +2518,7 @@ class Layout(IRNode):
 
     def is_channels_last_contiguous(self):
         ndim = len(self.size)
-        if ndim not in [4, 5]:
+        if ndim not in [4, 5] or self.size[1] == 1:
             return False
         for left, right, size in zip(
             self.stride, make_channels_last_strides_for(self.size), self.size  # type: ignore[arg-type]
@@ -3069,7 +3069,7 @@ class Buffer(IRNode):
             symbols_to_define.remove(s)
         assert (
             not symbols_to_define
-        ), f"unbacked symint {s} not written out, check comment above"
+        ), f"unbacked symint {symbols_to_define} not written out, check comment above"
 
     def realize(self):
         pass
@@ -3508,7 +3508,13 @@ class TemplateBuffer(Buffer):
 
 
 class TritonTemplateBuffer(TemplateBuffer):
-    pass
+    def __init__(self, layout, inputs, make_kernel_render, debug_extra=None):
+        super().__init__(layout, inputs, make_kernel_render)
+        self.debug_extra = debug_extra
+
+    def __str__(self):
+        out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
+        return out
 
 
 PrimitiveInfoType = Union[int, float, bool, str, List[Union[int, str, float, bool]]]
@@ -7364,6 +7370,15 @@ class WhileLoop(ExternKernel):
             )
             for i, output in enumerate(body_outputs)
         ]
+
+        for inp, out in zip(carried_inputs, outputs):
+            if inp.get_name() in V.graph.graph_inputs:
+                # if a carried input of the while_loop is a graph input,
+                # it can be returned as is when the number of iterations
+                # is zero. due to this, we can't (generally) reuse the
+                # output buffers corresponding to the graph inputs, as
+                # the inputs may end up being mutated.
+                V.graph.never_reuse_buffers.add(out.get_name())
 
         while_loop.outputs = outputs
         return outputs

@@ -801,19 +801,22 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
                 f"The valid types are: {SUPPORTED_PARAM_TYPES.keys()}."
             )
 
-        if param.default is not inspect.Parameter.empty:
-            error_fn(
-                f"Parameter {name} has a default value; this is not supported. "
-                f"If you want to use default values then create a function with "
-                f"default values that invokes the custom op."
-            )
         schema_type = SUPPORTED_PARAM_TYPES[param.annotation]
         if name in mutates_args:
             if not schema_type.startswith("Tensor"):
                 error_fn(f"Parameter {name} is in mutable_args but only Tensors or collections of Tensors can be mutated")
             schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
         seen_args.add(name)
-        params.append(f"{schema_type} {name}")
+        if param.default is inspect.Parameter.empty:
+            params.append(f"{schema_type} {name}")
+        else:
+            if param.default is not None and not isinstance(param.default, (int, float, bool)):
+                error_fn(
+                    f"Parameter {name} has an unsupported default value (we only support "
+                    f"int, float, bool, None). Please file an issue on GitHub so we can "
+                    f"prioritize this."
+                )
+            params.append(f"{schema_type} {name}={param.default}")
     mutates_args_not_seen = set(mutates_args) - seen_args
     if len(mutates_args_not_seen) > 0:
         error_fn(f"{mutates_args_not_seen} in mutates_args were not found in "
