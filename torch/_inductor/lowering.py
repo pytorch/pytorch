@@ -1224,8 +1224,14 @@ def quantized_decomposed_quantize_per_tensor_tensor(
     assert (
         input.get_dtype() == torch.float32
     ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
-    assert len(scale.get_size()) == 0, "expect scale as scalar tensor"
-    assert len(zero_point.get_size()) == 0, "expect zero_point as scalar tensor"
+    assert len(scale.get_size()) == 0 or (
+            len(scale.get_size()) == 1
+            and scale.get_size()[0] == 1
+        ), "expect scale as scalar tensor"
+    assert len(zero_point.get_size()) == 0 or (
+            len(zero_point.get_size()) == 1
+            and zero_point.get_size()[0] == 1
+        ), "expect zero_point as scalar tensor"
 
     input_loader = input.make_loader()
     scale_loader = scale.make_loader()
@@ -1233,8 +1239,8 @@ def quantized_decomposed_quantize_per_tensor_tensor(
 
     def inner_fn(idx):
         input = input_loader(idx)
-        scale_ = scale_loader(())
-        zero_point_ = zero_point_loader(())
+        scale_ = scale_loader((0,) if len(scale.get_size()) == 1 else ())
+        zero_point_ = zero_point_loader((0,) if len(scale.get_size()) == 1 else ())
         inv_scale = ops.reciprocal(scale_)
         val = ops.round(input * inv_scale) + zero_point_
         qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
