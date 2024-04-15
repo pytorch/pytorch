@@ -368,16 +368,6 @@ class CustomOpDef:
                 f"a functional operator and register an autograd formula for that."
             )
 
-        if any(
-            _library.utils.is_tensorlist_like_type(a.type)
-            for a in (*schema.arguments, *schema.returns)
-        ):
-            raise NotImplementedError(
-                f"NYI: registering autograd formula for operator {self} that "
-                f"accepts or takes Tensor lists. "
-                f"Please open an issue if you want us to prioritize this feature"
-            )
-
         self._backward_fn = backward_fn
         self._setup_context_fn = setup_context_fn
 
