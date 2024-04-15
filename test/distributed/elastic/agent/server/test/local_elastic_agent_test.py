@@ -626,7 +626,11 @@ class LocalElasticAgentTest(unittest.TestCase):
         healthcheck_port_env_name = TORCHELASTIC_HEALTH_CHECK_PORT
         os.environ[healthcheck_port_env_name] = "12345"
         # Run the agent
-        node_conf = Conf(entrypoint=_check_local_watchdog_setup, local_world_size=1, args=(TORCHELASTIC_HEALTH_CHECK_PORT, True))
+        node_conf = Conf(
+            entrypoint=_check_local_watchdog_setup,
+            local_world_size=1,
+            args=(TORCHELASTIC_HEALTH_CHECK_PORT, True),
+        )
         spec = self.get_worker_spec(node_conf, max_restarts=2)
         agent = self.get_agent(spec, node_config=node_conf)
         res = agent.run()
@@ -638,37 +642,51 @@ class LocalElasticAgentTest(unittest.TestCase):
         if healthcheck_port_env_name in os.environ:
             del os.environ[healthcheck_port_env_name]
         # Run the agent
-        node_conf = Conf(entrypoint=_check_local_watchdog_setup, local_world_size=1, args=(TORCHELASTIC_HEALTH_CHECK_PORT, False))
+        node_conf = Conf(
+            entrypoint=_check_local_watchdog_setup,
+            local_world_size=1,
+            args=(TORCHELASTIC_HEALTH_CHECK_PORT, False),
+        )
         spec = self.get_worker_spec(node_conf, max_restarts=2)
         agent = self.get_agent(spec, node_config=node_conf)
         res = agent.run()
         self.assertFalse(res.is_failed())
 
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
+    )
     def test_run_agent_healthcheck_setup_enabled_etcd(self):
         self.run_test_with_backend(
             backend="etcd", test_to_run=self.run_agent_healthcheck_setup_enabled
         )
 
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
+    )
     def test_run_agent_healthcheck_setup_enabled_c10d(self):
         self.run_test_with_backend(
             backend="c10d", test_to_run=self.run_agent_healthcheck_setup_enabled
         )
 
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
+    )
     def test_run_agent_healthcheck_setup_disabled_etcd(self):
         self.run_test_with_backend(
             backend="etcd", test_to_run=self.run_agent_healthcheck_setup_disabled
         )
 
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
+    )
     def test_run_agent_healthcheck_setup_disabled_c10d(self):
         self.run_test_with_backend(
             backend="c10d", test_to_run=self.run_agent_healthcheck_setup_disabled
         )
 
-    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
+    @skip_but_pass_in_sandcastle_if(
+        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
+    )
     def test_run_check_env_function_etcd(self):
         self.run_test_with_backend(
             backend="etcd", test_to_run=self.run_check_env_function

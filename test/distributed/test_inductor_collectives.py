@@ -697,7 +697,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(out, correct))
 
     def test_dynamo_trace_allreduce(self):
-
         def func(inp):
             ar = _functional_collectives.all_reduce(inp, "sum", "0")
             return ar
@@ -714,7 +713,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertTrue(same(out, correct))
 
     def test_dynamo_trace_all_gather_tensor(self):
-
         def func(inp):
             ar = _functional_collectives.all_gather_tensor(inp, 0, "0")
             return ar
@@ -988,7 +986,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         input = torch.ones(2, device=self.device)
         compiled(input)
 
-
     def test_dynamo_support_collective_op_with_async_op_False(self):
         def func(inp, out, *, pg):
             # user explicitly set the attribute `async_op` to False,
@@ -1049,7 +1046,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert same(outputs, correct_outputs)
 
     def test_dynamo_trace_reduce_scatter_tensor(self):
-
         def func(inp):
             ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, "0")
             return ar
@@ -1080,7 +1076,6 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.frame_count == 1
         assert counter.op_count == 3  # It generates 2 getattr to unpack the array
         assert same(out, correct)
-
 
     def test_backwards(self):
         """

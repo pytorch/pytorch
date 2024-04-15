@@ -131,6 +131,7 @@ class TestCollectivesWithWrapper(TestCase):
         dist.all_to_all_single(out, send)
         self.assertEqual(out.tolist(), list(zip(range(world_size), range(world_size))))
 
+
 class TestCollectivesWithBaseClass(MultiThreadedTestCase):
     @property
     def world_size(self):
