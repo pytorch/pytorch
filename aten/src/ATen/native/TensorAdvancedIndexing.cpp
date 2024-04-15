@@ -681,9 +681,6 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
     return at::clamp(*index, -size, std::max(size - 1, 0L));
   };
 
-  torch::List<c10::optional<Tensor>> clamped_indices(indices);
-  std::transform(indices.begin(), indices.end(), self.sizes().begin(), clamped_indices.begin(), clamp);
-
   if (self.numel() == 0) {
     std::vector<int64_t> new_sizes(self.dim());
     auto compute_new_size = [](const c10::optional<Tensor>& index, auto size) -> int64_t {
@@ -700,6 +697,9 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
     return self.new_full(result.sizes(), fill);
   }
 
+  torch::List<c10::optional<Tensor>> clamped_indices(indices);
+  std::transform(indices.begin(), indices.end(), self.sizes().begin(), clamped_indices.begin(), clamp);
+
   auto result = at::_unsafe_index(self, clamped_indices);
   return result.masked_fill(at::logical_not(mask), fill);
 }
@@ -707,6 +707,11 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
 Tensor _unsafe_masked_index_put_accumulate(const Tensor& self, const Tensor& mask, const torch::List<c10::optional<Tensor>>& indices, const Tensor& values) {
   // This is the backward of _unsafe_masked_index.
   // This function is not meant to be executed on eager mode.
+
+  if (self.numel() == 0) {
+    return self.clone();
+  }
+
   // We recompute the clamped indices and rely on inductor to CSE the computation
   auto clamp = [](const c10::optional<Tensor>& index, auto size) -> c10::optional<Tensor> {
     if (!index) {

@@ -3750,6 +3750,9 @@ def _unsafe_masked_index_put_accumulate(x, mask, indices, values):
         lambda: "tensors used as masks must be bool tensors",
     )
 
+    if x.numel() == 0:
+        return x.clone()
+
     for i in range(len(indices)):
         index = indices[i]
         if index is not None:
