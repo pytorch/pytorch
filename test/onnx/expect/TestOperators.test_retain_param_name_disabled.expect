@@ -1,0 +1,101 @@
+ir_version: 8
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    input: "0"
+    input: "7"
+    output: "4"
+    name: "MatMul_0"
+    op_type: "MatMul"
+  }
+  node {
+    input: "4"
+    input: "8"
+    output: "6"
+    name: "MatMul_1"
+    op_type: "MatMul"
+  }
+  name: "torch-jit-export"
+  initializer {
+    dims: 4
+    dims: 5
+    data_type: 1
+    name: "7"
+    raw_data: "\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@\000\000\000@"
+  }
+  initializer {
+    dims: 5
+    dims: 6
+    data_type: 1
+    name: "8"
+    raw_data: "\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@\000\000@@"
+  }
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "7"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "8"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 5
+          }
+          dim {
+            dim_value: 6
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "6"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 6
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}
