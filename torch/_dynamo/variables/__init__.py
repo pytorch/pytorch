@@ -69,6 +69,7 @@ from .misc import (
     MethodWrapperVariable,
     NewCellVariable,
     NewGlobalVariable,
+    NullVariable,
     NumpyVariable,
     PythonModuleVariable,
     RegexPatternVariable,
