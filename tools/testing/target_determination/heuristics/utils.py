@@ -1,8 +1,8 @@
-from functools import lru_cache
 import json
 import os
 import subprocess
 from collections import defaultdict
+from functools import lru_cache
 from pathlib import Path
 from typing import cast, Dict, List, Set, Union
 from urllib.request import Request, urlopen
