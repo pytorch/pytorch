@@ -3776,10 +3776,16 @@ def constant_pad_nd(
     pad: Tuple[int, ...],
     value: NumberType = 0,
 ) -> Tensor:
+    if builtins.all(p <= 0 for p in pad):
+        import torch._refs as refs
+
+        return refs.constant_pad_nd(input, pad, value)
+
     torch._check(
         len(pad) % 2 == 0,
         lambda: "constant_pad_nd requires an even number of padding",
     )
+
     dim = len(pad) // 2
     inp_shape = input.shape[-dim:]
     nc_dim = input.dim() - dim
@@ -3798,17 +3804,14 @@ def constant_pad_nd(
     for i in range(dim):
         indices[i + nc_dim] = out_indices[i]
 
-    if builtins.all(pad <= 0 for pad in pad):
-        result = aten._unsafe_index(input, indices)
-    else:
-        conds = []
-        for i in range(dim):
-            view_shape = [1] * input.dim()
-            view_shape[nc_dim + i] = out_indices[i].shape[0]
-            idx = out_indices[i].view(view_shape)
-            conds.append(torch.logical_and(idx >= 0, idx < input.shape[nc_dim + i]))
-        mask = reduce(torch.logical_and, conds)
-        result = aten._unsafe_masked_index(input, mask, indices, value)
+    conds = []
+    for i in range(dim):
+        view_shape = [1] * input.dim()
+        view_shape[nc_dim + i] = out_indices[i].shape[0]
+        idx = out_indices[i].view(view_shape)
+        conds.append(torch.logical_and(idx >= 0, idx < input.shape[nc_dim + i]))
+    mask = reduce(torch.logical_and, conds)
+    result = aten._unsafe_masked_index(input, mask, indices, value)
 
     # convert output to correct memory format, if necessary
     memory_format = utils.suggest_memory_format(input)
