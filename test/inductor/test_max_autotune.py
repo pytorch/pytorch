@@ -328,7 +328,8 @@ class TestMaxAutotune(TestCase):
             inputs: str,
             benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
         ) -> Dict[ChoiceCaller, float]:
-            return benchmark(choices)
+            if benchmark is not None:
+                return benchmark(choices)
 
         asc = AlgorithmSelectorCache()
 
@@ -425,6 +426,24 @@ class TestMaxAutotune(TestCase):
 
             FileCheck().check_not("extern_kernels.convolution").run(code[0])
             self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
+
+    def test_filled_cache_precompile(self):
+        def fn(a, b, c):
+            a = (a @ b) @ c
+            a, b, c = (t.to(torch.float16) for t in [a, b, c])
+            return (a @ b) @ c
+
+        fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
+        inputs = [torch.rand([256, 256], device="cuda") for _ in range(3)]
+        from torch._dynamo.utils import counters
+
+        self.assertEqual(fn(*inputs), fn_c(*inputs), atol=1e-2, rtol=1e-2)
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        fn_c = torch.compile(mode="max-autotune-no-cudagraphs")(fn)
+        self.assertEqual(counters["inductor"]["select_algorithm_precompile"], 0)
 
     def test_cat_addmm(self):
         def fn(a: torch.Tensor, b: torch.Tensor, c: torch.Tensor):
