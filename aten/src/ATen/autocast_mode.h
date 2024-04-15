@@ -542,7 +542,8 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
 #define ADD_NS(RAW_OP) at::RAW_OP
 
 #define _KERNEL_OVERLOAD_NARG_IMPL(_0, _1, _2, N, ...) N
-#define _KERNEL_OVERLOAD_NARG(...) _KERNEL_OVERLOAD_NARG_IMPL(__VA_ARGS__, 2, 1)
+#define _KERNEL_OVERLOAD_NARG(...) \
+  C10_EXPAND_MSVC_WORKAROUND(_KERNEL_OVERLOAD_NARG_IMPL(__VA_ARGS__, 2, 1))
 
 // Common cases where registration signature matches redispatch signature
 // (that's why SIGNATURE is repeated in the WrapFunction instantiation)
