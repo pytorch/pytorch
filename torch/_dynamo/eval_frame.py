@@ -138,14 +138,15 @@ class OptimizedModule(torch.nn.Module):
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
 
-        # There is a catch here. Today, Dynamo skips the __call__ (or
-        # _wrapped_call_impl) function in torch/nn/modules/module.py. This is
-        # done intentionally. If not skipped, Dynamo will keep recompiling
-        # _wrapped_call_impl because all nn modules will go through that
-        # function. To avoid this collision, we add an extra frame that is not
-        # skipped by the trace_rules infra (external_utsil.wrap_inline).
+        # Important consideration: Currently, Dynamo intentionally skips the
+        # __call__ (or _wrapped_call_impl) function in
+        # torch/nn/modules/module.py. This is to prevent continual recompilation
+        # of _wrapped_call_impl, as all nn modules pass through this function.
+        # To circumvent this issue, we introduce an extra frame that is not
+        # ignored by the trace_rules infrastructure (via
+        # external_utils.wrap_inline).
 
-        # Wrap the __call__ method so that hooks are also inline.
+        # Wrap the __call__ method so that hooks are also inlined.
         self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
 
         if hasattr(self._orig_mod, "_initialize_hook"):
