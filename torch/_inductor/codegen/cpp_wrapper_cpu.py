@@ -895,9 +895,11 @@ class CppWrapperCpu(WrapperCodeGen):
     @cache_on_self
     def get_output_refs(self):
         return [
-            f"torch::tensor({x.codegen_reference(self.wrapper_call)})"
-            if isinstance(x, ir.ShapeAsConstantBuffer) and not config.abi_compatible
-            else x.codegen_reference(self.wrapper_call)
+            (
+                f"torch::tensor({x.codegen_reference(self.wrapper_call)})"
+                if isinstance(x, ir.ShapeAsConstantBuffer) and not config.abi_compatible
+                else x.codegen_reference(self.wrapper_call)
+            )
             for x in V.graph.graph_outputs
         ]
 
@@ -1097,9 +1099,11 @@ class CppWrapperCpu(WrapperCodeGen):
             outputs_str = "output_tensors"
         else:
             outputs = [
-                f"output_tensors[{i}]"
-                if self.output_is_tensor[i]
-                else f"output_tensors[{i}].item()"
+                (
+                    f"output_tensors[{i}]"
+                    if self.output_is_tensor[i]
+                    else f"output_tensors[{i}].item()"
+                )
                 for i in range(len(V.graph.graph_outputs))
             ]
             outputs_str = f"[{', '.join(outputs)}]"
@@ -1541,7 +1545,10 @@ class CppWrapperCpu(WrapperCodeGen):
             )
             device_type, device_id = device_str.split(",")
             device_idx = "this->device_idx_" if V.graph.aot_mode else device_id
-            if buffer_if_can_stack_allocate is not None:
+            scheduler_node = V.graph.scheduler.name_to_node.get(name)
+            if buffer_if_can_stack_allocate is not None and not (
+                scheduler_node and scheduler_node.is_extern()
+            ):
                 from .cpp import DTYPE_TO_CPP
 
                 self.stack_allocated_buffers[name] = buffer_if_can_stack_allocate
