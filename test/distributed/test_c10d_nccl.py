@@ -11,6 +11,7 @@ import tempfile
 import threading
 import pickle
 import time
+import json
 import warnings
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -1551,6 +1552,19 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
         self.assertEqual(_get_process_group_uid(pg), 0)
         pg_2 = c10d.new_group([0, 1])
         self.assertEqual(_get_process_group_uid(pg_2), 1)
+
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    def test_set_process_group_desc(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f'cuda:{self.rank}')
+        pg_default = self._create_process_group_nccl(store, self.opts(), device_id=device)
+        self.assertEqual(pg_default.group_desc, "default_pg")
+        pg_1 = c10d.new_group([0, 1], group_desc="test_purpose")
+        self.assertEqual(pg_1.group_desc, "test_purpose")
+        pg_2 = c10d.new_group([0, 1])
+        self.assertEqual(pg_2.group_desc, "undefined")
 
 
 class DistributedDataParallelTest(
@@ -4173,13 +4187,19 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
         t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
         ver = t['version']
-        self.assertEqual(ver, "1.4")
+        self.assertEqual(ver, "1.5")
         pg_config = t['pg_config']
         self.assertEqual(len(pg_config), 1)
-        self.assertEqual(len(pg_config[0]), self.world_size)
+        default_pg_info = pg_config['0']
+        self.assertIn('name', default_pg_info)
+        self.assertIn('desc', default_pg_info)
+        self.assertIn('ranks', default_pg_info)
+        global_ranks = pg_config['0']['ranks']
+        self.assertEqual(len(json.loads(global_ranks)), self.world_size)
         t = t['entries']
         self.assertEqual(len(t), 2)
         last = t[-1]
+        self.assertEqual(last['process_group'], ('0', 'default_pg'))
         self.assertEqual(last['state'], 'completed')
         s = last['time_discovered_started_ns']
         f = last['time_discovered_completed_ns']

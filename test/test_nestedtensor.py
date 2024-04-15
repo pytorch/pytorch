@@ -46,9 +46,11 @@ from torch.testing._internal.common_utils import (
 )
 
 from torch.nested._internal.nested_tensor import (
+    buffer_from_jagged,
     jagged_from_list,
     NestedTensor,
     nested_view_from_values_offsets,
+    ViewNestedFromBuffer,
 )
 
 # Tests are ported from pytorch/nestedtensor.
@@ -181,6 +183,33 @@ def random_nt_from_similar(other, dims=None):
 def layout_name(layout):
     # e.g. "torch.jagged" -> "jagged"
     return layout.__repr__().split(".")[-1]
+
+
+# Internally-defined conversion functions are lifted to here for maximum test realism.
+# TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
+@torch.fx.wrap
+def convert_dense_to_nested_tensor(values):
+    offsets = torch.arange(
+        0, values.shape[0] * values.shape[1] + 1, values.shape[1], device=values.device
+    )
+    metadata_cache = {"max_seqlen": values.shape[1], "min_seqlen": 1}
+    nt = ViewNestedFromBuffer.apply(
+        values.view(-1, values.shape[-1]), offsets, metadata_cache
+    )
+    return nt
+
+@torch.fx.wrap
+def convert_jagged_to_nested_tensor(
+    values: torch.Tensor, offsets: torch.Tensor, max_length: int
+) -> torch.Tensor:
+    metadata_cache = {"max_seqlen": max_length, "min_seqlen": 1}
+    nt = ViewNestedFromBuffer.apply(values, offsets, metadata_cache)
+    return nt
+
+
+@torch.fx.wrap
+def convert_nt_to_jagged(nt):
+    return buffer_from_jagged(nt)
 
 
 @markDynamoStrictTest
@@ -1556,19 +1585,6 @@ class TestNestedTensorDeviceType(TestCase):
             torch.nn.functional.softmax(nt_noncontiguous, -1))
 
     def _test_bmm(self, device, dtype):
-        # error case: one is nested but the other is not
-        nt = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
-        t = torch.randn(4, device=device, dtype=dtype)
-        self.assertRaisesRegex(
-            RuntimeError,
-            "Expected both to be nested, but got a nested self and non-nested other",
-            lambda: nt.bmm(t)
-        )
-        self.assertRaisesRegex(
-            RuntimeError,
-            "Expected both to be nested, but got a non-nested self and nested other",
-            lambda: t.bmm(nt)
-        )
         # error case: not 3D tensors
         nt0 = torch.nested.nested_tensor([], device=device, dtype=dtype)
         nt1 = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
@@ -1641,6 +1657,37 @@ class TestNestedTensorDeviceType(TestCase):
         nt1 = torch.nested.nested_tensor([torch.randn((4, 6)), torch.randn((7, 5))], device=device, dtype=dtype)
         actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
         expect = torch.nested.to_padded_tensor(nt0, 0.0).bmm(torch.nested.to_padded_tensor(nt1, 0.0))
+        if dtype == torch.float16:
+            self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
+        else:
+            self.assertEqual(actual, expect)
+
+        # nested tensor bmm normal tensor
+        nt0 = torch.nested.nested_tensor([torch.randn((2, 7)), torch.randn((3, 7))], device=device, dtype=dtype)
+        nt1 = torch.rand(2, 7, 5, dtype=dtype, device=device)
+        actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
+        expect = torch.nested.to_padded_tensor(nt0, 0.0).bmm(nt1)
+        if dtype == torch.float16:
+            self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
+        else:
+            self.assertEqual(actual, expect)
+
+        # nested tensor bmm normal tensor with non-contiguous view
+        nt1 = torch.rand(2, 5, 7, dtype=dtype, device=device)
+        nt1 = nt1.transpose(1, 2)
+        actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
+        expect = torch.nested.to_padded_tensor(nt0, 0.0).bmm(nt1)
+        if dtype == torch.float16:
+            self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
+        else:
+            self.assertEqual(actual, expect)
+
+
+        # normal tensor bmm nested tensor
+        nt0 = torch.rand(2, 5, 7, dtype=dtype, device=device)
+        nt1 = torch.nested.nested_tensor([torch.randn((7, 6)), torch.randn((7, 5))], device=device, dtype=dtype)
+        actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
+        expect = nt0.bmm(torch.nested.to_padded_tensor(nt1, 0.0))
         if dtype == torch.float16:
             self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
         else:
@@ -3891,6 +3938,45 @@ class TestNestedTensorSubclass(TestCase):
         nt_t_copy_dtype = torch.ops.aten._to_copy(nt_t, dtype=torch.float16)
         self.assertEqual(torch.float16, nt_t_copy_dtype.dtype)
 
+    @skipIfTorchDynamo("Dynamo doesn't know how to trace prof.events()")
+    def test_profiler_sequence_nr(self):
+        with torch.profiler.profile() as prof:
+            values = torch.randn(4, 6, requires_grad=True)
+            offsets = torch.tensor([0, 2, 4])
+            values = values * 2
+            l = torch.nn.Linear(6, 8)
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+
+            nt = l(nt)
+            val = nt.values()
+
+            loss = val.sum()
+            loss.backward()
+
+        fwd_seq_nrs = []
+        for evt in prof.events():
+            if "linear" in evt.name.lower() and "backward" not in evt.name.lower() and evt.sequence_nr != -1:
+                fwd_seq_nrs.append(evt.sequence_nr)
+
+        bwd_seq_nrs = []
+        for evt in prof.events():
+            if (
+                "linear" in evt.name.lower() and
+                "backward" in evt.name.lower() and
+                "evaluate_function" not in evt.name.lower() and
+                evt.sequence_nr != -1
+            ):
+                bwd_seq_nrs.append(evt.sequence_nr)
+
+        # There should only be one such event with a sequence number:
+        # the PythonTLSSnapshot event - but, note that it's not terrible if
+        # we end up with multiple events with the same sequence number - so we
+        # could relax this check if it becomes inconvenient to maintain this
+        # property.
+        self.assertEqual(len(fwd_seq_nrs), 1)
+        self.assertEqual(len(bwd_seq_nrs), 1)
+        self.assertEqual(fwd_seq_nrs[0], bwd_seq_nrs[0])
+
     def test_is_same_size(self, device):
         def get_3_tensors():
             return [torch.randn(i + 2, 3, 4, requires_grad=True, dtype=torch.float64, device=device) for i in range(3)]
@@ -3911,6 +3997,8 @@ class TestNestedTensorSubclass(TestCase):
         nt1_t, nt2_t, nt3_t, nt4_t = (x.transpose(1, 2) for x in (nt1, nt2, nt3, nt4))
         check_size(nt1_t, nt2_t, nt3_t, nt4_t)
 
+    # Doesn't work until we have real views
+    @xfailIfTorchDynamo
     # Note 1: Math fallback doesn't work with bfloat16 on CUDA
     # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
     @unittest.skipIf(
@@ -4104,6 +4192,8 @@ class TestNestedTensorSubclass(TestCase):
         output_dense = F.scaled_dot_product_attention(query._values, key._values, value._values)
         self.assertEqual(output._values, output_dense)
 
+    # Doesn't work until we have real views
+    @xfailIfTorchDynamo
     @onlyCUDA
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FUSED_ATTENTION,
@@ -4148,6 +4238,31 @@ class TestNestedTensorSubclass(TestCase):
             output_ref_atol, output_ref_rtol = get_tolerances(out, out_lp_ref)
 
             self.assertEqual(out, out_component, atol=output_ref_atol, rtol=output_ref_rtol)
+
+    @skipIfTorchDynamo("SDPA test compiles internally")
+    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
+    # mha_varlen_fwd not supported on ROCm
+    @skipCUDAIfRocm
+    @onlyCUDA
+    @dtypes(*([torch.float16, torch.bfloat16, torch.float32] if SM80OrLater
+            else [torch.float16, torch.float32]))
+    def test_sdpa_backwards(self, device, dtype):
+        values = torch.randn(9, 3, 256, requires_grad=True, device=device, dtype=dtype)
+        offsets = torch.tensor([0, 1, 3, 5, 9], device=device, dtype=torch.int64)
+
+        @torch.compile
+        def f(values, offsets):
+            nt = convert_jagged_to_nested_tensor(values, offsets, max_length=4)
+            nt = nt.transpose(-2, -3)
+            # purposefully graph break to trigger view replay for subclass view input
+            torch.tensor(1).item()
+            output = F.scaled_dot_product_attention(nt, nt, nt).transpose(-2, -3)
+            return convert_nt_to_jagged(output)
+
+        output = f(values, offsets)
+        output.sum().backward()
+        self.assertEqual(values.grad, torch.ones_like(values))
 
 
 instantiate_parametrized_tests(TestNestedTensor)
