@@ -5,6 +5,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
+#include <cstdint>
 
 #ifdef __OBJC__
 #include <Foundation/Foundation.h>
@@ -21,8 +22,6 @@ typedef void* MTLLibrary_t;
 typedef void* MTLComputePipelineState_t;
 typedef void* MTLLibrary_t;
 #endif
-
-using namespace std;
 
 namespace at::mps {
 
