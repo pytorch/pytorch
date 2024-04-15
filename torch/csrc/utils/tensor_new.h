@@ -25,7 +25,7 @@ namespace utils {
 // - finally, we move it to cuda (via .to)
 // Step 1 happens with all modes disabled.
 //
-// lift_then_to=true is useful to prevent CUDA initialization under
+// `only_lift_cpu_tensors=true` is useful to prevent CUDA initialization under
 // FakeTensorMode because it avoids moving concrete data to CUDA.
 TORCH_API bool only_lift_cpu_tensors();
 TORCH_API void set_only_lift_cpu_tensors(bool value);
