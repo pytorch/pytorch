@@ -1,28 +1,33 @@
 # mypy: ignore-errors
 
+import copy
+import functools
+import heapq
+import itertools
+import logging
+import math
+import operator
+import os
+from collections import defaultdict
+from typing import List, Optional, Set, Tuple, Union
+
+import sympy
+
+import torch
+import torch.fx as fx
+import torch.utils._pytree as pytree
+from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
 from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
-    hint_int, free_symbols, is_symbol_binding_fx_node, find_symbol_binding_fx_nodes
+    find_symbol_binding_fx_nodes,
+    free_symbols,
+    hint_int,
+    is_symbol_binding_fx_node,
 )
-from torch.fx.experimental._backward_state import BackwardState
-import torch
-import torch.fx as fx
-import operator
-import math
-import heapq
-import torch.utils._pytree as pytree
-import copy
-import os
-import itertools
-import sympy
-from collections import defaultdict
 from torch.fx.passes import graph_drawer
-from typing import List, Optional, Set, Tuple, Union
-from .compile_utils import fx_graph_cse, get_aten_target
 from . import config
-import functools
-import logging
+from .compile_utils import fx_graph_cse, get_aten_target
 
 
 AOT_PARTITIONER_DEBUG = config.debug_partitioner
@@ -35,6 +40,7 @@ prims = torch.ops.prims
 def must_recompute(node):
     return node.meta.get("recompute", False)
 
+
 def has_recomputable_ops(fx_g):
     found = False
     for node in fx_g.graph.nodes:
@@ -42,17 +48,24 @@ def has_recomputable_ops(fx_g):
             return True
     return False
 
+
 def has_recomputable_rng_ops(fx_g):
     for node in fx_g.graph.nodes:
-        if must_recompute(node) and hasattr(node.target, "tags") and torch.Tag.nondeterministic_seeded in node.target.tags:
+        if (
+            must_recompute(node)
+            and hasattr(node.target, "tags")
+            and torch.Tag.nondeterministic_seeded in node.target.tags
+        ):
             return True
     return False
+
 
 def sym_node_size(node):
     if isinstance(node.meta["val"], (torch.SymInt, torch.SymBool)):
         return 1
     assert isinstance(node.meta["val"], torch.SymFloat)
     return 4
+
 
 class InvalidNodeBase:
     def __repr__(self):
@@ -86,25 +99,31 @@ def _extract_graph_with_inputs_outputs(joint_graph, inputs, outputs):
     for node in joint_graph.nodes:
         if node in inputs:
             continue
-        elif node.op == 'placeholder':
+        elif node.op == "placeholder":
             env[node] = InvalidNode
-        elif node.op == 'call_function':
+        elif node.op == "call_function":
             all_args = pytree.arg_tree_leaves(*node.args, **node.kwargs)
-            all_args = [isinstance(env[x], InvalidNodeBase) for x in all_args if isinstance(x, fx.Node)]
+            all_args = [
+                isinstance(env[x], InvalidNodeBase)
+                for x in all_args
+                if isinstance(x, fx.Node)
+            ]
             if any(all_args):
                 env[node] = InvalidNode
                 continue
             env[node] = new_graph.node_copy(node, lambda x: env[x])
-        elif node.op == 'get_attr':
+        elif node.op == "get_attr":
             env[node] = new_graph.node_copy(node, lambda x: env[x])
-        elif node.op == 'output':
+        elif node.op == "output":
             pass
     output_values = []
     for x in outputs:
         if isinstance(x, fx.Node):
             if x not in env:
                 raise RuntimeError(f"Node {x} couldn't be found in env")
-            assert not isinstance(env[x], InvalidNodeBase), f"Node {x} was invalid, but is output"
+            assert not isinstance(
+                env[x], InvalidNodeBase
+            ), f"Node {x} was invalid, but is output"
             output_values.append(env[x])
         else:
             output_values.append(x)
@@ -123,21 +142,31 @@ def _is_primal(node):
         and not _is_fwd_seed_offset(node)
     )
 
+
 def _is_tangent(node):
     return node.op == "placeholder" and "tangents" in node.target
 
+
 def _is_bwd_seed_offset(node):
-    return node.op == "placeholder" and ("bwd_seed" in node.target or "bwd_base_offset" in node.target)
+    return node.op == "placeholder" and (
+        "bwd_seed" in node.target or "bwd_base_offset" in node.target
+    )
+
 
 def _is_fwd_seed_offset(node):
-    return node.op == "placeholder" and ("fwd_seed" in node.target or "fwd_base_offset" in node.target)
+    return node.op == "placeholder" and (
+        "fwd_seed" in node.target or "fwd_base_offset" in node.target
+    )
+
 
 def _is_backward_state(node):
     return node.op == "placeholder" and isinstance(node.meta.get("val"), BackwardState)
 
 
 def _extract_fwd_bwd_outputs(joint_module: fx.GraphModule, *, num_fwd_outputs):
-    outputs = pytree.arg_tree_leaves(*(node.args for node in joint_module.graph.find_nodes(op="output")))
+    outputs = pytree.arg_tree_leaves(
+        *(node.args for node in joint_module.graph.find_nodes(op="output"))
+    )
     fwd_outputs = outputs[:num_fwd_outputs]
     bwd_outputs = outputs[num_fwd_outputs:]
     return fwd_outputs, bwd_outputs
@@ -150,8 +179,12 @@ def _remove_by_name(saved_values, name):
             break
 
 
-def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_sym_nodes, *, num_fwd_outputs):
-    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
+def _extract_fwd_bwd_modules(
+    joint_module: fx.GraphModule, saved_values, saved_sym_nodes, *, num_fwd_outputs
+):
+    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(
+        joint_module, num_fwd_outputs=num_fwd_outputs
+    )
     placeholders = joint_module.graph.find_nodes(op="placeholder")
     primal_inputs = [*filter(_is_primal, placeholders)]
     tangent_inputs = [*filter(_is_tangent, placeholders)]
@@ -162,7 +195,7 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
-        bwd_outputs
+        bwd_outputs,
     )
 
     for node in bwd_graph.find_nodes(op="placeholder"):
@@ -174,7 +207,6 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
             # BackwardState is saved directly
             _remove_by_name(saved_values, node.name)
             assert backward_state_inputs
-
 
     # Now that we have the finalized list of saved values, we need to ensure
     # we propagate all symbols which are referenced by backwards inputs.
@@ -211,7 +243,6 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
             saved_sym_nodes_binding.append(symbol_bindings[s])
         saved_symbols |= new_symbols
 
-
     # Update saved_sym_nodes that are now reordered to have all bindings at
     # front. This can also be used later on to figure out the position of saved
     # sym nodes in the output of fwd graph.
@@ -223,12 +254,16 @@ def _extract_fwd_bwd_modules(joint_module: fx.GraphModule, saved_values, saved_s
     fwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         primal_inputs + fwd_seed_offset_inputs,
-        fwd_outputs + saved_values + saved_sym_nodes
+        fwd_outputs + saved_values + saved_sym_nodes,
     )
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs + backward_state_inputs,
-        bwd_outputs
+        saved_sym_nodes
+        + saved_values
+        + tangent_inputs
+        + bwd_seed_offset_inputs
+        + backward_state_inputs,
+        bwd_outputs,
     )
 
     fwd_module = fx._lazy_graph_module._make_graph_module(joint_module, fwd_graph)
@@ -263,13 +298,21 @@ def default_partition(
         Returns the generated forward and backward Fx graph modules.
     """
     if has_recomputable_ops(joint_module):
-        return min_cut_rematerialization_partition(joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs)
+        return min_cut_rematerialization_partition(
+            joint_module, _joint_inputs, num_fwd_outputs=num_fwd_outputs
+        )
     primal_inputs = list(filter(_is_primal, joint_module.graph.nodes))
     fwd_seed_offset_inputs = list(filter(_is_fwd_seed_offset, joint_module.graph.nodes))
     inputs = primal_inputs + fwd_seed_offset_inputs
-    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
-    forward_only_graph = _extract_graph_with_inputs_outputs(joint_module.graph, inputs, fwd_outputs)
-    forward_node_names = {node.name for node in forward_only_graph.nodes if node.op != 'output'}
+    fwd_outputs, bwd_outputs = _extract_fwd_bwd_outputs(
+        joint_module, num_fwd_outputs=num_fwd_outputs
+    )
+    forward_only_graph = _extract_graph_with_inputs_outputs(
+        joint_module.graph, inputs, fwd_outputs
+    )
+    forward_node_names = {
+        node.name for node in forward_only_graph.nodes if node.op != "output"
+    }
     saved_values = []
     saved_sym_nodes = []
 
@@ -280,17 +323,18 @@ def default_partition(
             # Symints must be kept separate from tensors so that PythonFunction only calls
             # save_for_backward on tensors and stashes symints in autograd .ctx
             saved_sym_nodes.append(node)
-        elif (
-            'tensor_meta' not in node.meta
-            and node.op == 'call_function'
-        ):
+        elif "tensor_meta" not in node.meta and node.op == "call_function":
             # Since we can't save tuple of tensor values, we need to flatten out what we're saving
             users = node.users
             assert all(user.target == operator.getitem for user in users)
             saved_values.extend(users)
         else:
-            backward_usages = [n for n in node.users if n.name not in forward_node_names]
-            if 'tensor_meta' in node.meta and all(is_sym_node(n) for n in backward_usages):
+            backward_usages = [
+                n for n in node.users if n.name not in forward_node_names
+            ]
+            if "tensor_meta" in node.meta and all(
+                is_sym_node(n) for n in backward_usages
+            ):
                 # If we have a tensor in the forward, where only its sizes/strides are needed in the backward,
                 # and not the actual tensor data,
                 # then it will be a lot cheaper to save only the sizes/strides, and not the actual tensor.
@@ -305,7 +349,12 @@ def default_partition(
     saved_values = list(dict.fromkeys(saved_values).keys())
     saved_sym_nodes = list(dict.fromkeys(saved_sym_nodes).keys())
 
-    return _extract_fwd_bwd_modules(joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
+    return _extract_fwd_bwd_modules(
+        joint_module,
+        saved_values,
+        saved_sym_nodes=saved_sym_nodes,
+        num_fwd_outputs=num_fwd_outputs,
+    )
 
 
 def _prod(x):
@@ -314,12 +363,14 @@ def _prod(x):
         s *= i
     return s
 
+
 def _tensor_nbytes(numel, dtype):
     return numel * dtype.itemsize
 
+
 def _size_of(node: fx.Node) -> int:
-    if 'val' in node.meta:
-        val = node.meta['val']
+    if "val" in node.meta:
+        val = node.meta["val"]
         if isinstance(val, py_sym_types):
             if isinstance(val, torch.SymInt):
                 return 1
@@ -329,15 +380,19 @@ def _size_of(node: fx.Node) -> int:
         # torch._inductor.config.unbacked_symint_fallback (but this is a
         # layering violation)
         elif isinstance(val, (list, tuple)):
-            return sum(_tensor_nbytes(hint_int(n.numel(), fallback=4098), n.dtype) for n in val if isinstance(n, torch.Tensor))
+            return sum(
+                _tensor_nbytes(hint_int(n.numel(), fallback=4098), n.dtype)
+                for n in val
+                if isinstance(n, torch.Tensor)
+            )
         elif isinstance(val, torch.Tensor):
             return _tensor_nbytes(hint_int(val.numel(), fallback=4098), val.dtype)
 
         raise RuntimeError(f"Unknown metadata type {type(val)}")
 
     # Only needed since we don't always trace with fake tensors.
-    if 'tensor_meta' in node.meta:
-        metadata = node.meta['tensor_meta']
+    if "tensor_meta" in node.meta:
+        metadata = node.meta["tensor_meta"]
         # TODO: What is to_size_hint suppose to be?
         numel = _prod(map(to_size_hint, metadata.shape))  # noqa: F821
         dtype = metadata.dtype
@@ -350,9 +405,10 @@ def _size_of(node: fx.Node) -> int:
 # Used for some investigative purposes
 def _count_ops(graph):
     from collections import defaultdict
+
     cnt = defaultdict(int)
     for node in graph.nodes:
-        if node.op == 'call_function':
+        if node.op == "call_function":
             cnt[node.target.__name__] += 1
     print(sorted(cnt.items(), key=lambda x: x[1], reverse=True))
 
@@ -376,7 +432,9 @@ def pointwise_ops():
 
 
 def sort_depths(args, depth_map):
-    arg_depths = {arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)}
+    arg_depths = {
+        arg: depth_map[arg] for arg in args if isinstance(arg, torch.fx.node.Node)
+    }
     return sorted(arg_depths.items(), key=lambda x: x[1], reverse=True)
 
 
@@ -418,7 +476,7 @@ def reordering_to_mimic_autograd_engine(gm):
     depths = {}
     output_node = next(iter(gm.graph.find_nodes(op="output")))
     for node in gm.graph.nodes:
-        if node.op == 'placeholder':
+        if node.op == "placeholder":
             depths[node] = 0
         else:
             depths[node] = max([depths[arg] for arg in node.all_input_nodes], default=0)
@@ -449,7 +507,7 @@ def reordering_to_mimic_autograd_engine(gm):
         return gm
 
     # Build the graph op-by-op by starting from the node all the way to the end
-    for node in list(gm.graph.nodes)[order[first_node_in_bwd]:]:
+    for node in list(gm.graph.nodes)[order[first_node_in_bwd] :]:
         insert_node_in_graph(node)
 
     # The output node is already built by the traversal.
@@ -537,7 +595,6 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
             bw_tangent_start_node = node
             break
 
-
     fw_rng_state_outputs = []
     for base_node, node_pair in recomputable_rng_ops_map.items():
         # Step 2 - Modify the fwd pass such that
@@ -549,14 +606,26 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
                 "call_function",
                 run_and_save_rng,
                 args=(fw_node.target, *fw_node.args),
-                kwargs=fw_node.kwargs
+                kwargs=fw_node.kwargs,
             )
-            state = fw_graph.create_node("call_function", operator.getitem, args=(functional_fw_node, 0), kwargs={})
-            rng_output = fw_graph.create_node("call_function", operator.getitem, args=(functional_fw_node, 1,), kwargs={})
+            state = fw_graph.create_node(
+                "call_function",
+                operator.getitem,
+                args=(functional_fw_node, 0),
+                kwargs={},
+            )
+            rng_output = fw_graph.create_node(
+                "call_function",
+                operator.getitem,
+                args=(
+                    functional_fw_node,
+                    1,
+                ),
+                kwargs={},
+            )
             fw_node.replace_all_uses_with(rng_output)
             fw_graph.erase_node(fw_node)
             fw_rng_state_outputs.append(state)
-
 
         # Step 3 - Modify the bwd pass such that
         bw_graph = bw_module.graph
@@ -570,12 +639,11 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
                 "call_function",
                 run_with_rng_state,
                 args=(bw_rng_state_node, bw_node.target, *bw_node.args),
-                kwargs=bw_node.kwargs
+                kwargs=bw_node.kwargs,
             )
 
             bw_node.replace_all_uses_with(rng_output)
             bw_graph.erase_node(bw_node)
-
 
     # Add the rng states in the output of the fwd graph. AOT Autograd assumes
     # that symints are at the end of forward graph outputs. So, insert the new
@@ -583,7 +651,11 @@ def functionalize_rng_ops(joint_module, fw_module, bw_module, num_sym_nodes):
     fw_output_node = next(iter(fw_module.graph.find_nodes(op="output")))
     fw_outputs = fw_output_node.args[0]
     sym_node_start_idx = len(fw_outputs) - num_sym_nodes
-    outputs = fw_outputs[:sym_node_start_idx] + fw_rng_state_outputs + fw_outputs[sym_node_start_idx:]
+    outputs = (
+        fw_outputs[:sym_node_start_idx]
+        + fw_rng_state_outputs
+        + fw_outputs[sym_node_start_idx:]
+    )
     fw_module.graph.output(outputs)
     fw_module.graph.erase_node(fw_output_node)
     fw_module.recompile()
@@ -601,7 +673,10 @@ def cleanup_recompute_tags(joint_module):
     for node in joint_module.graph.nodes:
         if must_recompute(node):
             for user in node.users:
-                if must_recompute(user) and user.meta["recompute"] > node.meta["recompute"]:
+                if (
+                    must_recompute(user)
+                    and user.meta["recompute"] > node.meta["recompute"]
+                ):
                     node.meta["recompute"] = 0
     return joint_module
 
@@ -644,7 +719,7 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
         return False
 
     def should_ban_recomputation(node):
-        if node.op != 'call_function':
+        if node.op != "call_function":
             return False
         if node.target == operator.getitem:
             return False
@@ -661,7 +736,6 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
             ignored_ops = random_ops + compute_intensive_ops
             if get_aten_target(node) in ignored_ops:
                 return True
-
 
         # If a node *must* be materialized in the backwards pass, then we
         # should never recompute it. This is a pretty subtle point.  In
@@ -685,14 +759,15 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
         # cheap/small, and it makes sure we don't do things like recompute
         # normalizations in the backwards.
         if BAN_IF_REDUCTION:
-            input_tensors_size = sum(_size_of(i) for i in node.args if isinstance(i, fx.Node))
+            input_tensors_size = sum(
+                _size_of(i) for i in node.args if isinstance(i, fx.Node)
+            )
             output_size = _size_of(node)
-            return (output_size * 4 < input_tensors_size)
+            return output_size * 4 < input_tensors_size
         return False
 
-
     def is_materialized(node):
-        if node.op == 'placeholder':
+        if node.op == "placeholder":
             return True
 
         return not all(is_fusible(node, user) for user in node.users)
@@ -723,7 +798,7 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
         if node.meta.get("recompute", 0) > 0:
             return False
 
-        if 'val' in node.meta and isinstance(node.meta['val'], torch.SymFloat):
+        if "val" in node.meta and isinstance(node.meta["val"], torch.SymFloat):
             return False
 
         banned_nodes.add(node)
@@ -735,7 +810,7 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
         return True
 
     for node in joint_graph.nodes:
-        if node.op == 'output':
+        if node.op == "output":
             continue
 
         if node in required_bw_nodes:
@@ -762,8 +837,9 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
             ban_recomputation_if_allowed(node)
 
         # Checks if a node is actually a tuple. Can be simplified to just an isinstance check if we always use faketensors.
-        is_non_tensor_node = (('val' not in node.meta and 'tensor_meta' not in node.meta) or
-                              ('val' in node.meta and not isinstance(node.meta['val'], torch.Tensor)))
+        is_non_tensor_node = (
+            "val" not in node.meta and "tensor_meta" not in node.meta
+        ) or ("val" in node.meta and not isinstance(node.meta["val"], torch.Tensor))
 
         if is_sym_node(node):
             weight = sym_node_size(node)
@@ -811,25 +887,36 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
                 if user in required_fw_nodes:
                     if user.fw_order > max_range:
                         continue
-                    heapq.heappush(sorted_nodes, (user.fw_order, user, is_fusible(node, user)))
+                    heapq.heappush(
+                        sorted_nodes, (user.fw_order, user, is_fusible(node, user))
+                    )
         return max_range
 
     if BAN_IF_USED_FAR_APART:
         for used_node in required_fw_nodes:
-            orders = [user.fw_order for user in used_node.users if user in required_fw_nodes]
+            orders = [
+                user.fw_order for user in used_node.users if user in required_fw_nodes
+            ]
             fw_users = [user for user in used_node.users if user in required_fw_nodes]
             if len(orders) > 0:
                 first_unfusible_use = find_first_unfusible(fw_users, max(orders))
                 for user in tuple(used_node.users):
-                    if user in required_fw_nodes and user.fw_order > first_unfusible_use and is_fusible(used_node, user):
+                    if (
+                        user in required_fw_nodes
+                        and user.fw_order > first_unfusible_use
+                        and is_fusible(used_node, user)
+                    ):
                         if user in banned_nodes:
                             continue
                         log.info(
                             "used above/below fusible %s:(%s) -> %s -> %s:(%s)",
-                            used_node, used_node.fw_order, first_unfusible_use, user, user.fw_order
+                            used_node,
+                            used_node.fw_order,
+                            first_unfusible_use,
+                            user,
+                            user.fw_order,
                         )
                         ban_recomputation_if_allowed(user)
-
 
     # This heuristic is fairly straightforward. The idea is that although it is
     # cheap to recompute bandwidth-bound ops, we don't want to end up in a situation
@@ -856,19 +943,29 @@ def get_saved_values(joint_graph, node_classifications, heuristics_on, dont_ban=
                 visited.add(cur)
                 # 100 is arbitrary choice to try and prevent degenerate cases
                 if cur.fw_order > start_order + 100 and len(fusible) == 0:
-                    log.info("too long %s %s %s %s", cur, start_node, cur.fw_order, start_node.fw_order)
+                    log.info(
+                        "too long %s %s %s %s",
+                        cur,
+                        start_node,
+                        cur.fw_order,
+                        start_node.fw_order,
+                    )
                     ban_recomputation_if_allowed(cur)
                     break
 
                 for user in cur.users:
-                    if user in required_fw_nodes and is_fusible(cur, user) and user not in banned_nodes:
+                    if (
+                        user in required_fw_nodes
+                        and is_fusible(cur, user)
+                        and user not in banned_nodes
+                    ):
                         heapq.heappush(fusible, (user.fw_order, user))
 
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
     except Exception:
-        print('Failed to compute min-cut on following graph:')
-        print('\n'.join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
+        print("Failed to compute min-cut on following graph:")
+        print("\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph)))
         raise
 
     reachable, non_reachable = partition
@@ -1148,7 +1245,11 @@ def min_cut_rematerialization_partition(
 
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
     fw_module, bw_module = _extract_fwd_bwd_modules(
-        joint_module, saved_values, saved_sym_nodes=saved_sym_nodes, num_fwd_outputs=num_fwd_outputs)
+        joint_module,
+        saved_values,
+        saved_sym_nodes=saved_sym_nodes,
+        num_fwd_outputs=num_fwd_outputs,
+    )
 
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
@@ -1159,19 +1260,32 @@ def min_cut_rematerialization_partition(
 
     if AOT_PARTITIONER_DEBUG:
         from torch._inductor.fx_utils import get_node_storage
+
         storages = {get_node_storage(node) for node in saved_values}
-        print("Theoretical Activations Stored: ", sum([_size_of(i) for i in saved_values]) / 1e9)
+        print(
+            "Theoretical Activations Stored: ",
+            sum(_size_of(i) for i in saved_values) / 1e9,
+        )
         sorted_sizes = sorted([(_size_of(i), str(i)) for i in saved_values])
-        fw_module_nodes = {node.name for node in fw_module.graph.nodes if node.op == 'call_function'}
-        bw_module_nodes = {node.name for node in bw_module.graph.nodes if node.op == 'call_function'}
+        fw_module_nodes = {
+            node.name for node in fw_module.graph.nodes if node.op == "call_function"
+        }
+        bw_module_nodes = {
+            node.name for node in bw_module.graph.nodes if node.op == "call_function"
+        }
         remat_nodes = fw_module_nodes & bw_module_nodes
 
         counts = defaultdict(int)
         for node in fw_module.graph.nodes:
-            if node.name in remat_nodes and hasattr(node.target, '_overloadpacket'):
+            if node.name in remat_nodes and hasattr(node.target, "_overloadpacket"):
                 counts[str(node.target._overloadpacket)] += 1
-        print(f"# remat/fw/bw: {len(remat_nodes)}/{len(fw_module_nodes)}/{len(bw_module_nodes)}")
-        print("Count of Ops Rematerialized: ", sorted(counts.items(), key=lambda x: x[1], reverse=True))
+        print(
+            f"# remat/fw/bw: {len(remat_nodes)}/{len(fw_module_nodes)}/{len(bw_module_nodes)}"
+        )
+        print(
+            "Count of Ops Rematerialized: ",
+            sorted(counts.items(), key=lambda x: x[1], reverse=True),
+        )
     return fw_module, bw_module
 
 
