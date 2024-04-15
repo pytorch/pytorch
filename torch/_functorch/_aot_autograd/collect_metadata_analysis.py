@@ -33,6 +33,7 @@ from .functional_utils import (
     to_fun,
 )
 from .schemas import (
+    FunctionalTensorMetadataEq,
     InputAliasInfo,
     MutationType,
     OutputAliasInfo,
@@ -197,20 +198,6 @@ def run_functionalized_fw_and_collect_metadata(
                 and are_all_mutations_under_no_grad_or_inference_mode(f_arg)
             )
 
-            # Here, we're saying that if an input experienced a set call, inp.set_(other),
-            # then we can effectively not have to worry about whether its data was mutated.
-            # There are 3 cases:
-            # (1) We mutate inp *after* the set_() call. other is a graph intermediate.
-            #     In this case, we're not really mutating the input storage of "inp";
-            #     we're mutating the storage of an intermdiate value (other),
-            #     and slamming that storage into the input tensor. So no data mutation is necessary.
-            # (2) We mutate inp *after* the set_() call. other is a graph *input*.
-            #     In this case, the data mutation will be properly handled in the runtime
-            #     epilogue during the processing of "other"
-            # (3) We mutate inp *before* the set_() call.
-            #     This case is *not* currently handled.
-            #     TODO: discuss this in the PR. Both supporting this, and detecting + erroring out,
-            #     seem painful to get working.
             if mutates_storage_metadata:
                 mutates_data = False
 
@@ -461,6 +448,12 @@ alias each other from a multi-output view call"
                     output_type = OutputType.is_input
                 else:
                     output_type = OutputType.alias_of_input
+            elif functional_tensor_storage_changed and id(o) in inp_tensor_ids:
+                # When there is a set_() on an input, we cannot rely on checking storages
+                # to detect if we are returning an input (since the inputs storage is different)
+                assert curr_storage is not None
+                base_idx = inp_storage_refs[curr_storage]
+                output_type = OutputType.is_input
 
             # We only need to handle the intermediate base case when both
             # the intermediate base and the output require gradients.
@@ -540,7 +533,6 @@ from a multi-output view call"
                 and len(outs_with_identical_metadata_that_require_grad) > 0
                 and not o.requires_grad
             ):
-                assert len(outs_with_identical_metadata_that_require_grad) > 0
                 # In theory we could use any of these tensors to regenerate the aliased outputs from,
                 # since they all alias each other and have identical metatadata
                 out_alias = outs_with_identical_metadata_that_require_grad[0]
@@ -557,12 +549,55 @@ from a multi-output view call"
                 }
             else:
                 dynamic_dims = None
+
+            # Save the current FunctionalTensor output.
+            #
+            # This will be used at runtime for reconstructing output views from
+            # their respective base tensors.
+            #
+            # The FunctionalTensor will be saved if one of the 2 conditions below
+            # is true:
+            functional_tensor = None
+            if (
+                # 1. If the output_type is either of:
+                #    (i) alias_of_intermediate;
+                #    (ii) alias_of_intermediate_save_as_output; or
+                #    (iii) alias_of_intermediate_base_is_user_output.
+                #
+                # No need to worry about in-place view operations here, since
+                # this functionalization step elimitates mutations.
+                #
+                # i.e. we have access to the actual base tensor, before the
+                # in-place operation was applied.
+                output_type
+                in (
+                    OutputType.alias_of_intermediate,
+                    OutputType.alias_of_intermediate_save_as_output,
+                    OutputType.alias_of_intermediate_base_is_user_output,
+                )
+            ) or (
+                # 2. If the output_type is alias_of_input, and no in-place view
+                #    operationthe was run on the input (base tensor).
+                #
+                # In this case, we need to check for metadata mutation because
+                # the runtime explicitly reconstructs the inputs, before actually
+                # reconstructing the outputs. Due to in-place view operations, the
+                # fully reconstructed input may not be this output base tensor
+                # anymore.
+                output_type == OutputType.alias_of_input
+                and base_idx is not None
+                and not input_info[base_idx].mutates_metadata
+            ):
+                if isinstance(o, FunctionalTensor):
+                    functional_tensor = FunctionalTensorMetadataEq(o.elem)
+
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
                 requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,
+                functional_tensor=functional_tensor,
             )
             output_info.append(out_info)
 
