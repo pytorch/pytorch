@@ -172,7 +172,16 @@ class Guard:
         return self._hash
 
     def sort_key(self):
+        # Put the duplicate input guards at the end. The duplicate guards have
+        # two sources while guard.name only considers one source.
+        from ._dynamo.guards import GuardBuilder
+
+        is_duplicate_input = (
+            isinstance(self.create_fn, functools.partial)
+            and self.create_fn.func is GuardBuilder.DUPLICATE_INPUT
+        )
         return (
+            is_duplicate_input,
             self.source.value if self.source else -1,
             len(self.name),
             self.name,
@@ -606,6 +615,8 @@ class TracingContext:
         self.loc_in_frame = None
         # this is only set after aot_autograd
         self.fw_metadata = None
+        # this is only set after aot_autograd
+        self.aot_graph_name = None
         self.params_flat = None
         # this is for extended return calling convention from backend
         # compiler to aot_autograd

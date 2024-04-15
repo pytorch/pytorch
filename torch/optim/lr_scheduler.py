@@ -1720,10 +1720,8 @@ class OneCycleLR(LRScheduler):
         # Validate anneal_strategy
         if anneal_strategy not in ['cos', 'linear']:
             raise ValueError(f"anneal_strategy must by one of 'cos' or 'linear', instead got {anneal_strategy}")
-        elif anneal_strategy == 'cos':
-            self.anneal_func = self._annealing_cos
-        elif anneal_strategy == 'linear':
-            self.anneal_func = self._annealing_linear
+        else:
+            self._anneal_func_type = anneal_strategy
 
         # Initialize learning rate variables
         max_lrs = self._format_param('max_lr', self.optimizer, max_lr)
@@ -1761,17 +1759,17 @@ class OneCycleLR(LRScheduler):
         else:
             return [param] * len(optimizer.param_groups)
 
-
-    def state_dict(self):
-        state = super().state_dict()
-        anneal_func = state.pop('anneal_func')
-        state['anneal_func'] = anneal_func.__name__
-        return state
-
-    def load_state_dict(self, state_dict):
-        if 'anneal_func' in state_dict and isinstance(state_dict['anneal_func'], str):
-            state_dict['anneal_func'] = self.__getattribute__(state_dict['anneal_func'])
-        super().load_state_dict(state_dict)
+    def _anneal_func(self, *args, **kwargs):
+        if hasattr(self, '_anneal_func_type'):
+            if self._anneal_func_type == 'cos':
+                return self._annealing_cos(*args, **kwargs)
+            elif self._anneal_func_type == 'linear':
+                return self._annealing_linear(*args, **kwargs)
+            else:
+                raise ValueError(f"Unknown _anneal_func_type: {self._anneal_func_type}")
+        else:
+            # For BC
+            self.anneal_func(*args, **kwargs)
 
     @staticmethod
     def _annealing_cos(start, end, pct):
@@ -1802,9 +1800,9 @@ class OneCycleLR(LRScheduler):
                 end_step = phase['end_step']
                 if step_num <= end_step or i == len(self._schedule_phases) - 1:
                     pct = (step_num - start_step) / (end_step - start_step)
-                    computed_lr = self.anneal_func(group[phase['start_lr']], group[phase['end_lr']], pct)
+                    computed_lr = self._anneal_func(group[phase['start_lr']], group[phase['end_lr']], pct)
                     if self.cycle_momentum:
-                        computed_momentum = self.anneal_func(group[phase['start_momentum']], group[phase['end_momentum']], pct)
+                        computed_momentum = self._anneal_func(group[phase['start_momentum']], group[phase['end_momentum']], pct)
                     break
                 start_step = phase['end_step']
 
