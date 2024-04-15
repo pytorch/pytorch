@@ -238,7 +238,7 @@ if RUN_CPU:
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
         BaseTest(
             "test_multi_threading",
-            code_string_count={"pybind11::gil_scoped_release release;": 1},
+            code_string_count={"py::gil_scoped_release release;": 1},
         ),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest(

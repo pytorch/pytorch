@@ -512,6 +512,8 @@ class CppWrapperCpu(WrapperCodeGen):
                     else:
                         # Weights are promoted in the JIT mode
                         num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
+                        # release GIL to support multiple instances inference (in different threads of the same process)
+                        self.prefix.splice("py::gil_scoped_release release;")
 
                     if config.abi_compatible:
                         self.prefix.splice(
@@ -520,8 +522,6 @@ class CppWrapperCpu(WrapperCodeGen):
                             """
                         )
                     else:
-                        # release GIL to support multiple instances inference (in different threads of the same process)
-                        self.prefix.splice("pybind11::gil_scoped_release release;")                          
                         # This looks dumb, but can avoid creating two versions of code in the AOTInductor runtime.
                         self.prefix.splice(
                             f"""
@@ -1978,6 +1978,9 @@ if (custom_op_wrapper.get() == NULL) {
                 f"auto {buf_name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
             )
         else:
+            # Acquiring GIL before interacting with Python
+            self.writeline("py::gil_scoped_acquire acquire;")
+
             # In the JIT mode, because of the ABI-compatible requirement, we can't directly call
             # c10::Dispatcher to find the custom op and call it. Instead, we go back to Python
             # to invoke this custom op.
@@ -2022,6 +2025,9 @@ RAIIAtenTensorHandle {output_arg}(
     reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL)));"""
 
             self.writelines(lines.split("\n"))
+
+            # Destroy the GIL when the interaction with Python is done
+            self.writeline("acquire.release();")
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
         self,
