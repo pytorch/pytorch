@@ -305,6 +305,12 @@ class TritonPrinter(PythonPrinter):
             f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
 
+    def _print_Trunc(self, expr):
+        assert len(expr.args) == 1
+        return (
+            f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        )
+
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
@@ -714,6 +720,10 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     def log10(x):
         return f"libdevice.log10({x})"
+
+    @staticmethod
+    def log2(x):
+        return f"libdevice.log2({x})"
 
     @staticmethod
     def nextafter(x, y):
@@ -3281,10 +3291,15 @@ class TritonScheduling(BaseScheduling):
 
         return node_schedule
 
-    def codegen_nodes(self, nodes: List[scheduler.SchedulerNode]):
+    def codegen_node(
+        self, node: Union[scheduler.FusedSchedulerNode, scheduler.SchedulerNode]
+    ):
         """
         Given a set of pre-fused nodes, generate a Triton kernel.
         """
+
+        nodes: List[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
+
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
 
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
