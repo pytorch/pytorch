@@ -23,22 +23,25 @@ class FakeTensorProp(torch.fx.Interpreter):
          module (GraphModule): The module to be executed
          mode (Optional[FakeTensorMode]): The dispatch mode used to execute computation indicated by each FX Node.
     """
-    def __init__(self, module: torch.fx.GraphModule, mode: Optional[FakeTensorMode] = None):
+    def __init__(self, module: torch.fx.GraphModule, mode: Optional[FakeTensorMode] = None, *, check_consistency: bool = True):
         super().__init__(module)
         if mode is None:
             mode = FakeTensorMode()
         self._mode = mode
+        self.check_consistency = check_consistency
 
     def run_node(self, n: Node):
 
         result = super().run_node(n)
 
         nil = object()
-        scalar_types = (torch.SymInt, torch.SymFloat, torch.SymBool, int, float, bool)
+        # TODO: do boolean equality test too, see
+        # https://github.com/pytorch/pytorch/issues/124110
+        scalar_types = (torch.SymInt, torch.SymFloat, int, float)
 
         def check_consistent(new, old=nil):
             if isinstance(new, torch.Tensor):
-                if old is not nil:
+                if old is not nil and self.check_consistency:
                     assert isinstance(old, torch.Tensor)
                     torch._check(old.dim() == new.dim())
                     # Do this manually so that each individual test is irrefutable
@@ -46,7 +49,7 @@ class FakeTensorProp(torch.fx.Interpreter):
                     # gives us a compound expression and I'm not sure it
                     # simplifies right now)
                     for i, j in zip(old.shape, new.shape):
-                        torch._check(i == j)
+                        torch._check(i == j, lambda: f"{old.shape} != {new.shape}")
                 if isinstance(new, FakeTensor):
                     return snapshot_fake(new)
                 else:
@@ -54,7 +57,7 @@ class FakeTensorProp(torch.fx.Interpreter):
                     # should be running under the mode...
                     return snapshot_fake(self._mode.from_tensor(new, static_shapes=True))
             elif isinstance(new, scalar_types):
-                if old is not nil:
+                if old is not nil and self.check_consistency:
                     assert isinstance(old, scalar_types)
                     torch._check(old == new)
                 return new
@@ -62,7 +65,7 @@ class FakeTensorProp(torch.fx.Interpreter):
                 return None
 
         meta_arg = []
-        if 'val' in n.meta:
+        if 'val' in n.meta and n.meta['val'] is not None:
             meta_arg = [n.meta['val']]
 
         meta = tree_map(check_consistent, result, *meta_arg)
