@@ -22,17 +22,10 @@ inline namespace CPU_CAPABILITY {
 //    https://github.com/android/ndk/issues/1248
 //    https://bugs.llvm.org/show_bug.cgi?id=45824
 // Most likely we will do aarch32 support with inline asm.
-#if defined(__aarch64__)
-#if defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
+#if !defined(C10_MOBILE) && defined(__aarch64__) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC)
 
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
-#endif
-
-#if defined(AT_BUILD_ARM_VEC256_WITH_SLEEF)
-#define USE_SLEEF(sleef_code, non_sleef_code) sleef_code
-#else
-#define USE_SLEEF(sleef_code, non_sleef_code) non_sleef_code
 #endif
 
 template <int index, bool mask_val>
@@ -552,14 +545,13 @@ class Vectorized<c10::Half> {
         vsqrtq_f16(values.val[0]), vsqrtq_f16(values.val[1]));
   }
   Vectorized<c10::Half> reciprocal() const {
-    auto r0 = vrecpeq_f16(values.val[0]);
-    auto r1 = vrecpeq_f16(values.val[1]);
+    auto ones = vdupq_n_f16(1.0f);
+    auto r0 = vdivq_f16(ones, values.val[0]);
+    auto r1 = vdivq_f16(ones, values.val[1]);
     return Vectorized<c10::Half>(r0, r1);
   }
   Vectorized<c10::Half> rsqrt() const {
-    auto r0 = vrsqrteq_f16(values.val[0]);
-    auto r1 = vrsqrteq_f16(values.val[1]);
-    return Vectorized<c10::Half>(r0, r1);
+    return this->sqrt().reciprocal();
   }
   Vectorized<c10::Half> pow(const Vectorized<c10::Half>& exp) const {
     return map2_with_vec_float_method(exp, &Vectorized<float>::pow);
@@ -573,9 +565,9 @@ class Vectorized<c10::Half> {
   }
 
   Vectorized<c10::Half> operator!=(const Vectorized<c10::Half>& other) const {
-    float32x4_t r0 = vreinterpretq_f16_u16(
+    float16x8_t r0 = vreinterpretq_f16_u16(
         vmvnq_u16(vceqq_f16(values.val[0], other.values.val[0])));
-    float32x4_t r1 = vreinterpretq_f16_u16(
+    float16x8_t r1 = vreinterpretq_f16_u16(
         vmvnq_u16(vceqq_f16(values.val[1], other.values.val[1])));
     return Vectorized<c10::Half>(r0, r1);
   }
@@ -821,8 +813,7 @@ Vectorized<c10::Half> inline fmsub(
   return Vectorized<c10::Half>(r0, r1);
 }
 
-#endif /* __ARM_FEATURE_FP16_VECTOR_ARITHMETIC */
-#endif /* defined(aarch64) */
+#endif /* defined(aarch64) && defined(__ARM_FEATURE_FP16_VECTOR_ARITHMETIC) && !defined(C10_MOBILE) */
 
 } // namespace CPU_CAPABILITY
 } // namespace at::vec
