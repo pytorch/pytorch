@@ -1310,7 +1310,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
 
         # Find the start node and end node of a dequant pattern
         # * End node should be the match.output_node()
-        # * Start node should be the node of dtype convert to float32
+        # * Start node should be the node of dequantize_per_tensor
         dequant_pattern_end_node = match.output_node()
         assert dequant_pattern_end_node.target in [
             quantized_decomposed.dequantize_per_tensor.default,
@@ -1321,9 +1321,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         # For a dequant pattern, we should expect see the node list as:
         # * OPT(aten.reshape.default)
         # * OPT(prims.convert_element_type.default) (to_bf16)
-        # * aten.mul
-        # * aten.sub
-        # * prims.convert_element_type.default (to_fp32)
+        # * dequantize_per_tensor
         def _find_first_node_in_dequant_pattern(_node):
             if _node.target is quantized_decomposed.dequantize_per_tensor.default:
                 # For a dequant pattern, we expect the start node is a to_fp32 node
@@ -1336,6 +1334,11 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
 
         dequant_pattern_start_node = _find_first_node_in_dequant_pattern(
             dequant_pattern_end_node
+        )
+
+        assert (
+            dequant_pattern_start_node.target
+            is quantized_decomposed.dequantize_per_tensor.default
         )
 
         # Clone the dequant pattern for each user node
