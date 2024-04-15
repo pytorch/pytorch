@@ -1093,7 +1093,7 @@ build_update_message = """
     To develop locally:
       $ python -m pip install -e .
     To force cmake to re-generate native build files (off by default):
-      $ python -m pip install --config-settings "--global-option=--cmake" -e . 
+      $ python -m pip install --config-settings "--global-option=--cmake" -e .
 """
 
 
