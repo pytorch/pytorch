@@ -3102,16 +3102,16 @@ utils_device.CURRENT_DEVICE == None""".split(
         class C:
             x: torch.Tensor
 
-        def fn2(x) -> None:
+        def fn3(x) -> None:
             c = C(x)
             object.__setattr__(c, "x", x + 2)
             return c
 
         x3 = torch.randn(10)
-        obj31 = fn2(x3.clone())
+        obj31 = fn3(x3.clone())
 
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn3 = torch._dynamo.optimize(cnts)(fn2)
+        opt_fn3 = torch._dynamo.optimize(cnts)(fn3)
         obj32 = opt_fn3(x3.clone())
         self.assertTrue(same(obj31.x, x3 + 2))
         self.assertTrue(same(obj32.x, x3 + 2))
