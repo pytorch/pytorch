@@ -1160,20 +1160,21 @@ def quantized_decomposed_quantize_per_tensor_default(
 
     input_loader = input.make_loader()
 
-    def inner_fn(idx, scale, zero_point):
+    def inner_fn(idx, inv_scale, zero_point):
         input = input_loader(idx)
-        scale, zero_point = _create_constants(scale, zero_point, dtype=torch.float32)
-        inv_scale = ops.reciprocal(scale)
+        inv_scale, zero_point = _create_constants(
+            inv_scale, zero_point, dtype=torch.float32
+        )
         val = ops.round(input * inv_scale) + zero_point
         qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
-        clamped = ops.maximum(qmin, ops.minimum(qmax, val))
+        clamped = ops.minimum(ops.maximum(val, qmin), qmax)
         return ops.to_dtype(clamped, dtype)
 
     return Pointwise.create(
         device=input.get_device(),
         dtype=dtype,
         inner_fn=functools.partial(
-            inner_fn, scale=float(scale), zero_point=int(zero_point)
+            inner_fn, inv_scale=float(1.0 / scale), zero_point=int(zero_point)
         ),
         ranges=input.get_size(),
     )
@@ -1246,7 +1247,7 @@ def quantized_decomposed_quantize_per_tensor_tensor(
         inv_scale = ops.reciprocal(scale_)
         val = ops.round(input * inv_scale) + zero_point_
         qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
-        clamped = ops.maximum(qmin, ops.minimum(qmax, val))
+        clamped = ops.minimum(ops.maximum(val, qmin), qmax)
         return ops.to_dtype(clamped, dtype)
 
     return Pointwise.create(
