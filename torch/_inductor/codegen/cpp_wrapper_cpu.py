@@ -1978,8 +1978,8 @@ if (custom_op_wrapper.get() == NULL) {
                 f"auto {buf_name} = op_{cpp_kernel_key}.call({', '.join(codegen_args)});"
             )
         else:
-            # Acquiring GIL before interacting with Python
-            self.writeline("py::gil_scoped_acquire acquire;")
+            # Acquire the GIL before interacting with Python
+            self.writeline("py::gil_scoped_acquire acquire_custom_op_call;")
 
             # In the JIT mode, because of the ABI-compatible requirement, we can't directly call
             # c10::Dispatcher to find the custom op and call it. Instead, we go back to Python
@@ -2026,8 +2026,8 @@ RAIIAtenTensorHandle {output_arg}(
 
             self.writelines(lines.split("\n"))
 
-            # Destroy the GIL when the interaction with Python is done
-            self.writeline("acquire.release();")
+            # Release the GIL when the interaction with Python is done
+            self.writeline("py::gil_scoped_release release_custom_op_call;")
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
         self,
