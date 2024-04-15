@@ -3420,6 +3420,31 @@ def meta__foreach_addcop__scalarlist(self, tensor1, tensor2, scalars):
     )
 
 
+@register_meta([aten._foreach_clamp.default])
+def meta__foreach_clamp(self, min=None, max=None):
+    torch._check(
+        isinstance(self, list),
+        lambda: f"self must be a tensor list but got {type(self)!r}",
+    )
+    torch._check(
+        min is not None or max is not None,
+        lambda: "At least one of `min` and `max` must be specified",
+    )
+    return [torch.empty_like(t) for t in self]
+
+
+@register_meta([aten._foreach_clamp_.default])
+def meta__foreach_clamp__(self, min=None, max=None):
+    torch._check(
+        isinstance(self, list),
+        lambda: f"self must be a tensor list but got {type(self)!r}",
+    )
+    torch._check(
+        min is not None or max is not None,
+        lambda: "At least one of `min` and `max` must be specified",
+    )
+
+
 @register_meta([aten._fused_adam_.default])
 def meta__fused_adam_(
     self,
