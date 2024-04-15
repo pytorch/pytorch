@@ -170,6 +170,18 @@ void ProcessGroup::setGroupName(const std::string& name) {
   }
 }
 
+const std::string& ProcessGroup::getGroupDesc() const {
+  return pg_desc_;
+}
+
+void ProcessGroup::setGroupDesc(const std::string& name) {
+  pg_desc_ = name;
+  // Also set the group desc for all backends
+  for (auto& kv : deviceTypeToBackend_) {
+    kv.second->setGroupDesc(name);
+  }
+}
+
 void ProcessGroup::enableCollectivesTiming() {
   for (auto& kv : deviceTypeToBackend_) {
     kv.second->enableCollectivesTiming();

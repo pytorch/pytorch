@@ -69,6 +69,7 @@ from .utils import (
     do_bench,
     get_kernel_metadata,
     is_dynamic,
+    is_gpu,
     pad_listlike,
     sympy_dot,
     sympy_index_symbol,
@@ -122,7 +123,9 @@ def validate_ir(node_or_nodes):
     def _check_tensorbox(nodes):
         # Could expand this to check deeper properties
         # (e.g. TensorBox points to View or StorageBox)
-        if isinstance(nodes, (list, tuple)):
+        if nodes is None:
+            pass
+        elif isinstance(nodes, (list, tuple)):
             for node in nodes:
                 _check_tensorbox(node)
         elif isinstance(nodes, dict):
@@ -138,6 +141,7 @@ def validate_ir(node_or_nodes):
                     TensorBox,
                     sympy.logic.boolalg.Boolean,
                     Expr,
+                    EffectfulKernel,
                 ),
             ), f"Found {type(nodes)}, which is not a supported top level IR node. See [Note: Inductor IR]"
 
@@ -180,6 +184,7 @@ def fuse_reindexing(reindex1, reindex2):
 
 
 NHWC_STRIDE_ORDER = [3, 0, 2, 1]
+NHWDC_STRIDE_ORDER = [4, 0, 3, 2, 1]
 
 
 def stride_order2fill_order(order):
@@ -246,7 +251,7 @@ def get_device_type(x):
 
 
 def is_triton(x):
-    return get_device_type(x) == "cuda"
+    return is_gpu(get_device_type(x))
 
 
 def is_cpu(x):
@@ -683,7 +688,7 @@ class Reduction(Loops):
         numel_hint = V.graph.sizevars.symbolic_hint(sympy_product(ranges))
 
         should_split = (
-            is_triton(device)
+            get_device_type(device) == "cuda"
             and reduction_type
             not in {
                 "argmax",
@@ -1658,7 +1663,7 @@ class Scan(Loops):
         pointwise_ranges = [*size[:axis], *size[axis + 1 :]]
         scan_ranges = [size[axis]]
 
-        if device.type != "cuda":
+        if not is_gpu(device.type):
             # TODO: CPU support
             return [None] * len(dtypes)
 
@@ -2513,7 +2518,7 @@ class Layout(IRNode):
 
     def is_channels_last_contiguous(self):
         ndim = len(self.size)
-        if ndim not in [4, 5]:
+        if ndim not in [4, 5] or self.size[1] == 1:
             return False
         for left, right, size in zip(
             self.stride, make_channels_last_strides_for(self.size), self.size  # type: ignore[arg-type]
@@ -2673,6 +2678,31 @@ class FlexibleLayout(Layout):
         assert set(range(len(sizes))) == set(order)
         fill_order = stride_order2fill_order(order)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
+
+    @staticmethod
+    def stride_ordered_for_memory_format(sizes, memory_format):
+        """
+        Create a stride based on a memory format.
+
+        Memory format is translasted into a stride order,
+        so channels_last is the same as:
+            FlexibleLayout.stride_ordered(sizes, [3, 0, 2, 1])
+
+        This interface does not support memory_format `torch.preserve_format`
+        which should be used to deduce a format from another source
+        """
+        if memory_format == torch.channels_last:
+            return FlexibleLayout.stride_ordered(sizes, NHWC_STRIDE_ORDER)
+        elif memory_format == torch.channels_last_3d:
+            return FlexibleLayout.stride_ordered(sizes, NHWDC_STRIDE_ORDER)
+        elif memory_format == torch.contiguous_format:
+            return FlexibleLayout.contiguous_strides(sizes)
+        else:
+            log.debug(
+                "stride_ordered_for_memory_format, unsuppored memory_format: %s",
+                memory_format,
+            )
+            raise NotImplementedError()
 
     @staticmethod
     def same_ordered(sizes, stride):
@@ -3478,7 +3508,13 @@ class TemplateBuffer(Buffer):
 
 
 class TritonTemplateBuffer(TemplateBuffer):
-    pass
+    def __init__(self, layout, inputs, make_kernel_render, debug_extra=None):
+        super().__init__(layout, inputs, make_kernel_render)
+        self.debug_extra = debug_extra
+
+    def __str__(self):
+        out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
+        return out
 
 
 PrimitiveInfoType = Union[int, float, bool, str, List[Union[int, str, float, bool]]]
@@ -3722,7 +3758,7 @@ class ConcatKernel(NopKernel):
 
             if (
                 input_unwrapped.is_input_buffer()
-                and inputs[i].get_device().type == "cuda"
+                and is_gpu(inputs[i].get_device().type)
                 and not is_dynamic(input_buffer)
             ):
                 buffer_names.append(input_buffer.get_name())
@@ -4056,9 +4092,25 @@ class ExternKernel(InputsKernel):
             while isinstance(x.get_layout(), NonOwningLayout):
                 x = x.get_layout().view
             if isinstance(x.get_layout(), FlexibleLayout):
+                # If the the FlexibleLayout already has the size and stride in the required order,
+                # freeze it to a FixedLayout by using its current size and stride.
+                # The behavior of using its current size and stride or the given order can be different
+                # if the size and stride has ambiguilty, for example for a 4D input where the iC = 1:
+                # size=[s0, 1, 28, 28], stride=[784, 784, 28, 1]. If the required order is [3, 0, 2, 1] (channels last),
+                # the current size and stride already satisfies this order.
+                # However by freezing it to the required order, the layout will be changed to:
+                # size=[s0, 1, 28, 28], stride=[784, 1, 28, 1]), which is not actually necessary.
+
                 # fix flexiblelayout to be FixedLayout with stride_order
                 as_storage_and_layout(
-                    x, freeze=True, want_contiguous=False, stride_order=order
+                    x,
+                    freeze=True,
+                    want_contiguous=False,
+                    stride_order=get_stride_order(
+                        V.graph.sizevars.size_hints(x.get_layout().stride)
+                    )
+                    if is_stride_order_storage_and_layout(x, order)
+                    else order,
                 )
                 return x
             elif isinstance(
@@ -4098,6 +4150,10 @@ class ExternKernel(InputsKernel):
     @classmethod
     def require_channels_last(cls, x):
         return cls.require_stride_order(x, NHWC_STRIDE_ORDER)
+
+    @classmethod
+    def require_channels_last_3d(cls, x):
+        return cls.require_stride_order(x, NHWDC_STRIDE_ORDER)
 
     @classmethod
     def require_contiguous(cls, x):
@@ -4140,10 +4196,14 @@ class ExternKernel(InputsKernel):
         else:
             raise AssertionError(f"{arg_name} not in self.kwarg_properties")
 
-    def codegen_kwargs(self):
+    def codegen_kwargs(self, skip_out=False):
         if V.graph.cpp_wrapper:
             kwargs = []
             for arg_name in self.ordered_kwargs_for_cpp_kernel:
+                if skip_out and arg_name == "out":
+                    # ExternKernelOut has its own logic for inserting the out parameter
+                    continue
+
                 v = self.get_kwargs_value(arg_name)
                 if isinstance(v, sympy.Expr):
                     kwargs.append(v)
@@ -4244,12 +4304,12 @@ class ExternKernel(InputsKernel):
 class ExternKernelOut(ExternKernel):
     def codegen(self, wrapper):
         self.codegen_comment(wrapper)
-        args = [*self.codegen_args(), *self.codegen_kwargs()]
+        args = [*self.codegen_args(), *self.codegen_kwargs(skip_out=True)]
         wrapper.generate_extern_kernel_out(
-            self.output_view,
-            self.codegen_reference(),
-            args,
             self.get_kernel_name(),
+            self.codegen_reference(),
+            self.output_view.codegen_reference() if self.output_view else None,
+            args,
         )
 
     def __init__(
@@ -4294,7 +4354,13 @@ class RandomSeeds(ExternKernelOut):
             inputs=[],
             constant_args=[limits.min, limits.max, [count]],
             python_kernel_name="aten.randint.low_out",
-            cpp_kernel_name="at::randint_out",
+            # FIXME: Ideally we should only use at::_ops::randint_low_out::call here,
+            # but the signature is different from is at::randint_out. Again,
+            # we can simplify the code when only keeping an ABI-compatible version.
+            cpp_kernel_name="at::_ops::randint_low_out::call"
+            if config.abi_compatible
+            else "at::randint_out",
+            op_overload=aten.randint.low_out,
         )
 
 
@@ -5131,7 +5197,7 @@ class FallbackKernel(ExternKernelAlloc):
             if len(devices) == 1:
                 return devices[0]
             for device in devices:
-                if device.type == "cuda":
+                if is_gpu(device.type):
                     return device
             return devices[0]
         return None
@@ -5336,16 +5402,26 @@ class FallbackKernel(ExternKernelAlloc):
                 unflatten_args,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
-        device = cls.find_device(tensor_args, example_output)
-        assert device, "Not sure where to find device info"
+        if example_output is None:
+            packed = cls(
+                NoneLayout(None),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+            )
 
-        packed = cls(
-            MultiOutputLayout(device),
-            kernel,
-            tensor_args,
-            non_tensor_args,
-            unflatten_args,
-        )
+        else:
+            device = cls.find_device(tensor_args, example_output)
+            assert device, "Not sure where to find device info"
+
+            packed = cls(
+                MultiOutputLayout(device),
+                kernel,
+                tensor_args,
+                non_tensor_args,
+                unflatten_args,
+            )
 
         def generate_output(output, indices):
             if isinstance(output, (list, tuple)):
@@ -6743,9 +6819,9 @@ class QLinearPointwisePT2E(ExternKernelAlloc):
                 double inv_output_scale,
                 int64_t output_zero_point,
                 c10::optional<c10::ScalarType> output_dtype,
-                std::string post_op_name,
+                c10::string_view post_op_name,
                 torch::List<c10::optional<at::Scalar>> post_op_args,
-                std::string post_op_algorithm)"""
+                c10::string_view post_op_algorithm)"""
 
     def codegen(self, wrapper):
         # Parser the inputs and constant
@@ -6936,6 +7012,12 @@ class StorageBox(MutableBox):
         if isinstance(self.data, (InputBuffer, ReinterpretView)):
             return self.data.get_name() in V.graph.graph_inputs
         return False
+
+    def is_module_buffer(self):
+        return (
+            isinstance(self.data, (ConstantBuffer))
+            and self.data.get_name() in V.graph.constants
+        )
 
     def realize(self):
         if isinstance(
@@ -7181,26 +7263,29 @@ class Conditional(ExternKernel):
 
 @dataclasses.dataclass
 class WhileLoop(ExternKernel):
-    operands: Optional[List[TensorBox]] = None
+    carried_inputs: Optional[List[TensorBox]] = None
+    additional_inputs: Optional[List[TensorBox]] = None
     cond_subgraph: Optional[Subgraph] = None
     body_subgraph: Optional[Subgraph] = None
     outputs: Optional[List[MultiOutput]] = None
 
     def __init__(
         self,
-        operands: List[TensorBox],
+        carried_inputs: List[TensorBox],
+        additional_inputs: List[TensorBox],
         cond_subgraph: Subgraph,
         body_subgraph: Subgraph,
         layout: MultiOutputLayout,
     ):
-        self.operands = operands
+        self.carried_inputs = carried_inputs
+        self.additional_inputs = additional_inputs
         self.cond_subgraph = cond_subgraph
         self.body_subgraph = body_subgraph
 
         super().__init__(
             name=None,
             layout=layout,  # type: ignore[arg-type]
-            inputs=operands,  # type: ignore[list-item]
+            inputs=carried_inputs + additional_inputs,  # type: ignore[list-item]
         )
 
         self.name = V.graph.register_buffer(self)
@@ -7210,23 +7295,26 @@ class WhileLoop(ExternKernel):
         cls,
         cond_fn: Subgraph,
         body_fn: Subgraph,
-        operands: List[TensorBox],
+        carried_inputs: List[TensorBox],
+        additional_inputs: List[TensorBox],
     ):
-        operands = [cls.realize_input(x) for x in operands]
+        carried_inputs = [cls.realize_input(x) for x in carried_inputs]
+        additional_inputs = [cls.realize_input(x) for x in additional_inputs]
+        all_inputs = carried_inputs + additional_inputs
 
-        fx_operands = V.graph.current_node.args[-1]
-        fake_operands = [x.meta["val"] for x in fx_operands]  # type: ignore[union-attr]
+        fx_all_inputs = V.graph.current_node.args[-2] + V.graph.current_node.args[-1]  # type: ignore[operator]
+        fake_all_inputs = [x.meta["val"] for x in fx_all_inputs]  # type: ignore[union-attr]
 
         for subgraph in (cond_fn, body_fn):
             if subgraph.graph is None:
                 # create and lower subgraphs
                 subgraph.graph = V.graph.make_subgraph(
                     gm=subgraph.graph_module,
-                    example_inputs=fake_operands,
+                    example_inputs=fx_all_inputs,  # type: ignore[arg-type]
                     subgraph_name=subgraph.name,
                 )
                 with V.set_graph_handler(subgraph.graph):
-                    subgraph.graph.run(*fake_operands)
+                    subgraph.graph.run(*fake_all_inputs)
 
         cond_outputs = cond_fn.graph.graph_outputs  # type: ignore[union-attr]
         body_outputs = body_fn.graph.graph_outputs  # type: ignore[union-attr]
@@ -7243,24 +7331,25 @@ class WhileLoop(ExternKernel):
         assert len(cond_outputs[0].get_size()) == 0, cond_outputs
 
         assert (
-            len(operands) > 0
+            len(all_inputs) > 0
         ), "torch.while_loop is assumed to have at least one operand."
 
-        device = operands[0].get_device()
+        device = all_inputs[0].get_device()
 
-        # make sure operands and body outputs are structurally equivalent
-        assert len(operands) == len(body_outputs), (operands, body_outputs)
-        for i, (op, bo) in enumerate(zip(operands, body_outputs)):
+        # make sure carried_inputs and body outputs are structurally equivalent
+        assert len(carried_inputs) == len(body_outputs), (carried_inputs, body_outputs)
+        for i, (op, bo) in enumerate(zip(carried_inputs, body_outputs)):
             assert op.get_size() == bo.get_size(), (i, op, bo)
             assert op.get_stride() == bo.get_stride(), (i, op, bo)
-            # assume all operands and outputs are on the same device
+            # assume all carried_inputs and outputs are on the same device
             # as the MultiOutputLayout below requires single device
             assert op.get_device() == bo.get_device() == device, (i, op, bo, device)
             assert op.get_dtype() == bo.get_dtype(), (i, op, bo)
             assert op.get_layout().offset == bo.get_layout().offset, (i, op, bo)
 
         while_loop = WhileLoop(
-            operands=operands,
+            carried_inputs=carried_inputs,
+            additional_inputs=additional_inputs,
             cond_subgraph=cond_fn,
             body_subgraph=body_fn,
             # asserted above that there is at least one operand
@@ -7282,11 +7371,61 @@ class WhileLoop(ExternKernel):
             for i, output in enumerate(body_outputs)
         ]
 
+        for inp, out in zip(carried_inputs, outputs):
+            if inp.get_name() in V.graph.graph_inputs:
+                # if a carried input of the while_loop is a graph input,
+                # it can be returned as is when the number of iterations
+                # is zero. due to this, we can't (generally) reuse the
+                # output buffers corresponding to the graph inputs, as
+                # the inputs may end up being mutated.
+                V.graph.never_reuse_buffers.add(out.get_name())
+
         while_loop.outputs = outputs
         return outputs
 
     def codegen(self, wrapper):
         wrapper.codegen_while_loop(self)
+
+
+class EffectfulKernel(FallbackKernel):
+    def __init__(
+        self,
+        layout,
+        kernel,
+        tensor_args,
+        nontensor_args,
+        unflatten_args,
+        kwargs=None,
+    ):
+        super().__init__(
+            NoneLayout(layout.device),
+            kernel,
+            tensor_args,
+            nontensor_args,
+            unflatten_args,
+            kwargs=None,
+        )
+
+        from torch._higher_order_ops.effects import get_effect_key
+
+        effect_type = get_effect_key(kernel, (*nontensor_args, *tensor_args), kwargs)
+        assert effect_type is not None
+        self.effect_type = effect_type
+        self.prev_effect_buffer = V.graph.effectful_ops.get(effect_type, None)
+        V.graph.effectful_ops[effect_type] = self
+
+    def get_read_writes(self):
+        read_writes = super().get_read_writes()
+
+        if self.prev_effect_buffer is not None:
+            read_writes.reads.add(
+                dependencies.StarDep(self.prev_effect_buffer.get_name())
+            )
+
+        return read_writes
+
+    def has_side_effects(self):
+        return True
 
 
 class InterpreterShim(torch.fx.Interpreter):
