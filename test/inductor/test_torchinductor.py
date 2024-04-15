@@ -755,6 +755,7 @@ class CommonTemplate:
             ),
         )
 
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_torch_compile_override_registration(self):
         dynamic = False
         namespace_name = "aten"
