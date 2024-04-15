@@ -4016,7 +4016,8 @@ class ExternKernel(InputsKernel):
             x_unwrap_view.get_name()
         ).get_origin_node()
         if (
-            "val" in x_unwrap_view_node.meta
+            x_unwrap_view_node is not None
+            and "val" in x_unwrap_view_node.meta
             and isinstance(x_unwrap_view.layout, FlexibleLayout)
             and (
                 x_unwrap_view_node.meta["val"].is_contiguous(
