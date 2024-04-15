@@ -275,52 +275,6 @@ AOTIKernelMetaInfo AOTIPythonKernelHolder::get_inputs_meta_info(
   return inputs_meta_info;
 }
 
-/**
- * Initializes the cache for AOTInductor kernels within the
- * AOTIPythonKernelHolder class.
- *
- * The path of AOTI kernels for eager is
- *  - ${TORCHINDUCTOR_CACHE_DIR}/${kernel_path}/${kernel_id}.so
- *
- * Besides the kernel library, there is also a metadata file for each kernel
- * library.
- *  - ${TORCHINDUCTOR_CACHE_DIR}/aten_eager/${op_name}.json
- *
- * The kernels are loaded from the path and cached in the
- * AOTIPythonKernelHolder.
- *
- * Process:
- * 1. Device Type Check: It first checks if the device type is the compile-time
- * maximum. If so, the function exits early, as no initialization is needed for
- * these device types.
- *
- * 2. Environment Variable Retrieval: Attempts to retrieve the Eager AOTI kernel
- * path from the "TORCHINDUCTOR_CACHE_DIR" environment variable. If this
- * variable isn't set, the function exits early, indicating no path is provided.
- *
- * 3. AOTI Kernel Path Construction: Constructs the path to the AOTI kernels by
- * combining the base path from the environment variable with subdirectories
- * based on the device type (cpu, cuda, xpu) and operation name. This results in
- * a specific path targeting the required AOTI kernel for the current operation
- * and device.
- *
- * 4. Path Existence Check: Checks if the constructed path exists in the file
- * system. If not, the function returns, as there are no kernels to load.
- *
- * 5. Kernel File Processing: If the path exists, iterates through each file in
- * the directory. For files with a .so extension, it replaces this with .conf to
- * locate the corresponding kernel configuration file.
- *
- * 6. Kernel Metadata Loading and Caching: Reads the kernel metadata from each
- * .conf file (using TensorMetaInfo::fromConfig). If successful, adds this
- * metadata to the aoti_kernel_cache_. The cache maps the kernel metadata to a
- * corresponding AOTI model container runner, obtained via
- * getAOTIModelContainerRunner.
- *
- * This function is crucial for setting up the AOTI kernel infrastructure,
- * enabling efficient inference operations tailored to the specific runtime
- * environment.
- */
 void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
   if (device_.type() == c10::DeviceType::COMPILE_TIME_MAX_DEVICE_TYPES) {
     return;

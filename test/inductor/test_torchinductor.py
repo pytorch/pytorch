@@ -810,6 +810,7 @@ class CommonTemplate:
         print(kernel_lib_path)
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
 
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_torch_compile_override_registration(self):
         dynamic = False
         namespace_name = "aten"
