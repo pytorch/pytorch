@@ -3,7 +3,6 @@
 #ifdef USE_C10D_MPI
 
 #include <iostream>
-#include <limits>
 #include <map>
 
 #include <c10/core/DeviceGuard.h>
