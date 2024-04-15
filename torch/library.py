@@ -495,7 +495,7 @@ def register_fake(
         >>> assert y.shape == (2, 3)
         >>>
         >>> # Example 2: an operator with data-dependent output shape
-        >>> @torch.library.custom_op("mylib::custom_nonzero")
+        >>> @torch.library.custom_op("mylib::custom_nonzero", mutates_args=())
         >>> def custom_nonzero(x: Tensor) -> Tensor:
         >>>     x_np = x.numpy(force=True)
         >>>     res = np.stack(np.nonzero(x_np), axis=1)
