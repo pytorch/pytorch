@@ -5,6 +5,8 @@ import unittest
 import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
+import torch.nn.functional as F
+from torch.utils import _pytree as pytree
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
@@ -42,15 +44,20 @@ class TestPatternMatcher(TestCase):
         expected_matches,
         expected_nodes,
         additional_check=lambda code: None,
+        reference_in_float=False,
     ):
         counters.clear()
         torch.manual_seed(42)
-        expected = fn(*args)
+        if reference_in_float:
+            ref_inputs = pytree.tree_map_only(torch.Tensor, lambda x: x.to(torch.float32), args)
+        else:
+            ref_inputs = args
+        expected = fn(*ref_inputs)
         torch.manual_seed(42)
         actual, codes = run_and_get_code(torch.compile(fn), *args)
         if len(codes) == 1:
             codes = codes[0]
-        torch.testing.assert_close(actual, expected)
+        torch.testing.assert_close(actual, expected, check_dtype=not reference_in_float)
 
         self.assertEqual(
             counters["inductor"]["pattern_matcher_count"], expected_matches
@@ -1180,6 +1187,43 @@ class TestPatternMatcher(TestCase):
         c.append(a)
         stable_topological_sort(graph)
         self.assertEqual(list(graph.nodes), [b, a, c])
+
+    def test_scaled_softmax(self):
+        def mul_softmax(a, b):
+            return F.softmax(a * b, dim=0)
+
+        def div_softmax(x, inv_scale):
+            return F.softmax(x / inv_scale, dim=0)
+
+        x = torch.randn(10, 10)
+        scale = 0.5
+        self.common(mul_softmax, (x, scale), 1, 3)
+        self.common(mul_softmax, (scale, x), 1, 3)
+        self.common(div_softmax, (x, scale), 1, 3)
+
+        scale = torch.randn(10)
+        self.common(mul_softmax, (x, scale), 1, 3)
+        self.common(mul_softmax, (scale, x), 1, 3)
+        self.common(div_softmax, (x, scale), 1, 3)
+
+        scale = torch.randn(1, 10)
+        self.common(mul_softmax, (x, scale), 1, 3)
+        self.common(mul_softmax, (scale, x), 1, 3)
+        self.common(div_softmax, (x, scale), 1, 3)
+
+        # Test matching with type promotion
+        x = torch.randn(10, 10, dtype=torch.float16)
+        scale = torch.randn(10, dtype=torch.float16)
+        self.common(mul_softmax, (x, scale), 1, 4, reference_in_float=True)
+        self.common(mul_softmax, (scale, x), 1, 4, reference_in_float=True)
+        self.common(div_softmax, (x, scale), 1, 4, reference_in_float=True)
+
+        # No match if scale changes in softmax dim
+        scale = torch.randn(10, 10)
+        self.common(mul_softmax, (x, scale), 0, 0)
+        self.common(mul_softmax, (scale, x), 0, 0)
+        self.common(div_softmax, (x, scale), 0, 0)
+
 
 
 if __name__ == "__main__":
