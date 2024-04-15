@@ -27,7 +27,6 @@ def custom_op(
     *,
     mutates_args: Iterable[str],
     device_types: device_types_t = None,
-    qualname: Optional[str] = None,
 ) -> Callable:
     """Wraps a function into custom operator.
 
