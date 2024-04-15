@@ -6,3 +6,4 @@ setuptools==67.8.0
 six==1.16.0
 sympy==1.12
 typing_extensions==4.5.0
+idna==3.7
