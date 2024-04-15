@@ -1,6 +1,5 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import sys
 from unittest.mock import patch
 
 import functorch
@@ -41,9 +40,8 @@ def count_bytes_inductor(gm, example_inputs):
     return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
 
-# We don't support torch.compile() on
-# Windows and Python 3.12+
-if not IS_WINDOWS and sys.version_info < (3, 12):
+# We don't support torch.compile() on Windows
+if not IS_WINDOWS:
 
     @torch._dynamo.optimize(count_bytes_inductor)
     def f(x):
@@ -270,6 +268,19 @@ class NumBytesMetricTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
     @patch.object(config, "split_cat_fx_passes", False)
+    @patch.object(
+        config,
+        "pre_grad_fusion_options",
+        {
+            "batch_linear": {},
+            "batch_linear_lhs": {},
+            "batch_layernorm": {},
+            "batch_tanh": {},
+            "batch_relu": {},
+            "batch_sigmoid": {},
+        },
+    )
+    @patch.object(config, "post_grad_fusion_options", {})
     def test_cat_pointwise_many_complex_inputs(self):
         def f(*inputs):
             input = [torch.nn.functional.gelu(val) for val in inputs]
@@ -279,6 +290,19 @@ class NumBytesMetricTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """6400""")
 
     @patch.object(config, "split_cat_fx_passes", False)
+    @patch.object(
+        config,
+        "pre_grad_fusion_options",
+        {
+            "batch_linear": {},
+            "batch_linear_lhs": {},
+            "batch_layernorm": {},
+            "batch_tanh": {},
+            "batch_relu": {},
+            "batch_sigmoid": {},
+        },
+    )
+    @patch.object(config, "post_grad_fusion_options", {})
     def test_cat_pointwise_many_simple_inputs(self):
         def f(*inputs):
             input = [torch.nn.functional.relu(val) for val in inputs]

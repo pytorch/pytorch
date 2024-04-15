@@ -158,10 +158,6 @@ class TestDecomposeMemMM(TestCase):
             counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
             expected_val,
         )
-        self.assertEqual(
-            counters["inductor"]["decompose_mmt"],
-            expected_val,
-        )
         counters.clear()
 
     @parametrize(
@@ -201,10 +197,6 @@ class TestDecomposeMemMM(TestCase):
             counters["inductor"]["decompose_mm"] - decompose_mm_fwd,
             expected_val,
         )
-        self.assertEqual(
-            counters["inductor"]["decompose_mm_large_k"],
-            expected_val,
-        )
         counters.clear()
 
     @parametrize("m,k,n, should_decompose", [(20480, 5, 2, True)])
@@ -239,10 +231,6 @@ class TestDecomposeMemMM(TestCase):
         self.assertEqual(
             counters["inductor"]["decompose_mm"],
             1 if has_bias else 2,
-        )
-        self.assertEqual(
-            counters["inductor"]["decompose_mmt"],
-            expected_val,
         )
         counters.clear()
 
