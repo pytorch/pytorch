@@ -316,6 +316,7 @@ class _TorchDynamoContext:
 
         # add context containing GraphModule to any GraphModule forward functions
         if isinstance(fn, GraphModule):
+            # add context containing GraphModule to any GraphModule forward functions
             code_context.get_context(fn.forward.__code__)[
                 "orig_graphmodule"
             ] = weakref.ref(fn)
@@ -343,7 +344,8 @@ class _TorchDynamoContext:
         if (
             (filename is None or trace_rules.check(fn))
             and (
-                getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
+                getattr(fn, "__name__", "")
+                not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
             )
             and filename not in DONT_WRAP_FILES
         ):
