@@ -102,7 +102,6 @@ class VariableTrackerMeta(type):
         ) and cls not in (
             VariableTracker,
             variables.LazyVariableTracker,
-            variables.NullVariable,  # LVT should never wrap a NullVariable
         ):
             instance = instance.realize()
         return type.__instancecheck__(cls, instance)

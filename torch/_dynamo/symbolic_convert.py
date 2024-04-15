@@ -2275,15 +2275,16 @@ class InstructionTranslator(InstructionTranslatorBase):
             for k in self.symbolic_locals.keys()
             if k in reads and k not in self.cell_and_freevars()
         )
-        # NOTE: isinstance check on lazy VT's with NullVariable will NOT
-        # realize the lazy VT.
+        # NOTE: do not use isinstance, since it realizes lazy VT's
         argnames = tuple(
             k
             for k in all_argnames
-            if not isinstance(self.symbolic_locals[k], NullVariable)
+            if not type.__instancecheck__(NullVariable, self.symbolic_locals[k])
         )
         argnames_null = tuple(
-            k for k in all_argnames if isinstance(self.symbolic_locals[k], NullVariable)
+            k
+            for k in all_argnames
+            if type.__instancecheck__(NullVariable, self.symbolic_locals[k])
         )
         if sys.version_info < (3, 12):
             assert len(argnames_null) == 0, "variables should not be NULL in < 3.12"
