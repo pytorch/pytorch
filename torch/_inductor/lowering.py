@@ -1141,6 +1141,154 @@ def quantized_decomposed_dequantize_per_channel(
     )
 
 
+@register_lowering(
+    quantized_decomposed.quantize_per_tensor.default, type_promotion_kind=None
+)
+def quantized_decomposed_quantize_per_tensor_default(
+    input: TensorBox,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    if input.get_dtype() == torch.bfloat16:
+        input = to_dtype(input, torch.float32)
+    assert (
+        input.get_dtype() == torch.float32
+    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
+
+    input_loader = input.make_loader()
+
+    def inner_fn(idx, scale, zero_point):
+        input = input_loader(idx)
+        scale, zero_point = _create_constants(scale, zero_point, dtype=torch.float32)
+        inv_scale = ops.reciprocal(scale)
+        val = ops.round(input * inv_scale) + zero_point
+        qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
+        clamped = ops.maximum(qmin, ops.minimum(qmax, val))
+        return ops.to_dtype(clamped, dtype)
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=dtype,
+        inner_fn=functools.partial(inner_fn, scale=float(scale), zero_point=int(zero_point)),
+        ranges=input.get_size(),
+    )
+
+
+@register_lowering(
+    quantized_decomposed.dequantize_per_tensor.default, type_promotion_kind=None
+)
+def quantized_decomposed_dequantize_per_tensor_default(
+    input: TensorBox,
+    scale: float,
+    zero_point: int,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    assert (
+        input.get_dtype() == dtype
+    ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
+
+    input_loader = input.make_loader()
+
+    def inner_fn(idx, scale, zero_point):
+        input = input_loader(idx)
+        scale, zero_point = _create_constants(scale, zero_point, dtype=torch.float32)
+        val = ops.sub(ops.to_dtype(input, torch.float32), zero_point) * scale
+        return val
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=torch.float32,
+        inner_fn=functools.partial(inner_fn, scale=float(scale), zero_point=int(zero_point)),
+        ranges=input.get_size(),
+    )
+
+
+@register_lowering(
+    quantized_decomposed.quantize_per_tensor.tensor, type_promotion_kind=None
+)
+def quantized_decomposed_quantize_per_tensor_tensor(
+    input: TensorBox,
+    scale: TensorBox,
+    zero_point: TensorBox,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    if input.get_dtype() == torch.bfloat16:
+        input = to_dtype(input, torch.float32)
+    assert (
+        input.get_dtype() == torch.float32
+    ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
+    assert len(scale.get_size()) == 0, "expect scale as scalar tensor"
+    assert len(zero_point.get_size()) == 0, "expect zero_point as scalar tensor"
+
+    input_loader = input.make_loader()
+    scale_loader = scale.make_loader()
+    zero_point_loader = zero_point.make_loader()
+
+    def inner_fn(idx):
+        input = input_loader(idx)
+        scale_ = scale_loader(())
+        zero_point_ = zero_point_loader(())
+        inv_scale = ops.reciprocal(scale_)
+        val = ops.round(input * inv_scale) + zero_point_
+        qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
+        clamped = ops.maximum(qmin, ops.minimum(qmax, val))
+        return ops.to_dtype(clamped, dtype)
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=dtype,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
+    )
+
+
+@register_lowering(
+    quantized_decomposed.dequantize_per_tensor.tensor, type_promotion_kind=None
+)
+def quantized_decomposed_dequantize_per_tensor_tensor(
+    input: TensorBox,
+    scale: TensorBox,
+    zero_point: TensorBox,
+    quant_min: int,
+    quant_max: int,
+    dtype: torch.dtype,
+) -> TensorBox:
+    assert len(scale.get_size()) == 0, "expect scale as scalar tensor"
+    assert len(zero_point.get_size()) == 0, "expect zero_point as scalar tensor"
+    assert (
+        input.get_dtype() == dtype
+    ), f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
+
+    input_loader = input.make_loader()
+    scale_loader = scale.make_loader()
+    zero_point_loader = zero_point.make_loader()
+
+    def inner_fn(idx):
+        input = input_loader(idx)
+        scale_ = scale_loader(())
+        zero_point_ = zero_point_loader(())
+        if scale.dtype != torch.float32:
+            scale_ = ops.to_dtype(scale_, torch.float32)
+        if zero_point.dtype != torch.float32:
+            zero_point_ = ops.to_dtype(zero_point_, torch.float32)
+        val = ops.sub(ops.to_dtype(input, torch.float32), zero_point_) * scale_
+        return val
+
+    return Pointwise.create(
+        device=input.get_device(),
+        dtype=torch.float32,
+        inner_fn=inner_fn,
+        ranges=input.get_size(),
+    )
+
+
 @register_lowering(aten.cat)
 def cat(inputs, dim=0):
     cpu_device = inputs[0].get_device().type == "cpu"
