@@ -1,6 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from abc import ABC, abstractmethod
-from typing import Optional, Union, Tuple
+from typing import Optional, Union, Tuple, Dict
 from functools import partial
 
 import torch
@@ -372,18 +372,29 @@ class PrepareModuleInput(ParallelStyle):
     def __init__(
         self,
         *,
-        input_layouts: Union[Placement, Tuple[Placement]],
-        desired_input_layouts: Union[Placement, Tuple[Placement]],
+        input_layouts: Optional[Union[Placement, Tuple[Optional[Placement]]]] = None,
+        desired_input_layouts: Optional[Union[Placement, Tuple[Optional[Placement]]]] = None,
+        input_kwarg_layouts: Optional[Dict[str, Optional[Placement]]] = None,
+        desired_input_kwarg_layouts: Optional[Dict[str, Optional[Placement]]] = None,
         use_local_output: bool = False
     ):
         self.input_layouts = (input_layouts,) if isinstance(input_layouts, Placement) else input_layouts
         self.desired_input_layouts = \
             (desired_input_layouts,) if isinstance(desired_input_layouts, Placement) else desired_input_layouts
         self.use_local_output = use_local_output
-        assert len(self.input_layouts) == len(self.desired_input_layouts), \
-            "input_layouts and desired_input_layouts should have same length!"
+        if self.input_layouts is not None:
+            assert len(self.input_layouts) == len(self.desired_input_layouts), \
+                "input_layouts and desired_input_layouts should have same length!"
+        self.with_kwargs = input_kwarg_layouts is not None
+        self.input_kwarg_layouts = input_kwarg_layouts or {}
+        self.desired_input_kwarg_layouts = desired_input_kwarg_layouts or {}
+        if self.with_kwargs:
+            assert len(self.input_kwarg_layouts) == len(self.desired_input_kwarg_layouts), \
+                "input_kwarg_layouts and desired_input_kwarg_layouts should have same length!"
 
     def _prepare_input_fn(self, inputs, device_mesh):
+        if self.input_layouts is None:
+            return inputs
         prepared_inputs = []
         if not isinstance(inputs, tuple):
             inputs = (inputs,)
@@ -405,8 +416,32 @@ class PrepareModuleInput(ParallelStyle):
                 prepared_inputs.append(inp)
         return tuple(prepared_inputs)
 
+    def _prepare_input_kwarg_fn(self, inputs, kwarg_inputs, device_mesh):
+        prepared_arg_inputs = self._prepare_input_fn(inputs, device_mesh)
+        prepared_kwarg_inputs = {}
+        for kwarg_key in kwarg_inputs.keys():
+            kwarg_val = kwarg_inputs[kwarg_key]
+            input_layout = None
+            if kwarg_key in self.input_kwarg_layouts:
+                input_layout = self.input_kwarg_layouts[kwarg_key]
+                if input_layout is not None:
+                    kwarg_val = DTensor.from_local(kwarg_val, device_mesh, (input_layout,), run_check=False)
+
+            if kwarg_key in self.desired_input_kwarg_layouts:
+                assert kwarg_key in self.input_kwarg_layouts, f"input_kwarg_layouts should have the key {kwarg_key}!"
+                desired_layout = self.desired_input_kwarg_layouts[kwarg_key]
+                if desired_layout is not None and desired_layout != input_layout:
+                    kwarg_val = kwarg_val.redistribute(placements=(desired_layout,))
+
+            prepared_kwarg_inputs[kwarg_key] = kwarg_val.to_local() if self.use_local_output else kwarg_val
+
+        return (prepared_arg_inputs, prepared_kwarg_inputs)
+
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
-        module.register_forward_pre_hook(lambda _, inputs: self._prepare_input_fn(inputs, device_mesh))  # type: ignore[misc, call-arg]
+        if self.with_kwargs:
+            module.register_forward_pre_hook(lambda _, inputs, kwargs: self._prepare_input_kwarg_fn(inputs, kwargs, device_mesh), with_kwargs=True)  # type: ignore[misc]
+        else:
+            module.register_forward_pre_hook(lambda _, inputs: self._prepare_input_fn(inputs, device_mesh))  # type: ignore[misc, call-arg]
         return module
 
 

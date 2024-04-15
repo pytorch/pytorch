@@ -202,6 +202,29 @@ class TensorParallelStyleTest(DTensorTestBase):
         self.assertEqual(output.shape, (self.world_size * 2, 8 // self.world_size))
 
     @with_comms
+    def test_prepare_module_kwargs_input(self):
+        mesh = init_device_mesh(self.device_type, (self.world_size,))
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(8, 8)
+
+            def forward(self, x, *, y):
+                return self.linear(x) + y
+
+        test_mod = TestModule().to(self.device_type)
+        # Raise assertion error if module inputs and input_layouts do not have same length.
+        prepare_inps_simple = PrepareModuleInput(input_kwarg_layouts={"y": Shard(0)}, desired_input_kwarg_layouts={"y": Replicate()})
+        parallelize_module(test_mod.linear, mesh, ColwiseParallel(use_local_output=False))
+        parallelize_module(test_mod, mesh, prepare_inps_simple)
+
+        output = test_mod(
+            torch.randn(4, 8, device=self.device_type),
+            y=torch.ones(1, 8, device=self.device_type)
+        )
+
+    @with_comms
     def test_prepare_module_output(self):
         mesh = init_device_mesh(self.device_type, (self.world_size,))
 
