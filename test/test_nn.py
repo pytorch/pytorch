@@ -8019,6 +8019,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("60GB", "cpu")
     @largeTensorTest("16GB", "cuda")
+    @serialTest()
     def test_avg_pool_large_tensor(self, device):
         # test for https://github.com/pytorch/pytorch/issues/113833
         a = torch.randn(128, 256, 256, 256, dtype=torch.half, device=device, requires_grad=True)
@@ -8585,6 +8586,7 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(x.grad[:, :, -1, -1], g[:, :, -pb - 1 :, -pr - 1 :].sum((-2, -1)))
 
     @largeTensorTest("6GB")
+    @serialTest()
     def test_ReplicationPad3d_large(self, device):
         shapes = ([1, 65736, 2, 2, 2], [65736, 1, 2, 2, 2])
         pl, pr, pt, pbt, pf, pbk = 3, 4, 5, 6, 7, 8
@@ -9774,6 +9776,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(torch.half)
     @largeTensorTest('40GB')
+    @serialTest()
     def test_upsampling_64bit_indexing_channels_last(self, device, dtype):
         x = torch.rand((32, 64, 512, 512), dtype=dtype, device=device)
         out = torch.nn.functional.interpolate(x.to(memory_format=torch.channels_last), scale_factor=2, mode='nearest')
@@ -9784,6 +9787,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @dtypes(torch.half)
     @largeTensorTest('40GB')
+    @serialTest()
     def test_replicatepad_64bit_indexing(self, device, dtype):
         conv = torch.nn.Conv1d(128, 128, 3, 1, 1, padding_mode="replicate", device=device, dtype=dtype)
         x = torch.randn(size=(256 * 448 * 2, 128, 96), dtype=dtype, device=device)
@@ -10118,6 +10122,7 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.float, torch.half)
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
+    @serialTest()
     def test_warp_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
             x = torch.randn(shape, device="cuda", dtype=torch.float16, requires_grad=True)
@@ -10141,6 +10146,7 @@ class TestNNDeviceType(NNTestCase):
     @dtypes(torch.half)
     @largeTensorTest("20GB")
     @largeTensorTest("2GB", "cpu")
+    @serialTest()
     @precisionOverride({torch.half: 0.001})
     def test_softmax_64bit_indexing(self, device, dtype):
         def run_test(*shape):
@@ -10239,6 +10245,7 @@ class TestNNDeviceType(NNTestCase):
                      #   large_view.grad.numel()) * sizeof(dtype)
                      32769 * (65536 + 3 * 65536 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
+    @serialTest()
     def test_grid_sample_large_index_2d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
         # Try accessing the corners, there should be no segfault
@@ -10284,6 +10291,7 @@ class TestNNDeviceType(NNTestCase):
                      #   large_view.grad.numel()) * sizeof(dtype)
                      2 * 32769 * (32768 + 3 * 32768 / 128) *
                      torch.tensor([], dtype=dtype).element_size())
+    @serialTest()
     def test_grid_sample_large_index_3d(self, device, dtype):
         # Test 64-bit indexing with grid_sample (gh-41656)
         # Try accessing the corners, there should be no segfault
@@ -11352,6 +11360,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("120GB", "cpu")
     @largeTensorTest("45GB", "cuda")
+    @serialTest()
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_nll_loss_large_tensor(self, device, reduction):
         shape = [int(2 ** 16), int(2 ** 16) + 1]
@@ -11385,6 +11394,7 @@ class TestNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("20GB", "cpu")
     @largeTensorTest("20GB", "cuda")
+    @serialTest()
     @parametrize_test("reduction", ("none", "mean", "sum"))
     @serialTest(TEST_CUDA)
     def test_cross_entropy_64bit(self, device, reduction):
@@ -11744,6 +11754,7 @@ if __name__ == '__main__':
     @onlyCUDA
     @largeTensorTest("45GB", "cpu")
     @largeTensorTest("70GB", "cuda")
+    @serialTest()
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_cross_entropy_large_tensor(self, device, reduction):
         logits = torch.randn(int(2 ** 16), int(2 ** 16) + 1, dtype=torch.float32, device='cuda', requires_grad=True)
@@ -12628,6 +12639,7 @@ if __name__ == '__main__':
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA
     @largeTensorTest("42GB", "cuda")
+    @serialTest()
     def test_softmax_forward_64bit_indexing(self, device):
         batch_size = 70
         seq_len = 2048
@@ -12642,6 +12654,7 @@ if __name__ == '__main__':
 
     @onlyCUDA
     @largeTensorTest("20GB", "cuda")
+    @serialTest()
     def test_softmax_backward_64bit_indexing(self, device):
         for numel in (2147483650, 2147483650 + 1):
             x = torch.empty([1, 1, numel], device=device, dtype=torch.float16)
