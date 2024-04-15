@@ -127,7 +127,7 @@ class BaseListVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return iter_contains(self.items, args[0], tx)
+            return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
             from .builder import SourcelessBuilder
 
@@ -263,6 +263,9 @@ class CommonListMethodsVariable(BaseListVariable):
 class ListVariable(CommonListMethodsVariable):
     def python_type(self):
         return list
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(length={len(self.items)}"
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)

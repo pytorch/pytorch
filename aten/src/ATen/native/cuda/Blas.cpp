@@ -912,9 +912,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 
 #if defined(USE_ROCM) && ROCM_VERSION >= 60000
   // rocm's hipblaslt does not yet support amax, so calculate separately
-  auto out_float32 = out.to(kFloat);
-  out_float32.abs_();
-  amax = at::max(out_float32);
+  amax = at::max(at::abs(out.to(kFloat)));
 #endif
 
   return {out, amax};
