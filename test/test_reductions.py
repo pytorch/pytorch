@@ -2290,7 +2290,7 @@ class TestReductions(TestCase):
 
     @onlyCUDA
     @largeTensorTest('10GB')
-    @serialTest(TEST_CUDA)
+    @serialTest()
     def test_reduction_split(self, device):
         # Test reduction when there is a 32bit-indexing split
         # https://github.com/pytorch/pytorch/issues/37583
@@ -3603,7 +3603,7 @@ as the input tensor excluding its innermost dimension'):
     @onlyCUDA
     @largeTensorTest("8GB")
     @dtypes(torch.half, torch.chalf, torch.bfloat16)
-    @serialTest(TEST_CUDA)
+    @serialTest()
     def test_reductions_large_half_tensors(self, device, dtype):
         t = torch.ones(2**31, device=device, dtype=dtype)
         t[2**30:] = -1

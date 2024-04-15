@@ -17,10 +17,6 @@ import torch.nn.functional as F
 from torch import inf, nan
 from torch.autograd import gradcheck, gradgradcheck
 from torch.testing import make_tensor
-from torch.testing._internal.common_utils import TestCase, run_tests, TEST_WITH_UBSAN, set_default_dtype, \
-    instantiate_parametrized_tests, slowTest, parametrize as parametrize_test, subtest, skipIfMps, gcIfJetson, \
-    skipIfTorchDynamo, serialTest
-from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -44,11 +40,13 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize as parametrize_test,
     run_tests,
+    serialTest,
     set_default_dtype,
     skipIfMps,
     skipIfTorchDynamo,
     slowTest,
     subtest,
+    TEST_CUDA,
     TEST_WITH_UBSAN,
     TestCase,
 )
@@ -1825,7 +1823,7 @@ torch.cuda.synchronize()
                 self.assertEqual(x.shape[2], res.shape[2])
 
     @onlyCUDA
-    @largeTensorTest('6GB')
+    @largeTensorTest("6GB")
     @serialTest()
     def test_pooling_large(self, device):
         def helper(pool):

@@ -11396,7 +11396,6 @@ class TestNNDeviceType(NNTestCase):
     @largeTensorTest("20GB", "cuda")
     @serialTest()
     @parametrize_test("reduction", ("none", "mean", "sum"))
-    @serialTest(TEST_CUDA)
     def test_cross_entropy_64bit(self, device, reduction):
         labels = torch.zeros(190, 50, dtype=torch.long, device=device)
         logits = torch.ones(190, 229000, 50, dtype=torch.float, device=device)
