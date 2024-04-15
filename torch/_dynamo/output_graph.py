@@ -1005,11 +1005,11 @@ class OutputGraph:
             # Do not load variable if it is NULL.
             if sys.version_info >= (3, 12):
                 # Continuation function will load the NULL for v.
-                if isinstance(v, NullVariable):
+                if type.__instancecheck__(NullVariable, v):
                     continue
             else:
                 # A variable should never be NULL in < 3.12
-                assert not isinstance(v, NullVariable)
+                assert not type.__instancecheck__(NullVariable, v)
             if v not in val_to_names:
                 val_to_names[v] = list()
             val_to_names[v].append(k)
