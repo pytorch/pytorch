@@ -3733,10 +3733,9 @@ class ConcatKernel(NopKernel):
                     break
         any_input_is_storage_and_layout = any(is_storage_and_layout(x) for x in inputs)
         fx_node_args = V.graph.current_node.args[0]
-        if not isinstance(fx_node_args, (tuple, list)):
-            fx_node_args = [
-                fx_node_args,
-            ]
+        assert V.graph.current_node.target is aten.cat.default
+        assert isinstance(fx_node_args, list)
+        # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
         if any_input_is_storage_and_layout is False and any(
             "val" in arg.meta
             and (
