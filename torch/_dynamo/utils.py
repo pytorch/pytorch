@@ -439,6 +439,9 @@ def hashable(x):
     # cannot hash writable memoryview object
     except ValueError:
         return False
+    # not fully initialized object
+    except AttributeError:
+        return False
 
 
 def nothing(*args, **kwargs):
