@@ -755,6 +755,61 @@ class CommonTemplate:
             ),
         )
 
+    def test_aoti_compile_with_persistent_cache(self):
+        def fn(a):
+            return torch.abs(a)
+
+        device = "cpu"
+        ns = "aten"
+        op_name = "abs"
+        op_overload_name = "default"
+        input_tensor = torch.randn(128, dtype=torch.float, device=device)
+
+        from torch._inductor.utils import (
+            aoti_compile_with_persistent_cache,
+            aoti_eager_cache_dir,
+            load_aoti_eager_cache,
+        )
+
+        kernel_lib_path = aoti_compile_with_persistent_cache(
+            ns,
+            op_name,
+            op_overload_name,
+            input_tensor.device.type,
+            False,
+            fn,
+            args=(input_tensor,),
+            kwargs={},
+        )
+        self.assertTrue(len(kernel_lib_path) > 0)
+
+        aoti_eager_cache_path = aoti_eager_cache_dir()
+        self.assertTrue(aoti_eager_cache_path.exists())
+
+        device_kernel_cache = aoti_eager_cache_path / ns / device
+        kernel_conf = device_kernel_cache / f"{op_name}.{op_overload_name}.json"
+        self.assertTrue(kernel_conf.exists())
+
+        json_data = load_aoti_eager_cache(
+            "aten", "abs", "default", input_tensor.device.type
+        )
+        self.assertTrue(json_data is not None)
+        self.assertTrue(isinstance(json_data, list))
+        self.assertTrue(len(json_data) > 0)
+
+        op_info = json_data[0]
+        self.assertTrue(isinstance(op_info, dict))
+        self.assertTrue("meta_info" in op_info)
+        self.assertTrue("kernel_path" in op_info)
+        kernel_libs_abs_path = []
+        for item in json_data:
+            kernel_path = device_kernel_cache / item["kernel_path"]
+            print(kernel_path.as_posix())
+            kernel_libs_abs_path.append(kernel_path.as_posix())
+
+        print(kernel_lib_path)
+        self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
+
     def test_torch_compile_override_registration(self):
         dynamic = False
         namespace_name = "aten"
