@@ -1885,6 +1885,15 @@ Arguments:
               "group_name",
               &::c10d::ProcessGroup::getGroupName,
               "(Gets this process group name. It's cluster unique)")
+          .def(
+              "_set_group_desc",
+              &::c10d::ProcessGroup::setGroupDesc,
+              py::call_guard<py::gil_scoped_acquire>(),
+              "Sets the process group description. This is an internal C10D method, do not use.")
+          .def_property_readonly(
+              "group_desc",
+              &::c10d::ProcessGroup::getGroupDesc,
+              "Gets this process group description")
           .def_property(
               "bound_device_id",
               &::c10d::ProcessGroup::getBoundDeviceId,
