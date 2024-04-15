@@ -404,11 +404,11 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
                   "we will remove torch.library.impl_abstract in a future "
                   "version of PyTorch.",
                   DeprecationWarning, stacklevel=2)
-    return register_fake(qualname, func=func, lib=lib, _stacklevel=_stacklevel + 1)
+    return register_fake(qualname, func, lib=lib, _stacklevel=_stacklevel + 1)
 
 
 
-def register_fake(qualname, func=None, *, lib=None, _stacklevel=1):
+def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
     r"""Register a FakeTensor implementation ("fake impl") for this operator.
 
     Also sometimes known as a "meta kernel", "abstract impl".

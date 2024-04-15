@@ -42,6 +42,48 @@ def drosenbrock(tensor):
 
 @markDynamoStrictTest
 class TestOptimRenewed(TestCase):
+    """
+    This test class validates the core optimizers and is structured as the correctness of:
+    - The update algorithms (forloop implementation)
+        * Every optimizer's algorithm is most readably implemented through a big for-loop
+          over all the parameters, which is what we refer to as the forloop or single tensor
+          implementation. These algorithms are manually validated by comparing to the paper
+          and systematically validated by assuring that the loss goes the right direction
+          when the optimizer has been applied.
+        * This implementation should compose with optimizer hyperparameters well, such as
+          supporting Tensor LRs, the capturable API, and sparse and complex parameters.
+    - Each varying implementation
+        * We then have implementations that improve upon the performance of the forloop
+          implementation by leveraging fusion, namely our foreach (mult_tensor) and fused
+          implementations.
+        * These variations are validated numerically by comparing with the forloop version
+          of the optimizer. In fact, we test most variations this way--we see the forloop
+          implementation as the ground truth and expect that improvements to it in any way
+          should be just as correct.
+        * Both params and optimizer states should be validated numerically.
+    - state_dict APIs
+        * The optimizer instance should be serializable
+        * Calling save and load should be deterministic
+        * Moving between devices should be seamless
+        * BC - load_state_dict should be able to handle older optimizer states
+    - Hook APIs (everything should fire in the right order)
+    - LR Scheduler integration (composing should not error + should go the right direction)
+    - Parameter groups (should be equivalent to having multiple optimizers)
+    - Erroring (what should error should error)
+
+    We also cover different ways of generating parameters and grads:
+    - With parameters, we either generate them randomly given specific shapes or we take
+      them from a sample NN module.
+        * Variety is important here because NN modules have type Parameter and randomly
+          generated tensors have type Tensor.
+        * Parameters can be sparse for a subset of the optimizers (check out OptimizerInfo)
+        * Complex parameters should be handled using view_as_real
+        * Parameters can be spread across different devices and different dtypes for any
+          given optimizer
+        * Parameters can be contiguous and noncontiguous
+    - With grads, we follow suit from the parameters.
+        * Grads can also be None, empty, or zero-valued, and this should not disrupt training.
+    """
 
     @onlyCPU
     @optims(optim_db)
@@ -306,7 +348,7 @@ class TestOptimRenewed(TestCase):
 
             solution = torch.tensor([1, 1])
             with torch.no_grad():
-                initial_dist = sum([param.dist(solution) for param in params])
+                initial_dist = sum(param.dist(solution) for param in params)
 
             def get_grad(param, sparse_grad, w):
                 grad = drosenbrock(param)
@@ -368,13 +410,13 @@ class TestOptimRenewed(TestCase):
 
             if not kwargs.get("maximize", False):
                 self.assertLessEqual(
-                    sum([param.dist(solution) for param in params]),
+                    sum(param.dist(solution) for param in params),
                     initial_dist
                 )
             else:
                 self.assertGreaterEqual(
-                    sum([rosenbrock(param) for param in params]),
-                    sum([rosenbrock(param_t) for param_t in params_t]),
+                    sum(rosenbrock(param) for param in params),
+                    sum(rosenbrock(param_t) for param_t in params_t),
                 )
 
 
@@ -1581,6 +1623,36 @@ class TestOptimRenewed(TestCase):
             ) as mocked_foreach_impl:
                 optim.step()
                 self.assertTrue(mocked_foreach_impl.called)
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_non_empty_state(self, device, dtype, optim_info):
+        # There are internal tests that check that the state is not empty
+        optim_cls = optim_info.optim_cls
+        model = torch.nn.Linear(5, 5)
+        model.to(dtype=dtype, device=device)
+        inpt = torch.rand(2, 5, dtype=dtype, device=device)
+
+        for optim_input in optim_info.optim_inputs_func(device=device):
+            optim = optim_cls(model.parameters(), **optim_input.kwargs)
+            optim.zero_grad()
+            output = model(inpt)
+            loss = output.sum()
+            loss.backward()
+
+            if optim_info.only_supports_sparse_grads:
+                for param in model.parameters():
+                    if param.grad is not None:
+                        param.grad = param.grad.to_sparse()
+
+            if optim_info.step_requires_closure:
+                optim.step(lambda: 1.0)
+            else:
+                optim.step()
+
+            for state in optim.state.values():
+                self.assertGreater(len(state), 0)
+
+
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
