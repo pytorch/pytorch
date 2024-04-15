@@ -51,7 +51,7 @@ from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.func import functional_call, linearize, stack_module_state
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import SM70OrLater, TEST_CUDA, with_tf32_off
+from torch.testing._internal.common_cuda import SM70OrLater, TEST_CUDA, with_tf32_off, tf_on_and_off
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
@@ -1688,6 +1688,7 @@ class TestVmapOfGrad(TestCase):
             for key in result:
                 self.assertEqual(result[key], expected[key], atol=0, rtol=1.5e-3)
 
+    @tf32_on_and_off(0.005)
     @parametrize("mechanism", ["make_functional", "functional_call"])
     def test_per_sample_grads_embeddingnet(self, device, mechanism):
         class SampleNet(nn.Module):
