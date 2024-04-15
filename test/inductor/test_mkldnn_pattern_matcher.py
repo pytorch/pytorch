@@ -1533,8 +1533,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         r"""
         This testcase will quantize a Linear->GELU pattern with int8_mixed_bf16 quantization.
         """
-        # for gelu in [torch.nn.GELU("none"), torch.nn.GELU("tanh")]:
-        for gelu in [torch.nn.GELU("tanh"),]:
+        for gelu in [torch.nn.GELU("none"), torch.nn.GELU("tanh")]:
             self._qlinear_unary_cpu_test_helper(
                 (torch.randn((2, 4)),), gelu, int8_mixed_bf16=True
             )
@@ -1678,7 +1677,9 @@ class TestPatternMatcher(TestPatternMatcherBase):
             x2 = torch.randn((2, 5))
 
             def matcher_check_fn():
-                self.assertEqual(counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1)
+                self.assertEqual(
+                    counters["inductor"]["qlinear_weight_prepack_matcher_count"], 1
+                )
 
             self._test_common(
                 mod,
@@ -1806,12 +1807,14 @@ class TestPatternMatcher(TestPatternMatcherBase):
 
         mod = M().eval()
         v = torch.randn((1, 3, 8, 8), dtype=torch.float32, requires_grad=False).add(1)
+
         def matcher_check_fn():
             self.assertEqual(counters["inductor"]["qcat_matcher_count"], 1)
             self.assertEqual(
                 counters["inductor"]["qconv2d_weight_prepack_matcher_count"], 2
             )
             self.assertEqual(counters["inductor"]["qconv2d_unary_matcher_count"], 2)
+
         self._test_common(
             mod,
             (v,),

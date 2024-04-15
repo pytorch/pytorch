@@ -1172,7 +1172,9 @@ def quantized_decomposed_quantize_per_tensor_default(
     return Pointwise.create(
         device=input.get_device(),
         dtype=dtype,
-        inner_fn=functools.partial(inner_fn, scale=float(scale), zero_point=int(zero_point)),
+        inner_fn=functools.partial(
+            inner_fn, scale=float(scale), zero_point=int(zero_point)
+        ),
         ranges=input.get_size(),
     )
 
@@ -1203,7 +1205,9 @@ def quantized_decomposed_dequantize_per_tensor_default(
     return Pointwise.create(
         device=input.get_device(),
         dtype=torch.float32,
-        inner_fn=functools.partial(inner_fn, scale=float(scale), zero_point=int(zero_point)),
+        inner_fn=functools.partial(
+            inner_fn, scale=float(scale), zero_point=int(zero_point)
+        ),
         ranges=input.get_size(),
     )
 
@@ -1225,13 +1229,11 @@ def quantized_decomposed_quantize_per_tensor_tensor(
         input.get_dtype() == torch.float32
     ), f"Expecting input to have dtype torch.float32, but got dtype: {input.get_dtype()}"
     assert len(scale.get_size()) == 0 or (
-            len(scale.get_size()) == 1
-            and scale.get_size()[0] == 1
-        ), "expect scale as scalar tensor"
+        len(scale.get_size()) == 1 and scale.get_size()[0] == 1
+    ), "expect scale as scalar tensor"
     assert len(zero_point.get_size()) == 0 or (
-            len(zero_point.get_size()) == 1
-            and zero_point.get_size()[0] == 1
-        ), "expect zero_point as scalar tensor"
+        len(zero_point.get_size()) == 1 and zero_point.get_size()[0] == 1
+    ), "expect zero_point as scalar tensor"
 
     input_loader = input.make_loader()
     scale_loader = scale.make_loader()
