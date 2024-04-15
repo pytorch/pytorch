@@ -2880,6 +2880,12 @@ class AsyncCompile:
                 pool._start_executor_manager_thread()
         _compile_end()
 
+    @classmethod
+    def submit(cls, task: Callable[..., Any]) -> Any:
+        if config.compile_threads <= 1:
+            return task()
+        return cls.thread_pool().submit(task)
+
     def triton(self, kernel_name: str, source_code: str, device_str: str = "cuda"):
         _compile_start()
         _set_triton_ptxas_path()
