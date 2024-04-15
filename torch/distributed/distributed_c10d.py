@@ -1120,6 +1120,28 @@ def get_pg_count() -> int:
     """
     return _world.group_count
 
+def get_node_local_rank() -> int:
+    """
+    Return the local rank of the current process relative to the node.
+
+    Semantically, this is a useful concept for mapping processes to devices.
+    For example, on a node with 8 accelerator you could use the node local rank to decide
+    which accelerator device to bind the process to.
+
+    In practice, the actual assignment of node local ranks is handled by the process launcher outside of pytorch,
+    and communicated via the `LOCAL_RANK` environment variable.
+
+    Torchrun will automatically populate `LOCAL_RANK`, but other launchers may not.  If `LOCAL_RANK` is unspecified,
+    this API will raise an exception.
+
+    """
+    if "LOCAL_RANK" in os.environ:
+        return int(os.environ["LOCAL_RANK"])
+    raise RuntimeError(
+        "LOCAL_RANK is not in the environment, so `get_node_local_rank` can't be used. "
+        "Consider using torchrun or updating your process launcher to specify LOCAL_RANK."
+    )
+
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
     """
     Set the timeout for the given process group when users want to use a different timeout instead of
