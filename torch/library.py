@@ -496,7 +496,7 @@ def register_fake(
         >>> assert y.shape == (2, 3)
         >>>
         >>> # Example 2: an operator with data-dependent output shape
-        >>> @torch.library.custom_op("mylib::custom_nonzero")
+        >>> @torch.library.custom_op("mylib::custom_nonzero", mutates_args=())
         >>> def custom_nonzero(x: Tensor) -> Tensor:
         >>>     x_np = x.numpy(force=True)
         >>>     res = np.stack(np.nonzero(x_np), axis=1)
@@ -560,9 +560,9 @@ def register_autograd(op: _op_identifier, setup_context_fn: Callable, backward_f
     In order for an operator to work with autograd, you need to register
     a backward formula. There are two pieces to this:
     1. You must tell us what we need to save from the forward pass for
-       the backward pass. This is the "setup_context" function.
+    the backward pass. This is the "setup_context" function.
     2. You must tell us how to compute gradients during the backward pass.
-       This is the "backward" function.
+    This is the "backward" function.
 
     ``setup_context_fn(ctx, inputs, output)`` runs during the forward pass.
     Please save quantities needed for backward onto the ``ctx`` object via
@@ -571,7 +571,7 @@ def register_autograd(op: _op_identifier, setup_context_fn: Callable, backward_f
 
     ``backward_fn`` runs during the backward pass. It accepts ``(ctx, *grads)``:
     - ``grads`` is one or more gradients. The number of gradients matches
-      the number of outputs of the operator.
+    the number of outputs of the operator.
 
     Both ``setup_context_fn`` and ``backward_fn`` must be traceable. That is,
     they may not directly access Tensor.data_ptr and they must not depend on
