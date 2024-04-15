@@ -317,9 +317,8 @@ class TensorVariable(VariableTracker):
     def var_getattr(self, tx, name):
         from . import UserDefinedClassVariable
 
-        if tx.strict_checks_enabled:
-            if name in self._strict_mode_banned_ops():
-                unimplemented(f"Illegal getattr invocation {name} in strict mode")
+        if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
+            unimplemented(f"Illegal getattr invocation {name} in strict mode")
 
         if name == "__class__":
             return UserDefinedClassVariable(self.python_type())
@@ -431,9 +430,8 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if tx.strict_checks_enabled:
-            if name in self._strict_mode_banned_ops():
-                unimplemented(f"Illegal method invocation {name} in strict mode")
+        if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
+            unimplemented(f"Illegal method invocation {name} in strict mode")
 
         """
         Dispatch to a method-specific handler defined below.  If the
