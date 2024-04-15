@@ -6,7 +6,7 @@ import sympy
 
 import torch
 import torch.fx
-from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq, free_unbacked_symbols
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
 from .virtualized import V
@@ -161,7 +161,26 @@ class FakeTensorUpdater:
                 new_fake_tensor, node.meta["val"]
             ):
                 continue
+
+            scalar_types = (torch.SymInt, torch.SymFloat, torch.SymBool, int, float, bool)
+
+            def check_consistent(new, old):
+                if isinstance(new, torch.Tensor):
+                    assert isinstance(old, torch.Tensor)
+                    torch._check(old.dim() == new.dim())
+                    # Do this manually so that each individual test is irrefutable
+                    # (TODO: should be a helper for this, maybe sym_eq?  That
+                    # gives us a compound expression and I'm not sure it
+                    # simplifies right now)
+                    for i, j in zip(old.shape, new.shape):
+                        torch._check(i == j)
+                elif isinstance(new, scalar_types):
+                    assert isinstance(old, scalar_types)
+                    torch._check(old == new)
+
             node.meta["val"] = new_fake_tensor
+            if new_fake_tensor is not None:
+                pytree.tree_map_(check_consistent, new_fake_tensor, node.meta["val"])
 
             existing_storages[get_node_storage(node)] += 1
 
