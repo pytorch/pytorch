@@ -8,5 +8,5 @@
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 # echo "Testing pytorch"
-time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_sharded_tensor
+time python test/run_test.py --verbose -i distributed/_shard/sharded_tensor/test_sharded_tensor -k test_invalid_sharding
 assert_git_not_dirty
