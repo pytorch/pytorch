@@ -1301,9 +1301,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """2""")
+            self.assertExpectedInline(cnt.frame_count, """4""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """3""")
+            self.assertExpectedInline(cnt.frame_count, """5""")
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -4271,6 +4271,30 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(lengths)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_overlapping_inputs_with_dynamic_shapes_error(self):
+        @torch.compile(backend="aot_eager")
+        def fn(a, b, c, d, e, f):
+            a.mul_(2)
+            b.mul_(2)
+            c.mul_(2)
+            d.mul_(2)
+            e.mul_(2)
+            f.mul_(2)
+
+            base = torch.ones(2, 20)
+            a = base[:, 0:2]
+            b = base[:, 2:4]
+            c = base[:, 4:6]
+            d = base[:, 6:8]
+            e = base[:, 8:10]
+            f = base[:, 10:12]
+            f2 = base[:, 10:14]
+            out = fn(a, b, c, d, e, f)
+            with self.assertRaisesRegex(
+                AssertionError, "is being compiled with dynamic shapes"
+            ):
+                out2 = fn(a, b, c, d, e, f2)
+
     def test_user_ctor_ctx_manager_custom_init(self):
         class UserCtxManager:
             def __init__(self, x):
@@ -4378,6 +4402,27 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         else:
             self.fail("expected exception")
 
+    def test_megablocks_moe(self):
+        try:
+            from megablocks.layers import moe
+            from megablocks.layers.arguments import Arguments
+        except ImportError:
+            raise unittest.SkipTest("requires megablocks")
+        bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
+        args = Arguments(
+            hidden_size=hs,
+            ffn_hidden_size=hs * 2,
+            moe_num_experts=num_experts,
+            moe_capacity_factor=1,
+            moe_top_k=top_k,
+        )
+        moe_mlp = moe.MoE(args)
+        moe_mlp.cuda(torch.cuda.current_device()).half()
+        x = torch.randn(sl, bs, hs).cuda().half()
+        out1, _ = moe_mlp(x)
+        out2, _ = torch.compile(moe_mlp, backend="eager")(x)
+        self.assertEqual(out1, out2)
+
     def test_udf_classes_reconstruction(self):
         def fn(x):
             o = T(5)
@@ -4392,6 +4437,51 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # This should recompile
         T = IncByTwo
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_contains_range_constprop(self):
+        def fn(x):
+            # dynamo should const prop to False
+            if 3 in range(0, 10):
+                return x + 1
+            else:
+                return x + 2
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.zeros(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    # https://github.com/pytorch/pytorch/issues/104505
+    def test_as_strided_on_base_with_mutation_works(self):
+        def foo(a):
+            f = a.as_strided((2,), (1,), 0)
+            f.add_(1.0)
+            return a
+
+        a = torch.randn(2, 4)
+        a_ref = a.clone()
+        out_ref = foo(a_ref)
+        f_compiled = torch.compile(foo, backend="aot_eager")
+        out = f_compiled(a)
+        self.assertEqual(out_ref, out)
+        self.assertEqual(a_ref, a)
+
+    # https://github.com/pytorch/pytorch/issues/104505
+    def test_as_strided_on_existing_view_banned(self):
+        def foo(a):
+            e = a.diagonal()
+            f = e.as_strided((2,), (1,), 0)
+            f.add_(1.0)
+            return a
+
+        a = torch.randn(2, 4)
+        a_ref = a.clone()
+        out_ref = foo(a_ref)
+        f_compiled = torch.compile(foo, backend="aot_eager")
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "encountered a mutation on a view chain of length 2, where view 1 was an as_strided",
+        ):
+            out = f_compiled(a)
 
     def test_dont_aggressively_write_assert(self):
         record_graph = torch._dynamo.testing.EagerAndRecordGraphs()
@@ -4567,6 +4657,84 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         except Exception as e:
             compiled_str = str(e)
         self.assertEqual(orig_str, compiled_str)
+
+    def test_stk_sdd_is_transposed(self):
+        trigger_graph_break = False
+
+        def _is_transposed(x):
+            return (
+                not x.is_contiguous()
+                and x.stride()[0] == 1
+                and x.stride()[1] == x.size()[0]
+            )
+
+        class SDD(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, lhs, rhs):
+                ctx.save_for_backward(lhs, rhs)
+                out = torch.full_like(lhs, 1.0, dtype=lhs.dtype, device=lhs.device)
+                return out
+
+            @staticmethod
+            def backward(ctx, dy):
+                saved_tensors = ctx.saved_tensors
+                lhs, rhs = saved_tensors[:2]
+                trans_a = _is_transposed(lhs)
+                trans_b = _is_transposed(rhs)
+                dlhs = None
+                if ctx.needs_input_grad[0]:
+                    dlhs = torch.full_like(lhs, 1.0 if trans_a else 2.0)
+                drhs = None
+                if ctx.needs_input_grad[1]:
+                    drhs = torch.full_like(rhs, 1.0 if trans_b else 2.0)
+                if trigger_graph_break:
+                    if _is_transposed(dy):
+                        return dlhs + 1, drhs + 1, None, None
+                return dlhs, drhs, None, None
+
+        x1 = torch.randn((8, 8), requires_grad=True)
+        y1 = torch.randn((8, 8)).transpose(0, 1).requires_grad_(True)
+        x2 = torch.randn((8, 8), requires_grad=True)
+        y2 = torch.randn((8, 8)).transpose(0, 1).requires_grad_(True)
+
+        SDD.apply(x1, y1).sum().backward()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return SDD.apply(x2, y2)
+
+        fn().sum().backward()
+
+        self.assertEqual(x1.grad, x2.grad)
+        self.assertEqual(y1.grad, y2.grad)
+
+        trigger_graph_break = True
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            fn().sum().backward()
+
+    def test_partially_initialized_module_property(self):
+        class Matrix(torch.nn.Module):
+            def __init__(self, data):
+                super().__init__()
+                self._data = data
+                self.foo = 10 * self.blocking
+
+            @property
+            def data(self):
+                return self._data
+
+            @property
+            def blocking(self):
+                return self.data.shape[1]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return Matrix(torch.randn(10, 20))
+
+        v = fn()
+        self.assertEqual(v.foo, 200)
+        self.assertEqual(v.data.shape, (10, 20))
+        self.assertEqual(type(v), Matrix)
 
     def test_global_fn_mutation(self):
         def foo(x, y):
