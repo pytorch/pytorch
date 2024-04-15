@@ -1,5 +1,5 @@
 # Must happen before importing caffe2.python.*
-import caffe2.python.fakelowp.init_shared_libs  # noqa
+import glow.fb.test.init_shared_libs  # noqa
 import datetime
 import numpy as np
 from caffe2.proto import caffe2_pb2
