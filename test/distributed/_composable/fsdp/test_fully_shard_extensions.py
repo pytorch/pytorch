@@ -10,8 +10,9 @@ from typing import Any, List, Optional, Tuple, Union
 import torch
 import torch.distributed as dist
 import torch.nn as nn
-
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
+
+from torch.distributed.device_mesh import DeviceMesh
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import (
@@ -24,7 +25,9 @@ from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.two_tensor import TwoTensor
 
 
-def two_tensor_fsdp_pre_all_gather(self) -> Tuple[Tuple[torch.Tensor, ...], Any]:
+def two_tensor_fsdp_pre_all_gather(
+    self, mesh: DeviceMesh
+) -> Tuple[Tuple[torch.Tensor, ...], Any]:
     all_gather_inputs = (self.a, self.b)
     metadata = None
     return all_gather_inputs, metadata
