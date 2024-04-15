@@ -836,20 +836,26 @@ class FxGraphCache:
         write_atomic(path, content)
 
     @staticmethod
-    def _check_can_cache():
+    def _check_can_cache(gm: torch.fx.GraphModule):
         """
         Check some conditions that would preclude caching and raise BypassFxGraphCache
         to bypass in case caching is not possible.
         """
+        # Freezing can embed constants that wouldn't be static across runs.
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
-            # Freezing can embed constants that wouldn't be static across runs.
             raise BypassFxGraphCache()
 
+        # The treatment of guards in the caching implementation requires that
+        # we have a shape env.
         if FxGraphCache._get_shape_env() is None:
-            # The treatment of guards in the caching implementation requires that
-            # we have a shape env.
             log.debug("fx graph cache no shape env")
             raise BypassFxGraphCache()
+
+        # HigherOrderOperators should be handled on a case-by-case basis.
+        # Currently, we just skip caching if we have any.
+        for node in gm.graph.nodes:
+            if isinstance(node.target, torch._ops.HigherOrderOperator):
+                raise BypassFxGraphCache()
 
     @staticmethod
     def load(
@@ -866,7 +872,7 @@ class FxGraphCache:
 
         compiled_graph = None
         try:
-            FxGraphCache._check_can_cache()
+            FxGraphCache._check_can_cache(gm)
             key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
 
             lock_path = os.path.join(get_lock_dir(), key + ".lock")
