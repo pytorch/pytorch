@@ -456,7 +456,7 @@ class FSDPParam:
                 (
                     all_gather_inputs,
                     self._extensions_data.all_gather_metadata,
-                ) = self._sharded_local_tensor.fsdp_pre_all_gather()
+                ) = self._sharded_local_tensor.fsdp_pre_all_gather(self.mesh_info.mesh)
                 self._extensions_data.all_gather_input_sizes = [
                     t.size() for t in all_gather_inputs
                 ]
