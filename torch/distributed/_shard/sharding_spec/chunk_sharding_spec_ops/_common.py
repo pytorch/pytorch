@@ -209,10 +209,8 @@ def _result_distribute_with_col_rearrange(results, input, world_size, weight, pg
     for placement in weight._sharding_spec.placements:
         dim_size = output_split_sizes[placement.rank()]
         start = sum(
-            [
-                split_size if i < placement.rank() else 0
-                for i, split_size in enumerate(output_split_sizes)
-            ]
+            split_size if i < placement.rank() else 0
+            for i, split_size in enumerate(output_split_sizes)
         )
         indices += list(range(start, start + dim_size))
 

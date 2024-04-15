@@ -956,7 +956,7 @@ class DistributedDataParallel(Module, Joinable):
         # 1. Create gradient buffer
         device = torch.device("cpu") if device_ids is None else device_ids[0]
         self._delay_grad_buffer = torch.zeros(
-            sum([p.numel() for p in self._delay_all_reduce_params]),
+            sum(p.numel() for p in self._delay_all_reduce_params),
             device=device,
         )
 
