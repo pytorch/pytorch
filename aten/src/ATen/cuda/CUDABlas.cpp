@@ -418,9 +418,10 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
   CuBlasLtMatrixLayout Cdesc(abcType, m, n, ldc);
 
   if (num_batches > 1) {
-    Adesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, num_batches);
-    Bdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, num_batches);
-    Cdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, num_batches);
+    int num_batches_as_int = static_cast<int>(num_batches);
+    Adesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, num_batches_as_int);
+    Bdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, num_batches_as_int);
+    Cdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT, num_batches_as_int);
     Adesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stridea);
     Bdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, strideb);
     Cdesc.setAttribute(CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET, stridec);
@@ -676,14 +677,12 @@ template <>
 void bgemm_internal<c10::complex<double>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<double>))
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
-    // cublaslt returned CUBLAS_STATUS_INVALID_VALUE when calling cublasLtMatrixLayoutSetAttribute
-    // for either CUBLASLT_MATRIX_LAYOUT_BATCH_COUNT or CUBLASLT_MATRIX_LAYOUT_STRIDED_BATCH_OFFSET
-    // but only for complex inputs. This wasn't debugged further to determine which attr failed.
-    //
-    // Similarly, hipblaslt does not support complex gemm yet.
-    //
-    // Until these libraries work for complex, fall back to cublas/hipblas.
+#ifdef USE_ROCM
+    // hipblaslt does not support complex<double> gemm yet
     bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
+#else
+    bgemm_internal_cublaslt<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
+#endif
   }
   else {
     bgemm_internal_cublas<c10::complex<double>>(CUDABLAS_BGEMM_ARGS(c10::complex<double>));
@@ -694,8 +693,12 @@ template <>
 void bgemm_internal<c10::complex<float>>(CUDABLAS_BGEMM_ARGTYPES(c10::complex<float>))
 {
   if (at::globalContext().blasPreferredBackend() == BlasBackend::Cublaslt) {
-    // see note above for complex not working for cublaslt and hipblaslt
+#ifdef USE_ROCM
+    // hipblaslt does not support complex<float> gemm yet
     bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
+#else
+    bgemm_internal_cublaslt<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
+#endif
   }
   else {
     bgemm_internal_cublas<c10::complex<float>>(CUDABLAS_BGEMM_ARGS(c10::complex<float>));
