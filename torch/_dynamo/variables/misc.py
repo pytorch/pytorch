@@ -25,7 +25,7 @@ from ..utils import (
 )
 from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
-from .user_defined import UserDefinedObjectVariable
+from .user_defined import is_standard_setattr, UserDefinedObjectVariable
 
 
 class SuperVariable(VariableTracker):
@@ -170,8 +170,12 @@ class SuperVariable(VariableTracker):
             return super(variables.CustomizedDictVariable, self.objvar).call_method(
                 tx, "__setitem__", args, kwargs
             )
-        else:
-            unimplemented(f"non-function or method super: {inner_fn}")
+        elif is_standard_setattr(inner_fn) and isinstance(
+            self.objvar, UserDefinedObjectVariable
+        ):
+            return self.objvar.method_setattr_standard(tx, *args, **kwargs)
+
+        unimplemented(f"non-function or method super: {inner_fn}")
 
 
 class UnknownVariable(VariableTracker):
@@ -391,7 +395,7 @@ class AutogradFunctionVariable(VariableTracker):
             source = None
 
         fn = self.fn_cls.forward
-        ctx = AutogradFunctionContextVariable.create(tx)
+        ctx = AutogradFunctionContextVariable.create(tx, args, kwargs)
         args = [ctx, *args]
         if isinstance(fn, types.FunctionType):
             return variables.UserFunctionVariable(fn, source=source).call_function(
@@ -465,15 +469,23 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         inference=False,
         proxy=None,
         saved_tensors=None,
+        needs_input_grad=None,
         **kwargs,
     ):
         super().__init__(value=value, value_type=value_type, **kwargs)
         self.inference = inference
         self.proxy = proxy
         self.saved_tensors = saved_tensors
+        self.needs_input_grad = needs_input_grad
 
     @staticmethod
-    def create(tx):
+    def create(tx, args=None, kwargs=None):
+        needs_input_grad = None
+        if args and not kwargs:
+            needs_input_grad = tuple(
+                isinstance(x, variables.TensorVariable) and x.requires_grad
+                for x in args
+            )
         proxy = tx.output.create_proxy(
             "call_function", torch.autograd.function.FunctionCtx, tuple(), {}
         )
@@ -485,10 +497,12 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 inference=True,
                 proxy=proxy,
                 saved_tensors=SavedTensorBox(),
+                needs_input_grad=needs_input_grad,
             ),
             {},
         )
         proxy.node.meta["example_value"] = out.value
+
         return out
 
     def as_proxy(self):
@@ -503,6 +517,8 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if name == "__setattr__":
+            return super().call_method(tx, name, args, kwargs)
         if name != "save_for_backward":
             unimplemented(f"autograd.Function context method: {name}")
         if self.saved_tensors is None:
@@ -528,6 +544,15 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             )
         if name == "saved_tensors" and self.saved_tensors is not None:
             return variables.TupleVariable(list(self.saved_tensors.tensors))
+        if name == "needs_input_grad":
+            if self.needs_input_grad is not None:
+                return variables.ConstantVariable.create(self.needs_input_grad)
+            if self.source:
+                from .builder import VariableBuilder
+
+                return VariableBuilder(tx, AttrSource(self.source, "needs_input_grad"))(
+                    self.value.needs_input_grad
+                )
         return super().var_getattr(tx, name)
 
 
@@ -604,8 +629,12 @@ class GetAttrVariable(VariableTracker):
             # redirect to var_getattr on the original obj
             if isinstance(obj, variables.UserDefinedObjectVariable):
                 obj._check_for_getattribute()
-                if key in obj.value.__dict__:
+                if (
+                    key in obj.value.__dict__
+                    or tx.output.side_effects.has_pending_mutation_of_attr(obj, key)
+                ):
                     return obj.var_getattr(tx, key)
+
         return super().call_method(tx, name, args, kwargs)
 
 
@@ -934,6 +963,27 @@ class DebuggingVariable(VariableTracker):
                 return False
 
         return True
+
+
+class LoggingLoggerVariable(VariableTracker):
+    """
+    Represents a call to any of logging.Logger methods
+    """
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: "List[VariableTracker]",
+        kwargs: "Dict[str, VariableTracker]",
+    ) -> "VariableTracker":
+        if tx.export:
+            # For export cases, we can just make debugging functions no-ops
+            return
+        unimplemented("Logger not supported for non-export cases")
 
 
 class StopIterationVariable(VariableTracker):
