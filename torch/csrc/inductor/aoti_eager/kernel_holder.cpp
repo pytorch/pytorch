@@ -179,9 +179,10 @@ AOTIPythonKernelHolder::AOTIPythonKernelHolder(
       device_(c10::Device(c10::dispatchKeyToDeviceType(dispatch_key_), 0)),
       pyinterpreter_(getPyInterpreter()) {
   auto pos = op_name_.find("::");
-  TORCH_INTERNAL_ASSERT(pos != std::string::npos, op_name_);
-  // Remove the namespace from the op_name as ns is already set
-  op_name_ = op_name_.substr(pos + strlen("::"));
+  if (pos != std::string::npos) {
+    // Remove the namespace from the op_name as ns is already set
+    op_name_ = op_name_.substr(pos + strlen("::"));
+  }
 
   (void)is_symbolic_; // Suppress unused variable warning
 
