@@ -543,7 +543,8 @@ std::string AOTIPythonKernelHolder::produce_aoti_kernel_lib(
           .attr("aoti_compile_with_persistent_cache");
   if (aot_compile_function.ptr() == nullptr ||
       aot_compile_function.ptr() == Py_None) {
-    TORCH_WARN("Failed to import - torch._export.aot_compile");
+    TORCH_WARN(
+        "Failed to import - torch._inductor.utils.aoti_compile_with_persistent_cache");
     return kernel_lib_path;
   }
 
