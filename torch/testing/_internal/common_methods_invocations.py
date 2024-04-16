@@ -9780,16 +9780,6 @@ foreach_binary_op_db: List[OpInfo] = [
         sample_inputs_func=foreach_clamp_sample_func(2, True, True),
         dtypes=all_types_and(torch.bfloat16),
         dtypesIfCUDA=all_types_and(torch.bfloat16, torch.float16),
-        skips=(
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_outplace"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides"),
-            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
-        ),
     ),
     ForeachFuncInfo(
         "clamp_min",
