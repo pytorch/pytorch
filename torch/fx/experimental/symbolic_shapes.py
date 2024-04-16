@@ -1356,7 +1356,7 @@ class DimConstraints:
             # would then get k - 2 == s - 2, and thus s = k as the (only, constant) solution!
             base, divisor = args
             base, divisor = self.rewrite_with_congruences(s, base), self.rewrite_with_congruences(s, divisor)
-            mod_reduced = base.subs(self._var_to_val) % divisor.subs(self._var_to_val)
+            mod_reduced = base.xreplace(self._var_to_val) % divisor.xreplace(self._var_to_val)
             congruence = (base - mod_reduced) % divisor
             if congruence != 0:
                 self._congruences[s].add(congruence)
@@ -1371,7 +1371,7 @@ class DimConstraints:
             # and eliminating b % d as above.
             base, divisor = args
             base, divisor = self.rewrite_with_congruences(s, base), self.rewrite_with_congruences(s, divisor)
-            mod_reduced = base.subs(self._var_to_val) % divisor.subs(self._var_to_val)
+            mod_reduced = base.xreplace(self._var_to_val) % divisor.xreplace(self._var_to_val)
             congruence = (base - mod_reduced) % divisor
             if congruence != 0:
                 self._congruences[s].add(congruence)
@@ -1391,7 +1391,7 @@ class DimConstraints:
         if expr == sympy.true:
             return True
         orig_expr = expr
-        orig_reduced = orig_expr.subs(self._var_to_val)
+        orig_reduced = orig_expr.xreplace(self._var_to_val)
         # TODO(avik): https://github.com/pytorch/pytorch/issues/101093
         # It is possible that `expr` will fail the consistency check because of
         # precision errors. Specifically, on substituting its free symbols with
@@ -1416,7 +1416,7 @@ class DimConstraints:
             new_n_congruences = len(self._congruences[s])
             if expr == sympy.true:
                 return old_n_congruences == new_n_congruences
-            reduced = expr.subs(self._var_to_val)
+            reduced = expr.xreplace(self._var_to_val)
             if reduced == sympy.false:
                 self._inconsistencies.append(
                     f"{expr}, obtained by rewriting {orig_expr} with congruences, "
@@ -1499,7 +1499,7 @@ class DimConstraints:
         multivariate_inequalities = self._multivariate_inequalities
         self._multivariate_inequalities = set()
         for expr in multivariate_inequalities:
-            self.add(expr.subs(self._substitutions))
+            self.add(expr.xreplace(self._substitutions))
         self._raise_inconsistencies()
         self._univariate_inequalities = {
             s: exprs
@@ -1536,7 +1536,7 @@ class DimConstraints:
             multivariate_inequalities = self._multivariate_inequalities
             self._multivariate_inequalities = set()
             for expr in multivariate_inequalities:
-                self.add(expr.subs(s, self._substitutions[s]))
+                self.add(expr.xreplace(s, self._substitutions[s]))
             self._raise_inconsistencies()
 
         self._specialize_divisor_symbols()
@@ -1566,7 +1566,7 @@ class DimConstraints:
                 solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
                 # because this is univariate, the solution is a dynamic (range) constraint
                 if isinstance(solution, sympy.Or):
-                    solution = next(iter(arg for arg in solution.args if arg.subs(self._var_to_val)))
+                    solution = next(iter(arg for arg in solution.args if arg.xreplace(self._var_to_val)))
                 if isinstance(solution, sympy.And):
                     for arg in solution.args:
                         self._dynamic_results.add(self._dcp.doprint(arg))
@@ -1586,7 +1586,7 @@ class DimConstraints:
                     self._force_specialization(s)
                     sexpr = self._dcp._print_Symbol(s)
                     self._dynamic_results = {r for r in self._dynamic_results if sexpr not in r}
-            self.add_equality(source, expr.subs(self._substitutions))
+            self.add_equality(source, expr.xreplace(self._substitutions))
 
         # remaining symbolic equivalences become dynamic equality constraints
         for source, expr in self._symbolic_equivalences:
@@ -3059,9 +3059,9 @@ class ShapeEnv:
                 concrete_val = self.evaluate_expr(sympy.Eq(expr1, expr2))
                 if not concrete_val:
                     raise ConstraintViolationError(
-                        f"{src1.name()} = {expr1.subs(self.var_to_val)}"
+                        f"{src1.name()} = {expr1.xreplace(self.var_to_val)}"
                         " is not equal to "
-                        f"{src2.name()} = {expr2.subs(self.var_to_val)}"
+                        f"{src2.name()} = {expr2.xreplace(self.var_to_val)}"
                     )
 
             for src, root, fn in equalities_inputs.derived_equalities:
@@ -3080,8 +3080,8 @@ class ShapeEnv:
                     raise ConstraintViolationError(
                         f"Expected input {src.name()} to be equal to "
                         f"{fn(sympy.Symbol(debug_name))}, "
-                        f"where {debug_name} = {expr2.subs(self.var_to_val)}, "
-                        f"but got {expr1.subs(self.var_to_val)}"
+                        f"where {debug_name} = {expr2.xreplace(self.var_to_val)}, "
+                        f"but got {expr1.xreplace(self.var_to_val)}"
                     )
 
             for phantom_symbol in equalities_inputs.phantom_symbols:
@@ -3276,13 +3276,13 @@ class ShapeEnv:
                     if (
                         not isinstance(expr, sympy.Symbol) and
                         symbol in symbol_to_constraints and
-                        not equalities_inputs.is_derived(source, symbol_to_source[symbol][0], lambda x: expr.subs(symbol, x))
+                        not equalities_inputs.is_derived(source, symbol_to_source[symbol][0], lambda x: expr.xreplace(symbol, x))
                     ):
                         src = symbol_to_source[symbol][0]
                         msg = (
                             f"The values of {self._debug_name(source)} = {source.name()} must always be related to "
                             f"the values of {self._debug_name(src)} = {src.name()} by "
-                            f"{self._debug_name(source)} = {expr.subs(symbol, sympy.sympify(self._debug_name(src)))}."
+                            f"{self._debug_name(source)} = {expr.xreplace(symbol, sympy.sympify(self._debug_name(src)))}."
                         )
                         record_constraint_violation(equalities_inputs.warn_only, self._debug_name(source), msg)
 
@@ -3624,7 +3624,7 @@ class ShapeEnv:
                     add_expr(sympy.Ne(e.lhs, e.rhs))
 
             # NB: this helps us deal with And/Or connectives
-            expr = expr.subs(subst)
+            expr = expr.xreplace(subst)
 
         # Simplify making use of value range lower bound
         new_shape_env = {}
