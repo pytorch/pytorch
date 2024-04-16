@@ -600,11 +600,11 @@ class OpOverload(OperatorBase):
 
     @property
     def _namespace(self):
-        self._schema.name.split("::")[0]
+        return self._schema.name.split("::")[0]
 
     @property
     def _opname(self):
-        self._schema.name.split("::")[1]
+        return self._schema.name.split("::")[1]
 
     @property
     def _handle(self):
