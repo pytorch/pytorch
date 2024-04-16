@@ -288,16 +288,14 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         use_aten = True
 
     if use_aten:
-        choices.extend(
-            [
-                aten_addmm.bind(
-                    (inp_expanded, mat1, mat2),
-                    layout,
-                    ordered_kwargs_for_cpp_kernel,
-                    alpha=alpha,
-                    beta=beta,
-                )
-            ]
+        choices.append(
+            aten_addmm.bind(
+                (inp_expanded, mat1, mat2),
+                layout,
+                ordered_kwargs_for_cpp_kernel,
+                alpha=alpha,
+                beta=beta,
+            )
         )
 
         if (
