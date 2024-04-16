@@ -240,7 +240,10 @@ if RUN_CPU:
         ),
         BaseTest("test_mm_views"),
         BaseTest("test_multihead_attention", "cpu", test_cpu_repro.CPUReproTests()),
-        BaseTest("test_multi_threading"),
+        BaseTest(
+            "test_multi_threading",
+            code_string_count={"py::gil_scoped_release release;": 1},
+        ),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest(
             "test_qconv2d",
