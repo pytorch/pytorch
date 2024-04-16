@@ -349,6 +349,93 @@ static void init(void) {
   pytorch_qnnp_params.u8rmax = pytorch_u8rmax_ukernel__sse2;
   pytorch_qnnp_params.u8lut32norm = pytorch_u8lut32norm_ukernel__scalar;
   pytorch_qnnp_params.x8lut = pytorch_x8lut_ukernel__scalar;
+#elif CPUINFO_ARCH_PPC64 || defined(__powerpc__)
+  pytorch_qnnp_params.q8conv = (struct pytorch_q8conv_parameters){
+      .gemm = pytorch_q8gemm_ukernel_4x4c2__vsx,
+      .conv = pytorch_q8conv_ukernel_4x4c2__vsx,
+      .gemm_dq = pytorch_q8gemm_dq_ukernel_4x4c2__vsx,
+      .mr = 4,
+      .nr = 4,
+      .kr = 2,
+  };
+  pytorch_qnnp_params.q8gemm_sparse_c1x4 = (struct pytorch_q8gemm_sparse_parameters){
+      .gemm_dq = NULL,
+      .packedA_w32_gemm_dq = NULL,
+      .packedA_w16_gemm_dq = NULL,
+      .packedA_w8_gemm_dq = NULL,
+      .packA = NULL,
+      .mr = 8,
+      .nr = 4,
+      .kr = 4,
+      .log2_mr = 3,
+      .log2_row_block_size = 0,
+      .row_block_size = 1,
+      .col_block_size = 4,
+  };
+  pytorch_qnnp_params.q8gemm_sparse_c8x1 = (struct pytorch_q8gemm_sparse_parameters){
+      .gemm_dq = NULL,
+      .packedA_w32_gemm_dq = NULL,
+      .packedA_w16_gemm_dq = NULL,
+      .packedA_w8_gemm_dq = NULL,
+      .packA = NULL,
+      .mr = 4,
+      .nr = 8,
+      .kr = 1,
+      .log2_mr = 2,
+      .log2_row_block_size = 3,
+      .row_block_size = 8,
+      .col_block_size = 1,
+  };
+  pytorch_qnnp_params.q8conv_xzp = (struct pytorch_q8conv_xzp_parameters){
+      .kthreshold = SIZE_MAX,
+  };
+  pytorch_qnnp_params.q8dw9 = (struct pytorch_q8dwconv2d_up_parameters){
+      .updw = pytorch_q8dwconv_ukernel_up16x9__vsx,
+      .updw_per_channel = pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx,
+      .cr = 16,
+  };
+  pytorch_qnnp_params.q8dw25 = (struct pytorch_q8dwconv2d_mp_parameters){
+      .mpdw = pytorch_q8dwconv_ukernel_mp16x25__vsx,
+      .mpdw_per_channel = pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx,
+      .cr = 16,
+  };
+  pytorch_qnnp_params.q8dw27 = (struct pytorch_q8dwconv3d_mp_parameters){
+      .mpdw = pytorch_q8dwconv_ukernel_mp16x27__vsx,
+      .cr = 16,
+  };
+  pytorch_qnnp_params.q8vadd = pytorch_q8vadd_ukernel__vsx;
+  pytorch_qnnp_params.q8gavgpool = (struct pytorch_q8gavgpool_parameters){
+      .ltnr = pytorch_q8gavgpool_ukernel_up16xm__vsx,
+      .genr_lemr = pytorch_q8gavgpool_ukernel_up16x7__vsx,
+      .genr_gtmr = pytorch_q8gavgpool_ukernel_mp16x7p7q__vsx,
+      .mr = 7,
+      .nr = 16,
+  };
+  pytorch_qnnp_params.q8avgpool = (struct pytorch_q8avgpool_parameters){
+      .ltkr = pytorch_q8avgpool_ukernel_up16xm__vsx,
+      .gekr_lemr = pytorch_q8avgpool_ukernel_up16x9__vsx,
+      .gekr_gtmr = pytorch_q8avgpool_ukernel_mp16x9p8q__vsx,
+      .mr = 9,
+      .qr = 8,
+      .kr = 16,
+  };
+  pytorch_qnnp_params.u8maxpool = (struct pytorch_u8maxpool_parameters){
+      .ltkr = pytorch_u8maxpool_ukernel_sub16__vsx,
+      .gekr = pytorch_u8maxpool_ukernel_16x9p8q__vsx,
+      .mr = 9,
+      .qr = 8,
+      .kr = 16,
+  };
+  pytorch_qnnp_params.x8zip = (struct pytorch_x8zip_parameters){
+      .x2 = pytorch_qnnp_x8zip_x2__vsx,
+      .x3 = pytorch_qnnp_x8zip_x3__vsx,
+      .x4 = pytorch_qnnp_x8zip_x4__vsx,
+      .xm = pytorch_qnnp_x8zip_xm__vsx,
+  };
+  pytorch_qnnp_params.u8clamp = pytorch_u8clamp_ukernel__vsx;
+  pytorch_qnnp_params.u8rmax = pytorch_u8rmax_ukernel__vsx;
+  pytorch_qnnp_params.u8lut32norm = pytorch_u8lut32norm_ukernel__scalar;
+  pytorch_qnnp_params.x8lut = pytorch_x8lut_ukernel__scalar;
 #else
 #error "Unsupported architecture"
 #endif
@@ -356,9 +443,13 @@ static void init(void) {
 }
 
 enum pytorch_qnnp_status pytorch_qnnp_initialize(void) {
+//#if !CPUINFO_ARCH_PPC64
+#if !defined(__powerpc__)
+  // cpuinfo does not have support for ppc64le
   if (!cpuinfo_initialize()) {
     return pytorch_qnnp_status_out_of_memory;
   }
+#endif
 #ifdef _MSC_VER
   InitOnceExecuteOnce(&init_guard, pytorch_qnnp_init_win, NULL, NULL);
 #else
@@ -372,7 +463,9 @@ enum pytorch_qnnp_status pytorch_qnnp_initialize(void) {
 }
 
 enum pytorch_qnnp_status pytorch_qnnp_deinitialize(void) {
+#if !defined(__powerpc__)
   cpuinfo_deinitialize();
+#endif
   return pytorch_qnnp_status_success;
 }
 

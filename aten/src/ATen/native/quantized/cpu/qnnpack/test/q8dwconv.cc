@@ -2559,3 +2559,1067 @@ TEST(
   }
 }
 #endif /* CPUINFO_ARCH_X86 || CPUINFO_ARCH_X86_64 */
+
+#if CPUINFO_ARCH_PPC64
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_eq_16) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_eq_16_with_qmin) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .qmin(128)
+      .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_eq_16_with_qmax) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .qmax(128)
+      .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+}
+
+TEST(
+    Q8DWCONV_UP16x9__VSX,
+    single_output_channels_eq_16_with_input_zero_point_only) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .inputZeroPoint(255)
+      .kernelZeroPoint(0)
+      .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+}
+
+TEST(
+    Q8DWCONV_UP16x9__VSX,
+    single_output_channels_eq_16_with_kernel_zero_point_only) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .inputZeroPoint(0)
+      .kernelZeroPoint(255)
+      .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, multi_output_channels_eq_16) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, multi_output_channels_eq_16_with_subsampling) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .subsampling(2)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, multi_output_channels_eq_16_with_input_stride) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .inputStride(17)
+      .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, multi_output_channels_eq_16_with_output_stride) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .outputStride(19)
+      .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_div_16) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 16; channels < 128; channels += 24) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, multi_output_channels_div_16) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 16; channels < 128; channels += 24) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, multi_output_channels_div_16_with_output_stride) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 16; channels < 128; channels += 24) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .outputStride(171)
+        .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, multi_output_channels_lt_16) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 2; channels < 16; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_gt_16) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 31; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_gt_16_with_qmin) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 32; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .qmin(128)
+        .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_gt_16_with_qmax) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 32; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .qmax(128)
+        .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+  }
+}
+
+TEST(
+    Q8DWCONV_UP16x9__VSX,
+    single_output_channels_gt_16_with_input_zero_point_only) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 32; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .inputZeroPoint(255)
+        .kernelZeroPoint(0)
+        .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+  }
+}
+
+TEST(
+    Q8DWCONV_UP16x9__VSX,
+    single_output_channels_gt_16_with_kernel_zero_point_only) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 32; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .inputZeroPoint(0)
+        .kernelZeroPoint(255)
+        .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, multi_output_channels_gt_16) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 32; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, multi_output_channels_gt_16_with_output_stride) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 32; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .outputStride(31)
+        .test(pytorch_q8dwconv_ukernel_up16x9__vsx);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_eq_16_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_eq_16_with_qmin_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .qmin(128)
+      .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_eq_16_with_qmax_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .qmax(128)
+      .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+}
+
+TEST(
+    Q8DWCONV_UP16x9__VSX,
+    single_output_channels_eq_16_with_input_zero_point_only_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .inputZeroPoint(255)
+      .kernelZeroPoint(0)
+      .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+}
+
+TEST(
+    Q8DWCONV_UP16x9__VSX,
+    single_output_channels_eq_16_with_kernel_zero_point_only_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .inputZeroPoint(0)
+      .kernelZeroPoint(255)
+      .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, multi_output_channels_eq_16_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+}
+
+TEST(
+    Q8DWCONV_UP16x9__VSX,
+    multi_output_channels_eq_16_with_subsampling_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .subsampling(2)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+}
+
+TEST(
+    Q8DWCONV_UP16x9__VSX,
+    multi_output_channels_eq_16_with_input_stride_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .inputStride(17)
+      .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+}
+
+TEST(
+    Q8DWCONV_UP16x9__VSX,
+    multi_output_channels_eq_16_with_output_stride_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(3)
+      .kernelWidth(3)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .outputStride(19)
+      .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_div_16_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 16; channels < 128; channels += 24) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, multi_output_channels_div_16_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 16; channels < 128; channels += 24) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+  }
+}
+
+TEST(
+    Q8DWCONV_UP16x9__VSX,
+    multi_output_channels_div_16_with_output_stride_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 16; channels < 128; channels += 24) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .outputStride(171)
+        .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_gt_2_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 2; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_gt_16_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_gt_16_with_qmin_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .qmin(128)
+        .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, single_output_channels_gt_16_with_qmax_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .qmax(128)
+        .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+  }
+}
+
+TEST(
+    Q8DWCONV_UP16x9__VSX,
+    single_output_channels_gt_16_with_input_zero_point_only_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .inputZeroPoint(255)
+        .kernelZeroPoint(0)
+        .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+  }
+}
+
+TEST(
+    Q8DWCONV_UP16x9__VSX,
+    single_output_channels_gt_16_with_kernel_zero_point_only_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 9; channels < 16; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .inputZeroPoint(0)
+        .kernelZeroPoint(255)
+        .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+  }
+}
+
+TEST(Q8DWCONV_UP16x9__VSX, multi_output_channels_gt_16_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+  }
+}
+
+TEST(
+    Q8DWCONV_UP16x9__VSX,
+    multi_output_channels_gt_16_with_output_stride_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(3)
+        .kernelWidth(3)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .outputStride(25)
+        .test(pytorch_q8dwconv_ukernel_up16x9_per_channel__vsx, true);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_eq_16) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_eq_16_with_qmin) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .qmin(128)
+      .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_eq_16_with_qmax) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .qmax(128)
+      .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+}
+
+TEST(
+    Q8DWCONV_MP8x25__VSX,
+    single_output_channels_eq_16_with_input_zero_point_only) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .inputZeroPoint(255)
+      .kernelZeroPoint(0)
+      .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+}
+
+TEST(
+    Q8DWCONV_MP8x25__VSX,
+    single_output_channels_eq_16_with_kernel_zero_point_only) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .inputZeroPoint(0)
+      .kernelZeroPoint(255)
+      .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, multi_output_channels_eq_16) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, multi_output_channels_eq_16_with_subsampling) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .subsampling(2)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, multi_output_channels_eq_16_with_input_stride) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .inputStride(17)
+      .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, multi_output_channels_eq_16_with_output_stride) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .outputStride(19)
+      .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_div_16) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 16; channels < 128; channels += 24) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, multi_output_channels_div_16) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 16; channels < 128; channels += 24) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, multi_output_channels_div_16_with_output_stride) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 16; channels < 128; channels += 24) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .outputStride(171)
+        .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_gt_16) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_gt_16_with_qmin) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .qmin(128)
+        .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_gt_16_with_qmax) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .qmax(128)
+        .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+  }
+}
+
+TEST(
+    Q8DWCONV_MP8x25__VSX,
+    single_output_channels_gt_16_with_input_zero_point_only) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .inputZeroPoint(255)
+        .kernelZeroPoint(0)
+        .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+  }
+}
+
+TEST(
+    Q8DWCONV_MP8x25__VSX,
+    single_output_channels_gt_16_with_kernel_zero_point_only) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .inputZeroPoint(0)
+        .kernelZeroPoint(255)
+        .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, multi_output_channels_gt_8) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, multi_output_channels_gt_16_with_output_stride) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .outputStride(25)
+        .test(pytorch_q8dwconv_ukernel_mp16x25__vsx);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_eq_16_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_eq_16_with_qmin_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .qmin(128)
+      .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_eq_16_with_qmax_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .qmax(128)
+      .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+}
+
+TEST(
+    Q8DWCONV_MP8x25__VSX,
+    single_output_channels_eq_16_with_input_zero_point_only_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .inputZeroPoint(255)
+      .kernelZeroPoint(0)
+      .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+}
+
+TEST(
+    Q8DWCONV_MP8x25__VSX,
+    single_output_channels_eq_16_with_kernel_zero_point_only_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(1)
+      .inputZeroPoint(0)
+      .kernelZeroPoint(255)
+      .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, multi_output_channels_eq_16_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+}
+
+TEST(
+    Q8DWCONV_MP8x25__VSX,
+    multi_output_channels_eq_16_with_subsampling_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .subsampling(2)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+}
+
+TEST(
+    Q8DWCONV_MP8x25__VSX,
+    multi_output_channels_eq_16_with_input_stride_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .inputStride(17)
+      .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+}
+
+TEST(
+    Q8DWCONV_MP8x25__VSX,
+    multi_output_channels_eq_16_with_output_stride_per_channel) {
+  TEST_REQUIRES_VSX;
+  DWConvMicrokernelTester()
+      .kernelHeight(5)
+      .kernelWidth(5)
+      .cr(16)
+      .channels(16)
+      .width(5)
+      .outputStride(19)
+      .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_div_16_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 16; channels < 128; channels += 24) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, multi_output_channels_div_16_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 16; channels < 128; channels += 24) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+  }
+}
+
+TEST(
+    Q8DWCONV_MP8x25__VSX,
+    multi_output_channels_div_16_with_output_stride_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 16; channels < 128; channels += 24) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .outputStride(171)
+        .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_gt_16_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_gt_16_with_qmin_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .qmin(128)
+        .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, single_output_channels_gt_16_with_qmax_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .qmax(128)
+        .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+  }
+}
+
+TEST(
+    Q8DWCONV_MP8x25__VSX,
+    single_output_channels_gt_16_with_input_zero_point_only_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .inputZeroPoint(255)
+        .kernelZeroPoint(0)
+        .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+  }
+}
+
+TEST(
+    Q8DWCONV_MP8x25__VSX,
+    single_output_channels_gt_16_with_kernel_zero_point_only_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(1)
+        .inputZeroPoint(0)
+        .kernelZeroPoint(255)
+        .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+  }
+}
+
+TEST(Q8DWCONV_MP8x25__VSX, multi_output_channels_gt_16_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+  }
+}
+
+TEST(
+    Q8DWCONV_MP8x25__VSX,
+    multi_output_channels_gt_16_with_output_stride_per_channel) {
+  TEST_REQUIRES_VSX;
+  for (uint32_t channels = 17; channels < 24; channels++) {
+    DWConvMicrokernelTester()
+        .kernelHeight(5)
+        .kernelWidth(5)
+        .cr(16)
+        .channels(channels)
+        .width(5)
+        .outputStride(25)
+        .test(pytorch_q8dwconv_ukernel_mp16x25_per_channel__vsx, true);
+  }
+}
+#endif /* CPUINFO_ARCH_PPC64 */

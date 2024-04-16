@@ -341,7 +341,7 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
         "Turn this warning off by USE_{Q/X}NNPACK=OFF.")
       set(DISABLE_NNPACK_AND_FAMILY ON)
     endif()
-    if(NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64)$"))
+    if(NOT IOS AND NOT (CMAKE_SYSTEM_PROCESSOR MATCHES "^(i686|AMD64|x86_64|armv[0-9].*|arm64|aarch64|ppc64le)$"))
       message(WARNING
         "Target architecture \"${CMAKE_SYSTEM_PROCESSOR}\" is not supported in {Q/X}NNPACK. "
         "Supported architectures are x86, x86-64, ARM, and ARM64. "
@@ -361,6 +361,12 @@ if(USE_NNPACK OR USE_QNNPACK OR USE_PYTORCH_QNNPACK OR USE_XNNPACK)
       caffe2_update_option(USE_NNPACK OFF)
       caffe2_update_option(USE_QNNPACK OFF)
       caffe2_update_option(USE_PYTORCH_QNNPACK OFF)
+    endif()
+
+    # Power only supports PYTORCH_QNNPACK
+    if (CMAKE_SYSTEM_PROCESSOR STREQUAL "ppc64le")
+      caffe2_update_option(USE_NNPACK OFF)
+      caffe2_update_option(USE_QNNPACK OFF)
     endif()
 
     set(CAFFE2_THIRD_PARTY_ROOT "${PROJECT_SOURCE_DIR}/third_party")
@@ -442,7 +448,7 @@ else()
   set(USE_PTHREADPOOL OFF CACHE BOOL "" FORCE)
 endif()
 
-if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x|ppc64le)$")
+if(NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(s390x)$")
   # ---[ Caffe2 uses cpuinfo library in the thread pool
   # ---[ But it doesn't support s390x/powerpc and thus not used on s390x/powerpc
   if(NOT TARGET cpuinfo AND USE_SYSTEM_CPUINFO)

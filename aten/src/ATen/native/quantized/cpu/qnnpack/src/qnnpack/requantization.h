@@ -183,6 +183,13 @@ pytorch_qnnp_compute_conv_quantization_params(
   params.neon.vfmagic = 12582912.0f;
   params.neon.vimagic = (INT32_C(0x4B400000) -
       (int32_t)(uint32_t)output_zero_point);
+#elif CPUINFO_ARCH_PPC64
+  params.vsx.input_zero_point = (int16_t)(uint16_t)input_zero_point;
+  params.vsx.kernel_zero_points = kernel_zero_points;
+  params.vsx.requantization_scales = requantization_scales;
+  params.vsx.output_zero_point = (int16_t)(uint16_t)output_zero_point;
+  params.vsx.output_max = output_max;
+  params.vsx.output_min = output_min;
 #else
   params.scalar.input_zero_point = (int32_t)(uint32_t)input_zero_point;
   params.scalar.kernel_zero_points = kernel_zero_points;
@@ -237,6 +244,12 @@ pytorch_qnnp_compute_avgpool_quantization_params(
   params.neon.vfmagic = 12582912.0f;
   params.neon.vimagic = (INT32_C(0x4B400000) -
       (int32_t)(uint32_t)output_zero_point);
+#elif CPUINFO_ARCH_PPC64
+  params.vsx.bias = bias;
+  params.vsx.scale = scale;
+  params.vsx.output_zero_point = (int16_t)(uint16_t)output_zero_point;
+  params.vsx.output_max = output_max;
+  params.vsx.output_min = output_min;
 #else
   params.scalar.bias = bias;
   params.scalar.scale = scale;
@@ -282,6 +295,9 @@ pytorch_qnnp_compute_u8_clamping_params(
 #elif CPUINFO_ARCH_ARM || CPUINFO_ARCH_ARM64
   params.neon.output_max = output_max;
   params.neon.output_min = output_min;
+#elif CPUINFO_ARCH_PPC64
+  params.vsx.output_max = output_max;
+  params.vsx.output_min = output_min;
 #else
   params.scalar.output_min = (int32_t)(uint32_t)output_min;
   params.scalar.output_max = (int32_t)(uint32_t)output_max;
@@ -369,6 +385,21 @@ pytorch_qnnp_compute_add_quantization_params(
   params.neon.right_shift = (int32_t)-shift;
   params.neon.y_max = output_max;
   params.neon.y_min = output_min;
+#elif CPUINFO_ARCH_PPC64
+  const uint32_t remainder_mask = (UINT32_C(1) << shift) - UINT32_C(1);
+  const uint32_t remainder_threshold = remainder_mask >> 1;
+  const int32_t zero_point_product = (int32_t) -
+      (a_multiplier * (uint32_t)a_zero_point +
+       b_multiplier * (uint32_t)b_zero_point);
+  params.vsx.zero_point_product = zero_point_product;
+  params.vsx.a_multiplier = a_multiplier;
+  params.vsx.b_multiplier = b_multiplier;
+  params.vsx.y_zero_point = (int16_t)(uint16_t)output_zero_point;
+  params.vsx.remainder_mask = remainder_mask;
+  params.vsx.remainder_threshold = remainder_threshold;
+  params.vsx.shift = shift;
+  params.vsx.y_max = output_max;
+  params.vsx.y_min = output_min;
 #else
   const uint32_t remainder_mask = (UINT32_C(1) << shift) - UINT32_C(1);
   const uint32_t remainder_threshold = remainder_mask >> 1;

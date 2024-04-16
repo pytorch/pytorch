@@ -3,6 +3,7 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/cpu/vec/vec_base.h>
 #include <ATen/cpu/vec/vec256/vsx/vsx_helpers.h>
+#include <ATen/native/quantized/AffineQuantizerBase.h>
 #include <c10/util/qint8.h>
 #include <array>
 
