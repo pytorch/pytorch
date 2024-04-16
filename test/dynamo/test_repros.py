@@ -3875,6 +3875,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         make_fn(None)()
 
+    def test_call_finally_python_3_8_2(self):
+        def f(x):
+            while x:
+                try:
+                    pass
+                except Exception as _:
+                    continue
+
+        torch.compile(f, backend="eager")(0)
+
     def test_call_finally_opcode_python_3_8(self):
         def fn():
             try:
