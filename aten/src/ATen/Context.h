@@ -352,11 +352,10 @@ class TORCH_API Context {
   bool enabled_mem_efficientSDP = true;
   bool enabled_mathSDP = true;
   bool enabled_cudnnSDP = false;
-#ifdef USE_ROCM
-  bool benchmark_cudnn = true;
-#else
+  // miopen's benchmark mode is true by default because it's much
+  // faster than the immediate mode
+  bool benchmark_miopen = true;
   bool benchmark_cudnn = false;
-#endif
   Float32MatmulPrecision float32_matmul_precision =
       c10::utils::check_env("TORCH_ALLOW_TF32_CUBLAS_OVERRIDE") == true
       ? at::Float32MatmulPrecision::HIGH

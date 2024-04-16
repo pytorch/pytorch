@@ -189,11 +189,16 @@ void Context::alertCuBLASConfigNotDeterministic() const {
 }
 
 bool Context::benchmarkCuDNN() const {
-  return benchmark_cudnn;
+  if (hasHIP()) {
+    return benchmark_miopen;
+  } else {
+    return benchmark_cudnn;
+  }
 }
 
 void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
+  benchmark_miopen = b;
 }
 
 int Context::benchmarkLimitCuDNN() const {
