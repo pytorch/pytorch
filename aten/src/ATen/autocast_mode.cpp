@@ -345,10 +345,12 @@ Explicit registration for out-of-place ops
   _(sum, dim_DimnameList)
 
 #define AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(_)                         \
-  _("norm.Scalar",                                                          \
+  _(ADD_NS(norm),                                                           \
+    "norm.Scalar",                                                          \
     Tensor(const Tensor&, const Scalar&),                                   \
     Tensor(const Tensor&, const c10::optional<Scalar>&, ScalarType))        \
-  _("norm.ScalarOpt_dim",                                                   \
+  _(ADD_NS(norm),                                                           \
+    "norm.ScalarOpt_dim",                                                   \
     Tensor(const Tensor&, const c10::optional<Scalar>&, IntArrayRef, bool), \
     Tensor(                                                                 \
         const Tensor&,                                                      \
@@ -356,7 +358,8 @@ Explicit registration for out-of-place ops
         IntArrayRef,                                                        \
         bool,                                                               \
         ScalarType))                                                        \
-  _("norm.names_ScalarOpt_dim",                                             \
+  _(ADD_NS(norm),                                                           \
+    "norm.names_ScalarOpt_dim",                                             \
     Tensor(const Tensor&, const c10::optional<Scalar>&, DimnameList, bool), \
     Tensor(                                                                 \
         const Tensor&,                                                      \
@@ -410,8 +413,7 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   // The fp32_append_dtype wrapper overrides implicit promotion behavior.
   // norm does not implicitly promote, but be aware when adding new ops to this policy.
 #define _KERNEL_CUDA_DIFFERENT_REDISPATCH_SIGNATURE(...) \
-  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_CUDA(            \
-      ADD_NS(norm), __VA_ARGS__, fp32_append_dtype)
+  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_CUDA(__VA_ARGS__, fp32_append_dtype)
 
   AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(
       _KERNEL_CUDA_DIFFERENT_REDISPATCH_SIGNATURE)
@@ -593,8 +595,7 @@ TORCH_LIBRARY_IMPL(aten, AutocastXPU, m) {
   // The fp32_append_dtype wrapper overrides implicit promotion behavior.
   // norm does not implicitly promote, but be aware when adding new ops to this policy.
 #define _KERNEL_XPU_DIFFERENT_REDISPATCH_SIGNATURE(...) \
-  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_XPU(            \
-      ADD_NS(norm), __VA_ARGS__, fp32_append_dtype)
+  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_XPU(__VA_ARGS__, fp32_append_dtype)
 
   AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(
       _KERNEL_XPU_DIFFERENT_REDISPATCH_SIGNATURE)
