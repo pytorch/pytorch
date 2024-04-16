@@ -1923,6 +1923,12 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // reset log prefix to include group_desc
   logPrefix_ = createLogPrefix();
 
+#ifdef NCCL_COMM_DESCRIPTION
+  // Pass process group name and description to NCCL communicator
+  std::string commDesc = pg_desc_ + ':' + pg_name_;
+  options_->config.commDesc = strdup(commDesc.c_str());
+#endif
+
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
   bool singleP2POp = isP2POp(opType, batchP2P);
