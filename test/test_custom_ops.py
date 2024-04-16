@@ -2135,6 +2135,50 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(z, x + y)
         self.assertTrue(cpu_called)
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_manual_schema(self):
+        @torch.library.custom_op(
+            "_torch_testing::add",
+            mutates_args=(),
+            manual_schema="(Tensor x, float y) -> Tensor",
+        )
+        def add(x, y):
+            x_np = x.numpy(force=True)
+            out_np = x_np + y
+            return torch.from_numpy(out_np).to(x.device)
+
+        x = torch.randn(3)
+        y = 3.14
+        z = add(x, y)
+        self.assertEqual(z, x + y)
+
+        @torch.library.custom_op(
+            "_torch_testing::sin_",
+            mutates_args=["x"],
+            manual_schema="(Tensor(a!) x) -> ()",
+        )
+        def sin_(x):
+            x_np = x.numpy()
+            np.sin(x_np, out=x_np)
+
+        x = torch.randn(3)
+        expected = x.sin()
+        sin_(x)
+        self.assertEqual(x, expected)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_manual_schema_error(self):
+        with self.assertRaisesRegex(ValueError, "the op mutates {'x'}"):
+
+            @torch.library.custom_op(
+                "_torch_testing::sin_",
+                mutates_args=(),
+                manual_schema="(Tensor(a!) x) -> ()",
+            )
+            def sin_(x):
+                x_np = x.numpy()
+                np.sin(x_np, out=x_np)
+
     def test_supports_tensorlist(self):
         @torch._library.autograd.supports_tensorlist
         class Stack(torch.autograd.Function):
