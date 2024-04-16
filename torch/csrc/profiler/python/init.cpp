@@ -604,14 +604,6 @@ void initPythonBindings(PyObject* module) {
     }
     return py_symbolize(tb_ptrs);
   });
-  m.def("symbolize_tracebacks", [](const py::list& tbs) {
-    std::vector<CapturedTraceback*> tb_ptrs;
-    tb_ptrs.reserve(tbs.size());
-    for (py::handle tb : tbs) {
-      tb_ptrs.emplace_back(((THPCapturedTraceback*)tb.ptr())->data.get());
-    }
-    return py_symbolize(tb_ptrs);
-  });
   // directly convert address pointers to frames, used for testing symbolize
   m.def(
       "symbolize_addresses",
