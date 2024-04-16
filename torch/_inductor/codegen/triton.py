@@ -3398,6 +3398,21 @@ class TritonScheduling(BaseScheduling):
             return "tl.int32"
         return "tl.int64"
 
+
+    def has_non_contiguous_pw_in_reduction_kernel(self, node_schedule, numel, rnumel):
+        pointwise_nodes = list(
+            filter(
+                lambda n: n not in (EnableReduction, DisableReduction)
+                and not n.is_reduction()
+                and n.group[1][0] == numel * rnumel,
+                node_schedule
+            )
+        )
+        for node in pointwise_nodes:
+            if not all(dep.is_contiguous() for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes)):
+                return True
+        return False
+
     def get_kernel_args(self, node_schedule, numel, reduction_numel):
         reductions = list(
             filter(
@@ -3412,6 +3427,12 @@ class TritonScheduling(BaseScheduling):
                 reduction_hint_val = hints[0]
             else:
                 reduction_hint_val = ReductionHint.DEFAULT
+
+            if reduction_hint_val == ReductionHint.INNER and self.has_non_contiguous_pw_in_reduction_kernel(node_schedule, numel, reduction_numel):
+                reduction_hint_val = ReductionHint.DEFAULT
+            if numel == 26624:
+                # breakpoint() # TODO
+                pass
         else:
             reduction_hint_val = ReductionHint.DEFAULT
 
