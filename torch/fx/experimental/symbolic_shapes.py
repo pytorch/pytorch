@@ -545,7 +545,8 @@ def _advise_is_size(a):
 
     # This must always succeed, because the sole allowed caller _check_is_size
     # was responsible for expect_true'ing this
-    assert a >= 0
+    # This assert triggers expensive sym compute, do not do it until its cheap.
+    # assert a >= 0
 
     # NB: it's important not to constrain range for size for *hinted* SymInts,
     # because it is not only unsound, it will immediately trip our asserts
