@@ -103,15 +103,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -220,15 +220,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -347,15 +347,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -465,15 +465,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -593,15 +593,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -711,15 +711,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -838,15 +838,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -955,15 +955,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1082,15 +1082,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1200,15 +1200,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1328,15 +1328,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1446,15 +1446,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1573,15 +1573,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1690,15 +1690,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1817,15 +1817,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1935,15 +1935,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2063,15 +2063,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2181,15 +2181,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2308,15 +2308,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2425,15 +2425,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2552,15 +2552,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2670,15 +2670,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2798,15 +2798,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2916,15 +2916,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3043,15 +3043,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3160,15 +3160,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3287,15 +3287,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3405,15 +3405,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3533,15 +3533,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -3651,15 +3651,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout nWEIdia/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean nWEIdia/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
