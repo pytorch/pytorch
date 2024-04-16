@@ -31,7 +31,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_CUDA, HAS_GPU
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -578,7 +578,7 @@ class TestInductorDynamic(TestCase):
         actual = cfn(3)
         self.assertEqual(expect, actual)
 
-    def test_full(self, device):
+    def test_full_symbolic_value(self, device):
         def fn(a):
             return torch.full((3,), a), torch.full((3,), torch.sym_float(a))
 
@@ -586,6 +586,25 @@ class TestInductorDynamic(TestCase):
         expect = fn(5)
         actual = cfn(5)
         self.assertEqual(expect, actual)
+
+    def test_full_recompiles(self, device):
+        def fn(x):
+            _, L = x.shape
+            return torch.full((L, L), torch.finfo(torch.float16).min, device=device)
+
+        cfn = self.compile_fn(fn)
+
+        import functools
+
+        input_fn = functools.partial(torch.randint, 10, 1000, device=device)
+
+        cfn(input_fn((2, 3)))
+        cfn(input_fn((2, 4)))  # expect don't recompile here
+
+        # check compiled times of frame 0
+        from torch._dynamo.convert_frame import FRAME_COMPILE_COUNTER
+
+        self.assertEqual(FRAME_COMPILE_COUNTER[0], 1)
 
     @parametrize(
         "op",
@@ -712,5 +731,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # Slow on ASAN after https://github.com/pytorch/pytorch/pull/94068
-    if (HAS_CPU or HAS_CUDA) and not TEST_WITH_ASAN:
+    if (HAS_CPU or HAS_GPU) and not TEST_WITH_ASAN:
         run_tests(needs="filelock")

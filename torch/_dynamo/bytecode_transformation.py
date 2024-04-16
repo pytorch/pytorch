@@ -804,6 +804,7 @@ def remove_jump_if_none(instructions: List[Instruction]) -> None:
         if "_NONE" in inst.opname:
             is_op = create_instruction("IS_OP", arg=int("NOT" in inst.opname))
             is_op.argval = is_op.arg
+            is_op.positions = inst.positions
             if sys.version_info < (3, 12):
                 jump_op = create_instruction(
                     "POP_JUMP_FORWARD_IF_TRUE"
@@ -813,6 +814,7 @@ def remove_jump_if_none(instructions: List[Instruction]) -> None:
                 )
             else:
                 jump_op = create_instruction("POP_JUMP_IF_TRUE", target=inst.target)
+            jump_op.positions = inst.positions
             # update inst.exn_tab_entry.end if necessary
             if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
                 inst.exn_tab_entry.end = jump_op
@@ -838,6 +840,7 @@ def remove_binary_store_slice(instructions: List[Instruction]) -> None:
             if inst.exn_tab_entry and inst.exn_tab_entry.end is inst:
                 inst.exn_tab_entry.end = subscr_inst
             subscr_inst.exn_tab_entry = copy.copy(inst.exn_tab_entry)
+            subscr_inst.positions = inst.positions
             # modify inst in-place to preserve jump target
             inst.opcode = dis.opmap["BUILD_SLICE"]
             inst.opname = "BUILD_SLICE"
@@ -1172,14 +1175,14 @@ def cleaned_instructions(code, safe=False) -> List[Instruction]:
     if not safe:
         if sys.version_info < (3, 11):
             remove_load_call_method(instructions)
-        else:
-            remove_jump_if_none(instructions)
-            update_offsets(instructions)
-            devirtualize_jumps(instructions)
         if sys.version_info < (3, 12):
             explicit_super(code, instructions)
-        else:
+    if sys.version_info >= (3, 11):
+        remove_jump_if_none(instructions)
+        if sys.version_info >= (3, 12):
             remove_binary_store_slice(instructions)
+        update_offsets(instructions)
+        devirtualize_jumps(instructions)
     return instructions
 
 

@@ -12,11 +12,17 @@ import pytest
 import torch
 from torch import nn
 
-from torch.distributed.pipeline.sync._balance import balance_by_size, balance_by_time, blockpartition
+from torch.distributed.pipeline.sync._balance import (
+    balance_by_size,
+    balance_by_time,
+    blockpartition,
+)
 from torch.distributed.pipeline.sync._balance.profile import layerwise_sandbox
 from torch.testing._internal.common_utils import run_tests
 
-skip_if_no_cuda = pytest.mark.skipif(not torch.cuda.is_available(), reason="cuda required")
+skip_if_no_cuda = pytest.mark.skipif(
+    not torch.cuda.is_available(), reason="cuda required"
+)
 
 devices = ["cpu"]
 if torch.cuda.is_available():
@@ -24,7 +30,10 @@ if torch.cuda.is_available():
 
 
 def test_blockpartition():
-    assert blockpartition.solve([1, 2, 3, 4, 5, 6], partitions=2) == [[1, 2, 3, 4], [5, 6]]
+    assert blockpartition.solve([1, 2, 3, 4, 5, 6], partitions=2) == [
+        [1, 2, 3, 4],
+        [5, 6],
+    ]
 
 
 def test_blockpartition_zeros():
