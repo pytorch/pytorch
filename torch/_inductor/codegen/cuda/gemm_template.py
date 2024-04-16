@@ -33,7 +33,7 @@ extern "C" {
   {{kernel.check_not_null(Y)}}
   int64_t B = {{kernel.size(Y, 0, -3, default_value=1)}};
   int64_t M = {{kernel.size(X, -2)}};
-  int64_t K = {{kernel.size(X, -1)}};
+  int64_t K = {{kernel.size(W, -2)}};
   int64_t N = {{kernel.size(W, -1)}};
   using ElementComputeEpilogue = {{instance_type}}::ElementAccumulator;
   using coord_t = cutlass::gemm::GemmCoord::Index;
@@ -534,6 +534,15 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             and self.set_alignment(self.output_node.get_layout(), op.D)
         ):
             return None
+
+        # SparseGemm in CUTLASS has specific alignment check that for
+        # small k could make some of the choices throw kMisalignedOperand
+        # CUTLASS error when run, see:
+        # https://github.com/NVIDIA/cutlass/blob/e01b9b5029b7caca5a43c29f7d2714d7cf1dcae8/include/cutlass/gemm/kernel/sparse_gemm.h#L198-L200  # noqa: B950
+        # So, let's skip these choices if that would be the case.
+        if op.gemm_kind == cutlass_lib.GemmKind.Sparse:
+            if (X.layout.size[1] * 2) % op.tile_description.tile_shape[2] != 0:
+                return None
 
         # Set epilogue.
         # TODO: update epilogue functor according to epilogues.
