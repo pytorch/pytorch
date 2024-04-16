@@ -1,16 +1,25 @@
+#include <c10/util/irange.h>
 #include <torch/csrc/profiler/unwind/debug_info.h>
 #include <torch/csrc/profiler/unwind/dwarf_enums.h>
 #include <torch/csrc/profiler/unwind/dwarf_symbolize_enums.h>
 #include <torch/csrc/profiler/unwind/lexer.h>
 #include <torch/csrc/profiler/unwind/sections.h>
+#include <torch/csrc/profiler/unwind/unwind_error.h>
 #include <tuple>
 
 namespace torch::unwind {
 
 struct LineNumberProgram {
-  LineNumberProgram(Sections& s) : s_(s) {}
-  void parse(uint64_t offset) {
-    offset_ = offset;
+  LineNumberProgram(Sections& s, uint64_t offset) : s_(s), offset_(offset) {}
+
+  uint64_t offset() {
+    return offset_;
+  }
+  void parse() {
+    if (parsed_) {
+      return;
+    }
+    parsed_ = true;
     CheckedLexer L = s_.debug_line.lexer(offset_);
     std::tie(length_, is_64bit_) = L.readSectionLength();
     program_end_ = (char*)L.loc() + length_;
@@ -29,7 +38,7 @@ struct LineNumberProgram {
     }
     header_length_ = is_64bit_ ? L.read<uint64_t>() : L.read<uint32_t>();
     program_ = L;
-    program_.skip(header_length_);
+    program_.skip(int64_t(header_length_));
     minimum_instruction_length_ = L.read<uint8_t>();
     maximum_operations_per_instruction_ = L.read<uint8_t>();
     default_is_stmt_ = L.read<uint8_t>();
@@ -60,8 +69,8 @@ struct LineNumberProgram {
         for (auto& member : directory_members) {
           switch (member.content_type) {
             case DW_LNCT_path: {
-              include_directories_.push_back(
-                  s_.readString(L, member.form, is_64bit_));
+              include_directories_.emplace_back(
+                  s_.readString(L, member.form, is_64bit_, 0));
             } break;
             default: {
               skipForm(L, member.form);
@@ -70,7 +79,8 @@ struct LineNumberProgram {
         }
       }
 
-      for (auto _i : c10::irange(directories_count)) {
+      for (auto i : c10::irange(directories_count)) {
+        (void)i;
         LOG_INFO("{} {}\n", i, include_directories_[i]);
       }
       auto file_name_entry_format_count = L.read<uint8_t>();
@@ -79,14 +89,15 @@ struct LineNumberProgram {
         file_members.push_back({L.readULEB128(), L.readULEB128()});
       }
       auto files_count = L.readULEB128();
-      for (auto _i : c10::irange(files_count)) {
+      for (size_t i = 0; i < files_count; i++) {
         for (auto& member : file_members) {
           switch (member.content_type) {
             case DW_LNCT_path: {
-              file_names_.push_back(s_.readString(L, member.form, is_64bit_));
+              file_names_.emplace_back(
+                  s_.readString(L, member.form, is_64bit_, 0));
             } break;
             case DW_LNCT_directory_index: {
-              file_directory_index_.push_back(readData(L, member.form));
+              file_directory_index_.emplace_back(readData(L, member.form));
               UNWIND_CHECK(
                   file_directory_index_.back() < include_directories_.size(),
                   "directory index out of range");
@@ -97,20 +108,21 @@ struct LineNumberProgram {
           }
         }
       }
-      for (auto _i : c10::irange(files_count)) {
+      for (auto i : c10::irange(files_count)) {
+        (void)i;
         LOG_INFO("{} {} {}\n", i, file_names_[i], file_directory_index_[i]);
       }
     } else {
-      include_directories_.push_back(""); // implicit cwd
+      include_directories_.emplace_back(""); // implicit cwd
       while (true) {
         auto str = L.readCString();
         if (*str == '\0') {
           break;
         }
-        include_directories_.push_back(str);
+        include_directories_.emplace_back(str);
       }
-      file_names_.push_back("");
-      file_directory_index_.push_back(0);
+      file_names_.emplace_back("");
+      file_directory_index_.emplace_back(0);
       while (true) {
         auto str = L.readCString();
         if (*str == '\0') {
@@ -119,7 +131,7 @@ struct LineNumberProgram {
         auto directory_index = L.readULEB128();
         L.readULEB128(); // mod_time
         L.readULEB128(); // file_length
-        file_names_.push_back(str);
+        file_names_.emplace_back(str);
         file_directory_index_.push_back(directory_index);
       }
     }
@@ -150,13 +162,13 @@ struct LineNumberProgram {
   }
 
  private:
-  void skipForm(CheckedLexer& L, int form) {
+  void skipForm(CheckedLexer& L, uint64_t form) {
     auto sz = formSize(form, is_64bit_ ? 8 : 4);
     UNWIND_CHECK(sz, "unsupported form {}", form);
-    L.skip(*sz);
+    L.skip(int64_t(*sz));
   }
 
-  uint64_t readData(CheckedLexer& L, int encoding) {
+  uint64_t readData(CheckedLexer& L, uint64_t encoding) {
     switch (encoding) {
       case DW_FORM_data1:
         return L.read<uint8_t>();
@@ -237,7 +249,7 @@ struct LineNumberProgram {
               } break;
               default: {
                 PRINT_INST("skip extended op {}\n", extended_op);
-                program_.skip(len - 1);
+                program_.skip(int64_t(len - 1));
               } break;
             }
           } break;
@@ -282,24 +294,25 @@ struct LineNumberProgram {
         program_end_ - s_.debug_line.data);
   }
 
-  int64_t address_ = 0;
+  uint64_t address_ = 0;
   bool shadow_ = false;
+  bool parsed_ = false;
   Entry entry_ = {};
   std::vector<std::string> include_directories_;
   std::vector<std::string> file_names_;
   std::vector<uint64_t> file_directory_index_;
-  uint8_t segment_selector_size_;
-  uint8_t minimum_instruction_length_;
-  uint8_t maximum_operations_per_instruction_;
-  int8_t line_base_;
-  uint8_t line_range_;
-  uint8_t opcode_base_;
-  bool default_is_stmt_;
-  CheckedLexer program_ = {0, 0};
-  char* program_end_;
-  uint64_t header_length_;
-  uint64_t length_;
-  bool is_64bit_;
+  uint8_t segment_selector_size_ = 0;
+  uint8_t minimum_instruction_length_ = 0;
+  uint8_t maximum_operations_per_instruction_ = 0;
+  int8_t line_base_ = 0;
+  uint8_t line_range_ = 0;
+  uint8_t opcode_base_ = 0;
+  bool default_is_stmt_ = false;
+  CheckedLexer program_ = {nullptr};
+  char* program_end_ = nullptr;
+  uint64_t header_length_ = 0;
+  uint64_t length_ = 0;
+  bool is_64bit_ = false;
   std::vector<uint8_t> standard_opcode_lengths_;
   Sections& s_;
   uint64_t offset_;

@@ -320,9 +320,6 @@ struct Symbolizer {
     } else {
       addr2line_binary_ = "addr2line"; // default
     }
-    if (torch::get_symbolize_mode() == torch::SymbolizeMode::dladdr) {
-      addr2line_binary_ = nullptr;
-    }
   }
   static std::lock_guard<std::mutex> guard() {
     static std::mutex mutex;
@@ -342,17 +339,10 @@ struct Symbolizer {
       frame_map_[addr] = Frame{"??", "<unwind unsupported>", 0};
       return;
     }
-    if (addr2line_binary_ == nullptr) {
-      frame_map_[addr] = Frame{
-          maybe_library->first, dladdr_lookup(addr), maybe_library->second - 1};
-      return;
-    }
     has_pending_results_ = true;
     auto& entry = getOrCreate(maybe_library->first);
     entry.queried.push_back(addr);
     auto libaddress = maybe_library->second - 1;
-    std::cout << maybe_library->first << " " << std::hex << libaddress
-              << std::dec << "\n";
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     entry.comm->out() << (void*)libaddress << "\n";
     // we need to make sure we don't write more than 64k bytes to
@@ -422,9 +412,12 @@ struct Symbolizer {
   }
 };
 
-std::vector<Frame> symbolize_fast(const std::vector<void*>& frames) {
+static std::vector<Frame> symbolize_fast(
+    const std::vector<void*>& frames,
+    Mode mode) {
   static std::mutex cache_mutex;
-  static ska::flat_hash_map<void*, Frame> frame_map;
+  static std::array<ska::flat_hash_map<void*, Frame>, 2> frame_maps;
+  auto& frame_map = frame_maps[mode == Mode::fast ? 0 : 1];
 
   std::vector<uint32_t> indices_to_lookup;
   std::vector<Frame> results;
@@ -450,7 +443,11 @@ std::vector<Frame> symbolize_fast(const std::vector<void*>& frames) {
       Frame& f = results.at(i);
       auto library = libraryFor(frames.at(i));
       if (library) {
-        f = symbolizer.symbolize(library->first, library->second - 1);
+        if (mode == Mode::fast) {
+          f = symbolizer.symbolize(library->first, library->second - 1);
+        } else {
+          f = Frame{library->first, "??", library->second - 1};
+        }
       }
       if (f.funcname == "??") {
         f.funcname = dladdr_lookup(addr);
@@ -464,7 +461,8 @@ std::vector<Frame> symbolize_fast(const std::vector<void*>& frames) {
   return results;
 }
 
-std::vector<Frame> symbolize_addr2line(const std::vector<void*>& frames) {
+static std::vector<Frame> symbolize_addr2line(
+    const std::vector<void*>& frames) {
   auto guard = Symbolizer::guard();
   Symbolizer& s = Symbolizer::get();
   for (auto f : frames) {
@@ -480,12 +478,12 @@ std::vector<Frame> symbolize_addr2line(const std::vector<void*>& frames) {
 
 // fbcode will use llvm symbolize since there is an llvm dependency already
 #ifndef FBCODE_CAFFE2
-std::vector<Frame> symbolize(const std::vector<void*>& frames) {
-  if (torch::get_symbolize_mode() == torch::SymbolizeMode::fast) {
-    return symbolize_fast(frames);
+std::vector<Frame> symbolize(const std::vector<void*>& frames, Mode mode) {
+  if (mode == Mode::addr2line) {
+    return symbolize_addr2line(frames);
+  } else {
+    return symbolize_fast(frames, mode);
   }
-  // also handles dladdr mode by no-oping the addr2line call.
-  return symbolize_addr2line(frames);
 }
 #endif
 

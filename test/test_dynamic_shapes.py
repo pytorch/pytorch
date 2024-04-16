@@ -404,13 +404,13 @@ class TestPySymInt(TestCase):
         r = sym_int(a1 / 2)
         self.assertEqual(guard_int(r), 3)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(floor(s1/2), 3)""")
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(Trunc(s1/2), 3)""")
 
         a3 = create_symint(shape_env, 3)
         r = sym_int(2.0 * torch.sym_float(a3))
         self.assertEqual(guard_int(r), 6)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(2*s2, 6)""")
+        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(Trunc(2.0*s2), 6)""")
 
     def test_sym_sqrt(self):
         shape_env = ShapeEnv()
@@ -431,6 +431,18 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 15)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
+
+    def test_sym_trunc(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 5)
+        r = math.trunc(a0 / 2)
+        self.assertEqual(r, 2)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(Trunc(s0/2), 2)""")
+        r = torch.sym_int(torch.sym_sqrt(a0))
+        self.assertEqual(r, 2)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(Trunc(OpaqueUnaryFn_sqrt(s0)), 2)""")
 
     def test_sym_ceil(self):
         shape_env = ShapeEnv()

@@ -3,20 +3,22 @@
 #include <cstdint>
 #include <optional>
 
-namespace torch::unwind {
-
 enum {
   DW_TAG_subprogram = 0x2e,
+  DW_TAG_inlined_subroutine = 0x1d,
   DW_TAG_compile_unit = 0x11,
   DW_AT_sibling = 0x1, // reference
   DW_AT_name = 0x3, // string
   DW_AT_stmt_list = 0x10, // lineptr
+  DW_AT_addr_base = 0x73, // sec_offset
+  DW_AT_rnglists_base = 0x74, // sec_offset
   DW_AT_low_pc = 0x11, // address
   DW_AT_high_pc = 0x12, // address
   DW_AT_specification = 0x47, // reference
   DW_AT_abstract_origin = 0x31, // reference
   DW_AT_linkage_name = 0x6e, // string
   DW_AT_ranges = 0x55, // rnglist
+  DW_AT_str_offsets_base = 0x72, // sec_offset
   DW_FORM_addr = 0x01,
   DW_FORM_block2 = 0x03,
   DW_FORM_block4 = 0x04,
@@ -86,12 +88,13 @@ enum {
   DW_RLE_start_length = 0x7
 };
 
-static optional<size_t> formSize(uint64_t form, uint8_t sec_offset_size) {
+static torch::unwind::optional<size_t> formSize(
+    uint64_t form,
+    uint8_t sec_offset_size) {
   switch (form) {
     case DW_FORM_addr:
       return sizeof(void*);
     case DW_FORM_block2:
-      return std::nullopt;
     case DW_FORM_block4:
       return std::nullopt;
     case DW_FORM_data2:
@@ -101,13 +104,10 @@ static optional<size_t> formSize(uint64_t form, uint8_t sec_offset_size) {
     case DW_FORM_data8:
       return 8;
     case DW_FORM_string:
-      return std::nullopt;
     case DW_FORM_block:
-      return std::nullopt;
     case DW_FORM_block1:
       return std::nullopt;
     case DW_FORM_data1:
-      return 1;
     case DW_FORM_flag:
       return 1;
     case DW_FORM_sdata:
@@ -127,7 +127,6 @@ static optional<size_t> formSize(uint64_t form, uint8_t sec_offset_size) {
     case DW_FORM_ref8:
       return 8;
     case DW_FORM_ref_udata:
-      return std::nullopt;
     case DW_FORM_indirect:
       return std::nullopt;
     case DW_FORM_sec_offset:
@@ -137,7 +136,6 @@ static optional<size_t> formSize(uint64_t form, uint8_t sec_offset_size) {
     case DW_FORM_flag_present:
       return 0;
     case DW_FORM_strx:
-      return std::nullopt;
     case DW_FORM_addrx:
       return std::nullopt;
     case DW_FORM_ref_sup4:
@@ -153,7 +151,6 @@ static optional<size_t> formSize(uint64_t form, uint8_t sec_offset_size) {
     case DW_FORM_implicit_const:
       return 0;
     case DW_FORM_loclistx:
-      return std::nullopt;
     case DW_FORM_rnglistx:
       return std::nullopt;
     case DW_FORM_ref_sup8:
@@ -182,5 +179,3 @@ static optional<size_t> formSize(uint64_t form, uint8_t sec_offset_size) {
       return std::nullopt;
   }
 }
-
-} // namespace torch::unwind

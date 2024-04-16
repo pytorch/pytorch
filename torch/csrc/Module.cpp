@@ -165,7 +165,7 @@ static PyObject* THPModule_initExtension(
   if (torch::get_cpp_stacktraces_enabled()) {
     c10::SetStackTraceFetcher([]() -> std::string {
       auto tb = torch::CapturedTraceback::gather(false, false, true);
-      if (torch::get_symbolize_mode() == torch::SymbolizeMode::addr2line) {
+      if (torch::get_symbolize_mode() == torch::unwind::Mode::addr2line) {
         LOG(WARNING)
             << "symbolizing C++ stack trace for exception; if this hangs, rerun with TORCH_DISABLE_ADDR2LINE=1..."
             << std::endl;

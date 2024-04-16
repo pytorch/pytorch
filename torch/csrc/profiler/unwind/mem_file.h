@@ -8,7 +8,7 @@
 
 #include <elf.h>
 #include <fcntl.h>
-#include <string.h>
+#include <fmt/format.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <torch/csrc/profiler/unwind/lexer.h>
@@ -16,13 +16,14 @@
 #include <unistd.h>
 #include <cerrno>
 #include <cstdio>
+#include <cstring>
 #include <iostream>
 
 namespace torch::unwind {
 
 struct Section {
-  char* data;
-  size_t size;
+  char* data = nullptr;
+  size_t size = 0;
   const char* string(size_t offset) {
     return lexer(offset).readCString();
   }
@@ -39,8 +40,10 @@ struct Section {
 /// 2. Used in unity to load the elf file.
 struct MemFile {
   explicit MemFile(const char* filename_)
-      : fd_(0), mem_(nullptr), n_bytes_(0), name_(filename_) {
-    fd_ = open(filename_, O_RDONLY);
+      : fd_(open(filename_, O_RDONLY)),
+        mem_(nullptr),
+        n_bytes_(0),
+        name_(filename_) {
     UNWIND_CHECK(
         fd_ != -1, "failed to open {}: {}", filename_, strerror(errno));
     // NOLINTNEXTLINE
@@ -141,7 +144,7 @@ struct MemFile {
   std::string name_;
   Elf64_Ehdr* ehdr_;
   Elf64_Shdr* shdr_;
-  Section strtab_;
+  Section strtab_ = {nullptr, 0};
 };
 
 } // namespace torch::unwind

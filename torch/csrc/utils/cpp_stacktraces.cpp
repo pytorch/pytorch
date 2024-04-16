@@ -47,16 +47,16 @@ bool get_cpp_stacktraces_enabled() {
   return enabled;
 }
 
-SymbolizeMode compute_symbolize_mode() {
+static torch::unwind::Mode compute_symbolize_mode() {
   auto envar_c = std::getenv("TORCH_SYMBOLIZE_MODE");
   if (envar_c) {
     std::string envar = envar_c;
     if (envar == "dladdr") {
-      return SymbolizeMode::dladdr;
+      return unwind::Mode::dladdr;
     } else if (envar == "addr2line") {
-      return SymbolizeMode::addr2line;
+      return unwind::Mode::addr2line;
     } else if (envar == "fast") {
-      return SymbolizeMode::fast;
+      return unwind::Mode::fast;
     } else {
       TORCH_CHECK(
           false,
@@ -64,13 +64,13 @@ SymbolizeMode compute_symbolize_mode() {
           envar);
     }
   } else {
-    return compute_disable_addr2line() ? SymbolizeMode::dladdr
-                                       : SymbolizeMode::fast;
+    return compute_disable_addr2line() ? unwind::Mode::dladdr
+                                       : unwind::Mode::addr2line;
   }
 }
 
-SymbolizeMode get_symbolize_mode() {
-  static SymbolizeMode mode = compute_symbolize_mode();
+unwind::Mode get_symbolize_mode() {
+  static unwind::Mode mode = compute_symbolize_mode();
   return mode;
 }
 

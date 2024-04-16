@@ -1,6 +1,7 @@
 #pragma once
 #include <c10/macros/Export.h>
 #include <c10/util/Optional.h>
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -15,13 +16,17 @@ struct Frame {
   uint64_t lineno;
 };
 
+enum class Mode { addr2line, fast, dladdr };
+
 // note: symbolize is really slow
 // it will launch an addr2line process that has to parse dwarf
 // information from the libraries that frames point into.
 // Callers should first batch up all the unique void* pointers
 // across a number of unwind states and make a single call to
 // symbolize.
-TORCH_API std::vector<Frame> symbolize(const std::vector<void*>& frames);
+TORCH_API std::vector<Frame> symbolize(
+    const std::vector<void*>& frames,
+    Mode mode);
 
 // returns path to the library, and the offset of the addr inside the library
 TORCH_API c10::optional<std::pair<std::string, uint64_t>> libraryFor(

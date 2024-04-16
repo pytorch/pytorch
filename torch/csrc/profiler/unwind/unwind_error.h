@@ -12,7 +12,7 @@ struct UnwindError : public std::runtime_error {
 #define UNWIND_CHECK(cond, fmtstring, ...)                          \
   do {                                                              \
     if (!(cond)) {                                                  \
-      throw UnwindError(fmt::format(                                \
+      throw unwind::UnwindError(fmt::format(                        \
           "{}:{}: " fmtstring, __FILE__, __LINE__, ##__VA_ARGS__)); \
     }                                                               \
   } while (0)
@@ -26,6 +26,6 @@ struct UnwindError : public std::runtime_error {
 // #define PRINT_LINE_TABLE(...) LOG_INFO(__VA_ARGS__)
 #define PRINT_LINE_TABLE(...)
 
-using c10::optional;
+using c10::optional; // NOLINT
 
 } // namespace torch::unwind

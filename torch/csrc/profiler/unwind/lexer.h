@@ -1,7 +1,6 @@
 #pragma once
-#include <stdint.h>
-#include <string.h>
 #include <cstdint>
+#include <cstring>
 #include <utility>
 
 #include <torch/csrc/profiler/unwind/dwarf_enums.h>
@@ -34,7 +33,7 @@ struct LexerImpl {
   int64_t readSLEB128() {
     int64_t Value = 0;
     unsigned Shift = 0;
-    uint8_t Byte;
+    uint8_t Byte = 0;
     do {
       Byte = read<uint8_t>();
       uint64_t Slice = Byte & 0x7f;
@@ -42,12 +41,12 @@ struct LexerImpl {
           (Shift == 63 && Slice != 0 && Slice != 0x7f)) {
         throw UnwindError("sleb128 too big for int64");
       }
-      Value |= Slice << Shift;
+      Value |= int64_t(Slice << Shift);
       Shift += 7;
     } while (Byte >= 128);
     // Sign extend negative numbers if needed.
     if (Shift < 64 && (Byte & 0x40)) {
-      Value |= (-1ULL) << Shift;
+      Value |= int64_t((-1ULL) << Shift);
     }
     return Value;
   }
@@ -55,7 +54,7 @@ struct LexerImpl {
   uint64_t readULEB128() {
     uint64_t Value = 0;
     unsigned Shift = 0;
-    uint8_t p;
+    uint8_t p = 0;
     do {
       p = read<uint8_t>();
       uint64_t Slice = p & 0x7f;
@@ -123,6 +122,7 @@ struct LexerImpl {
     next_ += bytes;
     return *this;
   }
+
   int64_t readEncodedValue(uint8_t enc) {
     switch (enc & 0xF) {
       case DW_EH_PE_udata2:
@@ -152,7 +152,8 @@ struct LexerImpl {
   const char* end_;
 };
 
-using Lexer = LexerImpl<false>;
+// using Lexer = LexerImpl<false>;
 using CheckedLexer = LexerImpl<true>;
+using Lexer = LexerImpl<false>;
 
 } // namespace torch::unwind
