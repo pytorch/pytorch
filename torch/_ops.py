@@ -782,9 +782,9 @@ class OpOverload(OperatorBase):
 class TorchBindOpOverload(OpOverload):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        from torch._higher_order_ops.effects import register_side_effect_op
+        from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
 
-        register_side_effect_op(self)
+        _register_effectful_op(self, _EffectType.ORDERED)
 
     def _fallthrough_keys(self) -> List[DispatchKey]:
         # TODO: we should be calling the fallback for these, but a fallthrough is almost close
@@ -997,7 +997,8 @@ def _call_overload_packet_from_python(op: OpOverloadPacket, args, kwargs):
     # The following mirrors getOpWithStack.
     # In cpp, we do a schema matching for the arguments, and call ToIValue to
     # to check whether the arguments are valid. But need to do similar things here
-    # and allow toIValue FakeScriptObject.
+    # and check the schema whether the FakeScriptObject is the corresponding fake class
+    # of the actual class used in schema.
     exceptions = {}
     found_op = None
     for overload_name in op.overloads():
