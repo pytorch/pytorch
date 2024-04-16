@@ -215,10 +215,8 @@ def reorder_compute_for_overlap(
         assert_no_comm_nodes(needed_by_next_comm_and_ready_compute_nodes)
 
         total_compute_runtime_cost = rolled_over_compute_cost + sum(
-            [
-                estimate_op_runtime(node)
-                for node in needed_by_next_comm_and_ready_compute_nodes
-            ]
+            estimate_op_runtime(node)
+            for node in needed_by_next_comm_and_ready_compute_nodes
         )
         prev_comm_runtime_cost = estimate_op_runtime(comm_nodes[idx - 1])
         schedule_nodes(tuple_sorted(needed_by_next_comm_and_ready_compute_nodes))
