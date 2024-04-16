@@ -84,6 +84,7 @@ from .utils import (
     LazyString,
     nn_module_proxy,
     same,
+    set_example_value,
 )
 from .variables.base import VariableTracker
 from .variables.builder import (
@@ -433,7 +434,7 @@ class OutputGraph:
                 "dynamo_backward_state", BackwardState, source=BackwardStateSource()
             )
             self.backward_state_proxy.node.meta["grapharg"] = BackwardStateGraphArg()
-            self.backward_state_proxy.node.meta["example_value"] = BackwardState()
+            set_example_value(self.backward_state_proxy, BackwardState())
             self.backward_state_var = self.new_var()
         return self.backward_state_proxy
 
@@ -654,7 +655,7 @@ class OutputGraph:
                 before=True,
                 source=prop,
             )
-            proxy.node.meta["example_value"] = s
+            set_example_value(proxy.node, s)
             proxy.node.meta["grapharg"] = GraphArg(
                 prop,
                 s,
@@ -2107,7 +2108,7 @@ class SubgraphTracer(fx.Tracer):
         if proxy in self.lifted_freevars:
             return self.lifted_freevars[proxy]
         new_proxy = self.create_graph_input(proxy.node.name)
-        new_proxy.node.meta["example_value"] = proxy.node.meta["example_value"]
+        set_example_value(new_proxy.node, proxy.node.meta["example_value"])
         self.lifted_freevars[proxy] = new_proxy
         if self.parent is not None and proxy.tracer != self.parent:
             self.parent.lift_tracked_freevar_to_input(proxy)
