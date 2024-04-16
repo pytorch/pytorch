@@ -635,7 +635,7 @@ def register_autograd(op: _op_identifier, setup_context_fn: Callable, backward_f
 
 
 # If the op was defined in C++, then we want to make sure there was an
-# m.has_python_registrations(module, ...) call and that the module is the
+# m.set_python_module(module, ...) call and that the module is the
 # same as the module that called torch.library.register_fake.
 def _check_pystubs_once(func, qualname, actual_module_name):
     checked = False
@@ -654,13 +654,13 @@ def _check_pystubs_once(func, qualname, actual_module_name):
             op._schema.name,
             op._schema.overload_name)
         if maybe_pystub is None:
-            if torch._library.utils.requires_pystub():
+            if torch._library.utils.requires_set_python_module():
                 namespace = op.namespace
                 cpp_filename = op._handle.debug()
                 raise RuntimeError(
                     f"Operator '{qualname}' was defined in C++ and has a Python "
                     f"fake impl. In this situation, we require there to also be a "
-                    f"companion C++ `m.has_python_registrations(\"{actual_module_name}\")` "
+                    f"companion C++ `m.set_python_module(\"{actual_module_name}\")` "
                     f"call, but we could not find one. Please add that to "
                     f"to the top of the C++ TORCH_LIBRARY({namespace}, ...) block the "
                     f"operator was registered in ({cpp_filename})")
@@ -672,7 +672,7 @@ def _check_pystubs_once(func, qualname, actual_module_name):
                     f"Operator '{qualname}' specified that its python fake impl "
                     f"is in the Python module '{pystub_module}' but it was actually found "
                     f"in '{actual_module_name}'. Please either move the fake impl "
-                    f"or correct the m.has_python_registrations call ({cpp_filename})")
+                    f"or correct the m.set_python_module call ({cpp_filename})")
         checked = True
         return func(*args, **kwargs)
     return inner
