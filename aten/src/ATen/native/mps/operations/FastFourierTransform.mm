@@ -99,13 +99,14 @@ Tensor& _fft_r2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
       if (onesided) {
         // Return only unique results:
         outputTensor = [mpsGraph realToHermiteanFFTWithTensor:inputTensor
-                                                            axes:IntArrayToNSArray(dim)
-                                                      descriptor:descriptor
-                                                            name:nil];
+                                                         axes:IntArrayToNSArray(dim)
+                                                   descriptor:descriptor
+                                                         name:nil];
       } else {
         // Return with Hermitean conjugate results:
-        auto useDataType = (inputTensor.dataType == MPSDataTypeFloat16) ? MPSDataTypeComplexFloat16 : MPSDataTypeComplexFloat32;
-        auto cTensor =  [mpsGraph castTensor: inputTensor toType: useDataType name: nil];
+        auto useDataType =
+            (inputTensor.dataType == MPSDataTypeFloat16) ? MPSDataTypeComplexFloat16 : MPSDataTypeComplexFloat32;
+        auto cTensor = [mpsGraph castTensor:inputTensor toType:useDataType name:nil];
         outputTensor = [mpsGraph fastFourierTransformWithTensor:cTensor
                                                            axes:IntArrayToNSArray(dim)
                                                      descriptor:descriptor
