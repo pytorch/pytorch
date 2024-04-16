@@ -873,7 +873,7 @@ struct VISIBILITY_HIDDEN tuple_slice {
   int64_t e;
 };
 
-inline IValue fakeScriptObjectToIValue(
+inline bool checkFakeScriptObjectSchema(
     const c10::FunctionSchema& schema,
     size_t argumentPosition,
     py::handle object) {
@@ -895,7 +895,7 @@ inline IValue fakeScriptObjectToIValue(
         " is expected to be a FakeScriptObject of ",
         class_type->name().value().qualifiedName()));
   }
-  return toIValue(object, PyObjectType::get());
+  return true;
 }
 
 inline bool matchSchemaAllowFakeScriptObject(
@@ -936,7 +936,7 @@ inline bool matchSchemaAllowFakeScriptObject(
     const auto& argument = schema.arguments().at(arg_idx);
     if (argument.real_type()->kind() == TypeKind::ClassType &&
         py::isinstance(arg, fake_class_registry.attr("FakeScriptObject"))) {
-      fakeScriptObjectToIValue(schema, arg_idx, arg);
+      checkFakeScriptObjectSchema(schema, arg_idx, arg);
     } else {
       argumentToIValue(schema, arg_idx, arg);
     }
@@ -955,7 +955,7 @@ inline bool matchSchemaAllowFakeScriptObject(
       if (arg.real_type()->kind() == TypeKind::ClassType &&
           py::isinstance(
               cur_kwarg, fake_class_registry.attr("FakeScriptObject"))) {
-        fakeScriptObjectToIValue(schema, i, cur_kwarg);
+        checkFakeScriptObjectSchema(schema, i, cur_kwarg);
       } else {
         argumentToIValue(schema, i, cur_kwarg);
       }

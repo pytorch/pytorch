@@ -4,6 +4,7 @@ from .base import VariableTracker
 from .builtin import BuiltinVariable
 from .constant import ConstantVariable, EnumVariable
 from .ctx_manager import (
+    CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
     DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
@@ -70,9 +71,11 @@ from .misc import (
     NewGlobalVariable,
     NumpyVariable,
     PythonModuleVariable,
+    RegexPatternVariable,
     StopIterationVariable,
     StringFormatVariable,
     SuperVariable,
+    TorchVersionVariable,
     TypingVariable,
     UnknownVariable,
 )
@@ -101,6 +104,7 @@ __all__ = [
     "BackwardHookVariable",
     "BaseListVariable",
     "BuiltinVariable",
+    "CatchWarningsCtxManagerVariable",
     "ClosureVariable",
     "ConstantVariable",
     "ConstDictVariable",
@@ -134,6 +138,7 @@ __all__ = [
     "PlacementVariable",
     "PythonModuleVariable",
     "RangeVariable",
+    "RegexPatternVariable",
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "RestrictedListSubclassVariable",
@@ -146,6 +151,7 @@ __all__ = [
     "TensorVariable",
     "TorchCtxManagerClassVariable",
     "TorchInGraphFunctionVariable",
+    "TorchVersionVariable",
     "TupleVariable",
     "UnknownVariable",
     "UnspecializedNNModuleVariable",

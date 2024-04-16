@@ -22,8 +22,14 @@ SIDE_EFFECTS: Dict[torch._ops.OpOverload, _EffectType] = {
 }
 
 
-def register_side_effect_op(op: torch._ops.OpOverload) -> None:
-    SIDE_EFFECTS[op] = _EffectType.ORDERED
+def _register_effectful_op(op: torch._ops.OpOverload, effect: _EffectType):
+    assert isinstance(op, torch._ops.OpOverload) and not has_aliasing(op)
+    if op in SIDE_EFFECTS and SIDE_EFFECTS[op] != effect:
+        raise RuntimeError(
+            f"Already registered effect type {SIDE_EFFECTS[op]} to op {op}, "
+            f"trying to register a different effect type {effect}."
+        )
+    SIDE_EFFECTS[op] = effect
 
 
 class WithEffects(HigherOrderOperator):
