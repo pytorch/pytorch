@@ -1291,8 +1291,6 @@ exclude_patterns = [
     'test/quantization/fx/test_numeric_suite_fx.py',
     'test/quantization/fx/test_quantize_fx.py',
     'test/quantization/fx/test_subgraph_rewriter.py',
-    'test/scripts/cuda_memcheck_common.py',
-    'test/scripts/run_cuda_memcheck.py',
     'test/simulate_nccl_errors.py',
     'test/test_ao_sparsity.py',
     'test/test_autocast.py',
