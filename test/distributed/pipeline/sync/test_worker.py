@@ -13,7 +13,7 @@ import torch
 
 from torch.distributed.pipeline.sync.microbatch import Batch
 from torch.distributed.pipeline.sync.stream import CPUStream
-from torch.distributed.pipeline.sync.worker import Task, spawn_workers
+from torch.distributed.pipeline.sync.worker import spawn_workers, Task
 from torch.testing._internal.common_utils import run_tests
 
 
@@ -24,6 +24,7 @@ class fake_device:
 
     type = "fake"
     index = None
+
 
 def test_compute_multithreading():
     """Task.compute should be executed on multiple threads."""

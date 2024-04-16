@@ -10,10 +10,15 @@ from functools import partial
 
 import pytest
 import torch
-from torch import nn
 import torch.cuda
+from torch import nn
 
-from torch.distributed.pipeline.sync.checkpoint import Checkpointing, checkpoint, is_checkpointing, is_recomputing
+from torch.distributed.pipeline.sync.checkpoint import (
+    checkpoint,
+    Checkpointing,
+    is_checkpointing,
+    is_recomputing,
+)
 from torch.distributed.pipeline.sync.dependency import fork, join
 from torch.distributed.pipeline.sync.microbatch import Batch
 from torch.testing._internal.common_utils import run_tests
@@ -63,7 +68,14 @@ def test_serial_checkpoints(device):
     #                        +--> {b} --Checkpoint(Log)--> {b} --First--> {b}
     out.backward()
 
-    assert timeline == ["a:forward", "b:forward", "b:forward", "b:backward", "a:forward", "a:backward"]
+    assert timeline == [
+        "a:forward",
+        "b:forward",
+        "b:forward",
+        "b:backward",
+        "a:forward",
+        "a:backward",
+    ]
     #    |----------------------|  |-----------------------|  |-----------------------|
     #          forward pass            Checkpoint(Log[b])         Checkpoint(Log[a])
 
