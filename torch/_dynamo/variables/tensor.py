@@ -1,33 +1,20 @@
 # mypy: ignore-errors
 
 import functools
-
 import inspect
+import logging
 import operator
+import textwrap
 import types
 from typing import Dict, List
-
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-
-from ..bytecode_transformation import create_call_method
-from ..current_scope_id import current_scope_id
-from ..external_utils import call_hook_from_backward_state
-
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
 
 import sympy
 
 import torch._numpy as tnp
-
 import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
 from torch._subclasses.meta_utils import is_sparse_any
-
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
     GuardOnDataDependentSymNode,
@@ -35,11 +22,13 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SymTypes,
 )
-
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
-
+from ..bytecode_transformation import create_call_method
+from ..current_scope_id import current_scope_id
 from ..exc import unimplemented, UserError, UserErrorType
+from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import (
@@ -56,6 +45,13 @@ from ..utils import (
 from .base import _is_top_level_scope, VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
+log = logging.getLogger(__name__)
 
 # Ops that allow tensor <op> tensor
 supported_tensor_comparison_ops = {
@@ -321,9 +317,8 @@ class TensorVariable(VariableTracker):
     def var_getattr(self, tx, name):
         from . import UserDefinedClassVariable
 
-        if tx.strict_checks_enabled:
-            if name in self._strict_mode_banned_ops():
-                unimplemented(f"Illegal getattr invocation {name} in strict mode")
+        if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
+            unimplemented(f"Illegal getattr invocation {name} in strict mode")
 
         if name == "__class__":
             return UserDefinedClassVariable(self.python_type())
@@ -435,9 +430,8 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if tx.strict_checks_enabled:
-            if name in self._strict_mode_banned_ops():
-                unimplemented(f"Illegal method invocation {name} in strict mode")
+        if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
+            unimplemented(f"Illegal method invocation {name} in strict mode")
 
         """
         Dispatch to a method-specific handler defined below.  If the
@@ -683,7 +677,23 @@ class TensorVariable(VariableTracker):
 
     def method_item(self, *args, **kwargs):
         if not config.capture_scalar_outputs:
+            self._warn_capture_scalar_outputs()
             unimplemented("Tensor.item")
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _warn_capture_scalar_outputs():
+        log.warning(
+            textwrap.dedent(
+                """\
+                    Graph break from `Tensor.item()`, consider setting:
+                        torch._dynamo.config.capture_scalar_outputs = True
+                    or:
+                        env TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
+                    to include these operations in the captured graph.
+                """
+            )
+        )
 
     def method___len__(self):
         from ..symbolic_convert import InstructionTranslator
