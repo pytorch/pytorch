@@ -273,24 +273,24 @@ class TestMaxAutotune(TestCase):
 
         with config.patch(
             {
-                "use_autotune_local_cache": False,
-                "use_autotune_remote_cache": True,
+                "autotune_local_cache": False,
+                "autotune_remote_cache": True,
             }
         ), patch.dict(os.environ), patch(cache_module, MyCache, create=True):
             os.environ.pop("TRITON_CACHE_MANAGER", None)
             with config.patch({"max_autotune": True}):
                 for _ in range(4):
-                    torch.compile(mm, dynamic=dynamic)(a, b)
+                    with fresh_inductor_cache():
+                        torch.compile(mm, dynamic=dynamic)(a, b)
                     reset()
-                    torch._inductor.codecache.PyCodeCache.clear()
                 self.assertEqual(num_get, 3)
                 self.assertEqual(num_put, 1)
             num_get = 0
             num_put = 0
             for _ in range(4):
-                torch.compile(f, dynamic=dynamic)(x, y)
+                with fresh_inductor_cache():
+                    torch.compile(f, dynamic=dynamic)(x, y)
                 reset()
-                torch._inductor.codecache.PyCodeCache.clear()
             self.assertEqual(num_get, 3)
             self.assertEqual(num_put, 1)
 
