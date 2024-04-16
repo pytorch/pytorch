@@ -153,35 +153,42 @@ def preserve_global_state(fn):
     def _fn(*args, **kwargs):
         guards = GlobalStateGuard()
         prior_grad_mode = torch.is_grad_enabled()
-        prior_inference_mode = torch.is_inference_mode_enabled()
-        prior_deterministic = torch.are_deterministic_algorithms_enabled()
-        prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
-        py_rng_state = random.getstate()
-        torch_rng_state = torch.random.get_rng_state()
-        if torch.cuda.is_available():
-            cuda_rng_state = torch.cuda.get_rng_state()
-        allow_tf32 = torch._C._get_cublas_allow_tf32()
-        prior_fwd_from_src = torch.fx.graph_module._forward_from_src
-        torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
-        cleanup = setup_compile_debug()
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            cleanup.close()
-            torch._C._set_grad_enabled(prior_grad_mode)
-            torch.torch.autograd.grad_mode._enter_inference_mode(prior_inference_mode)
-            torch.use_deterministic_algorithms(
-                prior_deterministic, warn_only=prior_warn_only
-            )
-            random.setstate(py_rng_state)
-            torch.random.set_rng_state(torch_rng_state)
+        # Just in case we get left in a bad dispatch state we want to restore
+        # it. This can happen because the dispatch bits aren't a true
+        # stack/counter - so we can't just increment/decrement them as we enter
+        # and leave.
+        with torch._C._PreserveDispatchKeyGuard():
+            prior_inference_mode = torch.is_inference_mode_enabled()
+            prior_deterministic = torch.are_deterministic_algorithms_enabled()
+            prior_warn_only = torch.is_deterministic_algorithms_warn_only_enabled()
+            py_rng_state = random.getstate()
+            torch_rng_state = torch.random.get_rng_state()
             if torch.cuda.is_available():
-                torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
-            torch._C._set_cublas_allow_tf32(allow_tf32)
-            torch.fx.graph_module._forward_from_src = prior_fwd_from_src
-            assert (
-                guards.check()
-            ), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
+                cuda_rng_state = torch.cuda.get_rng_state()
+            allow_tf32 = torch._C._get_cublas_allow_tf32()
+            prior_fwd_from_src = torch.fx.graph_module._forward_from_src
+            torch.fx.graph_module._forward_from_src = fx_forward_from_src_skip_result
+            cleanup = setup_compile_debug()
+            try:
+                return fn(*args, **kwargs)
+            finally:
+                cleanup.close()
+                torch._C._set_grad_enabled(prior_grad_mode)
+                torch.torch.autograd.grad_mode._enter_inference_mode(
+                    prior_inference_mode
+                )
+                torch.use_deterministic_algorithms(
+                    prior_deterministic, warn_only=prior_warn_only
+                )
+                random.setstate(py_rng_state)
+                torch.random.set_rng_state(torch_rng_state)
+                if torch.cuda.is_available():
+                    torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+                torch._C._set_cublas_allow_tf32(allow_tf32)
+                torch.fx.graph_module._forward_from_src = prior_fwd_from_src
+                assert (
+                    guards.check()
+                ), f"Global {guards.reason()}state changed while dynamo tracing, please report a bug"
 
     _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
     return _fn
@@ -540,6 +547,21 @@ def _compile(
         nonlocal dynamo_time_before_restart
         nonlocal restart_reasons
         last_attempt_start_time = start_time = time.time()
+
+        def log_bytecode(prefix, name, filename, line_no, code):
+            if bytecode_log.isEnabledFor(logging.DEBUG):
+                bytecode_log.debug(
+                    format_bytecode(prefix, name, filename, line_no, code)
+                )
+
+        log_bytecode(
+            "ORIGINAL BYTECODE",
+            code.co_name,
+            code.co_filename,
+            code.co_firstlineno,
+            code,
+        )
+
         for attempt in itertools.count():
             CompileContext.get().attempt = attempt
             try:
@@ -569,19 +591,6 @@ def _compile(
                     log.debug("No graph captured with one_graph=True")
                 return None
 
-        def log_bytecode(prefix, name, filename, line_no, code):
-            if bytecode_log.isEnabledFor(logging.DEBUG):
-                bytecode_log.debug(
-                    format_bytecode(prefix, name, filename, line_no, code)
-                )
-
-        log_bytecode(
-            "ORIGINAL BYTECODE",
-            code.co_name,
-            code.co_filename,
-            code.co_firstlineno,
-            code,
-        )
         log_bytecode(
             "MODIFIED BYTECODE",
             code.co_name,
@@ -935,13 +944,12 @@ def catch_errors_wrapper(callback, hooks: Hooks):
                         else "dynamo tracing is disabled"
                     )
                 )
-                if not is_skipfile or config.verbose:
-                    log.debug(
-                        "skipping: %s (reason: %s, file: %s)",
-                        frame.f_code.co_name,
-                        skip_reason,
-                        frame.f_code.co_filename,
-                    )
+                log.debug(
+                    "skipping: %s (reason: %s, file: %s)",
+                    frame.f_code.co_name,
+                    skip_reason,
+                    frame.f_code.co_filename,
+                )
             return None
         if frame.f_code.co_filename == "<string>" and frame.f_code.co_name == "__new__":
             # nametuple constructor

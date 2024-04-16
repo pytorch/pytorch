@@ -9,12 +9,15 @@ from torch.testing._internal.common_utils import skipIfTorchDynamo
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import JitTestCase, warmup_backward, FileCheck
+from torch.testing._internal.jit_utils import FileCheck, JitTestCase, warmup_backward
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
+
 
 @skipIfTorchDynamo()
 class TestProfiler(JitTestCase):
@@ -58,8 +61,9 @@ class TestProfiler(JitTestCase):
 
         # item & add should not get pulled into the fusion group -
         # we expect to see Fusion Group (item / add) Fusion Group in ir dump
-        FileCheck().check("TensorExpr").check("Scalar = aten::item").check_next("Tensor = aten::add").check("TensorExpr").run(g)
-
+        FileCheck().check("TensorExpr").check("Scalar = aten::item").check_next(
+            "Tensor = aten::add"
+        ).check("TensorExpr").run(g)
 
         @torch.jit.script
         def non_const_dtype(x, y, cond: bool):
@@ -70,7 +74,9 @@ class TestProfiler(JitTestCase):
         non_const_dtype(x, x, True)
         g = torch.jit.last_executed_optimized_graph()
         # because dtype is non-const, sum should not get pulled into the Fusion Group
-        FileCheck().check("TensorExpr").check("TensorExpr").check_not("aten::sum").run(g)
+        FileCheck().check("TensorExpr").check("TensorExpr").check_not("aten::sum").run(
+            g
+        )
 
     def test_specialize_backward(self):
         def test_fuse(a, b):
@@ -118,13 +124,15 @@ class TestProfiler(JitTestCase):
             d = c * b
             return d
 
-        x = torch.tensor([.5])
+        x = torch.tensor([0.5])
         for _ in range(3):
             test_fuse(x, x)
 
         g = torch.jit.last_executed_optimized_graph()
         # Types should remain specialized for typecheck outputs & fusion outputs
-        FileCheck().check("Double(").check_same("prim::TypeCheck").check_same("\n").check("Double").check_same("TensorExpr").run(g)
+        FileCheck().check("Double(").check_same("prim::TypeCheck").check_same(
+            "\n"
+        ).check("Double").check_same("TensorExpr").run(g)
 
         # other outputs should not be specialized
         FileCheck().check("Tensor = prim::If").run(g)
@@ -201,7 +209,9 @@ class TestProfiler(JitTestCase):
         foo(x, y)
         foo(x, y)
         g = torch.jit.last_executed_optimized_graph()
-        FileCheck().check("CallFunction").check_next("Tensor = prim::TupleUnpack").run(g)
+        FileCheck().check("CallFunction").check_next("Tensor = prim::TupleUnpack").run(
+            g
+        )
 
     def test_autograd_fallback_graph(self):
         @torch.jit.script
