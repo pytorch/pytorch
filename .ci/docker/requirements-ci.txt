@@ -85,10 +85,10 @@ librosa>=0.6.2 ; python_version < "3.11"
 #Pinned versions:
 #test that import:
 
-mypy==1.8.0
+mypy==1.9.0
 # Pin MyPy version because new errors are likely to appear with each release
 #Description: linter
-#Pinned versions: 1.8.0
+#Pinned versions: 1.9.0
 #test that import: test_typing.py, test_type_hints.py
 
 networkx==2.8.8
@@ -134,9 +134,9 @@ opt-einsum==3.3
 #Pinned versions: 3.3
 #test that import: test_linalg.py
 
-optree==0.9.1
+optree==0.11.0
 #Description: A library for tree manipulation
-#Pinned versions: 0.9.1
+#Pinned versions: 0.11.0
 #test that import: test_vmap.py, test_aotdispatch.py, test_dynamic_shapes.py,
 #test_pytree.py, test_ops.py, test_control_flow.py, test_modules.py,
 #common_utils.py, test_eager_transforms.py, test_python_dispatch.py,
@@ -231,6 +231,7 @@ scikit-image==0.20.0 ; python_version >= "3.10"
 scipy==1.6.3 ; python_version < "3.10"
 scipy==1.8.1 ; python_version == "3.10"
 scipy==1.10.1 ; python_version == "3.11"
+scipy==1.12.0 ; python_version == "3.12"
 # Pin SciPy because of failing distribution tests (see #60347)
 #Description: scientific python
 #Pinned versions: 1.6.3
