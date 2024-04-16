@@ -3531,7 +3531,7 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
     torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
     torch._check(
-        x.dtype in [torch.float16, torch.bfloat16],,
+        x.dtype in [torch.float16, torch.bfloat16],
         lambda: f"expected x to be f16/bf16, got {x.dtype}",
     )
     torch._check(
