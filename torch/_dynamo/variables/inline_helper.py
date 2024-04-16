@@ -20,10 +20,10 @@ def should_decomp_for_pre_dispatch():
 
 
 @contextlib.contextmanager
-def decomp_for_pre_dispatch():
+def decomp_for_pre_dispatch(enabled=True):
     global should_decomp_for_pre_dispatch_
     prior = should_decomp_for_pre_dispatch_
-    should_decomp_for_pre_dispatch_ = True
+    should_decomp_for_pre_dispatch_ = enabled
     try:
         yield
     finally:

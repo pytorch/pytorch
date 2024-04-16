@@ -42,27 +42,50 @@ class TestSourceMatcher(JitTestCase):
         )
 
         self.assertEqual(len(module_partitions), 2)
-        self.assertEqual(len(module_partitions[torch.nn.Linear]), 3)
+        self.assertEqual(
+            len(module_partitions[torch.nn.Linear]),
+            6 if torch._dynamo.config.use_single_step_graph else 3,
+        )
         self.assertEqual(len(module_partitions[torch.nn.ReLU]), 1)
 
-        self.assertFalse(
-            check_subgraphs_connected(
-                module_partitions[torch.nn.Linear][0],
-                module_partitions[torch.nn.ReLU][0],
+        if torch._dynamo.config.use_single_step_graph:
+            self.assertFalse(
+                check_subgraphs_connected(
+                    module_partitions[torch.nn.Linear][1],
+                    module_partitions[torch.nn.ReLU][0],
+                )
             )
-        )
-        self.assertTrue(
-            check_subgraphs_connected(
-                module_partitions[torch.nn.Linear][1],
-                module_partitions[torch.nn.ReLU][0],
+            self.assertTrue(
+                check_subgraphs_connected(
+                    module_partitions[torch.nn.Linear][3],
+                    module_partitions[torch.nn.ReLU][0],
+                )
             )
-        )
-        self.assertFalse(
-            check_subgraphs_connected(
-                module_partitions[torch.nn.Linear][2],
-                module_partitions[torch.nn.ReLU][0],
+            self.assertFalse(
+                check_subgraphs_connected(
+                    module_partitions[torch.nn.Linear][5],
+                    module_partitions[torch.nn.ReLU][0],
+                )
             )
-        )
+        else:
+            self.assertFalse(
+                check_subgraphs_connected(
+                    module_partitions[torch.nn.Linear][0],
+                    module_partitions[torch.nn.ReLU][0],
+                )
+            )
+            self.assertTrue(
+                check_subgraphs_connected(
+                    module_partitions[torch.nn.Linear][1],
+                    module_partitions[torch.nn.ReLU][0],
+                )
+            )
+            self.assertFalse(
+                check_subgraphs_connected(
+                    module_partitions[torch.nn.Linear][2],
+                    module_partitions[torch.nn.ReLU][0],
+                )
+            )
 
     @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
     def test_module_partitioner_conv_relu_maxpool(self):

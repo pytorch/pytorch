@@ -418,13 +418,12 @@ class TestExport(TestCase):
         ep1 = export(M1(), (torch.randn(3, 3), ))
         if torch._dynamo.config.use_single_step_graph and 'mocked_non_strict_export' not in str(export):
             expected_result = [
-                ('linear.default_1', 'OpOverload.linear.default'),
-                ('linear.default_1', 'OpOverload.linear.default'),
-                ('linear.default_2', 'OpOverload.linear.default'),
-                ('linear.default_2', 'OpOverload.linear.default'),
+                ('t.default_1', 'OpOverload.t.default'),
+                ('addmm.default_1', 'OpOverload.addmm.default'),
+                ('t.default_2', 'OpOverload.t.default'),
+                ('addmm.default_2', 'OpOverload.addmm.default'),
                 ('relu.default_1', 'OpOverload.relu.default'),
-                ('add_1', 'method_descriptor.add')
-                ]
+                ('add_1', 'method_descriptor.add')]
         else:
             expected_result = [
                 ("linear_1", "builtin_function_or_method.linear"),
