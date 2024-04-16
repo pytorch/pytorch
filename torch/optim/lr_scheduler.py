@@ -1769,7 +1769,7 @@ class OneCycleLR(LRScheduler):
                 raise ValueError(f"Unknown _anneal_func_type: {self._anneal_func_type}")
         else:
             # For BC
-            self.anneal_func(*args, **kwargs)
+            return self.anneal_func(*args, **kwargs)
 
     @staticmethod
     def _annealing_cos(start, end, pct):
