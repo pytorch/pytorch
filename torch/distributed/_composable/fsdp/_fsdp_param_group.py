@@ -244,7 +244,7 @@ class FSDPParamGroup:
             self._all_gather_result, self.fsdp_params, self._all_gather_process_group
         )
         for fsdp_param in self.fsdp_params:
-            fsdp_param.init_unsharded_param()  # no-op after 1st call
+            fsdp_param.init_unsharded_param()
         self._to_unsharded()
         all_gather_copy_out_event = torch.cuda.Event()
         all_gather_copy_out_event.record()
@@ -342,7 +342,6 @@ class FSDPParamGroup:
         if self._post_reduce_view_out_event is not None:
             torch.cuda.current_stream().wait_event(self._post_reduce_view_out_event)
             self._post_reduce_view_out_event = None
-        self._training_state = TrainingState.IDLE
         self._post_forward_indices.clear()
         self.all_forward_output_grad_fns.clear()
 

@@ -633,7 +633,6 @@ def get_device_type_test_bases():
         test_bases.append(CPUTestBase)
         if torch.cuda.is_available():
             test_bases.append(CUDATestBase)
-
         device_type = torch._C._get_privateuse1_backend_name()
         device_mod = getattr(torch, device_type, None)
         if hasattr(device_mod, "is_available") and device_mod.is_available():
@@ -694,12 +693,12 @@ PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY = 'PYTORCH_TESTING_DEVICE_EXCEPT_FOR'
 PYTORCH_TESTING_DEVICE_FOR_CUSTOM_KEY = 'PYTORCH_TESTING_DEVICE_FOR_CUSTOM'
 
 
-def get_desired_device_type_test_bases(except_for=None, only_for=None, include_lazy=False, allow_mps=False, allow_xpu=False):
+def get_desired_device_type_test_bases(except_for=None, only_for=None, include_lazy=False, allow_mps=False):
     # allow callers to specifically opt tests into being tested on MPS, similar to `include_lazy`
     test_bases = device_type_test_bases.copy()
     if allow_mps and TEST_MPS and MPSTestBase not in test_bases:
         test_bases.append(MPSTestBase)
-    if allow_xpu and TEST_XPU and XPUTestBase not in test_bases:
+    if only_for == 'xpu' and TEST_XPU and XPUTestBase not in test_bases:
         test_bases.append(XPUTestBase)
     # Filter out the device types based on user inputs
     desired_device_type_test_bases = filter_desired_device_types(test_bases, except_for, only_for)
@@ -744,9 +743,7 @@ def get_desired_device_type_test_bases(except_for=None, only_for=None, include_l
 # device-specific tests (NB: this supports additional @parametrize usage).
 #
 # See note "Writing Test Templates"
-# TODO: remove "allow_xpu" option after Interl GPU support all test case instantiate by this function.
-def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False,
-                                  allow_mps=False, allow_xpu=False):
+def instantiate_device_type_tests(generic_test_class, scope, except_for=None, only_for=None, include_lazy=False, allow_mps=False):
     # Removes the generic test class from its enclosing scope so its tests
     # are not discoverable.
     del scope[generic_test_class.__name__]
@@ -766,7 +763,7 @@ def instantiate_device_type_tests(generic_test_class, scope, except_for=None, on
     generic_tests = [x for x in generic_members if x.startswith('test')]
 
     # Creates device-specific test cases
-    for base in get_desired_device_type_test_bases(except_for, only_for, include_lazy, allow_mps, allow_xpu):
+    for base in get_desired_device_type_test_bases(except_for, only_for, include_lazy, allow_mps):
         class_name = generic_test_class.__name__ + base.device_type.upper()
 
         # type set to Any and suppressed due to unsupport runtime class:
@@ -1141,12 +1138,7 @@ class expectedFailure:
 
         @wraps(fn)
         def efail_fn(slf, *args, **kwargs):
-            if not hasattr(slf, "device_type") and hasattr(slf, "device") and isinstance(slf.device, str):
-                target_device_type = slf.device
-            else:
-                target_device_type = slf.device_type
-
-            if self.device_type is None or self.device_type == target_device_type:
+            if self.device_type is None or self.device_type == slf.device_type:
                 try:
                     fn(slf, *args, **kwargs)
                 except Exception:
@@ -1393,9 +1385,6 @@ def expectedFailureCPU(fn):
 
 def expectedFailureCUDA(fn):
     return expectedFailure('cuda')(fn)
-
-def expectedFailureXPU(fn):
-    return expectedFailure('xpu')(fn)
 
 def expectedFailureMeta(fn):
     return skipIfTorchDynamo()(expectedFailure('meta')(fn))
