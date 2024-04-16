@@ -93,6 +93,7 @@ from .variables.builder import (
     VariableBuilder,
     wrap_fx_proxy,
 )
+from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -1001,6 +1002,14 @@ class OutputGraph:
             # while running test_subgraphs.py
             if isinstance(v.source, LocalSource) and v.source.local_name == k:
                 continue  # no need to restore initial state
+            # Do not load variable if it is NULL.
+            if sys.version_info >= (3, 12):
+                # Continuation function will load the NULL for v.
+                if type.__instancecheck__(NullVariable, v):
+                    continue
+            else:
+                # A variable should never be NULL in < 3.12
+                assert not type.__instancecheck__(NullVariable, v)
             if v not in val_to_names:
                 val_to_names[v] = list()
             val_to_names[v].append(k)
@@ -1262,6 +1271,30 @@ class OutputGraph:
 
         with self.restore_global_state():
             compiled_fn = self.call_user_compiler(gm)
+
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        if isinstance(compiled_fn, _LazyGraphModule) or (
+            isinstance(getattr(compiled_fn, "__self__", None), _LazyGraphModule)
+            and compiled_fn.__name__ == "_lazy_forward"
+        ):
+            # Since dynamo will run the forward method for the GraphModule shortly
+            # anyways, it does not hurt to do the real recompilation here if
+            # this is a _LazyGraphModule. This makes it easier for dynamo to
+            # optimize a _LazyGraphModule.
+
+            lazy_gm = (
+                compiled_fn
+                if isinstance(compiled_fn, _LazyGraphModule)
+                else compiled_fn.__self__
+            )
+
+            _LazyGraphModule.force_recompile(lazy_gm)
+
+            if not isinstance(compiled_fn, _LazyGraphModule):
+                # replace compiled_fn with the real forward method
+                compiled_fn = lazy_gm.forward
+
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
