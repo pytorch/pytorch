@@ -51,11 +51,12 @@ from .exc import (
 )
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
-from .side_effects import SideEffects
+from .side_effects import AttributeMutationExisting, SideEffects
 from .source import (
     AttrSource,
     BackwardStateSource,
     ConstantSource,
+    GetItemSource,
     GlobalStateSource,
     is_constant_source,
     is_from_local_source,
@@ -74,6 +75,7 @@ from .utils import (
     counters,
     dynamo_timed,
     get_instruction_source_311,
+    get_locals_to_steal,
     get_static_address_type,
     graph_break_reasons,
     increment_op_count,
@@ -393,6 +395,29 @@ class OutputGraph:
         self.backward_state: Dict[str, VariableTracker] = {}
         self.backward_state_proxy: Optional[torch.fx.Proxy] = None
         self.backward_state_var: Optional[str] = None
+
+        self.name_of_builtins_dict_key_in_fglobals: str = (
+            self.install_builtins_dict_in_fglobals()
+        )
+
+    def install_builtins_dict_in_fglobals(self):
+        # f_globals["__builtins__"] can be a dict or a module. This is an
+        # implemenation detail -
+        # https://docs.python.org/3/library/builtins.html.
+
+        # This makes guarding on any builtin messy because the guard check_fn
+        # has to check if the __builtins__ is a module or dict, and then access
+        # by either using getattr or getitem respectively.
+
+        # To solve this problem, we insert a new entry in f_globals which points
+        # to the builtins __dict__ and then we guard any builtin on this dict.
+        # To avoid any collision with the pre-existing keys, we use the
+        # install_global to give us a unique dict key.
+
+        f_builtins = self.global_scope["__builtins__"]
+        if not isinstance(f_builtins, dict):
+            f_builtins = f_builtins.__dict__
+        return self.install_global("__builtins_dict__", f_builtins)
 
     def add_backward_state_hook(self, hook: VariableTracker, prefix="hook"):
         name = f"{prefix}{len(self.backward_state)}"
@@ -827,6 +852,69 @@ class OutputGraph:
 
         raise AssertionError("unreachable")
 
+    def get_attr_mutations_on_stolen_lists(
+        self,
+    ) -> Dict[str, List[AttributeMutationExisting]]:
+        attr_mutations_on_stolen_lists: Dict[str, List[AttributeMutationExisting]] = {}
+        maybe_gm = self.local_scope.get("self")
+        stolen_list_names = get_locals_to_steal(maybe_gm)
+        for attr_mutation in self.side_effects.store_attr_mutations.keys():
+            if (
+                not isinstance(attr_mutation, AttributeMutationExisting)
+                or not isinstance(attr_mutation.source, GetItemSource)
+                or not isinstance(attr_mutation.source.base, LocalSource)
+            ):
+                continue
+
+            list_name = attr_mutation.source.base.local_name
+            if list_name not in stolen_list_names:
+                continue
+
+            # mutation is of type `stolen_list[i].attr_name`, so we need to keep stolen_list[i] alive
+            if list_name not in attr_mutations_on_stolen_lists:
+                attr_mutations_on_stolen_lists[list_name] = []
+            attr_mutations_on_stolen_lists[list_name].append(attr_mutation)
+        return attr_mutations_on_stolen_lists
+
+    def handle_mutations_on_stolen_list_inputs(self):
+        # When mutations happen on inputs list elements, those elements must be kept alive after the function call.
+        # If the input list is stolen, we perform the mutation on aliases.
+        alias_insts = []
+        attr_mutations_on_stolen_lists = self.get_attr_mutations_on_stolen_lists()
+        for arg in self.graphargs:
+            if not (
+                isinstance(arg._example, list)
+                and isinstance(arg.source, LocalSource)
+                and arg.source.local_name in attr_mutations_on_stolen_lists
+            ):
+                continue
+
+            # arg is a list that will be cleared by the compiled function
+            list_name = arg.source.local_name
+            assert list_name in self.code_options["co_varnames"]
+            for mutation in attr_mutations_on_stolen_lists[list_name]:
+                assert mutation.source is not None
+                assert isinstance(mutation.source, GetItemSource)
+                list_idx = mutation.source.index
+                alias_name = self.new_var(
+                    f"{list_name}_ref"
+                )  # self.new_var already adds unique id suffix
+
+                # bytecode of `alias_name = list_name[list_idx]`
+                alias_insts.extend(
+                    [
+                        create_instruction("LOAD_FAST", argval=list_name),
+                        create_instruction("LOAD_CONST", argval=list_idx),
+                        create_instruction("BINARY_SUBSCR"),
+                        create_instruction("STORE_FAST", argval=alias_name),
+                    ]
+                )
+
+                # perform mutation on alias, handled by suffix codegen
+                mutation.source = LocalSource(alias_name)
+
+        return alias_insts
+
     def compile_subgraph(
         self, tx, partial_convert=False, reason: Optional[GraphCompileReason] = None
     ):
@@ -867,6 +955,7 @@ class OutputGraph:
             self.pregraph_bytecode and self.export
         ), "export does not support pregraph_bytecode"
         prefix_insts.extend(self.pregraph_bytecode)
+        prefix_insts.extend(self.handle_mutations_on_stolen_list_inputs())
 
         def append_prefix_insts():
             self.add_output_instructions(prefix_insts)
