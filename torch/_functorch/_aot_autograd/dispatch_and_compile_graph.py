@@ -127,6 +127,9 @@ def aot_dispatch_base_graph(
             _map_assigned_buffer_to_proxy
         )
 
+    saved_updated_flat_args_subclasses_desugared = [
+        t.detach() if isinstance(t, torch.Tensor) else t for t in updated_flat_args_subclasses_desugared
+    ]
     fw_module = _create_graph(
         fn_to_trace,
         updated_flat_args_subclasses_desugared,
@@ -192,7 +195,7 @@ def aot_dispatch_base_graph(
             maybe_subclass_meta is None
         ), "aot_export_module does not support tensor subclass inputs for now."
         return fw_module
-    return fw_module, list(updated_flat_args_subclasses_desugared), maybe_subclass_meta
+    return fw_module, saved_updated_flat_args_subclasses_desugared, maybe_subclass_meta
 
 
 # Has the precondition that there
