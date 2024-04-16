@@ -321,6 +321,7 @@ cc_library(
 )
 
 ATEN_COPTS = COMMON_COPTS + [
+    "-DCAFFE2_BUILD_MAIN_LIBS",
     "-DHAVE_AVX_CPU_DEFINITION",
     "-DHAVE_AVX2_CPU_DEFINITION",
     "-fvisibility-inlines-hidden",
@@ -366,6 +367,7 @@ cc_library(
     deps = [
         ":ATen_CPU",
         ":aten_headers",
+        ":caffe2_for_aten_headers",
         ":torch_headers",
         "@fbgemm",
         "@ideep",
@@ -466,6 +468,21 @@ filegroup(
 
 
 filegroup(
+    name = "caffe2_perfkernels_srcs",
+    srcs = [
+        "caffe2/perfkernels/adagrad.cc",
+        "caffe2/perfkernels/embedding_lookup.cc",
+        "caffe2/perfkernels/embedding_lookup_idx.cc",
+        "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup.cc",
+        "caffe2/perfkernels/fused_8bit_rowwise_embedding_lookup_idx.cc",
+        "caffe2/perfkernels/fused_nbit_rowwise_conversion.cc",
+        "caffe2/perfkernels/lstm_unit_cpu_common.cc",
+        "caffe2/perfkernels/math_cpu_base.cc",
+        "caffe2/perfkernels/typed_axpy.cc",
+    ],
+)
+
+filegroup(
     name = "caffe2_serialize_srcs",
     srcs = [
         "caffe2/serialize/file_adapter.cc",
@@ -488,6 +505,100 @@ filegroup(
         "caffe2/utils/threadpool/pthreadpool.cc",
         "caffe2/utils/threadpool/pthreadpool_impl.cc",
         "caffe2/utils/threadpool/thread_pool_guard.cpp",
+    ],
+)
+
+# To achieve finer granularity and make debug easier, caffe2 is split into three libraries:
+# ATen, caffe2 and caffe2_for_aten_headers. ATen lib group up source codes under
+# aten/ directory and caffe2 contains most files under `caffe2/` directory. Since the
+# ATen lib and the caffe2 lib would depend on each other, `caffe2_for_aten_headers` is splitted
+# out from `caffe2` to avoid dependency cycle.
+cc_library(
+    name = "caffe2_for_aten_headers",
+    hdrs = [
+        "caffe2/core/common.h",
+        "caffe2/core/logging.h",
+        "caffe2/core/types.h",
+        "caffe2/perfkernels/common.h",
+        "caffe2/perfkernels/embedding_lookup.h",
+        "caffe2/perfkernels/embedding_lookup_idx.h",
+        "caffe2/utils/cpuid.h",
+        "caffe2/utils/fixed_divisor.h",
+    ] + glob([
+        "caffe2/utils/threadpool/*.h",
+    ]),
+    copts = CAFFE2_COPTS,
+    visibility = ["//visibility:public"],
+    deps = [
+        ":caffe2_core_macros",
+        "//c10",
+        "//caffe2/proto:caffe2_pb",
+    ],
+)
+
+py_binary(
+    name = "gen_op",
+    srcs = ["caffe2/contrib/aten/gen_op.py"],
+    deps = ["//torchgen"],
+)
+
+genrule(
+    name = "generated_caffe2_aten_op_headers",
+    srcs = [
+        "caffe2/contrib/aten/aten_op_template.h",
+        "aten/src/ATen/Declarations.yaml",
+    ],
+    outs = ["caffe2/caffe2/contrib/aten/gen_aten_op.h"],
+    cmd = """
+    $(location :gen_op) \
+        --output_prefix gen_ \
+        --install_dir $(@D) \
+        --aten_root `dirname $(location aten/src/ATen/Declarations.yaml)`/../.. \
+        --template_dir `dirname $(location caffe2/contrib/aten/aten_op_template.h)` \
+        --yaml_dir `dirname $(location aten/src/ATen/Declarations.yaml)`""",
+    tools = [":gen_op"],
+)
+
+cc_library(
+    name = "caffe2_headers",
+    hdrs = glob(
+        [
+            "caffe2/contrib/aten/*.h",
+            "caffe2/contrib/gloo/*.h",
+            "caffe2/core/*.h",
+            "caffe2/core/nomnigraph/include/nomnigraph/Converters/*.h",
+            "caffe2/core/nomnigraph/include/nomnigraph/Generated/*.h",
+            "caffe2/core/nomnigraph/include/nomnigraph/Graph/*.h",
+            "caffe2/core/nomnigraph/include/nomnigraph/Representations/*.h",
+            "caffe2/core/nomnigraph/include/nomnigraph/Support/*.h",
+            "caffe2/core/nomnigraph/include/nomnigraph/Transformations/*.h",
+            "caffe2/core/nomnigraph/tests/*.h",
+            "caffe2/db/*.h",
+            "caffe2/onnx/*.h",
+            "caffe2/perfkernels/*.h",
+            "caffe2/serialize/*.h",
+            "caffe2/utils/*.h",
+            "caffe2/utils/math/*.h",
+            "caffe2/utils/threadpool/*.h",
+            "modules/**/*.h",
+        ],
+        exclude = [
+            "caffe2/core/macros.h",
+        ],
+    ) + if_cuda(glob([
+        "caffe2/**/*.cuh",
+        "caffe2/image/*.h",
+    ])) + [":generated_caffe2_aten_op_headers"],
+    copts = CAFFE2_COPTS,
+    includes = [
+        "caffe2/core/nomnigraph/include",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":caffe2_core_macros",
+        ":caffe2_for_aten_headers",
+        "//caffe2/proto:caffe2_pb",
+        "//caffe2/proto:cc_proto",
     ],
 )
 
@@ -514,6 +625,64 @@ PERF_HEADERS = glob([
     "caffe2/perfkernels/*.h",
     "caffe2/core/*.h",
 ])
+
+cc_library(
+    name = "caffe2_perfkernels_avx",
+    srcs = glob([
+        "caffe2/perfkernels/*_avx.cc",
+    ]),
+    hdrs = PERF_HEADERS,
+    copts = PERF_COPTS + [
+        "-mavx",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":caffe2_headers",
+        "//c10",
+    ],
+    alwayslink = True,
+)
+
+cc_library(
+    name = "caffe2_perfkernels_avx2",
+    srcs = glob([
+        "caffe2/perfkernels/*_avx2.cc",
+    ]),
+    hdrs = PERF_HEADERS,
+    copts = PERF_COPTS + [
+        "-mavx2",
+        "-mfma",
+        "-mavx",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":caffe2_headers",
+        "//c10",
+    ],
+    alwayslink = True,
+)
+
+cc_library(
+    name = "caffe2_perfkernels_avx512",
+    srcs = [
+        "caffe2/perfkernels/common_avx512.cc",
+    ],
+    hdrs = PERF_HEADERS,
+    copts = PERF_COPTS + [
+        "-mavx512f",
+        "-mavx512dq",
+        "-mavx512vl",
+        "-mavx2",
+        "-mfma",
+        "-mavx",
+    ],
+    visibility = ["//visibility:public"],
+    deps = [
+        ":caffe2_headers",
+        "//c10",
+    ],
+    alwayslink = True,
+)
 
 # torch
 torch_cuda_headers = glob(["torch/csrc/cuda/*.h"])
@@ -544,6 +713,7 @@ cc_library(
     visibility = ["//visibility:public"],
     deps = [
         ":aten_headers",
+        ":caffe2_headers",
         "//c10",
         "@com_github_google_flatbuffers//:flatbuffers",
         "@local_config_python//:python_headers",
@@ -594,6 +764,7 @@ cc_library(
     ],
     visibility = ["//visibility:public"],
     deps = [
+        ":caffe2",
         ":torch_headers",
         "//caffe2/proto:torch_cc_proto",
         "@kineto",
