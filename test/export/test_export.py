@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
+    TEST_TRANSFORMERS,
     TestCase as TorchTestCase,
 )
 from torch.utils._pytree import (
@@ -423,7 +424,7 @@ class TestExport(TestCase):
                 foo, bad_example_inp, dynamic_shapes=dynamic_shapes, strict=False
             )
 
-    def test_state(self):
+    def test_state_tensors(self):
         class M(torch.nn.Module):  # simple with register buffer
             def __init__(self):
                 super().__init__()
@@ -464,7 +465,7 @@ class TestExport(TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "The attribute self.buf was assigned during export",
+            "The tensor attribute self.buf was assigned during export",
         ):
             torch.export.export(M(), (torch.randn(2, 3),), strict=False)
 
@@ -522,9 +523,28 @@ class TestExport(TestCase):
 
         with self.assertRaisesRegex(
             ValueError,
-            "The attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
+            "The tensor attributes self.tensors\\[0\\], self.tensors\\[1\\] were assigned during export",
         ):
             torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+
+    def test_state_primitives(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.x = 1
+                self.y = {"k": 2}
+                self.z = (3,)
+
+            def forward(self, x):
+                self.x = self.x + 4
+                self.y["k"] = self.y["k"] + 5
+                self.z = (self.z[0] + 6,)
+                return x + self.x + self.y["k"] + self.z[0]
+
+        ep = torch.export.export(M(), (torch.randn(2, 3),), strict=False)
+        self.assertTrue(
+            torch.allclose(ep.module()(torch.zeros(2, 3)), torch.ones(2, 3) * 21)
+        )
 
     # Predispatch has different expected results
     @testing.expectedFailureSerDerPreDispatch
@@ -1242,10 +1262,6 @@ class TestExport(TestCase):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    # TODO(pianpwk): resolve in immediate follow-up PR
-    # add name to ConstantArgument schema for SerDer
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerPreDispatch
     def test_export_func_with_default_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b=1):
@@ -4366,6 +4382,21 @@ def forward(self, x):
         ]
         self.assertEqual(expected_getattr_names, real_getattr_names)
 
+    # original input names aren't retraceable:
+    # compilation will succeed, but names won't match forward() signature.
+    @testing.expectedFailureRetraceability
+    def test_constant_input_naming(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, div="floor"):
+                return torch.div(x, y, rounding_mode=div)
+
+        f = Foo()
+        inputs = (torch.randn(4), torch.randn(4), "floor")
+        ep = export(f, inputs)
+        div_spec = ep.graph_signature.input_specs[2]
+        self.assertEqual(div_spec.arg.name, "div")
+        self.assertEqual(div_spec.arg.value, "floor")
+
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
 class TestOneOffModelExportResult(TestCase):
@@ -4590,6 +4621,31 @@ def forward(self, x):
                 logger.debug(x1)
                 x2 = x1 * x1
                 logger.info(1, 2, 3)
+                x3 = x2 + x2
+                return (x1, x3)
+
+        gm = export(M(), (torch.randn(3, 3),)).graph_module
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, x):
+    add = torch.ops.aten.add.Tensor(x, x);  x = None
+    mul = torch.ops.aten.mul.Tensor(add, add)
+    add_1 = torch.ops.aten.add.Tensor(mul, mul);  mul = None
+    return (add, add_1)""",
+        )
+
+    @unittest.skipIf(not TEST_TRANSFORMERS, "No transformers")
+    def test_hf_logging_logger(self):
+        import transformers
+
+        logger = transformers.utils.logging.get_logger(__name__)
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                logger.warning_once("start")
+                x1 = x + x
+                x2 = x1 * x1
                 x3 = x2 + x2
                 return (x1, x3)
 
