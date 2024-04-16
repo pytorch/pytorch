@@ -14,6 +14,7 @@ from typing import List, Optional, Set, Tuple, Union
 import sympy
 
 import torch
+import torch._inductor.inductor_prims
 import torch.fx as fx
 import torch.utils._pytree as pytree
 from torch.fx.experimental._backward_state import BackwardState
@@ -899,7 +900,6 @@ def min_cut_rematerialization_partition(
     ]  # noqa: E501,B950
     view_ops = [aten.squeeze, aten.unsqueeze, aten.alias]
     if compiler == "inductor":
-        inductor_prims = torch._inductor.inductor_prims
         default_recomputable_ops += [
             prims.div,
             prims.convert_element_type,
@@ -933,7 +933,7 @@ def min_cut_rematerialization_partition(
             aten.argmax,
             aten.maximum,
             prims.iota,
-            inductor_prims._low_memory_max_pool2d_offsets_to_indices,
+            prims._low_memory_max_pool2d_offsets_to_indices,
         ]  # noqa: E501,B950
         view_ops += [
             aten.view,

@@ -3485,12 +3485,6 @@ def pooling_size(x, i, kernel_size, stride, padding, ceil_mode):
     return x_out, ceil_mode
 
 
-fallback_max_pool2d_with_indices = fallback_handler(
-    aten.max_pool2d_with_indices.default,
-    add_to_fallback_set=False,
-)
-
-
 def should_fallback_max_pool2d_with_indices(kernel_size, dilation):
     kernel_size = pad_listlike(kernel_size, 2)
     window_size = kernel_size[0] * kernel_size[1]
@@ -3592,20 +3586,6 @@ def _low_memory_max_pool2d_with_offsets(
     return out, offsets
 
 
-@register_lowering(aten.max_pool2d_with_indices, type_promotion_kind=None)
-def max_pool2d_with_indices(
-    x, kernel_size, stride=None, padding=0, dilation=1, ceil_mode=False
-):
-    # assert we are on the fallback path, otherwise we should use the the
-    # prims._low_memory variant
-    kernel_size, stride, padding, dilation, _ = max_pool2d_checks(
-        x, kernel_size, stride, padding, dilation, assert_fallback=True
-    )
-    return fallback_max_pool2d_with_indices(
-        x, kernel_size, stride, padding, dilation, ceil_mode
-    )
-
-
 @register_lowering(
     prims._low_memory_max_pool2d_offsets_to_indices, type_promotion_kind=None
 )
@@ -3639,6 +3619,10 @@ def _low_memory_max_pool2d_offsets_to_indices(
         ranges=offsets.get_size(),
     )
     return indices
+
+
+# Fallback selected when we do not decompose to the low-memory path.
+make_fallback(aten.max_pool2d_with_indices)
 
 
 fallback_max_pool2d_with_indices_backward = fallback_handler(
@@ -4012,7 +3996,7 @@ def adaptive_max_pool2d(x, output_size):
     if h_in % h_out == 0 and w_in % w_out == 0:
         kernel_size = [h_in // h_out, w_in // w_out]
         if should_fallback_max_pool2d_with_indices(kernel_size, dilation=[1, 1]):
-            return max_pool2d_with_indices(x, kernel_size)
+            return max_pool2d_with_indices(x, kernel_size)  # type: ignore[name-defined]   # noqa: F821
         else:
             v, offsets = _low_memory_max_pool2d_with_offsets(
                 x,
