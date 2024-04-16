@@ -4,10 +4,22 @@ import sys
 from itertools import product
 
 import torch
-from torch.distributed._shard import _shard_tensor, sharded_tensor
-from torch.distributed._shard.sharding_spec import EnumerableShardingSpec, ShardMetadata
-from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
+from torch.distributed._shard import (
+    sharded_tensor,
+    _shard_tensor,
+)
+from torch.distributed._shard.sharding_spec import (
+    EnumerableShardingSpec,
+    ShardMetadata,
+)
+from torch.testing._internal.common_distributed import (
+    requires_nccl,
+    skip_if_lt_x_gpu,
+)
+from torch.testing._internal.common_utils import (
+    TEST_WITH_DEV_DBG_ASAN,
+    run_tests,
+)
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
@@ -33,9 +45,7 @@ class TestReshard(ShardedTensorTestBase):
         st.reshard(reshard_spec)
         self.assertEqual(1, len(st.local_shards()))
         self.assertEqual(1, len(st_compare.local_shards()))
-        st_compare._metadata.shards_metadata.sort(
-            key=lambda metadata: metadata.placement.rank()
-        )
+        st_compare._metadata.shards_metadata.sort(key=lambda metadata: metadata.placement.rank())
         self.assertEqual(st._metadata, st_compare._metadata)
         self.assertEqual(st.local_tensor(), st_compare.local_tensor())
         self.assertEqual(
