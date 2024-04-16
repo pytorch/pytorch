@@ -258,6 +258,15 @@ CI_USE_SGD = {
 DO_NOT_CAST_INPUTS = {"stable_diffusion"}
 
 
+# Maps a benchmark model name to a list of status codes. For any listed entry, we'll
+# capture TORCH_COMPILE_DEBUG logs in CI runs and preseve them (i.e., for upload) if
+# the result status matches one listed.
+CI_PRESERVE_COMPILE_DEBUG = {
+    "mnasnet1_0": ["fail_accuracy"],
+    "resnet50":  ["fail_accuracy"],
+}
+
+
 def model_specified_by_path(path_and_class_str):
     return ":" in path_and_class_str
 
@@ -2566,6 +2575,10 @@ class BenchmarkRunner:
                     accuracy_status = "fail_accuracy"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
+        # TESTING: delete me
+        if name in CI_PRESERVE_COMPILE_DEBUG:
+            accuracy_status = "fail_accuracy"
+
         return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
     def check_tolerance(
@@ -2812,6 +2825,19 @@ class BenchmarkRunner:
                 repro_dir,
             )
 
+    def maybe_preserve_compile_debug(self, name, status):
+        if name in CI_PRESERVE_COMPILE_DEBUG and status in CI_PRESERVE_COMPILE_DEBUG[name]:
+            src_dir = torch._dynamo.utils.get_debug_dir()
+            if os.path.isdir(src_dir):
+                dbg_dir = os.path.join(os.getcwd(), "test", "debug", "torch_compile_debug")
+                dst_dir = os.path.join(dbg_dir, os.path.basename(src_dir))
+                try:
+                    os.makedirs(dbg_dir, exist_ok=True)
+                    os.rename(src_dir, dst_dir)
+                    log.warning("Moved %s to %s", src_dir, dst_dir)
+                except OSError:
+                    log.exception("Failed to preserve %s", src_dir)
+
     def run_one_model(
         self,
         name,
@@ -2848,6 +2874,8 @@ class BenchmarkRunner:
             )
             print(status)
         torch.cuda.empty_cache()
+
+        self.maybe_preserve_compile_debug(name, status)
 
         if self.args.timing:
             from torch._dynamo.utils import op_count, print_time_report
@@ -4003,6 +4031,8 @@ def run(runner, args, original_dir=None):
         if original_dir:
             os.chdir(original_dir)
         model_names = list(runner.iter_model_names(args))
+        # TESTING: delete me
+        model_names = ["mnasnet1_0", "resnet50"]
         nmodels = len(model_names)
         for i, name in enumerate(model_names):
             current_name = name
@@ -4013,8 +4043,13 @@ def run(runner, args, original_dir=None):
                 timeout = args.timeout
                 if should_diff_branch(args):
                     timeout *= 2
+                env = os.environ.copy()
+                if args.ci and name in CI_PRESERVE_COMPILE_DEBUG:
+                    env["TORCH_COMPILE_DEBUG"] = "1"
                 subprocess.check_call(
-                    [sys.executable] + sys.argv + [f"--only={name}"], timeout=timeout
+                    [sys.executable] + sys.argv + [f"--only={name}"],
+                    timeout=timeout,
+                    env=env,
                 )
             except subprocess.TimeoutExpired:
                 write_csv_when_exception(args, name, "timeout")
