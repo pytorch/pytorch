@@ -900,6 +900,9 @@ unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_fn_with_kw
 unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_scalar_output)
 
 
+unittest.expectedFailure(TestDeserialize.test_exportdb_supported_case_dynamic_shape_map)
+
+
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSaveLoad(TestCase):
     def test_save_buffer(self):

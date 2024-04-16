@@ -175,9 +175,9 @@ def aot_dispatch_base_graph(
     num_tokens = len(fw_metadata.tokens)
     if num_tokens != 0 and config.unlift_effect_tokens:
         unlift_tokens(fw_module, fw_metadata)
-        saved_updated_flat_args_subclasses_desugared = saved_updated_flat_args_subclasses_desugared[
-            num_tokens:
-        ]
+        saved_updated_flat_args_subclasses_desugared = (
+            saved_updated_flat_args_subclasses_desugared[num_tokens:]
+        )
 
     assert copy_count == copy_count2
 
