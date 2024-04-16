@@ -338,9 +338,6 @@ numpy_default_int = "int64"
 # use numpy's PRNG if True, pytorch otherwise
 use_numpy_random_stream = False
 
-# (WIP)Generate a single graph for forward and backward.
-use_single_step_graph = False
-
 # Use C++ guard manager
 enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "0") == "1"
 
