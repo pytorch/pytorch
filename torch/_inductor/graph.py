@@ -1,4 +1,3 @@
-import bisect
 import itertools
 import logging
 import operator
@@ -80,7 +79,6 @@ log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 
-StorageDataPtr = int
 
 if config.is_fbcode():
     from torch._inductor.fb.utils import log_module_code
@@ -335,76 +333,8 @@ class GraphLowering(torch.fx.Interpreter):
             const_module.allocated_constant_name if const_module is not None else {}
         )
         self.init_backend_registration()
-        self.module_storages_in_benchmark_use: Set[StorageDataPtr] = set()
+
         self.effectful_ops: Dict[_EffectType, ir.Buffer] = {}
-        self.tensors_for_benchmark_use: Dict[
-            torch.device, List[torch.Tensor]
-        ] = self.get_sorted_tensors_for_benchmark_use(gm)
-
-    def get_read_only_parameter_for_benchmarking(
-        self, needed_bytes: int, device: torch.device
-    ) -> Optional[torch.Tensor]:
-        """
-        Generate a tensor that will be read-only from existing parameters.
-
-        Returns None if we do not have a currently unused in benchmarking Tensor large enough.
-
-        XXX: mutating this tensor will cause incorrectness issues.
-        """
-
-        sorted_tensors = self.tensors_for_benchmark_use[device]
-        min_index = bisect.bisect_left(
-            sorted_tensors, needed_bytes, key=lambda x: x.untyped_storage().nbytes()
-        )
-        if min_index == len(sorted_tensors):
-            return None
-
-        while (
-            min_index < len(sorted_tensors)
-            and sorted_tensors[min_index].untyped_storage().data_ptr()
-            in self.module_storages_in_benchmark_use
-        ):
-            min_index += 1
-
-        return sorted_tensors[min_index] if min_index < len(sorted_tensors) else None
-
-    @torch.utils._python_dispatch._disable_current_modes()
-    def get_sorted_tensors_for_benchmark_use(
-        self, gm: torch.fx.GraphModule
-    ) -> Dict[torch.device, List[torch.Tensor]]:
-        seen_dp = set()
-
-        tc = torch._guards.TracingContext.try_get()
-        tc_params: List[torch.Tensor] = [] if tc is None else tc.params_flat  # type: ignore[assignment]
-
-        tensors_by_device = defaultdict(list)
-        for mod_tensor in itertools.chain(tc_params, gm.parameters(), gm.buffers()):
-            mod_tensor = (
-                mod_tensor.data
-                if type(mod_tensor) is torch.nn.Parameter
-                else mod_tensor
-            )
-            if type(mod_tensor) is not torch.Tensor or not torch._C._has_storage(
-                mod_tensor
-            ):
-                continue
-
-            # MM benchmarking can be sensitive to mantissa
-            # Dont take from integer tensors bc they may be denormal
-            if not mod_tensor.is_floating_point():
-                continue
-
-            dp = mod_tensor.untyped_storage().data_ptr()
-            if dp in seen_dp:
-                continue
-
-            tensors_by_device[mod_tensor.device].append(mod_tensor)
-            seen_dp.add(dp)
-
-        for device_tensors in tensors_by_device.values():
-            device_tensors.sort(key=lambda x: x.untyped_storage().nbytes())
-
-        return tensors_by_device
 
     @staticmethod
     def decide_layout_opt(gm, *, is_inference) -> bool:
