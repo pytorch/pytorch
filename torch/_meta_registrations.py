@@ -431,6 +431,66 @@ def meta_sparse_structured_linear(
     return output
 
 
+@register_meta(aten._sparse_semi_structured_mm)
+def meta_sparse_structured_mm(
+    mat1: Tensor,
+    mat1_meta: Tensor,
+    mat2: Tensor,
+    out_dtype: Optional[torch.dtype] = None,
+):
+    assert len(mat1.shape) == 2
+    assert len(mat1_meta.shape) == 2
+    assert len(mat2.shape) == 2
+    assert mat1.size(1) == mat2.size(0) / 2
+    output_sizes = [mat1.size(0), mat2.size(1)]
+
+    if out_dtype is not None:
+        assert (
+            mat2.dtype == torch.int8 and out_dtype == torch.int32
+        ), "out_dtype is only supported for i8i8->i32 linear operator"
+    output = mat2.new_empty(
+        output_sizes,
+        dtype=mat2.dtype if out_dtype is None else out_dtype,
+    )
+
+    return output
+
+
+@register_meta(aten._sparse_semi_structured_addmm)
+def meta_sparse_structured_addmm(
+    input: Tensor,
+    mat1: Tensor,
+    mat1_meta: Tensor,
+    mat2: Tensor,
+    *,
+    alpha=1,
+    beta=1,
+    out_dtype: Optional[torch.dtype] = None,
+):
+    assert (
+        len(input.shape) == 1
+    ), "only input broadcasted to columns of mat1 * mat2 product is supported"
+    assert len(mat1.shape) == 2
+    assert len(mat1_meta.shape) == 2
+    assert len(mat2.shape) == 2
+    assert input.size(0) == mat1.size(
+        0
+    ), "only input broadcasted to columns of mat1 * mat2 product is supported"
+    assert mat1.size(1) == mat2.size(0) / 2
+    output_sizes = [mat1.size(0), mat2.size(1)]
+
+    if out_dtype is not None:
+        assert (
+            mat2.dtype == torch.int8 and out_dtype == torch.int32
+        ), "out_dtype is only supported for i8i8->i32 linear operator"
+    output = mat2.new_empty(
+        output_sizes,
+        dtype=mat2.dtype if out_dtype is None else out_dtype,
+    )
+
+    return output
+
+
 @register_meta(aten._cslt_sparse_mm)
 def meta__cslt_sparse_mm(
     compressed_A: torch.Tensor,
@@ -3337,6 +3397,29 @@ def meta__foreach_addcop__scalar(self, tensor1, tensor2, scalar=1):
     )
 
 
+@register_meta(
+    [
+        aten._foreach_addcdiv_.ScalarList,
+        aten._foreach_addcmul_.ScalarList,
+    ]
+)
+def meta__foreach_addcop__scalarlist(self, tensor1, tensor2, scalars):
+    torch._check(
+        all(isinstance(l, List) for l in [self, tensor1, tensor2, scalars]),
+        lambda: (
+            "_foreach_addc*_ op expects arguments of type: List[Tensor], List[Tensor], List[Tensor], List[Scalar], "
+            f"but got {type(self)}, {type(tensor1)}, {type(tensor2)}, and {type(scalars)}"
+        ),
+    )
+    torch._check(len(self) > 0, lambda: "input tensor list must not be empty.")
+    torch._check(
+        len(self) == len(tensor1)
+        and len(self) == len(tensor2)
+        and len(self) == len(scalars),
+        lambda: "All input tensor lists must have the same length",
+    )
+
+
 @register_meta([aten._fused_adam_.default])
 def meta__fused_adam_(
     self,
@@ -3448,8 +3531,8 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
     torch._check(w.dim() == 4, lambda: "w must be a 4D tensor")
     torch._check(
-        x.dtype is torch.bfloat16,
-        lambda: f"expected x to be bf16, got {x.dtype}",
+        x.dtype in [torch.float16, torch.bfloat16],
+        lambda: f"expected x to be f16/bf16, got {x.dtype}",
     )
     torch._check(
         w.dtype is torch.int32,
@@ -3462,8 +3545,8 @@ def meta__weight_int4pack_mm(x, w, q_group_size, q_scale_and_zeros):
 def meta__weight_int8pack_mm(x, w, q_scales):
     torch._check(x.dim() == 2, lambda: "x must be a 2D tensor")
     torch._check(
-        x.dtype is torch.bfloat16,
-        lambda: f"expected x to be bf16, got {x.dtype}",
+        x.dtype in [torch.float16, torch.bfloat16],
+        lambda: f"expected x to be f16/bf16, got {x.dtype}",
     )
     torch._check(w.dim() == 2, lambda: "w must be a 2D tensor")
     torch._check(
@@ -6136,6 +6219,22 @@ def meta_polygamma(n: int, self: Tensor) -> Tensor:
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
     )
     return torch.empty_like(self, dtype=result_dtype)
+
+
+@register_meta(aten.channel_shuffle.default)
+def meta_channel_shuffle(input, groups):
+    # Assume the input shape is (*, C, H, W), where * represents any number of leading dimensions
+    *leading_dims, C, H, W = input.size()
+    # The output shape is the same as the input
+    return torch.empty(
+        *leading_dims,
+        C,
+        H,
+        W,
+        dtype=input.dtype,
+        layout=input.layout,
+        device=input.device,
+    )
 
 
 def _create_unary_float_meta_func(func):
