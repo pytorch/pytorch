@@ -103,6 +103,7 @@ def custom_op(
 
         if manual_schema is None:
             import torch._custom_op.impl
+
             schema = torch._custom_op.impl.infer_schema(fn, mutates_args)
         else:
             schema = manual_schema
