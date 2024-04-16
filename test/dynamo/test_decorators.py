@@ -135,6 +135,8 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         )
 
     def test_disable_nn_module_with_class_decorator(self):
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
+
         @torch._dynamo.disable
         class SimpleLinear(torch.nn.Module):
             def __init__(self):
@@ -144,6 +146,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
             def forward(self, inp):
                 return self.layer0(torch.sigmoid(inp))
 
+        @torch.compile(backend=cnts)
         class SimpleModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -161,9 +164,7 @@ class DecoratorTests(torch._dynamo.test_case.TestCase):
         model = SimpleModel()
         model.layer0.register_forward_pre_hook(hook)
 
-        cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
-        opt_model = torch.compile(model, backend=cnts)
-        opt_model(torch.randn(4))
+        model(torch.randn(4))
 
         # check for no graph break
         self.assertEqual(cnts.frame_count, 2)
