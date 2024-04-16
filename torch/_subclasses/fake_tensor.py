@@ -35,7 +35,7 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-from torch.utils._pytree import PyTree, tree_map
+from torch.utils._cxx_pytree import PyTree, tree_map
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 
@@ -56,7 +56,7 @@ except ValueError as e:
     else:
         raise e
 
-pytree = torch.utils._pytree
+pytree = torch.utils._cxx_pytree
 T = TypeVar("T")
 TensorWeakRef = Any
 
@@ -1206,11 +1206,17 @@ class FakeTensorMode(TorchDispatchMode):
         else:
             return self._dispatch_impl(func, types, args, kwargs)
 
+    def _maybe_to_constant(self, t):
+        if self.is_our_fake(t):
+            return t.constant
+        else:
+            return t
+
     def _dispatch_impl(self, func, types, args, kwargs):
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
         flat_arg_fake_tensors = [
-            t for t in flat_args if isinstance(t, FakeTensor) and self.is_our_fake(t)
+            t for t in flat_args if self.is_our_fake(t)
         ]
         has_symbolic_sizes = any(
             i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors
@@ -1218,11 +1224,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         converter = self.fake_tensor_converter
 
-        def maybe_to_constant(t):
-            if isinstance(t, FakeTensor) and self.is_our_fake(t):
-                return t.constant
-            else:
-                return t
+        is_lift_func = func in self.lift_fns
 
         # To constant propagate through these functions:
         # 1, If this is a lift due to a torch.tensor call,
@@ -1232,7 +1234,7 @@ class FakeTensorMode(TorchDispatchMode):
         #    (Note that you can always call a lift fn manually, so we do
         #    have to check if there are any fake tensors!)
         # 2, Some functions that allow Python numbers to bind to Tensors, e.g, torch.div
-        if (func in self.lift_fns and not flat_arg_fake_tensors) or (
+        if (is_lift_func and not flat_arg_fake_tensors) or (
             should_allow_numbers_as_tensors(func)
             and not has_symbolic_sizes
             and not flat_arg_fake_tensors
@@ -1240,7 +1242,7 @@ class FakeTensorMode(TorchDispatchMode):
             assert all(
                 t.constant is not None for t in flat_arg_fake_tensors
             ), f"{func} should not have fake inputs without constants"
-            const_flat_args = [maybe_to_constant(a) for a in flat_args]
+            const_flat_args = [self._maybe_to_constant(a) for a in flat_args]
             const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
             out = func(*const_args, **const_kwargs)
             if type(out) is torch.Tensor and self.may_turn_const(out):
@@ -1258,8 +1260,9 @@ class FakeTensorMode(TorchDispatchMode):
         # tensor, it might be related to this line.  Though I'm not sure
         # how you'll know to read this comment, as this line won't show up
         # in the stack trace.
-        unrecognized_types = self.check_for_subclass(flat_args)
-        if unrecognized_types:
+        has_unrecognized_types = _check_for_subclass(flat_args)
+        if has_unrecognized_types:
+            unrecognized_types = [type(x) for x in flat_args if _check_for_subclass_arg(x)]
             not_implemented_log.debug(
                 "FakeTensorMode unrecognized subclass(es): %s", unrecognized_types
             )
@@ -1271,7 +1274,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # this is generated from torch.tensor(), which does not use the
         # dispatcher, to allow wrapper subclasses to wrap the new tensor
-        if func in self.lift_fns:
+        if is_lift_func:
             assert len(kwargs) == 0 and len(args) == 1, f"{args} {kwargs}"
 
             if type(args[0]) is torch.Tensor:
@@ -1302,7 +1305,7 @@ class FakeTensorMode(TorchDispatchMode):
             and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
         ):
-            const_flat_args = [maybe_to_constant(a) for a in flat_args]
+            const_flat_args = [self._maybe_to_constant(a) for a in flat_args]
             const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
 
             # NB: not in_kernel_invocation_manager(self) as we want to do REAL
@@ -1454,27 +1457,6 @@ class FakeTensorMode(TorchDispatchMode):
             or func.name() == "fbgemm::gmm"
         )
 
-    # [subclass inputs]
-    # Suppose we enable fake tensor mode.  This means that fake tensor
-    # mode will run first.  But what if we do an operation that
-    # involves a tensor subclass that will desugar into normal tensor
-    # operations?  Without returning NotImplemented, fake tensor mode will run first,
-    # decide that a conversion was made (since there was a non fake
-    # tensor argument), and report an error that converting non
-    # fake tensor is not supported.  What we actually wanted to happen
-    # was to give the subclass a chance to figure out what it wants to
-    # before erroring out. Returning NotImplemented here allows this.
-    def check_for_subclass(self, flat_args):
-        def check(x):
-            return (
-                isinstance(x, torch.Tensor)
-                and not isinstance(x, FakeTensor)
-                and type(x) is not torch.Tensor
-                and type(x) is not torch.nn.Parameter
-            )
-
-        return [type(x) for x in flat_args if check(x)]
-
     def validate_and_convert_non_fake_tensors(
         self, func, converter, flat_args, args_spec
     ):
@@ -1524,23 +1506,23 @@ class FakeTensorMode(TorchDispatchMode):
             nonlocal common_device
             nonlocal has_scalar_only_inputs
 
-            if isinstance(e, torch.Tensor) and common_device is None:
+            if not isinstance(e, torch.Tensor):
+                return e
+
+            if common_device is None:
                 (
                     common_device,
                     has_scalar_only_inputs,
                 ) = FakeTensor._find_common_device(func, flat_args)
 
-            if self.is_our_fake(e):
+            is_our_fake = self.is_our_fake(e)
+            if is_our_fake:
                 torch._check(
                     e.device == common_device,
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )
 
-            if (
-                isinstance(e, torch.Tensor)
-                and not self.is_our_fake(e)
-                and converter is not None
-            ):
+            if (not is_our_fake and converter is not None):
                 if has_scalar_only_inputs:
                     # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
                     # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.
@@ -1550,8 +1532,8 @@ class FakeTensorMode(TorchDispatchMode):
                     return converter.from_meta_and_device(
                         self, e, device or common_device
                     )
-            else:
-                return e
+
+            return e
 
         return tree_map(wrap, r)
 
@@ -1717,7 +1699,6 @@ class FakeCopyMode(TorchFunctionMode):
             with torch._C.DisableTorchFunctionSubclass():
                 return func(*args, **kwargs)
 
-
 def _device_handler(args):
     # NB: Don't use is_our_fake, just serve the fake information
     # as is.  Notice we don't use 'self'; we use args[0].fake_mode
@@ -1730,6 +1711,29 @@ def _device_handler(args):
         return torch.device("meta")
     else:
         return args[0].fake_device
+
+
+# [subclass inputs]
+# Suppose we enable fake tensor mode.  This means that fake tensor
+# mode will run first.  But what if we do an operation that
+# involves a tensor subclass that will desugar into normal tensor
+# operations?  Without returning NotImplemented, fake tensor mode will run first,
+# decide that a conversion was made (since there was a non fake
+# tensor argument), and report an error that converting non
+# fake tensor is not supported.  What we actually wanted to happen
+# was to give the subclass a chance to figure out what it wants to
+# before erroring out. Returning NotImplemented here allows this.
+def _check_for_subclass(flat_args):
+    return any(_check_for_subclass_arg(x) for x in flat_args)
+
+
+def _check_for_subclass_arg(x):
+    return (
+        not isinstance(x, FakeTensor)
+        and isinstance(x, torch.Tensor)
+        and type(x) is not torch.Tensor
+        and type(x) is not torch.nn.Parameter
+    )
 
 
 _DISPATCH_META_HANDLERS = {
