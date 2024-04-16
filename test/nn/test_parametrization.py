@@ -11,7 +11,8 @@ import torch.nn.init as init
 import torch.nn.utils.parametrize as parametrize
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, skipIfNoLapack, \
-    TemporaryFileName, instantiate_parametrized_tests, set_default_dtype, skipIfTorchDynamo
+    TemporaryFileName, instantiate_parametrized_tests, set_default_dtype, skipIfTorchDynamo, \
+    swap
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_nn import NNTestCase
@@ -19,7 +20,6 @@ from torch.testing._internal.common_utils import gradcheck
 
 
 class TestNNParametrization(NNTestCase):
-    torch.__future__.set_swap_module_params_on_conversion(True)
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
@@ -27,6 +27,7 @@ class TestNNParametrization(NNTestCase):
     #        and remove the `@skipIfNoLapack` (see #70995)
     # torch/nn/utils/parametrize
     @skipIfNoLapack
+    @swap([True, False])
     def test_register_and_remove_parametrization(self):
         r"""Test that it is possible to add a few parametrizations
         on a parameter or a buffer and that removing them restores the initial state
@@ -246,6 +247,7 @@ class TestNNParametrization(NNTestCase):
             self.assertNotEqual(model.weight, weight_copy)
             self.assertNotEqual(model.bias, bias_copy)
 
+    @swap([True, False])
     def test_register_and_remove_nested_parametrization(self):
         r"""Test that it is possible to nest the parametrizations
         meaning that the original param is parametrized again
@@ -266,6 +268,10 @@ class TestNNParametrization(NNTestCase):
         # Result should be skew-symmetric
         A = model.weight
         self.assertEqual(A, -A.T)
+        if torch.__future__.get_swap_module_params_on_conversion():
+            # When using the swap_tensors path, this is needed so that the autograd
+            # graph is not alive anymore.
+            del A
 
         # Add nested parametrization
         param_mod = model.parametrizations.weight
@@ -292,6 +298,7 @@ class TestNNParametrization(NNTestCase):
         self.assertFalse(hasattr(model, "parametrizations"))
         self.assertEqual(model.__class__, nn.Linear)
 
+    @swap([True, False])
     def test_register_and_remove_buffer_parametrization(self):
         r"""Test that it is possible to add and remove parametrizations on buffers"""
         # Define a couple vector parametrizations
@@ -329,6 +336,7 @@ class TestNNParametrization(NNTestCase):
     # FIXME: Rewrite this test using functions not depending on LAPACK
     #        and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
+    @swap([True, False])
     def test_serialization_parametrization(self):
         r"""Test that it is possible to serialize a parametrized model via state_dict"""
         # A stateful parametrization
@@ -377,6 +385,7 @@ class TestNNParametrization(NNTestCase):
     # FIXME: Rewrite this test using functions not depending on LAPACK
     #        and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
+    @swap([True, False])
     def test_initialization_parametrization(self):
         r"""Test that it is possible to initialize a parametrization when it
             implements a `right_inverse` method
@@ -445,6 +454,7 @@ class TestNNParametrization(NNTestCase):
         self.assertEqual(model.weight, X)
         self.assertEqual(model.parametrizations.weight.original, torch.zeros_like(X))
 
+    @swap([True, False])
     def test_errors_unparametrized_tensor_parametrization(self):
         # Test errors when registering a parametrization on an unparametrized tensor
         module = nn.Linear(3, 4)
@@ -588,6 +598,7 @@ class TestNNParametrization(NNTestCase):
         self.assertFalse(parametrize.is_parametrized(module))
         self.assertEqual(module.weight, weight_init)
 
+    @swap([True, False])
     def test_errors_parametrized_tensor_parametrization(self):
         # Test errors when registering a parametrization on a parametrized tensor
 
@@ -669,6 +680,7 @@ class TestNNParametrization(NNTestCase):
     # FIXME: Rewrite this test using functions not depending on LAPACK
     #        and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
+    @swap([True, False])
     def test_multiple_inputs_parametrization(self):
         # A parametrization with several outputs
         class RankOne(nn.Module):
@@ -766,6 +778,7 @@ class TestNNParametrization(NNTestCase):
     # FIXME: Rewrite this test using functions not depending on LAPACK
     #        and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
+    @swap([True, False])
     def test_caching_parametrization(self):
         r"""Test the caching system of a parametrization"""
         # Define a couple matrix parametrizations
@@ -792,6 +805,7 @@ class TestNNParametrization(NNTestCase):
     # FIXME: Rewrite this test using functions not depending on LAPACK
     #        and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
+    @swap([True, False])
     def test_caching_parametrization_with_transfer_parametrizations_and_params(self):
         r"""Test that transferring parametrizations doesn't cause issues with caching"""
         class Skew(nn.Module):
@@ -823,6 +837,7 @@ class TestNNParametrization(NNTestCase):
             # test that the results are distinct objects for each module
             self.assertNotEqual(id(A), id(X))
 
+    @swap([True, False])
     def test_parametrization_same_training_mode(self):
         r"""Test training mode updated on parametrization registration"""
         class Identity(nn.Module):
@@ -838,6 +853,7 @@ class TestNNParametrization(NNTestCase):
         self.assertTrue(module.parametrizations.weight[0].training)
         self.assertTrue(module.parametrizations.weight[1].training)
 
+    @swap([True, False])
     def test_type_before_parametrizations(self):
         r"""Test that type_before_parametrizations always retrieves original type"""
 
@@ -855,6 +871,7 @@ class TestNNParametrization(NNTestCase):
             parametrize.type_before_parametrizations(model) == original_type
         )
 
+    @swap([True, False])
     def test_deepcopy_after_parametrization(self):
         r"""Test that we are able to create a deepcopy of the module when it's parametrized."""
 
@@ -903,6 +920,7 @@ class TestNNParametrization(NNTestCase):
             parametrize.register_parametrization(model, "weight", AddOne())
             check_deepcopy(model, deepcopy(model))
 
+    @swap([True, False])
     def test_transfer_parametrizations_and_params(self):
         r"""Test that all parametrizations and their associated parameters are transferred."""
 
@@ -942,6 +960,10 @@ class TestNNParametrization(NNTestCase):
 
         # check that the transfer didn't affect the original value
         self.assertEqual(hold_weight, model.weight)
+        if torch.__future__.get_swap_module_params_on_conversion():
+            # When using the swap_tensors path, this is needed so that the autograd
+            # graph is not alive anymore.
+            del hold_weight
 
         # testing that changes to one set of parametrizations do not affect the other
         parametrize.remove_parametrizations(to_model, "weight")
@@ -966,6 +988,7 @@ class TestNNParametrization(NNTestCase):
         # check that the new transfer didn't change the value for the from_module
         self.assertEqual(hold_test_param, model.test_param)
 
+    @swap([True, False])
     def test_transfer_parametrizations_and_params_right_inverse(self):
         r"""Test that all parametrizations and their associated parameters are transferred."""
 
@@ -995,6 +1018,7 @@ class TestNNParametrization(NNTestCase):
         # check that transfer doesn't affect the from_model weight
         self.assertEqual(hold_weight, model.weight)
 
+    @swap([True, False])
     def test_transfer_parametrizations_and_params_single_param(self):
         r"""Test that all parametrizations and their associated parameters are transferred."""
 
@@ -1034,6 +1058,7 @@ class TestNNParametrization(NNTestCase):
     # FIXME: Rewrite this test using functions not depending on LAPACK
     # and remove the `@skipIfNoLapack` (see #70995)
     @skipIfNoLapack
+    @swap([True, False])
     def test_transfer_parametrizations_and_params_many_to_one(self):
         # A parametrization with several outputs
         class RankOne(nn.Module):
@@ -1100,6 +1125,7 @@ class TestNNParametrization(NNTestCase):
         # check that the new transfer didn't change the value for the from_module
         self.assertEqual(hold_test_param, model.test_param)
 
+    @swap([True, False])
     def test_new_spectral_norm(self):
         with set_default_dtype(torch.double):
             input = torch.randn(3, 5)
@@ -1229,16 +1255,30 @@ class TestNNParametrization(NNTestCase):
                     # avoid doing another power iteration
                     m, wrapped_m, _ = get_modules()
                     pre_remove_out = wrapped_m(input)
+                    if torch.__future__.get_swap_module_params_on_conversion():
+                        # When using the swap_tensors path, this is needed so that the autograd
+                        # graph is not alive anymore.
+                        pre_remove_out_ref = pre_remove_out.detach()
+                        del pre_remove_out
+                    else:
+                        pre_remove_out_ref = pre_remove_out
                     m.eval()
                     m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
-                    self.assertEqual(wrapped_m(input), pre_remove_out)
+                    self.assertEqual(wrapped_m(input), pre_remove_out_ref)
 
                     torch.nn.utils.parametrizations.spectral_norm(m)
                     for _ in range(3):
                         pre_remove_out = wrapped_m(input)
+                    if torch.__future__.get_swap_module_params_on_conversion():
+                        # When using the swap_tensors path, this is needed so that the autograd
+                        # graph is not alive anymore.
+                        pre_remove_out_ref = pre_remove_out.detach()
+                        del pre_remove_out
+                    else:
+                        pre_remove_out_ref = pre_remove_out
                     m.eval()
                     m = torch.nn.utils.parametrize.remove_parametrizations(m, 'weight')
-                    self.assertEqual(wrapped_m(input), pre_remove_out)
+                    self.assertEqual(wrapped_m(input), pre_remove_out_ref)
 
                     # TEST EVAL BEHAVIOR
                     m, wrapped_m, spectral_norm_m = get_modules()
@@ -1291,6 +1331,7 @@ class TestNNParametrization(NNTestCase):
 
                         gradcheck(fn, (m.parametrizations.weight.original,))
 
+    @swap([True, False])
     def test_new_spectral_norm_load_state_dict(self):
         for activate_times in (0, 3):
             inp = torch.randn(2, 3)
@@ -1361,6 +1402,7 @@ class TestNNParametrization(NNTestCase):
                 snm.eval()
                 self.assertEqual(out3_eval, snm(inp))
 
+    @swap([True, False])
     def test_new_spectral_norm_dim(self):
         inp = torch.randn(2, 3, 10, 12)
         m = nn.ConvTranspose2d(3, 4, (5, 6))
@@ -1371,6 +1413,7 @@ class TestNNParametrization(NNTestCase):
         # check that u refers to the same dimension
         self.assertEqual(snm._u.shape, m.parametrizations.weight.original[0, :, 0, 0].shape)
 
+    @swap([True, False])
     def test_new_spectral_norm_forward(self):
         input = torch.randn(3, 5)
         m = nn.Linear(5, 7)
@@ -1389,6 +1432,7 @@ class TestNNParametrization(NNTestCase):
         expect_out = m(input)
         self.assertEqual(expect_out, out_hat)
 
+    @swap([True, False])
     @skipIfTorchDynamo("Test does not work with TorchDynamo")
     def test_new_spectral_norm_value(self):
         # a test that the spectral norm (= top singular value)
@@ -1405,6 +1449,7 @@ class TestNNParametrization(NNTestCase):
                 self.assertEqual(m.weight.data, expected)
 
     @skipIfNoLapack
+    @swap([True, False])
     def test_orthogonal_parametrization(self):
         # Orthogonal implements 6 algorithms (3x parametrizations times 2 options of use_trivialization)
 
@@ -1523,6 +1568,7 @@ class TestNNParametrization(NNTestCase):
                     assert_is_orthogonal(m.weight)
 
     @skipIfNoLapack
+    @swap([True, False])
     def test_orthogonal_errors(self):
         m = nn.Linear(3, 4)
         with self.assertRaisesRegex(ValueError, "has to be one of"):
@@ -1536,6 +1582,7 @@ class TestNNParametrization(NNTestCase):
             m.weight = torch.randn(5, 5)
         torch.nn.utils.parametrize.remove_parametrizations(m, "weight")
 
+    @swap([True, False])
     def test_weight_norm_state_dict_compat(self):
         m = nn.Linear(4, 5)
         m = torch.nn.utils.weight_norm(m)
@@ -1548,12 +1595,14 @@ class TestNNParametrization(NNTestCase):
         input = torch.randn(3, 4)
         self.assertEqual(m(input), m2(input))
 
+    @swap([True, False])
     def test_weight_norm_pickle(self):
         m = nn.Linear(4, 5)
         m = torch.nn.utils.parametrizations.weight_norm(m)
         with self.assertRaisesRegex(RuntimeError, 'state_dict'):
             pickle.dumps(m)
 
+    @swap([True, False])
     def test_weight_norm_deepcopy(self):
         m = nn.Linear(4, 5)
         m = torch.nn.utils.parametrizations.weight_norm(m)
@@ -1563,6 +1612,7 @@ class TestNNParametrization(NNTestCase):
 
 
 class TestNNParametrizationDevice(NNTestCase):
+    @swap([True, False])
     def test_weight_norm_parametrization(self, device):
         for dtype in [torch.float, torch.bfloat16]:
             input = torch.randn(3, 4, dtype=dtype, device=device)

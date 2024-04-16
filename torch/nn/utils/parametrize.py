@@ -66,19 +66,13 @@ def _register_parameter_or_buffer(module, name, X):
         module.register_buffer(name, X)
 
 def _maybe_set(dest: Tensor, src: Tensor) -> None:
-    # print(dest, dest.grad)
-    # print(src, src.grad)
-    # print(id(dest), id(src))
-    # breakpoint()
-    # if (id(dest) == id(src)):
-    #     return
-    # FIXME: Do we need to swap_gradients here
-    # FIXME: Do we need to check type of both dest and src?
     should_swap = torch.__future__.get_swap_module_params_on_conversion() or is_traceable_wrapper_subclass(dest)
     if should_swap:
+        if isinstance(dest, Parameter) and not isinstance(src, Parameter):
+            src = Parameter(src, requires_grad=dest.requires_grad)
         torch.utils.swap_tensors(dest, src)
     else:
-        dest.set_(src)
+        dest.set_(src)  # type: ignore[call-overload]
 
 class ParametrizationList(ModuleList):
     r"""A sequential container that holds and manages the original parameters or buffers of a parametrized :class:`torch.nn.Module`.
