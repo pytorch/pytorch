@@ -3159,9 +3159,10 @@ class CppKernelDispatcher(CppKernel):
                 f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])} && "
                 + f"{self.itervars[1]} >= {cexpr_index(self.tiling_ranges[1])})"
             )
+            # TODO: more comments here about "==0"
             self.scalar_condition.writeline(
                 f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])} && "
-                + f"{self.itervars[1]} >= {cexpr_index(self.tiling_ranges[1])})"
+                + f"{self.itervars[1]} == 0)"
             )
 
     def gen_tiling_loops(self):
@@ -3192,10 +3193,11 @@ class CppKernelDispatcher(CppKernel):
             for i, line in enumerate(lines):
                 if isinstance(line, IndirectAssertLine):
                     continue
-                if isinstance(line, DeferredLine):
-                    line = line.line
-                modified_line = pattern.sub(new_var, line)
-                lines[i] = modified_line
+                elif isinstance(line, DeferredLine):
+                    line.line = modified_line = pattern.sub(new_var, line.line)
+                else:
+                    modified_line = pattern.sub(new_var, line)
+                    lines[i] = modified_line
 
         for i in dim:
             replace_loop_vars(
@@ -3668,7 +3670,6 @@ class CppKernelProxy(CppKernel):
                 outer_loop = self.loop_nest.split_with_tiling(
                     tiling_indices[0], factor=tiling_factors[0]
                 )
-                # outer_tail_loop.set_kernel(scalar_kernel)
                 inner_loop = outer_loop.split_with_tiling(
                     tiling_indices[1] - tiling_indices[0], factor=tiling_factors[0]
                 )
@@ -3677,15 +3678,6 @@ class CppKernelProxy(CppKernel):
                 kernel.vec_kernel = vec_kernel
                 kernel.scalar_kernel = scalar_kernel
                 inner_loop.set_kernel(kernel)
-            else:
-                assert len(tiling_indices) == 0
-                kernel = CppKernelDispatcher([])
-                kernel.scalar_kernel = scalar_kernel
-                if self.loop_nest.kernel:
-                    self.loop_nest.kernel = kernel
-                else:
-                    assert self.loop_nest.root
-                    self.loop_nest.root.set_kernel(kernel)
 
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
@@ -4327,10 +4319,12 @@ class LoopNestWithSplit:
                 loop.is_reduction = kernel.is_reduction
 
         loop_nest = LoopNestWithSplit(root)
+        _kernel = CppKernelDispatcher([])
+        _kernel.scalar_kernel = kernel
         if loop:
-            loop.kernel = kernel
+            loop.kernel = _kernel
         else:
-            loop_nest.kernel = kernel
+            loop_nest.kernel = _kernel
         return loop_nest
 
     def __bool__(self):
