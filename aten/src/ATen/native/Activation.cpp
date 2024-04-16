@@ -76,7 +76,6 @@
 #include <ATen/ops/tanh.h>
 #include <ATen/ops/threshold_backward_native.h>
 #include <ATen/ops/threshold_native.h>
-#include <ATen/ops/zeros_like.h>
 
 #include <utility>
 #endif
@@ -748,9 +747,8 @@ Tensor infinitely_differentiable_gelu_backward(
 }
 
 std::tuple<Tensor, Tensor> log_sigmoid_forward_cpu(const Tensor& input) {
-  // FIXME: do these actually need to be zeros_like or can they be empty_like?
-  auto result = at::zeros_like(input, at::MemoryFormat::Contiguous);
-  auto buffer = at::zeros_like(input, at::MemoryFormat::Contiguous);
+  auto result = at::empty_like(input, at::MemoryFormat::Contiguous);
+  auto buffer = at::empty_like(input, at::MemoryFormat::Contiguous);
   log_sigmoid_cpu_stub(kCPU, result, buffer, input.contiguous());
   return std::make_tuple(result, buffer);
 }

@@ -21,7 +21,7 @@ def FlopCounterMode(*args, **kwargs):
     return torch.utils.flop_counter.FlopCounterMode(*args, **kwargs, display=False)
 
 def get_total_flops(mode):
-    return str(sum([v for _, v in mode.flop_counts["Global"].items()]))
+    return str(sum(v for _, v in mode.flop_counts["Global"].items()))
 
 def T(*shape, requires_grad=False):
     return torch.randn(*shape, requires_grad=requires_grad)
