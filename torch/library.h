@@ -619,7 +619,7 @@ class TORCH_API Library final {
   /// - pymodule: the python module
   /// - context: We may include this in the error message.
   Library& set_python_module(const char* pymodule, const char* context = "") {
-    pystub_ = {pymodule, context};
+    python_module_ = {pymodule, context};
     return *this;
   }
 
@@ -849,7 +849,7 @@ class TORCH_API Library final {
   Kind kind_;
   c10::optional<std::string> ns_;
   c10::optional<c10::DispatchKey> dispatch_key_;
-  c10::optional<std::pair<const char*, const char*>> pystub_;
+  c10::optional<std::pair<const char*, const char*>> python_module_;
   const char* file_;
   uint32_t line_;
 
