@@ -102,6 +102,10 @@ test/test_mps.py @kulinseth @malfet
 aten/src/ATen/mps/ @kulinseth @malfet
 aten/src/ATen/native/mps/ @kulinseth @malfet
 
+# MTIA
+aten/src/ATen/detail/MTIAHooksInterface.h @egienvalue
+torch/csrc/mtia/ @egienvalue
+
 # Profiler
 torch/csrc/autograd/profiler* @aaronenyeshi
 torch/autograd/profiler* @aaronenyeshi

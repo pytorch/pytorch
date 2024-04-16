@@ -1,31 +1,20 @@
 # Owner(s): ["oncall: distributed"]
 
+from copy import deepcopy
+
 import torch
 import torch.optim as optim
-from torch.distributed._shard import (
-    sharded_tensor,
-    shard_parameter
-)
-
-from copy import deepcopy
-from torch.distributed._shard.sharding_spec import (
-    ChunkShardingSpec,
-)
-from torch.distributed._shard.sharded_optim import (
-    ShardedOptimizer,
-)
-from torch.testing._internal.common_distributed import (
-    requires_nccl,
-    skip_if_lt_x_gpu,
-)
-from torch.testing._internal.common_utils import (
-    run_tests,
-)
+from torch.distributed._shard import shard_parameter, sharded_tensor
+from torch.distributed._shard.sharded_optim import ShardedOptimizer
+from torch.distributed._shard.sharding_spec import ChunkShardingSpec
+from torch.testing._internal.common_distributed import requires_nccl, skip_if_lt_x_gpu
+from torch.testing._internal.common_utils import run_tests
 
 from torch.testing._internal.distributed._shard.sharded_tensor import (
     ShardedTensorTestBase,
     with_comms,
 )
+
 
 class MyShardedModel(torch.nn.Module):
     def __init__(self, spec=None, group=None):
@@ -34,7 +23,11 @@ class MyShardedModel(torch.nn.Module):
         torch.manual_seed(0)
         self.param = torch.nn.Parameter(torch.rand(5, 10))
         if spec is not None:
-            self.sharded_param = torch.nn.Parameter(sharded_tensor.rand(spec, 20, 10, requires_grad=True, process_group=group))
+            self.sharded_param = torch.nn.Parameter(
+                sharded_tensor.rand(
+                    spec, 20, 10, requires_grad=True, process_group=group
+                )
+            )
         else:
             self.sharded_param = torch.nn.Parameter(torch.rand(5, 10))
 
@@ -87,7 +80,6 @@ class MyShardedLinear(torch.nn.Module):
 
 
 class TestShardedOptimizer(ShardedTensorTestBase):
-
     @with_comms(init_rpc=False)
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
@@ -105,8 +97,9 @@ class TestShardedOptimizer(ShardedTensorTestBase):
         sharded_model = MyShardedModel(spec=rowwise_spec).cuda()
 
         # copy the parameters from local model
-        sharded_model.sharded_param.local_shards()[0].tensor = \
+        sharded_model.sharded_param.local_shards()[0].tensor = (
             local_model.sharded_param.detach().clone().requires_grad_()
+        )
 
         local_optim = optim.SGD(local_model.parameters(), lr=0.1)
         sharded_model_params = dict(sharded_model.named_parameters())
@@ -137,12 +130,10 @@ class TestShardedOptimizer(ShardedTensorTestBase):
             new_val = sharded_optim.named_params[key]
             if isinstance(val, sharded_tensor.ShardedTensor):
                 self.assertNotEqual(
-                    val.local_shards()[0].tensor,
-                    new_val.local_shards()[0].tensor
+                    val.local_shards()[0].tensor, new_val.local_shards()[0].tensor
                 )
                 self.assertEqual(
-                    new_val.local_shards()[0].tensor,
-                    local_model.sharded_param
+                    new_val.local_shards()[0].tensor, local_model.sharded_param
                 )
             else:
                 self.assertNotEqual(val, new_val)
@@ -179,5 +170,6 @@ class TestShardedOptimizer(ShardedTensorTestBase):
         self.assertTrue("linear2.weight" in param_keys)
         self.assertFalse("bias" in param_keys)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     run_tests()
