@@ -344,10 +344,32 @@ Explicit registration for out-of-place ops
   _(sum, dim_IntList)                   \
   _(sum, dim_DimnameList)
 
-#define AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(_)                                                                                                                                                                             \
-  _(ADD_NS(norm), "norm.Scalar", Tensor (const Tensor &, const Scalar&), Tensor (const Tensor &, const c10::optional<Scalar>&, ScalarType), fp32_append_dtype)                                                                  \
-  _(ADD_NS(norm), "norm.ScalarOpt_dim", Tensor (const Tensor &, const c10::optional<Scalar>&, IntArrayRef, bool), Tensor (const Tensor &, const c10::optional<Scalar>&, IntArrayRef, bool, ScalarType), fp32_append_dtype)      \
-  _(ADD_NS(norm), "norm.names_ScalarOpt_dim", Tensor (const Tensor &, const c10::optional<Scalar>&, DimnameList, bool), Tensor (const Tensor &, const c10::optional<Scalar>&, DimnameList, bool, ScalarType), fp32_append_dtype)
+#define AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(_)                         \
+  _(ADD_NS(norm),                                                           \
+    "norm.Scalar",                                                          \
+    Tensor(const Tensor&, const Scalar&),                                   \
+    Tensor(const Tensor&, const c10::optional<Scalar>&, ScalarType),        \
+    fp32_append_dtype)                                                      \
+  _(ADD_NS(norm),                                                           \
+    "norm.ScalarOpt_dim",                                                   \
+    Tensor(const Tensor&, const c10::optional<Scalar>&, IntArrayRef, bool), \
+    Tensor(                                                                 \
+        const Tensor&,                                                      \
+        const c10::optional<Scalar>&,                                       \
+        IntArrayRef,                                                        \
+        bool,                                                               \
+        ScalarType),                                                        \
+    fp32_append_dtype)                                                      \
+  _(ADD_NS(norm),                                                           \
+    "norm.names_ScalarOpt_dim",                                             \
+    Tensor(const Tensor&, const c10::optional<Scalar>&, DimnameList, bool), \
+    Tensor(                                                                 \
+        const Tensor&,                                                      \
+        const c10::optional<Scalar>&,                                       \
+        DimnameList,                                                        \
+        bool,                                                               \
+        ScalarType),                                                        \
+    fp32_append_dtype)
 
 #define AT_FORALL_PROMOTE(_) \
   _(addcdiv)                 \
@@ -393,11 +415,8 @@ TORCH_LIBRARY_IMPL(aten, Autocast, m) {
   // fp32_append_dtype
   // The fp32_append_dtype wrapper overrides implicit promotion behavior.
   // norm does not implicitly promote, but be aware when adding new ops to this policy.
-#define _KERNEL_CUDA_DIFFERENT_REDISPATCH_SIGNATURE(...) \
-  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_CUDA(__VA_ARGS__)
-
   AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(
-      _KERNEL_CUDA_DIFFERENT_REDISPATCH_SIGNATURE)
+      KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_CUDA)
 
   // promote
 #define _KERNEL_CUDA_PROMOTE(...) KERNEL_CUDA(__VA_ARGS__, promote)
