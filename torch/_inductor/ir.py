@@ -68,6 +68,7 @@ from .utils import (
     developer_warning,
     do_bench,
     get_kernel_metadata,
+    is_cpu_device,
     is_dynamic,
     is_gpu,
     pad_listlike,
@@ -75,6 +76,7 @@ from .utils import (
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
+    timed,
 )
 from .virtualized import ops, V
 
@@ -3531,7 +3533,10 @@ class ChoiceCaller:
 
     def benchmark(self, *args, out) -> float:
         algo = self.to_callable()
-        return do_bench(lambda: algo(*args, out=out))
+        if is_cpu_device(args):
+            return timed(lambda: algo(*args, out=out), ())
+        else:
+            return do_bench(lambda: algo(*args, out=out))
 
     def call_name(self) -> str:
         raise NotImplementedError()

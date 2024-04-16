@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from torch._inductor.select_algorithm import TritonTemplateCaller
 
 from . import config
-from .utils import do_bench
+from .utils import do_bench, timed
 from .virtualized import V
 
 CUDA_VISIBLE_DEVICES = "CUDA_VISIBLE_DEVICES"
@@ -434,6 +434,14 @@ class BenchmarkRequest:
     def cleanup_run_fn(self) -> None:
         pass
 
+    def do_bench(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+    ) -> float:
+        raise NotImplementedError()
+
     def benchmark(
         self,
         *input_tensors: torch.Tensor,
@@ -459,22 +467,7 @@ class BenchmarkRequest:
             load_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
             start_ts = time.time()
 
-        device_idx_set = {
-            tensor.device.index
-            for tensor in [*input_tensors, output_tensor]
-            if isinstance(tensor, torch.Tensor)
-            and tensor.is_cuda
-            and tensor.device.index is not None
-        }
-        assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
-        if len(device_idx_set) == 1:
-            device_idx = next(iter(device_idx_set))
-        else:
-            device_idx = torch.cuda.current_device()
-
-        with torch.cuda.device(device_idx):
-            out = do_bench(fn)
-            torch.cuda.synchronize()  # shake out any CUDA errors
+        out = self.do_bench(fn, *input_tensors, output_tensor)
 
         if debug:
             bench_elapse = time.time() - start_ts  # type: ignore[possibly-undefined]
@@ -506,7 +499,34 @@ class TestBenchmarkRequest(BenchmarkRequest):
         return self.value
 
 
-class TritonBenchmarkRequest(BenchmarkRequest):
+class GPUDeviceBenchmarkRequest(BenchmarkRequest):
+    def do_bench(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+    ) -> float:
+        device_idx_set = {
+            tensor.device.index
+            for tensor in [*input_tensors, output_tensor]
+            if isinstance(tensor, torch.Tensor)
+            and tensor.is_cuda
+            and tensor.device.index is not None
+        }
+        assert len(device_idx_set) <= 1, f"Can not mix devices {device_idx_set}"
+        if len(device_idx_set) == 1:
+            device_idx = next(iter(device_idx_set))
+        else:
+            device_idx = torch.cuda.current_device()
+
+        with torch.cuda.device(device_idx):
+            out = do_bench(fn)
+            torch.cuda.synchronize()  # shake out any CUDA errors
+
+        return out
+
+
+class TritonBenchmarkRequest(GPUDeviceBenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
 
@@ -580,7 +600,7 @@ class TritonBenchmarkRequest(BenchmarkRequest):
         return f"{self.kernel_name=}, {self.module_path=}, {self.module_cache_key=}"
 
 
-class CUDABenchmarkRequest(BenchmarkRequest):
+class CUDABenchmarkRequest(GPUDeviceBenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put CUDA Tensors in here!
 
@@ -668,8 +688,18 @@ class CUDABenchmarkRequest(BenchmarkRequest):
         return f"{self.kernel_name=}, {self.source_file=}, {self.hash_key=}"
 
 
+class CPUDeviceBenchmarkRequest(BenchmarkRequest):
+    def do_bench(
+        self,
+        fn,
+        *input_tensors: torch.Tensor,
+        output_tensor: Optional[torch.Tensor] = None,
+    ) -> float:
+        return timed(fn, ())
+
+
 @dataclasses.dataclass
-class CppBenchmarkRequest(BenchmarkRequest):
+class CppBenchmarkRequest(CPUDeviceBenchmarkRequest):
     # Important: Instances of this class have to be serializable
     # across process boundaries. Do not put Tensors in here!
 

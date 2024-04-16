@@ -318,7 +318,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
         class M(torch.nn.Module):
             def __init__(self, bias):
                 super().__init__()
-                self.linear = torch.nn.Linear(10, 30, bias)
+                self.linear = torch.nn.Linear(10, 32, bias)
 
             def forward(self, x):
                 return self.linear(x)

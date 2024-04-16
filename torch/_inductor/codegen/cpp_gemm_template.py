@@ -8,9 +8,8 @@ from .cpp_template_kernel import CppTemplateKernel
 GEMM_TEMPLATE = r"""
 {{template.header().getvalue()}}
 // TODO: use micro-kernel to replace this naive GEMM implementation below
-// TODO: support weight prepack
 extern "C"
-{{kernel.def_kernel(inputs=[X, W], outputs=[Y], names_str="X, W, Y", input_reorder=input_reorder)}}
+{{kernel.def_kernel(inputs=[X, W], outputs=[Y], names_str="X, W, Y")}}
 {
     // TODO: support dynamic shapes
     int64_t M = {{kernel.size(Y, 0)}};
@@ -19,26 +18,35 @@ extern "C"
 
     #pragma omp parallel for collapse(2)
     for (int64_t i = 0; i < M; ++i) {
-        for (int64_t j = 0; j < N; ++j) {
-            {{kernel.acc_dtype(Y)}} sum = 0;
-            for (int64_t k = 0; k < K; ++k) {
-                sum += {{kernel.index(X, ["i", "k"])}} * {{kernel.index(W, ["k", "j"])}};
+        for (int64_t j = 0; j < N/{{n_bs}}; ++j) {
+            {{kernel.acc_dtype(Y)}} sum[16];
+            for (int64_t ni = 0; ni < {{n_bs}}; ++ni) {
+                sum[ni] = 0;
             }
-            {{kernel.index(Y, ["i", "j"])}} = sum;
+            for (int64_t k = 0; k < K; ++k) {
+                for (int64_t ni = 0; ni < {{n_bs}}; ++ni) {
+                    sum[ni] += {{kernel.index(X, ["i", "k"])}} * {{kernel.index(W, ["j", "k", "ni"])}};
+                }
+            }
+            for (int64_t ni = 0; ni < {{n_bs}}; ++ni) {
+                int64_t n = j * {{n_bs}} + ni;
+                {{kernel.index(Y, ["i", "n"])}} = sum[ni];
+            }
         }
     }
 }
 """
 
 
-class CppGemmTemplate(CppTemplate):
+class CppPackedGemmTemplate(CppTemplate):
     def __init__(
         self,
         input_nodes,
         layout: Layout,
-        input_reorder: Optional[List[int]] = None,
+        n_block_size: int = 1,
     ):
-        super().__init__("cpp_gemm", input_nodes, layout, input_reorder)
+        super().__init__("cpp_gemm", input_nodes, layout)
+        self.n_block_size = n_block_size
 
     def render(  # type: ignore[override]
         self,
@@ -63,9 +71,9 @@ class CppGemmTemplate(CppTemplate):
             X=X,
             W=W,
             Y=Y,
+            n_bs=self.n_block_size,
             template=self,
             kernel=kernel,
             epilogues=epilogue_nodes,
-            input_reorder=self.input_reorder,
         )
         return self._template_from_string(GEMM_TEMPLATE).render(**options)

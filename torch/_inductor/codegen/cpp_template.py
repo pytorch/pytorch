@@ -25,12 +25,10 @@ class CppTemplate(KernelTemplate):
         name: str,
         input_nodes,
         layout: Layout,
-        input_reorder: Optional[List[int]] = None,
     ):
         super().__init__(name)
         self.input_nodes = input_nodes
         self.output_node: Buffer = Buffer("buf_out", layout)
-        self.input_reorder = input_reorder
         self.layout = layout
 
     def generate(self, **kwargs):
@@ -49,13 +47,8 @@ class CppTemplate(KernelTemplate):
                 kernel.args.python_argdefs(),
             )
 
-        input_reorder = (
-            self.input_reorder
-            if self.input_reorder is not None
-            else list(range(len(self.input_nodes)))
-        )
         expected_args = list(
-            unique(self.input_nodes[idx].get_name() for idx in input_reorder)
+            unique(input_node.get_name() for input_node in self.input_nodes)
         )
         expected_args.extend([self.output_node.get_name()])
         assert list(call_args)[: len(expected_args)] == expected_args, (

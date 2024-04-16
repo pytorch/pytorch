@@ -38,9 +38,11 @@ from .ir import ChoiceCaller, PrimitiveInfoType
 from .utils import (
     do_bench,
     get_dtype_size,
+    is_cpu_device,
     Placeholder,
     sympy_dot,
     sympy_product,
+    timed,
     unique,
 )
 from .virtualized import V
@@ -804,7 +806,10 @@ class ExternKernelCaller(ChoiceCaller):
                 out_new, tuple(out.size()), tuple(out.stride())
             )
             out.copy_(out_new)  # for correctness checking
-            return do_bench(lambda: algo(*args))
+            if is_cpu_device(args):
+                return timed(lambda: algo(*args), ())
+            else:
+                return do_bench(lambda: algo(*args))
 
     def to_callable(self):
         fn = self.choice.to_callable()
@@ -1042,26 +1047,32 @@ class AlgorithmSelectorCache(PersistentCache):
         example_inputs = list(unique_example_inputs.values()) + [
             x for x in input_nodes if not isinstance(x, ir.IRNode)
         ]
-        example_inputs_extern = [
-            torch.as_strided(
-                unique_example_inputs[input_node.get_name()],
-                V.graph.sizevars.size_hints(
-                    input_node.get_size(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                V.graph.sizevars.size_hints(
-                    input_node.get_stride(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                V.graph.sizevars.size_hint(
-                    input_node.get_layout().offset,
-                    fallback=config.unbacked_symint_fallback,
-                ),
-            )
-            if isinstance(input_node, ir.IRNode)
-            else input_node
-            for input_node in input_nodes
-        ]
+        example_inputs_extern = []
+        for input_node in input_nodes:
+            if isinstance(input_node, ir.IRNode):
+                example_input = unique_example_inputs[input_node.get_name()]
+                if example_input.is_mkldnn:
+                    example_inputs_extern.append(example_input)
+                else:
+                    example_inputs_extern.append(
+                        torch.as_strided(
+                            example_input,
+                            V.graph.sizevars.size_hints(
+                                input_node.get_size(),
+                                fallback=config.unbacked_symint_fallback,
+                            ),
+                            V.graph.sizevars.size_hints(
+                                input_node.get_stride(),
+                                fallback=config.unbacked_symint_fallback,
+                            ),
+                            V.graph.sizevars.size_hint(
+                                input_node.get_layout().offset,
+                                fallback=config.unbacked_symint_fallback,
+                            ),
+                        )
+                    )
+            else:
+                example_inputs_extern.append(input_node)
 
         out = cls.benchmark_example_value(layout)
         out_extern = torch.as_strided(
@@ -1101,7 +1112,8 @@ class AlgorithmSelectorCache(PersistentCache):
                 result = choice.benchmark(*example_inputs, out=out)
             if VERIFY:
                 torch.testing.assert_close(out_extern, expected, **VERIFY)
-            torch.cuda.synchronize()  # shake out any CUDA errors
+            if torch.cuda.is_available():
+                torch.cuda.synchronize()  # shake out any CUDA errors
             return result
 
         def benchmark_in_current_process(choices):
@@ -1175,6 +1187,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                 )
                 for n in input_nodes
+                if isinstance(n, ir.IRNode)
             ]
         )
         n = None if log.getEffectiveLevel() == logging.DEBUG else 10
