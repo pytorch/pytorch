@@ -64,12 +64,14 @@ from torchgen.model import (
     BaseOperatorName,
     FunctionSchema,
     NativeFunction,
+    SchemaKind,
     Type,
     Variant,
 )
 from torchgen.utils import FileManager, split_name_params
 from torchgen.yaml_utils import YamlLoader
 
+from .gen_inplace_or_view_type import is_tensor_list_type
 from .gen_trace_type import should_trace
 
 #
@@ -158,9 +160,12 @@ _SKIP_PYTHON_BINDINGS = [
     "fill.Tensor",  # only used by the functionalization pass
     "fill.Scalar",  # only used by the functionalization pass
     "lift.*",
-    "normal_functional",  # only used by the functionalization pas
+    "normal_functional",  # only used by the functionalization pass
     "nbytes",
     "itemsize",
+    "_batch_norm_with_update",
+    "_batch_norm_with_update_out",
+    "_batch_norm_no_update",
 ]
 
 SKIP_PYTHON_BINDINGS = [
@@ -1349,6 +1354,25 @@ def emit_single_dispatch(
         )
 
         if lambda_return == "void":
+            # Make in-place foreach return `self` at python-binding level.
+            # ref: https://github.com/pytorch/pytorch/pull/118622#pullrequestreview-1904804954
+            self_arg = f.func.arguments.self_arg
+            return_stmt: str
+            if (
+                str(f.func.name).startswith("_foreach_")
+                and f.func.kind() == SchemaKind.inplace
+            ):
+                # note(crcrpar): `_foreach_pow.ScalarAndTensor` does NOT have its in-place
+                # variant and it unlikely to have it in the future. Thus it's safe to have the following assert.
+                assert self_arg is not None and is_tensor_list_type(
+                    self_arg.argument.type
+                )
+                return_stmt = """PyObject* self_tensorlist = _r.args[0];
+Py_INCREF(self_tensorlist);
+return self_tensorlist;
+"""
+            else:
+                return_stmt = "Py_RETURN_NONE;"
             return f"""\
 {schema_comment}
 {inits}
@@ -1357,7 +1381,7 @@ auto dispatch_{name} = []({lambda_formals}) -> {lambda_return} {{
   {dispatch_callee}({dispatch_args});
 }};
 dispatch_{name}({lambda_args}){set_requires_grad};
-Py_RETURN_NONE;
+{return_stmt}
 """
         else:
             typename = structseq_typenames.get(gen_structseq_typename_key(f))

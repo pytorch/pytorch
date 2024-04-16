@@ -8,7 +8,7 @@ from typing import Dict, List, Optional, Tuple
 from torch._export.serde.union import _Union
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (4, 2)
+SCHEMA_VERSION = (5, 3)
 TREESPEC_VERSION = 1
 
 
@@ -90,7 +90,7 @@ class TensorMeta:
     requires_grad: bool
     device: Device
     strides: List[SymInt]
-    storage_offset: int
+    storage_offset: SymInt
     layout: Layout
 
 
@@ -123,13 +123,18 @@ class TensorArgument:
     name: str
 
 
+@dataclass
+class TokenArgument:
+    name: str
+
+
 # This is use for storing the contents of a list which contain optional tensors
 # (Tensor?[], ex. [Tensor, None, ...]), where the list will be serialized to the
 # type List[OptionalTensorArgument], with tensor values seiralized to the
 # "as_tensor" field, and None values serialized to the "as_none" field.
 @dataclass(repr=False)
 class OptionalTensorArgument(_Union):
-    as_tensor: str
+    as_tensor: TensorArgument
     as_none: Tuple[()]
 
 
@@ -210,6 +215,21 @@ class UserInputSpec:
     arg: Argument
 
 
+@dataclass(repr=False)
+class ConstantValue(_Union):
+    as_none: Tuple[()]
+    as_int: int
+    as_float: float
+    as_string: str
+    as_bool: bool
+
+
+@dataclass
+class ConstantInputSpec:
+    name: str
+    value: ConstantValue
+
+
 @dataclass
 class InputToParameterSpec:
     arg: TensorArgument
@@ -236,6 +256,11 @@ class InputToCustomObjSpec:
     custom_obj_name: str
 
 
+@dataclass
+class InputTokenSpec:
+    arg: TokenArgument
+
+
 @dataclass(repr=False)
 class InputSpec(_Union):
     user_input: UserInputSpec
@@ -243,6 +268,8 @@ class InputSpec(_Union):
     buffer: InputToBufferSpec
     tensor_constant: InputToTensorConstantSpec
     custom_obj: InputToCustomObjSpec
+    token: InputTokenSpec
+    constant_input: ConstantInputSpec
 
 
 @dataclass
@@ -279,6 +306,11 @@ class UserInputMutationSpec:
     user_input_name: str
 
 
+@dataclass
+class OutputTokenSpec:
+    arg: TokenArgument
+
+
 @dataclass(repr=False)
 class OutputSpec(_Union):
     user_output: UserOutputSpec
@@ -287,6 +319,7 @@ class OutputSpec(_Union):
     gradient_to_parameter: GradientToParameterSpec
     gradient_to_user_input: GradientToUserInputSpec
     user_input_mutation: UserInputMutationSpec
+    token: OutputTokenSpec
 
 
 @dataclass

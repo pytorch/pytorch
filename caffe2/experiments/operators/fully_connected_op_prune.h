@@ -263,7 +263,6 @@ class FullyConnectedPruneGradientOp : public Operator<Context> {
     int window_size = 100;
     // TODO(wyiming): this threshold should be
     // based on distribution of the layer weight
-    float thr = 0.01;
     TORCH_DCHECK_EQ(Mask.dim32(0), W.dim32(0));
     TORCH_DCHECK_EQ(Mask.dim32(1), W.dim32(1));
     TORCH_DCHECK_EQ(Ag_dW.dim32(0), W.dim32(0));

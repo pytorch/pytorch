@@ -2,13 +2,14 @@
 
 #include <c10/cuda/CUDAMacros.h>
 #include <c10/util/Exception.h>
-#include <cuda_runtime_api.h>
+#include <c10/util/env.h>
 
 #include <atomic>
 #include <cstddef>
 #include <cstdlib>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace c10::cuda::CUDACachingAllocator {
 
@@ -72,14 +73,13 @@ class C10_CUDA_API CUDAAllocatorConfig {
   static CUDAAllocatorConfig& instance() {
     static CUDAAllocatorConfig* s_instance = ([]() {
       auto inst = new CUDAAllocatorConfig();
-      const char* env = getenv("PYTORCH_CUDA_ALLOC_CONF");
-      inst->parseArgs(env);
+      inst->parseArgs(c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF"));
       return inst;
     })();
     return *s_instance;
   }
 
-  void parseArgs(const char* env);
+  void parseArgs(const std::optional<std::string>& env);
 
  private:
   CUDAAllocatorConfig();
