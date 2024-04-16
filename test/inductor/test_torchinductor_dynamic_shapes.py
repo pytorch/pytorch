@@ -388,7 +388,7 @@ class TestInductorDynamic(TestCase):
             return torch.ops.aten.cat.default([g, g, g2])
 
         cf = torch.compile(fullgraph=True)(f)
-        arg = torch.tensor([4, 6], device='cuda')
+        arg = torch.tensor([4, 6], device="cuda")
         self.assertEqual(f(arg), cf(arg))
 
     @torch._dynamo.config.patch(
