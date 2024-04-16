@@ -861,11 +861,11 @@ class OutputGraph:
         ] = {}
         maybe_gm = self.local_scope.get("self")
         stolen_list_names = get_locals_to_steal(maybe_gm)
-        for x in (
-            list(tx.stack)
-            + list(tx.symbolic_locals.values())
-            + list(self.side_effects.store_attr_mutations.keys())
-        ):
+        for x in [
+            *tx.stack,
+            *tx.symbolic_locals.values(),
+            *self.side_effects.store_attr_mutations.keys(),
+        ]:
             if not (
                 isinstance(x, (VariableTracker, AttributeMutationExisting))
                 and isinstance(x.source, GetItemSource)
