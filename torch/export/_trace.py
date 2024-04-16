@@ -5,6 +5,7 @@ import logging
 import re
 import time
 import warnings
+from collections import deque
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -225,6 +226,7 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
 def _get_param_buffer_mapping(
     original_module: torch.nn.Module,
     traced_module: torch.nn.Module,
+    ignore_weight_sharing: Optional[bool] = False,
 ) -> Dict[str, str]:
     """
     Returns a mapping of parameter/buffer names from the new module to the
@@ -232,12 +234,47 @@ def _get_param_buffer_mapping(
     of a traced module to what the original module contains.
     """
 
-    param_lookup: Dict[int, List[str]] = {}
-    buffer_lookup: Dict[int, List[str]] = {}
+    def _lookup_fqn(dynamo_name, lookup_queue, ignore_weight_sharing):
+        # handle weight sharing case
+        # pop left to follow ordering in model
+
+        if ignore_weight_sharing:
+            return lookup_queue.popleft()
+
+        # preserve names for error logging
+        original_name = dynamo_name
+        original_queue = [name for name in lookup_queue]
+
+        # try to name match by cleaning up parts of dynamo name
+        # that won't appear in the original module FQN
+        while True:
+            if dynamo_name.startswith("L__self___"):
+                dynamo_name = dynamo_name[len("L__self___") :]
+            elif dynamo_name.startswith("fn"):
+                dynamo_name = dynamo_name[len("fn") :]
+            elif dynamo_name.startswith("getattr"):
+                dynamo_name = dynamo_name[len("getattr") :]
+            elif dynamo_name[0] in "_.":
+                dynamo_name = dynamo_name[1:]
+            else:
+                break
+
+        # we have this while loop for aliasing/unused weight sharing cases
+        # e.g. self.a = Linear(...); self.b = self.a.weight; forward(x) = self.b @ x
+        # in this case only b will be traced by dynamo
+        dynamo_name = re.sub(r"[^a-zA-Z0-9]+", "_", dynamo_name)
+        while lookup_queue:
+            fqn = lookup_queue.popleft()
+            if re.sub(r"[^a-zA-Z0-9]+", "_", fqn).endswith(dynamo_name):
+                return fqn
+        raise ValueError(f"Cannot find FQN for {original_name} in {original_queue}")
+
+    param_lookup: Dict[int, deque[str]] = {}
+    buffer_lookup: Dict[int, deque[str]] = {}
     for name, param in original_module.named_parameters(remove_duplicate=False):
-        param_lookup.setdefault(id(param), []).append(name)
+        param_lookup.setdefault(id(param), deque()).append(name)
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
-        buffer_lookup.setdefault(id(buffer), []).append(name)
+        buffer_lookup.setdefault(id(buffer), deque()).append(name)
 
     param_buffer_table: Dict[str, str] = {}
     for dynamo_name, dynamo_param in traced_module.named_parameters(
@@ -245,14 +282,22 @@ def _get_param_buffer_mapping(
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_param) in param_lookup:
-            param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)].pop()
+            param_buffer_table[dynamo_name] = _lookup_fqn(
+                dynamo_name,
+                param_lookup[id(dynamo_param)],
+                ignore_weight_sharing=ignore_weight_sharing,
+            )
 
     for dynamo_name, dynamo_buffer in traced_module.named_buffers(
         remove_duplicate=False
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_buffer) in buffer_lookup:
-            param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)].pop()
+            param_buffer_table[dynamo_name] = _lookup_fqn(
+                dynamo_name,
+                buffer_lookup[id(dynamo_buffer)],
+                ignore_weight_sharing=ignore_weight_sharing,
+            )
 
     return param_buffer_table
 
@@ -337,7 +382,11 @@ def _restore_state_dict(
     """
     Restores the state dict of the traced module to that of the original module.
     """
-    param_buffer_table = _get_param_buffer_mapping(original_module, traced_module)
+    param_buffer_table = _get_param_buffer_mapping(
+        original_module,
+        traced_module,
+        ignore_weight_sharing=True,
+    )
     # Since the graph module is flattened (no module heirarchy), we
     # need to noramlize the module by replacing "." with "_". If we
     # don't, it will try to save the weight to a submodule which no

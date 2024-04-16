@@ -161,9 +161,16 @@ class UnflattenedModule(torch.nn.Module):
         self.range_constraints = export_module.range_constraints
         self.equality_constraints: List = []
 
+        # handle weight-sharing, only clone once
+        id_to_params: Dict[int, torch.nn.Parameter] = {}
         state_dict = export_module.state_dict
         for name in self.graph_signature.parameters:
-            cloned = torch.nn.Parameter(state_dict[name].clone())
+            param = state_dict[name]
+            if id(param) in id_to_params:
+                cloned = id_to_params[id(param)]
+            else:
+                cloned = torch.nn.Parameter(param.clone())
+                id_to_params[id(param)] = cloned
             _assign_attr(
                 cloned,
                 self,
@@ -171,14 +178,21 @@ class UnflattenedModule(torch.nn.Module):
                 attr_kind=_AttrKind.PARAMETER,
             )
 
+        id_to_buffers: Dict[int, torch.nn.Parameter] = {}
         non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
         for name in self.graph_signature.buffers:
             if name in non_persistent_buffers:
                 persistent = False
-                cloned = export_module.constants[name].clone()
+                buffer = export_module.constants[name]
             else:
                 persistent = True
-                cloned = state_dict[name].clone()
+                buffer = state_dict[name]
+
+            if id(buffer) in id_to_buffers:
+                cloned = id_to_buffers[id(buffer)]
+            else:
+                cloned = buffer.clone()
+                id_to_buffers[id(buffer)] = cloned
 
             _assign_attr(
                 cloned,
