@@ -656,7 +656,7 @@ def _check_pystubs_once(func, qualname, actual_module_name):
         if maybe_pystub is None:
             if torch._library.utils.requires_pystub():
                 namespace = op.namespace
-                cpp_filename = op._handle().debug()
+                cpp_filename = op._handle.debug()
                 raise RuntimeError(
                     f"Operator '{qualname}' was defined in C++ and has a Python "
                     f"fake impl. In this situation, we require there to also be a "
@@ -667,7 +667,7 @@ def _check_pystubs_once(func, qualname, actual_module_name):
         else:
             pystub_module = maybe_pystub[0]
             if actual_module_name != pystub_module:
-                cpp_filename = op._handle().debug()
+                cpp_filename = op._handle.debug()
                 raise RuntimeError(
                     f"Operator '{qualname}' specified that its python fake impl "
                     f"is in the Python module '{pystub_module}' but it was actually found "
