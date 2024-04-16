@@ -8220,6 +8220,7 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
         ),
         # SparseLt
         ("cuSPARSELt", ("hipSPARSELt", CONV_TYPE, API_SPECIAL)),
+        ("AT_CUSPARSELT_ENABLED", ("AT_HIPSPARSELT_ENABLED", CONV_TYPE, API_SPECIAL)),
         ("cusparseLtHandle_t", ("hipsparseLtHandle_t", CONV_TYPE, API_SPECIAL)),
         ("cusparseLtMatDescriptor_t", ("hipsparseLtMatDescriptor_t", CONV_TYPE, API_SPECIAL)),
         ("cusparseLtInit", ("hipsparseLtInit", CONV_MATH_FUNC, API_SPECIAL)),
