@@ -300,6 +300,13 @@ class CachingAutotuner(KernelInterface):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
         for k, v in cfg.kwargs.items():
+            if torch.version.hip is not None:
+                if k == "matrix_instr_nonkdim":
+                    compile_meta["matrix_instr_nonkdim"] = v
+                    continue
+                if k == "waves_per_eu":
+                    compile_meta["waves_per_eu"] = v
+                    continue
             compile_meta["constants"][self.fn.arg_names.index(k)] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
@@ -340,6 +347,13 @@ class CachingAutotuner(KernelInterface):
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
             }
+            if torch.version.hip is not None:
+                if "waves_per_eu" in compile_meta:
+                    options["waves_per_eu"] = compile_meta["waves_per_eu"]
+                if "matrix_instr_nonkdim" in compile_meta:
+                    options["matrix_instr_nonkdim"] = compile_meta[
+                        "matrix_instr_nonkdim"
+                    ]
             compile_kwargs = {
                 "target": target,
                 "options": options,
@@ -387,7 +401,9 @@ class CachingAutotuner(KernelInterface):
             "bin": binary,
             "launch_enter_hook": binary.launch_enter_hook,
             "launch_exit_hook": binary.launch_exit_hook,
-            "metadata": binary.metadata,
+            "metadata": binary.packed_metadata
+            if hasattr(binary, "packed_metadata")
+            else binary.metadata,
             "shared": binary_shared,
         }
 
@@ -442,37 +458,78 @@ class CachingAutotuner(KernelInterface):
                 metadata,
             )
 
-        def get_launch_args_with_kernel_launch_metadata(
-            grid,
-            grid_0,
-            grid_1,
-            grid_2,
-            stream,
-            function,
-            metadata,
-            bin,
-            launch_enter_hook,
-            launch_exit_hook,
-            num_warps,
-            shared,
-            cta_args,
-            args,
-        ):
-            """
-            Construct launch args after CompiledKernel.launch_metadata is added
-            by https://github.com/openai/triton/pull/3492 .
-            """
-            return (
+        # Getting the kernel launch args is extremely perf-sensitive.  Evaluating
+        # `bin.launch_metadata` is relatively expensive, and returns None unless a
+        # `launch_enter_hook` is installed.  So if we don't have that hook installed,
+        # we want to burn None in to the launch args with zero overhead.
+        # See https://github.com/pytorch/pytorch/issues/123597
+        if binary.launch_enter_hook:
+
+            def get_launch_args_with_kernel_launch_metadata(
+                grid,
                 grid_0,
                 grid_1,
                 grid_2,
                 stream,
                 function,
                 metadata,
-                bin.launch_metadata(grid, stream, *args),
+                bin,
                 launch_enter_hook,
                 launch_exit_hook,
-            )
+                num_warps,
+                shared,
+                cta_args,
+                args,
+            ):
+                """
+                Construct launch args after CompiledKernel.launch_metadata is added
+                by https://github.com/openai/triton/pull/3492 .
+                """
+                return (
+                    grid_0,
+                    grid_1,
+                    grid_2,
+                    stream,
+                    function,
+                    metadata,
+                    bin.launch_metadata(grid, stream, *args),
+                    launch_enter_hook,
+                    launch_exit_hook,
+                )
+
+        else:
+
+            def get_launch_args_with_kernel_launch_metadata(
+                grid,
+                grid_0,
+                grid_1,
+                grid_2,
+                stream,
+                function,
+                metadata,
+                bin,
+                launch_enter_hook,
+                launch_exit_hook,
+                num_warps,
+                shared,
+                cta_args,
+                args,
+            ):
+                """
+                Construct launch args after CompiledKernel.launch_metadata is added
+                by https://github.com/openai/triton/pull/3492 .
+                """
+                return (
+                    grid_0,
+                    grid_1,
+                    grid_2,
+                    stream,
+                    function,
+                    metadata,
+                    None,
+                    launch_enter_hook,
+                    launch_exit_hook,
+                )
 
         scope["get_launch_args"] = (
             get_launch_args_with_kernel_launch_metadata
