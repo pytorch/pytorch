@@ -5,7 +5,6 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 
-#include <cstdint>
 
 #ifdef __OBJC__
 #include <Foundation/Foundation.h>
