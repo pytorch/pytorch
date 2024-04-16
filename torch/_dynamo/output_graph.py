@@ -878,66 +878,65 @@ class OutputGraph:
 
         raise AssertionError("unreachable")
 
-    def get_attr_mutations_on_stolen_lists(
-        self,
-    ) -> Dict[str, List[AttributeMutationExisting]]:
-        attr_mutations_on_stolen_lists: Dict[str, List[AttributeMutationExisting]] = {}
+    def handle_aliases_for_stolen_lists(self, tx):
+        # If list inputs are stolen, but still needed after the function call, create aliases to keep them alive
+        alias_insts = []
+
+        needs_alias: Dict[
+            str, List[Union[VariableTracker, AttributeMutationExisting]]
+        ] = {}
         maybe_gm = self.local_scope.get("self")
         stolen_list_names = get_locals_to_steal(maybe_gm)
-        for attr_mutation in self.side_effects.store_attr_mutations.keys():
-            if (
-                not isinstance(attr_mutation, AttributeMutationExisting)
-                or not isinstance(attr_mutation.source, GetItemSource)
-                or not isinstance(attr_mutation.source.base, LocalSource)
+        for x in [
+            *tx.stack,
+            *tx.symbolic_locals.values(),
+            *self.side_effects.store_attr_mutations.keys(),
+        ]:
+            if not (
+                isinstance(x, (VariableTracker, AttributeMutationExisting))
+                and isinstance(x.source, GetItemSource)
+                and isinstance(x.source.base, LocalSource)
+                and x.source.base.local_name in stolen_list_names
             ):
                 continue
 
-            list_name = attr_mutation.source.base.local_name
-            if list_name not in stolen_list_names:
-                continue
+            stolen_name = x.source.base.local_name
+            if stolen_name not in needs_alias:
+                needs_alias[stolen_name] = []
+            needs_alias[stolen_name].append(x)
 
-            # mutation is of type `stolen_list[i].attr_name`, so we need to keep stolen_list[i] alive
-            if list_name not in attr_mutations_on_stolen_lists:
-                attr_mutations_on_stolen_lists[list_name] = []
-            attr_mutations_on_stolen_lists[list_name].append(attr_mutation)
-        return attr_mutations_on_stolen_lists
-
-    def handle_mutations_on_stolen_list_inputs(self):
-        # When mutations happen on inputs list elements, those elements must be kept alive after the function call.
-        # If the input list is stolen, we perform the mutation on aliases.
-        alias_insts = []
-        attr_mutations_on_stolen_lists = self.get_attr_mutations_on_stolen_lists()
+        visited = set()
         for arg in self.graphargs:
             if not (
                 isinstance(arg._example, list)
                 and isinstance(arg.source, LocalSource)
-                and arg.source.local_name in attr_mutations_on_stolen_lists
+                and arg.source.local_name in needs_alias
             ):
                 continue
 
             # arg is a list that will be cleared by the compiled function
             list_name = arg.source.local_name
             assert list_name in self.code_options["co_varnames"]
-            for mutation in attr_mutations_on_stolen_lists[list_name]:
-                assert mutation.source is not None
-                assert isinstance(mutation.source, GetItemSource)
-                list_idx = mutation.source.index
+            for x in needs_alias[list_name]:
+                list_idx = x.source.index
                 alias_name = self.new_var(
                     f"{list_name}_ref"
                 )  # self.new_var already adds unique id suffix
 
-                # bytecode of `alias_name = list_name[list_idx]`
-                alias_insts.extend(
-                    [
-                        create_instruction("LOAD_FAST", argval=list_name),
-                        create_instruction("LOAD_CONST", argval=list_idx),
-                        create_instruction("BINARY_SUBSCR"),
-                        create_instruction("STORE_FAST", argval=alias_name),
-                    ]
-                )
+                if list_idx not in visited:
+                    visited.add(list_idx)
+                    # bytecode of `alias_name = list_name[list_idx]`
+                    alias_insts.extend(
+                        [
+                            create_instruction("LOAD_FAST", argval=list_name),
+                            create_instruction("LOAD_CONST", argval=list_idx),
+                            create_instruction("BINARY_SUBSCR"),
+                            create_instruction("STORE_FAST", argval=alias_name),
+                        ]
+                    )
 
-                # perform mutation on alias, handled by suffix codegen
-                mutation.source = LocalSource(alias_name)
+                # operate on alias, handled by suffix codegen
+                x.source = LocalSource(alias_name)
 
         return alias_insts
 
@@ -981,7 +980,7 @@ class OutputGraph:
             self.pregraph_bytecode and self.export
         ), "export does not support pregraph_bytecode"
         prefix_insts.extend(self.pregraph_bytecode)
-        prefix_insts.extend(self.handle_mutations_on_stolen_list_inputs())
+        prefix_insts.extend(self.handle_aliases_for_stolen_lists(tx))
 
         def append_prefix_insts():
             self.add_output_instructions(prefix_insts)
