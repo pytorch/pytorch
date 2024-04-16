@@ -2007,7 +2007,8 @@ def maybe_snapshot_memory(should_snapshot_memory, suffix):
             try:
                 torch.cuda.memory._dump_snapshot(
                     os.path.join(
-                        torch._dynamo.config.base_dir, f"{output_filename.rstrip('.csv')}_{suffix}.pickle"
+                        torch._dynamo.config.base_dir,
+                        f"{output_filename.rstrip('.csv')}_{suffix}.pickle",
                     )
                 )
             except Exception as e:
@@ -2717,7 +2718,9 @@ class BenchmarkRunner:
             if tag is not None:
                 experiment_kwargs["tag"] = tag
             results = []
-            with maybe_snapshot_memory(self.args.snapshot_memory, f"eager_{self.args.only}"):
+            with maybe_snapshot_memory(
+                self.args.snapshot_memory, f"eager_{self.args.only}"
+            ):
                 eager_latency, eager_peak_mem, _ = warmup(
                     self.model_iter_fn, model, example_inputs, "eager"
                 )
@@ -2731,7 +2734,11 @@ class BenchmarkRunner:
                 optimized_model_iter_fn = optimize_ctx(self.model_iter_fn)
                 aot_compilation_time = 0
 
-            with maybe_enable_compiled_autograd(self.args.compiled_autograd), maybe_snapshot_memory(self.args.snapshot_memory, f"compiled_{self.args.only}"):
+            with maybe_enable_compiled_autograd(
+                self.args.compiled_autograd
+            ), maybe_snapshot_memory(
+                self.args.snapshot_memory, f"compiled_{self.args.only}"
+            ):
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
                 )
