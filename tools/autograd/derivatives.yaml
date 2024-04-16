@@ -583,7 +583,7 @@
 
 - name: div.Scalar(Tensor self, Scalar other) -> Tensor
   self: div_tensor_self_backward(grad, other, self.scalar_type())
-  result: self_t / other
+  result: auto_linear
 
 - name: div.Tensor_mode(Tensor self, Tensor other, *, str? rounding_mode) -> Tensor
   self: div_tensor_self_backward(grad, other, self.scalar_type(), rounding_mode)
@@ -1163,11 +1163,11 @@
 
 - name: amax(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
-  result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
+  result: auto_linear
 
 - name: amin(Tensor self, int[1] dim=[], bool keepdim=False) -> Tensor
   self: scale_grad_by_count(restore_reduced_dims(grad, dim, keepdim), restore_reduced_dims(result, dim, keepdim) == self, dim)
-  result: amaxamin_jvp(self_p, self_t, result, dim, keepdim)
+  result: auto_linear
 
 - name: mm(Tensor self, Tensor mat2) -> Tensor
   self: mm_mat1_backward(grad, mat2, self.sym_sizes(), self.sym_strides(), self.layout(), 1)
@@ -1185,7 +1185,7 @@
 
 - name: mul.Scalar(Tensor self, Scalar other) -> Tensor
   self: mul_tensor_backward(grad, other, self.scalar_type())
-  result: self_t * other
+  result: auto_linear
 
 - name: mv(Tensor self, Tensor vec) -> Tensor
   self: grad.ger(vec.conj())

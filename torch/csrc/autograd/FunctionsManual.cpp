@@ -206,16 +206,6 @@ Tensor scale_grad_by_count(
   return (grad / mask.sum(dims, true)) * mask;
 }
 
-Tensor amaxamin_jvp(
-    const Tensor& x,
-    const Tensor& dx,
-    const Tensor& result,
-    IntArrayRef dim,
-    bool keepdim) {
-  auto mask = x == restore_reduced_dims(result, dim, keepdim);
-  return at::where(mask, dx, 0.).sum(dim, keepdim) / mask.sum(dim, keepdim);
-}
-
 std::tuple<Tensor, Tensor> _euclidean_dist_backward(
     const Tensor& grad,
     const Tensor& x1,

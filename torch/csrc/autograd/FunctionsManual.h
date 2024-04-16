@@ -782,12 +782,6 @@ std::tuple<Tensor, Tensor> atan2_backward(
     const Tensor& self,
     const Tensor& other,
     std::array<bool, 2> output_mask);
-Tensor amaxamin_jvp(
-    const Tensor& x,
-    const Tensor& dx,
-    const Tensor& result,
-    IntArrayRef dim,
-    bool keepdim);
 std::tuple<Tensor, Tensor, Tensor> layer_norm_double_backward(
     const Tensor& input,
     const c10::optional<Tensor>& gamma,
