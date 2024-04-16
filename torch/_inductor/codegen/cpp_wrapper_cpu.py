@@ -201,9 +201,18 @@ class CppWrapperCpu(WrapperCodeGen):
 
                 class RAIIPyObject {
                 public:
+                    RAIIPyObject() : obj_(nullptr) {}
                     RAIIPyObject(PyObject* obj) : obj_(obj) {}
                     ~RAIIPyObject() {
                         Py_XDECREF(obj_);
+                    }
+                    RAIIPyObject& operator=(const RAIIPyObject& other) {
+                        if (this != &other) {
+                            Py_XDECREF(obj_);
+                            obj_ = other.obj_;
+                            Py_XINCREF(obj_);
+                        }
+                        return *this;
                     }
                     operator PyObject*() {
                         return obj_;
@@ -2025,15 +2034,13 @@ RAIIPyObject codecache_module(PyImport_ImportModule("torch._inductor.codecache")
 if (codecache_module.get() == NULL) {
     throw std::runtime_error("Failed to load torch._inductor.codecache");
 }
-custom_op_wrapper_ptr = std::make_unique<RAIIPyObject>(PyObject_GetAttrString(codecache_module, "custom_op_wrapper"));
-if (custom_op_wrapper_ptr.get()->get() == NULL) {
+custom_op_wrapper = PyObject_GetAttrString(codecache_module, "custom_op_wrapper");
+if (custom_op_wrapper.get() == NULL) {
     throw std::runtime_error("Failed to load torch._inductor.codecache.custom_op_wrapper");
 }"""
 
         # Use ptr here because RAIIPyObject does not have a default constructor
-        declarations_before_scope = [
-            "std::unique_ptr<RAIIPyObject> custom_op_wrapper_ptr;"
-        ]
+        declarations_before_scope = ["RAIIPyObject custom_op_wrapper;"]
         scope_gil_acquire = self.generate_scoped_gil_acquire(
             declarations_before_scope, lines
         )
@@ -2131,7 +2138,7 @@ PyTuple_SetItem({py_args_var}, 0, PyUnicode_FromString("{python_kernel_name}"));
 
             lines += f"""
 // Call the custom op in Python
-RAIIPyObject py_{buf_name}(PyObject_CallObject(custom_op_wrapper_ptr.get()->get(), {py_args_var}));
+RAIIPyObject py_{buf_name}(PyObject_CallObject(custom_op_wrapper, {py_args_var}));
 if (py_{buf_name}.get() == NULL) {{
     throw std::runtime_error("PyObject_CallObject {python_kernel_name} failed");
 }}"""
