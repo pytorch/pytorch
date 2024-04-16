@@ -2106,6 +2106,29 @@ class ReduceOpTest(TestCase):
             self.assertFalse(None in (reduce_op, reduce_op_obj))
             self.assertFalse(not_reduceop in (reduce_op, reduce_op_obj))
 
+class LocalRankTest(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 4
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    def testWithoutEnv(self):
+        with self.assertRaisesRegex(RuntimeError, "LOCAL_RANK"):
+            dist.get_node_local_rank()
+
+    def testNodeLocalRank(self):
+        os.environ["LOCAL_RANK"] = str(self.rank)
+        self.assertEqual(dist.get_node_local_rank(), self.rank)
 
 if __name__ == "__main__":
     assert (
