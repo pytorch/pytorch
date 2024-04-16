@@ -5,8 +5,6 @@
    - [Untrusted models](#untrusted-models)
    - [Untrusted inputs](#untrusted-inputs)
    - [Data privacy](#data-privacy)
-   - [Untrusted environments or networks](#untrusted-environments-or-networks)
-   - [Multi-Tenant environments](#multi-tenant-environments)
 
 ## Reporting Security Issues
 
@@ -57,23 +55,3 @@ If applicable, prepare your model against bad inputs and prompt injections. Some
 **Take special security measures if your model if you train models with sensitive data**. Prioritize [sandboxing](https://developers.google.com/code-sandboxing) your models and:
 - Do not feed sensitive data to untrusted model (even if runs in a sandboxed environment)
 - If you consider publishing a model that was partially trained with sensitive data, be aware that data can potentially be recovered from the trained weights (especially if model overfits).
-
-### Untrusted environments or networks
-
-If you can't run your models in a secure and isolated environment or if it must be exposed to an untrusted network, make sure to take the following security precautions:
-* Confirm the hash of any downloaded artifact (e.g. pre-trained model weights) matches a known-good value
-* Encrypt your data if sending it over the network.
-
-### Multi-Tenant environments
-
-If you intend to run multiple models in parallel with shared memory, it is your responsibility to ensure the models do not interact or access each other's data. The primary areas of concern are tenant isolation, resource allocation, model sharing and hardware attacks.
-
-#### Tenant Isolation
-
-You must make sure that models run separately. Since models can run code, it's important to use strong isolation methods to prevent unwanted access to the data from other tenants.
-
-Separating networks is also a big part of isolation. If you keep model network traffic separate, you not only prevent unauthorized access to data or models, but also prevent malicious users or tenants sending graphs to execute under another tenant’s identity.
-
-#### Hardware Attacks
-
-Besides the virtual environment, the hardware (GPUs or TPUs) can also be attacked. [Research](https://scholar.google.com/scholar?q=gpu+side+channel) has shown that side channel attacks on GPUs are possible, which can make data leak from other models or processes running on the same system at the same time.
