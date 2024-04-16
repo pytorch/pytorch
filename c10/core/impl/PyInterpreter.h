@@ -177,18 +177,37 @@ struct C10_API PyInterpreterVTable {
   virtual c10::SymIntArrayRef sym_strides(const TensorImpl* self) const = 0;
   virtual c10::SymInt sym_storage_offset(const TensorImpl* self) const = 0;
 
-  virtual void trace_gpu_event_creation(uintptr_t event) const = 0;
-  virtual void trace_gpu_event_deletion(uintptr_t event) const = 0;
-  virtual void trace_gpu_event_record(uintptr_t event, uintptr_t stream)
-      const = 0;
-  virtual void trace_gpu_event_wait(uintptr_t event, uintptr_t stream)
-      const = 0;
-  virtual void trace_gpu_memory_allocation(uintptr_t ptr) const = 0;
-  virtual void trace_gpu_memory_deallocation(uintptr_t ptr) const = 0;
-  virtual void trace_gpu_stream_creation(uintptr_t stream) const = 0;
-  virtual void trace_gpu_device_synchronization() const = 0;
-  virtual void trace_gpu_stream_synchronization(uintptr_t stream) const = 0;
-  virtual void trace_gpu_event_synchronization(uintptr_t event) const = 0;
+  virtual void trace_gpu_event_creation(
+      c10::DeviceType device_type,
+      uintptr_t event) const = 0;
+  virtual void trace_gpu_event_deletion(
+      c10::DeviceType device_type,
+      uintptr_t event) const = 0;
+  virtual void trace_gpu_event_record(
+      c10::DeviceType device_type,
+      uintptr_t event,
+      uintptr_t stream) const = 0;
+  virtual void trace_gpu_event_wait(
+      c10::DeviceType device_type,
+      uintptr_t event,
+      uintptr_t stream) const = 0;
+  virtual void trace_gpu_memory_allocation(
+      c10::DeviceType device_type,
+      uintptr_t ptr) const = 0;
+  virtual void trace_gpu_memory_deallocation(
+      c10::DeviceType device_type,
+      uintptr_t ptr) const = 0;
+  virtual void trace_gpu_stream_creation(
+      c10::DeviceType device_type,
+      uintptr_t stream) const = 0;
+  virtual void trace_gpu_device_synchronization(
+      c10::DeviceType device_type) const = 0;
+  virtual void trace_gpu_stream_synchronization(
+      c10::DeviceType device_type,
+      uintptr_t stream) const = 0;
+  virtual void trace_gpu_event_synchronization(
+      c10::DeviceType device_type,
+      uintptr_t event) const = 0;
 
   virtual void reset_backward_hooks(const TensorImpl* self) const = 0;
 };

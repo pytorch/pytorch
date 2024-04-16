@@ -50,12 +50,8 @@ struct VecMaskCast<int, 1, float, 1> {
 template <typename dst_t>
 struct VecMaskCast<dst_t, 1, int64_t, 2> {
   static inline VecMask<dst_t, 1> apply(const VecMask<int64_t, 2>& vec_mask) {
-    auto low = _mm256_shuffle_epi32(vec_mask[0], _MM_SHUFFLE(2, 0, 2, 0));
-    auto high = _mm256_shuffle_epi32(vec_mask[1], _MM_SHUFFLE(2, 0, 2, 0));
-    low = _mm256_permute4x64_epi64(low, _MM_SHUFFLE(3, 1, 2, 0));
-    high = _mm256_permute4x64_epi64(high, _MM_SHUFFLE(3, 1, 2, 0));
-    return VecMask<int, 1>(Vectorized<int>(_mm256_blend_epi32(low, high, 0xF0)))
-        .cast<dst_t, 1>();
+    auto int_vec = convert<int, 1, int64_t, 2>(VectorizedN<int64_t, 2>(vec_mask));
+    return VecMask<int, 1>(int_vec).cast<dst_t, 1>();
   }
 };
 

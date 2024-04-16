@@ -721,6 +721,8 @@ void initDispatchBindings(PyObject* module) {
       c10::impl::ForceDispatchKeyGuard,
       c10::DispatchKeySet,
       c10::DispatchKeySet>(m, "_ForceDispatchKeyGuard");
+  py_context_manager<c10::impl::ForceDispatchKeyGuard>(
+      m, "_PreserveDispatchKeyGuard");
   py_context_manager<c10::impl::IncludeDispatchKeyGuard, c10::DispatchKey>(
       m, "_IncludeDispatchKeyGuard");
   py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
@@ -730,6 +732,8 @@ void initDispatchBindings(PyObject* module) {
 
   py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
       m, "_AutoDispatchBelowAutograd");
+  py_context_manager<at::AutoDispatchBelowADInplaceOrView>(
+      m, "_AutoDispatchBelowADInplaceOrView");
 
   // Prints out the name of every operator that has a kernel registered to the
   // Dispatcher under [dispatch_key]. If no arguments are specified, it'll print
@@ -850,6 +854,19 @@ void initDispatchBindings(PyObject* module) {
         ->storage()
         .unsafeGetStorageImpl()
         ->set_throw_on_mutable_data_ptr();
+  });
+
+  // Invariant: you must ONLY call this with FakeTensors.
+  m.def("_set_warn_deprecated_on_mutable_data_ptr", [](const at::Tensor& t) {
+    if (!t.unsafeGetTensorImpl()->has_storage()) {
+      // If the Tensor doesn't have a storage, then accessing .data_ptr()
+      // will already raise an error.
+      return;
+    }
+    t.unsafeGetTensorImpl()
+        ->storage()
+        .unsafeGetStorageImpl()
+        ->set_warn_deprecated_on_mutable_data_ptr();
   });
 
   using c10::impl::TorchDispatchModeKey;
