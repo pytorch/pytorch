@@ -674,7 +674,7 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
     std::vector<c10::Device> devices;
     devices.reserve(deviceTypes_.size());
     for (auto& dt : deviceTypes_) {
-      devices.push_back(c10::Device(dt));
+      devices.emplace_back(dt);
     }
     return devices;
   }
