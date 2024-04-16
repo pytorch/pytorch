@@ -25,10 +25,11 @@ def _msg_dict_from_dcp_method_args(*args, **kwargs) -> Dict[str, Any]:
     # checkpoint ID can be passed in through the serializer or through the checkpoint id directly
     storage_writer = kwargs.get("storage_writer", None)
     storage_reader = kwargs.get("storage_reader", None)
-    if kwargs.get("checkpoint_id") is None and (
-        serializer := storage_writer or storage_reader
-    ):
-        msg_dict["checkpoint_id"] = getattr(serializer, "checkpoint_id", None)
+    checkpoint_id = kwargs.get("checkpoint_id", None)
+    if not checkpoint_id and (serializer := storage_writer or storage_reader):
+        checkpoint_id = getattr(serializer, "checkpoint_id", None)
+
+    msg_dict["checkpoint_id"] = str(checkpoint_id)
 
     return msg_dict
 
