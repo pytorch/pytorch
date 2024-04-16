@@ -832,7 +832,7 @@ def _get_updated_range_constraints(
     if _is_executorch:
         assert num_lifted is None
         assert example_inputs is None
-        shape_env = get_shape_env(gm)
+        shape_env, _ = get_shape_env(gm)
         if shape_env is None:
             return {}
         range_constraints = {
