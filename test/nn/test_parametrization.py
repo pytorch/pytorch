@@ -9,6 +9,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.nn.init as init
 import torch.nn.utils.parametrize as parametrize
+from torch import Tensor
+from torch.__future__ import get_swap_module_params_on_conversion
 from torch.nn import Parameter
 from torch.testing._internal.common_utils import run_tests, skipIfNoLapack, \
     TemporaryFileName, instantiate_parametrized_tests, set_default_dtype, skipIfTorchDynamo, \
@@ -17,6 +19,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_nn import NNTestCase
 from torch.testing._internal.common_utils import gradcheck
+from torch.testing._internal.two_tensor import TwoTensor
 
 
 class TestNNParametrization(NNTestCase):
@@ -84,8 +87,7 @@ class TestNNParametrization(NNTestCase):
         self.assertTrue(parametrize.is_parametrized(model, "weight"))
         self.assertFalse(parametrize.is_parametrized(model, "bias"))
         self.assertNotIn("weight", model._parameters)
-        A = model.weight
-        self.assertTrue(A.shape[0] == 1)
+        self.assertTrue(model.weight.shape[0] == 1)
         parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
         self.assertFalse(hasattr(model, "parametrizations"))
         self.assertEqual(model.weight, initial_model.weight)
@@ -100,8 +102,7 @@ class TestNNParametrization(NNTestCase):
         self.assertTrue(parametrize.is_parametrized(model, "weight"))
         self.assertFalse(parametrize.is_parametrized(model, "bias"))
         self.assertNotIn("weight", model._parameters)
-        A = model.weight
-        self.assertTrue(A.shape[0] == 1)
+        self.assertTrue(model.weight.shape[0] == 1)
         parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
         self.assertFalse(hasattr(model, "parametrizations"))
         self.assertEqual(model.weight, initial_model.weight)
@@ -118,6 +119,10 @@ class TestNNParametrization(NNTestCase):
         # Result should be skew-symmetric
         A = model.weight
         self.assertEqual(A, -A.T)
+        if get_swap_module_params_on_conversion():
+            # When using the swap_tensors path, this is needed so that the autograd
+            # graph is not alive anymore.
+            del A
         # Remove and check consistency
         parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
         self.assertFalse(hasattr(model, "parametrizations"))
@@ -135,6 +140,10 @@ class TestNNParametrization(NNTestCase):
         # Result should be skew-symmetric
         A = model.weight
         self.assertEqual(A, -A.T)
+        if get_swap_module_params_on_conversion():
+            # When using the swap_tensors path, this is needed so that the autograd
+            # graph is not alive anymore.
+            del A
         # Remove and check consistency
         parametrize.remove_parametrizations(model, "weight", leave_parametrized=False)
         self.assertFalse(hasattr(model, "parametrizations"))
@@ -149,6 +158,10 @@ class TestNNParametrization(NNTestCase):
         X = model.weight
         Id = torch.eye(X.size(0), device=X.device)
         self.assertEqual(X.T @ X, Id)
+        if get_swap_module_params_on_conversion():
+            # When using the swap_tensors path, this is needed so that the autograd
+            # graph is not alive anymore.
+            del X
         # Structure tests
         self.assertTrue(hasattr(model, "parametrizations"))
         self.assertTrue(parametrize.is_parametrized(model))
@@ -228,6 +241,10 @@ class TestNNParametrization(NNTestCase):
         sgd.step()
         self.assertNotEqual(model.weight, weight_copy)
         self.assertNotEqual(model.bias, bias_copy)
+        if get_swap_module_params_on_conversion():
+            # When using the swap_tensors path, this is needed so that the autograd
+            # graph is not alive anymore.
+            del weight_copy, bias_copy
 
         # Test leave_parametrized=True
         for _ in range(2):
@@ -246,6 +263,10 @@ class TestNNParametrization(NNTestCase):
             sgd.step()
             self.assertNotEqual(model.weight, weight_copy)
             self.assertNotEqual(model.bias, bias_copy)
+            if get_swap_module_params_on_conversion():
+                # When using the swap_tensors path, this is needed so that the autograd
+                # graph is not alive anymore.
+                del weight_copy, bias_copy
 
     @swap([True, False])
     def test_register_and_remove_nested_parametrization(self):
@@ -268,7 +289,7 @@ class TestNNParametrization(NNTestCase):
         # Result should be skew-symmetric
         A = model.weight
         self.assertEqual(A, -A.T)
-        if torch.__future__.get_swap_module_params_on_conversion():
+        if get_swap_module_params_on_conversion():
             # When using the swap_tensors path, this is needed so that the autograd
             # graph is not alive anymore.
             del A
@@ -960,7 +981,7 @@ class TestNNParametrization(NNTestCase):
 
         # check that the transfer didn't affect the original value
         self.assertEqual(hold_weight, model.weight)
-        if torch.__future__.get_swap_module_params_on_conversion():
+        if get_swap_module_params_on_conversion():
             # When using the swap_tensors path, this is needed so that the autograd
             # graph is not alive anymore.
             del hold_weight
@@ -1255,7 +1276,7 @@ class TestNNParametrization(NNTestCase):
                     # avoid doing another power iteration
                     m, wrapped_m, _ = get_modules()
                     pre_remove_out = wrapped_m(input)
-                    if torch.__future__.get_swap_module_params_on_conversion():
+                    if get_swap_module_params_on_conversion():
                         # When using the swap_tensors path, this is needed so that the autograd
                         # graph is not alive anymore.
                         pre_remove_out_ref = pre_remove_out.detach()
@@ -1269,7 +1290,7 @@ class TestNNParametrization(NNTestCase):
                     torch.nn.utils.parametrizations.spectral_norm(m)
                     for _ in range(3):
                         pre_remove_out = wrapped_m(input)
-                    if torch.__future__.get_swap_module_params_on_conversion():
+                    if get_swap_module_params_on_conversion():
                         # When using the swap_tensors path, this is needed so that the autograd
                         # graph is not alive anymore.
                         pre_remove_out_ref = pre_remove_out.detach()
@@ -1500,7 +1521,13 @@ class TestNNParametrization(NNTestCase):
 
                 # We do not support householder for complex inputs
                 # See Note [Householder complex]
-                w_init = m.weight.clone()
+
+                # When using the swap_tensors path, this is needed so that the autograd
+                # graph is not alive anymore.
+                if get_swap_module_params_on_conversion():
+                    w_init = m.weight.clone().detach()
+                else:
+                    w_init = m.weight.clone()
                 if parametrization == "householder" and m.weight.is_complex():
                     msg = "householder parametrization does not support complex tensors"
                     with self.assertRaisesRegex(ValueError, msg):
@@ -1609,6 +1636,90 @@ class TestNNParametrization(NNTestCase):
         m2 = deepcopy(m)
         input = torch.randn(3, 4)
         self.assertEqual(m(input), m2(input))
+
+    @swap([True])
+    def test_wrapper_subclass_parametrization(self):
+        class Subclassify(nn.Module):
+            def forward(self, X):
+                return TwoTensor(X, X)
+
+        class UnSubclassify(nn.Module):
+            def forward(self, X):
+                return X.a
+
+        class IdentityWithRightInverse(nn.Module):
+            def forward(self, X):
+                return X
+
+            def right_inverse(self, X):
+                return TwoTensor(X, X)
+
+        def _check_parametrization(parametrization,
+                                   type_before_registration,
+                                   type_after_registration,
+                                   leave_parametrized=False,
+                                   type_after_right_inverse=None):
+            model = nn.Linear(2, 2)
+            buf = torch.randn(2, 2)
+            model.register_buffer('buf', buf)
+            if type_before_registration == TwoTensor and type_after_registration == Tensor:
+                model._apply(lambda t: TwoTensor(t, t))
+            initial_weight = model.weight.clone().detach()
+            initial_weight_id = id(model.weight)
+            initial_buf = model.buf.clone().detach()
+            initial_buf_id = id(model.buf)
+            type_original_weight = type_before_registration if type_after_right_inverse is None else type_after_right_inverse
+            type_original_buf = Tensor if type_original_weight is nn.Parameter else type_original_weight
+            type_after_removal_buf = type_after_registration if leave_parametrized else type_original_buf
+            if leave_parametrized:
+                if type_after_registration is Tensor:
+                    type_after_removal_weight = nn.Parameter
+                else:
+                    type_after_removal_weight = type_after_registration
+            else:
+                type_after_removal_weight = type_original_weight
+
+            parametrize.register_parametrization(model, "weight", parametrization())
+            parametrize.register_parametrization(model, "buf", parametrization())
+            self.assertTrue(hasattr(model, "parametrizations"))
+            self.assertTrue(parametrize.is_parametrized(model))
+            self.assertFalse(parametrize.is_parametrized(model, "bias"))
+            # checks for weight
+            self.assertTrue(parametrize.is_parametrized(model, "weight"))
+            self.assertTrue(isinstance(model.parametrizations.weight.original, nn.Parameter))
+            self.assertTrue(type(model.parametrizations.weight.original) is type_original_weight)
+            self.assertNotIn("weight", model._parameters)
+            self.assertTrue(type(model.weight) is type_after_registration)
+            # checks for buf
+            self.assertTrue(parametrize.is_parametrized(model, "buf"))
+            self.assertFalse(isinstance(model.parametrizations.buf.original, nn.Parameter))
+            self.assertTrue(type(model.parametrizations.buf.original) is type_original_buf)
+            self.assertTrue(type(model.buf) is type_after_registration)
+            parametrize.remove_parametrizations(model, "weight", leave_parametrized=leave_parametrized)
+            parametrize.remove_parametrizations(model, "buf", leave_parametrized=leave_parametrized)
+            self.assertFalse(hasattr(model, "parametrizations"))
+            self.assertEqual(model.__class__, nn.Linear)
+            # checks for weight
+            self.assertTrue(type(model.weight) is type_after_removal_weight)
+            self.assertTrue(isinstance(model.weight, nn.Parameter))
+            self.assertEqual(id(model.weight), initial_weight_id)
+            # checks for buf
+            self.assertTrue(type(model.buf) is type_after_removal_buf)
+            self.assertFalse(isinstance(model.buf, nn.Parameter))
+            self.assertEqual(id(model.buf), initial_buf_id)
+            if not leave_parametrized and type_after_right_inverse is None:
+                self.assertEqual(model.weight, initial_weight)
+                self.assertEqual(model.buf, initial_buf)
+
+
+        _check_parametrization(Subclassify, nn.Parameter, TwoTensor)
+        _check_parametrization(UnSubclassify, TwoTensor, Tensor)
+        _check_parametrization(IdentityWithRightInverse, nn.Parameter, TwoTensor,
+                               type_after_right_inverse=TwoTensor)
+        _check_parametrization(Subclassify, nn.Parameter, TwoTensor, leave_parametrized=True)
+        _check_parametrization(UnSubclassify, TwoTensor, Tensor, leave_parametrized=True)
+        _check_parametrization(IdentityWithRightInverse, nn.Parameter, TwoTensor,
+                               leave_parametrized=True, type_after_right_inverse=TwoTensor)
 
 
 class TestNNParametrizationDevice(NNTestCase):

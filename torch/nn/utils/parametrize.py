@@ -1,8 +1,9 @@
 import torch
+from torch.__future__ import get_swap_module_params_on_conversion
 from torch.nn.modules.container import ModuleList, ModuleDict, Module
 from torch.nn.parameter import Parameter
-from torch import Tensor
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch import Tensor
 
 import collections
 import copyreg
@@ -66,7 +67,7 @@ def _register_parameter_or_buffer(module, name, X):
         module.register_buffer(name, X)
 
 def _maybe_set(dest: Tensor, src: Tensor) -> None:
-    should_swap = torch.__future__.get_swap_module_params_on_conversion() or is_traceable_wrapper_subclass(dest)
+    should_swap = get_swap_module_params_on_conversion() or is_traceable_wrapper_subclass(dest)
     if should_swap:
         if isinstance(dest, Parameter) and not isinstance(src, Parameter):
             src = Parameter(src, requires_grad=dest.requires_grad)
@@ -663,9 +664,11 @@ def remove_parametrizations(
                         # RuntimeError: set_storage is not allowed on a Tensor created from .data or .detach().
                         raise RuntimeError("Calling remove_parametrizations() with leave_parametrized=True "
                                            "for a parameter that is an instance of a tensor subclass requires "
-                                           "set_() to be implemented correctly for the tensor subclass. Either "
-                                           "set leave_parametrized=False or provide a working implementation for "
-                                           "set_() in the tensor subclass.") from e
+                                           "set_() to be implemented correctly for the tensor subclass."
+                                           "Alternatively, one can opt into the swap_tensors path"
+                                           "Either set leave_parametrized=False or provide a working implementation"
+                                           "for set_() in the tensor subclass or set "
+                                           "torch.__future__.set_swap_module_params_on_conversion(True).") from e
     else:
         if leave_parametrized:
             # We cannot use no_grad because we need to know whether one or more
