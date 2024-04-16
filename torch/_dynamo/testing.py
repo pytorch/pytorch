@@ -284,7 +284,16 @@ def rand_strided(
         + extra_size
     )
     if dtype.is_floating_point:
-        buffer = torch.randn(needed_size, dtype=dtype, device=device)
+        if dtype.itemsize == 1:
+            """
+            normal distribution kernel is not implemented for fp8..
+            Workaround that by creating a fp16 tensor and then cast.
+            """
+            buffer = torch.randn(needed_size, dtype=torch.float16, device=device).to(
+                dtype=dtype
+            )
+        else:
+            buffer = torch.randn(needed_size, dtype=dtype, device=device)
     else:
         buffer = torch.zeros(size=[needed_size], dtype=dtype, device=device)
     return torch.as_strided(buffer, size, stride)

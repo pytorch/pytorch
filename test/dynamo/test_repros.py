@@ -38,6 +38,8 @@ from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     disable_translation_validation_if_dynamic_shapes,
+    instantiate_parametrized_tests,
+    parametrize,
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.two_tensor import TwoTensor
@@ -3873,6 +3875,16 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         make_fn(None)()
 
+    def test_call_finally_python_3_8_2(self):
+        def f(x):
+            while x:
+                try:
+                    pass
+                except Exception as _:
+                    continue
+
+        torch.compile(f, backend="eager")(0)
+
     def test_call_finally_opcode_python_3_8(self):
         def fn():
             try:
@@ -4122,7 +4134,15 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(opt_fn("10"), fn("10"))
         self.assertEqual(cnt.frame_count, 4)
 
-    def test_tensor_set_data(self):
+    @parametrize(
+        "backend",
+        ["eager", "aot_eager", "inductor"],
+    )
+    @parametrize(
+        "func_name",
+        ["func1", "func2", "func3"],
+    )
+    def test_tensor_set_data(self, backend, func_name):
         # https://github.com/pytorch/pytorch/issues/113030
         def func1(x, y):
             x.data = y
@@ -4140,43 +4160,45 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             y.data = torch.zeros([0])
             return torch.tensor(x is z)
 
-        for backend in ["eager", "aot_eager", "inductor"]:
-            for func in [func1, func2, func3]:
-                if backend != "eager" and func is func1:
-                    # add_ not working w/ aot_autograd?
-                    continue
-                torch._dynamo.reset()
-                cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
+        funcs = {"func1": func1, "func2": func2, "func3": func3}
+        func = funcs[func_name]
 
-                compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
-                requires_grad = func is not func1
-                for i in range(0, 5):
-                    # Inputs
-                    eager_a = torch.ones([6], requires_grad=requires_grad)
-                    compiled_a = torch.ones([6], requires_grad=requires_grad)
+        if backend != "eager" and func is func1:
+            # add_ not working w/ aot_autograd?
+            return
 
-                    eager_b = torch.ones([6], requires_grad=requires_grad)
-                    compiled_b = torch.ones([6], requires_grad=requires_grad)
+        torch._dynamo.reset()
+        cnt = torch._dynamo.testing.CompileCounterWithBackend(backend)
 
-                    # Eager
-                    out_eager = func(eager_a, eager_b)
-                    # Compiled
-                    out_compiled = compiled_fn(compiled_a, compiled_b)
-                    self.assertEqual(eager_a, compiled_a)
-                    self.assertEqual(eager_b, compiled_b)
-                    self.assertTrue(torch.equal(out_eager, out_compiled))
+        compiled_fn = torch.compile(func, backend=cnt, fullgraph=True)
+        requires_grad = func is not func1
+        for i in range(0, 5):
+            # Inputs
+            eager_a = torch.ones([6], requires_grad=requires_grad)
+            compiled_a = torch.ones([6], requires_grad=requires_grad)
 
-                    # func1 hits a leaf Variable that requires grad is being used in an in-place operation
-                    if requires_grad:
-                        bwd_inp_eager = torch.randn([6])
-                        bwd_inp_compiled = torch.clone(bwd_inp_eager)
-                        eager_a.backward(bwd_inp_eager)
-                        compiled_a.backward(bwd_inp_compiled)
-                        self.assertEqual(eager_a.grad, compiled_a.grad)
+            eager_b = torch.ones([6], requires_grad=requires_grad)
+            compiled_b = torch.ones([6], requires_grad=requires_grad)
 
-                # Prove guarding works - we run the compiled_fn 5 times
-                # frame_count should stay at 1.
-                self.assertEqual(cnt.frame_count, 1)
+            # Eager
+            out_eager = func(eager_a, eager_b)
+            # Compiled
+            out_compiled = compiled_fn(compiled_a, compiled_b)
+            self.assertEqual(eager_a, compiled_a)
+            self.assertEqual(eager_b, compiled_b)
+            self.assertTrue(torch.equal(out_eager, out_compiled))
+
+            # func1 hits a leaf Variable that requires grad is being used in an in-place operation
+            if requires_grad:
+                bwd_inp_eager = torch.randn([6])
+                bwd_inp_compiled = torch.clone(bwd_inp_eager)
+                eager_a.backward(bwd_inp_eager)
+                compiled_a.backward(bwd_inp_compiled)
+                self.assertEqual(eager_a.grad, compiled_a.grad)
+
+        # Prove guarding works - we run the compiled_fn 5 times
+        # frame_count should stay at 1.
+        self.assertEqual(cnt.frame_count, 1)
 
     @unittest.skipIf(
         TEST_WITH_ROCM or not PLATFORM_SUPPORTS_FLASH_ATTENTION,
@@ -4754,6 +4776,9 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
 
         global_fn = new_fn
         self.assertEqual(opt(x, y), foo(x, y))
+
+
+instantiate_parametrized_tests(ReproTests)
 
 
 if __name__ == "__main__":
