@@ -149,10 +149,6 @@ def efficient_conv_bn_fn_eval(
     and inductor_config.efficient_conv_bn_eval_fx_passes,
 )
 def efficient_conv_bn_eval_decomp_graph_transform(match: Match, *args, **kwargs):
-    # only run this pass if use_single_step_graph is true. efficient_conv_bn_eval_graph_transform
-    # will take care of the module level fusing.
-    if not torch._dynamo.config.use_single_step_graph:
-        return
     bn_node = match.nodes[0]
     graph = match.graph
     assert len(bn_node.args) == 9
@@ -168,7 +164,7 @@ def efficient_conv_bn_eval_decomp_graph_transform(match: Match, *args, **kwargs)
     if input_node.op != "call_function":  # type: ignore[union-attr]
         return
 
-    input_fn = input_node.target # type: ignore[arg-type, union-attr]
+    input_fn = input_node.target  # type: ignore[arg-type, union-attr]
     supported_convs = [
         torch.ops.aten.linear.default,
         torch.ops.aten.conv1d.default,
@@ -196,18 +192,18 @@ def efficient_conv_bn_eval_decomp_graph_transform(match: Match, *args, **kwargs)
         bn_running_mean = bn_node.args[3]
         bn_running_var = bn_node.args[4]
         bn_eps = bn_node.args[7]
-        assert len(conv_node.args) >= 2 # type: ignore[union-attr]
+        assert len(conv_node.args) >= 2  # type: ignore[union-attr]
         conv_input = conv_node.args[0]  # type: ignore[union-attr]
-        conv_weight = conv_node.args[1] # type: ignore[union-attr]
-        conv_bias = conv_node.args[2] if len(conv_node.args) >= 3 else None # type: ignore[union-attr]
-        conv_remainging_args = conv_node.args[3:] # type: ignore[union-attr]
+        conv_weight = conv_node.args[1]  # type: ignore[union-attr]
+        conv_bias = conv_node.args[2] if len(conv_node.args) >= 3 else None  # type: ignore[union-attr]
+        conv_remainging_args = conv_node.args[3:]  # type: ignore[union-attr]
         args = (
             bn_weight,
             bn_bias,
             bn_running_mean,
             bn_running_var,
             bn_eps,
-            conv_node.target, # type: ignore[union-attr]
+            conv_node.target,  # type: ignore[union-attr]
             conv_weight,
             conv_bias,
             conv_input,

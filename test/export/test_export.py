@@ -416,14 +416,24 @@ class TestExport(TestCase):
                 return x
 
         ep1 = export(M1(), (torch.randn(3, 3), ))
-        expected_result = [
-            ("linear_1", "builtin_function_or_method.linear"),
-            ("linear_1", "builtin_function_or_method.linear"),
-            ("linear_2", "builtin_function_or_method.linear"),
-            ("linear_2", "builtin_function_or_method.linear"),
-            ("relu_1", "function.relu"),
-            ("add_1", "method_descriptor.add"),
-        ]
+        if torch._dynamo.config.use_single_step_graph and 'mocked_non_strict_export' not in str(export):
+            expected_result = [
+                ('linear.default_1', 'OpOverload.linear.default'),
+                ('linear.default_1', 'OpOverload.linear.default'),
+                ('linear.default_2', 'OpOverload.linear.default'),
+                ('linear.default_2', 'OpOverload.linear.default'),
+                ('relu.default_1', 'OpOverload.relu.default'),
+                ('add_1', 'method_descriptor.add')
+                ]
+        else:
+            expected_result = [
+                ("linear_1", "builtin_function_or_method.linear"),
+                ("linear_1", "builtin_function_or_method.linear"),
+                ("linear_2", "builtin_function_or_method.linear"),
+                ("linear_2", "builtin_function_or_method.linear"),
+                ("relu_1", "function.relu"),
+                ("add_1", "method_descriptor.add"),
+            ]
         actual_result = []
         for i, node in enumerate(ep1.graph.nodes):
             if node.op == "call_function":

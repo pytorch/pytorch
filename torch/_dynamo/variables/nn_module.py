@@ -9,7 +9,7 @@ from typing import Any, Dict, List
 
 import torch.nn
 
-from .. import trace_rules, variables
+from .. import config, trace_rules, variables
 from ..exc import unimplemented, UnspecializeRestartAnalysis, Unsupported
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import GenerationTracker
@@ -74,6 +74,9 @@ def record_nn_module_stack(module_key: str, source, tx, mod: torch.nn.Module):
         yield
     finally:
         del tx.nn_module_stack[module_key]
+
+
+tracer_to_used_names = {}
 
 
 class NNModuleVariable(VariableTracker):
@@ -321,38 +324,46 @@ class NNModuleVariable(VariableTracker):
 
                 from .builder import wrap_fx_proxy
 
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_module",
-                        self.module_key,
-                        *proxy_args_kwargs(args, kwargs),
-                    ),
-                )
+                # TorchDynamo purposely graph breaks on RNN, GRU, LSTMs, don't try to make_fx and
+                # inline into these modules
+                if not config.use_single_step_graph or isinstance(
+                    mod, (torch.nn.RNN, torch.nn.GRU, torch.nn.LSTM)
+                ):
+                    return wrap_fx_proxy(
+                        tx=tx,
+                        proxy=tx.output.create_proxy(
+                            "call_module",
+                            self.module_key,
+                            *proxy_args_kwargs(args, kwargs),
+                        ),
+                    )
+
+            # handle the cases where
+            # 1. module is not a nn module or ao module
+            # 2. modules without forward and backward hooks under use_single_step_graph config
+            assert self.source, (
+                "Must provide a valid source in order to inline, "
+                "since inlined function may have default args which must be guarded."
+            )
+            if isinstance(mod, torch.fx.GraphModule):
+                # TODO: do we want to support __call__ for GM's?
+                # If so at least some changes are needed, we don't allow inlining
+                # the call_wrapped currently, and maybe other issues too
+                fn = mod.forward
             else:
-                assert self.source, (
-                    "Must provide a valid source in order to inline, "
-                    "since inlined function may have default args which must be guarded."
-                )
-                if isinstance(mod, torch.fx.GraphModule):
-                    # TODO: do we want to support __call__ for GM's?
-                    # If so at least some changes are needed, we don't allow inlining
-                    # the call_wrapped currently, and maybe other issues too
-                    fn = mod.forward
-                else:
-                    fn = mod._call_impl
-                fn_source = AttrSource(self.source, "__call__")
-                if istype(fn, types.MethodType):
-                    fn = fn.__func__
-                    fn_source = AttrSource(fn_source, "__func__")
-                    args = [self] + args
-                else:
-                    assert istype(fn, types.FunctionType)
-                return tx.inline_user_function_return(
-                    variables.UserFunctionVariable(fn, source=fn_source),
-                    args,
-                    kwargs,
-                )
+                fn = mod._call_impl
+            fn_source = AttrSource(self.source, "__call__")
+            if istype(fn, types.MethodType):
+                fn = fn.__func__
+                fn_source = AttrSource(fn_source, "__func__")
+                args = [self] + args
+            else:
+                assert istype(fn, types.FunctionType)
+            return tx.inline_user_function_return(
+                variables.UserFunctionVariable(fn, source=fn_source),
+                args,
+                kwargs,
+            )
 
     def call_method(
         self,
@@ -398,6 +409,66 @@ class NNModuleVariable(VariableTracker):
             # Dynamo inlines `__call__`, includes hooks.
             return self.call_function(tx, args, kwargs)
         elif name == "forward":
+            if config.use_single_step_graph:
+                import torch.utils._pytree as pytree
+                from torch._functorch.aot_autograd import create_functional_call
+                from .builtin import BuiltinVariable
+                from .inline_helper import (
+                    decompose_and_inline_function_with_makefx,
+                    reconstruct_node_meta_data,
+                )
+
+                start_node_code = len(tx.output.graph.nodes)
+
+                # For single step graph we want to use make_fx to extract the fx graph
+                # representing the fwd and inline that fx graph.
+                # Dynamo needs to see all inputs and output of each torch function
+                # in case they are saved for the backward.
+                mod = tx.output.get_submodule(self.module_key)
+                fn = mod.forward.__func__
+                # TODO(JackCaoG): considering using source and regualr builder instead of
+                # SourcelessBuilder.
+                fn_source = AttrSource(self.source, "__call__")
+                fn_source = AttrSource(fn_source, "__func__")
+
+                # Create the functional version of the module which also lifted
+                # all parameters as inputs.
+                params = {
+                    **dict(mod.named_parameters(remove_duplicate=False)),
+                    **dict(mod.named_buffers(remove_duplicate=False)),
+                }
+                params_flat, params_spec = pytree.tree_flatten(params)
+                params_flat = list(params_flat)
+                params_len = len(params_flat)
+                functional_call = create_functional_call(
+                    mod, params_spec, params_len, check_tuple_output=False
+                )
+
+                # Create VariableTrackers for this module's named_parameters and named_buffers.
+                self_params_as_vt = []
+                for full_name in params_spec.context:
+                    current_obj = self
+                    # handle the multi level named_parameter like `mod.y.z`
+                    for name in full_name.split("."):
+                        current_obj = BuiltinVariable(getattr).call_function(
+                            tx, [current_obj, ConstantVariable.create(name)], {}
+                        )
+                    self_params_as_vt.append(current_obj)
+
+                # stich the args togther and pass it to decompose_and_inline_function_with_makefx
+                complete_tensor_variable_args = self_params_as_vt + args
+                res = decompose_and_inline_function_with_makefx(
+                    tx,
+                    functional_call,
+                    complete_tensor_variable_args,
+                    kwargs,
+                )
+
+                num_nodes_need_update_metadata = (
+                    len(tx.output.graph.nodes) - start_node_code
+                )
+                reconstruct_node_meta_data(self, tx, num_nodes_need_update_metadata)
+                return res
             # Example: `self.layer.forward(x)`
             # This is used for explicit calling `forward` in a forward function.
             # Dynamo puts `call_method` node in FX, doesn't trigger hooks.

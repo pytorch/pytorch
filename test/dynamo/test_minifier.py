@@ -142,9 +142,48 @@ inner(torch.randn(20, 20).cuda(), torch.randn(20, 20))
 
         res = self._run_full_test(run_code, "dynamo", "ReluCompileError", isolate=False)
 
-        self.assertExpectedInline(
-            res.minifier_module(),
-            """\
+        if torch._dynamo.config.use_single_step_graph:
+            expected_repro = """\
+class Repro(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.register_buffer('G__mod___b_x', torch.randn([20, 20], dtype=torch.float32).cuda())
+        self.register_buffer('G__mod___b_y', torch.randn([20, 20], dtype=torch.float32))
+        self.G__mod___m_x_weight = torch.nn.Parameter(torch.randn([20, 20], dtype=torch.float32, device="cuda"))
+        self.G__mod___m_x_bias = torch.nn.Parameter(torch.randn([20], dtype=torch.float32, device="cuda"))
+        self.G__mod___p_x = torch.nn.Parameter(torch.randn([20, 20], dtype=torch.float32, device="cuda"))
+        self.G__mod___m_y_weight = torch.nn.Parameter(torch.randn([20, 20], dtype=torch.float32))
+        self.G__mod___m_y_bias = torch.nn.Parameter(torch.randn([20], dtype=torch.float32))
+        self.G__mod___p_y = torch.nn.Parameter(torch.randn([20, 20], dtype=torch.float32))
+
+    def forward(self, L_x1_ : torch.Tensor, L_y1_ : torch.Tensor):
+        l_x1_ = L_x1_
+        l_y1_ = L_y1_
+        randn = torch.randn(20, 20)
+        x2 = randn.cuda();  randn = None
+        y2 = torch.randn(20, 20)
+        child_2 = l_x1_ + x2;  l_x1_ = x2 = None
+        child_5 = l_y1_ + y2;  l_y1_ = y2 = None
+        child = self.G__mod___m_x_weight
+        child_1 = self.G__mod___m_x_bias
+        linear = torch.ops.aten.linear.default(child_2, child, child_1);  child_2 = child = child_1 = None
+        g__mod___p_x = self.G__mod___p_x
+        add_2 = linear + g__mod___p_x;  linear = g__mod___p_x = None
+        g__mod___b_x = self.G__mod___b_x
+        x3 = add_2 + g__mod___b_x;  add_2 = g__mod___b_x = None
+        child_3 = self.G__mod___m_y_weight
+        child_4 = self.G__mod___m_y_bias
+        linear_1 = torch.ops.aten.linear.default(child_5, child_3, child_4);  child_5 = child_3 = child_4 = None
+        g__mod___p_y = self.G__mod___p_y
+        add_4 = linear_1 + g__mod___p_y;  linear_1 = g__mod___p_y = None
+        g__mod___b_y = self.G__mod___b_y
+        y3 = add_4 + g__mod___b_y;  add_4 = g__mod___b_y = None
+        cpu = x3.cpu();  x3 = None
+        add_6 = cpu + y3;  cpu = y3 = None
+        relu = torch.relu(add_6);  add_6 = None
+        return (relu,)"""
+        else:
+            expected_repro = """\
 class Repro(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -176,7 +215,11 @@ class Repro(torch.nn.Module):
         cpu = x3.cpu();  x3 = None
         add_6 = cpu + y3;  cpu = y3 = None
         relu = torch.relu(add_6);  add_6 = None
-        return (relu,)""",
+        return (relu,)"""
+
+        self.assertExpectedInline(
+            res.minifier_module(),
+            expected_repro,
         )
 
     # Test if we can actually get a minified graph

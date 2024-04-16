@@ -2504,7 +2504,11 @@ class CommonTemplate:
             with torch.no_grad():
                 torch.compile(fn)(t)
         # TODO: Autograd internal assertion
-        msg = "Failed running call_module .*"
+        msg = (
+            r"isDifferentiableType\(variable\.scalar_type\(\)\) *"
+            if torch._dynamo.config.use_single_step_graph
+            else "Failed running call_module .*"
+        )
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t)
 
