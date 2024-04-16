@@ -1,19 +1,31 @@
 # Owner(s): ["module: inductor"]
 import contextlib
-import sys
 from unittest.mock import patch
 
 import functorch
 
 import torch
 import torch._inductor.config as config
+import torch.autograd
 from torch._inductor import metrics
 from torch._inductor.compile_fx import compile_fx, count_bytes_inner
-from torch.testing._internal.common_utils import (
-    IS_WINDOWS,
-    skipIfRocm,
-    TestCase as TorchTestCase,
-)
+from torch._inductor.test_case import TestCase as InductorTestCase
+from torch.testing._internal.common_utils import IS_WINDOWS, skipIfRocm
+
+########################
+# Explanation of Tests #
+########################
+# These tests are all testing *memory accesses* of TorchInductor.
+# They are intended to be deterministic performance tests.
+# The expect tests are all measuring the number of memory bytes read/written by
+# the code that Inductor has generated
+#
+# If the test is failing because the number became smaller, feel free to lower it.
+# On the other hand, if the test is failing because the number became larger,
+# that means that your change is leading to *more* memory accesses on this test.
+#
+# That may still be aceeptable, but be aware that you are likely lowering
+# performance for that setting.
 
 # Defines all the kernels for tests
 from torch.testing._internal.triton_utils import HAS_CUDA, requires_cuda
@@ -28,9 +40,8 @@ def count_bytes_inductor(gm, example_inputs):
     return compile_fx(gm, example_inputs, inner_compile=count_bytes_inner)
 
 
-# We don't support torch.compile() on
-# Windows and Python 3.12+
-if not IS_WINDOWS and sys.version_info < (3, 12):
+# We don't support torch.compile() on Windows
+if not IS_WINDOWS:
 
     @torch._dynamo.optimize(count_bytes_inductor)
     def f(x):
@@ -79,7 +90,7 @@ def TI(*size, mx=10, dtype=torch.int32, device=DEVICE):
     return torch.randint(0, mx, size, dtype=dtype, device=device)
 
 
-class TestCase(TorchTestCase):
+class TestCase(InductorTestCase):
     device = DEVICE
     pass
 
@@ -257,6 +268,19 @@ class NumBytesMetricTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """400""")
 
     @patch.object(config, "split_cat_fx_passes", False)
+    @patch.object(
+        config,
+        "pre_grad_fusion_options",
+        {
+            "batch_linear": {},
+            "batch_linear_lhs": {},
+            "batch_layernorm": {},
+            "batch_tanh": {},
+            "batch_relu": {},
+            "batch_sigmoid": {},
+        },
+    )
+    @patch.object(config, "post_grad_fusion_options", {})
     def test_cat_pointwise_many_complex_inputs(self):
         def f(*inputs):
             input = [torch.nn.functional.gelu(val) for val in inputs]
@@ -266,6 +290,19 @@ class NumBytesMetricTests(TestCase):
         self.assertExpectedInline(count_numel(f, *inp), """6400""")
 
     @patch.object(config, "split_cat_fx_passes", False)
+    @patch.object(
+        config,
+        "pre_grad_fusion_options",
+        {
+            "batch_linear": {},
+            "batch_linear_lhs": {},
+            "batch_layernorm": {},
+            "batch_tanh": {},
+            "batch_relu": {},
+            "batch_sigmoid": {},
+        },
+    )
+    @patch.object(config, "post_grad_fusion_options", {})
     def test_cat_pointwise_many_simple_inputs(self):
         def f(*inputs):
             input = [torch.nn.functional.relu(val) for val in inputs]
@@ -564,6 +601,28 @@ class SchedulerFusionTests(TestCase):
         inp = (T(10, 10),)
         self.assertExpectedInline(count_numel(f, *inp), """800""")
 
+    @patch.object(config, "pattern_matcher", False)
+    def test_fusion_choice4_cpu(self):
+        # Fuse nodes with same number of elements and compatible orginal var ranges
+        # [buf0: {d0: 60, d1: 11}, buf1: {d0: 660}] -> buf0_buf1
+        def f(x, w):
+            o1 = x * w
+            output = o1 + 1.0
+            return output
+
+        inp = (T(2, 3, 10, 11, device="cpu"), T(11, device="cpu"))
+        self.assertExpectedInline(count_numel(f, *inp), """1331""")
+
+        # [buf0_buf1: {d0: 60, d1: 11}, buf2: {d0: 660}] -> buf0_buf1_buf2
+        def f(x, w1, w2):
+            o1 = x * w1
+            o2 = x * w2
+            output = o1 + o2
+            return output
+
+        inp = (T(2, 3, 10, 11, device="cpu"), T(11, device="cpu"), T(11, device="cpu"))
+        self.assertExpectedInline(count_numel(f, *inp), """1342""")
+
 
 class TilingTests(TestCase):
     def test_tiling_simple(self):
@@ -644,6 +703,45 @@ class MinCutPartitioningTests(TestCase):
 
         inp = (T(10, grad=True), T(10, grad=True))
         self.assertExpectedInline(count_numel_train(f, *inp), """70""")
+
+    def test_partitioning_with_view(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                y = x.sin()
+                x = x.cos()
+                x = x.view(10, 10)
+                ctx.save_for_backward(x, y)
+                x = x.cos()
+                return x
+
+            @staticmethod
+            def backward(ctx, gradOut):
+                x, y = ctx.saved_tensors
+                return torch.mm(gradOut, x).view(100) * y
+
+        def f(a):
+            return Foo.apply(a)
+
+        inp = (T(100, grad=True),)
+        # We do not want to recompute the x.cos().view() chain, as it's
+        # materialized in backwards
+        self.assertExpectedInline(count_numel_train(f, *inp), """900""")
+
+    @patch.object(config, "pattern_matcher", False)
+    def test_partitioning_long_chain_add(self):
+        def f(x):
+            orig = x
+            for _ in range(2):
+                x = x * x
+                x = torch.mm(x, x)
+                x = x * 2
+                x = orig + x
+                orig = x
+            return x
+
+        inp = (T(10, 10, grad=True),)
+        self.assertExpectedInline(count_numel_train(f, *inp), """3900""")
 
 
 def unfusible(x):
@@ -909,7 +1007,7 @@ class WouldBeNiceIfItWorked:
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CUDA:
         run_tests(needs="filelock")

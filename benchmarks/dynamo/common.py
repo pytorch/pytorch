@@ -742,6 +742,11 @@ def speedup_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
         row.append(kwargs["compression_ratio"])
         row.append(kwargs["eager_peak_mem"])
         row.append(kwargs["dynamo_peak_mem"])
+
+    if "cache_lookup_latency" in kwargs:
+        headers.append("cache_lookup_latency")
+        row.append(kwargs["cache_lookup_latency"])
+
     if "dynamo_stats" in kwargs:
         for k, v in kwargs["dynamo_stats"].items():
             headers.append(k)
@@ -1127,6 +1132,9 @@ class AOTInductorModelCache:
 
     @classmethod
     def load(cls, model, example_inputs, device):
+        import torch._inductor
+        import torch.export._trace
+
         key = weakref.ref(model)
         if key not in cls.cache:
             # Register the output dataclass to pytree
@@ -1135,9 +1143,27 @@ class AOTInductorModelCache:
                 # copy.deepcopy is required to prevent any surprising side-effect,
                 # see https://github.com/pytorch/pytorch/issues/113029
                 example_outputs = copy.deepcopy(model)(*example_args, **example_kwargs)
-            _register_dataclass_output_as_pytree(example_outputs)
 
-            so_path = torch._export.aot_compile(model, example_args, example_kwargs)
+            if pytree._is_namedtuple_instance(example_outputs):
+                typ = type(example_outputs)
+                pytree._register_namedtuple(
+                    typ,
+                    serialized_type_name=f"{typ.__module__}.{typ.__name__}",
+                )
+            else:
+                _register_dataclass_output_as_pytree(example_outputs)
+
+            gm = torch.export._trace._export(
+                model,
+                example_args,
+                example_kwargs,
+                pre_dispatch=True,
+            ).module()
+            with torch.no_grad():
+                so_path = torch._inductor.aot_compile(
+                    gm, example_args, example_kwargs
+                )  # type: ignore[arg-type]
+
             cls.cache[key] = torch._export.aot_load(so_path, device)
 
         return cls.cache[key]
@@ -2680,7 +2706,16 @@ class BenchmarkRunner:
             self.seperate_optimizer = self.optimizer
 
         self.init_optimizer(name, current_device, model.parameters())
-        with self.pick_grad(name, self.args.training):
+
+        # The self.autocast context is needed for the model we export with aot_compile,
+        # similar to what we do in the check_accuracy function
+        ctx = (
+            self.autocast(**self.autocast_arg)
+            if self.args.export_aot_inductor
+            else contextlib.nullcontext()
+        )
+
+        with self.pick_grad(name, self.args.training), ctx:
             ok, total = Stats.reset_counters()
             experiment_kwargs = {}
             if tag is not None:
@@ -2708,6 +2743,21 @@ class BenchmarkRunner:
                         "dynamo",
                     )
 
+            if self.args.profile_dynamo_cache_lookup:
+                with torch.profiler.profile(
+                    activities=[torch.profiler.ProfilerActivity.CPU]
+                ) as prof:
+                    with maybe_enable_compiled_autograd(self.args.compiled_autograd):
+                        warmup(optimized_model_iter_fn, model, example_inputs, "dynamo")
+
+                events = list(
+                    filter(
+                        lambda event: "TorchDynamo Cache Lookup" in event.key,
+                        prof.key_averages(),
+                    )
+                )
+                dynamo_cache_lookup_latency = events[0].self_cpu_time_total
+
             compilation_time = dynamo_latency - eager_latency + aot_compilation_time
             compression_ratio = (
                 eager_peak_mem / dynamo_peak_mem if dynamo_peak_mem else 0.0
@@ -2719,12 +2769,19 @@ class BenchmarkRunner:
                     f"ratio: {compression_ratio:.2f}"
                 )
 
+            if self.args.print_compilation_time:
+                print(f"Compilation time: {compilation_time:.2f}")
+
             if experiment.func is speedup_experiment:
                 experiment_kwargs["compilation_latency"] = compilation_time
                 experiment_kwargs["compression_ratio"] = compression_ratio
                 experiment_kwargs["eager_peak_mem"] = eager_peak_mem
                 experiment_kwargs["dynamo_peak_mem"] = dynamo_peak_mem
                 experiment_kwargs["dynamo_stats"] = dynamo_stats
+                if self.args.profile_dynamo_cache_lookup:
+                    experiment_kwargs[
+                        "cache_lookup_latency"
+                    ] = dynamo_cache_lookup_latency
 
             if experiment.func is coverage_experiment:
                 ok, total = Stats.reset_counters()
@@ -3130,6 +3187,11 @@ def parse_args(args=None):
         help="print extra memory statistics",
     )
     parser.add_argument(
+        "--print-compilation-time",
+        action="store_true",
+        help="print compilation latency",
+    )
+    parser.add_argument(
         "--print-dataframe-summary",
         action="store_true",
         help="print dataframe result used for calculating accuracy",
@@ -3236,6 +3298,13 @@ def parse_args(args=None):
         "--compiled-autograd",
         action="store_true",
         help="Enables compiled autograd on compiled benchmark",
+    )
+
+    parser.add_argument(
+        "--profile_dynamo_cache_lookup",
+        "--profile-dynamo-cache-lookup",
+        action="store_true",
+        help="profiles TorchDynamo cache lookup",
     )
 
     group_fuser = parser.add_mutually_exclusive_group()
@@ -3520,6 +3589,7 @@ def run(runner, args, original_dir=None):
             "Wav2Vec2ForCTC",
             "Wav2Vec2ForPreTraining",
             "sam",
+            "sam_fast",
             "resnet50_quantized_qat",
             "mobilenet_v2_quantized_qat",
         }:

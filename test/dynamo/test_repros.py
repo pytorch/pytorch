@@ -11,13 +11,15 @@ import inspect
 import itertools
 import random
 import unittest
+import warnings
 import weakref
 from abc import ABC
 from collections import namedtuple
 from copy import deepcopy
 from enum import Enum
 from functools import wraps
-from typing import List
+from typing import Any, Dict, Iterator, List, Tuple
+from unittest import mock
 
 import numpy as np
 import torch
@@ -126,6 +128,10 @@ def _do_paste_mask(masks, boxes, img_h: int, img_w: int, skip_empty: bool = True
         return img_masks[:, 0], (slice(y0_int, y1_int), slice(x0_int, x1_int))
     else:
         return img_masks[:, 0], ()
+
+
+def global_fn(x):
+    return torch.sin(x)
 
 
 def cat(tensors, dim=0):
@@ -360,6 +366,56 @@ class ReformerEncoder(torch.nn.Module):
             all_attentions=all_attentions,
             past_buckets_states=past_buckets_states,
         )
+
+
+class ListConfig:
+    class ValueNode:
+        def __init__(self, value):
+            self.value = value
+
+        def _dereference_node(self):
+            return self
+
+        def _is_missing(self):
+            return False
+
+        def _value(self):
+            return self.value
+
+    # Based on an example from omegaconfig.listconfig
+    class ListIterator(Iterator[Any]):
+        def __init__(self, lst: Any, resolve: bool) -> None:
+            self.resolve = resolve
+            self.iterator = iter(lst.__dict__["_content"])
+            self.index = 0
+
+        def __next__(self) -> Any:
+            x = next(self.iterator)
+            if self.resolve:
+                x = x._dereference_node()
+                if x._is_missing():
+                    raise AssertionError()
+
+            self.index = self.index + 1
+            if isinstance(x, ListConfig.ValueNode):
+                return x._value()
+            raise AssertionError()
+
+    def __iter__(self):
+        return self._iter_ex(True)
+
+    def _iter_ex(self, resolve: bool) -> Iterator[Any]:
+        try:
+            return ListConfig.ListIterator(self, resolve)
+        except Exception:
+            raise AssertionError()
+
+    def __init__(self):
+        self._content = [
+            ListConfig.ValueNode(1),
+            ListConfig.ValueNode(3),
+            ListConfig.ValueNode(torch.tensor([7.0])),
+        ]
 
 
 def longformer_chunk(hidden_states, window_overlap=256):
@@ -1245,9 +1301,9 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             self.assertTrue(same(opt_model(a, b, c, d), correct))
 
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """2""")
+            self.assertExpectedInline(cnt.frame_count, """4""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """3""")
+            self.assertExpectedInline(cnt.frame_count, """5""")
 
     def test_hf_model_output(self):
         ex = ModelOutput(a=torch.randn(10), b=torch.randn(10), c=torch.randn(10))
@@ -1969,6 +2025,22 @@ class ReproTests(torch._dynamo.test_case.TestCase):
 
         fn(torch.randn(3))
 
+    def test_issue111522(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x, y):
+            return x + y.a
+
+        class A:
+            a = 2
+
+        self.assertEqual(f(torch.zeros(2), A()), torch.full([2], 2.0))
+
+        del A.a
+
+        # graph break on missing attr
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            f(torch.zeros(2), A())
+
     def test_dict_list_values(self):
         def inner_fn(args):
             return [x[1].shape for x in args]
@@ -2079,6 +2151,29 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_m.forward(listy)
 
         self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_issue111918(self):
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def fn(x):
+            x = x + 1
+            y = x.item()
+            if y > 2:
+                return x * 2
+            else:
+                return x * 3
+
+        x = torch.tensor([3.0])
+        fn(x)
+        self.assertEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.op_count, 4)
+
+        torch._dynamo.reset()
+        fn = torch.compile(fn, fullgraph=True, backend="eager")
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            fn(x)
 
     def test_vdd_duplicate_error(self):
         def fn(a, dt):
@@ -2449,6 +2544,50 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(mod(*args), opt_mod(*args)))
         self.assertEqual(cnt.op_count, 5)
         self.assertEqual(cnt.frame_count, 1)
+
+    def test_omegaconf_listconfig_iter(self):
+        obj = ListConfig()
+        x = torch.zeros(2)
+
+        def fn():
+            y = x
+            for i in obj:
+                y += i
+            return y
+
+        expected = fn()
+        actual = torch.compile(fn, fullgraph=True, backend="eager")()
+        self.assertEqual(actual, expected)
+
+    def test_user_defined_iter(self):
+        class MyIter:
+            def __init__(self):
+                self.i = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                if self.i < 3:
+                    self.i += 1
+                    return self.i
+                raise StopIteration()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            for i in MyIter():
+                x += i
+            return x
+
+        self.assertEqual(fn(torch.zeros(1)), torch.full([1], 6.0))
+
+    def test_stop_iteration_reconstruct(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            return x.sin(), StopIteration(1, 2, 3)
+
+        _, res = fn(torch.ones(1))
+        self.assertEqual(str(res), str(StopIteration(1, 2, 3)))
 
     def test_tensor_data_kwarg(self):
         # https://github.com/pytorch/pytorch/issues/96278
@@ -3350,6 +3489,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         actual = fn_opt(*inputs)
         self.assertTrue(same(actual, expected))
 
+    @mock.patch("torch._dynamo.config.guard_nn_modules", True)
     def test_hf_xsoftmax_training(self):
         from torch._dynamo.utils import counters
 
@@ -3542,6 +3682,18 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             return _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR
 
         self.assertEqual(f(), _GLOBAL_CPU_TENSOR + _GLOBAL_CPU_TENSOR)
+
+    def test_randint_out_dynamic(self):
+        def randint_fn(high, size, out):
+            return torch.randint(high, size, out=out)
+
+        opt_model = torch.compile(randint_fn)
+
+        out1 = torch.empty(10, dtype=torch.int32)
+        opt_model(17, (10,), out1)
+
+        out2 = torch.empty(12, dtype=torch.int32)
+        opt_model(17, (12,), out2)
 
     @requires_cuda
     def test_guard_default_device(self):
@@ -4095,6 +4247,54 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         opt_fn(x, x)
         self.assertEqual(cnt.frame_count, 1)
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_unbacked_arange_in_bounds(self):
+        # see https://github.com/pytorch/pytorch/issues/113002
+        class PaddingNet(nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, lengths):
+                max_seq_len = lengths.max().item()
+                row_vector = torch.arange(0, max_seq_len, 1)
+                matrix = torch.unsqueeze(lengths, dim=-1)
+                mask = row_vector < matrix
+                mask = mask.type(torch.float32)
+                mask_3d_btd = mask[:, :, None]
+                return mask_3d_btd
+
+        model = PaddingNet()
+        lengths = torch.tensor([5, 4, 4, 4], dtype=torch.int32)
+
+        cnt = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnt, nopython=True)(model)
+        opt_fn(lengths)
+        self.assertEqual(cnt.frame_count, 1)
+
+    def test_overlapping_inputs_with_dynamic_shapes_error(self):
+        @torch.compile(backend="aot_eager")
+        def fn(a, b, c, d, e, f):
+            a.mul_(2)
+            b.mul_(2)
+            c.mul_(2)
+            d.mul_(2)
+            e.mul_(2)
+            f.mul_(2)
+
+            base = torch.ones(2, 20)
+            a = base[:, 0:2]
+            b = base[:, 2:4]
+            c = base[:, 4:6]
+            d = base[:, 6:8]
+            e = base[:, 8:10]
+            f = base[:, 10:12]
+            f2 = base[:, 10:14]
+            out = fn(a, b, c, d, e, f)
+            with self.assertRaisesRegex(
+                AssertionError, "is being compiled with dynamic shapes"
+            ):
+                out2 = fn(a, b, c, d, e, f2)
+
     def test_user_ctor_ctx_manager_custom_init(self):
         class UserCtxManager:
             def __init__(self, x):
@@ -4202,6 +4402,27 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         else:
             self.fail("expected exception")
 
+    def test_megablocks_moe(self):
+        try:
+            from megablocks.layers import moe
+            from megablocks.layers.arguments import Arguments
+        except ImportError:
+            raise unittest.SkipTest("requires megablocks")
+        bs, sl, hs, num_experts, top_k = (16, 1024, 512, 1, 1)
+        args = Arguments(
+            hidden_size=hs,
+            ffn_hidden_size=hs * 2,
+            moe_num_experts=num_experts,
+            moe_capacity_factor=1,
+            moe_top_k=top_k,
+        )
+        moe_mlp = moe.MoE(args)
+        moe_mlp.cuda(torch.cuda.current_device()).half()
+        x = torch.randn(sl, bs, hs).cuda().half()
+        out1, _ = moe_mlp(x)
+        out2, _ = torch.compile(moe_mlp, backend="eager")(x)
+        self.assertEqual(out1, out2)
+
     def test_udf_classes_reconstruction(self):
         def fn(x):
             o = T(5)
@@ -4216,6 +4437,51 @@ class ReproTests(torch._dynamo.test_case.TestCase):
         # This should recompile
         T = IncByTwo
         self.assertEqual(fn(x), opt_fn(x))
+
+    def test_contains_range_constprop(self):
+        def fn(x):
+            # dynamo should const prop to False
+            if 3 in range(0, 10):
+                return x + 1
+            else:
+                return x + 2
+
+        opt_fn = torch.compile(fn, backend="eager")
+        x = torch.zeros(4)
+        self.assertEqual(fn(x), opt_fn(x))
+
+    # https://github.com/pytorch/pytorch/issues/104505
+    def test_as_strided_on_base_with_mutation_works(self):
+        def foo(a):
+            f = a.as_strided((2,), (1,), 0)
+            f.add_(1.0)
+            return a
+
+        a = torch.randn(2, 4)
+        a_ref = a.clone()
+        out_ref = foo(a_ref)
+        f_compiled = torch.compile(foo, backend="aot_eager")
+        out = f_compiled(a)
+        self.assertEqual(out_ref, out)
+        self.assertEqual(a_ref, a)
+
+    # https://github.com/pytorch/pytorch/issues/104505
+    def test_as_strided_on_existing_view_banned(self):
+        def foo(a):
+            e = a.diagonal()
+            f = e.as_strided((2,), (1,), 0)
+            f.add_(1.0)
+            return a
+
+        a = torch.randn(2, 4)
+        a_ref = a.clone()
+        out_ref = foo(a_ref)
+        f_compiled = torch.compile(foo, backend="aot_eager")
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "encountered a mutation on a view chain of length 2, where view 1 was an as_strided",
+        ):
+            out = f_compiled(a)
 
     def test_dont_aggressively_write_assert(self):
         record_graph = torch._dynamo.testing.EagerAndRecordGraphs()
@@ -4281,6 +4547,213 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         # We graph-break here, so the failure should be eager
         with self.assertRaisesRegex(AssertionError, ""):
             f_fail(torch.ones(6, 4))
+
+    def test_detectron2_instances_cat(self):
+        class Instances:
+            def __init__(self, image_size: Tuple[int, int], **kwargs: Any):
+                self._image_size = image_size
+                self._fields: Dict[str, Any] = {}
+                for k, v in kwargs.items():
+                    self.set(k, v)
+
+            @property
+            def image_size(self) -> Tuple[int, int]:
+                return self._image_size
+
+            def __setattr__(self, name: str, val: Any) -> None:
+                if name.startswith("_"):
+                    super().__setattr__(name, val)
+                else:
+                    self.set(name, val)
+
+            def __getattr__(self, name: str) -> Any:
+                if name == "_fields" or name not in self._fields:
+                    raise AttributeError(
+                        f"Cannot find field '{name}' in the given Instances!"
+                    )
+                return self._fields[name]
+
+            def __len__(self) -> int:
+                for v in self._fields.values():
+                    # use __len__ because len() has to be int and is not friendly to tracing
+                    return v.__len__()
+                raise NotImplementedError("Empty Instances does not support __len__!")
+
+            def set(self, name: str, value: Any) -> None:
+                with warnings.catch_warnings(record=True):
+                    data_len = len(value)
+                if len(self._fields):
+                    assert (
+                        len(self) == data_len
+                    ), f"Adding a field of length {data_len} to a Instances of length {len(self)}"
+                self._fields[name] = value
+
+            def get(self, name: str) -> Any:
+                return self._fields[name]
+
+            @staticmethod
+            def cat(instance_lists: List["Instances"]) -> "Instances":
+                assert all(isinstance(i, Instances) for i in instance_lists)
+                assert len(instance_lists) > 0
+                if len(instance_lists) == 1:
+                    return instance_lists[0]
+
+                image_size = instance_lists[0].image_size
+                if not isinstance(
+                    image_size, torch.Tensor
+                ):  # could be a tensor in tracing
+                    for i in instance_lists[1:]:
+                        assert i.image_size == image_size
+                ret = Instances(image_size)
+                for k in instance_lists[0]._fields.keys():
+                    values = [i.get(k) for i in instance_lists]
+                    v0 = values[0]
+                    if isinstance(v0, torch.Tensor):
+                        values = torch.cat(values, dim=0)
+                    elif isinstance(v0, list):
+                        values = list(itertools.chain(*values))
+                    elif hasattr(type(v0), "cat"):
+                        values = type(v0).cat(values)
+                    else:
+                        raise ValueError(
+                            f"Unsupported type {type(v0)} for concatenation"
+                        )
+                    ret.set(k, values)
+                return ret
+
+        instances = [
+            Instances((16, 16), a=torch.randn(16, 16), b=torch.randn(16, 16))
+            for _ in range(3)
+        ]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(instances):
+            return instances[0].cat(instances)
+
+        actual = fn(instances)
+        expected = instances[0].cat(instances)
+        self.assertEqual(type(actual), type(expected))
+        self.assertEqual(actual.__dict__, expected.__dict__)
+
+    def test_super_in_staticmethod(self):
+        class A:
+            @staticmethod
+            def foo():
+                return super().__init__()
+
+        def fn(obj):
+            return obj.foo()
+
+        obj = A()
+
+        try:
+            fn(obj)
+        except Exception as e:
+            orig_str = str(e)
+        self.assertIn("no arguments", orig_str)
+
+        try:
+            torch.compile(backend="eager")(fn)(obj)
+        except Exception as e:
+            compiled_str = str(e)
+        self.assertEqual(orig_str, compiled_str)
+
+    def test_stk_sdd_is_transposed(self):
+        trigger_graph_break = False
+
+        def _is_transposed(x):
+            return (
+                not x.is_contiguous()
+                and x.stride()[0] == 1
+                and x.stride()[1] == x.size()[0]
+            )
+
+        class SDD(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, lhs, rhs):
+                ctx.save_for_backward(lhs, rhs)
+                out = torch.full_like(lhs, 1.0, dtype=lhs.dtype, device=lhs.device)
+                return out
+
+            @staticmethod
+            def backward(ctx, dy):
+                saved_tensors = ctx.saved_tensors
+                lhs, rhs = saved_tensors[:2]
+                trans_a = _is_transposed(lhs)
+                trans_b = _is_transposed(rhs)
+                dlhs = None
+                if ctx.needs_input_grad[0]:
+                    dlhs = torch.full_like(lhs, 1.0 if trans_a else 2.0)
+                drhs = None
+                if ctx.needs_input_grad[1]:
+                    drhs = torch.full_like(rhs, 1.0 if trans_b else 2.0)
+                if trigger_graph_break:
+                    if _is_transposed(dy):
+                        return dlhs + 1, drhs + 1, None, None
+                return dlhs, drhs, None, None
+
+        x1 = torch.randn((8, 8), requires_grad=True)
+        y1 = torch.randn((8, 8)).transpose(0, 1).requires_grad_(True)
+        x2 = torch.randn((8, 8), requires_grad=True)
+        y2 = torch.randn((8, 8)).transpose(0, 1).requires_grad_(True)
+
+        SDD.apply(x1, y1).sum().backward()
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return SDD.apply(x2, y2)
+
+        fn().sum().backward()
+
+        self.assertEqual(x1.grad, x2.grad)
+        self.assertEqual(y1.grad, y2.grad)
+
+        trigger_graph_break = True
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            fn().sum().backward()
+
+    def test_partially_initialized_module_property(self):
+        class Matrix(torch.nn.Module):
+            def __init__(self, data):
+                super().__init__()
+                self._data = data
+                self.foo = 10 * self.blocking
+
+            @property
+            def data(self):
+                return self._data
+
+            @property
+            def blocking(self):
+                return self.data.shape[1]
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            return Matrix(torch.randn(10, 20))
+
+        v = fn()
+        self.assertEqual(v.foo, 200)
+        self.assertEqual(v.data.shape, (10, 20))
+        self.assertEqual(type(v), Matrix)
+
+    def test_global_fn_mutation(self):
+        def foo(x, y):
+            return global_fn(x) + y
+
+        x = torch.ones(1)
+        y = torch.ones(1)
+
+        opt = torch.compile(foo, fullgraph=True, backend="eager")
+        self.assertEqual(opt(x, y), foo(x, y))
+
+        # Change global_fn
+        global global_fn
+
+        def new_fn(x):
+            return torch.cos(x)
+
+        global_fn = new_fn
+        self.assertEqual(opt(x, y), foo(x, y))
 
 
 if __name__ == "__main__":

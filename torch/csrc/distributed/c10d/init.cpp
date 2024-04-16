@@ -843,6 +843,11 @@ This class does not support ``__members__`` property.)");
           py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>());
 
+  module.def(
+      "_set_thread_isolation_mode",
+      &::c10d::set_thread_isolation_mode,
+      py::arg("enable"));
+
   // Bindings for GroupRegistry.hpp
   //
   // Register a process group in the native registry. Process groups registered
@@ -1880,6 +1885,15 @@ Arguments:
               "group_name",
               &::c10d::ProcessGroup::getGroupName,
               "(Gets this process group name. It's cluster unique)")
+          .def(
+              "_set_group_desc",
+              &::c10d::ProcessGroup::setGroupDesc,
+              py::call_guard<py::gil_scoped_acquire>(),
+              "Sets the process group description. This is an internal C10D method, do not use.")
+          .def_property_readonly(
+              "group_desc",
+              &::c10d::ProcessGroup::getGroupDesc,
+              "Gets this process group description")
           .def_property(
               "bound_device_id",
               &::c10d::ProcessGroup::getBoundDeviceId,
@@ -2393,6 +2407,7 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
               py::call_guard<py::gil_scoped_release>())
           .def_property_readonly(
               "options", &::c10d::ProcessGroupNCCL::getOptions)
+          .def_property_readonly("uid", &::c10d::ProcessGroupNCCL::getUid)
           .def_property(
               "bound_device_id",
               &::c10d::ProcessGroupNCCL::getBoundDeviceId,
@@ -2404,6 +2419,34 @@ options :class:`~torch.distributed.ProcessGroupNCCL.Options`).
   module.def(
       "_get_intra_node_comm_usage_counter",
       &::c10d::intra_node_comm::getIntraNodeCommUsageCounter);
+
+  using IntraNodeComm = ::c10d::intra_node_comm::IntraNodeComm;
+  py::class_<IntraNodeComm, c10::intrusive_ptr<IntraNodeComm>>(
+      module, "_IntraNodeComm")
+      .def(
+          py::init([](const c10::intrusive_ptr<::c10d::Store>& store,
+                      size_t rank,
+                      size_t world_size,
+                      c10::optional<size_t> buffer_size) {
+            auto comm = c10::make_intrusive<IntraNodeComm>(
+                store, rank, world_size, buffer_size);
+            if (!comm->rendezvous()) {
+              throw std::runtime_error("IntraNodeComm::rendezvous failed");
+            }
+            return comm;
+          }),
+          py::arg("store"),
+          py::arg("rank"),
+          py::arg("world_size"),
+          py::arg("buffer_size") = c10::nullopt)
+      .def("barrier", &IntraNodeComm::barrier, py::arg("ranks") = py::none())
+      .def("put", &IntraNodeComm::put, py::arg("input"), py::arg("offset") = 0)
+      .def(
+          "get",
+          &IntraNodeComm::get,
+          py::arg("rank"),
+          py::arg("tensor"),
+          py::arg("offset") = 0);
 
 #ifdef NCCL_HAS_COMM_CTA_CGA
   py::class_<ncclConfig_t>(
@@ -2475,7 +2518,9 @@ Example::
           "split_color", &::c10d::ProcessGroupNCCL::Options::split_color)
       .def_readwrite(
           "global_ranks_in_group",
-          &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group);
+          &::c10d::ProcessGroupNCCL::Options::global_ranks_in_group)
+      .def_readwrite(
+          "group_name", &::c10d::ProcessGroupNCCL::Options::group_name);
 
 #endif
 

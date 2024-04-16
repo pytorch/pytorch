@@ -2,10 +2,12 @@ from typing import Any, cast, Optional, Union
 
 import typing_extensions
 
+import torch
 import torch.nn as nn
 
 from torch.distributed._composable import contract
-from torch.distributed._tensor import DeviceMesh
+from torch.distributed._tensor import DeviceMesh, DTensor
+
 from ._fsdp_api import MixedPrecisionPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
@@ -111,7 +113,7 @@ def fully_shard(
 
     managed_modules = _get_managed_modules(module)
     params, buffers = _get_managed_states(managed_modules)
-    _move_states_to_device(params, buffers, device, mesh_info)
+    _move_states_to_device(params, buffers, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
             params, module, mesh_info, post_forward_mesh_info, device, mp_policy
@@ -186,7 +188,7 @@ class FSDP:
             if isinstance(module, FSDP):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
-                    fsdp_param_group.reduce_scatter_grads = requires_gradient_sync
+                    fsdp_param_group.reduce_grads = requires_gradient_sync
                     fsdp_param_group.all_reduce_grads = requires_gradient_sync
 
     def set_requires_all_reduce(self, requires_all_reduce: bool, recurse: bool = True):
@@ -195,6 +197,9 @@ class FSDP:
         implement gradient accumulation with only reduce-scatter but not
         all-reduce for HSDP.
         """
+        # TODO: post_reduce_output += fsdp_param.sharded_param.grad
+        # after reduce-scatter and before all-reduce
+        raise NotImplementedError("requires_all_reduce is not yet supported in HSDP")
         for module in cast(nn.Module, self).modules():
             if isinstance(module, FSDP):
                 state = module._get_fsdp_state()
@@ -205,3 +210,40 @@ class FSDP:
         if (state := _get_module_fsdp_state(cast(nn.Module, self))) is None:
             raise AssertionError(f"No FSDP state found on {self}")
         return state
+
+    def _apply(self, *args: Any, **kwargs: Any) -> Any:
+        # Reshard to ensure that sharded parameters are registered
+        self.reshard()
+        ret = super()._apply(*args, **kwargs)  # type: ignore[misc]
+        state = self._get_fsdp_state()
+        if not (fsdp_param_group := state._fsdp_param_group):
+            return ret
+        # TODO: Remove this padding logic once DTensor pads the local tensor:
+        # https://github.com/pytorch/pytorch/issues/113045
+        with torch.no_grad():
+            for fsdp_param in fsdp_param_group.fsdp_params:
+                module_info = fsdp_param._module_info
+                new_param = getattr(module_info.module, module_info.param_name)
+                if new_param is not fsdp_param.sharded_param:
+                    if torch.__future__.get_swap_module_params_on_conversion():
+                        raise AssertionError(
+                            "Expects swap_tensors to preserve object but got "
+                            f"{new_param} instead of {fsdp_param.sharded_param}"
+                        )
+                    else:
+                        raise AssertionError(
+                            "Please set torch.__future__.set_swap_module_params_on_conversion(True) "
+                            "to use _apply methods with FSDP"
+                        )
+                local_tensor = new_param._local_tensor
+                padded_sharded_size = fsdp_param.padded_sharded_param_size
+                if local_tensor.size() != padded_sharded_size:
+                    padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
+                    padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
+                    local_tensor = padded_local_tensor
+                fsdp_param._sharded_param_data = local_tensor.view(-1)
+                assert isinstance(fsdp_param.sharded_param, DTensor)  # mypy
+                fsdp_param.sharded_param._local_tensor = local_tensor[
+                    : fsdp_param.sharded_size[0]
+                ]
+        return ret

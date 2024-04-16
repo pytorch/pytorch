@@ -198,6 +198,9 @@ class TORCH_API DebugInfoWriter {
   virtual void write(const std::string& ncclTrace);
   static DebugInfoWriter& getWriter(int rank);
   static void registerWriter(std::unique_ptr<DebugInfoWriter> writer);
+  virtual std::string getWriterTarget() {
+    return filename_;
+  }
 
  protected:
   DebugInfoWriter(std::string namePrefix, int rank) {
