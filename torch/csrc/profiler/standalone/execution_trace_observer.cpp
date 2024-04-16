@@ -326,7 +326,7 @@ static bool initExecutionTraceStart(ExecutionTraceObserver& ob) {
 
   ob.out << fmt::format(
       R"JSON({{
-  "schema": "1.0.2-chakra.0.0.4", "pid": {}, "time": "{}", "start_ts": {},
+  "schema": "1.0.3-chakra.0.0.4", "pid": {}, "time": "{}", "start_ts": {},
   "nodes": [)JSON",
       ob.pid,
       ob.record_time,
