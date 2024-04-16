@@ -161,9 +161,16 @@ class UnflattenedModule(torch.nn.Module):
         self.range_constraints = export_module.range_constraints
         self.equality_constraints: List = []
 
+        # handle weight-sharing, only clone once
+        id_to_params: Dict[int, torch.nn.Parameter] = {}
         state_dict = export_module.state_dict
         for name in self.graph_signature.parameters:
-            cloned = torch.nn.Parameter(state_dict[name].clone())
+            param = state_dict[name]
+            if id(param) in id_to_params:
+                cloned = id_to_params[id(param)]
+            else:
+                cloned = torch.nn.Parameter(param.clone())
+                id_to_params[id(param)] = cloned
             _assign_attr(
                 cloned,
                 self,
@@ -535,9 +542,11 @@ class _ModuleFrame:
             _add_submodule(
                 parent.module,
                 accessor,
-                self.module
-                if self.cached_graph_module is None
-                else self.cached_graph_module,
+                (
+                    self.module
+                    if self.cached_graph_module is None
+                    else self.cached_graph_module
+                ),
             )
             self.parent_call_module = parent.graph.call_module(accessor)
 
@@ -566,9 +575,11 @@ class _ModuleFrame:
                         op="call_function",
                         target=operator.getitem,
                         args=(flat_args, idx),
-                        name=arg.name
-                        if not isinstance(arg, ConstantArgument)
-                        else f"_constant_{idx}",
+                        name=(
+                            arg.name
+                            if not isinstance(arg, ConstantArgument)
+                            else f"_constant_{idx}"
+                        ),
                     )
                     if isinstance(arg, ConstantArgument):
                         continue
@@ -893,20 +904,15 @@ def _sink_params(
             # To make sure this always happen, we should enforce the invariant that no placeholder node
             # in the unflattened graph appears in inputs_to_state dict, which means all the extra input
             # nodes have been handled.
-            if state_name[: len(scope)] == scope:
-                attr_path = state_name[len(scope) :]
-                state_attr = _recursive_getattr(module, attr_path)
-                attr_name = ".".join(attr_path)
-            else:  # weight sharing, find in separate submodule
-                attr_path = state_name
-                state_attr = _recursive_getattr(root_module, attr_path)
-                attr_name = "_".join(attr_path)
-                setattr(module, attr_name, state_attr)
 
+            if state_name[: len(scope)] != scope:
+                continue
+            attr_path = state_name[len(scope) :]
+            state_attr = _recursive_getattr(module, attr_path)
             assert isinstance(state_attr, (torch.Tensor, torch.ScriptObject))
             # Make sure the newly created get_attr node is placed after the last placeholder node
             with graph.inserting_after(the_last_input):
-                new_node = graph.create_node("get_attr", attr_name)
+                new_node = graph.create_node("get_attr", ".".join(attr_path))
 
             node.replace_all_uses_with(new_node, propagate_meta=True)
         graph.erase_node(node)

@@ -5,6 +5,7 @@ import logging
 import re
 import time
 import warnings
+from collections import deque
 from contextlib import contextmanager, nullcontext
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple, Union
 
@@ -232,12 +233,12 @@ def _get_param_buffer_mapping(
     of a traced module to what the original module contains.
     """
 
-    param_lookup: Dict[int, List[str]] = {}
-    buffer_lookup: Dict[int, List[str]] = {}
+    param_lookup: Dict[int, deque[str]] = {}
+    buffer_lookup: Dict[int, deque[str]] = {}
     for name, param in original_module.named_parameters(remove_duplicate=False):
-        param_lookup.setdefault(id(param), []).append(name)
+        param_lookup.setdefault(id(param), deque()).append(name)
     for name, buffer in original_module.named_buffers(remove_duplicate=False):
-        buffer_lookup.setdefault(id(buffer), []).append(name)
+        buffer_lookup.setdefault(id(buffer), deque()).append(name)
 
     param_buffer_table: Dict[str, str] = {}
     for dynamo_name, dynamo_param in traced_module.named_parameters(
@@ -245,14 +246,31 @@ def _get_param_buffer_mapping(
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_param) in param_lookup:
-            param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)].pop()
+            # handle weight sharing case
+            # pop left to follow ordering in model
+            # we have this while loop for aliasing/unused weight sharing cases
+            # e.g. self.a = Linear(...); self.b = self.a.weight; forward(x) = self.b @ x
+            # in this case only b will be traced by dynamo
+            while True:
+                fqn = param_lookup[id(dynamo_param)].popleft()
+                if fqn.replace(".", "_") == dynamo_name[len("L__self___") :].replace(
+                    ".", "_"
+                ):
+                    param_buffer_table[dynamo_name] = fqn
+                    break
 
     for dynamo_name, dynamo_buffer in traced_module.named_buffers(
         remove_duplicate=False
     ):
         assert dynamo_name not in param_buffer_table
         if id(dynamo_buffer) in buffer_lookup:
-            param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)].pop()
+            while True:
+                fqn = buffer_lookup[id(dynamo_buffer)].popleft()
+                if fqn.replace(".", "_") == dynamo_name[len("L__self___") :].replace(
+                    ".", "_"
+                ):
+                    param_buffer_table[dynamo_name] = fqn
+                    break
 
     return param_buffer_table
 
