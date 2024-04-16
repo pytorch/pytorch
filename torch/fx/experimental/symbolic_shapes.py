@@ -106,6 +106,14 @@ def log_lru_cache_stats(wrapped_f):
     log.debug("lru_cache_stats %s: %s", wrapped_f.__name__, wrapped_f.cumulative_cache_info())
 
 
+@dataclass
+class _TensorSnapshot:
+    shape: Tuple[int, ...]
+
+    def dim(self):
+        return len(self.shape)
+
+
 # Wrapper on lru_cache that reports statistics at process end
 def lru_cache(maxsize):
     def inner(f):
@@ -250,7 +258,7 @@ def check_consistent(new, old) -> None:
     scalar_types = (torch.SymInt, torch.SymFloat, int, float)
 
     if isinstance(new, torch.Tensor):
-        assert isinstance(old, torch.Tensor)
+        assert isinstance(old, (torch.Tensor, _TensorSnapshot))
         torch._check(old.dim() == new.dim(), lambda: f"{old.shape} != {new.shape} (old != new)")
         # Do this manually so that each individual test is irrefutable
         # (TODO: should be a helper for this, maybe sym_eq?  That
