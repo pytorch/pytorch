@@ -216,7 +216,9 @@ def async_save(
             torch.device("cpu") in pg._device_types  # type: ignore[attr-defined]
         ), "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
 
-    cpu_state_dict = _offload_state_dict_to_cpu(_stateful_to_state_dict(state_dict))
+    cpu_state_dict = _offload_state_dict_to_cpu(
+        _stateful_to_state_dict(state_dict), type_check=False
+    )
 
     executor = ThreadPoolExecutor(max_workers=1)
     f: Future = executor.submit(

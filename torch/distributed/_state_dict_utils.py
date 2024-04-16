@@ -1,3 +1,4 @@
+import copy
 import io
 import math
 from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING
@@ -166,7 +167,7 @@ def _iterate_state_dict(
         if isinstance(iter_object, tuple):
             ret = tuple(ret)
     elif not type_check:
-        ret = iter_object
+        ret = copy.deepcopy(iter_object)
     else:
         raise ValueError(f"Unexpected value type {type(iter_object)}")
 
