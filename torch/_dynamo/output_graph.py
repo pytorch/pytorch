@@ -1297,8 +1297,11 @@ class OutputGraph:
 
         if isinstance(compiled_fn, torch.nn.Module):
             # We handle nn modules using OptimizedModule in eval_frame.py. To
-            # avoid infinite recursion, only disable __call__.
+            # avoid infinite recursion, only disable __call__/_call_impl. NN
+            # module variable tracker directly inline _call_impl instead of
+            # __call__.
             compiled_fn.__call__ = disable(compiled_fn.__call__)
+            compiled_fn._call_impl = disable(compiled_fn._call_impl)
         else:
             compiled_fn = disable(compiled_fn)
 
