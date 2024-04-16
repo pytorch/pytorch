@@ -1,46 +1,59 @@
 # Owner(s): ["module: unknown"]
 
-from torch.testing._internal.common_utils import run_tests, IS_ARM64
-
 # Kernels
-from ao.sparsity.test_kernels import TestQuantizedSparseKernels  # noqa: F401
-from ao.sparsity.test_kernels import TestQuantizedSparseLayers  # noqa: F401
+from ao.sparsity.test_kernels import (  # noqa: F401  # noqa: F401
+    TestQuantizedSparseKernels,
+    TestQuantizedSparseLayers,
+)
 
 # Parametrizations
 from ao.sparsity.test_parametrization import TestFakeSparsity  # noqa: F401
 
+# Scheduler
+from ao.sparsity.test_scheduler import (  # noqa: F401  # noqa: F401
+    TestCubicScheduler,
+    TestScheduler,
+)
+
 # Sparsifier
-from ao.sparsity.test_sparsifier import TestBaseSparsifier  # noqa: F401
-from ao.sparsity.test_sparsifier import TestWeightNormSparsifier  # noqa: F401
-from ao.sparsity.test_sparsifier import TestNearlyDiagonalSparsifier  # noqa: F401
+from ao.sparsity.test_sparsifier import (  # noqa: F401  # noqa: F401  # noqa: F401
+    TestBaseSparsifier,
+    TestNearlyDiagonalSparsifier,
+    TestWeightNormSparsifier,
+)
 
 # Structured Pruning
-from ao.sparsity.test_structured_sparsifier import TestBaseStructuredSparsifier  # noqa: F401
-from ao.sparsity.test_structured_sparsifier import TestSaliencyPruner  # noqa: F401
-from ao.sparsity.test_structured_sparsifier import TestFPGMPruner  # noqa: F401
-
-# Scheduler
-from ao.sparsity.test_scheduler import TestScheduler  # noqa: F401
-from ao.sparsity.test_scheduler import TestCubicScheduler  # noqa: F401
+from ao.sparsity.test_structured_sparsifier import (  # noqa: F401  # noqa: F401  # noqa: F401
+    TestBaseStructuredSparsifier,
+    TestFPGMPruner,
+    TestSaliencyPruner,
+)
+from torch.testing._internal.common_utils import IS_ARM64, run_tests
 
 # Composability
 if not IS_ARM64:
-    from ao.sparsity.test_composability import TestComposability  # noqa: F401
-    from ao.sparsity.test_composability import TestFxComposability  # noqa: F401
+    from ao.sparsity.test_composability import (  # noqa: F401  # noqa: F401
+        TestComposability,
+        TestFxComposability,
+    )
 
-# Utilities
-from ao.sparsity.test_sparsity_utils import TestSparsityUtilFunctions  # noqa: F401
-
-# Data Sparsifier
-from ao.sparsity.test_data_sparsifier import TestBaseDataSparsifier  # noqa: F401
-from ao.sparsity.test_data_sparsifier import TestNormDataSparsifiers  # noqa: F401
-from ao.sparsity.test_data_sparsifier import TestQuantizationUtils  # noqa: F401
+# Activation Sparsifier
+from ao.sparsity.test_activation_sparsifier import (  # noqa: F401
+    TestActivationSparsifier,
+)
 
 # Data Scheduler
 from ao.sparsity.test_data_scheduler import TestBaseDataScheduler  # noqa: F401
 
-# Activation Sparsifier
-from ao.sparsity.test_activation_sparsifier import TestActivationSparsifier  # noqa: F401
+# Data Sparsifier
+from ao.sparsity.test_data_sparsifier import (  # noqa: F401  # noqa: F401  # noqa: F401
+    TestBaseDataSparsifier,
+    TestNormDataSparsifiers,
+    TestQuantizationUtils,
+)
+
+# Utilities
+from ao.sparsity.test_sparsity_utils import TestSparsityUtilFunctions  # noqa: F401
 
 if __name__ == "__main__":
     run_tests()
