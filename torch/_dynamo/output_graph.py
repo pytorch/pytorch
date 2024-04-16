@@ -434,7 +434,7 @@ class OutputGraph:
                 "dynamo_backward_state", BackwardState, source=BackwardStateSource()
             )
             self.backward_state_proxy.node.meta["grapharg"] = BackwardStateGraphArg()
-            set_example_value(self.backward_state_proxy, BackwardState())
+            set_example_value(self.backward_state_proxy.node, BackwardState())
             self.backward_state_var = self.new_var()
         return self.backward_state_proxy
 

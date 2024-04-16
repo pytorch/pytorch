@@ -1157,7 +1157,9 @@ def set_example_value(node, example_value):
         node.meta["example_value_snapshot"] = example_value
     else:
         node.meta["example_value_snapshot"] = pytree.tree_map_only(
-            torch.Tensor, lambda x: x.detach(), example_value
+            torch.Tensor,
+            lambda x: torch.fx.experimental.symbolic_shapes._TensorSnapshot(x.shape),
+            example_value,
         )
 
 
