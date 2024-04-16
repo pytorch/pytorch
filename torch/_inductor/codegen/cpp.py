@@ -3670,7 +3670,12 @@ class CppKernelProxy(CppKernel):
             else:
                 assert len(tiling_indices) == 0
                 kernel = CppKernelDispatcher([])
-                self.loop_nest.set_kernel(kernel)
+                kernel.scalar_kernel = scalar_kernel
+                if self.loop_nest.kernel:
+                    self.loop_nest.kernel = kernel
+                else:
+                    assert self.loop_nest.root
+                    self.loop_nest.root.set_kernel(kernel)
 
     def codegen_loops(self, code, worksharing):
         self.codegen_loops_impl(self.loop_nest, code, worksharing)
