@@ -2,6 +2,7 @@ import torch
 from torch.nn.modules.container import ModuleList, ModuleDict, Module
 from torch.nn.parameter import Parameter
 from torch import Tensor
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 import collections
 import copyreg
@@ -64,6 +65,20 @@ def _register_parameter_or_buffer(module, name, X):
     else:
         module.register_buffer(name, X)
 
+def _maybe_set(dest: Tensor, src: Tensor) -> None:
+    # print(dest, dest.grad)
+    # print(src, src.grad)
+    # print(id(dest), id(src))
+    # breakpoint()
+    # if (id(dest) == id(src)):
+    #     return
+    # FIXME: Do we need to swap_gradients here
+    # FIXME: Do we need to check type of both dest and src?
+    should_swap = torch.__future__.get_swap_module_params_on_conversion() or is_traceable_wrapper_subclass(dest)
+    if should_swap:
+        torch.utils.swap_tensors(dest, src)
+    else:
+        dest.set_(src)
 
 class ParametrizationList(ModuleList):
     r"""A sequential container that holds and manages the original parameters or buffers of a parametrized :class:`torch.nn.Module`.
@@ -157,7 +172,7 @@ class ParametrizationList(ModuleList):
             # Set the original to original so that the user does not need to re-register the parameter
             # manually in the optimiser
             with torch.no_grad():
-                original.set_(new)  # type: ignore[call-overload]
+                _maybe_set(original, new)
             _register_parameter_or_buffer(self, "original", original)
         else:
             for i, originali in enumerate(new):
@@ -231,7 +246,7 @@ class ParametrizationList(ModuleList):
                         f"while `original` has dtype {self.original.dtype}"
                     )
                 # We know that the result is going to have the same dtype
-                self.original.set_(value)  # type: ignore[call-overload]
+                _maybe_set(self.original, value)
             else:
                 if not isinstance(value, collections.abc.Sequence):
                     raise ValueError(
@@ -255,7 +270,7 @@ class ParametrizationList(ModuleList):
                             f"Tensor {i} returned by `right_inverse` has dtype {tensor.dtype} "
                             f"while `original{i}` has dtype {original_i.dtype}"
                         )
-                    original_i.set_(tensor)
+                    _maybe_set(original_i, tensor)
 
     def forward(self) -> Tensor:
         if torch.jit.is_scripting():
@@ -645,10 +660,10 @@ def remove_parametrizations(
             # This way the user does not need to update the optimizer
             with torch.no_grad():
                 if type(original) is torch.Tensor:
-                    original.set_(t)
+                    _maybe_set(original, t)
                 else:
                     try:
-                        original.set_(t)
+                        _maybe_set(original, t)
                     except RuntimeError as e:
                         # TODO: Fix this for tensor subclasses that are parameters:
                         # RuntimeError: set_storage is not allowed on a Tensor created from .data or .detach().
