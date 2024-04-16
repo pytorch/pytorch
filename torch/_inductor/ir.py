@@ -4015,6 +4015,8 @@ class ExternKernel(InputsKernel):
         x_unwrap_view_node = V.graph.get_buffer(
             x_unwrap_view.get_name()
         ).get_origin_node()
+        # If the node of x.unwrap_view() has meta tensor and the meta tensor is in CL format,
+        # freeze the layout of x.unwrap_view() as CL format.
         if (
             x_unwrap_view_node is not None
             and "val" in x_unwrap_view_node.meta
