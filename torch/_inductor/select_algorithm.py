@@ -87,7 +87,7 @@ class TritonTemplateKernel(TritonKernel):
         self,
         kernel_name,
         input_nodes,
-        output_node,
+        output_nodes: List[ir.Buffer],
         defines,
         num_stages,
         num_warps,
@@ -102,13 +102,14 @@ class TritonTemplateKernel(TritonKernel):
         *,
         index_dtype,
     ):
+        # TODO what do do here ?
         super().__init__(
-            sympy_product(output_node.get_size()),
+            sympy_product(output_nodes[0].get_size()), # TODO DONT LAND
             sympy.Integer(1),
             index_dtype=index_dtype,
         )
         self.input_nodes = input_nodes
-        self.output_node = output_node
+        self.output_nodes = output_nodes
         self.named_input_nodes = {}
         self.defines = defines
         self.kernel_name = kernel_name
@@ -139,7 +140,7 @@ class TritonTemplateKernel(TritonKernel):
         """
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         num_bytes = []
-        for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
+        for i, inp in enumerate(itertools.chain(self.input_nodes, self.output_nodes)):
             size = V.graph.sizevars.size_hints(inp.get_size())
             numel = functools.reduce(operator.mul, size)
             dtype_size = get_dtype_size(inp.get_dtype())
@@ -241,27 +242,39 @@ class TritonTemplateKernel(TritonKernel):
         self.render_hooks["<DEF_KERNEL>"] = hook
         return "<DEF_KERNEL>"
 
-    def size(self, name: str, index: int):
+    def size(self, name: Optional[str], index: int, output_index: int=0):
         """
         Hook called from template code to get the size of an arg.
         Will add needed args to pass it in if it is dynamic.
+
+        Args:
+            name: If None, get the size of the output tensor. Otherwise, get the size of the named input tensor.
+            index: The index of the size to get
+            output_index: Defaults to 0, but can bet set to [0,len(output_nodes)) to get the size of a specific output tensor.
         """
         assert isinstance(index, int)
         if name is None:
-            val = self.output_node.get_size()[index]
+            val = self.output_nodes[output_index].get_size()[index]
+            # val = self.output_node.get_size()[index]
         else:
             assert isinstance(name, str)
             val = self.named_input_nodes[name].get_size()[index]
         return texpr(self.rename_indexing(val))
 
-    def stride(self, name, index):
+    def stride(self, name, index, output_index: int=0):
         """
         Hook called from template code to get the stride of an arg.
         Will add needed args to pass it in if it is dynamic.
+
+        Args:
+            name: If None, get the stride of the output tensor. Otherwise, get the stride of the named input tensor.
+            index: The index of the stride to get
+            output_index: Defaults to 0, but can bet set to [0,len(output_nodes)) to get the stride of a specific output tensor.
         """
         assert isinstance(index, int)
         if name is None:
-            val = self.output_node.get_stride()[index]
+            val = self.output_nodes[output_index].get_stride()[index]
+            # val = self.output_node.get_stride()[index]
         else:
             assert isinstance(name, str)
             val = self.named_input_nodes[name].get_stride()[index]
@@ -290,7 +303,6 @@ class TritonTemplateKernel(TritonKernel):
                 return self._inner.indirect_indexing(index_var, size, False)
                 # return sympy_symbol(str(index_var))
 
-        # if self.modification_cache is None:
         with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
             assert isinstance(
                 self.subgraphs, ir.ComputedBuffer
@@ -313,11 +325,18 @@ class TritonTemplateKernel(TritonKernel):
         indices: Union[List[Any], Tuple[Any]],
         val: str,
         mask: Optional[str] = None,
+        output_index: int = 0
     ):
         """
         Hook called from template code to store the final output
         (if the buffer hasn't been optimized away), then append any
         epilogue fusions.
+
+        Args:
+            indices: The indices to store the output at
+            val: The value to store
+            mask: The mask to store with the output
+            output_index: Defaults to 0, but can bet set to [0,len(output_nodes)) to store the output to a specific output tensor.
         """
         assert isinstance(indices, (list, tuple))
         assert isinstance(val, str)
@@ -325,7 +344,7 @@ class TritonTemplateKernel(TritonKernel):
         assert self.template_mask is None
         indices = list(map(TritonPrinter.paren, indices))
         index_symbols = [sympy.Symbol(x) for x in indices]
-        lengths = [V.graph.sizevars.simplify(s) for s in self.output_node.get_size()]
+        lengths = [V.graph.sizevars.simplify(s) for s in self.output_nodes[output_index].get_size()]
         assert len(indices) == len(lengths)
 
         # glue to make generated code use same indexing from template
@@ -357,7 +376,7 @@ class TritonTemplateKernel(TritonKernel):
             epilogue_args.append(input_node.make_loader()(index_symbols))
 
         V.ops.store(
-            self.output_node.get_name(),
+            self.output_nodes[0].get_name(),
             output_index,
             self.epilogue_fn(*epilogue_args),
         )
@@ -553,7 +572,7 @@ class TritonTemplate(KernelTemplate):
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
         ), TritonTemplateKernel(
             kernel_name=kernel_name,
-            output_node=fake_out,
+            output_nodes=[fake_out,],
             use_jit=True,
             **kernel_options,
         ) as kernel:
@@ -596,7 +615,7 @@ class TritonTemplate(KernelTemplate):
         def make_kernel_render(out_node):
             kernel = TritonTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME),
-                output_node=out_node,
+                output_node=[out_node,],
                 use_jit=False,
                 **kernel_options,
             )
