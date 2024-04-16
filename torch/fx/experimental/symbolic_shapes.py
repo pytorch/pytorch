@@ -251,7 +251,7 @@ def check_consistent(new, old) -> None:
 
     if isinstance(new, torch.Tensor):
         assert isinstance(old, torch.Tensor)
-        torch._check(old.dim() == new.dim())
+        torch._check(old.dim() == new.dim(), lambda: f"{old.shape} != {new.shape} (old != new)")
         # Do this manually so that each individual test is irrefutable
         # (TODO: should be a helper for this, maybe sym_eq?  That
         # gives us a compound expression and I'm not sure it
