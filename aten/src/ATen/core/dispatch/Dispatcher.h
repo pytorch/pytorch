@@ -227,12 +227,12 @@ public:
    * Given an operator, tells the Dispatcher that we have implemented a fake impl
    * for this op in the given Python module. Call this a "pystub".
    */
-  RegistrationHandleRAII registerPyStub(const OperatorName& op_name, const char* pymodule, const char* context);
+  RegistrationHandleRAII registerPythonModule(const OperatorName& op_name, const char* pymodule, const char* context);
 
   /**
    * Given an operator, throws if we have a pystub.
    */
-  void throwIfHasPyStub(OperatorName op_name);
+  void throwIfHasPythonModule(OperatorName op_name);
 
   c10::optional<std::pair<const char*, const char*>> getPyStub(OperatorName op_name);
 
