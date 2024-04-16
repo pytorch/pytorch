@@ -219,9 +219,7 @@ class TestInductorDynamic(TestCase):
         opt_r = opt_f(x, b)
         self.assertEqual(r, opt_r)
 
-    @torch._dynamo.config.patch(
-        capture_dynamic_output_shape_ops=True
-    )
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
     def test_nonzero_no_realloc(self, device):
         @torch.compile(fullgraph=True, dynamic=True)
         def f(x, y):
