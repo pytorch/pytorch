@@ -664,9 +664,9 @@ void ProcessGroupNCCL::WorkNCCL::synchronizeInternal(
 bool ProcessGroupNCCL::WorkNCCL::wait(std::chrono::milliseconds timeout) {
   RECORD_PARAM_COMMS(
       static_cast<int>(this->seq_), // seq
-      0, // process group ptr
+      std::make_tuple("", ""), // PG name tuple
       rank_, // rank
-      "wait", // colName
+      "wait", // collective name
       0, // inNelems
       0, // outNelems
       at::kByte, // dType
@@ -864,20 +864,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
       this->globalRankStride = -1;
     }
   }
-
-  RECORD_PARAM_COMMS(
-      0, // seq
-      static_cast<int>(uid_), // pg id
-      rank, // rank
-      "init", // colName
-      0, // inNelems
-      0, // outNelems
-      at::kByte, // dType
-      std::vector<int64_t>(), // inSplitSizes
-      std::vector<int64_t>(), // outSplitSizes
-      globalRankStart, // globalRankStart
-      globalRankStride, // globalRankStride
-      size_); // worldSize
 
   // Attach hooks to cache allocator to trigger the hooks whenever a traced
   // action is called. In the following hooks, we register a newly allocated
@@ -1934,6 +1920,9 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // Create the unique NCCL ID and broadcast it
   ncclUniqueId ncclID;
 
+  // reset log prefix to include group_desc
+  logPrefix_ = createLogPrefix();
+
   // For batch_isend_irecv, ncclGroupStart() would be called upfront
   bool batchP2P = ncclActiveGroupCounter_ > 0;
   bool singleP2POp = isP2POp(opType, batchP2P);
@@ -1945,7 +1934,16 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // For point-to-point communication on the same process, don't need broadcast.
   if (!isSendRecvSelf) {
     // Broadcast so that each process can have a unique NCCL ID
+    auto timeStarted = std::chrono::steady_clock::now();
     broadcastUniqueNCCLID(&ncclID, singleP2POp, deviceKey, p2pRank);
+    auto timerDeltaMs =
+        std::chrono::duration_cast<std::chrono::duration<double>>(
+            std::chrono::steady_clock::now() - timeStarted)
+            .count() *
+        1000;
+    LOG(INFO) << logPrefix()
+              << "ProcessGroupNCCL broadcast unique ID through store took "
+              << timerDeltaMs << " ms";
   }
 
   at::cuda::OptionalCUDAGuard gpuGuard;
@@ -2048,9 +2046,22 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   }
 #endif
 
-  logPrefix_ = createLogPrefix(); // reset log prefix to include group_desc
   NCCLTraceBuffer::get()->record_pg_ranks(
       std::make_tuple(pg_name_, pg_desc_), groupRanks());
+
+  RECORD_PARAM_COMMS(
+      0, // seq
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
+      rank, // rank
+      "init", // collective name
+      0, // inNelems
+      0, // outNelems
+      at::kByte, // dType
+      std::vector<int64_t>(), // inSplitSizes
+      std::vector<int64_t>(), // outSplitSizes
+      globalRankStart, // globalRankStart
+      globalRankStride, // globalRankStride
+      size_); // worldSize
 
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL created ncclComm_ "
             << ncclComm->ncclComm_ << " on CUDA device: " << deviceIndex;
@@ -3121,11 +3132,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      static_cast<int>(uid_), // pg id
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
-      "allreduce", // colName
+      "allreduce", // collective name
       tensor.numel(), // inNelems
       tensor.numel(), // outNelems
       tensor.scalar_type(), // dType
@@ -3148,11 +3159,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allreduce_coalesced(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      static_cast<int>(uid_), // pg id
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
       rank_, // rank
-      "allreduce_coalesced", // colName
+      "allreduce_coalesced", // collective name
       total_numel, // inNelems
       total_numel, // outNelems
       tensors[0].scalar_type(), // dType
@@ -3201,11 +3212,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::broadcast(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      static_cast<int>(uid_), // pg id
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
       opts.rootRank, // root rank
-      "broadcast", // colName
+      "broadcast", // collective name
       tensor.numel(), // inNelems
       tensor.numel(), // outNelems
       tensor.scalar_type(), // dType
@@ -3295,11 +3306,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      static_cast<int>(uid_), // pg id
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
       opts.rootRank, // root rank
-      "reduce", // colName
+      "reduce", // collective name
       tensor.numel(), // inNelems
       tensor.numel(), // outNelems
       tensor.scalar_type(), // dType
@@ -3391,11 +3402,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::allgather(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank
-      "all_gather", // colName
+      "all_gather", // collective name
       inputTensor.numel(), // inNelems
       inputTensor.numel() * // outNelems
           this->getSize(),
@@ -3519,11 +3530,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      this->getID(),
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank
-      "reduce_scatter", // colName
+      "reduce_scatter", // collective name
       outputTensor.numel() * this->getSize(), // inNelems
       outputTensor.numel(), // outNelems
       outputTensor.scalar_type(), // dType
@@ -3629,11 +3640,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      static_cast<int>(uid_), // pg id
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       inputTensor, // inputTensor
       outputTensor, // outputTensor
       rank_, // rank
-      "_reduce_scatter_base", // colName
+      "_reduce_scatter_base", // collective name
       inputTensor.numel(), // inNelems
       tensor.numel(), // outNelems
       tensor.scalar_type(), // dtype
@@ -3717,9 +3728,9 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::barrier(const BarrierOptions& opts) {
   RECORD_PARAM_COMMS(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      static_cast<int>(uid_), // pg id
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       rank_, // rank
-      "barrier", // colName
+      "barrier", // collective name
       0, // inNelems
       0, // outNelems
       at::kByte, // dType
@@ -3786,11 +3797,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        static_cast<int>(uid_), // pg id
+        std::make_tuple(pg_name_, pg_desc_), // PG name tuple
         inputTensor, // inputTensor
         outputTensor, // outputTensor
         rank_, // rank
-        "all_to_all", // colName
+        "all_to_all", // collective name
         inputTensor.numel(), // inNelems
         outputTensor.numel(), // outNelems
         inputTensor.scalar_type(), // dType
@@ -3828,11 +3839,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall_base(
         static_cast<int>(
             this->getSequenceNumberForGroup() +
             1), // seq + 1 to match collective
-        static_cast<int>(uid_), // pg id
+        std::make_tuple(pg_name_, pg_desc_), // PG name tuple
         inputTensor, // inputTensor
         outputTensor, // outputTensor
         rank_, // rank
-        "all_to_allv", // colName
+        "all_to_allv", // collective name
         inputTensor.numel(), // inNelems
         outputTensor.numel(), // outNelems
         inputTensor.scalar_type(), // dType
@@ -3906,11 +3917,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::alltoall(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      static_cast<int>(uid_), // pg id
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       rank_, // rank
-      "all_to_all", // colName
+      "all_to_all", // collective name
       total_numel, // inNelems
       total_numel, // outNelems
       inputTensors.front().scalar_type(), // dType
@@ -3958,11 +3969,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::send(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      static_cast<int>(uid_), // pg id
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
       dstRank, // dst rank
-      "send", // colName
+      "send", // collective name
       tensor.numel(), // inNelems
       tensor.numel(), // outNelems
       tensor.scalar_type(), // dType
@@ -3999,11 +4010,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::recv(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      static_cast<int>(uid_), // pg id
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       tensors, // inputTensors
       tensors, // outputTensors
       srcRank, // src rank
-      "recv", // colName
+      "recv", // collective name
       tensor.numel(), // inNelems
       tensor.numel(), // outNelems
       tensor.scalar_type(), // dType
@@ -4099,11 +4110,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::gather(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      static_cast<int>(uid_), // pg id
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       opts.rootRank, // root rank
-      "gather", // colName
+      "gather", // collective name
       inputTensor.numel(), // inNelems
       inputTensor.numel() * this->getSize(), // outNelems
       inputTensor.scalar_type(), // dType
@@ -4186,11 +4197,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::scatter(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      static_cast<int>(uid_), // pg id
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       inputTensors, // inputTensors
       outputTensors, // outputTensors
       opts.rootRank, // root rank
-      "scatter", // colName
+      "scatter", // collective name
       outputTensor.numel() * this->getSize(), // inNelems
       outputTensor.numel(), // outNelems
       outputTensor.scalar_type(), // dType
@@ -4256,11 +4267,11 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_allgather_base(
   RECORD_PARAM_COMMS_DATA(
       static_cast<int>(
           this->getSequenceNumberForGroup() + 1), // seq + 1 to match collective
-      static_cast<int>(uid_), // pg id
+      std::make_tuple(pg_name_, pg_desc_), // PG name tuple
       input_tensor, // inputTensors
       output_tensor, // outputTensors
       rank_, // rank
-      "_allgather_base", // colName
+      "_allgather_base", // collective name
       input_tensor.numel(), // inNelems
       output_tensor.numel(), // outNelems
       output_tensor.scalar_type(), // dType
