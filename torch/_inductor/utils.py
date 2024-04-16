@@ -21,7 +21,6 @@ import tempfile
 import textwrap
 import time
 import unittest
-import weakref
 from dataclasses import fields
 from datetime import datetime
 from io import StringIO
@@ -35,7 +34,6 @@ from typing import (
     NamedTuple,
     Optional,
     Protocol,
-    Sequence,
     Set,
     TypeVar,
     Union,
@@ -172,75 +170,6 @@ def do_bench(*args, **kwargs):
     if quantile_field_name not in kwargs:
         kwargs[quantile_field_name] = (0.5, 0.2, 0.8)
     return triton_do_bench(*args, **kwargs)[0]
-
-
-def get_primitive_bitwidth(dtype: torch.dtype):
-    if dtype.is_floating_point:
-        return torch.finfo(dtype).bits
-    else:
-        return torch.iinfo(dtype).bits
-
-
-def get_read_only_benchmark_value(
-    size: Sequence[int],
-    stride: Sequence[int],
-    dtype: torch.dtype = torch.float32,
-    device: Union[str, torch.device] = "cpu",
-    extra_size: int = 0,
-):
-    """
-    Generate a tensor that will be read-only from existing parameters.
-
-    XXX: mutating this tensor will cause incorrectness issues.
-    """
-    from .virtualized import V
-
-    # ints are often used for indexing, cant grap random allocation
-    if not V.graph or not dtype.is_floating_point:
-        return torch._dynamo.testing.rand_strided(
-            size, stride, dtype, device, extra_size
-        )
-
-    device: torch.device = (
-        device if not isinstance(device, str) else torch.device(device)
-    )
-    needed_size = (
-        sum((shape - 1) * stride for shape, stride in zip(size, stride))
-        + 1
-        + extra_size
-    )
-    needed_bytes = needed_size * get_primitive_bitwidth(dtype)
-
-    mod_tensor = V.graph.get_read_only_parameter_for_benchmarking(needed_bytes, device)
-    if mod_tensor is not None:
-        assert (
-            mod_tensor.untyped_storage().nbytes() >= needed_bytes
-            and mod_tensor.device == device
-        )
-        buffer = mod_tensor.new_empty([], dtype=dtype)
-        buffer.set_(
-            mod_tensor.untyped_storage(),
-            storage_offset=0,
-            size=[needed_size],
-            stride=[1],
-        )  # type: ignore[call-overload]
-        out_tensor = torch.as_strided(buffer, size, stride)
-
-        stor_data_ptr = mod_tensor.untyped_storage().data_ptr()
-        V.graph.module_storages_in_benchmark_use.add(stor_data_ptr)
-        dp_set_ref = weakref.ref(V.graph.module_storages_in_benchmark_use)
-
-        def remove_dp():
-            dp_set = dp_set_ref()
-            if dp_set is None:
-                return
-
-            dp_set.remove(stor_data_ptr)
-
-        weakref.finalize(out_tensor, remove_dp)
-        return out_tensor
-
-    return torch._dynamo.testing.rand_strided(size, stride, dtype, device, extra_size)
 
 
 @functools.lru_cache(None)
