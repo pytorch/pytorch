@@ -618,14 +618,14 @@ class TORCH_API Library final {
   /// Args:
   /// - pymodule: the python module
   /// - context: We may include this in the error message.
-  Library& has_python_registrations(const char* pymodule, const char* context = "") {
+  Library& set_python_module(const char* pymodule, const char* context = "") {
     pystub_ = {pymodule, context};
     return *this;
   }
 
-  /// Deprecated; use has_python_registrations instead
+  /// Deprecated; use set_python_module instead
   Library& impl_abstract_pystub(const char* pymodule, const char* context = "") {
-    return has_python_registrations(pymodule, context);
+    return set_python_module(pymodule, context);
   }
 
   /// Define an operator for a schema and then register an implementation for
