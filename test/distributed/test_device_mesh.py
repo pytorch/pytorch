@@ -14,6 +14,7 @@ from torch.distributed._tensor.placement_types import _Partial, Shard
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh, init_device_mesh
 
 from torch.distributed.distributed_c10d import (
+    _world,
     get_global_rank,
     get_world_size,
     init_process_group,
@@ -24,6 +25,7 @@ from torch.distributed.distributed_c10d import (
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
+    skip_unless_torch_gpu,
     with_comms,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -61,6 +63,13 @@ class DeviceMeshTest(DTensorTestBase):
         DeviceMesh(device_type, mesh_tensor)
         self.assertTrue(is_initialized())
         self.destroy_pg()
+
+    @with_comms
+    @skip_unless_torch_gpu
+    def test_assert_invalid_mesh_tensor(self):
+        mesh = torch.arange(self.world_size).to(self.rank)
+        with self.assertRaises(ValueError):
+            device_mesh = DeviceMesh(self.device_type, mesh)
 
     @with_comms
     def test_get_group(self):
@@ -291,6 +300,23 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         with self.assertRaisesRegex(RuntimeError, "Invalid mesh_dim_name"):
             dp_mesh = mesh["dim0"]
 
+    @with_comms
+    def test_cache_and_reuse_submesh_slice_result(self):
+        mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
+
+        dp_mesh = mesh["dp"]
+        ref_pg_count = _world.group_count
+
+        # When we call the "dp" slice second time, it should not create any new pg.
+        # As we are just using the cached result so the pg count should be the same.
+        dp_mesh_2 = mesh["dp"]
+        self.assertEqual(ref_pg_count, _world.group_count)
+
+        # When we call the "tp" slice, it should create a new pg, as the "tp" slice is called
+        # for the first time.
+        tp_mesh = mesh["tp"]
+        self.assertTrue(_world.group_count > ref_pg_count)
+
 
 class TestMeshEnv(DTensorTestBase):
     @with_comms
@@ -443,9 +469,11 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 torch.chunk(big_tensor, device_mesh.size(), dim=shard_dim)
             )
             unpadded_list = [
-                shard_placement._unpad_tensor(big_tensor_chunks[i], pad_sizes[i])
-                if pad_sizes[i] > 0
-                else big_tensor_chunks[i]
+                (
+                    shard_placement._unpad_tensor(big_tensor_chunks[i], pad_sizes[i])
+                    if pad_sizes[i] > 0
+                    else big_tensor_chunks[i]
+                )
                 for i, big_tensor in enumerate(big_tensor_chunks)
             ]
             all_gathered_tensor = torch.cat(unpadded_list, dim=shard_dim)
@@ -660,30 +688,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
                 output_tensor = torch.cat(output_tensor_list, dim=scatter_dim)
                 expected_tensor = torch.cat(expected_tensor_list, dim=scatter_dim)
                 self.assertEqual(output_tensor, expected_tensor)
-
-
-class DeviceMeshTestWithNativeFunCol(DeviceMeshTest):
-    def setUp(self) -> None:
-        self._prev_native_funcol_enabled = funcol.native_funcol_enabled()
-        funcol.enable_native_funcol()
-        super().setUp()
-
-    def tearDown(self) -> None:
-        super().tearDown()
-        if not self._prev_native_funcol_enabled:
-            funcol.disable_native_funcol()
-
-
-class DeviceMeshCollectiveTestWithNativeFunCol(DeviceMeshCollectiveTest):
-    def setUp(self) -> None:
-        self._prev_native_funcol_enabled = funcol.native_funcol_enabled()
-        funcol.enable_native_funcol()
-        super().setUp()
-
-    def tearDown(self) -> None:
-        super().tearDown()
-        if not self._prev_native_funcol_enabled:
-            funcol.disable_native_funcol()
 
 
 if __name__ == "__main__":

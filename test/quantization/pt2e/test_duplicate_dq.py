@@ -4,7 +4,7 @@ import unittest
 from typing import Any, Dict
 
 import torch
-import torch._export as export
+from torch._export import capture_pre_autograd_graph
 
 from torch.ao.quantization.observer import (
     HistogramObserver,
@@ -102,7 +102,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
 
         # program capture
         m = copy.deepcopy(m_eager)
-        m = export.capture_pre_autograd_graph(
+        m = capture_pre_autograd_graph(
             m,
             example_inputs,
         )
@@ -110,7 +110,7 @@ class TestDuplicateDQPass(QuantizationTestCase):
         m = prepare_pt2e(m, quantizer)
         # Calibrate
         m(*example_inputs)
-        m = convert_pt2e(m, fold_quantize=True)
+        m = convert_pt2e(m)
 
         pt2_quant_output = m(*example_inputs)
         for n in m.graph.nodes:

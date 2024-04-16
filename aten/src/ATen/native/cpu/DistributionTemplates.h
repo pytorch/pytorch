@@ -321,7 +321,7 @@ void bernoulli_kernel(const TensorBase &self, const TensorBase &p_, RNG generato
     auto p = expand_inplace(self, p_cpu);
     auto iter = TensorIteratorConfig()
         .add_output(self)
-        .add_input(*p)
+        .add_const_input(*p)
         .check_all_same_dtype(false)
         .build();
     if (p->scalar_type() == kDouble) {

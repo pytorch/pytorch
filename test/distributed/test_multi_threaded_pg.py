@@ -93,6 +93,38 @@ class TestCollectivesWithWrapper(TestCase):
             with self.assertRaises(SkipTest):
                 _test_method(self)
 
+    @spawn_threads_and_init_comms(world_size=4)
+    def test_all_to_all_single_tensor(self):
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        send = torch.full((world_size, 2), rank)
+        sizes = torch.ones(world_size, dtype=torch.int64)
+
+        out = torch.zeros(world_size, 2, dtype=send.dtype)
+        dist.all_to_all_single(out, send, sizes, sizes)
+        self.assertEqual(out.tolist(), list(zip(range(world_size), range(world_size))))
+
+    @spawn_threads_and_init_comms(world_size=4)
+    def test_all_to_all_single_list(self):
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        send = torch.full((world_size, 2), rank)
+        sizes = [1] * world_size
+
+        out = torch.zeros(world_size, 2, dtype=send.dtype)
+        dist.all_to_all_single(out, send, sizes, sizes)
+        self.assertEqual(out.tolist(), list(zip(range(world_size), range(world_size))))
+
+    @spawn_threads_and_init_comms(world_size=4)
+    def test_all_to_all_single_none(self):
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        send = torch.full((world_size, 2), rank)
+
+        out = torch.zeros(world_size, 2, dtype=send.dtype)
+        dist.all_to_all_single(out, send)
+        self.assertEqual(out.tolist(), list(zip(range(world_size), range(world_size))))
+
 class TestCollectivesWithBaseClass(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -137,6 +169,11 @@ class TestCollectivesWithBaseClass(MultiThreadedTestCase):
 
         dist.reduce_scatter(output_tensor, to_reduce_scatter)
         expected_tensor = torch.ones(3, 3) * dist.get_rank() * self.world_size
+        self.assertEqual(output_tensor, expected_tensor)
+
+        output_tensor = torch.empty(3, 3)
+        dist.reduce_scatter(output_tensor, to_reduce_scatter, op=dist.ReduceOp.AVG)
+        expected_tensor = torch.ones(3, 3) * dist.get_rank()
         self.assertEqual(output_tensor, expected_tensor)
 
     def test_broadcast_object_list(self):

@@ -7,11 +7,11 @@ import torch
 
 import torch._inductor
 
+from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
-    TestCase,
 )
 
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
@@ -698,9 +698,31 @@ class ForeachTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @requires_cuda
+    def test_aliasing(self):
+        def test_foreach_add(a0, a1, a2, b0, b1, b2):
+            return torch._foreach_add_([a0, a1, a2], [b0, b1, b2])
+
+        input = torch.ones(10, 10, device="cuda")
+        input2 = torch.ones(10, 10, device="cuda")
+        inps = [
+            input,
+            input.view(10, 10),
+            input.view(10, 10),
+            input2,
+            input2.view(10, 10),
+            input2.view(10, 10),
+        ]
+
+        out_eager = test_foreach_add(*inps)
+        out_compiled = torch.compile(test_foreach_add)(*inps)
+
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests(needs="filelock")

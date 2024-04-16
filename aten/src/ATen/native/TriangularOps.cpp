@@ -41,7 +41,7 @@ namespace {
 template <typename scalar_t>
 void apply_triu_tril_single(
     scalar_t* result,
-    scalar_t* self,
+    const scalar_t* self,
     bool inplace,
     int64_t k,
     int64_t n,
@@ -86,7 +86,7 @@ template <typename scalar_t>
 void apply_triu_tril(const Tensor& result, const Tensor& self, bool inplace, int64_t k, bool upper) {
   auto n = self.size(-2);
   auto m = self.size(-1);
-  auto self_data = self.data_ptr<scalar_t>();
+  auto self_data = self.const_data_ptr<scalar_t>();
   auto self_stride = (self.dim() > 2 && self.stride(-3) > 0) ? self.stride(-3) : 1;
   auto batchsize = batchCountTrilTriu(result);
   auto self_row_stride = self.stride(-2);
@@ -107,7 +107,7 @@ void apply_triu_tril(const Tensor& result, const Tensor& self, bool inplace, int
 
   parallel_for(0, batchsize, 0, [&](int64_t start, int64_t end) {
     for (const auto b : c10::irange(start, end)) {
-      scalar_t* self_batch = &self_data[b * self_stride];
+      const scalar_t* self_batch = &self_data[b * self_stride];
       scalar_t* result_batch = &result_data[b * result_stride];
       apply_triu_tril_single<scalar_t>(
           result_batch,

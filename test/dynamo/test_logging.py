@@ -85,7 +85,7 @@ def single_record_test(**kwargs):
 class LoggingTests(LoggingTestCase):
     test_bytecode = multi_record_test(2, bytecode=True)
     test_output_code = multi_record_test(2, output_code=True)
-    test_aot_graphs = multi_record_test(2, aot_graphs=True)
+    test_aot_graphs = multi_record_test(3, aot_graphs=True)
 
     @requires_cuda
     @make_logging_test(schedule=True)
@@ -335,7 +335,7 @@ LoweringException: AssertionError:
             if torch._logging._internal._is_torch_handler(handler):
                 break
         self.assertIsNotNone(handler)
-        self.assertIn("[INFO]", handler.format(records[0]))
+        self.assertIn("I", handler.format(records[0]))
         self.assertEqual("custom format", handler.format(records[1]))
 
     @make_logging_test(dynamo=logging.INFO)
@@ -354,7 +354,7 @@ LoweringException: AssertionError:
         for record in records:
             r = handler.format(record)
             for l in r.splitlines():
-                self.assertIn("[INFO]", l)
+                self.assertIn("I", l)
 
     test_trace_source_simple = within_range_record_test(1, 100, trace_source=True)
 
@@ -449,10 +449,11 @@ LoweringException: AssertionError:
 
     @make_logging_test(trace_source=True)
     def test_trace_source_funcname(self, records):
+        # NOTE: list comprehensions are inlined in 3.12, so test with tuples
         def fn1():
             def fn2():
                 if True:
-                    return [torch.ones(3, 3) for _ in range(5)]
+                    return tuple(torch.ones(3, 3) for _ in range(5))
                 return None
 
             return fn2()
@@ -463,7 +464,7 @@ LoweringException: AssertionError:
         found_funcname = False
         for record in records:
             msg = record.getMessage()
-            if "<listcomp>" in msg and "fn1.fn2" in msg:
+            if "<genexpr>" in msg and "fn1.fn2" in msg:
                 found_funcname = True
 
         self.assertTrue(found_funcname)

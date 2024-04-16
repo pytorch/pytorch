@@ -16,6 +16,8 @@ __all__ = [
     "matmul",
     "SDPBackend",
     "SDPAParams",
+    "enable_cudnn_sdp",
+    "cudnn_sdp_enabled",
     "enable_flash_sdp",
     "flash_sdp_enabled",
     "enable_mem_efficient_sdp",
@@ -306,11 +308,30 @@ def can_use_efficient_attention(params: SDPAParams, debug: bool = False) -> bool
     return torch._C._can_use_mem_efficient_attention(params, debug)
 
 
+def cudnn_sdp_enabled():
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Returns whether cuDNN scaled dot product attention is enabled or not.
+    """
+    return torch._C._get_cudnn_sdp_enabled()
+
+
+def enable_cudnn_sdp(enabled: bool):
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Enables or disables cuDNN scaled dot product attention.
+    """
+    torch._C._set_sdp_use_cudnn(enabled)
+
+
 @contextlib.contextmanager
 def sdp_kernel(
     enable_flash: bool = True,
     enable_math: bool = True,
     enable_mem_efficient: bool = True,
+    enable_cudnn: bool = True,
 ):
     r"""
     .. warning:: This flag is beta and subject to change.
@@ -336,6 +357,8 @@ def sdp_kernel(
         backend_list.append(SDPBackend.EFFICIENT_ATTENTION)
     if enable_math:
         backend_list.append(SDPBackend.MATH)
+    if enable_cudnn:
+        backend_list.append(SDPBackend.CUDNN_ATTENTION)
 
     with sdpa_kernel(backend_list) as context:
         try:

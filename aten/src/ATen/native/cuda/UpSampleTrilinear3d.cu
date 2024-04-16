@@ -43,7 +43,7 @@ __global__ void upsample_trilinear3d_out_frame(
     const accscalar_t rheight,
     const accscalar_t rwidth,
     const bool align_corners,
-    const PackedTensorAccessor64<scalar_t, 5> idata,
+    const PackedTensorAccessor64<const scalar_t, 5> idata,
     PackedTensorAccessor64<scalar_t, 5> odata) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -128,7 +128,7 @@ __global__ void upsample_trilinear3d_backward_out_frame(
     const accscalar_t rwidth,
     const bool align_corners,
     PackedTensorAccessor64<scalar_t, 5> idata,
-    const PackedTensorAccessor64<scalar_t, 5> odata,
+    const PackedTensorAccessor64<const scalar_t, 5> odata,
     scalar_t* idata_ptr) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -269,7 +269,7 @@ static void upsample_trilinear3d_out_cuda_template(
       input.scalar_type(), "upsample_trilinear3d_out_frame", [&] {
         using accscalar_t = at::acc_type<scalar_t, true>;
 
-        auto idata = input.packed_accessor64<scalar_t, 5>();
+        auto idata = input.packed_accessor64<const scalar_t, 5>();
         auto odata = output.packed_accessor64<scalar_t, 5>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(
@@ -340,7 +340,7 @@ static void upsample_trilinear3d_backward_out_cuda_template(
         using accscalar_t = at::acc_type<scalar_t, true>;
 
         auto idata = grad_input.packed_accessor64<scalar_t, 5>();
-        auto odata = grad_output.packed_accessor64<scalar_t, 5>();
+        auto odata = grad_output.packed_accessor64<const scalar_t, 5>();
         scalar_t* idata_ptr = grad_input.mutable_data_ptr<scalar_t>();
 
         const accscalar_t rdepth = area_pixel_compute_scale<accscalar_t>(

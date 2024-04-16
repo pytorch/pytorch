@@ -7,7 +7,7 @@
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
 
-namespace at { namespace functorch {
+namespace at::functorch {
 
 namespace{
 std::tuple<Tensor,optional<int64_t>>
@@ -52,7 +52,7 @@ std::tuple<Tensor,optional<int64_t>>
 view_as_complex_batch_rule(const Tensor& self, optional<int64_t> self_bdim) {
   // guard against the user passing in a batch of scalar tensors with batch
   // size equal to 2.
-  TORCH_CHECK(self.sizes().size() > 1, "Input tensor must have one or more dimensions");
+  TORCH_CHECK(self.sym_sizes().size() > 1, "Input tensor must have one or more dimensions");
 
   auto self_ = moveBatchDimToFront(self, self_bdim);
   auto result = at::view_as_complex(self_);
@@ -185,4 +185,4 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 }
 
 #undef INVOKE
-}}
+} // namespace at::functorch

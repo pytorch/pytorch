@@ -65,15 +65,50 @@ def filtered_configs(
         block_k = max(min(block_k, k), min_block_size)
         # each warp computes 16x16 tile = 256
         num_warps = min(num_warps, block_m * block_n // 256)
-        if (block_m, block_n, block_k, num_stages, num_warps) not in used:
-            used.add((block_m, block_n, block_k, num_stages, num_warps))
-            yield triton_config(
-                BLOCK_M=block_m,
-                BLOCK_N=block_n,
-                BLOCK_K=block_k,
-                num_stages=num_stages,
-                num_warps=num_warps,
-            )
+        if torch.version.hip:
+            for matrix_instr_nonkdim in [0, 16]:
+                if matrix_instr_nonkdim != 0 and (
+                    block_m % matrix_instr_nonkdim != 0
+                    or block_n % matrix_instr_nonkdim != 0
+                ):
+                    #  block_m and block_n must be a multiple of matrix_instr_nonkdim
+                    continue
+                if (
+                    block_m,
+                    block_n,
+                    block_k,
+                    num_stages,
+                    num_warps,
+                    matrix_instr_nonkdim,
+                ) not in used:
+                    used.add(
+                        (
+                            block_m,
+                            block_n,
+                            block_k,
+                            num_stages,
+                            num_warps,
+                            matrix_instr_nonkdim,
+                        )
+                    )
+                    yield triton_config(
+                        BLOCK_M=block_m,
+                        BLOCK_N=block_n,
+                        BLOCK_K=block_k,
+                        num_stages=num_stages,
+                        num_warps=num_warps,
+                        matrix_instr_nonkdim=matrix_instr_nonkdim,
+                    )
+        else:
+            if (block_m, block_n, block_k, num_stages, num_warps, 0) not in used:
+                used.add((block_m, block_n, block_k, num_stages, num_warps, 0))
+                yield triton_config(
+                    BLOCK_M=block_m,
+                    BLOCK_N=block_n,
+                    BLOCK_K=block_k,
+                    num_stages=num_stages,
+                    num_warps=num_warps,
+                )
 
 
 # List of dictionaries to store the kernel configs. Configs that evaluate to true

@@ -11,7 +11,6 @@
 #include <c10/util/Exception.h>
 
 #include <structmember.h>
-#include <cstring>
 #include <limits>
 #include <sstream>
 

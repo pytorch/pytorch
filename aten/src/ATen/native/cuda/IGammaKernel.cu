@@ -450,7 +450,7 @@ __noinline__ __host__ __device__ scalar_t calc_igammac(scalar_t a, scalar_t x) {
 }
 
 // NOTE: this __noinline__ is important -- otherwise, observed compile times significantly
-// increase.  The same kernel seems to get recompiled mulitple times via gpu_kernel_with_scalars,
+// increase.  The same kernel seems to get recompiled multiple times via gpu_kernel_with_scalars,
 // multiple dtypes, etc.
 template <typename scalar_t>
 __noinline__ __host__ __device__ scalar_t calc_igamma(scalar_t a, scalar_t x) {

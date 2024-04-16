@@ -19,7 +19,11 @@ from torch.testing._internal.common_distributed import (
     requires_nccl,
     skip_if_lt_x_gpu,
 )
-from torch.testing._internal.common_utils import requires_cuda
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    requires_cuda,
+)
 from torch._inductor.compile_fx import compile_fx as inductor_compile_fx
 from torch.utils._triton import has_triton
 from torch._inductor.utils import run_and_get_triton_code
@@ -524,6 +528,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
             self.assertTrue(same(eager_out, inductor_out, tol=0.001))
 
 
+@instantiate_parametrized_tests
 @requires_nccl()
 @requires_cuda
 class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
@@ -643,15 +648,15 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_trace_allreduce(self):
 
-        def func(inp, *, tag, ranks, group_size):
-            ar = _functional_collectives.all_reduce(inp, "sum", ranks, tag)
+        def func(inp):
+            ar = _functional_collectives.all_reduce(inp, "sum", "0")
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
         counter = CompileCounter()
         compiled = torch.compile(func, backend=counter)
-        out = compiled(inputs, **self.get_world_trs())
-        correct = func(inputs, **self.get_world_trs())
+        out = compiled(inputs)
+        correct = func(inputs)
         self.assertEqual(counter.frame_count, 1)
 
         # should test more precisely, but the 2 is supposed to be (all_reduce, wait)
@@ -660,15 +665,15 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_trace_all_gather_tensor(self):
 
-        def func(inp, *, tag, ranks, group_size):
-            ar = _functional_collectives.all_gather_tensor(inp, 0, ranks, tag)
+        def func(inp):
+            ar = _functional_collectives.all_gather_tensor(inp, 0, "0")
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
         counter = CompileCounter()
         compiled = torch.compile(func, backend=counter)
-        out = compiled(inputs, **self.get_world_trs())
-        correct = func(inputs, **self.get_world_trs())
+        out = compiled(inputs)
+        correct = func(inputs)
         self.assertEqual(counter.frame_count, 1)
 
         # should test more precisely, but the 2 is supposed to be (all_gather, wait)
@@ -715,6 +720,28 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         # should test more precisely, but the 3 is supposed to be (all_gather, wait, copy_)
         assert counter.op_count == 3
+        assert same(outputs, correct_outputs)
+
+    def test_dynamo_rewrite_dist_all_gather_list(self):
+
+        def func(inp, out, *, pg):
+            torch.distributed.all_gather(
+                out,
+                inp,
+                pg,
+            )
+        local_size = [4, 4]
+        # single-proc test
+        global_size = local_size
+
+        inputs = torch.ones(local_size, device=self.device)
+        outputs = [torch.empty(global_size, device=self.device)]
+        correct_outputs = [torch.empty(global_size, device=self.device)]
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+        compiled(inputs, outputs, pg=GroupMember.WORLD)
+        func(inputs, correct_outputs, pg=GroupMember.WORLD)
+        assert counter.frame_count == 1
         assert same(outputs, correct_outputs)
 
     def test_dynamo_rewrite_dist_all_gather_args_match(self):
@@ -769,27 +796,152 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
-    def test_dynamo_rewrite_dist_allreduce(self):
+    @parametrize(
+        "pg_mode",
+        [
+            "positional",
+            "positional_none",
+            "kwargs",
+            "kwargs_none",
+            "unspecified",
+        ]
+    )
+    def test_dynamo_rewrite_dist_allreduce(self, pg_mode):
 
-        def func(tensor, pg):
+        def func(tensor, *args, **kwargs):
             torch.distributed.all_reduce(
                 tensor,
+                *args,
+                **kwargs,
+            )
+
+        counter = CompileCounter()
+        compiled = torch.compile(func, backend=counter, fullgraph=True)
+
+        args = []
+        kwargs = {}
+
+        if pg_mode == "positional":
+            args.append(torch.distributed.ReduceOp.MAX)
+            args.append(GroupMember.WORLD)
+        elif pg_mode == "positional_none":
+            args.append(torch.distributed.ReduceOp.MAX)
+            args.append(None)
+        elif pg_mode == "kwargs":
+            kwargs["group"] = GroupMember.WORLD
+        elif pg_mode == "kwargs_none":
+            kwargs["group"] = None
+        else:
+            assert pg_mode == "unspecified"
+
+        inputs_compiled = torch.ones(2, device=self.device)
+        inputs_eager = torch.ones(2, device=self.device)
+
+        compiled(inputs_compiled, *args, **kwargs)
+        func(inputs_eager, *args, **kwargs)
+
+        assert counter.frame_count == 1
+        # should test more precisely, but the 3 is supposed to be (all_reduce, wait, copy_)
+        assert counter.op_count == 3
+        assert same(inputs_compiled, inputs_eager)
+
+    def test_dynamo_rewrite_dist_all_to_all_single(self):
+
+        def func(output, input, pg):
+            torch.distributed.all_to_all_single(
+                output,
+                input,
                 group=pg
             )
 
         counter = CompileCounter()
         compiled = torch.compile(func, backend=counter, fullgraph=True)
 
-        inputs_compiled = torch.ones(2, device=self.device)
-        inputs_eager = torch.ones(2, device=self.device)
+        input_compiled = torch.ones(2, device=self.device)
+        input_eager = torch.ones(2, device=self.device)
+        output_compiled = torch.empty(2, device=self.device)
+        output_eager = torch.empty(2, device=self.device)
 
-        compiled(inputs_compiled, GroupMember.WORLD)
-        func(inputs_eager, GroupMember.WORLD)
+        compiled(output_compiled, input_compiled, GroupMember.WORLD)
+        func(output_eager, input_eager, GroupMember.WORLD)
 
         assert counter.frame_count == 1
-        # should test more precisely, but the 3 is supposed to be (all_reduce, wait, copy_)
-        assert counter.op_count == 3
-        assert same(inputs_compiled, inputs_eager)
+        assert same(output_compiled, output_eager)
+
+    @parametrize(
+        "reduce_op",
+        [
+            torch.distributed.ReduceOp.SUM,
+            torch.distributed.ReduceOp.AVG,
+            torch.distributed.ReduceOp.PRODUCT,
+            torch.distributed.ReduceOp.MIN,
+            torch.distributed.ReduceOp.MAX,
+        ]
+    )
+    def test_dynamo_rewrite_dist_allreduce_reduce_op(self, reduce_op):
+        from torch.distributed._functional_collectives import REDUCE_OP_TO_STR
+
+        def verify_rewrite(gm, _):
+            ar_nodes = []
+            for node in gm.graph.nodes:
+                if node.target in [
+                        torch.ops.c10d_functional.all_reduce,
+                        torch.ops._c10d_functional.all_reduce]:
+                    ar_nodes.append(node)
+            self.assertEqual(len(ar_nodes), 1)
+            reduce_op_str = ar_nodes[0].args[1]
+            self.assertEqual(REDUCE_OP_TO_STR[reduce_op], reduce_op_str)
+            return gm
+
+        compiled = torch.compile(
+            torch.distributed.all_reduce,
+            backend=verify_rewrite,
+            fullgraph=True,
+        )
+        inputs = (
+            torch.ones(2, device=self.device),
+            reduce_op,
+            GroupMember.WORLD,
+        )
+        compiled(*inputs)
+
+    @parametrize(
+        "source", [
+            "GroupMember.WORLD",
+            "group.WORLD",
+            "_get_default_group",
+        ]
+    )
+    def test_dynamo_get_world_group(self, source):
+
+        def func(tensor):
+            if source == "GroupMember.WORLD":
+                group = torch.distributed.GroupMember.WORLD
+            elif source == "group.WORLD":
+                group = torch.distributed.group.WORLD
+            else:
+                assert source == "_get_default_group"
+                group = torch.distributed.distributed_c10d._get_default_group()
+
+            torch.distributed.all_reduce(
+                tensor,
+                group=group,
+            )
+
+        def verify(gm, _):
+            ar_nodes = []
+            for node in gm.graph.nodes:
+                if node.target in [
+                        torch.ops.c10d_functional.all_reduce,
+                        torch.ops._c10d_functional.all_reduce]:
+                    ar_nodes.append(node)
+            self.assertEqual(len(ar_nodes), 1)
+            return gm
+
+        compiled = torch.compile(func, backend=verify, fullgraph=True)
+        input = torch.ones(2, device=self.device)
+        compiled(input)
+
 
     def test_dynamo_support_collective_op_with_async_op_False(self):
 
@@ -860,15 +1012,15 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     def test_dynamo_trace_reduce_scatter_tensor(self):
 
-        def func(inp, *, tag, ranks, group_size):
-            ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, ranks, tag)
+        def func(inp):
+            ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, "0")
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
         counter = CompileCounter()
         compiled = torch.compile(func, backend=counter)
-        out = compiled(inputs, **self.get_world_trs())
-        correct = func(inputs, **self.get_world_trs())
+        out = compiled(inputs)
+        correct = func(inputs)
         self.assertEqual(counter.frame_count, 1)
 
         # should test more precisely, but the 2 is supposed to be (reduce_scatter, wait)
@@ -896,19 +1048,19 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
         However, I wanted to at least see if it was possible to support it as a design goal.
         """
-        def func(inp, *, tag, ranks, group_size):
-            ar = _functional_collectives.all_reduce(inp, "sum", ranks, tag)
+        def func(inp):
+            ar = _functional_collectives.all_reduce(inp, "sum", "0")
             return ar
 
         input = torch.ones(4, 4, device="cuda", requires_grad=True)
         # TODO implement backwards
         with self.assertRaisesRegex(RuntimeError, "element 0 of tensors does not require grad and does not have a grad_fn"):
             compiled = torch.compile(func, backend="aot_eager")  # inductor bug with single-op allreduce graph
-            out = compiled(input, **self.get_world_trs())
+            out = compiled(input)
             out.sum().backward()
 
             correct_input = input.clone().detach().requires_grad_()
-            correct = func(correct_input, **self.get_world_trs())
+            correct = func(correct_input)
             correct.sum().backward()
             self.assertTrue(same(out, correct))
             self.assertTrue(same(input.grad, correct_input.grad))

@@ -78,7 +78,7 @@ C10_EXPORT int stringToKind(const std::string& str) {
   }();
   try {
     return str_to_kind.at(str);
-  } catch (std::out_of_range& err) {
+  } catch (std::out_of_range&) {
     throw std::out_of_range("unknown token in stringToKind");
   }
 }

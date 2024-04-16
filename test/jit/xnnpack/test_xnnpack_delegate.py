@@ -7,6 +7,7 @@ import torch._C
 
 torch.ops.load_library("//caffe2:xnnpack_backend")
 
+
 class TestXNNPackBackend(unittest.TestCase):
     def test_xnnpack_constant_data(self):
         class Module(torch.nn.Module):
@@ -24,17 +25,19 @@ class TestXNNPackBackend(unittest.TestCase):
             scripted_module,
             {
                 "forward": {
-                    "inputs" : [torch.randn(4, 4, 4)],
-                    "outputs": [torch.randn(4, 4, 4)]
+                    "inputs": [torch.randn(4, 4, 4)],
+                    "outputs": [torch.randn(4, 4, 4)],
                 }
-            }
+            },
         )
 
         for i in range(0, 20):
             sample_input = torch.randn(4, 4, 4)
             actual_output = scripted_module(sample_input)
             expected_output = lowered_module(sample_input)
-            self.assertTrue(torch.allclose(actual_output, expected_output, atol=1e-03, rtol=1e-03))
+            self.assertTrue(
+                torch.allclose(actual_output, expected_output, atol=1e-03, rtol=1e-03)
+            )
 
     def test_xnnpack_lowering(self):
         class Module(torch.nn.Module):
@@ -45,13 +48,11 @@ class TestXNNPackBackend(unittest.TestCase):
 
         faulty_compile_spec = {
             "backward": {
-                "inputs" : [torch.zeros(1)],
+                "inputs": [torch.zeros(1)],
                 "outputs": [torch.zeros(1)],
             }
         }
-        error_msg = (
-            "method_compile_spec does not contain the \"forward\" key."
-        )
+        error_msg = 'method_compile_spec does not contain the "forward" key.'
 
         with self.assertRaisesRegex(
             RuntimeError,
@@ -64,21 +65,21 @@ class TestXNNPackBackend(unittest.TestCase):
             )
 
         mismatch_compile_spec = {
-            "forward" : {
-                "inputs" : [torch.zeros(1), torch.zeros(1)],
-                "outputs" : [torch.zeros(1)]
+            "forward": {
+                "inputs": [torch.zeros(1), torch.zeros(1)],
+                "outputs": [torch.zeros(1)],
             }
         }
-        error_msg = ("method_compile_spec inputs do not match expected number of forward inputs")
+        error_msg = (
+            "method_compile_spec inputs do not match expected number of forward inputs"
+        )
 
         with self.assertRaisesRegex(
             RuntimeError,
             error_msg,
         ):
             _ = torch._C._jit_to_backend(
-                "xnnpack",
-                scripted_module,
-                mismatch_compile_spec
+                "xnnpack", scripted_module, mismatch_compile_spec
             )
 
         lowered = torch._C._jit_to_backend(
@@ -86,10 +87,10 @@ class TestXNNPackBackend(unittest.TestCase):
             scripted_module,
             {
                 "forward": {
-                    "inputs" : [torch.zeros(1)],
+                    "inputs": [torch.zeros(1)],
                     "outputs": [torch.zeros(1)],
                 }
-            }
+            },
         )
         lowered(torch.zeros(1))
 
@@ -113,14 +114,16 @@ class TestXNNPackBackend(unittest.TestCase):
             add_module,
             {
                 "forward": {
-                    "inputs" : [sample_inputs[0].clone(), sample_inputs[1].clone()],
-                    "outputs": [sample_output]
+                    "inputs": [sample_inputs[0].clone(), sample_inputs[1].clone()],
+                    "outputs": [sample_output],
                 }
-            }
+            },
         )
 
         actual_output = lowered_add_module.forward(sample_inputs[0], sample_inputs[1])
-        self.assertTrue(torch.allclose(actual_output, expected_output, atol=1e-03, rtol=1e-03))
+        self.assertTrue(
+            torch.allclose(actual_output, expected_output, atol=1e-03, rtol=1e-03)
+        )
 
     def test_xnnpack_broadcasting(self):
         class AddModule(torch.nn.Module):
@@ -139,14 +142,16 @@ class TestXNNPackBackend(unittest.TestCase):
             add_module,
             {
                 "forward": {
-                    "inputs" : [sample_inputs[0], sample_inputs[1]],
-                    "outputs": [sample_output]
+                    "inputs": [sample_inputs[0], sample_inputs[1]],
+                    "outputs": [sample_output],
                 }
-            }
+            },
         )
 
         actual_output = lowered_add_module.forward(sample_inputs[0], sample_inputs[1])
-        self.assertTrue(torch.allclose(actual_output, expected_output, atol=1e-03, rtol=1e-03))
+        self.assertTrue(
+            torch.allclose(actual_output, expected_output, atol=1e-03, rtol=1e-03)
+        )
 
     def test_xnnpack_unsupported(self):
         class AddSpliceModule(torch.nn.Module):
@@ -173,8 +178,8 @@ class TestXNNPackBackend(unittest.TestCase):
                 add_module,
                 {
                     "forward": {
-                        "inputs" : [sample_inputs[0], sample_inputs[1]],
-                        "outputs": [sample_output]
+                        "inputs": [sample_inputs[0], sample_inputs[1]],
+                        "outputs": [sample_output],
                     }
-                }
+                },
             )

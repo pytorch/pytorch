@@ -20,7 +20,7 @@
 #include <cstdlib>
 #include <string>
 
-// TODO: C++17 has the fileystem header, which may replace these
+// TODO: C++17 has the filesystem header, which may replace these
 #ifdef _WIN32
   // On Windows, the POSIX implementations are considered deprecated. We simply map to the newer variant.
   #include <process.h>
@@ -1500,7 +1500,11 @@ NvrtcFunction jit_pwise_function(
     std::stringstream ss;
     ss << *cache_dir << "/";
     ss << kernel_name;
+#ifdef USE_ROCM
+    ss << "_arch" << prop->gcnArchName;
+#else
     ss << "_arch" << cuda_major << "." << cuda_minor;
+#endif
     ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
     ss << (compile_to_sass ? "_sass" : "_ptx");
     ss << "_" << code.length();
@@ -1510,7 +1514,7 @@ NvrtcFunction jit_pwise_function(
     std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
     if (readin.fail()) {
       // NOTE: this does not warn because the file might not exist
-      // TODO: consider if this should explicilty check for the file's existence or not to throw
+      // TODO: consider if this should explicitly check for the file's existence or not to throw
       //   an informative warning
       readin.close();
     } else {
@@ -1537,7 +1541,7 @@ NvrtcFunction jit_pwise_function(
   // Constructs nvrtc build arguments
   // CUDA 11.1 allows going directly to SASS (sm_) instead of PTX (compute_)
   // which gives better backwards compatibility to work on older driver,
-  // (since older driver doesn't necessrily recognize PTX emitted by new
+  // (since older driver doesn't necessarily recognize PTX emitted by new
   // toolkit);
   // Meanwhile, for forward compatibility (future device with
   // `unsupported_arch==True`), since SASS are not necessarily compatible,

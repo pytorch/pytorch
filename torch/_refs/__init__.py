@@ -739,7 +739,7 @@ def isreal(a: TensorLikeType) -> TensorLikeType:
 
 # TODO: if this is special maybe it should be defined there and imported here?
 @_make_elementwise_unary_reference(
-    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=aten.special_i0
+    ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT, aten_op=aten.i0
 )
 def i0(a):
     return prims.bessel_i0(a)
@@ -1366,6 +1366,12 @@ def fmin(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
 )
 def fmod(a: TensorLikeType, b: TensorLikeType) -> TensorLikeType:
     return prims.fmod(a, b)
+
+
+@register_decomposition(aten.frexp)
+@out_wrapper("mantissa", "exponent")
+def frexp(self: TensorLikeType) -> Tuple[TensorLikeType, TensorLikeType]:
+    return torch.return_types.frexp(prims.frexp(self))
 
 
 @_make_elementwise_binary_reference(
@@ -2161,7 +2167,7 @@ def _reduction(
     computation_dtype, result_dtype = utils.reduction_dtypes(
         a, output_dtype_kind, dtype
     )
-    a = _maybe_convert_to_dtype(a, computation_dtype)  # type: ignore[assignment]
+    a = _maybe_convert_to_dtype(a, computation_dtype)  # type: ignore[method-assign]
     result = prim(a, dims)
     if keepdims:
         output_shape = [a.shape[i] if i not in dims else 1 for i in range(a.ndim)]
@@ -2480,7 +2486,7 @@ def mean(
     nelem = 1 if a.ndim == 0 else reduce(operator.mul, (a.shape[i] for i in dims), 1)
     result = true_divide(result, nelem)
     result_dtype = a.dtype if dtype is None else dtype
-    result = _maybe_convert_to_dtype(result, result_dtype)  # type: ignore[assignment]
+    result = _maybe_convert_to_dtype(result, result_dtype)  # type: ignore[method-assign]
     if out is not None:
         assert isinstance(out, TensorLike)
         out = _maybe_resize_out(out, result.shape)
@@ -2714,20 +2720,62 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
 
     from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
 
-    for t in tensors:
-        # match logic in legacy_cat_wrap_dim
-        if t.ndim == 1 and guard_size_oblivious(t.size(0) == 0):
-            continue
-        dim = utils.canonicalize_dim(t.ndim, dim)
-        utils.validate_idx(t.ndim, dim)
-        break
+    # This is a bit tricky.  Naively, you would expect to just pick one
+    # arbitrary tensor and check that all tensors match this tensor.  However,
+    # there is legacy behavior which says that if you have a 1-D empty tensor
+    # (0,), this is permissible.  So you can't assume that all the tensors
+    # have same dimensionality, and you can't assume that the first tensor is
+    # the correct stencil.
+    #
+    # We'll implement this in a few passes.  First, we will try to infer the
+    # ndim of the cat output.  If this ndim != 1, then we know that all ndim =
+    # 1 inputs must be empty, or are errors.  If this ndim == 1, then life
+    # is easy (the legacy special case coincides with regular handling).
+    #
+    # NB: The regular implementation of cat just filters out empty inputs,
+    # but we do it slightly different here for better handling for unbacked
+    # SymInts
+
+    example = None
+    for i, t in enumerate(tensors):
+        if example is None:
+            if t.ndim != 1:
+                example = t
+        else:
+            if t.ndim != 1:
+                torch._check(
+                    t.ndim == example.ndim,
+                    lambda: "Number of dimensions of tensors must match.  "
+                    f"Expected {example.ndim}-D tensors, but got {t.ndim}-D for "
+                    f"tensor number {i} in the list",
+                )
+
+    if example is None:
+        # example is None if everything is 1-D.  If so, just arbitrarily pick
+        # the first one
+        example = tensors[0]
+
+    shape = example.shape
+    filtered = []
+    for tensor_idx, tensor in enumerate(tensors):
+        if len(shape) != len(tensor.shape):
+            assert tensor.ndim == 1  # we've already checked this above
+            # Don't suggest the legacy behavior in the error message
+            torch._check(
+                tensor.shape[0] == 0,
+                lambda: f"Number of dimensions of tensors must match.  "
+                f"Expected {example.ndim}-D tensors, but got 1-D for "
+                f"tensor number {tensor_idx} in the list",
+            )
+        else:
+            # Remove inputs that are 1-D, zero size
+            if tensor.ndim == 1 and guard_size_oblivious(tensor.shape[0] == 0):
+                continue
+            # Don't bother checking size match, prims.cat will handle it
+            filtered.append(tensor)
 
     memory_format = cat_compute_output_memory_format(tensors)
 
-    # Filters tensors with one dimension of length zero
-    filtered = tuple(
-        x for x in tensors if not (x.ndim == 1 and guard_size_oblivious(x.numel() == 0))
-    )
     if len(filtered) == 0:
         t = tensors[0]
 
@@ -2744,6 +2792,9 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
             requires_grad=requires_grad,
             memory_format=memory_format,
         )
+
+    dim = utils.canonicalize_dim(filtered[0].ndim, dim)
+    utils.validate_idx(filtered[0].ndim, dim)
 
     return prims.cat(filtered, dim).clone(memory_format=memory_format)
 
@@ -3707,7 +3758,7 @@ def roll(
     # Avoid modulo by zero
     if a.numel() == 0:
         # Keeping this as ref for now as FakeTensor runs into some issues with complex tensors
-        return clone(a)
+        return a.clone()
 
     if a.dim() == 0 and len(dims) > 0:
         raise IndexError(
@@ -3738,9 +3789,8 @@ def roll(
     dim = dims[0]
     size = a.shape[dim]
     start = (size - shifts[0]) % size
-    t0 = torch.narrow(a, dim, start, size - start)
-    t1 = torch.narrow(a, dim, 0, start)
-    return torch.cat((t0, t1), dim)
+    idx = torch.arange(size, device=a.device)
+    return a.index_select(dim, torch.fmod(start + idx, size))
 
 
 @register_decomposition(aten.rot90)
@@ -4253,16 +4303,16 @@ def diag_embed(
     """
     Reference implementation of torch.diag_embed
     """
+    # convert from negative dims
+    rank = t.ndim + 1
+    dim1 = utils.canonicalize_dim(rank=rank, idx=dim1)
+    dim2 = utils.canonicalize_dim(rank=rank, idx=dim2)
+
     # as per the docs, exchanging dims is equivalent to changing the sign of
     # offset
     if dim1 > dim2:
         dim1, dim2 = dim2, dim1
         offset = -offset
-
-    # convert from negative dims
-    rank = t.ndim + 1
-    dim1 = utils.canonicalize_dim(rank=rank, idx=dim1)
-    dim2 = utils.canonicalize_dim(rank=rank, idx=dim2)
 
     torch._check(
         dim1 != dim2, lambda: f"diagonal dimensions cannot be identical {dim1}, {dim2}"
@@ -4882,9 +4932,10 @@ def arange(
         lambda: f"step must be finite but got {step}",
     )
 
+    args = (start, end, step)
+    integer_args = builtins.all(isinstance(arg, IntLike) for arg in args)
+
     if dtype is None:
-        args = (start, end, step)
-        integer_args = builtins.all(isinstance(arg, IntLike) for arg in args)
         dtype = torch.int64 if integer_args else torch.get_default_dtype()
 
     is_integer = utils.is_integer_dtype(dtype)
@@ -4912,7 +4963,6 @@ def arange(
             requires_grad=requires_grad,
         )
 
-    computation_dtype = utils.get_acc_type(dtype, device)
     index = prims.iota(
         length,
         start=0,
@@ -4920,6 +4970,10 @@ def arange(
         dtype=torch.int64,
         device=device,
         requires_grad=False,
+    )
+
+    computation_dtype = (
+        torch.long if integer_args else utils.get_acc_type(dtype, device)
     )
     index = _maybe_convert_to_dtype(index, computation_dtype)
     result = start + step * index
@@ -6246,6 +6300,8 @@ def _infer_scalar_type(obj):
             return torch.cfloat
         elif default_dtype is torch.double:
             return torch.cdouble
+        elif default_dtype is torch.half:
+            return torch.chalf
         else:
             raise RuntimeError("invalid default scalar type for complex")
     if isinstance(obj, torch.Tensor):
@@ -6282,21 +6338,15 @@ def _infer_scalar_type(obj):
 
 # Analogous to recursive_store
 # xref: recursive_store in torch/csrc/utils/tensor_new.cpp
-def _recursive_build(sizes, dim, scalarType, obj):
-    ndim = len(sizes)
-    assert dim <= ndim
-    if dim == ndim:
+def _recursive_build(scalarType: torch.dtype, obj: TensorOrNumberLikeType):
+    if isinstance(obj, Tensor) and obj.ndim <= 1:
+        obj = obj.item()
+        # fall through into next case
+    if isinstance(obj, Number):
         return torch.scalar_tensor(obj, dtype=scalarType)
-    n = sizes[dim]
+
     seq = obj
-    seq_size = len(seq)
-    if seq_size != n:
-        raise ValueError(
-            f"expected sequence of length {n} at dim {dim} (got {seq_size})"
-        )
-    return torch.stack(
-        [_recursive_build(sizes, dim + 1, scalarType, item) for item in seq]
-    )
+    return torch.stack([_recursive_build(scalarType, item) for item in seq])
 
 
 # xref: internal_new_from_data in torch/csrc/utils/tensor_new.cpp
@@ -6333,7 +6383,6 @@ def _internal_new_from_data(
     # TODO: test for numpy input with PyArray_Check
 
     device = device_opt if device_opt is not None else options["device"]
-    sizes = _compute_sizes(data, scalar_type)
     inferred_scalar_type = _infer_scalar_type(data) if type_inference else scalar_type
 
     # NB: Don't need to avoid tracing, as we aren't going to do any manual
@@ -6348,7 +6397,7 @@ def _internal_new_from_data(
         # of a freshly allocated CPU tensor.  Here, we're going to do an
         # alternate, heinously slow implementation: turn each individual
         # scalar into a tensor, and then repeatedly cat them together
-        tensor = _recursive_build(sizes, 0, inferred_scalar_type, data)
+        tensor = _recursive_build(inferred_scalar_type, data)
 
         tensor = tensor.to(device, inferred_scalar_type, non_blocking=False, copy=False)
 
@@ -6379,7 +6428,8 @@ def tensor(data, *, dtype=None, device=None, pin_memory=False, requires_grad=Fal
         pin_memory=pin_memory,
     )
     new_tensor.detach_()
-    new_tensor.requires_grad_(requires_grad)
+    if requires_grad:
+        new_tensor.requires_grad_(requires_grad)
     return new_tensor
 
 

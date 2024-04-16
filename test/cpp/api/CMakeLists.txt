@@ -41,7 +41,7 @@ set(TORCH_API_TEST_SOURCES
   ${TORCH_API_TEST_DIR}/inference_mode.cpp
   ${TORCH_API_TEST_DIR}/grad_mode.cpp
   ${TORCH_API_TEST_DIR}/operations.cpp
-  ${TORCH_API_TEST_DIR}/singleton_int.cpp
+  ${TORCH_API_TEST_DIR}/nested_int.cpp
 )
 if(USE_CUDA OR USE_ROCM)
   list(APPEND TORCH_API_TEST_SOURCES ${TORCH_API_TEST_DIR}/parallel.cpp)
