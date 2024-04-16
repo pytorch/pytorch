@@ -9618,6 +9618,17 @@ class CommonTemplate:
         t = rand_strided((8, 1500, 1), (1504, 1, 1), device=self.device)
         self.assertFalse(complex_memory_overlap(t))
 
+    def test_generate_rand_fp8(self):
+        """
+        PyTorch can not generate fp8 tensors with a normal distribution because of
+        missing needed kernels.
+
+        We work around that in rand_strided by generating an fp16 tensor first and
+        then do casting.
+        """
+        t = rand_strided((2, 3), (3, 1), device=self.device, dtype=torch.float8_e4m3fn)
+        self.assertTrue(t.dtype is torch.float8_e4m3fn)
+
 
 @dataclasses.dataclass
 class TestFailure:
