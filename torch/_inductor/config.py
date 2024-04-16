@@ -421,7 +421,7 @@ shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 
 # Control if we will do padding for pointwise/reductions
 comprehensive_padding = (
-    os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "1") == "1"
+    os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "0" if is_fbcode() else "1") == "1"
 )
 pad_channels_last = False
 
