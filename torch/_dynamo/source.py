@@ -170,6 +170,25 @@ class AttrSource(ChainedSource):
         return f"{self.base.name()}.{self.member}"
 
 
+# Represents tensor.grad source. It could be represented by AttrSource as well.
+# But, we could access grad field on tensor directly in C++ without going
+# through the Python bytecodes. Therefore, we use a separate source for grad
+# field.
+@dataclasses.dataclass(frozen=True)
+class GradSource(ChainedSource):
+    member: str = "grad"
+
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+        codegen.extend_output(codegen.create_load_attrs(self.member))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.{self.member}"
+
+
 @dataclasses.dataclass(frozen=True)
 class ParamBufferSource(AttrSource):
     def guard_source(self):
@@ -437,6 +456,18 @@ class ODictGetItemSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class OptimizerSource(ChainedSource):
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return self.base.name()
+
+
+@dataclasses.dataclass(frozen=True)
 class NNModuleSource(ChainedSource):
     def reconstruct(self, codegen):
         self.base.reconstruct(codegen)
@@ -533,6 +564,14 @@ def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     if not allow_cell_or_freevar and source.cell_or_freevar:
         return False
     return True
+
+
+def is_from_optimizer_source(source: Source):
+    if isinstance(source, OptimizerSource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_optimizer_source(source.base)
+    return False
 
 
 # TODO: can probably write a generic "test this on everything in the chain"

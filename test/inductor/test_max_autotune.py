@@ -273,24 +273,24 @@ class TestMaxAutotune(TestCase):
 
         with config.patch(
             {
-                "use_autotune_local_cache": False,
-                "use_autotune_remote_cache": True,
+                "autotune_local_cache": False,
+                "autotune_remote_cache": True,
             }
         ), patch.dict(os.environ), patch(cache_module, MyCache, create=True):
             os.environ.pop("TRITON_CACHE_MANAGER", None)
             with config.patch({"max_autotune": True}):
                 for _ in range(4):
-                    torch.compile(mm, dynamic=dynamic)(a, b)
+                    with fresh_inductor_cache():
+                        torch.compile(mm, dynamic=dynamic)(a, b)
                     reset()
-                    torch._inductor.codecache.PyCodeCache.clear()
                 self.assertEqual(num_get, 3)
                 self.assertEqual(num_put, 1)
             num_get = 0
             num_put = 0
             for _ in range(4):
-                torch.compile(f, dynamic=dynamic)(x, y)
+                with fresh_inductor_cache():
+                    torch.compile(f, dynamic=dynamic)(x, y)
                 reset()
-                torch._inductor.codecache.PyCodeCache.clear()
             self.assertEqual(num_get, 3)
             self.assertEqual(num_put, 1)
 
@@ -541,6 +541,33 @@ class TestMaxAutotune(TestCase):
             act = torch.compile(f)(x, y)
         ref = f(x, y)
         self.assertTrue(torch.allclose(act, ref, atol=4 * 1e-3, rtol=4 * 1e-3))
+
+    @config.patch(max_autotune=True)
+    def test_empty_conv_input(self, kernel_size=3):
+        x = torch.randn(0, 256, 14, 14, device="cuda")
+        weight = torch.randn(256, 256, kernel_size, kernel_size, device="cuda")
+
+        def f(x, weight):
+            return torch.convolution(
+                x,
+                weight,
+                bias=None,
+                stride=[1, 1],
+                padding=[0, 0],
+                dilation=[1, 1],
+                transposed=False,
+                output_padding=[0, 0],
+                groups=1,
+            )
+
+        opt_f = torch.compile(f)
+        ref = f(x, weight)
+        act = opt_f(x, weight)
+        self.assertTrue(torch.allclose(ref, act, atol=4 * 1e-3, rtol=4 * 1e-3))
+
+    @config.patch(max_autotune=True)
+    def test_empty_conv_input_with_1x1_kernel(self):
+        self.test_empty_conv_input(kernel_size=1)
 
 
 class TestBenchmarkRequest(BenchmarkRequest):

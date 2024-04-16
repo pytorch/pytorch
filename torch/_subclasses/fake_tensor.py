@@ -336,15 +336,17 @@ def in_kernel_invocation_manager(fake_mode):
     meta_in_tls = torch._C._meta_in_tls_dispatch_include()
     assert meta_in_tls == prev_in_kernel, f"{meta_in_tls}, {prev_in_kernel}"
 
-    guard = torch._C._DisableTorchDispatch()  # type: ignore[attr-defined]
-    fake_mode.in_kernel_invocation = True
-    torch._C._set_meta_in_tls_dispatch_include(True)
-    try:
-        yield
-    finally:
-        fake_mode.in_kernel_invocation = prev_in_kernel
-        torch._C._set_meta_in_tls_dispatch_include(prev_in_kernel)
-        del guard
+    with torch._C._DisableTorchDispatch():
+        fake_mode.in_kernel_invocation = True
+        # Unfortunately _set_meta_in_tls_dispatch_include(False) can leave
+        # `Dense` turned on (because it's implied by `Meta`)
+        with torch._C._PreserveDispatchKeyGuard():
+            torch._C._set_meta_in_tls_dispatch_include(True)
+            try:
+                yield
+            finally:
+                fake_mode.in_kernel_invocation = prev_in_kernel
+                # torch._C._set_meta_in_tls_dispatch_include(prev_in_kernel)
 
 
 # Return if the function allows Python numbers to bind to Tensors
@@ -435,6 +437,8 @@ class FakeTensor(torch.Tensor):
         )
         if not fake_mode._allow_unsafe_data_ptr_access:
             torch._C._set_throw_on_mutable_data_ptr(self)
+        else:
+            torch._C._set_warn_deprecated_on_mutable_data_ptr(self)
 
         assert elem.device.type == "meta", elem.device.type
         device = device if isinstance(device, torch.device) else torch.device(device)
@@ -761,10 +765,8 @@ class FakeTensorMode(TorchDispatchMode):
         allow_non_fake_inputs=False,
         shape_env=None,
         static_shapes=None,
-        _allow_unsafe_data_ptr_access=True,
     ):
         log.debug("create_mode 0x%x", id(self))
-        self._allow_unsafe_data_ptr_access = _allow_unsafe_data_ptr_access
         self.allow_fallback_kernels = allow_fallback_kernels
         self.fake_tensor_converter = FakeTensorConverter()
         if static_shapes is not None:
@@ -775,6 +777,9 @@ class FakeTensorMode(TorchDispatchMode):
         import torch._dynamo.config
         import torch._functorch.config
 
+        self._allow_unsafe_data_ptr_access = (
+            torch._functorch.config.fake_tensor_allow_unsafe_data_ptr_access
+        )
         self.allow_meta = torch._functorch.config.fake_tensor_allow_meta
         self.cache_enabled = torch._dynamo.config.fake_tensor_cache_enabled
         self.cache_crosscheck_enabled = (
@@ -1366,7 +1371,7 @@ class FakeTensorMode(TorchDispatchMode):
             func.name()
         ).abstract_impl.kernel
         if maybe_abstract_impl:
-            ctx = torch._library.abstract_impl.AbstractImplCtx(self.shape_env, func)
+            ctx = torch._library.abstract_impl.AbstractImplCtx(self, func)
             with torch._library.abstract_impl.set_ctx_getter(lambda: ctx), self:
                 result = maybe_abstract_impl(*args, **kwargs)
                 return result
@@ -1384,7 +1389,7 @@ class FakeTensorMode(TorchDispatchMode):
             # We infer the meta of a custom ops that return None to just
             # return None. custom ops are not allowed to mutate metadata
             # of their inputs, so this is safe.
-            if can_generate_trivial_abstract_impl(func):
+            if torch._library.utils.can_generate_trivial_fake_impl(func):
                 return None
             # no meta kernel registered, fallback to kernel for the device
             if has_symbolic_sizes or not self.can_run_unsafe_fallback(func):
@@ -1671,22 +1676,6 @@ def run_fallback_kernel(
             return e
 
     return pytree.tree_map(map_out, r)
-
-
-def can_generate_trivial_abstract_impl(op: torch._ops.OpOverload) -> bool:
-    assert isinstance(op, torch._ops.OpOverload)
-    if torch._library.utils.is_builtin(op):
-        # We control the built-ins. These may (in rare cases)
-        # do input metadata mutation (which we have banned on custom ops)
-        return False
-    schema = op._schema
-    # It's suspicious if the op is not mutable but returns nothing, so we return False out of an abundance of caution
-    if not schema.is_mutable:
-        return False
-    if len(schema.returns) > 0:
-        return False
-    # If the op returns nothing, then it has a trivial abstract impl.
-    return True
 
 
 # Just for use to allow copying a module to fake tensors,

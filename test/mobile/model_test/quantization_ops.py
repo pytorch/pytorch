@@ -93,21 +93,23 @@ class DynamicQuantModule:
             trans_input = torch.randn(1, 16, 2)
             tgt = torch.rand(1, 16, 2)
 
-            return len((
-                self.rnn(input, h),
-                self.rnncell(input[0], h[0]),
-                self.gru(input, h),
-                self.grucell(input[0], h[0]),
-                self.lstm(input, (h, c)),
-                # self.lstm(torch.nn.utils.rnn.pack_padded_sequence(self.a, lengths=torch.tensor([3,2,1])), (h, c)),
-                self.lstmcell(input[0], (h[0], c[0])),
-                self.transformers[0](trans_input, tgt),
-                self.transformers[1](trans_input),
-                self.transformers[2](trans_input, tgt),
-                self.linears[0](linear_input),
-                self.linears[1](linear_input),
-                self.linears[2](linear_input, linear_input),
-            ))
+            return len(
+                (
+                    self.rnn(input, h),
+                    self.rnncell(input[0], h[0]),
+                    self.gru(input, h),
+                    self.grucell(input[0], h[0]),
+                    self.lstm(input, (h, c)),
+                    # self.lstm(torch.nn.utils.rnn.pack_padded_sequence(self.a, lengths=torch.tensor([3,2,1])), (h, c)),
+                    self.lstmcell(input[0], (h[0], c[0])),
+                    self.transformers[0](trans_input, tgt),
+                    self.transformers[1](trans_input),
+                    self.transformers[2](trans_input, tgt),
+                    self.linears[0](linear_input),
+                    self.linears[1](linear_input),
+                    self.linears[2](linear_input, linear_input),
+                )
+            )
 
 
 class StaticQuantModule:

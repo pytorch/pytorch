@@ -28,6 +28,7 @@ from torch._export.passes.lift_constants_pass import (
     lift_constants_pass,
     rewrite_script_object_meta,
 )
+from torch._export.utils import placeholder_naming_pass, placeholder_prefixes
 from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
@@ -211,7 +212,10 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                     except Exception:  # TODO(zhxchen17) Remove this.
                         return path
 
-                nn_module_stack = {root_key: (root, root_cls), **nn_module_stack}
+                nn_module_stack = {
+                    root_key: (root, root_cls.__module__ + "." + root_cls.__qualname__),
+                    **nn_module_stack,
+                }
                 node.meta["nn_module_stack"] = {
                     key: (normalize_path(path), ty)
                     for key, (path, ty) in nn_module_stack.items()
@@ -276,6 +280,55 @@ def _remap_constants(
             constant = constants[orig_target]
             del constants[orig_target]
             constants[spec.target] = constant
+
+
+def _rename_constants_nodes(
+    gm: torch.fx.GraphModule,
+    graph_signature: ExportGraphSignature,
+) -> None:
+    """
+    For strict mode, rename constants nodes that were previously annotated as buffers.
+    """
+    # handle name collisions with existing constants
+    node_names = {node.name for node in gm.graph.nodes}
+
+    def rename_constant(name):
+        if name in node_names:
+            n = 1
+            while (dup_name := f"{name}_{n}") in node_names:
+                n += 1
+            name = dup_name
+        node_names.add(name)
+        return name
+
+    # use input specs to map names from buffers to constants
+    buffer_prefix = placeholder_prefixes[InputKind.BUFFER]
+    const_prefix = placeholder_prefixes[InputKind.CONSTANT_TENSOR]
+    buffer_to_constant = {}
+    for spec in graph_signature.input_specs:
+        if spec.kind == InputKind.CONSTANT_TENSOR and not spec.arg.name.startswith(
+            const_prefix
+        ):
+            if spec.arg.name.startswith(buffer_prefix):  # map from buffer to constants
+                c_name = rename_constant(
+                    const_prefix + spec.arg.name[len(buffer_prefix) :]
+                )
+            else:  # lifted constant
+                c_name = rename_constant(const_prefix + spec.arg.name)
+            buffer_to_constant[spec.arg.name] = c_name
+            spec.arg.name = c_name
+    for spec in graph_signature.output_specs:
+        if spec.arg.name in buffer_to_constant:
+            spec.arg.name = buffer_to_constant[spec.arg.name]
+
+    # Rename constants nodes for all modules
+    for mod in gm.modules():
+        if not isinstance(mod, torch.fx.GraphModule):
+            continue
+        for node in mod.graph.nodes:
+            if node.name in buffer_to_constant:
+                node.name = node.target = buffer_to_constant[node.name]
+        mod.recompile()
 
 
 def _restore_state_dict(
@@ -482,13 +535,14 @@ def _export_non_strict(
 
         gm = replace_set_grad_with_hop_pass(gm)
 
-    # Remove nn_module_stack metadata from all placeholders/inputs nodes.
-    for mod in gm.modules():
-        if not isinstance(mod, torch.fx.GraphModule):
+    # Remove nn_module_stack, stack_trace metadata from all placeholders/inputs nodes.
+    for _mod in gm.modules():
+        if not isinstance(_mod, torch.fx.GraphModule):
             continue
-        for node in mod.graph.nodes:
+        for node in _mod.graph.nodes:
             if node.op in ["placeholder", "output"]:
                 node.meta.pop("nn_module_stack", None)
+                node.meta.pop("stack_trace", None)
 
     # NOTE: aot_export adds symint metadata for placeholders with int values;
     # since these become specialized, we replace such metadata with the original values
@@ -512,7 +566,7 @@ def _export_non_strict(
     def make_argument_spec(i, node) -> ArgumentSpec:
         if isinstance(node, (int, bool, float, type(None))):
             # For const outputs we just directly return this
-            return ConstantArgument(value=node)
+            return ConstantArgument(name="", value=node)
 
         assert (
             "val" in node.meta
@@ -532,7 +586,7 @@ def _export_non_strict(
         else:
             # TODO: this branch is likely wrong, all permissible ConstantArgument type
             # should have been handled already
-            return ConstantArgument(value=val)
+            return ConstantArgument(name=node.name, value=val)
 
     input_specs, output_specs = _sig_to_specs(
         user_inputs=set(graph_signature.user_inputs),
@@ -564,6 +618,17 @@ def _export_non_strict(
 
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
+
+    # prettify names for placeholder nodes
+    placeholder_naming_pass(
+        gm,
+        export_graph_signature,
+        mod,
+        fake_args,
+        fake_kwargs,
+        fake_params_buffers,
+        constants,
+    )
 
     @dataclasses.dataclass
     class _ExportedProgramNonStrict:
@@ -648,14 +713,75 @@ def _verify_nn_module_stack(graph_module: torch.fx.GraphModule) -> None:
         for node in mod.graph.nodes:
             if node.op in ["call_function", "get_attr"]:
                 if i == 0:
-                    if node.meta.get("nn_module_stack", None) is None:
+                    if (
+                        nn_module_stack := node.meta.get("nn_module_stack", None)
+                    ) is None:
                         raise SpecViolationError(
                             f"Node {node} of type {node.op} is missing nn_module_stack metadata"
+                        )
+                    if not all(
+                        isinstance(k, str)
+                        and isinstance(v, tuple)
+                        and len(v) == 2
+                        and all(isinstance(x, str) for x in v)
+                        for k, v in nn_module_stack.items()
+                    ):
+                        raise SpecViolationError(
+                            f"Node {node} of type {node.op} has incorrect nn_module_stack metadata format"
+                            f"expected Dict[str, Tuple[str, str]], but got {nn_module_stack}"
                         )
             elif node.op in ["placeholder", "output"]:
                 if node.meta.get("nn_module_stack", None):
                     raise SpecViolationError(
                         f"Node {node} of type {node.op} contains nn_module_stack metadata, this should be None"
+                    )
+
+
+def _verify_stack_trace(graph_module: torch.fx.GraphModule) -> None:
+    """
+    Perform stack trace checks on the graph.
+    Constraints:
+        - None or non-empty str for 'call_function', 'get_attr'
+        - None for 'placeholder', 'output'
+    """
+    for i, mod in enumerate([graph_module] + list(graph_module.modules())):
+        if not isinstance(mod, torch.fx.GraphModule):
+            continue
+        for node in graph_module.graph.nodes:
+            stack_trace = node.meta.get("stack_trace", None)
+            if node.op in ["call_function", "get_attr"]:
+                if not (stack_trace is None or isinstance(stack_trace, str)):
+                    raise SpecViolationError(
+                        f"Node {node} of type {node.op} has invalid stack_trace metadata, "
+                        f"expected a string or None but instead found: {stack_trace}"
+                    )
+            elif node.op in ["placeholder", "output"]:
+                if stack_trace:
+                    raise SpecViolationError(
+                        f"Node {node} of type {node.op} contains stack_trace metadata, "
+                        f"expected None but instead found: {stack_trace}"
+                    )
+
+
+def _verify_placeholder_names(gm: torch.fx.GraphModule, sig: ExportGraphSignature):
+    """
+    Performs a sanity check on the placeholder node names.
+    - User input nodes: no restrictions, should match the original forward() signature
+    - Params/buffers/constants/custom_obj/token nodes: should start with prefixes defined in <placeholder_prefixes>
+    """
+    name_to_kind = {spec.arg.name: spec.kind for spec in sig.input_specs}
+    for mod in gm.modules():
+        if not isinstance(mod, torch.fx.GraphModule):
+            continue
+        for node in mod.graph.nodes:
+            if node.op == "placeholder":
+                if node.name not in name_to_kind:
+                    continue
+                node_kind = name_to_kind[node.name]
+                prefix = placeholder_prefixes[node_kind]
+                if not node.name.startswith(prefix):
+                    raise SpecViolationError(
+                        f"Placeholder node name {node.name} does not follow spec for {node_kind}, name should have prefix: {prefix}"
                     )
 
 
@@ -922,6 +1048,8 @@ def _export(
 
         _rewrite_non_persistent_buffers(mod, ep_non_strict.sig, ep_non_strict.constants)
         _verify_nn_module_stack(gm)
+        _verify_stack_trace(gm)
+        _verify_placeholder_names(gm, ep_non_strict.sig)
         exported_program = ExportedProgram(
             root=gm,
             graph=gm.graph,
@@ -934,10 +1062,6 @@ def _export(
             example_inputs=(args, kwargs),
             constants=ep_non_strict.constants,
         )
-        if len(range_constraints) > 0:
-            exported_program = exported_program._transform_do_not_use(
-                _AddRuntimeAssertionsForInlineConstraintsPass(range_constraints)
-            )
         return exported_program
 
     gm_torch_level = _export_to_torch_ir(
@@ -1045,9 +1169,10 @@ def _export(
     export_graph_signature = ep_non_strict.sig
     constants = ep_non_strict.constants
 
-    # Don't copy over nn_module_stack metadata for params/buffers nodes
+    # Don't copy over nn_module_stack, stack_trace metadata for params/buffers nodes
     for metadata in params_buffers_to_node_meta.values():
         metadata.pop("nn_module_stack", None)
+        metadata.pop("stack_trace", None)
 
     # After aot_export, set the param/buffer metadata back into placeholders
     # Technically, users can still construct this data from param names
@@ -1108,6 +1233,9 @@ def _export(
     # 4. Rewrite constants to have the same FQN as the original module.
     _remap_constants(constant_attrs, export_graph_signature, constants)
 
+    # 5. Rename constants nodes in graph module from buffers to constants
+    _rename_constants_nodes(gm, export_graph_signature)
+
     module_call_signatures = {
         fqn: ModuleCallSignature(inputs=[], outputs=[], **specs)
         for fqn, specs in gm_torch_level.meta["module_call_specs"].items()
@@ -1120,6 +1248,8 @@ def _export(
 
     assert orig_out_spec is not None
     _verify_nn_module_stack(gm)
+    _verify_stack_trace(gm)
+    _verify_placeholder_names(gm, export_graph_signature)
     exported_program = ExportedProgram(
         root=gm,
         graph=gm.graph,

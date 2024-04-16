@@ -246,7 +246,6 @@ inductor_expected_failures_single_sample["cuda"] = {
 
 # intentionally not handled
 intentionally_not_handled = {
-    ("as_strided", "partial_views"): {b8, f16, f32, f64, i32, i64},
     "resize_": {b8, f16, f32, f64, i32, i64},
     "resize_as_": {b8, f16, f32, f64, i32, i64},
 }
@@ -369,13 +368,12 @@ inductor_override_kwargs = {
     # Following tests are failing with strict comparision but atol=1 is acceptable due roundings errors
     ("nn.functional.interpolate.bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
     ("nn.functional.upsample_bilinear", "cpu", u8): {"atol": 1, "rtol": 0},
+    ("nn.functional.interpolate.bicubic", "cpu", u8): {"atol": 1, "rtol": 0},
+    # High atol due to precision loss
     ("nn.functional.interpolate.bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
     ("nn.functional.upsample_bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
-    # Temporarily skip interpolat bicubic tests:
-    "nn.functional.interpolate.bicubic": {
-        "assert_equal": False,
-        "check_gradient": False,
-    },
+    ("nn.functional.interpolate.bicubic", "cpu", f32): {"atol": 5e-3, "rtol": 0},
+    ("nn.functional.interpolate.bicubic", "cuda", f64): {"atol": 1e-3, "rtol": 0},
 }
 
 
@@ -465,6 +463,7 @@ class TestInductorOpInfo(TestCase):
         allowed_dtypes = [f16, f32, f64, i32, i64, b8]
         if op_name not in (
             "nn.functional.interpolate.bilinear",
+            "nn.functional.interpolate.bicubic",
             "nn.functional.upsample_bilinear",
             "nn.functional.upsample_nearest",
         ):
