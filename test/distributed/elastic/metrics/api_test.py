@@ -10,10 +10,10 @@ import abc
 import unittest.mock as mock
 
 from torch.distributed.elastic.metrics.api import (
+    _get_metric_name,
     MetricData,
     MetricHandler,
     MetricStream,
-    _get_metric_name,
     prof,
 )
 from torch.testing._internal.common_utils import run_tests, TestCase
