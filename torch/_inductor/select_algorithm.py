@@ -862,6 +862,70 @@ class ExternKernelCaller(ChoiceCaller):
         }
 
 
+class DataProcessorChoiceCallerWrapper:
+    def __init__(self, wrapped, preprocessor, postprocessor):
+        self._wrapped = wrapped
+        if preprocessor is not None:
+            self._preprocessor = preprocessor
+        else:
+            self._preprocessor = lambda x, y: (x, y)
+        if postprocessor is not None:
+            self._postprocessor = postprocessor
+        else:
+            self._postprocessor = lambda x: x
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+    def benchmark(self, *args, out) -> float:
+        new_args, new_out = self._preprocessor(args, out)
+        result = self._wrapped.benchmark(*new_args, out=new_out)
+        new_out = self._postprocessor(new_out)
+        if out is not new_out:
+            out.copy_(new_out)
+        return result
+
+    def output_node(self) -> ir.TensorBox:
+        result = self._wrapped.output_node()
+        return self._postprocessor(result)
+
+
+class DataProcessorTemplateWrapper:
+    def __init__(
+        self,
+        wrapped_template_cls,
+        preprocessor,
+        postprocessor,
+        **kwargs,
+    ):
+        if preprocessor is not None:
+            self._preprocessor = preprocessor
+        else:
+            self._preprocessor = lambda x, y: (x, y)
+        if postprocessor is not None:
+            self._postprocessor = postprocessor
+        else:
+            self._postprocessor = lambda x, y: (x, y)
+        assert "input_nodes" in kwargs
+        assert "layout" in kwargs
+        kwargs["input_nodes"], kwargs["layout"] = preprocessor(
+            kwargs["input_nodes"], kwargs["layout"]
+        )
+        self._wrapped = wrapped_template_cls(**kwargs)
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+    def maybe_append_choice(self, choices, **kwargs):
+        return type(self._wrapped).maybe_append_choice(self, choices, **kwargs)
+
+    def generate(self, **kwargs):
+        choice_caller = self._wrapped.generate(**kwargs)
+        return DataProcessorChoiceCallerWrapper(
+            choice_caller, self._preprocessor, self._postprocessor
+        )
+
+
 class ErrorFromChoice(RuntimeError):
     def __init__(self, msg, choice: ChoiceCaller, inputs_str):
         msg += f"\nFrom choice {choice}\n{inputs_str}"

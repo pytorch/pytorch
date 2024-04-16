@@ -2,8 +2,8 @@ from typing import List, Optional
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from . import config, ir
+from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .ir import TensorBox
 from .lowering import (
     add,
@@ -16,9 +16,11 @@ from .lowering import (
 )
 from .select_algorithm import (
     autotune_select_algorithm,
+    DataProcessorTemplateWrapper,
     ExternKernelChoice,
     realize_inputs,
 )
+from .utils import sympy_product
 from .virtualized import V
 
 
@@ -378,43 +380,6 @@ def register_onednn_fusion_ops():
                     )
                 ]
                 if config.max_autotune or config.max_autotune_gemm:
-
-                    class DataPreprocessorChoiceCallerWrapper:
-                        def __init__(self, wrapped, processor):
-                            self._wrapped = wrapped
-                            self._processor = processor
-
-                        def __getattr__(self, name):
-                            return getattr(self._wrapped, name)
-
-                        def benchmark(self, *args, out) -> float:
-                            new_args, new_out = self._processor(args, out)
-                            return self._wrapped.benchmark(*new_args, out=new_out)
-
-                    class DataPreprocessorTemplateWrapper:
-                        def __init__(self, wrapped_template_cls, processor, **kwargs):
-                            self._processor = processor
-                            assert "input_nodes" in kwargs
-                            assert "layout" in kwargs
-                            kwargs["input_nodes"], kwargs["layout"] = processor(
-                                kwargs["input_nodes"], kwargs["layout"]
-                            )
-                            self._wrapped = wrapped_template_cls(**kwargs)
-
-                        def __getattr__(self, name):
-                            return getattr(self._wrapped, name)
-
-                        def maybe_append_choice(self, choices, **kwargs):
-                            return type(self._wrapped).maybe_append_choice(
-                                self, choices, **kwargs
-                            )
-
-                        def generate(self, **kwargs):
-                            choice_caller = self._wrapped.generate(**kwargs)
-                            return DataPreprocessorChoiceCallerWrapper(
-                                choice_caller, self._processor
-                            )
-
                     *m, _ = x.get_size()
                     n, k = orig_w.get_size()
                     # TODO: decide block size per ISA
@@ -427,6 +392,7 @@ def register_onednn_fusion_ops():
                             x = inputs[0]
                             w = inputs[2]
                             if isinstance(w, ir.IRNode):
+                                x = view(x, [-1, k])
                                 blocked_w = permute(
                                     view(w, (n / n_block_size, n_block_size, k)),
                                     [0, 2, 1],
@@ -439,9 +405,10 @@ def register_onednn_fusion_ops():
                                     layout_or_out = ir.FixedLayout(
                                         x.get_device(),
                                         x.get_dtype(),
-                                        [*m, n],
+                                        [sympy_product((*m,)), n],
                                     )
                             else:
+                                x = x.view([-1, k])
                                 blocked_w = (
                                     w.reshape(n / n_block_size, n_block_size, k)
                                     .transpose(1, 2)
@@ -449,9 +416,18 @@ def register_onednn_fusion_ops():
                                 )
                             return [x, blocked_w], layout_or_out
 
-                        template = DataPreprocessorTemplateWrapper(
+                        def postprocessor(out):
+                            if not isinstance(m, (list, tuple)):
+                                return out
+                            if isinstance(out, ir.IRNode):
+                                return view(out, [*m, n])
+                            else:
+                                return out.view([*m, n])
+
+                        template = DataProcessorTemplateWrapper(
                             CppPackedGemmTemplate,
                             preprocessor,
+                            postprocessor,
                             input_nodes=[x, packed_w, orig_w, None, batch_size],
                             layout=layout,
                             n_block_size=n_block_size,
