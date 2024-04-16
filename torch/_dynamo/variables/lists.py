@@ -444,7 +444,6 @@ class SizeVariable(TupleVariable):
 
         proxy = tracer.create_proxy("call_function", torch.Size, (proxies,), {})
         set_example_value(
-            None,
             proxy.node,
             torch.Size(
                 [

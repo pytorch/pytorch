@@ -964,7 +964,7 @@ class SymNodeVariable(VariableTracker):
             assert proxy.node.meta["example_value"] == sym_num
         if sym_num is None:
             sym_num = get_fake_value(proxy.node, tx)
-        set_example_value(tx, proxy.node, sym_num)
+        set_example_value(proxy.node, sym_num)
 
         if isinstance(sym_num, (sympy.Integer, int, bool)):
             sym_num = int(sym_num) if isinstance(sym_num, sympy.Integer) else sym_num
