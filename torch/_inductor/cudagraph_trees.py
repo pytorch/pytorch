@@ -561,7 +561,7 @@ class CUDAWarmupNode:
         stack_traces: Optional[StackTraces],
         stream: torch.cuda.Stream,
         already_warm: bool,
-        id: int,
+        id: GraphID,
     ):
         self.wrapped_function = wrapped_function
         self.parent = parent
@@ -655,6 +655,12 @@ class CUDAWarmupNode:
 
     def all_outputs_are_dead(self):
         return not list(self.path_live_weakrefs())
+
+    def _is_cuda_graph_recorded_tensor(self, t: torch.Tensor):
+        for storage_weak_ref in self.path_live_weakrefs():
+            if t.untyped_storage().data_ptr() == storage_weak_ref.data_ptr():
+                return True
+        return False
 
 
 # Aliases for List that say what the indices denote
@@ -1730,12 +1736,12 @@ class CUDAGraphTreeManager:
         self.graph_counter = itertools.count(0)
         self.func_counter = itertools.count(0)
 
-        # mapping from graph_id to (function id to mutation type hint). See more details in
-        # [Note: Optimistic Mutation Check]
+        # mapping from graph_id to (function id to mutation type hint) since we are
+        # specializing on a particular combination of Parent Node -> Function ID.
         self.non_cudagraph_managed_mutation_hint: Dict[
             Optional[GraphID], Dict[FunctionID, bool]
         ] = defaultdict(dict)
-        self.warmup_node_counter = itertools.count(1)
+        self.warmup_node_counter = itertools.count(start=1, step=-1)
 
         # whether we the current node is in a state of warmup, recording, execution. If
         # there is no current node the state will be ExecutionState.None.
@@ -1796,12 +1802,12 @@ class CUDAGraphTreeManager:
     def _get_cuda_graph_recorded_tensor_checker(self) -> Callable[[Tensor], bool]:
         return (
             self.current_node._is_cuda_graph_recorded_tensor
-            if isinstance(self.current_node, CUDAGraphNode)
+            if isinstance(self.current_node, (CUDAGraphNode, CUDAWarmupNode))
             else lambda _: False
         )
 
-    def new_warmup_node_id(self) -> int:
-        return next(self.warmup_node_counter)
+    def new_warmup_node_id(self) -> GraphID:
+        return GraphID(next(self.warmup_node_counter))
 
     def _update_non_cudagraph_managed_mutation(
         self, function_id: FunctionID, inputs: List[Tensor]
@@ -1812,18 +1818,21 @@ class CUDAGraphTreeManager:
             inputs,
             self._get_cuda_graph_recorded_tensor_checker(),
         ):
-            perf_hint_log.warning(has_mutation_str)
             self.non_cudagraph_managed_mutation_hint[node_id][function_id] = True
+            # skip warning for warmup nodes
+            if node_id and node_id.id < 0:
+                return
+            if self.current_node and self.current_node.stack_traces:
+                has_mutation_str = f"{has_mutation_str}\nParent node from : \n {self.current_node.stack_traces[-1]}"
+            perf_hint_log.warning(has_mutation_str)
         else:
             self.non_cudagraph_managed_mutation_hint[node_id][function_id] = False
 
     def _get_node_id(self) -> Optional[GraphID]:
         if self.current_node is None:
             return None
-        elif isinstance(self.current_node, CUDAGraphNode):
+        elif isinstance(self.current_node, (CUDAGraphNode, CUDAWarmupNode)):
             return self.current_node.id
-        elif isinstance(self.current_node, CUDAWarmupNode):
-            return GraphID(-1 * self.current_node.id)
         else:
             raise RuntimeError(f"Unknown node type {type(self.current_node)}")
 
@@ -1838,45 +1847,6 @@ class CUDAGraphTreeManager:
         if self.in_warmup:
             self.try_end_curr_warmup(function_id)
 
-        # [Note: Optimistic Mutation Check]
-        # To determine whether applying cudagraph, we need to check input mutations,
-        # falling into four categories: a) no mutation, b) mutation on parameters/buffers,
-        # c) mutation on cudagraph recorded tensors, d) mutation on non-cudagraph recorded tensors.
-        # We can apply cudagraph for type a,b,c but cannot for type d. This input mutation types
-        # depends on function, current_node, and inputs.
-        #
-        # Since `check_for_mutation` is slow, there is a trade-off on making type c or d faster.
-        # - To make type d) faster, we want to `check_for_mutation` and call eager function early.
-        #   However, this adds unnecessary overhead to type a, b, c due to the extra check.
-        # - To make type c) faster, we want to skip `check_for_mutation` at the beginning and
-        #   only `check_for_mutation` before `record_function` for a new function. This removes
-        #   the overhead of `check_for_mutation` for type a, b, c. However, this adds extra overhead
-        #   to type d due to `check_invariants` for all children nodes.
-        #
-        # Instead, we design optimistic mutation check. The assumption is that, given a function
-        # and a node, the input mutation types usually remain the same across inputs. So, if we have
-        # ever detect a function on a node with type d, we will never detect it as type c. The detailed
-        # design is:
-        # - [Slow Path] On the first invocation of a function on a node, we run `check_for_mutation`
-        #   once and cache the input mutation type as `non_cudagraph_managed_mutation[node_id][func_id]`.
-        # - [Fast Path] On the subsequent invocations of a function on a node, we skip
-        #   `check_for_mutation`. For `non_cudagraph_managed_mutation[node_id][func_id]` as true, we
-        #   directly call eager function. Otherwise, we `check_variants` and call cudagraph function.
-        # - [Slow Path] Before `record_function`, we run `check_for_mutation` again.
-        #
-        # Q1: Would there be overhead for type a,b,c,d?
-        # A: No. We only check input mutation types for the first invocation of a function on a node.
-        #
-        # Q2: If a function happens to be type c during the first invocation on a node, could we detect
-        #     it as type d in the future?
-        # A:  Yes. This is done by `check_invariants` and guarantees the correctness.
-        #
-        # Q3: If a function happens to type d during the first invocation on a node, could it still
-        #     be recognized as type c in the future?
-        # A: No. But this should happen rarely according to our assumption. In the rare case that
-        #    it happens, there would not be any correctness issues and the performance is the same
-        #    as the eager (or inductor optimized) function.
-        #
         node_id = self._get_node_id()
         if function_id not in self.non_cudagraph_managed_mutation_hint[node_id]:
             self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
@@ -1933,17 +1903,19 @@ class CUDAGraphTreeManager:
                 if self.current_node is None:
                     return self.run(new_inputs, function_id)
 
+            if len(wrapped_function.mutated_input_idxs) > 0:
+                self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
+                if self.non_cudagraph_managed_mutation_hint[self._get_node_id()][
+                    function_id
+                ]:
+                    return wrapped_function.model(new_inputs)
+
             # at this point, we necessarily will do a new recording
             self.debug_fail_counter += 1
 
             self.try_end_curr_execution()
             if self.current_node is not None:
                 self.apply_checkpoint_execution_state_in_allocator()
-
-        # Runtime check again since current node and cudagraph managed tensors may have changed
-        self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
-        if self.non_cudagraph_managed_mutation_hint[self._get_node_id()][function_id]:
-            return wrapped_function.model(new_inputs)
 
         # now, we are in a recording state !
         return self.record_function(new_inputs, function_id)
