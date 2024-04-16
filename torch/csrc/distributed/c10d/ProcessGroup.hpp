@@ -485,43 +485,16 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Agrees on an initial sequence number for the whole group by having rank 0
   // create it and broadcast it to other ranks using the store. Only implemented
-  // for GLOO and NCCL backends currently.
+  // for GLOO, NCCL and UCC backends currently.
   virtual void setSequenceNumberForGroup() {
-    auto backendType = getBackendType();
-    // TODO: HACK for backend name to get sequence number for that backend.
-    if (backendType == ProcessGroup::BackendType::GLOO ||
-        backendType == ProcessGroup::BackendType::NCCL ||
-        backendType == ProcessGroup::BackendType::UCC) {
-      getDefaultBackend()->setSequenceNumberForGroup();
-    } else {
-      TORCH_CHECK(
-          false,
-          c10::str(
-              "ProcessGroup ",
-              getBackendName(),
-              " does not yet support sequence numbers."));
-    }
+    getDefaultBackend()->setSequenceNumberForGroup();
   }
 
   // Retrieves the current sequence number for the whole group, which should be
   // in sync. If the returned number is not consistent across the group, it
   // may indicate that there is some sort of collective desynchronization.
   virtual uint64_t getSequenceNumberForGroup() {
-    auto backendType = getBackendType();
-
-    // TODO: HACK for backend name to get sequence number for that backend.
-    if (backendType == ProcessGroup::BackendType::GLOO ||
-        backendType == ProcessGroup::BackendType::NCCL ||
-        backendType == ProcessGroup::BackendType::UCC) {
-      return getDefaultBackend()->getSequenceNumberForGroup();
-    } else {
-      TORCH_CHECK(
-          false,
-          c10::str(
-              "ProcessGroup ",
-              getBackendName(),
-              " does not yet support sequence numbers."));
-    }
+    return getDefaultBackend()->getSequenceNumberForGroup();
   }
 
   virtual c10::intrusive_ptr<Work> send(
