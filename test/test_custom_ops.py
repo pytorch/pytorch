@@ -2123,7 +2123,7 @@ class TestCustomOpAPI(TestCase):
 
         cpu_called = False
 
-        @add.register_impl("cpu")
+        @add.register_kernel("cpu")
         def _(x, y):
             nonlocal cpu_called
             cpu_called = True
@@ -2579,7 +2579,7 @@ Please use `add.register_fake` to add an fake impl.""",
             out_np = np.sin(x_np)
             return torch.from_numpy(out_np)
 
-        @f.register_impl("cuda")
+        @f.register_kernel("cuda")
         def _(x: Tensor) -> Tensor:
             nonlocal cuda_call_count
             cuda_call_count += 1

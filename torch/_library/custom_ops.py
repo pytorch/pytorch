@@ -123,7 +123,7 @@ def custom_op(
                     f"was provided to us in `mutates_args`. Please make these "
                     f"consistent."
                 )
-        result.register_impl(device_types)(fn)
+        result.register_kernel(device_types)(fn)
         return result
 
     return inner
@@ -163,7 +163,7 @@ class CustomOpDef:
     def __repr__(self) -> str:
         return f"<CustomOpDef({self._qualname})>"
 
-    def register_impl(
+    def register_kernel(
         self, device_types: device_types_t, fn: Optional[Callable] = None, /
     ) -> Callable:
         """Register an implementation for a device type for this operator.
@@ -191,7 +191,7 @@ class CustomOpDef:
             >>>     return torch.from_numpy(y_np)
             >>>
             >>> # Add implementations for the cuda device
-            >>> @numpy_sin.register_impl("cuda")
+            >>> @numpy_sin.register_kernel("cuda")
             >>> def _(x):
             >>>     x_np = x.cpu().numpy()
             >>>     y_np = np.sin(x_np)
@@ -458,17 +458,17 @@ class CustomOpDef:
 # >>>     return x.sin()
 # >>>
 # >>> # Usage 1: not as a decorator
-# >>> numpy_sin.register_impl("cuda", fn)
+# >>> numpy_sin.register_kernel("cuda", fn)
 # >>>
 # >>> # Usage 2: as a decorator
-# >>> @numpy_sin.register_impl("cuda")
+# >>> @numpy_sin.register_kernel("cuda")
 # >>> def fn2(x):
 # >>>     return x.sin
 #
-# The way we support this is that `register_impl` accepts an optional `fn`.
+# The way we support this is that `register_kernel` accepts an optional `fn`.
 # If `fn` is provided (Usage 1), then we know that the user is using it not
 # as a decorator.
-# If `fn` is not provided (Usage 2), then `register_impl` needs to return a
+# If `fn` is not provided (Usage 2), then `register_kernel` needs to return a
 # decorator.
 
 
