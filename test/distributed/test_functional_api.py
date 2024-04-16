@@ -12,10 +12,10 @@ import torch.distributed._tensor as dt
 import torch.distributed.distributed_c10d as c10d
 
 from functorch import make_fx
-from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._triton import has_triton
+from torch._inductor.utils import run_and_get_code
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -24,8 +24,8 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
-    requires_nccl,
     TEST_SKIPS,
+    requires_nccl,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -401,6 +401,7 @@ class TestMakeFx(MultiThreadedTestCase):
         self.assertFalse(torch.fx._symbolic_trace.is_fx_tracing())
 
     def test_all_reduce_tracing(self):
+
         def allred(input):
             return ft_c.all_reduce(input, "sum", group=dist.group.WORLD) + 1
 
@@ -584,6 +585,7 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
 
 
 class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
+
     @property
     def world_size(self):
         return 4
@@ -606,17 +608,23 @@ class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
 
             # rank0: [0., 1.], rank1: [2., 3.]
             send_tensor = torch.arange(2, dtype=torch.float32, device=device) + 2 * rank
-            recvd_tensor = ft_c.permute_tensor(send_tensor, [1, 0], group=mesh)
+            recvd_tensor = ft_c.permute_tensor(
+                send_tensor,
+                [1, 0],
+                group=mesh
+            )
 
             # rank0: [2., 3.], rank1: [0., 1.]
-            expected = torch.arange(2, dtype=torch.float32, device=device) + 2 * (
-                (rank - 1 + 2) % 2
-            )
+            expected = torch.arange(
+                2,
+                dtype=torch.float32,
+                device=device
+            ) + 2 * ((rank - 1 + 2) % 2)
             self.assertEqual(
                 recvd_tensor,
                 expected,
                 msg=f"Expected {expected} on {self.rank=} (local_rank={rank}), "
-                f"but received {recvd_tensor} instead.",
+                    f"but received {recvd_tensor} instead."
             )
 
 
@@ -640,7 +648,12 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             sizes = [1] * world_size
             t = t * 10
             assert t.requires_grad
-            out = ft_c.all_to_all_single_autograd(t, sizes, sizes, group)
+            out = ft_c.all_to_all_single_autograd(
+                t,
+                sizes,
+                sizes,
+                group
+            )
             out = out + 2
             return out
 
@@ -665,7 +678,12 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             sizes = [1] * world_size
             t = t * 10
             assert t.requires_grad
-            out = ft_c.all_to_all_single_autograd(t, sizes, sizes, group)
+            out = ft_c.all_to_all_single_autograd(
+                t,
+                sizes,
+                sizes,
+                group
+            )
             out = out + 2
             return out.sum()
 
@@ -679,9 +697,9 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
         for code in codes:
             FileCheck().check_count(
                 "_c10d_functional.all_to_all_single.default", 1, exactly=True
-            ).check_count("_c10d_functional.wait_tensor.default", 1, exactly=True).run(
-                code
-            )
+            ).check_count(
+                "_c10d_functional.wait_tensor.default", 1, exactly=True
+            ).run(code)
 
         self.assertIsNotNone(t.grad)
 
