@@ -22,7 +22,7 @@ https://www.facebook.com/whitehat
 
 
 ## Using Pytorch Securely
-**Consider Pythor models as programs**. Machine Learning models are mathematical vectors and weights in their essence, but as they grow in complexity they can require privileges or be partially composed by programmatic code. That said, running untrusted models is equivelent to running untrusted code.
+**Pytorch models are programs**, so treat its security seriously -- running untrusted models is equivalent to running untrusted code. In general we recommend that model weights and the python code for the model are shared independently. That said, be careful about where you get the python code from and who wrote it (preferentially check for a provenance or checksums, do not run any pip installed package).
 
 ### Untrusted models
 Be careful when running untrusted models. This classification includes models created by unknown developers or utilizing data obtained from unknown sources[^data-poisoning-sources].
