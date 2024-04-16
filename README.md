@@ -204,8 +204,8 @@ Replace `<user>` with your Windows username.
 Download Anaconda and install it. Make sure to give execute permissions to the downloaded Anaconda script.
 ```bash
 wget https://repo.anaconda.com/archive/Anaconda3-2024.02-1-Linux-x86_64.sh
-chmod +x /home/<user>/Downloads/Anaconda3-2024.02-1-Linux-x86_64.sh
-./home/<user>/Downloads/Anaconda3-2024.02-1-Linux-x86_64.sh
+chmod +x Anaconda3-2024.02-1-Linux-x86_64.sh
+./Anaconda3-2024.02-1-Linux-x86_64.sh
 ```
 Activate the newly installed Anaconda environment and create a new environment for PyTorch development.
 ```bash
