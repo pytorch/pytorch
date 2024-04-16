@@ -55,7 +55,8 @@ from torch.testing._internal.common_cuda import (
     SM70OrLater,
     TEST_CUDA,
     tf32_on_and_off,
-    with_tf32_off)
+    with_tf32_off.
+)
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
