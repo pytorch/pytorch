@@ -7,13 +7,10 @@
 # LICENSE file in the root directory of this source tree.
 
 from abc import ABC, abstractmethod
-from typing import Any, Callable, cast, Optional, Tuple
+from typing import Any, Callable, Optional, Tuple, cast
 
 from torch.distributed.elastic.rendezvous import RendezvousStateError
-from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
-    RendezvousBackend,
-    Token,
-)
+from torch.distributed.elastic.rendezvous.dynamic_rendezvous import RendezvousBackend, Token
 
 
 class RendezvousBackendTestMixin(ABC):
@@ -31,9 +28,7 @@ class RendezvousBackendTestMixin(ABC):
         """Corrupts the state stored in the backend."""
         pass
 
-    def _set_state(
-        self, state: bytes, token: Optional[Any] = None
-    ) -> Tuple[bytes, Token, bool]:
+    def _set_state(self, state: bytes, token: Optional[Any] = None) -> Tuple[bytes, Token, bool]:
         result = self._backend.set_state(state, token)
 
         self.assertIsNotNone(result)
