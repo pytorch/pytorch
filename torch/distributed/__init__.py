@@ -117,6 +117,7 @@ if is_available():
         _coalescing_manager,
         _CoalescingManager,
         _get_process_group_name,
+        get_node_local_rank,
     )
 
     from .rendezvous import (
