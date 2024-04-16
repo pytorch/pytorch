@@ -928,9 +928,9 @@ def aot_module_simplified(
         # For overhead reasons, this is not the default wrapper, see comment:
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
         def boxed_forward(runtime_args: List[Any]):
-            if dist.get_rank() == 0:
-                for i in range(len(runtime_args)):
-                    torch_log.warning(f"boxed_forward: idx: {i}, sys.getrefcount(runtime_args[i]): {sys.getrefcount(runtime_args[i])}")
+            # if dist.get_rank() == 0:
+            #     for i in range(len(runtime_args)):
+            #         torch_log.warning(f"boxed_forward: idx: {i}, sys.getrefcount(runtime_args[i]): {sys.getrefcount(runtime_args[i])}")
             flat_args = []
             flat_args.extend(params_flat)
             flat_args.extend(runtime_args)
