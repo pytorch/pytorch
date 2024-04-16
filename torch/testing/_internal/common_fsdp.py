@@ -715,7 +715,7 @@ class MixtureOfExperts(NestedWrappedModule):
         d_input = 8
         expert = _maybe_cuda(nn.Linear(d_expert, d_shared), self.move_to_cuda)
 
-        self.num_expert_params = sum([p.numel() for p in expert.parameters()])
+        self.num_expert_params = sum(p.numel() for p in expert.parameters())
         for p in expert.parameters():
             p.expert = True  # type: ignore[attr-defined]
 
@@ -829,12 +829,14 @@ class MLP(nn.Module):
         self,
         dim: int,
         device: Optional[torch.device] = None,
+        *,
+        bias: bool = True,
         with_buffer: bool = False,
         dim_multiplier: int = 4,
     ):
         super().__init__()
-        self.in_proj = nn.Linear(dim, dim_multiplier * dim, device=device)
-        self.out_proj = nn.Linear(dim_multiplier * dim, dim, device=device)
+        self.in_proj = nn.Linear(dim, dim_multiplier * dim, device=device, bias=bias)
+        self.out_proj = nn.Linear(dim_multiplier * dim, dim, device=device, bias=bias)
         if with_buffer:
             self.register_buffer("buffer", torch.randn((dim,), device=device))
         else:
@@ -1067,17 +1069,20 @@ class FSDPTest(MultiProcessTestCase):
 
             raise
 
+        device_ids = None
         if torch.cuda.is_available() and torch.cuda.device_count():
-            torch.cuda.set_device(self.rank % torch.cuda.device_count())
+            device_id = self.rank % torch.cuda.device_count()
+            torch.cuda.set_device(device_id)
+            device_ids = [device_id]
 
         # Execute barrier prior to running test to ensure that every process
         # has finished initialization and that the following test
         # immediately exiting due to a skip doesn't cause flakiness.
-        dist.barrier()
+        dist.barrier(device_ids=device_ids)
 
         self.run_test(test_name, pipe)
 
-        dist.barrier()
+        dist.barrier(device_ids=device_ids)
 
         dist.destroy_process_group()
 
