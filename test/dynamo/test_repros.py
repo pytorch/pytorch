@@ -4777,6 +4777,29 @@ def forward(self, s0 : torch.SymInt, s1 : torch.SymInt, L_x_ : torch.Tensor):
         global_fn = new_fn
         self.assertEqual(opt(x, y), foo(x, y))
 
+    # ref https://github.com/pytorch/pytorch/issues/123974
+    def test_list_reverse(self):
+        def ladder(x):
+            trail = x.size(-1)
+            assert trail > 2
+            weights = []
+            for s in [trail, trail - 1, trail - 2]:
+                weights.append(torch.ones(s, s - 1))
+
+            for w in weights:
+                x = x @ w
+
+            weights.reverse()
+
+            for w in weights:
+                x = x @ w.t()
+
+            return x
+
+        data = torch.randn(3, 4)
+        opt_ladder = torch.compile(ladder, fullgraph=True, backend="eager")
+        self.assertEqual(opt_ladder(data), ladder(data))
+
 
 instantiate_parametrized_tests(ReproTests)
 
