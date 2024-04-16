@@ -795,18 +795,15 @@ class TorchBindOpOverload(OpOverload):
         ]
 
         def _may_use_fallthrough_instead_of_fallback(key: DispatchKey):
-            _fallthrough_in_cpp_dispatcher = (
-                torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), key)
-                and torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
+            if torch._C._dispatch_has_kernel_for_dispatch_key(self.name(), key):
+                return torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
                     self.name(), key
                 )
-            )
 
-            _fallthrough_in_python_dispatcher = (
+            return (
                 key not in self.py_kernels
                 or self.py_kernels[key] is torch.library.fallthrough_kernel
             )
-            return _fallthrough_in_cpp_dispatcher or _fallthrough_in_python_dispatcher
 
         return [
             key
@@ -1078,8 +1075,10 @@ class _OpNamespace(types.ModuleType):
         # for overloads and raise an exception if there are more than one.
         namespace_name = self.name
         qualified_op_name = f"{namespace_name}::{op_name}"
+        op_module = self.__module__ + "." + namespace_name
+
         try:
-            op, overload_names = torch._C._jit_get_operation(qualified_op_name)
+            op, overload_names = _get_packet(qualified_op_name, op_module)
             if op is None:
                 raise AttributeError(
                     f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
@@ -1091,10 +1090,6 @@ class _OpNamespace(types.ModuleType):
                 f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
             ) from e
 
-        # let the script frontend know that op is identical to the builtin op
-        # with qualified_op_name
-        torch.jit._builtins._register_builtin(op, qualified_op_name)
-        op.__module__ = self.__module__ + "." + namespace_name
         opoverloadpacket = OpOverloadPacket(
             qualified_op_name, op_name, op, overload_names
         )
@@ -1104,6 +1099,22 @@ class _OpNamespace(types.ModuleType):
         setattr(self, op_name, opoverloadpacket)
         self._dir.append(op_name)
         return opoverloadpacket
+
+
+def _get_packet(qualname, op_module):
+    op, overload_names = torch._C._jit_get_operation(qualname)
+    if op is not None:
+        op.__module__ = op_module
+        # let the script frontend know that op is identical to the builtin op
+        # with qualified_op_name
+        torch.jit._builtins._register_builtin(op, qualname)
+    return op, overload_names
+
+
+def _refresh_packet(packet):
+    op, overload_names = _get_packet(packet._qualified_op_name, packet._op.__module__)
+    packet._op = op
+    packet._overload_names = overload_names
 
 
 class _PyOpNamespace(_OpNamespace):

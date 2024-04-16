@@ -381,7 +381,9 @@ class TestNew2dParallelStateDict(DTensorTestBase):
             "net1": ColwiseParallel(),
             "net2": RowwiseParallel(),
         }
-        model_2d = parallelize_module(simple_model().cuda(), mesh_2d["tp"], parallelize_plan)
+        model_2d = parallelize_module(
+            simple_model().cuda(), mesh_2d["tp"], parallelize_plan
+        )
         model_2d = FSDP(model_2d, device_mesh=mesh_2d["dp"], use_orig_params=True)
         FSDP.set_state_dict_type(
             model_2d,

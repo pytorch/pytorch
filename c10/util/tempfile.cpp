@@ -1,4 +1,5 @@
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 #include <c10/util/tempfile.h>
 #include <fmt/format.h>
 
@@ -22,10 +23,11 @@ static std::string make_filename(std::string_view name_prefix) {
   // We see if any of these environment variables is set and use their value, or
   // else default the temporary directory to `/tmp`.
 
-  const char* tmp_directory = "/tmp";
+  std::string tmp_directory = "/tmp";
   for (const char* variable : {"TMPDIR", "TMP", "TEMP", "TEMPDIR"}) {
-    if (const char* path = getenv(variable)) {
-      tmp_directory = path;
+    auto path_opt = c10::utils::get_env(variable);
+    if (path_opt.has_value()) {
+      tmp_directory = path_opt.value();
       break;
     }
   }
