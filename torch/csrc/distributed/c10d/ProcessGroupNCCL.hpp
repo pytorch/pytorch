@@ -37,6 +37,10 @@
 
 namespace c10d {
 
+// Control whether to always use high priority streams
+static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
+    "TORCH_NCCL_HIGH_PRIORITY"};
+
 // Control whether or not wait() is blocking or non-blocking.
 static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
     "TORCH_NCCL_BLOCKING_WAIT",
@@ -1068,10 +1072,22 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // initialized to be -1 to indicate no collective has been enqueued
   int64_t lastEnqueuedSeq_{-1};
 
+  // the name of the last collective enqueued into workMetaList_
+  std::string lastEnqueuedWorkName_;
+
+  // the sequential number of the last colletive started as the kernal
+  int64_t lastStartedSeq_{-1};
+
+  // the name of the last collective started as the kernal
+  std::string lastStartedWorkName_;
+
   // the sequential number of the last colletive completed marked by
   // the watchdog thread
   // initialized to be -1 to indicate no collective has been completed
   int64_t lastCompletedSeq_{-1};
+
+  // the name of the last collective completed
+  std::string lastCompletedWorkName_;
 
   std::exception_ptr watchDogException_ = nullptr;
 
