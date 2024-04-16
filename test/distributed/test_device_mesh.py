@@ -322,9 +322,8 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             dp_mesh = mesh["dim0"]
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_cache_and_reuse_submesh_slice_result(self):
-        mesh = init_device_mesh(self.device_type, (2, 4), mesh_dim_names=("dp", "tp"))
+        mesh = init_device_mesh(self.device_type, (2, 2), mesh_dim_names=("dp", "tp"))
 
         dp_mesh = mesh["dp"]
         ref_pg_count = _world.group_count

@@ -1,6 +1,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import math
+import threading
 from typing import Dict, List, Optional, Tuple, TYPE_CHECKING, Union
 
 import torch
@@ -57,15 +58,32 @@ else:
             )
 
     class _MeshEnv:
-        def __init__(self) -> None:
-            self.mesh_stack: List[DeviceMesh] = []
-            self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
-            self.parent_to_child_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
+        _instance: Optional["_MeshEnv"] = None
+        _lock = threading.Lock()
+        mesh_stack: List["DeviceMesh"] = []
+        child_to_parent_mapping: Dict["DeviceMesh", "DeviceMesh"] = {}
+        parent_to_child_mapping: Dict["DeviceMesh", Dict[str, "DeviceMesh"]] = {}
+
+        @classmethod
+        def __new___(cls) -> "_MeshEnv":
+            if not cls._instance:
+                with cls._lock:
+                    cls._instance = cls()
+            return cls._instance
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
                 raise RuntimeError("No device mesh is currently active!")
             return self.mesh_stack[-1]
+
+        def which_mesh_dim_group(self, device_mesh: "DeviceMesh", mesh_dim: int) -> int:
+            cur_rank = device_mesh.get_rank()
+            pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
+                -1, device_mesh.mesh.size(mesh_dim)
+            )
+            for group_number, mesh_1d in enumerate(pg_ranks_by_dim):
+                if cur_rank in mesh_1d:
+                    return group_number
 
         def create_child_mesh(
             self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
@@ -73,7 +91,12 @@ else:
             # Directly return the child mesh if it is already created.
             child_mesh_mappings = self.parent_to_child_mapping.get(device_mesh)
             if child_mesh_mappings:
-                sub_mesh = child_mesh_mappings.get(mesh_dim_name)
+                which_mesh_dim_group = self.which_mesh_dim_group(device_mesh, mesh_dim)
+                mesh_dim_key = f"{mesh_dim_name}_{which_mesh_dim_group}"
+                print(
+                    f"rank:{device_mesh.get_rank()}, {mesh_dim_name=}, {mesh_dim=}, {which_mesh_dim_group=}"
+                )
+                sub_mesh = child_mesh_mappings.get(mesh_dim_key)
                 if sub_mesh:
                     return sub_mesh
 
@@ -84,21 +107,25 @@ else:
                 -1, device_mesh.mesh.size(mesh_dim)
             )
 
-            for mesh_1d in pg_ranks_by_dim:
+            self.parent_to_child_mapping.setdefault(device_mesh, {})
+            for local_rank, mesh_1d in enumerate(pg_ranks_by_dim):
+                # print(f"{local_rank=}, {mesh_1d=}")
                 sub_mesh = DeviceMesh(
                     device_mesh.device_type,
                     mesh_1d,
                     mesh_dim_names=(mesh_dim_name,),
                 )
+
                 if cur_rank in mesh_1d:
                     res_sub_mesh = sub_mesh
+                    self.parent_to_child_mapping[device_mesh][
+                        f"{mesh_dim_name}_{local_rank}"
+                    ] = res_sub_mesh
 
             res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
             # Assign the current DeviceMesh as the parent of the child DeviceMesh.
             self.child_to_parent_mapping[res_sub_mesh] = device_mesh
-            self.parent_to_child_mapping.setdefault(device_mesh, {})[
-                mesh_dim_name
-            ] = res_sub_mesh
+
             return res_sub_mesh
 
         def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
