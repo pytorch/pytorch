@@ -139,7 +139,7 @@ inline void tinygemm_kernel(
         // when BLOCK_N = 64, handle each row at a time
         // to reduce de-quantize overhead.
         if constexpr (col == 0) {
-          __m256i b4 = _mm256_load_si256((__m256i*)(B + k * ldb));
+          __m256i b4 = _mm256_loadu_si256((__m256i*)(B + k * ldb));
           if (k + PREFETCH_SIZE_K < K) {
             _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb, _MM_HINT_T0);
           }
