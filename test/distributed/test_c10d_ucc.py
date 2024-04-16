@@ -23,9 +23,9 @@ import torch.nn.functional as F
 import torch.testing._internal.common_utils as common
 from test_c10d_common import (
     gpus_for_rank,
+    Task,
     ModuleForDdpCommHook,
     SparseGradientModule,
-    Task,
 )
 from torch import nn
 from torch.nn.parallel import DistributedDataParallel
@@ -36,10 +36,10 @@ from torch.testing._internal.common_distributed import (
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
-    retry_on_connect_failures,
-    run_tests,
-    skip_but_pass_in_sandcastle,
     TestCase,
+    run_tests,
+    retry_on_connect_failures,
+    skip_but_pass_in_sandcastle,
 )
 
 
@@ -207,7 +207,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
 
         # Single input tests
         tests = simple_reduce_tests(self.rank, self.world_size)
-        for op, input, expected in tests:
+        for (op, input, expected) in tests:
             opts = c10d.AllreduceOptions()
             opts.reduceOp = op
             tensor = fn(input)
@@ -260,7 +260,7 @@ class ProcessGroupUCCTest(MultiProcessTestCase):
 
     def _test_reduce_basics(self, fn):
         pg = self._create_process_group_ucc()
-        for op, input, output in simple_reduce_tests(self.rank, self.world_size):
+        for (op, input, output) in simple_reduce_tests(self.rank, self.world_size):
             for root in range(self.world_size):
                 opts = c10d.ReduceOptions()
                 opts.reduceOp = op
@@ -346,9 +346,7 @@ class DistributedDataParallelTest(
 
     def _get_process_group(self):
         store = self._get_store()
-        c10d.init_process_group(
-            "ucc", store=store, rank=self.rank, world_size=self.world_size
-        )
+        c10d.init_process_group("ucc", store=store, rank=self.rank, world_size=self.world_size)
         return c10d.distributed_c10d._get_default_group()
 
     def _test_ucc_backend(
@@ -385,9 +383,7 @@ class DistributedDataParallelTest(
 
     # TODO: test_ucc_backend_2gpu_module and test_ucc_backend_4gpu_module
     # require broadcast_coalesced which is not supported by ucc currently
-    @skip_but_pass_in_sandcastle(
-        "requires broadcast coalesced, which is not supported by ucc currently"
-    )
+    @skip_but_pass_in_sandcastle("requires broadcast coalesced, which is not supported by ucc currently")
     @requires_ucc()
     @skip_if_lt_x_gpu(4)
     def test_ucc_backend_2gpu_module(self):
@@ -395,9 +391,7 @@ class DistributedDataParallelTest(
         devices = [torch.device("cuda:" + str(i)) for i in int_devices]
         self._test_ucc_backend(devices, None, multi_device=True)
 
-    @skip_but_pass_in_sandcastle(
-        "requires broadcast coalesced, which is not supported by ucc currently"
-    )
+    @skip_but_pass_in_sandcastle("requires broadcast coalesced, which is not supported by ucc currently")
     @requires_ucc()
     @skip_if_lt_x_gpu(8)
     def test_ucc_backend_4gpu_module(self):
@@ -652,9 +646,7 @@ class DistributedDataParallelTest(
         # Check that the gradients are sparse and identical
         vanilla_parameter = next(vanilla_model.parameters())
         ddp_parameter = next(ddp_model.parameters())
-        self.assertEqual(
-            vanilla_parameter.grad.coalesce(), ddp_parameter.grad.coalesce()
-        )
+        self.assertEqual(vanilla_parameter.grad.coalesce(), ddp_parameter.grad.coalesce())
 
     @requires_ucc()
     @skip_if_lt_x_gpu(2)
@@ -882,9 +874,7 @@ class DistributedDataParallelTest(
             ModuleForDdpCommHook(), process_group=process_group
         )
 
-        expected_err = (
-            "Communication hook: return annotation should be torch.futures.Future"
-        )
+        expected_err = "Communication hook: return annotation should be torch.futures.Future"
         with self.assertRaisesRegex(
             ValueError,
             expected_err,
@@ -1045,6 +1035,7 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
 
 
 class CompilerTest(test_c10d_common.CompilerTest):
+
     @property
     def world_size(self):
         return 2
@@ -1067,11 +1058,15 @@ class CompilerTest(test_c10d_common.CompilerTest):
 
     @skip_if_lt_x_gpu(2)
     def test_allgather_work_wait_gpu(self):
-        self._test_allgather_work_wait(torch.ones(2, 2, device=self.rank) * self.rank)
+        self._test_allgather_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_broadcast_work_wait_gpu(self):
-        self._test_broadcast_work_wait(torch.ones(2, 2, device=self.rank) * self.rank)
+        self._test_broadcast_work_wait(
+            torch.ones(2, 2, device=self.rank) * self.rank
+        )
 
     @skip_if_lt_x_gpu(2)
     def test_nested_comm_tensor_wrapping_gpu(self):
@@ -1091,21 +1086,28 @@ class CompilerTest(test_c10d_common.CompilerTest):
         )
 
     def test_allgather_work_wait_cpu(self):
-        self._test_allgather_work_wait(torch.ones(2, 2) * self.rank)
+        self._test_allgather_work_wait(
+            torch.ones(2, 2) * self.rank
+        )
 
     def test_broadcast_work_wait_cpu(self):
-        self._test_broadcast_work_wait(torch.ones(2, 2) * self.rank)
+        self._test_broadcast_work_wait(
+            torch.ones(2, 2) * self.rank
+        )
 
     def test_nested_comm_tensor_wrapping_cpu(self):
-        self._test_nested_comm_tensor_wrapping(torch.ones(2, 2) * self.rank)
+        self._test_nested_comm_tensor_wrapping(
+            torch.ones(2, 2) * self.rank
+        )
 
     def test_consecutive_comm_work_wait_cpu(self):
-        self._test_consecutive_comm_work_wait(torch.ones(2, 2) * self.rank)
+        self._test_consecutive_comm_work_wait(
+            torch.ones(2, 2) * self.rank
+        )
 
 
-class UccProcessGroupWithDispatchedCollectivesTests(
-    test_c10d_common.ProcessGroupWithDispatchedCollectivesTests
-):
+class UccProcessGroupWithDispatchedCollectivesTests(test_c10d_common.ProcessGroupWithDispatchedCollectivesTests):
+
     @skip_but_pass_in_sandcastle("Fails on M60")
     @requires_ucc()
     @skip_if_lt_x_gpu(1)

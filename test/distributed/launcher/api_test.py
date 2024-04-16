@@ -23,7 +23,9 @@ from unittest.mock import MagicMock, Mock, patch
 import torch
 import torch.distributed as dist
 from torch.distributed.elastic.agent.server.api import RunResult, WorkerState
-from torch.distributed.elastic.multiprocessing.api import SignalException
+from torch.distributed.elastic.multiprocessing.api import (
+    SignalException,
+)
 from torch.distributed.elastic.multiprocessing.errors import ChildFailedError
 from torch.distributed.elastic.rendezvous.etcd_server import EtcdServer
 from torch.distributed.elastic.utils import get_socket_with_port
@@ -155,9 +157,7 @@ class ElasticLaunchTest(unittest.TestCase):
             {str(i) for i in range(world_size)}, set(os.listdir(self.test_dir))
         )
 
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_script_python(self):
         nnodes = 1
         nproc_per_node = 4
@@ -172,9 +172,7 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_script_python_local_rank_transfer(self):
         nnodes = 1
         nproc_per_node = 4
@@ -189,9 +187,7 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_script_bash(self):
         nnodes = 1
         nproc_per_node = 4
@@ -204,9 +200,7 @@ class ElasticLaunchTest(unittest.TestCase):
         world_size = nnodes * nproc_per_node
         self.check_works_ran(world_size)
 
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_function(self):
         nnodes = 1
         nproc_per_node = 4
@@ -220,9 +214,7 @@ class ElasticLaunchTest(unittest.TestCase):
         actual_res = sorted(value for value in res.values())
         self.assertEqual(expected_res, actual_res)
 
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_dist_sum_with_static_rdzv(self):
         nnodes = 1
         nproc_per_node = 4
@@ -251,9 +243,7 @@ class ElasticLaunchTest(unittest.TestCase):
         actual_res = sorted(value for value in res.values())
         self.assertEqual(expected_res, actual_res)
 
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_elastic(self):
         nproc_per_node = 4
 
@@ -298,9 +288,7 @@ class ElasticLaunchTest(unittest.TestCase):
             )("-u", path("bin/test_script.py"), f"--touch-file-dir={self.test_dir}")
         record_mock.assert_called_once()
 
-    @skip_but_pass_in_sandcastle_if(
-        TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan"
-    )
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_DEV_DBG_ASAN, "test incompatible with dev/dbg asan")
     def test_launch_elastic_multiple_agents(self):
         min_nodes = 1
         max_nodes = 2
