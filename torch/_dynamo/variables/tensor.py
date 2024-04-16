@@ -40,6 +40,7 @@ from ..utils import (
     object_has_getattribute,
     product,
     proxy_args_kwargs,
+    set_example_value,
     tensortype_to_dtype,
 )
 from .base import _is_top_level_scope, VariableTracker
@@ -963,7 +964,7 @@ class SymNodeVariable(VariableTracker):
             assert proxy.node.meta["example_value"] == sym_num
         if sym_num is None:
             sym_num = get_fake_value(proxy.node, tx)
-        proxy.node.meta["example_value"] = sym_num
+        set_example_value(proxy.node, sym_num)
 
         if isinstance(sym_num, (sympy.Integer, int, bool)):
             sym_num = int(sym_num) if isinstance(sym_num, sympy.Integer) else sym_num
