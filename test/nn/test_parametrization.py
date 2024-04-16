@@ -19,7 +19,6 @@ from torch.testing._internal.common_utils import gradcheck
 
 
 class TestNNParametrization(NNTestCase):
-    torch.__future__.set_swap_module_params_on_conversion(True)
     _do_cuda_memory_leak_check = True
     _do_cuda_non_default_stream = True
 
