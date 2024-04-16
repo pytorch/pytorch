@@ -2904,6 +2904,9 @@ exit(2)
             for optimizer_ctor, foreach, decoupled_weight_decay, weight_decay in product(
                 (torch.optim.NAdam, torch.optim.RAdam,), (False, True,), (False, True,), (0.0, 0.1,))
         ] + [
+            (torch.optim.Rprop, {"lr": 0.1, "foreach": foreach, "maximize": maximize})
+            for foreach, maximize in product((False, True,), (False, True,))
+        ] + [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad})
             for optimizer_ctor, foreach, amsgrad in product(
                 (torch.optim.Adam, torch.optim.AdamW), (False, True), (False, True),)
@@ -2913,8 +2916,8 @@ exit(2)
         ] + [
             (optimizer_ctor, {"lr": 0.1, "foreach": foreach, "maximize": maximize, "weight_decay": weight_decay})
             for optimizer_ctor, foreach, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD,
-                                                                            torch.optim.Adadelta), (False, True),
-                                                                           (False, True), (0, 0.1))
+                                                                            torch.optim.Adadelta, torch.optim.RMSprop),
+                                                                           (False, True), (False, True), (0, 0.1))
         ]
 
         for optimizer_ctor, kwargs in cases:
@@ -2928,7 +2931,8 @@ exit(2)
         for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW,
                                                                  torch.optim.ASGD, torch.optim.Adamax,
                                                                  torch.optim.NAdam, torch.optim.RAdam,
-                                                                 torch.optim.Adadelta), (True, False)):
+                                                                 torch.optim.Adadelta, torch.optim.RMSprop,
+                                                                 torch.optim.Rprop), (True, False)):
             ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             grads1, grads2 = ([torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2))
@@ -3239,6 +3243,24 @@ exit(2)
             cuda_driver_api_call = f"ctypes.CDLL('{libcuda_name}').cuDeviceGetCount(ctypes.byref(x))"
             rc = check_output(f"import torch; import ctypes;x=ctypes.c_int(-1);print({cuda_driver_api_call})")
             self.assertEqual(rc, "3")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
+    @unittest.skipIf(TEST_WITH_ROCM, "too lazy to debug this on ROCm")
+    def test_device_count_not_cached_pre_init(self):
+        test_script = """\
+import torch
+import os
+r1 = torch.cuda.device_count()
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+r2 = torch.cuda.device_count()
+torch.empty(10, device='cuda')
+print(f"{r1}, {r2}")
+"""
+
+        r = subprocess.check_output([sys.executable, "-c", test_script]).decode("ascii").strip()
+
+        x = torch.cuda.device_count()
+        self.assertEqual(f"{x}, 1", r)
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest

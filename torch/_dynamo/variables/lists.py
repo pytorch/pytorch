@@ -127,7 +127,7 @@ class BaseListVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return iter_contains(self.items, args[0], tx)
+            return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
             from .builder import SourcelessBuilder
 
@@ -263,6 +263,9 @@ class CommonListMethodsVariable(BaseListVariable):
 class ListVariable(CommonListMethodsVariable):
     def python_type(self):
         return list
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(length={len(self.items)}"
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
@@ -637,14 +640,14 @@ class ListIteratorVariable(VariableTracker):
     def __repr__(self):
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
-    def next_variables(self, tx):
+    def next_variable(self, tx):
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
             raise StopIteration()
         tx.output.side_effects.mutation(self)
         self.index += 1
-        return self.items[old_index], self
+        return self.items[old_index]
 
     def call_method(
         self,

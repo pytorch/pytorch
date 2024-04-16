@@ -31,7 +31,7 @@ class FakeTensorProp(torch.fx.Interpreter):
 
     def run_node(self, n: Node):
         import sympy
-        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, rename_unbacked_to
+        from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 
         result = super().run_node(n)
         sym = None
@@ -58,7 +58,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         if meta is not None:
             n.meta['val'] = meta
             if sym is not None:
-                rename_unbacked_to(v, meta)
+                torch._check(meta == v)
         return result
 
     def propagate(self, *args):

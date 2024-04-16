@@ -405,6 +405,7 @@ def mps_ops_modifier(ops):
         'mean',
         'ne',
         'neg',
+        'nn.functional.rms_norm',
         'nn.functional.padconstant',
         'nn.functional.padreflect',
         'nn.functional.padreplicate',
