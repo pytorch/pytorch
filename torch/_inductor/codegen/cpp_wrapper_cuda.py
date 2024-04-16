@@ -161,8 +161,8 @@ class CppWrapperCuda(CppWrapperCpu):
         self.prefix.writeline("\n")
         if not V.graph.aot_mode:
             for kernel in chain(
-                self.src_to_kernel.values(),
-                [entry[0] for entry in self.user_defined_kernel_cache.values()],
+                sorted(self.src_to_kernel.values()),
+                sorted([entry[0] for entry in self.user_defined_kernel_cache.values()]),
             ):
                 self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
             self.prefix.writeline("\n")
@@ -198,6 +198,8 @@ class CppWrapperCuda(CppWrapperCpu):
             var_name = f"var_{next(self.arg_var_id)}"
             if isinstance(arg, (sympy.Integer, sympy.Symbol, SymbolicCallArg)):
                 self.writeline(f"auto {var_name} = {arg};")
+            elif isinstance(arg, sympy.Float):
+                self.writeline(f"float {var_name} = {self.expr_printer(arg)};")
             elif isinstance(arg, sympy.Expr):
                 self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
             elif is_int(arg):

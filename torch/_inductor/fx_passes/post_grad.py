@@ -12,7 +12,7 @@ import torch._inductor as inductor
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._decomp import register_decomposition
-from torch._dynamo.utils import optimus_scuba_log
+from torch._dynamo.utils import counters, optimus_scuba_log
 
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 
@@ -45,22 +45,22 @@ from ..utils import decode_device, is_pointwise_use
 from ..virtualized import V
 from .ddp_fusion import fuse_ddp_communication
 from .group_batch_fusion import group_batch_fusion_passes
+from .pre_grad import is_same_dict, save_inductor_dict
 from .reinplace import reinplace_inplaceable_ops
+from .split_cat import POST_GRAD_PATTERNS
 
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 
+pattern_matcher_passes = POST_GRAD_PATTERNS.values()
 # First pass_patterns[0] are applied, then [1], then [2]
 pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
-# patterns applied only in inference
-inference_patterns = PatternMatcherPass()
-decompose_mm_pass = PatternMatcherPass()
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -89,9 +89,15 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         remove_noop_ops(gm.graph)
         for patterns in pass_patterns:
             patterns.apply(gm.graph)  # type: ignore[arg-type]
-        if is_inference:
-            inference_patterns.apply(gm.graph)  # type: ignore[arg-type]
-        decompose_mm_pass.apply(gm.graph)  # type: ignore[arg-type]
+        for pattern_matcher_pass in pattern_matcher_passes:
+            inductor_before_change = save_inductor_dict(
+                [pattern_matcher_pass.pass_name]
+            )
+            pattern_matcher_pass.apply(gm.graph)  # type: ignore[arg-type]
+            if not is_same_dict(counters["inductor"], inductor_before_change):
+                optimus_scuba_log[
+                    f"{pattern_matcher_pass.pass_name}_post_grad"
+                ] = upload_graph(gm.graph)
 
     if config._fuse_ddp_communication:
         fuse_ddp_communication(
@@ -146,12 +152,7 @@ def reorder_for_locality(graph: torch.fx.Graph):
     # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
     # and this reordering doesnt work well with mutation
     first_copy = next(
-        (
-            node
-            for node in graph.nodes
-            if node.op == "call_function"
-            and node.target == torch.ops.aten.copy_.default
-        ),
+        iter(graph.find_nodes(op="call_function", target=torch.ops.aten.copy_.default)),
         None,
     )
     past_mutating_epilogue = True if first_copy is None else False
@@ -627,12 +628,9 @@ def remove_noop_ops(graph: torch.fx.Graph):
     input_storages = set()
     output_storages = set()
 
-    for node in graph.nodes:
-        if node.op == "placeholder":
-            inputs.add(node)
-            input_storages.add(get_node_storage(node))
-        else:
-            break
+    for node in graph.find_nodes(op="placeholder"):
+        inputs.add(node)
+        input_storages.add(get_node_storage(node))
 
     output_node = next(iter(reversed(graph.nodes)))
     assert output_node.op == "output"
@@ -710,9 +708,10 @@ def decompose_auto_functionalized(graph):
             match.replace_by_example(decomp, flat_args, run_dce=False)
 
     graph_pass.apply(graph)
-    for node in graph.nodes:
-        if node.target is torch.ops.higher_order.auto_functionalized:
-            raise AssertionError("auto_functionalized was not removed")
+    for node in graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.auto_functionalized
+    ):
+        raise AssertionError("auto_functionalized was not removed")
 
 
 @register_lowering_pattern(
@@ -798,9 +797,10 @@ def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
     """
-    for nd in gm.graph.nodes:
-        if nd.target == torch.ops.aten.view.default:
-            nd.target = torch.ops.aten.reshape.default
+    for nd in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.aten.view.default
+    ):
+        nd.target = torch.ops.aten.reshape.default
 
 
 def should_prefer_unfused_addmm(match):
