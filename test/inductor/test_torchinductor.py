@@ -1384,6 +1384,31 @@ class CommonTemplate:
         actual = associative_scan(logcumsum_combine, a, 0)
         self.assertEqual(expect, actual)
 
+    def test_custom_scan_op_compiled(self):
+        if self.device != "cuda":
+            raise unittest.SkipTest("associative_scan only supported on GPU")
+
+        from torch._higher_order_ops.associative_scan import associative_scan
+
+        def sum_combine(a, b):
+            return a + b
+
+        def fn(a, b, dim):
+            diff = (a - b).abs()
+            sad = associative_scan(sum_combine, diff, dim)
+            return sad.sum(dim)
+
+        a = torch.randn(100, 100, device=self.device)
+        b = torch.randn(100, 100, device=self.device)
+        self.common(fn, (a, b, 0))
+        cfn = torch.compile(fn)
+        _, code = run_and_get_code(cfn, a, b, 0)
+
+        # Check everything is fused into a single kernel
+        FileCheck().check_not("run(").check(
+            "triton_red_fused_sum_0.run(arg0_1, arg1_1, buf1, 100, 100, grid=grid(100), stream=stream0)"
+        ).check_not("run(").run(code[0])
+
     @skipCUDAIf(TEST_WITH_ROCM, "associative_scan is not supported on ROCm")
     def test_custom_scan_op_multi_input(self):
         if self.device != "cuda":
