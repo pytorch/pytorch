@@ -1143,7 +1143,7 @@ def enum_repr(value, local):
     return local_name
 
 
-def set_example_value(node, example_value):
+def set_example_value(tx, node, example_value):
     # NB: example_value is a bit of a misnomer, because this is always a fake
     # tensor of some sort.  Furthermore, these example values serve as the
     # runtime state of Dynamo tracing, which means if metadata mutation
