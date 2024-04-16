@@ -35,13 +35,12 @@ Refer to: https://github.com/pytorch/pytorch/issues/111640 for detail design of 
 quantization.
 """
 
-DEQUANT_PER_TENSOR_OPS = [
-    quantized_decomposed.dequantize_per_tensor.default,
-    quantized_decomposed.dequantize_per_tensor.tensor,
-]
-
 
 def _get_pattern_output_dtype(match: Match):
+    """
+    Get the pattern's output dtype from node's meta
+    Assume only 1 output node in this matched pattern.
+    """
     pattern_output_nodes = match.output_nodes()
     assert len(pattern_output_nodes) == 1
     output_node = pattern_output_nodes[0]
@@ -370,7 +369,6 @@ def _register_quantized_linear_lowering(
     pass_number,
     computation_op,
     unary_attr,
-    original_pattern_output_dtype=torch.float32,
 ):
     @register_lowering_pattern(
         pattern,
@@ -595,13 +593,11 @@ def _register_quantization_unary_fusion():
         conv_unary_replace_patterns = {
             UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
                 get_dequantize_qconv_pt2e_pattern(1),
-                with_dtype_convert=is_bf16,
             ),
             UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
                 generate_pattern_with_unary(
                     get_dequantize_qconv_pt2e_pattern(1), aten.relu.default
                 ),
-                with_dtype_convert=is_bf16,
             ),
             UnaryAttr("hardtanh", [], ""): generate_pattern_with_output_quant(
                 _unary_fusion_pattern(
@@ -694,11 +690,9 @@ def _register_quantization_unary_fusion():
             linear_unary_replace_patterns = {
                 UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
                     qlinear_pattern,
-                    with_dtype_convert=is_bf16,
                 ),
                 UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
                     generate_pattern_with_unary(qlinear_pattern, aten.relu.default),
-                    with_dtype_convert=is_bf16,
                 ),
                 UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
                     _unary_fusion_pattern(
@@ -730,7 +724,6 @@ def _register_quantization_unary_fusion():
                     1,  # pass_number
                     torch.ops.onednn.qlinear_pointwise,  # computation_op
                     unary_attr,  # unary_attr
-                    original_pattern_output_dtype=original_pattern_output_dtype,
                 )
 
             # Priority 2 to match: QLinear Unary pattern with FP32/BF16 output
@@ -770,7 +763,6 @@ def _register_quantization_unary_fusion():
                     2,  # pass_number
                     torch.ops.onednn.qlinear_pointwise,  # computation_op
                     unary_attr,  # unary_attr
-                    original_pattern_output_dtype=original_pattern_output_dtype,
                 )
 
 
@@ -1324,7 +1316,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         # * dequantize_per_tensor
         def _find_first_node_in_dequant_pattern(_node):
             if _node.target is quantized_decomposed.dequantize_per_tensor.default:
-                # For a dequant pattern, we expect the start node is a to_fp32 node
+                # For a dequant pattern, we expect the start node is a dequantize_per_tensor node
                 return _node
             else:
                 assert (
@@ -1658,7 +1650,11 @@ def _is_valid_dequant_linear_pattern(dtype, input_dim_exceeds_two, input_contigu
             linear_node, input_index, dtype, input_dim_exceeds_two, input_contiguous
         )
 
-        assert dequant_node.target in DEQUANT_PER_TENSOR_OPS
+        assert dequant_node.target in [
+            quantized_decomposed.dequantize_per_tensor.default,
+            quantized_decomposed.dequantize_per_tensor.tensor,
+        ]
+
         if len(list(dequant_node.users)) != 1:
             # Ensure the dequant pattern only has 1 user
             # since we will delete the dequant pattern here
