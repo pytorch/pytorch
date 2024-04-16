@@ -2223,10 +2223,10 @@ class TestSDPACudaOnly(NNTestCase):
         attn_mask_strides = (14, 14, 14, 1)
 
         # Calculate the number of elements needed for each tensor
-        query_num_elements = max([size * stride for size, stride in zip(query_size, query_strides)])
-        key_num_elements = max([size * stride for size, stride in zip(key_size, key_strides)])
-        value_num_elements = max([size * stride for size, stride in zip(value_size, value_strides)])
-        attention_mask_num_elements = max([size * stride for size, stride in zip(attention_mask_size, attn_mask_strides)])
+        query_num_elements = max(size * stride for size, stride in zip(query_size, query_strides))
+        key_num_elements = max(size * stride for size, stride in zip(key_size, key_strides))
+        value_num_elements = max(size * stride for size, stride in zip(value_size, value_strides))
+        attention_mask_num_elements = max(size * stride for size, stride in zip(attention_mask_size, attn_mask_strides))
 
         # Create the tensors with the specified sizes and strides
         query = torch.randn(query_num_elements, device=device).as_strided(query_size, query_strides)

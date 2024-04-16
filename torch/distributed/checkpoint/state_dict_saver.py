@@ -164,7 +164,7 @@ def async_save(
     planner: Optional[SavePlanner] = None,
     process_group: Optional[dist.ProcessGroup] = None,
 ) -> Future:
-    """Asynchronous version of ``save_state_dict``. This code first de-stages the state_dict on CPU, and then calls
+    """Asynchronous version of ``save``. This code first de-stages the state_dict on CPU, and then calls
     `save` in a separate thread.
 
     .. warning::

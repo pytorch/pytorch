@@ -139,37 +139,42 @@ class GuardManager:
         parts = [guard_name + ": " + part for part in parts]
         return parts
 
-    def get_manager_line(self, accessor_str, guard_manager):
+    def get_manager_line(self, guard_manager, accessor_str=None):
         source = guard_manager.get_source()
         t = guard_manager.__class__.__name__
-        s = t + "(source = " + source + ", accessor = " + accessor_str + ")"
+        s = t + ": source=" + source
+        if accessor_str:
+            s += ", " + accessor_str
         return s
 
     def construct_dict_manager_string(self, mgr, body):
         for idx, (key_mgr, val_mgr) in sorted(mgr.get_key_value_managers().items()):
-            if key_mgr:
-                accessor = f"KeyManager(index={idx})"
-                body.writeline(self.get_manager_line(accessor, key_mgr))
-                self.construct_manager_string(key_mgr, body)
+            body.writeline(f"KeyValueManager pair at index={idx}")
+            with body.indent():
+                if key_mgr:
+                    body.writeline(f"KeyManager: {self.get_manager_line(key_mgr)}")
+                    self.construct_manager_string(key_mgr, body)
 
-            if val_mgr:
-                accessor = f"ValueManager(index={idx})"
-                body.writeline(self.get_manager_line(accessor, val_mgr))
-                self.construct_manager_string(val_mgr, body)
+                if val_mgr:
+                    body.writeline(f"ValueManager: {self.get_manager_line(val_mgr)}")
+                    self.construct_manager_string(val_mgr, body)
 
     def construct_manager_string(self, mgr, body):
         with body.indent():
             for guard in mgr.get_leaf_guards():
                 body.writelines(self.get_guard_lines(guard))
 
-            if istype(mgr, DictGuardManager):
+            # This works for both DictGuardManager and SubclassedDictGuardManager
+            if isinstance(mgr, DictGuardManager):
                 self.construct_dict_manager_string(mgr, body)
 
             # General case of GuardManager/RootGuardManager
             for accessor, child_mgr in zip(
                 mgr.get_accessors(), mgr.get_child_managers()
             ):
-                body.writeline(self.get_manager_line(accessor.repr(), child_mgr))
+                body.writeline(
+                    self.get_manager_line(child_mgr, f"accessed_by={accessor.repr()}")
+                )
                 self.construct_manager_string(child_mgr, body)
 
     def __str__(self):
@@ -345,7 +350,7 @@ def get_key_index(dct, key):
 
 
 def get_key_index_source(source, index):
-    return f"{source}.keys()[{index}]"
+    return f"list({source}.keys())[{index}]"
 
 
 def getitem_on_dict_manager(
@@ -360,13 +365,19 @@ def getitem_on_dict_manager(
         index = get_key_index(base_example_value, source.index)
 
     key_source = get_key_index_source(base_source_name, index)
-    value_source = f"{base_source_name}[{key_source}]"
+    key_example_value = list(base_example_value.keys())[index]
+    if isinstance(key_example_value, (int, str)):
+        value_source = f"{base_source_name}[{key_example_value!r}]"
+    else:
+        value_source = f"{base_source_name}[{key_source}]"
     if not isinstance(source.index, ConstDictKeySource):
         # We have to insert a key manager guard here
         # TODO - source debug string is probably wrong here.
         base_guard_manager.get_key_manager(
             index=index, source=key_source, example_value=source.index
-        ).add_equals_match_guard(source.index, [f"{key_source} == {source.index}"])
+        ).add_equals_match_guard(
+            source.index, [f"{key_source} == {key_example_value!r}"]
+        )
 
     return base_guard_manager.get_value_manager(
         index=index, source=value_source, example_value=example_value
@@ -452,7 +463,7 @@ class GuardBuilder(GuardBuilderBase):
         dict_mgr = self.get_guard_manager(guard)
         assert isinstance(dict_mgr, DictGuardManager)
         for idx, key in enumerate(value.keys()):
-            key_source = guard.name + f".keys()[{idx}]"
+            key_source = get_key_index_source(guard.name, idx)
             key_manager = dict_mgr.get_key_manager(
                 index=idx, source=key_source, example_value=key
             )
@@ -468,7 +479,7 @@ class GuardBuilder(GuardBuilderBase):
             else:
                 # Install EQUALS_MATCH guard
                 key_manager.add_equals_match_guard(
-                    key, get_verbose_code_parts(f"{key_source} == {key}", guard)
+                    key, get_verbose_code_parts(f"{key_source} == {key!r}", guard)
                 )
 
     def get_global_guard_manager(self):
@@ -1088,16 +1099,10 @@ class GuardBuilder(GuardBuilderBase):
 
     def NN_MODULE(self, guard: Guard):
         self.ID_MATCH(guard)
-        ref = self.arg_ref(guard)
         val = self.get(guard.name)
-
-        def setup_guard():
+        if hasattr(val, "training"):
             assert istype(val.training, bool)
             self._guard_on_attribute(guard, "training", GuardBuilder.CONSTANT_MATCH)
-
-        if hasattr(val, "training"):
-            # There are cases where a monkeypatched object has a guard made between __new__ and __init__
-            setup_guard()
         else:
             exc.unimplemented(f"Guard setup for uninitialized class {type(val)}")
 
@@ -1744,6 +1749,7 @@ class CheckFunctionManager:
                 continue
 
             guard.create(builder)
+
         self.check_fn = self.compile_check_fn(builder, guards, guard_fail_fn)
         # Keep track of weak references of objects with ID_MATCH guard. This
         # info is stored alongside optimized_code and check_fn and is used to
