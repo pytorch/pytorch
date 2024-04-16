@@ -127,55 +127,22 @@ class BaseListVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return iter_contains(self.items, args[0], tx)
+            return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
             from .builder import SourcelessBuilder
 
             return tx.inline_user_function_return(
-                SourcelessBuilder()(tx, polyfill.index), [self] + list(args), kwargs
+                SourcelessBuilder.create(tx, polyfill.index),
+                [self] + list(args),
+                kwargs,
             )
 
         return super().call_method(tx, name, args, kwargs)
 
     @staticmethod
     def list_compare(tx, op, left, right):
-        from .builtin import BuiltinVariable
-
-        eq_result = BaseListVariable.list_eq(tx, left, right)
-        if op is operator.eq:
-            return eq_result
-        elif op is operator.ne:
-            return BuiltinVariable(operator.not_).call_function(tx, [eq_result], {})
-        else:
-            unimplemented(f"list_compare {left} {op} {right}")
-
-    @staticmethod
-    def list_eq(tx, left, right):
-        from .builtin import BuiltinVariable
-
-        # Most list-like variables implement comparison ops the same way,
-        # so they can re-use this helper.
-        # There are quirks though, like how `tuple([2]) == torch.Size([2])`,
-        # but `tuple([2]) != list([2])`
-        if len(left.items) != len(right.items):
-            return ConstantVariable.create(False)
-        if len(left.items) == 0:
-            return ConstantVariable.create(True)
-
-        # Generic list comparison works by iterating over left aka self and right the compared-to list.
-        # If we hit here, their lengths are the same and they cannot be expressed as python constants.
-        # So, we iterate over the zipped list items.
-        comps = []
-        for l, r in zip(left.items, right.items):
-            comp = BuiltinVariable(operator.eq).call_function(tx, [l, r], {})
-            if comp.is_python_constant() and not comp.as_python_constant():
-                # early exit in false case
-                return comp
-            comps.append(comp)
-
-        return functools.reduce(
-            lambda a, b: BuiltinVariable(operator.and_).call_function(tx, [a, b], {}),
-            comps,
+        return variables.UserFunctionVariable(polyfill.list_cmp).call_function(
+            tx, [variables.BuiltinVariable(op), left, right], {}
         )
 
 
@@ -214,7 +181,7 @@ class RangeVariable(BaseListVariable):
         assert "range" not in codegen.tx.f_globals
         codegen.append_output(codegen.create_load_python_module(range, True))
         codegen.foreach(self.items)
-        return create_call_function(3, False)
+        codegen.extend_output(create_call_function(3, False))
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -297,9 +264,12 @@ class ListVariable(CommonListMethodsVariable):
     def python_type(self):
         return list
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}(length={len(self.items)}"
+
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_LIST", arg=len(self.items))]
+        codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
 
     def call_method(
         self,
@@ -345,7 +315,7 @@ class DequeVariable(CommonListMethodsVariable):
             codegen.create_load_python_module(collections.deque, True)
         )
         codegen.foreach(self.items)
-        return create_call_function(len(self.items), False)
+        codegen.extend_output(create_call_function(len(self.items), False))
 
     def call_method(
         self,
@@ -399,7 +369,7 @@ class TupleVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_TUPLE", arg=len(self.items))]
+        codegen.append_output(create_instruction("BUILD_TUPLE", arg=len(self.items)))
 
     def call_method(
         self,
@@ -418,6 +388,11 @@ class TupleVariable(BaseListVariable):
 
 class SizeVariable(TupleVariable):
     """torch.Size(...)"""
+
+    _nonvar_fields = {
+        "proxy",
+        *TupleVariable._nonvar_fields,
+    }
 
     def __init__(
         self,
@@ -481,7 +456,7 @@ class SizeVariable(TupleVariable):
         build_torch_size = [
             create_instruction("BUILD_TUPLE", arg=len(self.items)),
         ] + create_call_function(1, True)
-        return build_torch_size
+        codegen.extend_output(build_torch_size)
 
     def unpack_var_sequence(self, tx):
         return list(self.items)
@@ -546,6 +521,11 @@ class SizeVariable(TupleVariable):
 
 
 class NamedTupleVariable(TupleVariable):
+    _nonvar_fields = {
+        "tuple_cls",
+        *TupleVariable._nonvar_fields,
+    }
+
     def __init__(self, items, tuple_cls, **kwargs):
         super().__init__(items, **kwargs)
         self.tuple_cls = tuple_cls
@@ -556,13 +536,20 @@ class NamedTupleVariable(TupleVariable):
     def as_python_constant(self):
         return self.python_type()(*[x.as_python_constant() for x in self.items])
 
+    def as_proxy(self):
+        assert self.python_type() is not SizeVariable
+        return self.python_type()(*self._as_proxy())
+
     def reconstruct(self, codegen):
         create_fn = getattr(self.tuple_cls, "_make", self.tuple_cls)
         codegen.append_output(codegen._create_load_const(create_fn))
         codegen.foreach(self.items)
-        return [
-            create_instruction("BUILD_TUPLE", arg=len(self.items)),
-        ] + create_call_function(1, True)
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_TUPLE", arg=len(self.items)),
+            ]
+            + create_call_function(1, True)
+        )
 
     def var_getattr(self, tx, name):
         def check_and_create_method():
@@ -625,7 +612,7 @@ class SliceVariable(BaseListVariable):
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
-        return [create_instruction("BUILD_SLICE", arg=len(self.items))]
+        codegen.append_output(create_instruction("BUILD_SLICE", arg=len(self.items)))
 
     def var_getattr(self, tx, name):
         fields = ["start", "stop", "step"]
@@ -635,6 +622,11 @@ class SliceVariable(BaseListVariable):
 
 
 class ListIteratorVariable(VariableTracker):
+    _nonvar_fields = {
+        "index",
+        *VariableTracker._nonvar_fields,
+    }
+
     def __init__(self, items, index: int = 0, **kwargs):
         super().__init__(**kwargs)
         assert isinstance(items, list)
@@ -646,18 +638,16 @@ class ListIteratorVariable(VariableTracker):
         self.index = index
 
     def __repr__(self):
-        return (
-            f"{self.__class__.__name__}({repr(self.items)}, index={repr(self.index)})"
-        )
+        return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
-    def next_variables(self, tx):
+    def next_variable(self, tx):
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
             raise StopIteration()
         tx.output.side_effects.mutation(self)
         self.index += 1
-        return self.items[old_index], self
+        return self.items[old_index]
 
     def call_method(
         self,
@@ -684,10 +674,12 @@ class ListIteratorVariable(VariableTracker):
     def reconstruct(self, codegen):
         remaining_items = self.items[self.index :]
         codegen.foreach(remaining_items)
-        return [
-            create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
-            create_instruction("GET_ITER"),
-        ]
+        codegen.extend_output(
+            [
+                create_instruction("BUILD_TUPLE", arg=len(remaining_items)),
+                create_instruction("GET_ITER"),
+            ]
+        )
 
 
 class TupleIteratorVariable(ListIteratorVariable):
@@ -775,7 +767,8 @@ class RestrictedListSubclassVariable(ListVariable):
 
     def reconstruct(self, codegen):
         codegen(self.user_cls_source)
-        return super().reconstruct(codegen) + create_call_function(1, True)
+        super().reconstruct(codegen)
+        codegen.extend_output(create_call_function(1, True))
 
     def call_method(
         self,

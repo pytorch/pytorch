@@ -19,6 +19,7 @@ from tools.testing.target_determination.heuristics.utils import (
     query_changed_files,
     REPO_ROOT,
 )
+from tools.testing.test_run import TestRun
 
 
 class HistoricalClassFailurCorrelation(HeuristicInterface):
@@ -30,19 +31,12 @@ class HistoricalClassFailurCorrelation(HeuristicInterface):
     def __init__(self, **kwargs: Any):
         super().__init__(**kwargs)
 
-    def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
-        correlated_tests = _rank_correlated_tests(tests)
-
-        test_rankings = TestPrioritizations(
-            tests_being_ranked=tests, probable_relevance=correlated_tests
-        )
-
-        return test_rankings
-
-    def get_prediction_confidence(self, tests: List[str]) -> Dict[str, float]:
+    def get_prediction_confidence(self, tests: List[str]) -> TestPrioritizations:
         ratings = _get_ratings_for_tests(set(tests))
-        test_ratings = {k: v for (k, v) in ratings.items() if k in tests}
-        return normalize_ratings(test_ratings, 1)
+        test_ratings = {
+            TestRun(k): v for (k, v) in ratings.items() if TestRun(k).test_file in tests
+        }
+        return TestPrioritizations(tests, normalize_ratings(test_ratings, 0.25))
 
 
 def _get_historical_test_class_correlations() -> Dict[str, Dict[str, float]]:

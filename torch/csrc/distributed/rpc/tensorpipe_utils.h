@@ -35,7 +35,7 @@ class TensorpipeDeviceTypeConverter {
   // Same as above: this method cannot return a tensorpipe::Allocation::Tensor,
   // thus it appends it to the `tensors` field of the tensorpipe::Allocation.
   virtual at::DataPtr allocateTensorForReceiving(
-      int deviceIndex,
+      c10::DeviceIndex deviceIndex,
       size_t length,
       const std::vector<c10::Stream>& streams,
       tensorpipe::Allocation& allocation) const = 0;

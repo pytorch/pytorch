@@ -27,7 +27,7 @@ void cpu_avg_pool(
   auto input = input_.contiguous();
   auto output = output_.contiguous();
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t numel = output.numel();
@@ -50,7 +50,7 @@ void cpu_avg_pool(
       output_data[i] = static_cast<scalar_t>(0);
 
       // local pointers
-      scalar_t* input_ptr = input_data + c * input_height * input_width;
+      const scalar_t* input_ptr = input_data + c * input_height * input_width;
 
       // compute the mean of the input image...
       int64_t ih0 = oh * dH - padH;
@@ -115,7 +115,7 @@ void cpu_avg_pool_channels_last(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
@@ -179,7 +179,7 @@ void cpu_avg_pool_channels_last(
       // Pass II: compute local sum
       for (const auto ih : c10::irange(ih0, ih1)) {
         for (const auto iw : c10::irange(iw0, iw1)) {
-          scalar_t* in = input_data + n * input_height * input_width * channels +
+          const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
           int64_t d2 = 0;
@@ -229,7 +229,7 @@ void cpu_avg_pool_channels_last(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
@@ -303,7 +303,7 @@ void cpu_avg_pool_channels_last(
       // Pass II: compute local sum
       for (const auto ih : c10::irange(ih0, ih1)) {
         for (const auto iw : c10::irange(iw0, iw1)) {
-          scalar_t* in = input_data + n * input_height * input_width * channels +
+          const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
           int64_t d2 = 0;
@@ -358,7 +358,7 @@ void cpu_avg_pool_backward(
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   int64_t ndim = grad_output.ndimension();
@@ -373,7 +373,7 @@ void cpu_avg_pool_backward(
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
       scalar_t* grad_input_ptr = grad_input_data + c * input_height * input_width;
-      scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
+      const scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
 
       for (const auto oh : c10::irange(output_height)) {
         for (const auto ow : c10::irange(output_width)) {
@@ -428,7 +428,7 @@ void cpu_avg_pool_backward_channels_last(
   auto grad_output = grad_output_.contiguous(memory_format);
 
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
 
   int64_t nbatch = grad_input.size(0);
   int64_t channels = grad_input.size(1);
@@ -442,7 +442,7 @@ void cpu_avg_pool_backward_channels_last(
   at::parallel_for(0, nbatch, 0, [&](int64_t begin, int64_t end) {
     for (const auto n : c10::irange(begin, end)) {
       scalar_t* grad_input_ptr = grad_input_data + n * input_height * input_width * channels;
-      scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
+      const scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
 
       for (const auto oh : c10::irange(output_height)) {
         for (const auto ow : c10::irange(output_width)) {
@@ -467,7 +467,7 @@ void cpu_avg_pool_backward_channels_last(
             }
           }
 
-          scalar_t* gout = grad_output_ptr + oh * output_width * channels + ow * channels;
+          const scalar_t* gout = grad_output_ptr + oh * output_width * channels + ow * channels;
           int64_t size = channels;
           int64_t len = size - (size % Vec::size());
           for (const auto ih : c10::irange(ih0, ih1)) {

@@ -309,7 +309,6 @@ coverage_ignore_functions = [
     "reference_representation_rewrite",
     # torch.ao.quantization.pt2e.utils
     "fold_bn_weights_into_conv_node",
-    "get_aten_graph_module",
     "remove_tensor_overload_for_qdq_ops",
     # torch.ao.quantization.qconfig
     "get_default_qat_qconfig",
@@ -668,6 +667,8 @@ coverage_ignore_functions = [
     "parallelize_module",
     # torch.distributed.tensor.parallel.input_reshard
     "input_reshard",
+    # torch.distributed.tensor.parallel.loss
+    "loss_parallel",
     # torch.distributed.tensor.parallel.style
     "make_sharded_output_tensor",
     # torch.distributions.utils
@@ -944,7 +945,7 @@ coverage_ignore_functions = [
     "is_channels_last_strides_3d",
     "is_contiguous",
     "is_non_overlapping_and_dense_indicator",
-    "is_singleton",
+    "is_nested_int",
     "is_symbol_binding_fx_node",
     "is_symbolic",
     # torch.fx.experimental.unification.core
@@ -3556,6 +3557,15 @@ html_css_files = [
 
 from sphinx.ext.coverage import CoverageBuilder
 
+# NB: Due to some duplications of the following modules/functions, we keep
+# them as expected failures for the time being instead of return 1
+ignore_duplicated_modules = {
+    "torch.nn.utils.weight_norm",
+    "torch.nn.utils.spectral_norm",
+    "torch.nn.parallel.data_parallel",
+    "torch.ao.quantization.quantize",
+}
+
 
 def coverage_post_process(app, exception):
     if exception is not None:
@@ -3596,7 +3606,7 @@ def coverage_post_process(app, exception):
         path=torch.__path__, prefix=torch.__name__ + "."
     ):
         if is_not_internal(modname):
-            if modname not in modules:
+            if modname not in modules and modname not in ignore_duplicated_modules:
                 missing.add(modname)
 
     output = []

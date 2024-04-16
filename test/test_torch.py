@@ -31,7 +31,7 @@ from torch import multiprocessing as mp
 from torch.testing import make_tensor
 
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
-    TEST_WITH_TORCHINDUCTOR, TestCase, TEST_WITH_ROCM, run_tests, IS_JETSON,
+    TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_WINDOWS, IS_FILESYSTEM_UTF8_ENCODING, NO_MULTIPROCESSING_SPAWN,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
     TEST_WITH_CROSSREF, skipIfTorchDynamo, skipRocmIfTorchInductor, set_default_dtype,
@@ -63,6 +63,11 @@ from torch.testing._internal.common_dtype import (
     get_all_qint_dtypes,
 )
 from torch.testing._internal.two_tensor import TwoTensor
+
+if TEST_WITH_TORCHINDUCTOR:
+    from torch._inductor.test_case import TestCase
+else:
+    from torch.testing._internal.common_utils import TestCase  # type: ignore[assignment]
 
 
 # Protects against includes accidentally setting the default dtype
@@ -5211,6 +5216,48 @@ else:
         self.assertTrue(torch._C._is_cow_tensor(t))
         self.assertTrue(torch._C._is_cow_tensor(clone))
 
+    # This tests that if a COW materialization is attempted inside an
+    # `at::parallel_for` loop function, then an error is raised. This test is
+    # implemented in Python rather than C++ because the C++ tests are built
+    # without multithreading support in `at::parallel_for`.
+    @skipXLA
+    @skipIfTorchDynamo("Torchdynamo fails and we do not need to test it here anyway")
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    def test_parallel_cow_materialize_error(self, device, dtype):
+
+        def run(num_threads, num_parallel, skip_first, should_error):
+            orig_num_threads = torch.get_num_threads()
+
+            try:
+                torch.set_num_threads(num_threads)
+
+                a = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)._lazy_clone()
+
+                if should_error:
+                    with self.assertRaisesRegex(RuntimeError, r'Materializing a storage'):
+                        torch._test_parallel_materialize(
+                            a, num_parallel, skip_first)
+                else:
+                    torch._test_parallel_materialize(a, num_parallel, skip_first)
+
+                # Error should not raise in any case if the tensor is not COW
+                b = torch.tensor([[0, 1], [2, 3]], device=device, dtype=dtype)
+                torch._test_parallel_materialize(b, num_parallel, skip_first)
+
+            finally:
+                torch.set_num_threads(orig_num_threads)
+
+        run(1, 1, False, True)
+        run(1, 1, True, False)
+        run(1, 10, False, True)
+        run(1, 10, True, True)
+        run(10, 1, False, True)
+        run(10, 1, True, False)
+        run(10, 10, False, True)
+        run(10, 10, True, True)
+        run(10, 2, False, True)
+        run(10, 2, True, True)
+
     # FIXME: move to test distributions
     @skipIfMps
     @dtypesIfCUDA(torch.float, torch.double, torch.half)
@@ -10205,7 +10252,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
         from torch.library import Library, impl
         global _my_storage
 
-        my_lib = Library("my_lib", "DEF")
+        my_lib = Library("my_lib", "DEF")  # noqa: TOR901
         my_lib.define('my_func() -> None')
 
         a = torch.tensor([1.])

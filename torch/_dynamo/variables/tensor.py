@@ -1,27 +1,20 @@
 # mypy: ignore-errors
 
 import functools
-
 import inspect
+import logging
 import operator
+import textwrap
 import types
 from typing import Dict, List
-
-
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
 
 import sympy
 
 import torch._numpy as tnp
-
 import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
-
+from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
     GuardOnDataDependentSymNode,
@@ -29,11 +22,13 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SymTypes,
 )
-
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
-
+from ..bytecode_transformation import create_call_method
+from ..current_scope_id import current_scope_id
 from ..exc import unimplemented, UserError, UserErrorType
+from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import (
@@ -47,10 +42,18 @@ from ..utils import (
     proxy_args_kwargs,
     tensortype_to_dtype,
 )
-from .base import VariableTracker
+from .base import _is_top_level_scope, VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
 
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
+log = logging.getLogger(__name__)
+
+# Ops that allow tensor <op> tensor
 supported_tensor_comparison_ops = {
     ">": operator.gt,
     "<": operator.lt,
@@ -59,12 +62,23 @@ supported_tensor_comparison_ops = {
     "==": operator.eq,
     "!=": operator.ne,
 }
+# Ops that allow tensor <op> None
 supported_const_comparison_ops = {
     "is": operator.is_,
     "is not": operator.is_not,
     "==": operator.eq,
     "!=": operator.ne,
 }
+supported_comparison_ops = {
+    **supported_tensor_comparison_ops,
+    **supported_const_comparison_ops,
+}
+supported_tensor_comparison_op_values = dict.fromkeys(
+    supported_tensor_comparison_ops.values()
+)
+supported_const_comparison_op_values = dict.fromkeys(
+    supported_const_comparison_ops.values()
+)
 
 
 class TensorVariable(VariableTracker):
@@ -84,6 +98,7 @@ class TensorVariable(VariableTracker):
         "is_sparse",
         "class_type",
         "specialized_value",
+        "_is_name_set",
         *VariableTracker._nonvar_fields,
     }
 
@@ -111,6 +126,7 @@ class TensorVariable(VariableTracker):
         size=None,
         stride=None,
         is_contiguous=None,
+        _is_name_set=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
@@ -126,6 +142,10 @@ class TensorVariable(VariableTracker):
         self.is_contiguous = is_contiguous
         self.is_sparse = is_sparse
         self.class_type = class_type
+        if _is_name_set is None:
+            # no need to rename inputs
+            _is_name_set = self.proxy.node.op == "placeholder"
+        self._is_name_set: bool = _is_name_set
 
     def as_proxy(self):
         return self.proxy
@@ -145,7 +165,11 @@ class TensorVariable(VariableTracker):
             "is_sparse": value.is_sparse,
             "class_type": type(value),
         }
-        if not has_free_symbols(value):
+        if is_sparse_any(value) and not has_free_symbols(value):
+            props["size"] = tuple(
+                [int(s) if is_symbolic(s) else s for s in value.size()]
+            )
+        elif not has_free_symbols(value):
             # this is a fully static shape, and the keys on props here inform specialization.
             # We have to cast to int here, because these might get accessed as ConstantVariable, which has
             # a strict no-symint policy. If we got here due to not having free symbols, this is a known constant
@@ -173,7 +197,31 @@ class TensorVariable(VariableTracker):
         return props
 
     def dynamic_getattr(self, tx, name):
-        if not self.source:
+        fake_val = self.proxy.node.meta["example_value"]
+        # For getattrs on tensors without sources,
+        # we can do better than the default (creating a GetAttrVariable)
+        # if:
+        # (1) the tensor is a traceable tensor subclass
+        # (2) We are getattr'ing an inner tensor from that subclass
+        if not self.source and is_traceable_wrapper_subclass(fake_val):
+            fake_val = self.proxy.node.meta["example_value"]
+            attrs, ctx = fake_val.__tensor_flatten__()
+            proxy = getattr(self.as_proxy(), name)
+            example_value = getattr(fake_val, name)
+            if name in attrs:
+                # attrs returned from tensor_flatten are always tensors
+                assert isinstance(example_value, torch.Tensor)
+                from .builder import wrap_fx_proxy
+
+                return wrap_fx_proxy(tx=tx, proxy=proxy, example_value=example_value)
+            # any other attributes on the subclass (that are not methods)
+            # are assumed to be constant metadata.
+            elif not callable(example_value):
+                from .builder import SourcelessBuilder
+
+                return SourcelessBuilder.create(tx, example_value)
+
+        if not (self.source and self.source.subguards_allowed()):
             raise NotImplementedError()
 
         # For local source, we associate the real value. We use this real value
@@ -215,46 +263,80 @@ class TensorVariable(VariableTracker):
         install_guard(attr_source.make_guard(GuardBuilder.HASATTR))
         return VariableBuilder(tx, attr_source)(real_value)
 
-    def var_getattr(self, tx, name):
-        from . import ConstantVariable, UserDefinedClassVariable
+    def method_attr_ndim(self, tx):
+        if self.ndim is not None:
+            return ConstantVariable.create(self.ndim)
+        else:
+            return self.call_method(tx, "dim", [], {})
 
-        if tx.strict_checks_enabled:
-            if name in self._strict_mode_banned_ops():
-                unimplemented(f"Illegal getattr invocation {name} in strict mode")
+    def method_attr_dtype(self, tx):
+        if self.dtype is not None:
+            return ConstantVariable.create(self.dtype)
 
-        result = None
-        if name == "ndim" and self.ndim is not None:
-            result = ConstantVariable.create(self.ndim)
-        elif name == "dtype" and self.dtype is not None:
-            result = ConstantVariable.create(self.dtype)
-        elif name == "device" and self.device is not None:
-            result = ConstantVariable.create(self.device)
-        elif name == "layout" and self.layout is not None:
-            result = ConstantVariable.create(self.layout)
-        elif name == "is_cuda" and self.device is not None:
-            result = ConstantVariable.create(self.device.type == "cuda")
-        elif name == "shape" and self.size is not None:
+    def method_attr_device(self, tx):
+        if self.device is not None:
+            return ConstantVariable.create(self.device)
+
+    def method_attr_layout(self, tx):
+        if self.layout is not None:
+            return ConstantVariable.create(self.layout)
+
+    def method_attr_is_cuda(self, tx):
+        if self.device is not None:
+            return ConstantVariable.create(self.device.type == "cuda")
+
+    def method_attr_shape(self, tx):
+        if self.size is not None:
             sizes = [variables.ConstantVariable.create(x) for x in self.size]
-            result = SizeVariable(sizes)
-        elif name == "requires_grad" and self.requires_grad is not None:
-            result = ConstantVariable.create(self.requires_grad)
-        elif name == "is_quantized" and self.is_quantized is not None:
-            result = ConstantVariable.create(self.is_quantized)
-        elif name == "is_sparse" and self.is_sparse is not None:
-            result = ConstantVariable.create(self.is_sparse)
-        elif name == "shape" and self.size is None:
-            result = self.call_method(tx, "size", [], {})
-        elif name == "ndim" and self.ndim is None:
-            result = self.call_method(tx, "dim", [], {})
-        elif name == "data":
-            result = self.call_method(tx, "detach", [], {})
+            return SizeVariable(sizes)
+        else:
+            return self.call_method(tx, "size", [], {})
+
+    def method_attr_requires_grad(self, tx):
+        if self.requires_grad is not None:
+            return ConstantVariable.create(self.requires_grad)
+
+    def method_attr_is_quantized(self, tx):
+        if self.is_quantized is not None:
+            return ConstantVariable.create(self.is_quantized)
+
+    def method_attr_is_sparse(self, tx):
+        if self.is_sparse is not None:
+            return ConstantVariable.create(self.is_sparse)
+
+    def method_attr_data(self, tx):
+        return self.call_method(tx, "detach", [], {})
+
+    def method_attr__version(self, tx):
+        from ..tensor_version_op import _tensor_version
+
+        return variables.TorchInGraphFunctionVariable(_tensor_version).call_function(
+            tx, [self], {}
+        )
+
+    def var_getattr(self, tx, name):
+        from . import UserDefinedClassVariable
+
+        if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
+            unimplemented(f"Illegal getattr invocation {name} in strict mode")
+
         if name == "__class__":
             return UserDefinedClassVariable(self.python_type())
+
+        handler = getattr(self, f"method_attr_{name}", None)
+        result = handler(tx) if handler is not None else None
 
         # Add a guard for type matching, these guards are checked before tensor guards
         # In some cases, a <tensor>.<attr> guard can be evaluated first, and break if
         # <tensor> is later changed to another type
-        if result is not None and self.source is not None:
+        if (
+            result is not None
+            and self.source
+            and self.source.subguards_allowed()
+            and not (
+                name not in ("grad", "requires_grad") and result.is_python_constant()
+            )
+        ):
             install_guard(self.make_guard(GuardBuilder.TYPE_MATCH))
             result.source = AttrSource(self.source, name)
 
@@ -275,7 +357,7 @@ class TensorVariable(VariableTracker):
         # For attributes (not methods) that were not caught in the special handling above,
         # (e.g. tensor.real), we handle these generically, assuming that the output type is
         # a tensor.
-        if result is None:
+        if result is None and name != "grad":
 
             def try_generic_attr_handling():
                 from .builder import wrap_fx_proxy
@@ -348,9 +430,8 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if tx.strict_checks_enabled:
-            if name in self._strict_mode_banned_ops():
-                unimplemented(f"Illegal method invocation {name} in strict mode")
+        if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
+            unimplemented(f"Illegal method invocation {name} in strict mode")
 
         """
         Dispatch to a method-specific handler defined below.  If the
@@ -586,7 +667,7 @@ class TensorVariable(VariableTracker):
 
         tensor = self.as_proxy().node.meta["example_value"]
         out = tolist(tensor, self.as_proxy())
-        return SourcelessBuilder()(tx, out)
+        return SourcelessBuilder.create(tx, out)
 
     def method_backward(self, *args, **kwargs):
         unimplemented("Tensor.backward")
@@ -596,7 +677,23 @@ class TensorVariable(VariableTracker):
 
     def method_item(self, *args, **kwargs):
         if not config.capture_scalar_outputs:
+            self._warn_capture_scalar_outputs()
             unimplemented("Tensor.item")
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _warn_capture_scalar_outputs():
+        log.warning(
+            textwrap.dedent(
+                """\
+                    Graph break from `Tensor.item()`, consider setting:
+                        torch._dynamo.config.capture_scalar_outputs = True
+                    or:
+                        env TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
+                    to include these operations in the captured graph.
+                """
+            )
+        )
 
     def method___len__(self):
         from ..symbolic_convert import InstructionTranslator
@@ -714,6 +811,32 @@ class TensorVariable(VariableTracker):
             ),
         )
 
+    def method_to_local(self, *args, **kwargs):
+        from ..symbolic_convert import InstructionTranslator
+
+        tx = InstructionTranslator.current_tx()
+        # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
+        # and rewrite args to have only proxyable args, then insert call_function
+        args_as_value = [x.as_python_constant() for x in args]
+        kwargs_as_value = {k: v.as_python_constant() for k, v in kwargs.items()}
+
+        def to_local_fn_with_prim_types(x):
+            return x.to_local(*args_as_value, **kwargs_as_value)
+
+        # attach the same function name for better debugging
+        to_local_fn_with_prim_types.__name__ = "prim_to_local"
+
+        from .builder import wrap_fx_proxy
+
+        return wrap_fx_proxy(
+            tx=tx,
+            proxy=tx.output.create_proxy(
+                "call_function",
+                to_local_fn_with_prim_types,
+                *proxy_args_kwargs([self], {}),
+            ),
+        )
+
     def method_register_hook(self, *args, **kwargs):
         return self._method_register_hook("register_hook", *args, **kwargs)
 
@@ -722,55 +845,14 @@ class TensorVariable(VariableTracker):
             "register_post_accumulate_grad_hook", *args, **kwargs
         )
 
-    def _method_register_hook(self, name, *args, **kwargs):
+    def _method_register_hook(self, name: str, hook: VariableTracker):
+        # Note - do not arbitrarily add hooks here - make sure they match the same contract
+        # see [On tensor.register_hook]
         from ..symbolic_convert import InstructionTranslator
 
         tx = InstructionTranslator.current_tx()
-        # Note - do not arbitrarily add hooks here - make sure they match the same contract
-        # see [On tensor.register_hook]
-        assert len(args) == 1 and not kwargs
-        fn_var = args[0]
-        if not isinstance(
-            fn_var,
-            (
-                variables.functions.FunctoolsPartialVariable,
-                variables.UserFunctionVariable,
-                variables.TorchInGraphFunctionVariable,
-                variables.NNModuleVariable,
-            ),
-        ):
-            unimplemented("Unexpected callable type passed to register_hook")
-
-        if isinstance(fn_var, variables.NestedUserFunctionVariable):
-            # NestedUserFunctionVariable don't carry their fn, but reconstruction builds it
-            # This should not be onerous to support when needed.
-            unimplemented("NYI - lambda variables as hooks")
-        elif isinstance(fn_var, variables.functions.FunctoolsPartialVariable):
-            # TODO(jansel): this is kind of sketch since it will lead to recompiles
-            # we should remove it in a future PR
-            fn = fn_var.guard_as_python_constant()
-        else:
-            fn = fn_var.fn
-
-        handle_variable = variables.user_defined.RemovableHandleVariable(
-            mutable_local=variables.base.MutableLocal(),
-        )
 
         if not self.source:
-            # Intermediary
-            src = fn_var.source
-            if (
-                not src
-                and isinstance(fn_var, variables.functions.FunctoolsPartialVariable)
-                and fn_var.func.source
-            ):
-                src = fn_var.func.source
-
-            if not src:
-                unimplemented("No source for register_hook target fn")
-
-            tx.output.guards.add(src.make_guard(GuardBuilder.ID_MATCH))
-
             if not compiled_autograd.compiled_autograd_enabled:
                 # TODO(voz):
                 # We can relax this by speculating the callable and ensuring that it doesn't modify arbitrary
@@ -791,14 +873,22 @@ class TensorVariable(VariableTracker):
                     "Compilation of intermediate hooks requires compiled autograd"
                 )
 
-            # This wraps our user provided fn with a function that intercedes and
-            # uses our `invoke` higher order op to record a hook invocation in bwd graph.
-            fn = functools.partial(trace_wrapped, fn=fn)
+            hook_name, bw_state_proxy = tx.output.add_backward_state_hook(hook)
 
-            def _register_hook_trampoline(tensor):
-                hook_callable = getattr(tensor, name)
-                hook_callable(fn)
-                return tensor
+            def _register_hook_trampoline(tensor, bw_state):
+                register_hook = getattr(tensor, name)
+                register_hook(
+                    functools.partial(
+                        trace_wrapped,
+                        fn=call_hook_from_backward_state,
+                        bw_state=bw_state,
+                        hook_name=hook_name,
+                    )
+                )
+                # TODO(jansel): returning None here is wrong, it should be
+                # RemovableHandle, but we need some extra work to support
+                # this properly.
+                return None
 
             from .builder import wrap_fx_proxy
 
@@ -807,12 +897,15 @@ class TensorVariable(VariableTracker):
                 tx.output.create_proxy(
                     "call_function",
                     _register_hook_trampoline,
-                    (self.as_proxy(),),
+                    (self.as_proxy(), bw_state_proxy),
                     {},
                 ),
             )
 
-        tx.output.side_effects.register_hook(self, fn_var, handle_variable, name)
+        handle_variable = variables.RemovableHandleVariable(
+            mutable_local=variables.base.MutableLocal(),
+        )
+        tx.output.side_effects.register_hook(self, hook, handle_variable, name)
         return handle_variable
 
     def method_requires_grad_(self, requires_grad=True):
@@ -827,22 +920,42 @@ class TensorVariable(VariableTracker):
     def method_new(self, *args, **kwargs):
         # Convert x.new(torch.Size) into x.new_empty(torch.Size),
         # as Tensor.new acts differently with a Size input versus a tuple input.
-        if len(args) == 1 and isinstance(args[0], SizeVariable):
+        if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
+            len(args) >= 1
+            and all(
+                isinstance(a, ConstantVariable) and a.python_type() == int for a in args
+            )
+        ):
             from ..symbolic_convert import InstructionTranslator
 
             return self.call_method(
                 InstructionTranslator.current_tx(), "new_empty", args, kwargs
             )
 
-    def rename(self, tx, name):
-        self.proxy.node._rename(name)
-        return super().rename(tx, name)
+    def method_untyped_storage(self):
+        return UntypedStorageVariable(
+            self, self.as_proxy().node.meta["example_value"].untyped_storage()
+        )
+
+    def set_name_hint(self, name: str):
+        # Only rename at the top-level scope, this is to avoid the confusion between
+        # mutating a variable vs renaming it (e.g. a = b) during speculating a higher order op,
+        # where mutation is prohibited and it's difficult to differentiate it with renaming.
+        if not self._is_name_set and _is_top_level_scope(current_scope_id()):
+            self.proxy.node._rename(name)
+            self._is_name_set = True
 
 
 class SymNodeVariable(VariableTracker):
     """
     Represents a symbolic size, e.g., as returned by tensor.size(0)
     """
+
+    _nonvar_fields = {
+        "proxy",
+        "sym_num",
+        *VariableTracker._nonvar_fields,
+    }
 
     @classmethod
     def create(cls, tx, proxy, sym_num, **options):
@@ -853,8 +966,6 @@ class SymNodeVariable(VariableTracker):
         proxy.node.meta["example_value"] = sym_num
 
         if isinstance(sym_num, (sympy.Integer, int, bool)):
-            if isinstance(sym_num, sympy.Integer):
-                breakpoint()
             sym_num = int(sym_num) if isinstance(sym_num, sympy.Integer) else sym_num
             return ConstantVariable.create(sym_num)
 
@@ -899,7 +1010,7 @@ class SymNodeVariable(VariableTracker):
             tx.output.create_proxy(
                 "call_method",
                 name,
-                *proxy_args_kwargs([self] + list(args), kwargs),
+                *proxy_args_kwargs([self, *args], kwargs),
             ),
         )
 
@@ -1021,6 +1132,12 @@ class UnspecializedPythonVariable(TensorVariable):
     This is a 1-element tensor represents unspecialized python float/int.
     """
 
+    _nonvar_fields = {
+        "raw_value",
+        "need_unwrap",
+        *TensorVariable._nonvar_fields,
+    }
+
     def __init__(
         self, proxy: torch.fx.Proxy, *, raw_value=None, need_unwrap=True, **kwargs
     ):
@@ -1041,6 +1158,11 @@ class UnspecializedPythonVariable(TensorVariable):
 class FakeItemVariable(TensorVariable):
     """An unspecialized python variable which prevents access to the underlying raw value.
     This is needed if item is called on a FakeTensor."""
+
+    _nonvar_fields = {
+        "need_unwrap",
+        *TensorVariable._nonvar_fields,
+    }
 
     def __init__(self, proxy: torch.fx.Proxy, **kwargs):
         need_unwrap = kwargs.pop("need_unwrap", False)
@@ -1079,3 +1201,65 @@ class TensorSubclassVariable(VariableTracker):
 
     def python_type(self):
         return type(self.value)
+
+
+class UntypedStorageVariable(VariableTracker):
+    _nonvar_fields = {
+        "example_value",
+        *VariableTracker._nonvar_fields,
+    }
+
+    def __init__(
+        self,
+        from_tensor: TensorVariable,
+        example_value: torch.UntypedStorage,
+        **kwargs,
+    ):
+        super().__init__(**kwargs),
+        self.from_tensor = from_tensor
+        # Example_value will always have device="meta"
+        self.example_value = example_value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        if name == "size":
+            assert not args
+            assert not kwargs
+            result = self.example_value.size()
+            if not has_free_symbols(result):
+                # avoid creating a node in the graph
+                return ConstantVariable.create(int(result))
+            else:
+                from ..external_utils import untyped_storage_size
+                from .builder import wrap_fx_proxy
+
+                return wrap_fx_proxy(
+                    tx,
+                    tx.output.create_proxy(
+                        "call_function",
+                        untyped_storage_size,
+                        (self.from_tensor.as_proxy(),),
+                        {},
+                    ),
+                )
+        if name == "resize_" and len(args) == 1:
+            assert not kwargs
+            tx.output.create_proxy(
+                "call_function",
+                torch.ops.inductor.resize_storage_bytes_,
+                (self.from_tensor.as_proxy(), args[0].as_proxy()),
+                {},
+            )
+            return self
+
+        return super().call_method(tx, name, args, kwargs)
+
+    def reconstruct(self, codegen):
+        codegen(self.from_tensor)
+        codegen.append_output(codegen.create_load_method("untyped_storage"))
+        codegen.extend_output(create_call_method(0))

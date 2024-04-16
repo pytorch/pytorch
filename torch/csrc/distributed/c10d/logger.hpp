@@ -101,4 +101,39 @@ class TORCH_API Logger {
   long num_iterations_stats_recorded_ = 0;
 };
 
+// a generic logging data struct that holds different types of logging data.
+// starting with key value pairs of strings and integers,
+// It can be extended to more types as needed.
+struct C10dLoggingData {
+  // logging fields that are string types.
+  std::map<std::string, std::string> strings;
+  // logging fields that are int64_t types.
+  std::map<std::string, int64_t> integers;
+};
+
+class TORCH_API C10dLogger {
+ public:
+  C10dLogger(const C10dLogger&) = default;
+  C10dLogger(C10dLogger&&) = delete;
+  C10dLogger& operator=(const C10dLogger&) = default;
+  C10dLogger& operator=(C10dLogger&&) = delete;
+  virtual ~C10dLogger() = default;
+  virtual void log(const C10dLoggingData& data);
+  static C10dLogger* getLogger();
+  static void registerLogger(std::unique_ptr<C10dLogger>);
+
+ protected:
+  // singletion, hide constructor from the public
+  C10dLogger(const std::string& logDestination) {
+    logDestination_ = logDestination;
+  }
+
+  // the name of the destination this logger should log to
+  std::string logDestination_;
+
+ private:
+  static std::unique_ptr<C10dLogger> logger_;
+  static std::atomic<bool> registered_;
+};
+
 } // namespace c10d

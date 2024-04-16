@@ -10,13 +10,13 @@ from torch._dynamo.testing import reset_rng_state
 
 from torch._inductor import config, test_operators
 from torch._inductor.codegen.multi_kernel import MultiKernelCall
+from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     skipIfRocm,
-    TestCase,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA
 
@@ -279,7 +279,7 @@ class MultiKernelTest(TestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CUDA:
         run_tests()

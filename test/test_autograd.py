@@ -5718,7 +5718,7 @@ for shape in [(1,), ()]:
         # The autograd engine creates worker threads only when GPU devices are present.
         # So make sure that we do shutdown threads when we're testing cuda and make sure
         # that there is no thread to shutdown when we're not using cuda.
-        if TEST_CUDA or torch.backends.mps.is_available():
+        if TEST_CUDA or torch.backends.mps.is_available() or torch.xpu.is_available():
             self.assertRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
         else:
             self.assertNotRegex(s, "PYTORCH_API_USAGE torch.autograd.thread_shutdown")
@@ -8765,8 +8765,12 @@ get_out().sum().backward()
         except subprocess.TimeoutExpired as e:
             self.fail(msg="Example code timed out! See the code sample in the test for details.")
         except subprocess.CalledProcessError as e:
-            err_msg = "RuntimeError: one of the variables needed for gradient computation"
-            self.assertTrue(err_msg in e.output.decode("utf-8"))
+            if e.returncode < 0:
+                # Sometimes we segfault instead of deadlocking
+                self.fail("Subprocess exited with a fatal signal")
+            else:
+                err_msg = "RuntimeError: one of the variables needed for gradient computation"
+                self.assertTrue(err_msg in e.output.decode("utf-8"))
 
     def test_view_func_replay(self):
         with torch.autograd._force_original_view_tracking(True):
@@ -8777,7 +8781,7 @@ get_out().sum().backward()
                 self.assertEqual(a.device, b.device)
                 self.assertEqual(a.dtype, b.dtype)
 
-            def _test_fn(fn, inp, *args):
+            def _test_fn(fn, inp, *args, use_unsafe_view_func=False):
                 outs = fn(inp, *args)
                 # handle functions that return multiple views (e.g. split)
                 if isinstance(outs, torch.Tensor):
@@ -8790,8 +8794,12 @@ get_out().sum().backward()
                     # forward view_func
                     new_inp = inp.clone()
                     _assert_match_metadata(new_inp, inp)
-                    new_out = out._view_func(new_inp)
+                    if use_unsafe_view_func:
+                        new_out = out._view_func_unsafe(new_inp)
+                    else:
+                        new_out = out._view_func(new_inp)
                     _assert_match_metadata(new_out, out)
+                    self.assertEqual(new_out, out)
 
                     # reverse view_func
                     new_out = out.detach()
@@ -8830,7 +8838,7 @@ get_out().sum().backward()
             _test_fn(
                 lambda x: x.chunk(2, -1)[0].transpose(0, 1).unsqueeze(-1), torch.randn(2, 3, 4))
             _test_fn(
-                lambda x: x.split_with_sizes([1, 3], -1)[0].chunk(2, -1), torch.randn(2, 3, 4))
+                lambda x: x.split_with_sizes([1, 3], -1)[0].chunk(2, 0), torch.randn(2, 3, 4))
 
             # chains with missing view_func()s use as_strided() to cover the gaps
             def chain_with_only_parent_view_func(x):
@@ -8838,7 +8846,7 @@ get_out().sum().backward()
                     x = x.split_with_sizes([1, 3], -1)[0]
 
                 with torch.autograd._force_original_view_tracking(False):
-                    x = x.chunk(2, -1)
+                    x = x.chunk(2, 0)
 
                 return x
 
@@ -8849,11 +8857,76 @@ get_out().sum().backward()
                     x = x.split_with_sizes([1, 3], -1)[0]
 
                 with torch.autograd._force_original_view_tracking(True):
-                    x = x.chunk(2, -1)
+                    x = x.chunk(2, 0)
 
                 return x
 
             _test_fn(chain_with_only_current_view_func, torch.randn(2, 3, 4))
+
+            # TODO: Move this somewhere else
+            # test NT views
+            from torch.nested._internal.nested_tensor import nested_view_from_values_offsets
+
+            values = torch.randn(10, 5)
+            offsets = torch.tensor([0, 3, 6, 10])
+            _test_fn(nested_view_from_values_offsets, values, offsets)
+
+            nt = nested_view_from_values_offsets(values, offsets).clone().detach()
+            _test_fn(torch.ops.aten._nested_get_values.default, nt, use_unsafe_view_func=True)
+
+            def chain_nt_to_dense_back_and_forth(nt):
+                # NJT1 -> dense -> NJT2 -> dense
+                offsets2 = nt.offsets().clone().detach()
+                return nested_view_from_values_offsets(nt.values(), offsets2).values()
+
+            _test_fn(chain_nt_to_dense_back_and_forth, nt, use_unsafe_view_func=True)
+
+            def chain_dense_to_nt_back_and_forth(values, offsets):
+                offsets2 = offsets.clone().detach()
+                # dense -> NJT1 -> dense -> NJT2
+                return nested_view_from_values_offsets(
+                    nested_view_from_values_offsets(values, offsets).values(),
+                    offsets2)
+
+            _test_fn(chain_dense_to_nt_back_and_forth, values, offsets, use_unsafe_view_func=True)
+
+    def test_view_func_replay_with_modified_state(self):
+        with torch.autograd._force_original_view_tracking(True):
+            base = torch.randn(3, 4, 5)
+            view = base.select(1, 2)
+
+            def symint_visitor_fn(x):
+                # modify saved index
+                return x + 1
+
+            # ensure modifying state changes view replay
+            new_base = torch.randn_like(base)
+            new_view = view._view_func(new_base, symint_visitor_fn=symint_visitor_fn)
+            self.assertEqual(new_view, new_base.select(1, 3))
+
+            # ensure saved state reverts back afterwards
+            self.assertEqual(view._view_func(new_base), new_base.select(1, 2))
+
+            # check modifying tensor state. currently, slice_inverse() is the only
+            # view that saves a tensor
+            base = torch.randn(3, 4, 5)
+            sliced = base[:, 2:3, :].detach()
+            view = torch.ops.aten.slice_inverse(sliced, base, 1, 2, 3, 1)
+
+            replacement_shape = (1, 2, 3)
+
+            def tensor_visitor_fn(x):
+                # return tensor with a smaller shape than the saved one
+                return torch.randn(*replacement_shape)
+
+            # ensure modifying state changes view replay
+            new_sliced = torch.ones_like(base)[:, 2:3, :].detach()
+            new_view = view._view_func(new_sliced, tensor_visitor_fn=tensor_visitor_fn)
+            self.assertEqual(new_view.shape, replacement_shape)
+            self.assertEqual(new_view, new_sliced.as_strided(replacement_shape, (6, 3, 1)))
+
+            # ensure saved state reverts back afterwards
+            self.assertEqual(view._view_func(sliced), base)
 
     def test_setup_context_when_forward_has_default_args(self):
         class PowFunction(Function):
@@ -9273,8 +9346,6 @@ class TestAutogradForwardMode(TestCase):
         class MySubclass(torch.Tensor):
             def __new__(cls, data=None):
                 return torch.Tensor._make_subclass(cls, data)
-
-            __torch_function__ = torch._C._disabled_torch_function_impl
 
             @classmethod
             def __torch_dispatch__(cls, func, types, args=(), kwargs=None):

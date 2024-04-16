@@ -3,13 +3,11 @@
 import os
 import sys
 import unittest
-import weakref
 from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as ft_c
-import torch.distributed._functional_collectives_impl as ft_c_impl
 import torch.distributed._tensor as dt
 import torch.distributed.distributed_c10d as c10d
 
@@ -17,6 +15,7 @@ from functorch import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils._triton import has_triton
+from torch._inductor.utils import run_and_get_code
 
 if not dist.is_available():
     print("Distributed not available, skipping tests", file=sys.stderr)
@@ -25,10 +24,9 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     MultiThreadedTestCase,
-    requires_nccl,
     TEST_SKIPS,
+    requires_nccl,
 )
-
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -223,6 +221,7 @@ class TestPgTag(MultiThreadedTestCase):
         self.assertEqual(dist.group.WORLD, pg)
 
 
+@instantiate_parametrized_tests
 class TestTraceableCollectives(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -364,7 +363,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
 class TestMetaCollectives(TestCase):
     def test_all_reduce(self):
         x = torch.rand((2, 3, 4), device="meta")
-        out = ft_c.all_reduce(x, "sum", [1])
+        out = ft_c.all_reduce(x, "sum", "0")
         self.assertEqual(x.size(), out.size())
 
 
@@ -380,7 +379,7 @@ class TestGradCollectives(MultiThreadedTestCase):
     def test_all_reduce(self):
         x = torch.rand([4], requires_grad=True)
         y = torch.rand([4], requires_grad=True)
-        out = ft_c.all_reduce(x, "sum", [0, 1])
+        out = ft_c.all_reduce(x, "sum", dist.group.WORLD)
         (out + y).sum().backward()
         self.assertIsNone(x.grad)
 
@@ -394,9 +393,17 @@ class TestMakeFx(MultiThreadedTestCase):
         super().setUp()
         self._spawn_threads()
 
+    def tearDown(self):
+        super().tearDown()
+
+        # race condition with threads causes is_fx_tracing flag to be set incorrectly.
+        torch.fx._symbolic_trace._is_fx_tracing_flag = False
+        self.assertFalse(torch.fx._symbolic_trace.is_fx_tracing())
+
     def test_all_reduce_tracing(self):
+
         def allred(input):
-            return ft_c.all_reduce(input, "sum", group=[0, 1]) + 1
+            return ft_c.all_reduce(input, "sum", group=dist.group.WORLD) + 1
 
         graph = make_fx(allred)(torch.rand(4))
         FileCheck().check("all_reduce").check("wait_tensor").run(str(graph.graph))
@@ -419,8 +426,6 @@ class TestMakeFx(MultiThreadedTestCase):
             str(mesh_dim_graph.graph)
         )
 
-
-instantiate_parametrized_tests(TestTraceableCollectives)
 
 BACKEND = dist.Backend.NCCL if torch.cuda.is_available() else dist.Backend.GLOO
 WORLD_SIZE = 2
@@ -537,40 +542,6 @@ class TestCollectivesWithNCCL(MultiProcessTestCase):
         self.assertEqual(y, expected)
 
     @with_comms()
-    def test_all_to_all_single_output_split_sizes_none(self):
-        device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
-        mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
-        rank = dist.get_rank()
-
-        input_split_sizes = [1] * self.world_size
-        x = torch.ones(self.world_size, self.world_size, device=device) * (rank + 1)
-        y = ft_c.all_to_all_single(
-            x, output_split_sizes=None, input_split_sizes=input_split_sizes, group=mesh
-        )
-        expected = []
-        for idx, tensor in enumerate(torch.chunk(x, self.world_size)):
-            expected.append(torch.full_like(tensor, (idx + 1)))
-        expected = torch.cat(expected)
-        self.assertEqual(y, expected)
-
-    @with_comms()
-    def test_all_to_all_single_input_split_sizes_none(self):
-        device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
-        mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
-        rank = dist.get_rank()
-
-        output_split_sizes = [1] * self.world_size
-        x = torch.ones(self.world_size, self.world_size, device=device) * (rank + 1)
-        y = ft_c.all_to_all_single(
-            x, output_split_sizes=output_split_sizes, input_split_sizes=None, group=mesh
-        )
-        expected = []
-        for idx, tensor in enumerate(torch.chunk(x, self.world_size)):
-            expected.append(torch.full_like(tensor, (idx + 1)))
-        expected = torch.cat(expected)
-        self.assertEqual(y, expected)
-
-    @with_comms()
     def test_all_to_all_single_split_sizes_none(self):
         device = "cuda" if BACKEND == dist.Backend.NCCL else "cpu"
         mesh = dt.DeviceMesh(device, torch.arange(self.world_size))
@@ -657,85 +628,80 @@ class TestNCCLCollectivesWithWorldSize4(TestCollectivesWithNCCL):
             )
 
 
-
-class TestOpWaitiness(MultiThreadedTestCase):
-    @property
-    def world_size(self):
-        return 1
-
+@instantiate_parametrized_tests
+class TestFunctionalAutograd(MultiThreadedTestCase):
     def setUp(self):
         super().setUp()
         self._spawn_threads()
 
-    def tearDown(self):
-        super().tearDown()
-        ft_c_impl._wait_all()
+    @property
+    def world_size(self):
+        return 2
 
-    def test_wait_reduce_outstanding_work_count(self):
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+    @parametrize("compile", [True, False])
+    def test_all_to_all_single(self, compile: bool = True) -> None:
+        group = dist.group.WORLD.group_name
 
-        tensor = torch.ones([4])
-        res = ft_c.all_reduce(tensor, "sum", [0])
-        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
-        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+        t = torch.rand((self.world_size, 2), requires_grad=True)
 
-        res.trigger_wait()
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
-        self.assertFalse(ft_c_impl._tensor_needs_wait(res))
+        def my_func(t: torch.Tensor, world_size: int) -> torch.Tensor:
+            sizes = [1] * world_size
+            t = t * 10
+            assert t.requires_grad
+            out = ft_c.all_to_all_single_autograd(
+                t,
+                sizes,
+                sizes,
+                group
+            )
+            out = out + 2
+            return out
 
-    def test_add_triggers_wait(self):
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        if compile:
+            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
+        else:
+            compiled = my_func
 
-        tensor = torch.ones([4])
-        res = ft_c.all_reduce(tensor, "sum", [0])
-        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
-        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+        out = compiled(t, self.world_size)
+        self.assertIsNotNone(out.grad_fn)
+        self.assertTrue(out.requires_grad)
+        loss = out.sum()
+        loss.backward()
+        self.assertIsNotNone(t.grad)
 
-        foo = res + torch.ones([4])
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
-        self.assertFalse(ft_c_impl._tensor_needs_wait(res))
-        self.assertFalse(isinstance(foo, ft_c.AsyncCollectiveTensor))
+    def test_all_to_all_single_inductor(self) -> None:
+        group = dist.group.WORLD.group_name
 
-    def test_view_does_not_trigger_wait(self):
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        t = torch.rand((self.world_size, 2), requires_grad=True)
 
-        tensor = torch.ones([4])
-        res = ft_c.all_reduce(tensor, "sum", [0])
-        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
-        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
+        def my_func(t: torch.Tensor, world_size: int) -> torch.Tensor:
+            sizes = [1] * world_size
+            t = t * 10
+            assert t.requires_grad
+            out = ft_c.all_to_all_single_autograd(
+                t,
+                sizes,
+                sizes,
+                group
+            )
+            out = out + 2
+            return out.sum()
 
-        foo = res.view([2, 2])
-        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
-        self.assertTrue(ft_c_impl._tensor_needs_wait(res))
-        self.assertTrue(ft_c_impl._tensor_needs_wait(foo))
-        self.assertTrue(isinstance(foo, ft_c.AsyncCollectiveTensor))
+        compiled = torch.compile(my_func, fullgraph=True)
 
-        foo.trigger_wait()
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        def run_with_backward():
+            out = compiled(t, self.world_size)
+            out.backward()
 
-        self.assertEqual(foo.tolist(), [[1.0, 1.0], [1.0, 1.0]])
+        res, codes = run_and_get_code(run_with_backward)
+        for code in codes:
+            FileCheck().check_count(
+                "_c10d_functional.all_to_all_single.default", 1, exactly=True
+            ).check_count(
+                "_c10d_functional.wait_tensor.default", 1, exactly=True
+            ).run(code)
 
-    def test_dead_wrapper_triggers_wait(self):
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
-
-        tensor = torch.ones([4])
-        res = ft_c.all_reduce(tensor, "sum", [0])
-
-        wr = weakref.ref(res)
-        self.assertTrue(wr() is not None)
-        res = None
-        self.assertTrue(wr() is None)
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
-
-    def test_dead_wrapper_plus_view(self):
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
-
-        tensor = torch.ones([4])
-        res = ft_c.all_reduce(tensor, "sum", [0])
-        res = res.view([2, 2])
-        self.assertEqual(1, ft_c_impl._outstanding_wait_count())
-        res = None
-        self.assertEqual(0, ft_c_impl._outstanding_wait_count())
+        self.assertIsNotNone(t.grad)
 
 
 if __name__ == "__main__":

@@ -187,7 +187,7 @@ class DynamicType : public SharedType {
   bool equals(const DynamicType& other) const;
 
   template <typename F>
-  bool compareArguments(const DynamicType& other, F&& f) const {
+  bool compareArguments(const DynamicType& other, const F& f) const {
     if (arguments_.elems.size() != other.arguments_.elems.size()) {
       return false;
     }

@@ -164,7 +164,7 @@ class EventList(list):
 
     @property
     def self_cpu_time_total(self):
-        return sum([event.self_cpu_time_total for event in self])
+        return sum(event.self_cpu_time_total for event in self)
 
     def table(
         self,
@@ -456,6 +456,7 @@ class FunctionEvent(FormattedTimesMixin):
         node_id=-1,
         device_type=DeviceType.CPU,
         device_index=0,
+        device_resource_id=None,
         is_legacy=False,
         flops=None,
         trace_name=None,
@@ -485,6 +486,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.sequence_nr: int = sequence_nr
         self.device_type: DeviceType = device_type
         self.device_index: int = device_index
+        self.device_resource_id: int = (
+            thread if device_resource_id is None else device_resource_id
+        )
         self.is_legacy: bool = is_legacy
         self.flops: Optional[int] = flops
 
@@ -522,7 +526,7 @@ class FunctionEvent(FormattedTimesMixin):
         if self.is_async or self.device_type != DeviceType.CPU:
             return 0
         return self.cpu_memory_usage - sum(
-            [child.cpu_memory_usage for child in self.cpu_children]
+            child.cpu_memory_usage for child in self.cpu_children
         )
 
     @property
@@ -530,7 +534,7 @@ class FunctionEvent(FormattedTimesMixin):
         if self.is_async or self.device_type != DeviceType.CPU:
             return 0
         return self.cuda_memory_usage - sum(
-            [child.cuda_memory_usage for child in self.cpu_children]
+            child.cuda_memory_usage for child in self.cpu_children
         )
 
     @property
@@ -538,7 +542,7 @@ class FunctionEvent(FormattedTimesMixin):
         if self.is_async or self.device_type != DeviceType.CPU:
             return 0
         return self.privateuse1_memory_usage - sum(
-            [child.privateuse1_memory_usage for child in self.cpu_children]
+            child.privateuse1_memory_usage for child in self.cpu_children
         )
 
     @property
@@ -546,7 +550,7 @@ class FunctionEvent(FormattedTimesMixin):
         if self.is_async or self.device_type != DeviceType.CPU:
             return 0
         return self.cpu_time_total - sum(
-            [child.cpu_time_total for child in self.cpu_children]
+            child.cpu_time_total for child in self.cpu_children
         )
 
     @property
@@ -572,7 +576,7 @@ class FunctionEvent(FormattedTimesMixin):
             return 0
         if self.device_type == DeviceType.CPU:
             return self.cuda_time_total - sum(
-                [child.cuda_time_total for child in self.cpu_children]
+                child.cuda_time_total for child in self.cpu_children
             )
         else:
             assert self.device_type == DeviceType.CUDA
@@ -591,10 +595,10 @@ class FunctionEvent(FormattedTimesMixin):
             return 0
         if self.device_type == DeviceType.CPU:
             return self.privateuse1_time_total - sum(
-                [child.privateuse1_time_total for child in self.cpu_children]
+                child.privateuse1_time_total for child in self.cpu_children
             )
         else:
-            assert self.device_type == DeviceType.CUDA
+            assert self.device_type == DeviceType.PrivateUse1
             return self.privateuse1_time_total
 
     @property
@@ -777,18 +781,19 @@ class MemRecordsAcc:
 
     def __init__(self, mem_records):
         self._mem_records = mem_records
-        self._start_uses: List[int] = []
+        self._start_nses: List[int] = []
         self._indices: List[int] = []
         if len(mem_records) > 0:
-            tmp = sorted([(r[0].start_us(), i) for i, r in enumerate(mem_records)])
-            self._start_uses, self._indices = zip(*tmp)  # type: ignore[assignment]
+            tmp = sorted([(r[0].start_ns(), i) for i, r in enumerate(mem_records)])
+            self._start_nses, self._indices = zip(*tmp)  # type: ignore[assignment]
 
     def in_interval(self, start_us, end_us):
         r"""
         Return all records in the given interval
+        To maintain backward compatibility, convert us to ns in function
         """
-        start_idx = bisect.bisect_left(self._start_uses, start_us)
-        end_idx = bisect.bisect_right(self._start_uses, end_us)
+        start_idx = bisect.bisect_left(self._start_nses, start_us * 1000)
+        end_idx = bisect.bisect_right(self._start_nses, end_us * 1000)
         for i in range(start_idx, end_idx):
             yield self._mem_records[self._indices[i]]
 
@@ -862,7 +867,10 @@ def _build_table(
         event.self_privateuse1_memory_usage > 0 for event in events
     )
     use_device = events[0].use_device
-    if not use_device and (has_privateuse1_mem or has_privateuse1_time):
+    # Running on PrivateUse1 device with profiler but not enable
+    # ProfilerActivity.PrivateUse1 can also catch privateuse1 memory usage.
+    # Here only need to check has_privateuse1_time if not use_device.
+    if not use_device and has_privateuse1_time:
         raise RuntimeError(
             "use_device is None, but there is private device performance data."
         )
@@ -881,11 +889,11 @@ def _build_table(
             with_flops=with_flops,
         )
 
-    name_column_width = max([len(evt.key) for evt in events]) + 4
+    name_column_width = max(len(evt.key) for evt in events) + 4
     if max_name_column_width is not None:
         name_column_width = min(name_column_width, max_name_column_width)
 
-    shapes_column_width = max([len(str(evt.input_shapes)) for evt in events]) + 4
+    shapes_column_width = max(len(str(evt.input_shapes)) for evt in events) + 4
     if max_shapes_column_width is not None:
         shapes_column_width = min(shapes_column_width, max_shapes_column_width)
 
@@ -900,7 +908,7 @@ def _build_table(
     has_stack = len(stacks) > 0
     if has_stack:
         src_column_width = (
-            max([max([len(entry) for entry in stack]) for stack in stacks]) + 4
+            max(max(len(entry) for entry in stack) for stack in stacks) + 4
         )
         if max_src_column_width is not None:
             src_column_width = min(src_column_width, max_src_column_width)
@@ -946,7 +954,7 @@ def _build_table(
                     "Self CUDA Mem",
                 ]
             )
-        if has_privateuse1_mem:
+        if use_device and has_privateuse1_mem:
             privateuse1 = use_device.upper()
             headers.extend(
                 [
@@ -1025,7 +1033,7 @@ def _build_table(
         result.append(s)
         result.append("\n")  # Yes, newline after the end as well
 
-    sum_self_cpu_time_total = sum([event.self_cpu_time_total for event in events])
+    sum_self_cpu_time_total = sum(event.self_cpu_time_total for event in events)
     sum_self_cuda_time_total = 0
     sum_self_privateuse1_time_total = 0
     for evt in events:
@@ -1127,7 +1135,7 @@ def _build_table(
                         _format_memory(evt.self_cuda_memory_usage),
                     ]
                 )
-            if has_privateuse1_mem:
+            if use_device and has_privateuse1_mem:
                 row_values.extend(
                     [
                         # PrivateUse1 Mem Total

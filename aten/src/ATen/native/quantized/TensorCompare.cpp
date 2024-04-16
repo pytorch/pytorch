@@ -50,9 +50,7 @@ std::tuple<Tensor, Tensor> sort_quantized_cpu_stable(
     c10::optional<bool> stable,
     int64_t dim,
     bool descending) {
-  Tensor sort_int;
-  Tensor sort_indicies;
-  std::tie(sort_int, sort_indicies) =
+  auto [sort_int, sort_indicies] =
       at::sort(self.int_repr(), stable, dim, descending);
   return std::forward_as_tuple(
       at::_make_per_tensor_quantized_tensor(

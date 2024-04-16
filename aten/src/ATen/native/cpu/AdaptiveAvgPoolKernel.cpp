@@ -22,7 +22,7 @@ void cpu_adaptive_avg_pool(
   auto input = input_.contiguous();
   auto output = output_.contiguous();
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t ndim = input.ndimension();
@@ -36,7 +36,7 @@ void cpu_adaptive_avg_pool(
   // parallel on dim of N, C
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
-      scalar_t* input_ptr = input_data + c * input_height * input_width;
+      const scalar_t* input_ptr = input_data + c * input_height * input_width;
       scalar_t* output_ptr = output_data + c * output_height * output_width;
 
       for (const auto oh : c10::irange(output_height)) {
@@ -77,7 +77,7 @@ cpu_adaptive_avg_pool_channels_last(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
@@ -107,7 +107,7 @@ cpu_adaptive_avg_pool_channels_last(
       scalar_t* out = output_data + i * channels;
       int64_t size = channels;
 
-      // Note: For oridinary usage scenario, each out lane should
+      // Note: For ordinary usage scenario, each out lane should
       //   fit in L1 cache; otherwise consider block dim C.
       // Pass I: zero the out lane
       int64_t d1 = 0;
@@ -121,7 +121,7 @@ cpu_adaptive_avg_pool_channels_last(
       // Pass II: compute local sum
       for (const auto ih : c10::irange(ih0, ih1)) {
         for (const auto iw : c10::irange(iw0, iw1)) {
-          scalar_t* in = input_data + n * input_height * input_width * channels +
+          const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
           int64_t d2 = 0;
@@ -164,7 +164,7 @@ cpu_adaptive_avg_pool_channels_last(
   auto input = input_.contiguous(memory_format);
   auto output = output_.contiguous(memory_format);
 
-  auto input_data = input.data_ptr<scalar_t>();
+  auto input_data = input.const_data_ptr<scalar_t>();
   auto output_data = output.data_ptr<scalar_t>();
 
   int64_t nbatch = input.size(0);
@@ -212,7 +212,7 @@ cpu_adaptive_avg_pool_channels_last(
       // Pass II: compute local sum
       for (const auto ih : c10::irange(ih0, ih1)) {
         for (const auto iw : c10::irange(iw0, iw1)) {
-          scalar_t* in = input_data + n * input_height * input_width * channels +
+          const scalar_t* in = input_data + n * input_height * input_width * channels +
               ih * input_width * channels + iw * channels;
 
           int64_t d2 = 0;
@@ -261,7 +261,7 @@ void cpu_adaptive_avg_pool_backward(
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   int64_t ndim = grad_output.ndimension();
@@ -276,7 +276,7 @@ void cpu_adaptive_avg_pool_backward(
   at::parallel_for(0, channels, 0, [&](int64_t begin, int64_t end) {
     for (const auto c : c10::irange(begin, end)) {
       scalar_t* grad_input_ptr = grad_input_data + c * input_height * input_width;
-      scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
+      const scalar_t* grad_output_ptr = grad_output_data + c * output_height * output_width;
 
       for (const auto oh : c10::irange(output_height)) {
         int64_t ih0 = start_index(oh, output_height, input_height);
@@ -313,7 +313,7 @@ void cpu_adaptive_avg_pool_backward_channels_last(
   auto grad_output = grad_output_.contiguous(memory_format);
 
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
-  auto grad_output_data = grad_output.data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
 
   int64_t nbatch = grad_input.size(0);
   int64_t channels = grad_input.size(1);
@@ -327,7 +327,7 @@ void cpu_adaptive_avg_pool_backward_channels_last(
   at::parallel_for(0, nbatch, 0, [&](int64_t begin, int64_t end) {
     for (const auto n : c10::irange(begin, end)) {
       scalar_t* grad_input_ptr = grad_input_data + n * input_height * input_width * channels;
-      scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
+      const scalar_t* grad_output_ptr = grad_output_data + n * output_height * output_width * channels;
 
       for (const auto oh : c10::irange(output_height)) {
         int64_t ih0 = start_index(oh, output_height, input_height);
@@ -339,7 +339,7 @@ void cpu_adaptive_avg_pool_backward_channels_last(
           int64_t iw1 = end_index(ow, output_width, input_width);
           int64_t kw = iw1 - iw0;
 
-          scalar_t* gout = grad_output_ptr + oh * output_width * channels + ow * channels;
+          const scalar_t* gout = grad_output_ptr + oh * output_width * channels + ow * channels;
           int64_t size = channels;
           for (const auto ih : c10::irange(ih0, ih1)) {
             for (const auto iw : c10::irange(iw0, iw1)) {

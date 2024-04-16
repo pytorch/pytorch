@@ -71,11 +71,11 @@ TORCH_CUDA_CPP_API cudaDeviceProp* getCurrentDeviceProperties();
 
 TORCH_CUDA_CPP_API int warp_size();
 
-TORCH_CUDA_CPP_API cudaDeviceProp* getDeviceProperties(int64_t device);
+TORCH_CUDA_CPP_API cudaDeviceProp* getDeviceProperties(c10::DeviceIndex device);
 
 TORCH_CUDA_CPP_API bool canDeviceAccessPeer(
-    int64_t device,
-    int64_t peer_device);
+    c10::DeviceIndex device,
+    c10::DeviceIndex peer_device);
 
 TORCH_CUDA_CPP_API c10::Allocator* getCUDADeviceAllocator();
 

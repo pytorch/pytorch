@@ -297,7 +297,7 @@ __device__ __inline__ void vectorized_layer_norm_kernel_impl(
 
 //to avoid windows SFINAE errors
 template <typename T, typename T_ACC>
-__global__ __inline__ void vectorized_layer_norm_kernel(
+__global__ void vectorized_layer_norm_kernel(
   const int N,
   T_ACC eps,
   const  T* __restrict__ X,
@@ -393,7 +393,7 @@ __global__ void layer_norm_grad_input_kernel(
 
 // This implementation gets called when input buffers (dY, X, gamma and dX) are aligned
 // to vec_size * sizeof(T). Compared to the unvectorized implementation, it is about 10%
-// faster measuread at PT operator level, with cases seeing a 2X speedup (where N >> M).
+// faster measured at PT operator level, with cases seeing a 2X speedup (where N >> M).
 // There are no noticeable regressions on the rest of the sizes.
 
 template<typename T, typename T_ACC>
@@ -1149,12 +1149,12 @@ void LayerNormBackwardKernelImplInternal(
   file a support request to support bigger batches");
   TORCH_CHECK(N <= std::numeric_limits<int>::max(), "Normalized shape should have less than INT_MAX elements, \
   file a support request to support bigger normalized shapes");
-  const T* dY_data = dY.template data_ptr<T>();
-  const T* X_data = X.template data_ptr<T>();
-  const T_ACC* mean_data = mean.template data_ptr<T_ACC>();
-  const T_ACC* rstd_data = rstd.template data_ptr<T_ACC>();
+  const T* dY_data = dY.template const_data_ptr<T>();
+  const T* X_data = X.template const_data_ptr<T>();
+  const T_ACC* mean_data = mean.template const_data_ptr<T_ACC>();
+  const T_ACC* rstd_data = rstd.template const_data_ptr<T_ACC>();
   const T* gamma_data =
-      gamma.defined() ? gamma.template data_ptr<T>() : nullptr;
+      gamma.defined() ? gamma.template const_data_ptr<T>() : nullptr;
   T* dX_data = dX->defined() ? dX->template data_ptr<T>() : nullptr;
   cudaStream_t cuda_stream = at::cuda::getCurrentCUDAStream();
   const int warp_size = at::cuda::warp_size();

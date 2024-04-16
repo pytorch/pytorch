@@ -54,6 +54,10 @@ densenet121,pass,0
 
 
 
+detectron2_fcos_r_50_fpn,pass,23
+
+
+
 dlrm,pass,0
 
 
@@ -90,6 +94,14 @@ hf_Bart,pass,0
 
 
 
+hf_Bert,pass,0
+
+
+
+hf_Bert_large,pass,0
+
+
+
 hf_DistilBert,pass,0
 
 
@@ -114,10 +126,6 @@ hf_T5_large,pass_due_to_skip,0
 
 
 
-hf_clip,eager_fail_to_run,0
-
-
-
 hf_distil_whisper,pass,0
 
 
@@ -127,6 +135,10 @@ lennard_jones,pass,0
 
 
 llama,pass,0
+
+
+
+maml,pass_due_to_skip,0
 
 
 
@@ -142,7 +154,7 @@ mobilenet_v2,pass,0
 
 
 
-mobilenet_v2_quantized_qat,eager_fail_to_run,0
+mobilenet_v2_quantized_qat,pass,2
 
 
 
@@ -151,6 +163,10 @@ mobilenet_v3_large,pass,0
 
 
 moco,model_fail_to_load,0
+
+
+
+moondream,pass,0
 
 
 
@@ -178,6 +194,10 @@ pyhpc_isoneutral_mixing,pass,0
 
 
 
+pyhpc_turbulent_kinetic_energy,pass,0
+
+
+
 pytorch_CycleGAN_and_pix2pix,pass,0
 
 
@@ -202,7 +222,7 @@ resnet50,pass,0
 
 
 
-resnet50_quantized_qat,eager_fail_to_run,0
+resnet50_quantized_qat,pass,2
 
 
 

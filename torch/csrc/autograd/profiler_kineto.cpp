@@ -22,9 +22,6 @@
 
 #include <ATen/Context.h>
 
-#include <deque>
-#include <limits>
-#include <sstream>
 #include <stdexcept>
 #include <utility>
 
@@ -53,11 +50,11 @@ namespace autograd {
 namespace profiler {
 
 namespace {
-inline int64_t getTimeUs() {
+inline int64_t getTimeNs() {
 #ifdef USE_KINETO
   return libkineto::timeSinceEpoch(std::chrono::system_clock::now());
 #else
-  return c10::getTime() / 1000;
+  return c10::getTime();
 #endif // USE_KINETO
 }
 
@@ -270,6 +267,8 @@ struct AddGenericMetadata : public MetadataBase {
       addMetadata("Fwd thread id", std::to_string(op_event.forward_tid_));
       addMetadata("Sequence number", std::to_string(op_event.sequence_number_));
     }
+    addMetadata(
+        "Record function id", std::to_string(op_event.record_function_id_));
   }
 
   void operator()(ExtraFields<EventType::Backend>& backend_event) {
@@ -308,7 +307,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
       const ProfilerConfig& config,
       std::set<torch::profiler::impl::ActivityType> activities)
       : ProfilerStateBase(config),
-        start_time_(getTimeUs()),
+        start_time_(getTimeNs()),
         record_queue_(config, std::move(activities)) {}
   ~KinetoThreadLocalState() override = default;
 
@@ -375,7 +374,7 @@ struct KinetoThreadLocalState : public ProfilerStateBase {
 
   std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>
   finalizeTrace() {
-    auto end_time = getTimeUs();
+    auto end_time = getTimeNs();
     record_queue_.stop();
 
     std::lock_guard<std::mutex> guard(state_mutex_);
@@ -556,7 +555,9 @@ void prepareProfiler(
           config.state == ProfilerState::KINETO_PRIVATEUSE1_FALLBACK,
       "Supported only in Kineto profiler");
   torch::profiler::impl::kineto::prepareTrace(
-      /*cpuOnly=*/!(at::hasCUDA() || at::hasXPU() || at::hasMTIA()),
+      /*cpuOnly=*/!(
+          at::hasCUDA() || at::hasXPU() || at::hasMTIA() ||
+          c10::get_privateuse1_backend() != "privateuseone"),
       activities,
       config.experimental_config);
 
@@ -773,8 +774,8 @@ const c10::ArrayRef<std::string> KinetoEvent::moduleHierarchy() const {
   return {};
 }
 
-uint64_t KinetoEvent::durationUs() const {
-  return (result_->endTimeNS() - result_->start_time_ns_) / 1000;
+uint64_t KinetoEvent::durationNs() const {
+  return (result_->endTimeNS() - result_->start_time_ns_);
 }
 
 int64_t KinetoEvent::debugHandle() const {
@@ -784,16 +785,16 @@ int64_t KinetoEvent::debugHandle() const {
       [](const auto&) -> int64_t { return -1; }));
 }
 
-uint8_t KinetoEvent::deviceIndex() const {
+int KinetoEvent::deviceIndex() const {
   return result_->visit(c10::overloaded(
       [](const ExtraFields<EventType::Allocation>& i) {
-        return static_cast<uint8_t>(i.device_index_);
+        return static_cast<int>(i.device_index_);
       },
       [](const ExtraFields<EventType::OutOfMemory>& i) {
-        return static_cast<uint8_t>(i.device_index_);
+        return static_cast<int>(i.device_index_);
       },
       [&](const auto&) {
-        return static_cast<uint8_t>(result_->kineto_info_.device);
+        return static_cast<int>(result_->kineto_info_.device);
       }));
 }
 
@@ -855,7 +856,7 @@ FORWARD_FROM_RESULT(endThreadId, endTID())
 FORWARD_FROM_RESULT(activityType, kinetoType())
 FORWARD_FROM_RESULT(name, name())
 FORWARD_FROM_RESULT(deviceType, deviceType())
-FORWARD_FROM_RESULT(startUs, start_time_ns_ / 1000)
+FORWARD_FROM_RESULT(startNs, start_time_ns_)
 FORWARD_FROM_RESULT(correlationId, correlationID())
 FORWARD_FROM_RESULT(deviceResourceId, kineto_info_.resource)
 #undef FORWARD_FROM_RESULT
@@ -907,7 +908,7 @@ ProfilerResult::ProfilerResult(
     std::unique_ptr<torch::profiler::impl::kineto::ActivityTraceWrapper>&&
         trace,
     std::vector<experimental_event_t>&& event_tree)
-    : trace_start_us_(start_time),
+    : trace_start_ns_(start_time),
       events_(std::move(events)),
       trace_(std::move(trace)),
       event_tree_(std::move(event_tree)) {}

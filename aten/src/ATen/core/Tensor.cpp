@@ -72,9 +72,9 @@ void TensorBase::enforce_invariants() {
 
 void TensorBase::print() const {
   if (defined()) {
-    std::cerr << "[" << toString() << " " << sizes() << "]" << std::endl;
+    std::cerr << "[" << toString() << " " << sizes() << "]" << '\n';
   } else {
-    std::cerr << "[UndefinedTensor]" << std::endl;
+    std::cerr << "[UndefinedTensor]" << '\n';
   }
 }
 
