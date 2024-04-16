@@ -136,7 +136,7 @@ class OpStrategy(StrategyType):
         """
         Returns the max number of shards across all placement strategies
         """
-        return max([strategy.output_spec.num_shards for strategy in self.strategies])
+        return max(strategy.output_spec.num_shards for strategy in self.strategies)
 
     @property
     def output_mesh_shape(self):
