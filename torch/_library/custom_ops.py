@@ -27,6 +27,7 @@ def custom_op(
     *,
     mutates_args: Iterable[str],
     device_types: device_types_t = None,
+    manual_schema: Optional[str] = None,
 ) -> Callable:
     """Wraps a function into custom operator.
 
@@ -51,6 +52,11 @@ def custom_op(
             is valid for. If no device type is provided, then the function
             is used as the default implementation for all device types.
             Examples: "cpu", "cuda".
+        manual_schema (None | str): A schema string for the operator. If not
+            provided, we'll infer a schema for the operator from its type
+            annotations. We recommend letting us infer a schema unless you
+            have a specific reason not to (e.g. you're code-generating a schema).
+            Example: "(Tensor x, int y) -> (Tensor, Tensor)".
 
     Examples::
         >>> import torch
@@ -95,9 +101,27 @@ def custom_op(
     def inner(fn):
         import torch
 
-        schema = torch._custom_op.impl.infer_schema(fn, mutates_args)
+        if manual_schema is None:
+            import torch._custom_op.impl
+            schema = torch._custom_op.impl.infer_schema(fn, mutates_args)
+        else:
+            schema = manual_schema
         namespace, opname = name.split("::")
         result = CustomOpDef(namespace, opname, schema, fn)
+        if manual_schema is not None:
+            # Check that manual_schema's alias annotations match those of `mutates_args`.
+            expected = set()
+            for arg in result._opoverload._schema.arguments:
+                if arg.alias_info is not None and arg.alias_info.is_write:
+                    expected.add(arg.name)
+            if expected != set(mutates_args):
+                raise ValueError(
+                    f"Attempted to create a custom op with `mutates_args={mutates_args}` "
+                    f"and `manual_schema={manual_schema}. The manual schema suggests "
+                    f"that the op mutates {expected}, which is different from what "
+                    f"was provided to us in `mutates_args`. Please make these "
+                    f"consistent."
+                )
         result.register_impl(device_types)(fn)
         return result
 
