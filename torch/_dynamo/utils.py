@@ -92,12 +92,13 @@ import importlib
 import torch
 import torch._functorch.config
 import torch.fx.experimental.symbolic_shapes
+import torch.utils._pytree as pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
-from torch.utils._pytree import tree_map_only
 from torch.utils._triton import has_triton, has_triton_package
 
 
@@ -484,6 +485,19 @@ def istype(obj, allowed_types):
     return type(obj) is allowed_types
 
 
+if sys.version_info >= (3, 12):
+    # Some typing classes moved to C in 3.12,
+    # which no longer have the _Final mixin.
+    _builtin_final_typing_classes = (
+        typing.ParamSpecArgs,
+        typing.ParamSpecKwargs,
+        typing.ParamSpec,
+        typing.TypeVar,
+        typing.TypeVarTuple,
+        typing.TypeAliasType,
+    )
+
+
 def is_typing(value):
     # _Final catches most of typing classes:
     #   - Any
@@ -493,6 +507,8 @@ def is_typing(value):
     #
     # NB: we intentionally ignore classes that inherit from Generic, since they
     # can be used as both TypingVariable as well as UserDefinedClassVariable.
+    if sys.version_info >= (3, 12) and isinstance(value, _builtin_final_typing_classes):
+        return True
     return isinstance(value, typing._Final) or value is typing.Generic  # type: ignore[attr-defined]
 
 
@@ -703,7 +719,9 @@ class CleanupHook:
     name: str
 
     def __call__(self, *args):
-        CleanupManager.count -= 1
+        # Make sure we're not shutting down
+        if CleanupManager is not None:
+            CleanupManager.count -= 1
         del self.scope[self.name]
 
     @staticmethod
@@ -756,6 +774,29 @@ def clone_input(x, *, dtype=None):
         if x.device.type == "xla":
             # Access data_ptr() for a xla tensor will cause crash
             return torch_clone(x)
+
+        # Handle sparse storage (no stride).
+        if x.layout is torch.sparse_coo:
+            return torch.sparse_coo_tensor(
+                torch_clone(x._indices()),
+                torch_clone(x._values()),
+                x.shape,
+                is_coalesced=x.is_coalesced(),
+            )
+        elif is_sparse_compressed(x):
+            if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                compressed_indices = x.crow_indices()
+                plain_indices = x.col_indices()
+            else:
+                compressed_indices = x.ccol_indices()
+                plain_indices = x.row_indices()
+            return torch.sparse_compressed_tensor(
+                torch_clone(compressed_indices),
+                torch_clone(plain_indices),
+                torch_clone(x.values()),
+                x.shape,
+                layout=x.layout,
+            )
 
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
@@ -1263,6 +1304,22 @@ def same(
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
+    elif type(ref).__name__ == "QuestionAnsweringModelOutput":
+        # This skips checking accuracy for start_logits/end_logits.
+        # Tentatively, start_logits/end_logits appear to be very prone to
+        # inaccuracies and is somewhat subsumed by checking the loss.
+        return same(
+            ref.loss,
+            res.loss,
+            fp64_ref.loss,
+            cos_similarity,
+            tol,
+            equal_nan,
+            exact_dtype,
+            relax_numpy_equality,
+            ignore_non_fp,
+            log_error=log_error,
+        )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
         assert set(ref.keys()) == set(
@@ -1537,7 +1594,7 @@ class CompileProfiler:
 
         def recompilation_report():
             if len(gf):
-                max_recompiles = max([num_recompiles(code) for code in gf])
+                max_recompiles = max(num_recompiles(code) for code in gf)
                 recomp_table = tabulate(
                     summarized_gf,
                     headers=["Function", "Recompiles", "Recompile Reasons"],
@@ -1747,7 +1804,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:
-        _ = tree_map_only(
+        _ = pytree.tree_map_only(
             torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
         )
     return ret_val
@@ -1856,7 +1913,7 @@ def get_real_value(node, tracer):
 
 
 def assert_no_fake_params_or_buffers(gm):
-    from torch._subclasses.fake_tensor import FakeTensorConfig
+    from torch._subclasses.fake_tensor import FakeTensorConfig, is_fake
 
     def stack_or_hint(t):
         if FakeTensorConfig.debug:
@@ -1867,12 +1924,12 @@ def assert_no_fake_params_or_buffers(gm):
             return "Enable TORCH_FAKE_TENSOR_DEBUG=1 to get creation stack traces on fake tensors."
 
     for name, buffer in gm.named_buffers():
-        assert not isinstance(
-            buffer, torch._subclasses.FakeTensor
+        assert not is_fake(
+            buffer
         ), f"Unexpected fake buffer {name} {stack_or_hint(buffer)}"
     for name, param in gm.named_parameters():
-        assert not isinstance(
-            param, torch._subclasses.FakeTensor
+        assert not is_fake(
+            param
         ), f"Unexpected fake param {name} {stack_or_hint(param)}"
 
 
@@ -2592,3 +2649,53 @@ def nn_module_proxy(mod):
     proxy = mod.__class__.__new__(mod.__class__)
     proxy.__dict__ = mod.__dict__
     return proxy
+
+
+class GmWrapper(torch.nn.Module):
+    def __init__(self, gm, spec):
+        super().__init__()
+        self.gm = gm
+        self.spec = spec
+
+    def forward(self, *args):
+        args: List[Any] = list(args)
+        return self.gm(*pytree.tree_unflatten(args, self.spec))
+
+
+def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
+    """
+    Mutate inputs so that they are flat and wrap gm such that it
+    accepts those inputs.  This is needed for graphs that take
+    bumpy inputs.
+    """
+    inputs, spec = pytree.tree_flatten(inputs)
+    compiled_fn = compile_gm(GmWrapper(gm, spec), inputs)
+
+    idx_to_steal = [
+        i
+        for i, node in enumerate(gm.graph.nodes)
+        if node.op == "placeholder" and node.meta.get("steal_arg", False)
+    ]
+
+    def wrapper(*args):
+        # note this doesn't check the spec, assuming it is the same
+        flat_args = pytree.arg_tree_leaves(*args)
+
+        # flat_args is a new list, so we need to clear references from the old list
+        for i in idx_to_steal:
+            args[i].clear()
+
+        # this call is boxed to avoid increasing refcount until we reach aot_module_simplified forward
+        return compiled_fn(flat_args)
+
+    return wrapper
+
+
+def get_locals_to_steal(maybe_gm):
+    if not isinstance(maybe_gm, torch.fx.GraphModule) or not hasattr(maybe_gm, "meta"):
+        return []
+    return maybe_gm.meta.get("locals_to_steal", [])
+
+
+def set_locals_to_steal(gm, locals_to_steal):
+    gm.meta["locals_to_steal"] = locals_to_steal

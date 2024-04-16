@@ -31,7 +31,6 @@ class InteropTests(torch._dynamo.test_case.TestCase):
         trace_fn = torch.jit.trace(fn, [torch.zeros(10), torch.zeros(10)])
         self._common(lambda a, b: trace_fn(a, b) + 1)
 
-    @torch._dynamo.config.patch(capture_func_transforms=True)
     def test_vmap_in_graph(self):
         from functools import wraps
 

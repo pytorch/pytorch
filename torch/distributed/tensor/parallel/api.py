@@ -1,5 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from typing import Dict, Union
+from fnmatch import fnmatch
 
 import torch
 import torch.distributed._tensor.random as random
@@ -88,21 +89,29 @@ def parallelize_module(  # type: ignore[return]
         return parallelize_plan._apply(module, device_mesh)
     elif isinstance(parallelize_plan, dict):
         for module_path, parallelize_style in parallelize_plan.items():
-            sub_module = module.get_submodule(module_path)
-            parent_module = module
-            if "." in module_path:
-                parent_module_path = ".".join(module_path.split(".")[:-1])
-                parent_module = module.get_submodule(parent_module_path)
-                module_path = module_path.split(".")[-1]
-            parent_module.register_module(  # type: ignore[call-arg] # pyre-ignore[20]
-                module_path,
-                parallelize_module(  # type: ignore[arg-type]
-                    sub_module, device_mesh, parallelize_style  # type: ignore[arg-type] # pyre-ignore[6]
-                ),
-            )
+            path_splits = module_path.split(".")
+            if len(path_splits) == 0:
+                raise ValueError(
+                    "Expect module path to be non-empty, but got empty string!"
+                )
+            while path_splits:
+                atom = path_splits.pop(0)
+                matched_children = filter(
+                    # `t[0]` is child name
+                    lambda t: fnmatch(t[0], atom), module.named_children()
+                )
+                # apply the plan to all matched submodules
+                for _, submodule in matched_children:
+                    if path_splits:
+                        # we haven't reached the leaf, apply in dict style
+                        leaf_path = ".".join(path_splits)   # rest of the path after `atom`
+                        parallelize_module(submodule, device_mesh, {leaf_path: parallelize_style})
+                    else:
+                        # otherwise, directly apply style to this submodule
+                        parallelize_module(submodule, device_mesh, parallelize_style)
         return module
     else:
-        raise RuntimeError(  # pyre-ignore[7]
+        raise TypeError(  # pyre-ignore[7]
             "Expect Union[ParallelStyle, Dict[str, ParallelStyle]] for"
             f" parallelize_plan, {type(parallelize_plan)} found!"
         )
