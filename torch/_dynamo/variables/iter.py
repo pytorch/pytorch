@@ -178,6 +178,10 @@ class ItertoolsVariable(VariableTracker):
             return variables.CountIteratorVariable(*args, mutable_local=MutableLocal())
         elif self.value is itertools.cycle:
             return variables.CycleIteratorVariable(*args, mutable_local=MutableLocal())
+        elif self.value is itertools.dropwhile:
+            return variables.UserFunctionVariable(polyfill.dropwhile).call_function(
+                tx, args, kwargs
+            )
         else:
             return super().call_function(tx, args, kwargs)
 

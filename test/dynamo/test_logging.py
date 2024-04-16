@@ -85,7 +85,7 @@ def single_record_test(**kwargs):
 class LoggingTests(LoggingTestCase):
     test_bytecode = multi_record_test(2, bytecode=True)
     test_output_code = multi_record_test(2, output_code=True)
-    test_aot_graphs = multi_record_test(2, aot_graphs=True)
+    test_aot_graphs = multi_record_test(3, aot_graphs=True)
 
     @requires_cuda
     @make_logging_test(schedule=True)
