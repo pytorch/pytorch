@@ -1,5 +1,4 @@
 #include <ATen/ATen.h>
-#include <ATen/xpu/CachingHostAllocator.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <c10/util/CallOnce.h>
