@@ -47,9 +47,6 @@ void* initTopoInfo(Topology topology, NvlMesh nvlMesh, size_t rank);
 // Topology Detection
 ////////////////////////////////////////////////////////////////////////////////
 
-// TODO: find a better way to determine this
-static constexpr size_t kMaxNvLinks = 20;
-
 static std::ostream& operator<<(std::ostream& os, const NvlMesh& nvlMesh) {
   std::ostringstream oss;
   for (size_t i = 0; i < kMaxDevices; ++i) {
@@ -97,6 +94,9 @@ static NvlMesh getNvlMesh(const std::vector<std::string>& rankToBusId) {
         driverApi->nvmlDeviceGetHandleByPciBusId_v2_(
             rankToBusId[r].c_str(), &devices[r]) == NVML_SUCCESS);
   }
+
+  // TODO: find a better way to determine this
+  constexpr size_t kMaxNvLinks = 20;
 
   // For each device, loop over devices connected to it via NVLink
   for (size_t idx = 0; idx < worldSize; ++idx) {
