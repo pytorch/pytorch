@@ -674,22 +674,22 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
         memory_format = None
 
     return TensorMetadata(
-        dtype=t.dtype,
-        shape=t.shape,
-        stride=t.stride() if t.layout == torch.strided else (),
-        device=t.device,
-        layout=t.layout,
-        memory_format=memory_format,
-        storage_offset=t.storage_offset(),
-        requires_grad=t.requires_grad,
-        is_quantized=t.is_quantized,
-        is_conj=t.is_conj(),
-        is_neg=t.is_neg(),
-        is_inference=t.is_inference(),
-        is_sparse=t.is_sparse,
-        is_coalesced=t.is_coalesced() if t.is_sparse else None,
-        dense_dim=t.dense_dim() if t.is_sparse else None,
-        sparse_dim=t.sparse_dim() if t.is_sparse else None,
+        t.dtype,
+        t.shape,
+        t.stride() if t.layout == torch.strided else (),
+        t.device,
+        t.layout,
+        memory_format,
+        t.storage_offset(),
+        t.requires_grad,
+        t.is_quantized,
+        t.is_conj(),
+        t.is_neg(),
+        t.is_inference(),
+        t.is_sparse,
+        t.is_coalesced() if t.is_sparse else None,
+        t.dense_dim() if t.is_sparse else None,
+        t.sparse_dim() if t.is_sparse else None,
     )
 
 
