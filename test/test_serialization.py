@@ -981,7 +981,10 @@ class TestSerialization(TestCase, SerializationMixin):
             lr_scheduler_state = torch.load(f)
 
         self.assertEqual(lr_scheduler_state['base_lrs'], lr_scheduler.base_lrs)
-        self.assertFalse(hasattr(lr_scheduler_state['anneal_func'], '__self__'))  # check method is not bound
+        if 'anneal_func' in lr_scheduler_state:
+            self.assertFalse(hasattr(lr_scheduler_state['anneal_func'], '__self__'))  # check method is not bound
+        else:
+            self.assertTrue('_anneal_func_type' in lr_scheduler_state)
         self.assertTrue(size < 1024 * 1024)  # Must be less than 1MB
 
     def test_serialization_python_attr(self):
