@@ -528,11 +528,15 @@ class TestExecutionTrace(TestCase):
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
 
+        # This line causes background threads to be spawned that persist even
+        # after the test exits! Need to investigate how/why
         test_module = torch.compile(ConvAndRelu())
 
         x = torch.rand(128, 4096)
         et = ExecutionTraceObserver().register_callback(fp.name)
         et.start()
+        # This line causes background threads to be spawned that persist even
+        # after the test exits! Need to investigate how/why
         test_module.forward(x)
         et.stop()
 
@@ -842,6 +846,14 @@ class TestProfiler(TestCase):
                 if end_under_profiler == context:
                     t.join(timeout=timeout)
 
+        # Make test more resilient by first checking what threads are running before the test runs itself
+        # Ideally we shouldn't have to do this as other tests should clean up appropriately
+        with torch.profiler.profile(with_stack=True) as prof:
+            pass
+        roots = prof.profiler.kineto_results.experimental_event_tree()
+        nodes = [node for node in _utils.traverse_dfs(roots) if isinstance(node.extra_fields, _ExtraFields_PyCall)]
+        base_tid_counts = collections.Counter([node.start_tid for node in nodes])
+
         try:
             add_threads(False)
             with torch.profiler.profile(with_stack=True) as prof:
@@ -883,18 +895,19 @@ class TestProfiler(TestCase):
         ]
         tid_counts = collections.Counter([node.start_tid for node in nodes])
 
+        diff_tid_counts = tid_counts - base_tid_counts
         prior_threads = sum(
             not start_under_profiler for start_under_profiler, _ in thread_spec
         )
         expected_threads = prior_threads + 1
         self.assertEqual(
-            len(tid_counts), expected_threads, f"{expected_threads}, {tid_counts}"
+            len(diff_tid_counts), expected_threads, f"{expected_threads}, {tid_counts}"
         )
         self.assertEqual(len(nodes), sum(tid_counts.values()))
 
         # Profiler uses uint64_t max as a placeholder until TID can be determined.
         no_tid = 2**64 - 1
-        self.assertFalse(no_tid in tid_counts)
+        self.assertFalse(no_tid in diff_tid_counts)
 
         worker_threads = prior_threads + (1 if work_in_main_thread else 0)
 
