@@ -54,6 +54,7 @@ from .common import (
     DTYPE_TO_COMPUTATION_DTYPE,
     ExprPrinter,
     IndentedBuffer,
+    IndirectAssertLine,
     Kernel,
     KernelArgs,
     OpOverrides,
@@ -3185,11 +3186,13 @@ class CppKernelDispatcher(CppKernel):
                 ]
             )
 
-    def replace_load_store_vars(self, kernel, dim: List[int]):
+    def replace_vars(self, kernel, dim: List[int]):
         def replace_loop_vars(lines, var, new_var):
             pattern = re.compile(f"(?<!{var}_){var}")
             for i, line in enumerate(lines):
-                if hasattr(line, "line"):
+                if isinstance(line, IndirectAssertLine):
+                    continue
+                if isinstance(line, DeferredLine):
                     line = line.line
                 modified_line = pattern.sub(new_var, line)
                 lines[i] = modified_line
@@ -3200,6 +3203,9 @@ class CppKernelDispatcher(CppKernel):
             )
             replace_loop_vars(
                 kernel.stores._lines, self.itervars[i], self.itervars_tail[i]
+            )
+            replace_loop_vars(
+                kernel.compute._lines, self.itervars[i], self.itervars_tail[i]
             )
 
     def gen_kernel(self, kernel, code):
@@ -3223,9 +3229,9 @@ class CppKernelDispatcher(CppKernel):
                 code.splice(self.scalar_loop)
                 stack.enter_context(code.indent())
                 if len(self.tiling_ranges) == 1:
-                    self.replace_load_store_vars(self.scalar_kernel, [0])
+                    self.replace_vars(self.scalar_kernel, [0])
                 elif len(self.tiling_ranges) == 2:
-                    self.replace_load_store_vars(self.scalar_kernel, [0, 1])
+                    self.replace_vars(self.scalar_kernel, [0, 1])
                 self.gen_kernel(self.scalar_kernel, code)
 
     def codegen_vec_kernel(self, code):
@@ -3236,7 +3242,7 @@ class CppKernelDispatcher(CppKernel):
                 code.splice(self.vec_loop)
                 stack.enter_context(code.indent())
                 if len(self.tiling_ranges) == 2:
-                    self.replace_load_store_vars(self.vec_kernel, [1])
+                    self.replace_vars(self.vec_kernel, [1])
                 self.gen_kernel(self.vec_kernel, code)
 
     def codegen_tile2d_kernel(self, code):
@@ -4344,8 +4350,7 @@ class LoopNestWithSplit:
         When the loop is split at the top level, the max depth is 1.
         """
         max_depth = 0
-        assert self.root is not None
-        loop = self.root
+        loop: Optional[LoopLevel] = self.root
         is_reduction = loop.is_reduction if loop else False
         while loop and loop.is_reduction == is_reduction:
             max_depth += 1
