@@ -1140,7 +1140,7 @@ class VecNEON(VecISA):
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
-        return "asimd". # detects the presence of advanced SIMD on armv8-a kernels
+        return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
