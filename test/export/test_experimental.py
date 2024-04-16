@@ -53,7 +53,7 @@ def forward(self, b_submodule_buffer1, x):
         )
 
         self.assertExpectedInline(
-            str(ep.graph_module.strict_graph_1.code.strip()),
+            str(ep.graph_module.strict_graph_0.code.strip()),
             """\
 def forward(self, arg0_1, arg1_1):
     add = torch.ops.aten.add.Tensor(arg0_1, 2)

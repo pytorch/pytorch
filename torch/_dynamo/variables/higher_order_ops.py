@@ -971,9 +971,18 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         subgraph_example_value = [
             proxy.node.meta["example_value"] for proxy in body_r.as_proxy()
         ]
-        map_example_out = [
-            t.expand(sample_shape[0], *t.shape) for t in subgraph_example_value
-        ]
+        with tx.output.fake_mode:
+            map_example_out = [
+                torch.empty_strided(
+                    size=(sample_shape[0], *t.size()),
+                    stride=(0, *t.stride()),
+                    dtype=t.dtype,
+                    layout=t.layout,
+                    device=t.device,
+                    requires_grad=t.requires_grad,
+                )
+                for t in subgraph_example_value
+            ]
 
         body_nn_modules = dict(tx.output.nn_modules)
 
