@@ -721,6 +721,18 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
         model = LoggingLoggerModule()
         _ = torch.onnx.dynamo_export(model, input)
 
+    def test_export_with_hf_logging_logger(self):
+        logger = transformers.utils.logging.get_logger(__name__)
+
+        class HFLoggingLoggerModule(torch.nn.Module):
+            def forward(self, x):
+                logger.warning_once("abc")
+                return x + 1
+
+        input = torch.randn(2, 3)
+        model = HFLoggingLoggerModule()
+        _ = torch.onnx.dynamo_export(model, input)
+
     def test_checkpoint_cast(self):
         model_id = "openai/whisper-large-v3"
         feature_extractor = transformers.WhisperFeatureExtractor(feature_size=128)
