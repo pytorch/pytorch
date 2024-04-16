@@ -162,11 +162,7 @@ mobilenet_v3_large,pass,7
 
 
 
-moco,pass,17
-
-
-
-moondream,model_fail_to_load,0
+moco,pass,11
 
 
 

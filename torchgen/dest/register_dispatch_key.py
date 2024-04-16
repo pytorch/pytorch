@@ -127,11 +127,11 @@ def gen_maybe_create_proxy_helper(backend_index: BackendIndex) -> List[str]:
         if empty_strided_impl is None
         else [
             f"""
-c10::optional<Tensor> maybe_create_proxy(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
+std::optional<Tensor> maybe_create_proxy(const Tensor &out, IntArrayRef sizes, IntArrayRef strides, const TensorOptions &options) {{
   if (out.strides() != strides) {{
     return {empty_strided_impl}(sizes, strides, options);
   }}
-  return c10::nullopt;
+  return std::nullopt;
 }}
 """
         ]
@@ -260,7 +260,7 @@ class RegisterDispatchKey:
         if type == DeviceCheckType.NoCheck:
             return "  // No device check\n"
 
-        device_check = "c10::optional<Device> common_device = nullopt;\n"
+        device_check = "std::optional<Device> common_device = std::nullopt;\n"
         device_check += "(void)common_device; // Suppress unused variable warning\n"
         for arg in args:
             # Only tensor like arguments are eligible
@@ -688,11 +688,11 @@ resize_out(out, sizes, strides, options);
         elif k is SchemaKind.inplace:
             output_type = "std::reference_wrapper<Tensor>"
             output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
-            proxy_field = f"std::array<c10::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
+            proxy_field = f"std::array<::std::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
         elif k is SchemaKind.out:
             output_type = "std::reference_wrapper<Tensor>"
             output_value = "proxy_outputs_[output_idx].has_value() ? *proxy_outputs_[output_idx] : outputs_[output_idx].get()"
-            proxy_field = f"std::array<c10::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
+            proxy_field = f"std::array<::std::optional<Tensor>, {len(f.func.returns)}> proxy_outputs_;"
 
         if self.backend_index.dispatch_key == DispatchKey.CUDA:
             if self.rocm:

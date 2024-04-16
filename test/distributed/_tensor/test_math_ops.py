@@ -169,13 +169,11 @@ class DistMathOpsTest(DTensorTestBase):
                 with comm_mode:
                     dist_y = loss_fn(dist_x, dist_target, reduction=reduction)
                     if shard_dim == channel_dim:
-                        # TODO: currently CommDebugMode cannot log communications within
-                        # sharding prop; need to fix it before enabling this check.
-                        # self.assertEqual(comm_mode.get_total_counts(), 1)
-                        # self.assertEqual(
-                        #     comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
-                        #     1,
-                        # )
+                        self.assertEqual(comm_mode.get_total_counts(), 1)
+                        self.assertEqual(
+                            comm_mode.get_comm_counts()[funcol.all_gather_into_tensor],
+                            1,
+                        )
                         self.assertTrue(dist_y.placements[0].is_replicate())
                         self.assertEqual(dist_y.to_local(), y)
                     else:
@@ -296,7 +294,7 @@ class DistMathOpsTest(DTensorTestBase):
         # https://pytorch.org/docs/stable/generated/torch.nn.LayerNorm.html
         batch, sentence_length, embedding_dim = 20, 5, 10
         norm_shape_idx_list = list(range(3))
-        shard_dims = [-1, 0, 1, 2]
+        shard_dims = [0, 1, 2]
         elementwise_affine_list = [False, True]
         test_config_list = list(
             itertools.product(shard_dims, norm_shape_idx_list, elementwise_affine_list)
@@ -347,9 +345,10 @@ class DistMathOpsTest(DTensorTestBase):
             with comm_mode:
                 y_dist = layer_norm_dist(x_dist)
 
-            self.assertLessEqual(
+            expected_fwd_comm = 0 if shard_dim < norm_idx else 1
+            self.assertEqual(
                 comm_mode.get_total_counts(),
-                1,  # TODO: This should be 0!
+                expected_fwd_comm,
                 f"comm count={comm_mode.get_total_counts()}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )
@@ -361,9 +360,11 @@ class DistMathOpsTest(DTensorTestBase):
             with comm_mode:
                 y_dist.sum().backward()
 
-            self.assertLessEqual(
+            expected_bwd_comm = 0 if shard_dim < norm_idx else 1
+
+            self.assertEqual(
                 comm_mode.get_total_counts(),
-                1,  # TODO: This should be 0!
+                expected_bwd_comm,
                 f"comm count={comm_mode.get_total_counts()}, "
                 f"shard_dim={shard_dim}, norm_shape={normalized_shape}, elem_affine={elementwise_affine}",
             )

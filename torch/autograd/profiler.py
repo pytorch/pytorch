@@ -1,4 +1,6 @@
 from collections import defaultdict
+from dataclasses import dataclass
+from time import perf_counter_ns
 from typing import Any, Dict, List, Optional
 from warnings import warn
 
@@ -87,6 +89,18 @@ def _run_on_profiler_stop():
     _set_is_profiler_enabled(False)
 
 
+@dataclass
+class _ProfilerStats:
+    "Profiler timing and stats used by developers to catch issues/regressions"
+    profiling_window_duration_sec: float = 0
+    number_of_events: int = 0
+    profiler_prepare_call_duration_us: int = 0
+    profiler_enable_call_duration_us: int = 0
+    profiler_disable_call_duration_us: int = 0
+    parse_kineto_call_duration_us: int = 0
+    function_events_build_tree_call_duration_us: int = 0
+
+
 class profile:
     """Context manager that manages autograd profiler state and holds a summary of results.
 
@@ -100,9 +114,6 @@ class profile:
 
         use_cuda (bool, optional): Enables timing of CUDA events as well using the cudaEvent API.
             Adds approximately 4us of overhead to each tensor operation.
-
-        use_xpu (bool, optional): Enables timing of XPU events.
-            Only supports Kineto profiling while XPU backend is available.
 
         record_shapes (bool, optional): If shapes recording is set, information
             about input dimensions will be collected. This allows one to see which
@@ -181,7 +192,6 @@ class profile:
         enabled=True,
         *,
         use_cuda=False,
-        use_xpu=False,
         use_device=None,
         record_shapes=False,
         with_flops=False,
@@ -197,7 +207,6 @@ class profile:
         if not self.enabled:
             return
         self.use_cuda = use_cuda
-        self.use_xpu = use_xpu
         self.use_device: Optional[str] = (
             use_device if use_device != "privateuseone" else None
         )
@@ -215,6 +224,9 @@ class profile:
             experimental_config = _ExperimentalConfig()
         self.experimental_config = experimental_config
         self.kineto_results: Optional[_ProfilerResult] = None
+        self.profiling_start_time_ns = 0
+        self.profiling_end_time_ns = 0
+        self._stats = _ProfilerStats()
 
         if not self.use_cpu:
             assert (
@@ -224,11 +236,6 @@ class profile:
         if self.use_device == "cuda":
             self.use_device = None
             self.use_cuda = True
-            self.use_xpu = False
-        elif self.use_device == "xpu":
-            self.use_device = None
-            self.use_cuda = False
-            self.use_xpu = True
 
         if self.use_device and self.use_device != _get_privateuse1_backend_name():
             warn(f"{self.use_device} doesn't support profile.")
@@ -237,12 +244,6 @@ class profile:
         if self.use_cuda and not torch.cuda.is_available():
             warn("CUDA is not available, disabling CUDA profiling")
             self.use_cuda = False
-
-        if self.use_xpu and (
-            not hasattr(torch, "xpu") or not torch.xpu.is_available()
-        ):  # type: ignore[attr-defined]
-            warn("XPU is not available, disabling XPU profiling")
-            self.use_xpu = False
 
         self.kineto_activities = set()
         if self.use_cpu:
@@ -257,11 +258,7 @@ class profile:
                 self.profiler_kind = ProfilerState.KINETO_GPU_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.CUDA)
-        if self.use_xpu:
-            assert (
-                use_kineto or ProfilerActivity.XPU in _supported_activities()
-            ), "Profiling on XPU backend must enable Kineto"
-            self.kineto_activities.add(ProfilerActivity.XPU)
+
         if self.use_device:
             if (
                 not use_kineto
@@ -273,7 +270,6 @@ class profile:
                 self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.PrivateUse1)
-                self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1
 
         assert (
             len(self.kineto_activities) > 0
@@ -301,32 +297,58 @@ class profile:
 
     def _prepare_trace(self):
         self.entered = True
+        t0 = perf_counter_ns()
         _prepare_profiler(self.config(), self.kineto_activities)
+        t1 = perf_counter_ns()
+        self._stats.profiler_prepare_call_duration_us = int((t1 - t0) / 1000)
 
     def _start_trace(self):
         self.entered = True
         _run_on_profiler_start()
+        t0 = perf_counter_ns()
         _enable_profiler(self.config(), self.kineto_activities)
+        t1 = perf_counter_ns()
+        self._stats.profiler_enable_call_duration_us = int((t1 - t0) / 1000)
+        self.profiling_start_time_ns = t1
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
         if self.use_cuda:
             torch.cuda.synchronize()
-        if self.use_xpu:
-            torch.xpu.synchronize()  # type: ignore[attr-defined]
+        elif self.use_device and hasattr(torch, self.use_device):
+            privateuse1_module = getattr(torch, self.use_device)
+            if hasattr(privateuse1_module, "synchronize"):
+                privateuse1_module.synchronize()
+
+        t0 = perf_counter_ns()
         self.kineto_results = _disable_profiler()
+        t1 = perf_counter_ns()
+        self._stats.profiler_disable_call_duration_us = int((t1 - t0) / 1000)
+        self.profiling_end_time_ns = t0
+
         _run_on_profiler_stop()
+        t0 = perf_counter_ns()
         parsed_results = self._parse_kineto_results(self.kineto_results)
+        t1 = perf_counter_ns()
+        self._stats.parse_kineto_call_duration_us = int((t1 - t0) / 1000)
+
         self.function_events = EventList(
             parsed_results,
             use_cuda=self.use_cuda,
-            use_xpu=self.use_xpu,
             use_device=self.use_device,
             profile_memory=self.profile_memory,
             with_flops=self.with_flops,
         )
+        t0 = perf_counter_ns()
         self.function_events._build_tree()
+        t1 = perf_counter_ns()
+        self._stats.function_events_build_tree_call_duration_us = int((t1 - t0) / 1000)
+
+        self._stats.number_of_events = len(self.function_events)
+        self._stats.profiling_window_duration_sec = (
+            (self.profiling_end_time_ns - self.profiling_start_time_ns) * 1.0 / 1e9
+        )
         return False
 
     def __repr__(self):
@@ -409,7 +431,7 @@ class profile:
     def _parse_kineto_results(self, result: _ProfilerResult):
         # result.events() has most of the events - PyTorch op-level and device-level events
 
-        trace_start_us = result.trace_start_us()
+        trace_start_ns = result.trace_start_ns()
         mem_records = [
             [evt, False] for evt in result.events() if evt.name() == MEMORY_EVENT_NAME
         ]
@@ -433,13 +455,6 @@ class profile:
                 else 0
             )
 
-        def _xpu_memory_usage(mem_record):
-            return (
-                mem_record.nbytes()
-                if mem_record.device_type() in [DeviceType.XPU]
-                else 0
-            )
-
         def _privateuse1_memory_usage(mem_record):
             return (
                 mem_record.nbytes()
@@ -450,27 +465,24 @@ class profile:
         # Create and return FunctionEvent list
         function_events = []
         device_corr_map: Dict[int, List[FunctionEvent]] = {}
-        device_corr_map_values: List[FunctionEvent] = []
         max_evt_id = 0
         for kineto_event in result.events():
             if _filter_name(kineto_event.name()):
                 continue
-            rel_start_us = kineto_event.start_us() - trace_start_us
-            rel_end_us = rel_start_us + kineto_event.duration_us()
-            abs_end_us = kineto_event.start_us() + kineto_event.duration_us()
+            rel_start_ns = kineto_event.start_ns() - trace_start_ns
+            rel_end_ns = rel_start_ns + kineto_event.duration_ns()
+            abs_end_ns = kineto_event.start_ns() + kineto_event.duration_ns()
 
             cpu_memory_usage = 0
             cuda_memory_usage = 0
-            xpu_memory_usage = 0
             privateuse1_memory_usage = 0
             if kineto_event.device_type() == DeviceType.CPU:
                 # find the corresponding memory allocation events
                 for mem_record in mem_records_acc.in_interval(
-                    kineto_event.start_us(), abs_end_us
+                    kineto_event.start_ns() / 1000, abs_end_ns / 1000
                 ):
                     cpu_memory_usage += _cpu_memory_usage(mem_record[0])
                     cuda_memory_usage += _cuda_memory_usage(mem_record[0])
-                    xpu_memory_usage += _xpu_memory_usage(mem_record[0])
                     privateuse1_memory_usage += _privateuse1_memory_usage(mem_record[0])
                     mem_record[1] = True
 
@@ -483,8 +495,8 @@ class profile:
                 name=_rewrite_name(name=kineto_event.name(), with_wildcard=True),
                 trace_name=_rewrite_name(name=kineto_event.name(), with_wildcard=False),
                 thread=kineto_event.start_thread_id(),
-                start_us=rel_start_us,
-                end_us=rel_end_us,
+                start_us=rel_start_ns / 1000,
+                end_us=rel_end_ns / 1000,
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
                 concrete_inputs=kineto_event.concrete_inputs(),
@@ -497,12 +509,12 @@ class profile:
                 use_device=self.use_device,
                 cpu_memory_usage=cpu_memory_usage,
                 cuda_memory_usage=cuda_memory_usage,
-                xpu_memory_usage=xpu_memory_usage,
                 privateuse1_memory_usage=privateuse1_memory_usage,
                 is_async=is_async,
                 sequence_nr=kineto_event.sequence_nr(),
                 device_type=kineto_event.device_type(),
                 device_index=kineto_event.device_index(),
+                device_resource_id=kineto_event.device_resource_id(),
                 flops=kineto_event.flops(),
             )
             max_evt_id = max(max_evt_id, fe.id)
@@ -510,9 +522,7 @@ class profile:
                 if self.use_device:
                     privateuse1_time = kineto_event.privateuse1_elapsed_us()
                     if privateuse1_time > 0:
-                        fe.append_privateuse1_kernel(
-                            fe.name, fe.device_index, privateuse1_time
-                        )
+                        fe.append_kernel(fe.name, fe.device_index, privateuse1_time)
                         fe.is_legacy = True
                 else:
                     # Check if we have CUDA time as a fallback
@@ -526,55 +536,39 @@ class profile:
                 if corr_id not in device_corr_map:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
-        # prepare the values list for corr map to avoid duplicately appending kernel
-        # while some CPU Kineto events (e.g. CUDA/XPU Runtime Activity) have a same
-        # correlation ID as CPU events
-        device_corr_map_values = [
-            fe for fe_list in device_corr_map.values() for fe in fe_list
-        ]
 
-        # associate CUDA/XPU kernels and CUDA/XPU runtime (CPU) with CPU events
+        # associate CUDA kernels and CUDA runtime (CPU) with CPU events
         for fe in function_events:
             if (
                 fe.device_type == DeviceType.CPU
                 and not fe.is_async
                 and fe.id in device_corr_map
-                and fe not in device_corr_map_values
             ):
                 for f_evt in device_corr_map[fe.id]:
-                    if f_evt.device_type == DeviceType.CUDA:
+                    if (
+                        f_evt.device_type == DeviceType.CUDA
+                        or f_evt.device_type == DeviceType.PrivateUse1
+                    ):
                         fe.append_kernel(
                             f_evt.name,
                             f_evt.device_index,
                             f_evt.time_range.end - f_evt.time_range.start,
                         )
-                    elif f_evt.device_type == DeviceType.XPU:
-                        fe.append_xpu_kernel(
-                            f_evt.name,
-                            f_evt.device_index,
-                            f_evt.time_range.end - f_evt.time_range.start,
-                        )
-                    elif f_evt.device_type == DeviceType.PrivateUse1:
-                        fe.append_privateuse1_kernel(
-                            f_evt.name,
-                            f_evt.device_index,
-                            f_evt.time_range.end - f_evt.time_range.start,
-                        )
                     elif f_evt.device_type == DeviceType.CPU:
-                        # make sure that 'thread' of a CPU Kineto (e.g. CUDA/XPU Runtime) event is associated
+                        # make sure that 'thread' of a CPU Kineto (e.g. CUDA Runtime) event is associated
                         # with the 'thread' of the corresponding linked PyTorch event to properly track
                         # parents and children
                         f_evt.thread = fe.thread
 
         def createFunctionEventForMemoryEvents(evt):
-            rel_start_us = evt.start_us() - trace_start_us
+            rel_start_ns = evt.start_ns() - trace_start_ns
             fe = FunctionEvent(
                 id=max_evt_id,
                 name=evt.name(),
                 trace_name=None,  # not outputting in the trace
                 thread=evt.start_thread_id(),
-                start_us=rel_start_us,
-                end_us=rel_start_us,  # no duration
+                start_us=rel_start_ns / 1000,
+                end_us=rel_start_ns / 1000,  # no duration
                 fwd_thread=evt.start_thread_id(),
                 input_shapes=[],
                 stack=[],
@@ -582,7 +576,6 @@ class profile:
                 use_device=self.use_device,
                 cpu_memory_usage=_cpu_memory_usage(evt),
                 cuda_memory_usage=_cuda_memory_usage(evt),
-                xpu_memory_usage=_xpu_memory_usage(evt),
                 privateuse1_memory_usage=_privateuse1_memory_usage(evt),
                 is_async=False,
                 sequence_nr=-1,
@@ -1049,7 +1042,7 @@ class KinetoStepTracker:
     for now. The result could be incorrect increments of the step count.
     """
 
-    _current_step = -1
+    _current_step = 0
     _step_dict: Dict[str, int] = defaultdict(int)
 
     @classmethod

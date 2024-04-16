@@ -1853,8 +1853,7 @@ def verify_ninja_availability():
 
 def _prepare_ldflags(extra_ldflags, with_cuda, verbose, is_standalone):
     if IS_WINDOWS:
-        python_path = os.path.dirname(sys.executable)
-        python_lib_path = os.path.join(python_path, 'libs')
+        python_lib_path = os.path.join(sys.base_exec_prefix, 'libs')
 
         extra_ldflags.append('c10.lib')
         if with_cuda:
@@ -2176,11 +2175,6 @@ def _write_ninja_file_to_build_library(path,
     if python_include_path is not None:
         system_includes.append(python_include_path)
 
-    # Windows does not understand `-isystem`.
-    if IS_WINDOWS:
-        user_includes += system_includes
-        system_includes.clear()
-
     common_cflags = []
     if not is_standalone:
         common_cflags.append(f'-DTORCH_EXTENSION_NAME={name}')
@@ -2188,8 +2182,12 @@ def _write_ninja_file_to_build_library(path,
 
     common_cflags += [f"{x}" for x in _get_pybind11_abi_build_flags()]
 
-    common_cflags += [f'-I{include}' for include in user_includes]
-    common_cflags += [f'-isystem {include}' for include in system_includes]
+    # Windows does not understand `-isystem` and quotes flags later.
+    if IS_WINDOWS:
+        common_cflags += [f'-I{include}' for include in user_includes + system_includes]
+    else:
+        common_cflags += [f'-I{shlex.quote(include)}' for include in user_includes]
+        common_cflags += [f'-isystem {shlex.quote(include)}' for include in system_includes]
 
     common_cflags += [f"{x}" for x in _get_glibcxx_abi_build_flags()]
 

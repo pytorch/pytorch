@@ -14,7 +14,7 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,pass,11
+DALLE2_pytorch,pass,12
 
 
 
@@ -86,7 +86,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,35
+detectron2_fcos_r_50_fpn,pass,21
 
 
 
@@ -234,7 +234,7 @@ mobilenet_v3_large,pass,0
 
 
 
-moco,pass,11
+moco,pass,5
 
 
 

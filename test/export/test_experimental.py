@@ -43,12 +43,12 @@ class TestExperiment(TestCase):
         self.assertExpectedInline(
             str(ep.graph_module.code.strip()),
             """\
-def forward(self, arg0_1, arg1_1):
-    sin = torch.ops.aten.sin.default(arg1_1)
+def forward(self, b_submodule_buffer1, x):
+    sin = torch.ops.aten.sin.default(x)
     strict_graph_1 = self.strict_graph_1
-    strict_mode_1 = torch.ops.higher_order.strict_mode(strict_graph_1, (sin, arg0_1));  strict_graph_1 = sin = arg0_1 = None
+    strict_mode_1 = torch.ops.higher_order.strict_mode(strict_graph_1, (sin, b_submodule_buffer1));  strict_graph_1 = sin = b_submodule_buffer1 = None
     getitem_1 = strict_mode_1[0];  strict_mode_1 = None
-    add = torch.ops.aten.add.Tensor(arg1_1, 3);  arg1_1 = None
+    add = torch.ops.aten.add.Tensor(x, 3);  x = None
     return (getitem_1, add)""",
         )
 

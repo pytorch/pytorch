@@ -242,9 +242,11 @@ class _DDPSink(Function):
         # None and are not filled with zeros.
         ctx.set_materialize_grads(False)
         ctx.ddp_weakref = ddp_weakref
-        ret = tuple(
-            inp.clone() if isinstance(inp, torch.Tensor) else inp for inp in inputs
-        )
+        ret = inputs
+        if ddp_weakref()._ddp_sink_clone:
+            ret = tuple(
+                inp.clone() if isinstance(inp, torch.Tensor) else inp for inp in inputs
+            )
         return ret
 
     @staticmethod
@@ -665,6 +667,7 @@ class DistributedDataParallel(Module, Joinable):
             self.device_mesh = device_mesh
             self.process_group = device_mesh.get_group(mesh_dim=0)
             from torch.distributed.device_mesh import _mesh_resources
+
             if _mesh_resources.get_parent_mesh(device_mesh) is not None:
                 # TODO: This is a temporary work around to enable DDP + TP.
                 # We should do the logic in DDP so that the 2D implementation is
@@ -887,13 +890,21 @@ class DistributedDataParallel(Module, Joinable):
             "python_reducer_without_compiled_forward",
         )
         if self._use_python_reducer:
-            torch._inductor.config.fuse_ddp_communication = True
-            torch._inductor.config.fuse_ddp_bucket_size = bucket_cap_mb
+            torch._inductor.config._fuse_ddp_communication = True
+            torch._inductor.config._fuse_ddp_bucket_size = bucket_cap_mb
+            # Directly adding this to the trace rule will disturb the users
+            # who are using DDPOptimizer.
+            torch._dynamo.trace_rules.LEGACY_MOD_INLINELIST.add(
+                "torch.nn.parallel.distributed"
+            )
         self._force_to_disable_cpp_reducer = (
             optimize_ddp == "python_reducer_without_compiled_forward"
         )
         if self._use_python_reducer:
             self._register_accum_grad_hook()
+
+        # Whether or not DDPSink performs a clone.
+        self._ddp_sink_clone = True
 
     def _register_accum_grad_hook(self):
         import torch.distributed._functional_collectives as fcol
@@ -945,7 +956,7 @@ class DistributedDataParallel(Module, Joinable):
         # 1. Create gradient buffer
         device = torch.device("cpu") if device_ids is None else device_ids[0]
         self._delay_grad_buffer = torch.zeros(
-            sum([p.numel() for p in self._delay_all_reduce_params]),
+            sum(p.numel() for p in self._delay_all_reduce_params),
             device=device,
         )
 
@@ -1967,13 +1978,6 @@ class DistributedDataParallel(Module, Joinable):
             >>> ddp.register_comm_hook(state=None, hook=encode_and_decode)
         """
         self._check_comm_hook(hook)
-        if hook.__name__ in ["bf16_compress_hook", "fp16_compress_hook"]:
-            # If we pass None, then the hook will try to get the world size
-            # by calling `dist.group.WORLD.size()`, which causes compilation
-            # errors. So we pre-decode the process group and pass it to the
-            # hook.
-            if state is None:
-                state = dist.group.WORLD
         assert self.logger is not None
         self.logger._set_comm_hook_name(hook.__qualname__)
         self._comm_hooks.append((hook, state))
@@ -2362,3 +2366,16 @@ class DistributedDataParallel(Module, Joinable):
         if not _rank_not_in_group(new_process_group):
             self.process_group = new_process_group
             self.reducer._update_process_group(new_process_group)
+
+    def _set_ddp_sink_clone(self, val: bool):
+        """
+        Sets whether or not DDPSink should clone the output tensors or not.
+        The default is True since if the loss is modified in place we run
+        into the view is modified in-place error.
+
+        Although, cloning the tensors can add significant memory and
+        performance hit if the number and size of tensors are large. As
+        a result, this can be set to False if you are not modifying the
+        loss in place.
+        """
+        self._ddp_sink_clone = val

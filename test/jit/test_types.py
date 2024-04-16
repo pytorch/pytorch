@@ -1,26 +1,31 @@
 # Owner(s): ["oncall: jit"]
 
-from collections import namedtuple
-from typing import Dict, Iterator, List, Optional, Tuple
-
-from torch.testing._internal.jit_utils import JitTestCase
-from torch.testing import FileCheck
-from textwrap import dedent
-from jit.test_module_interface import TestModuleInterface  # noqa: F401
 import inspect
 import os
 import sys
+from collections import namedtuple
+from textwrap import dedent
+from typing import Dict, Iterator, List, Optional, Tuple
+
 import torch
 import torch.testing._internal.jit_utils
+from torch.testing import FileCheck
+
+from torch.testing._internal.jit_utils import JitTestCase
+
+from jit.test_module_interface import TestModuleInterface  # noqa: F401
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
+
 
 class TestTypesAndAnnotation(JitTestCase):
     def test_pep585_type(self):
@@ -30,7 +35,7 @@ class TestTypesAndAnnotation(JitTestCase):
             xl: list[tuple[torch.Tensor]] = []
             xd: dict[str, int] = {}
             xl.append((x,))
-            xd['foo'] = 1
+            xd["foo"] = 1
             return xl.pop(), xd
 
         self.checkScript(fn, [torch.randn(2, 2)])
@@ -47,7 +52,7 @@ class TestTypesAndAnnotation(JitTestCase):
 
         self.checkScript(fn, [torch.randn(2, 2)])
 
-        GG = namedtuple('GG', ['f', 'g'])
+        GG = namedtuple("GG", ["f", "g"])
 
         class Foo(torch.nn.Module):
             @torch.jit.ignore
@@ -77,13 +82,17 @@ class TestTypesAndAnnotation(JitTestCase):
             return x + 10
 
         class M(torch.nn.Module):
-            def forward(self, in_batch: Dict[str, Optional[torch.Tensor]]) -> torch.Tensor:
+            def forward(
+                self, in_batch: Dict[str, Optional[torch.Tensor]]
+            ) -> torch.Tensor:
                 self.dropout_modality(in_batch)
                 fn(in_batch)
                 return torch.tensor(1)
 
             @torch.jit.ignore
-            def dropout_modality(self, in_batch: Dict[str, Optional[torch.Tensor]]) -> Dict[str, Optional[torch.Tensor]]:
+            def dropout_modality(
+                self, in_batch: Dict[str, Optional[torch.Tensor]]
+            ) -> Dict[str, Optional[torch.Tensor]]:
                 return in_batch
 
         sm = torch.jit.script(M())
@@ -111,16 +120,17 @@ class TestTypesAndAnnotation(JitTestCase):
             return my_arg + 10
 
         with self.assertRaisesRegex(RuntimeError, "argument 'my_arg'"):
+
             @torch.jit.script
             def other_fn(x):
-                return fn('2')
+                return fn("2")
 
     def test_type_annotate_py3(self):
         def fn():
-            a : List[int] = []
-            b : torch.Tensor = torch.ones(2, 2)
-            c : Optional[torch.Tensor] = None
-            d : Optional[torch.Tensor] = torch.ones(3, 4)
+            a: List[int] = []
+            b: torch.Tensor = torch.ones(2, 2)
+            c: Optional[torch.Tensor] = None
+            d: Optional[torch.Tensor] = torch.ones(3, 4)
             for _ in range(10):
                 a.append(4)
                 c = torch.ones(2, 2)
@@ -130,66 +140,88 @@ class TestTypesAndAnnotation(JitTestCase):
         self.checkScript(fn, ())
 
         def wrong_type():
-            wrong : List[int] = [0.5]
+            wrong: List[int] = [0.5]
             return wrong
 
-        with self.assertRaisesRegex(RuntimeError, "List type annotation"
-                                    r" `List\[int\]` did not match the "
-                                    "types of the given list elements"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "List type annotation"
+            r" `List\[int\]` did not match the "
+            "types of the given list elements",
+        ):
             torch.jit.script(wrong_type)
 
     def test_optional_no_element_type_annotation(self):
         """
         Test that using an optional with no contained types produces an error.
         """
+
         def fn_with_comment(x: torch.Tensor) -> Optional:
             return (x, x)
 
         def annotated_fn(x: torch.Tensor) -> Optional:
             return (x, x)
 
-        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Attempted to use Optional without a contained type"
+        ):
             cu = torch.jit.CompilationUnit()
             cu.define(dedent(inspect.getsource(fn_with_comment)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Attempted to use Optional without a contained type"
+        ):
             cu = torch.jit.CompilationUnit()
             cu.define(dedent(inspect.getsource(annotated_fn)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Attempted to use Optional without a contained type"
+        ):
             torch.jit.script(fn_with_comment)
 
-        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Optional without a contained type"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Attempted to use Optional without a contained type"
+        ):
             torch.jit.script(annotated_fn)
 
     def test_tuple_no_element_type_annotation(self):
         """
         Test that using a tuple with no contained types produces an error.
         """
+
         def fn_with_comment(x: torch.Tensor) -> Tuple:
             return (x, x)
 
         def annotated_fn(x: torch.Tensor) -> Tuple:
             return (x, x)
 
-        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Attempted to use Tuple without a contained type"
+        ):
             cu = torch.jit.CompilationUnit()
             cu.define(dedent(inspect.getsource(fn_with_comment)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Attempted to use Tuple without a contained type"
+        ):
             cu = torch.jit.CompilationUnit()
             cu.define(dedent(inspect.getsource(annotated_fn)))
 
-        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Attempted to use Tuple without a contained type"
+        ):
             torch.jit.script(fn_with_comment)
 
-        with self.assertRaisesRegex(RuntimeError, r"Attempted to use Tuple without a contained type"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"Attempted to use Tuple without a contained type"
+        ):
             torch.jit.script(annotated_fn)
 
     def test_ignoring_module_attributes(self):
         """
         Test that module attributes can be ignored.
         """
+
         class Sub(torch.nn.Module):
             def forward(self, a: int) -> int:
                 return sum([a])
@@ -229,9 +261,10 @@ class TestTypesAndAnnotation(JitTestCase):
 
         mod = ModuleUsesIgnoredAttr(1)
 
-        with self.assertRaisesRegexWithHighlight(RuntimeError, r"attribute was ignored during compilation", "self.sub"):
+        with self.assertRaisesRegexWithHighlight(
+            RuntimeError, r"attribute was ignored during compilation", "self.sub"
+        ):
             scripted_mod = torch.jit.script(mod)
-
 
     def test_ignoring_fn_with_nonscriptable_types(self):
         class CFX:
@@ -246,7 +279,9 @@ class TestTypesAndAnnotation(JitTestCase):
                 return iter(self.a)
 
             @torch.jit._drop
-            def __fx_create_arg__(self, tracer: torch.fx.Tracer) -> torch.fx.node.Argument:
+            def __fx_create_arg__(
+                self, tracer: torch.fx.Tracer
+            ) -> torch.fx.node.Argument:
                 # torch.fx classes are not scriptable
                 return tracer.create_node(
                     "call_function",
@@ -257,35 +292,36 @@ class TestTypesAndAnnotation(JitTestCase):
 
         torch.jit.script(CFX)
 
-
     def test_unimported_type_resolution(self):
         # verify fallback from the python resolver to the c++ resolver
 
-        @ torch.jit.script
+        @torch.jit.script
         def fn(x):
             # type: (number) -> number
             return x + 1
 
-        FileCheck().check('Scalar').run(fn.graph)
+        FileCheck().check("Scalar").run(fn.graph)
 
     def test_parser_bug(self):
         def parser_bug(o: Optional[torch.Tensor]):
             pass
 
     def test_mismatched_annotation(self):
-        with self.assertRaisesRegex(RuntimeError, 'annotated with type'):
+        with self.assertRaisesRegex(RuntimeError, "annotated with type"):
+
             @torch.jit.script
             def foo():
-                x : str = 4
+                x: str = 4
                 return x
 
     def test_reannotate(self):
-        with self.assertRaisesRegex(RuntimeError, 'declare and annotate'):
+        with self.assertRaisesRegex(RuntimeError, "declare and annotate"):
+
             @torch.jit.script
             def foo():
                 x = 5
                 if 1 == 1:
-                    x : Optional[int] = 7
+                    x: Optional[int] = 7
 
     def test_annotate_outside_init(self):
         msg = "annotations on instance attributes must be declared in __init__"
@@ -293,6 +329,7 @@ class TestTypesAndAnnotation(JitTestCase):
 
         # Simple case
         with self.assertRaisesRegexWithHighlight(ValueError, msg, highlight):
+
             @torch.jit.script
             class BadModule:
                 def __init__(self, x: int):
@@ -303,6 +340,7 @@ class TestTypesAndAnnotation(JitTestCase):
 
         # Type annotation in a loop
         with self.assertRaisesRegexWithHighlight(ValueError, msg, highlight):
+
             @torch.jit.script
             class BadModuleLoop:
                 def __init__(self, x: int):
@@ -324,8 +362,10 @@ class TestTypesAndAnnotation(JitTestCase):
     def test_inferred_type_error_message(self):
         inferred_type = torch._C.InferredType("ErrorReason")
 
-        with self.assertRaisesRegex(RuntimeError,
-                                    "Tried to get the type from an InferredType but the type is null."):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Tried to get the type from an InferredType but the type is null.",
+        ):
             t = inferred_type.type()
 
         with self.assertRaisesRegex(RuntimeError, "ErrorReason"):

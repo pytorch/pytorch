@@ -79,6 +79,20 @@ class LocalSource(Source):
 
 
 @dataclasses.dataclass(frozen=True)
+class SyntheticLocalSource(Source):
+    local_name: str
+
+    def reconstruct(self, codegen):
+        codegen.append_output(codegen.create_load(self.local_name))
+
+    def guard_source(self):
+        return GuardSource.SYNTHETIC_LOCAL
+
+    def name(self):
+        return f"SYNTHETIC_LOCAL[{self.local_name!r}]"
+
+
+@dataclasses.dataclass(frozen=True)
 class RandomValueSource(Source):
     random_call_index: int
 
@@ -156,10 +170,55 @@ class AttrSource(ChainedSource):
         return f"{self.base.name()}.{self.member}"
 
 
+# Represents tensor.grad source. It could be represented by AttrSource as well.
+# But, we could access grad field on tensor directly in C++ without going
+# through the Python bytecodes. Therefore, we use a separate source for grad
+# field.
+@dataclasses.dataclass(frozen=True)
+class GradSource(ChainedSource):
+    member: str = "grad"
+
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+        codegen.extend_output(codegen.create_load_attrs(self.member))
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return f"{self.base.name()}.{self.member}"
+
+
 @dataclasses.dataclass(frozen=True)
 class ParamBufferSource(AttrSource):
     def guard_source(self):
         return _GUARD_SOURCE_NN_MODULE[self.base.guard_source()]
+
+
+# This source is intended to be used in places where a source is needed but it is expected
+# that the symbol will be simplified out later on. Symbols with ephemeral sources are
+# prioritized to be simplified out when e.g. compared against a symbol without an ephemeral
+# source. Guarding on this source is an error.
+#
+# Example: During subclass view fake-ification, any close-over ViewFunc state should be
+# symbolicized / fake-ified to avoid invalid specialization during view replay. This source
+# is useful for symbols utilized in the middle of the view chain that are not expected to be
+# present within the final view shape metadata.
+@dataclasses.dataclass(frozen=True)
+class EphemeralSource(Source):
+    desc: Optional[str] = None
+
+    def guard_source(self):
+        return GuardSource.EPHEMERAL
+
+    def name(self):
+        return f"<ephemeral{': ' + self.desc if self.desc is not None else ''}>"
+
+    def make_guard(self):
+        raise NotImplementedError()
+
+    def is_ephemeral(self):
+        return True
 
 
 class TensorProperty(enum.Enum):
@@ -397,6 +456,18 @@ class ODictGetItemSource(ChainedSource):
 
 
 @dataclasses.dataclass(frozen=True)
+class OptimizerSource(ChainedSource):
+    def reconstruct(self, codegen):
+        self.base.reconstruct(codegen)
+
+    def guard_source(self):
+        return self.base.guard_source()
+
+    def name(self):
+        return self.base.name()
+
+
+@dataclasses.dataclass(frozen=True)
 class NNModuleSource(ChainedSource):
     def reconstruct(self, codegen):
         self.base.reconstruct(codegen)
@@ -493,6 +564,14 @@ def is_from_local_source(source: Source, *, allow_cell_or_freevar=True):
     if not allow_cell_or_freevar and source.cell_or_freevar:
         return False
     return True
+
+
+def is_from_optimizer_source(source: Source):
+    if isinstance(source, OptimizerSource):
+        return True
+    if isinstance(source, ChainedSource):
+        return is_from_optimizer_source(source.base)
+    return False
 
 
 # TODO: can probably write a generic "test this on everything in the chain"

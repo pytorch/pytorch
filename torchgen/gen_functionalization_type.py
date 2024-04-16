@@ -431,7 +431,8 @@ def emit_view_functionalization_body(
         {reverse_lambda.decl()} {{
           return {reverse_lambda.inner_call()}
         }},
-        /*is_multi_output=*/{str(is_multi_output_view).lower()}
+        /*is_multi_output=*/{str(is_multi_output_view).lower()},
+        /*is_as_strided=*/{str(str(f.func.name) == 'as_strided').lower()}
       );
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]

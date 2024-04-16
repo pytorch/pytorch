@@ -8,6 +8,7 @@ from torch.distributed.tensor.parallel.style import (
     PrepareModuleInput,
     PrepareModuleOutput,
     RowwiseParallel,
+    SequenceParallel,
 )
 
 __all__ = [
@@ -16,6 +17,7 @@ __all__ = [
     "PrepareModuleInput",
     "PrepareModuleOutput",
     "RowwiseParallel",
+    "SequenceParallel",
     "parallelize_module",
     "loss_parallel"
 ]

@@ -130,15 +130,18 @@ class FakeSymbolicTensor(torch.Tensor):
         raise RuntimeError(f"operator {func_overload} not supported")
 
 
-def create_symbolic_tensor(name, arg, shape_env):
+def create_symbolic_tensor(name, arg, shape_env, source=None, dynamic_dims=None):
     from torch._dynamo.source import ConstantSource
 
+    if source is None:
+        source = ConstantSource(name)
     constraint_dims = [None] * arg.dim()
-    dynamic_dims = [DimDynamic.DUCK] * arg.dim()
+    if dynamic_dims is None:
+        dynamic_dims = [DimDynamic.DUCK] * arg.dim()
     sym_shapes, sym_strides, sym_storage_offset = \
         shape_env.create_symbolic_sizes_strides_storage_offset(
             arg,
-            source=ConstantSource(name),
+            source=source,
             symbolic_context=StatelessSymbolicContext(
                 dynamic_sizes=dynamic_dims,
                 constraint_sizes=constraint_dims
@@ -374,6 +377,21 @@ class TestPySymInt(TestCase):
         self.assertEqual(guard_int(a0), 2)
         self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
 
+    def test_prefer_deferred_runtime_assertions_over_guards(self):
+        shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
+        s0 = create_symint(shape_env, 2)
+        self.assertEqual(guard_int(s0), 2)
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(s0, 2)""")
+
+        shape_env = ShapeEnv(prefer_deferred_runtime_asserts_over_guards=True)
+        s0 = create_symint(shape_env, 2)
+        self.assertTrue(expect_true(s0 == 2))
+        self.assertEqual(len(shape_env.guards), 0)
+        self.assertExpectedInline(
+            str([ra.expr for ra in shape_env.deferred_runtime_asserts[None]]),
+            """[Eq(s0, 2)]"""
+        )
+
     def test_sym_int(self):
         shape_env = ShapeEnv()
         a0 = create_symint(shape_env, 5)
@@ -386,13 +404,13 @@ class TestPySymInt(TestCase):
         r = sym_int(a1 / 2)
         self.assertEqual(guard_int(r), 3)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(floor(s1/2), 3)""")
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(Trunc(s1/2), 3)""")
 
         a3 = create_symint(shape_env, 3)
         r = sym_int(2.0 * torch.sym_float(a3))
         self.assertEqual(guard_int(r), 6)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(2*s2, 6)""")
+        self.assertExpectedInline(str(shape_env.guards[2][0]), """Eq(Trunc(2.0*s2), 6)""")
 
     def test_sym_sqrt(self):
         shape_env = ShapeEnv()
@@ -400,7 +418,7 @@ class TestPySymInt(TestCase):
         r = torch._sym_sqrt(a0)
         self.assertEqual(r, 2)
         self.assertIsInstance(r, torch.SymFloat, msg=type(r))
-        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(sqrt(s0), 2)""")
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(OpaqueUnaryFn_sqrt(s0), 2)""")
 
     def test_sym_floor(self):
         shape_env = ShapeEnv()
@@ -413,6 +431,18 @@ class TestPySymInt(TestCase):
         self.assertEqual(r, 15)
         self.assertIsInstance(r, torch.SymInt, msg=type(r))
         self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(3*s0, 15)""")
+
+    def test_sym_trunc(self):
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 5)
+        r = math.trunc(a0 / 2)
+        self.assertEqual(r, 2)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[0][0]), """Eq(Trunc(s0/2), 2)""")
+        r = torch.sym_int(torch.sym_sqrt(a0))
+        self.assertEqual(r, 2)
+        self.assertIsInstance(r, torch.SymInt, msg=type(r))
+        self.assertExpectedInline(str(shape_env.guards[1][0]), """Eq(Trunc(OpaqueUnaryFn_sqrt(s0)), 2)""")
 
     def test_sym_ceil(self):
         shape_env = ShapeEnv()
@@ -497,13 +527,15 @@ def forward(self, x_1):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 5)
         i0 = shape_env.create_unbacked_symint()
-        self.assertTrue(expect_true(i0 <= s0))
+        self.assertTrue(expect_true(i0 < s0))
         self.assertExpectedInline(
             str([ra.expr for ra in shape_env.deferred_runtime_asserts[i0.node.expr]]),
-            """[-s0 + u0 <= 0]"""
+            """[-s0 + u0 < 0]"""
         )
-        self.assertTrue(i0 <= s0)
+        self.assertTrue(i0 < s0)
+        self.assertTrue(i0 != s0)
         self.assertFalse(i0 > s0)
+        self.assertFalse(i0 >= s0)
 
     def test_expect_true_prefer_later(self):
         shape_env = ShapeEnv()
@@ -748,6 +780,87 @@ class f(torch.nn.Module):
 
         # No guards should be generated
         self.assertEqual(len(shape_env.guards), 0)
+
+    def test_ephemeral_source_simplification(self):
+        from torch._dynamo.source import EphemeralSource
+
+        # For full robustness, ensure the ephemeral source symbols are simplified out regardless
+        # of construction order or check order.
+        for construct_ephemeral_first, x_first_in_check in (
+            itertools.product([False, True], [False, True])
+        ):
+            shape_env = ShapeEnv()
+            shape = (5, 10)
+            dynamic_dims = [DimDynamic.DYNAMIC for _ in shape]
+            x = create_symbolic_tensor(
+                "x",
+                torch.randn(*shape),
+                shape_env,
+                source=(EphemeralSource() if construct_ephemeral_first else None),
+                dynamic_dims=dynamic_dims,
+            )
+            y = create_symbolic_tensor(
+                "y",
+                torch.randn(*shape),
+                shape_env,
+                source=(EphemeralSource() if not construct_ephemeral_first else None),
+                dynamic_dims=dynamic_dims,
+            )
+            t_with_ephemeral = x if construct_ephemeral_first else y
+
+            def _get_ephemeral_source_symbols(t):
+                return [
+                    s.node.expr for s in itertools.chain(t.shape, t.stride(), (t.storage_offset(),))
+                    if isinstance(s, torch.SymInt) and s.node.expr in shape_env.var_to_sources
+                    and any(
+                        source.is_ephemeral() for source in shape_env.var_to_sources[s.node.expr]
+                    )
+                ]
+
+            # these checks should simplify out the ephemeral symbols, regardless of the
+            # ordering x == y or y == x
+            self.assertTrue(len(_get_ephemeral_source_symbols(t_with_ephemeral)) > 0)
+            if x_first_in_check:
+                torch._check(x.size() == y.size())
+                torch._check(x.stride() == y.stride())
+                torch._check(x.storage_offset() == y.storage_offset())
+            else:
+                torch._check(y.size() == x.size())
+                torch._check(y.stride() == x.stride())
+                torch._check(y.storage_offset() == x.storage_offset())
+            self.assertEqual(len(_get_ephemeral_source_symbols(t_with_ephemeral)), 0)
+
+    def test_ephemeral_source_unified_with_non_ephemeral_source(self):
+        from torch._dynamo.source import EphemeralSource
+
+        for construct_ephemeral_first in (False, True):
+            shape_env = ShapeEnv()
+            shape = (5, 10)
+            # use duck sizing here to ensure symbol reuse across x and y
+            duck_dims = [DimDynamic.DUCK for _ in shape]
+            x = create_symbolic_tensor(
+                "x",
+                torch.randn(*shape),
+                shape_env,
+                source=(EphemeralSource() if construct_ephemeral_first else None),
+                dynamic_dims=duck_dims,
+            )
+            y = create_symbolic_tensor(
+                "y",
+                torch.randn(*shape),
+                shape_env,
+                source=(EphemeralSource() if not construct_ephemeral_first else None),
+                dynamic_dims=duck_dims,
+            )
+
+            # regardless of construction order, non-ephemeral sources should be preferred
+            # first in the var_to_sources list for potential guarding later on
+            for source_list in shape_env.var_to_sources.values():
+                self.assertFalse(source_list[0].is_ephemeral())
+
+            self.assertEqual(x.size(), y.size())
+            self.assertEqual(x.stride(), y.stride())
+            self.assertEqual(x.storage_offset(), y.storage_offset())
 
 
 @skipIfTorchDynamo("Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)")

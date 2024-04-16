@@ -12,6 +12,7 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/CPUBlas.h>
+#include <ATen/native/cpu/int_mm_kernel.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/ReduceOps.h>
@@ -29,12 +30,17 @@
 #else
 #include <ATen/ops/_addmm_activation_native.h>
 #include <ATen/ops/_compute_linear_combination_native.h>
+#include <ATen/ops/_convert_weight_to_int4pack_native.h>
+#include <ATen/ops/_int_mm_native.h>
 #include <ATen/ops/_linalg_check_errors.h>
 #include <ATen/ops/_linalg_det.h>
 #include <ATen/ops/_linalg_det_native.h>
 #include <ATen/ops/_linalg_slogdet.h>
 #include <ATen/ops/_linalg_slogdet_native.h>
 #include <ATen/ops/_unsafe_view.h>
+#include <ATen/ops/_weight_int4pack_mm_native.h>
+#include <ATen/ops/_weight_int8pack_mm_native.h>
+#include <ATen/ops/abs.h>
 #include <ATen/ops/addbmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/addr.h>
@@ -115,6 +121,7 @@
 #include <ATen/ops/mul.h>
 #include <ATen/ops/mv.h>
 #include <ATen/ops/narrow.h>
+#include <ATen/ops/ne.h>
 #include <ATen/ops/norm.h>
 #include <ATen/ops/nuclear_norm_native.h>
 #include <ATen/ops/ones.h>
@@ -2810,6 +2817,36 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   // values larger than 10^53 (same for negative numbers), so that's fine.
   auto ord = scalar_ord.toDouble();
   auto dim = opt_dim.value_or(IntArrayRef{});
+  auto size = self.sizes();
+  auto ndim = self.dim();
+
+  auto opt_dim_ = dim.vec();
+  maybe_wrap_dims(opt_dim_, ndim);
+
+  using Int = IntArrayRef::value_type;
+  std::vector<Int> all_dim(ndim);
+  std::iota(all_dim.begin(), all_dim.end(), 0);
+
+  bool is_all_reduce = !opt_dim.has_value() || opt_dim.value().empty();
+  auto reduce_dim = is_all_reduce ? all_dim : opt_dim_;
+
+  bool is_reduce_over_1D_vector = true;
+  for (auto i : reduce_dim) {
+    if (size[i] != 1){
+      is_reduce_over_1D_vector = false;
+      break;
+    }
+  }
+
+  if (is_reduce_over_1D_vector) {
+    if (ord != 0.0) {
+      keepdim ? at::abs_outf(self, const_cast<Tensor&>(result)) : at::abs_outf(self.squeeze(reduce_dim), const_cast<Tensor&>(result));
+    } else {
+      keepdim ? at::ne_outf(self, 0, const_cast<Tensor&>(result)) : at::ne_outf(self.squeeze(reduce_dim), 0, const_cast<Tensor&>(result));
+    }
+    return;
+  }
+
   // No need to handle opt_dtype explicitly as it is already encoded in the dtype of result
 
   // https://github.com/pytorch/pytorch/issues/52648
@@ -3386,6 +3423,179 @@ Tensor& kron_out(const Tensor& self, const Tensor& other, Tensor& result) {
 
 Tensor kron(const Tensor& self, const Tensor& other) {
   return KronImpl(self, other).kron();
+}
+
+// Weight Only Quantization Gemm
+DEFINE_DISPATCH(weight_to_int4pack_stub);
+DEFINE_DISPATCH(int4pack_mm_stub);
+DEFINE_DISPATCH(int8pack_mm_stub);
+
+Tensor _convert_weight_to_int4pack_cpu(
+    const Tensor& in,
+    int64_t innerKTiles) {
+
+  TORCH_CHECK(in.dim() == 2,
+      __func__, " : expect weight to be 2D tensor.");
+  TORCH_CHECK(in.dtype() == at::kInt,
+      __func__, " : expect weight to be kInt.");
+  TORCH_CHECK(innerKTiles == 2 || innerKTiles == 4 || innerKTiles == 8,
+      __func__, " : innerKTiles need to be 2, 4, or 8, got ", innerKTiles);
+
+  auto weight = in.contiguous();
+  auto N = weight.size(0);
+  auto K = weight.size(1);
+
+  // Create fake shapes for cpu. The meta registration in dynamo requires
+  // operator has the same output shape for each device. So creating a fake
+  // shape {N / 8, K / (16 * innerKTiles), 32, innerKTiles / 2}
+  constexpr int64_t kNTileSize = 8;
+  constexpr int64_t kKTileSize = 16;
+  auto nTiles = (N + kNTileSize - 1) / kNTileSize;
+
+  TORCH_CHECK(N % 16 == 0,
+      __func__, " : expect N to be dividable by 16");
+  const int64_t kSuperKTileSize = kKTileSize * innerKTiles;
+  TORCH_CHECK( K % kSuperKTileSize == 0,
+      __func__, " : epxect K to be dividable by ", kSuperKTileSize);
+  auto kSuperTiles = (K + kSuperKTileSize - 1) / kSuperKTileSize;
+
+  auto weight_packed = at::empty(
+      {nTiles, kSuperTiles, 32, innerKTiles / 2},
+      at::TensorOptions().dtype(at::kInt));
+
+  weight_to_int4pack_stub(kCPU, weight_packed, weight, N, K);
+  return weight_packed;
+}
+
+Tensor _weight_int4pack_mm_cpu(
+    const Tensor& A,
+    const Tensor& B,
+    int64_t qGroupSize,
+    const Tensor& qScaleAndZeros) {
+
+  constexpr int64_t kNTileSize = 8;
+
+  auto M = A.size(0);
+  auto N = B.size(0) * kNTileSize;
+  auto K = A.size(1);
+
+  TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf,
+      __func__, " : expect A to be float16 or bfloat16 tensor.");
+  TORCH_CHECK(A.is_contiguous(),
+      __func__, " : expect A to be contiguous.");
+  TORCH_CHECK(A.dim() == 2,
+      __func__, " : expect A to be 2D tensor.");
+
+  TORCH_CHECK(B.dtype() == kInt,
+      __func__, " : expect B to be int32 tensor.");
+  TORCH_CHECK(B.is_contiguous(),
+      __func__, " : expect B to be contiguous.");
+  TORCH_CHECK(B.dim() == 4,
+      __func__, " : expect B to 4d tensor.");
+
+  TORCH_CHECK(qGroupSize == 32 || qGroupSize == 64 || qGroupSize == 128
+      || qGroupSize == 256,
+      __func__, ": expect qGroupSize to be 32, 64, 128 or 256, got ", qGroupSize);
+
+  TORCH_CHECK(qScaleAndZeros.dim() == 3 && qScaleAndZeros.size(1) == N
+      && qScaleAndZeros.size(2) == 2,
+      __func__, ": expect qScaleAndZeros to be 3d tensor with sizes [:, ", N, ", 2]");
+
+  auto C = at::empty({M, N}, A.options());
+  int4pack_mm_stub(kCPU, C, A, B, qGroupSize, qScaleAndZeros, N, K);
+
+  return C;
+}
+
+Tensor _weight_int8pack_mm_cpu(
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& scales) {
+
+  auto M = A.size(0);
+  auto N = B.size(0);
+  auto K = A.size(1);
+
+  TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf,
+      __func__, " : expect A to be float16 or bfloat16 tensor.");
+  TORCH_CHECK(A.is_contiguous(),
+      __func__, " : expect A to be contiguous.");
+  TORCH_CHECK(A.dim() == 2,
+      __func__, " : expect A to be 2D tensor.");
+
+  TORCH_CHECK(B.dtype() == kChar,
+      __func__, " : expect B to be int8 tensor.");
+  TORCH_CHECK(B.is_contiguous(),
+      __func__, " : expect B to be contiguous.");
+  TORCH_CHECK(B.size(1) == K,
+      __func__, " : expect B.size(1) == ", K);
+
+  TORCH_CHECK(scales.dim() == 1 && scales.size(0) == N,
+      __func__, " : expect scales to be 1d tensor with size ", N);
+
+  auto C = at::empty({M, N}, A.options());
+  int8pack_mm_stub(kCPU, C, A, B, scales);
+
+  return C;
+}
+
+Tensor& _int_mm_out_cpu(const Tensor& self, const Tensor& mat2, Tensor& result) {
+  static constexpr c10::string_view func_name = "int_mm_out_cpu";
+  TORCH_CHECK(self.dim() == 2, func_name, ": Expected self to be of dimension 2 but got ", self.dim());
+  TORCH_CHECK(mat2.dim() == 2, func_name, ": Expected mat2 to be of dimension 2 but got ", mat2.dim());
+  TORCH_CHECK(self.size(1) == mat2.size(0), func_name, ": self.size(1) needs to match mat2.size(0) but got ", self.size(1), " and ", mat2.size(0));
+  TORCH_CHECK(self.dtype() == at::kChar, func_name, ": Expected self dtype to be of type int8 but got ", self.dtype());
+  TORCH_CHECK(mat2.dtype() == at::kChar, func_name, ": Expected mat2 dtype to be of type int8 but got ", mat2.dtype());
+  TORCH_CHECK(result.dtype() == at::kInt, func_name, ": Expected result dtype to be of type kInt but got ", result.dtype());
+  TORCH_CHECK(result.size(0) == self.size(0), func_name, ": Expected result.size(0) to be ", self.size(0), " but got ", result.size(0));
+  TORCH_CHECK(result.size(1) == mat2.size(1), func_name, ": Expected result.size(1) to be ", mat2.size(1), " but got ", result.size(1));
+  TORCH_CHECK(result.dim() == 2, func_name, ": Expected result to be of dimension 2 but got ", result.dim());
+  TORCH_CHECK(result.is_contiguous(), func_name, ": Expected result to be contiguous.");
+
+  if (result.numel() == 0 || self.size(1) == 0) {
+    return result.zero_();
+  }
+
+  bool dispatched = false;
+  if (at::globalContext().userEnabledMkldnn()) {
+    try {
+      mkldnn_matmul_i8i8i32(self, mat2, result);
+      dispatched = true;
+    } catch (const std::exception& e) {
+      TORCH_WARN(func_name, " failed, switching to BLAS gemm: ", e.what());
+    }
+  }
+  if (!dispatched) {
+    auto a = reinterpret_cast<int8_t*>(self.data_ptr());
+    auto b = reinterpret_cast<int8_t*>(mat2.data_ptr());
+    auto c = reinterpret_cast<int32_t*>(result.data_ptr());
+    const int64_t m = result.size(0);
+    const int64_t n = result.size(1);
+    const int64_t k = self.size(1);
+    const int64_t lda_0 = self.strides()[0];
+    const int64_t lda_1 = self.strides()[1];
+    const int64_t ldb_0 = mat2.strides()[0];
+    const int64_t ldb_1 = mat2.strides()[1];
+    const int64_t ldc = result.strides()[0];
+    parallel_for(0, m * n, 1, [&](int64_t start, int64_t end) {
+      for (const auto i : c10::irange(start, end)) {
+        auto row = i / n;
+        auto col = i % n;
+        c[row * ldc + col] = 0;
+        for (const auto k : c10::irange(k)) {
+          c[row * ldc + col] = c[row * ldc + col] +
+              static_cast<int32_t>(a[row * lda_0 + k * lda_1]) *
+                  static_cast<int32_t>(b[k * ldb_0 + col * ldb_1]);
+        }
+      }
+    });
+  }
+  return result;
+}
+
+Tensor _int_mm_cpu(const Tensor& self, const Tensor& mat2) {
+  Tensor result = at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
+  return _int_mm_out_cpu(self, mat2, result);
 }
 
 } // namespace native

@@ -9,7 +9,6 @@
 #include <c10/util/Optional.h>
 #include <c10/util/OptionalArrayRef.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
-#include <torch/csrc/inductor/aoti_torch/tensor_converter.h>
 
 #define AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE(...)    \
   try {                                                    \
@@ -24,6 +23,19 @@
   return AOTI_TORCH_SUCCESS;
 
 namespace torch::aot_inductor {
+
+inline at::Tensor* tensor_handle_to_tensor_pointer(AtenTensorHandle handle) {
+  return reinterpret_cast<at::Tensor*>(handle);
+}
+
+inline AtenTensorHandle tensor_pointer_to_tensor_handle(at::Tensor* tensor) {
+  return reinterpret_cast<AtenTensorHandle>(tensor);
+}
+
+inline AtenTensorHandle new_tensor_handle(at::Tensor&& tensor) {
+  at::Tensor* new_tensor = new at::Tensor(std::move(tensor));
+  return tensor_pointer_to_tensor_handle(new_tensor);
+}
 
 // utility functions to convert a pointer to an optional value
 template <class T>
@@ -129,7 +141,7 @@ inline std::array<bool, N> pointer_to_list(const int32_t* ptr) {
   return result;
 }
 
-// utility functions to convert a pointer to a list of optional values
+// Utility function to convert a pointer to an optional list of values
 template <class T, class U>
 inline c10::optional<c10::ArrayRef<T>> pointer_to_optional_list(
     U** ptr,

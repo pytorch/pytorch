@@ -92,9 +92,9 @@ void searchsorted_cpu_contiguous(Tensor& result, const Tensor& input, const Tens
   int64_t idim_in = is_scalar_input ? 1 : input.sizes().back();
   int64_t idim_bd = boundaries.sizes().back();
 
-  const input_t *data_in = input.data_ptr<input_t>();
-  const input_t *data_bd = boundaries.data_ptr<input_t>();
-  const int64_t *data_st = sorter.defined() ? sorter.data_ptr<int64_t>() : nullptr;
+  const input_t *data_in = input.const_data_ptr<input_t>();
+  const input_t *data_bd = boundaries.const_data_ptr<input_t>();
+  const int64_t *data_st = sorter.defined() ? sorter.const_data_ptr<int64_t>() : nullptr;
   output_t *data_out = result.data_ptr<output_t>();
 
   bool is_1d_boundaries = boundaries.dim() == 1;
