@@ -251,15 +251,16 @@ def check_consistent(new, old) -> None:
 
     if isinstance(new, torch.Tensor):
         assert isinstance(old, torch.Tensor)
-        torch._check(old.dim() == new.dim())
+        torch._check(old.dim() == new.dim(), lambda: f"{old.shape} != {new.shape} (old != new)")
         # Do this manually so that each individual test is irrefutable
         # (TODO: should be a helper for this, maybe sym_eq?  That
         # gives us a compound expression and I'm not sure it
         # simplifies right now)
         for i, j in zip(old.shape, new.shape):
             rename_unbacked_to(i, j)
-    elif isinstance(new, scalar_types):
-        assert isinstance(old, scalar_types)
+    # NB: bool is subclass of int
+    elif isinstance(new, scalar_types) and not isinstance(new, bool):
+        assert isinstance(old, scalar_types) and not isinstance(old, bool), f"{old} != {new}"
         rename_unbacked_to(old, new)
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
@@ -4585,8 +4586,8 @@ class ShapeEnv:
             if vr == ValueRanges(lower, upper):
                 continue
 
+            # Updates the range and the guards corresponding to each bound of the symbol.
             self._update_var_to_range(symbol, ValueRanges(lower, upper))
-
             # Clears the cache, since this update can change the result.
             self._maybe_evaluate_static.cache_clear()
 
