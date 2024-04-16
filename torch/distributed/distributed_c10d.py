@@ -562,7 +562,7 @@ class _World:
             config_info.append(
                 {
                     "pg_name": self.pg_names[pg],
-                    "uid": _get_process_group_uid(pg),
+                    "pg_desc": pg.group_desc,
                     "backend_config": self.pg_backend_config[pg],
                     "ranks": list(ranks.keys())
                     if len(ranks) != default_pg_size
@@ -1097,7 +1097,7 @@ def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
         pg = group
     return {
         "pg_name": _get_process_group_name(pg),
-        "uid": _get_process_group_uid(pg),
+        "pg_desc": pg.group_desc,
         "backend_config": get_backend_config(pg),
         "pg_size": _get_group_size(pg),
         "ranks": get_process_group_ranks(pg),
