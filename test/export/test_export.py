@@ -1262,10 +1262,6 @@ class TestExport(TestCase):
         }
         self._test_export_same_as_eager(kw_func, args, kwargs)
 
-    # TODO(pianpwk): resolve in immediate follow-up PR
-    # add name to ConstantArgument schema for SerDer
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerPreDispatch
     def test_export_func_with_default_kwargs(self):
         class Module(torch.nn.Module):
             def forward(self, arg1, arg2, a, b=1):
@@ -4385,6 +4381,21 @@ def forward(self, x):
             node.name for node in ep.graph.nodes if node.op == "get_attr"
         ]
         self.assertEqual(expected_getattr_names, real_getattr_names)
+
+    # original input names aren't retraceable:
+    # compilation will succeed, but names won't match forward() signature.
+    @testing.expectedFailureRetraceability
+    def test_constant_input_naming(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x, y, div="floor"):
+                return torch.div(x, y, rounding_mode=div)
+
+        f = Foo()
+        inputs = (torch.randn(4), torch.randn(4), "floor")
+        ep = export(f, inputs)
+        div_spec = ep.graph_signature.input_specs[2]
+        self.assertEqual(div_spec.arg.name, "div")
+        self.assertEqual(div_spec.arg.value, "floor")
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")
