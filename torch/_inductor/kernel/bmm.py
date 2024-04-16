@@ -116,7 +116,7 @@ def tuned_bmm(mat1, mat2, *, layout=None):
 
     if len(choices) == 0:
         log.warning("No choices for GEMM, using ATen backend as fallback")
-        choices.extend([aten_bmm.bind((mat1, mat2), layout)])
+        choices.append(aten_bmm.bind((mat1, mat2), layout))
 
     return autotune_select_algorithm("bmm", choices, [mat1, mat2], layout)
 
