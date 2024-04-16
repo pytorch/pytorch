@@ -2348,13 +2348,15 @@ class BenchmarkRunner:
                 torch._inductor.config.triton.cudagraphs = False
         return model
 
-    def save_cache_dir_in_test_reports(self, name):
+    def save_cache_dir(self, name):
         try:
             cache_dir = os.environ.get("TORCHINDUCTOR_CACHE_DIR")
             if not cache_dir:
                 log.error("INDUCTOR_CACHE_DIR is not set")
             else:
-                dst_dir = os.path.join(os.getcwd(), "test", "inductor-artifacts")
+                dst_dir = os.path.join(
+                    os.getcwd(), "test", "debug", "inductor-artifacts"
+                )
                 os.makedirs(dst_dir, exist_ok=True)
                 archive = os.path.join(dst_dir, name)
                 shutil.make_archive(archive, "zip", cache_dir)
@@ -2400,7 +2402,7 @@ class BenchmarkRunner:
             output_csv(output_filename, headers, fields)
 
             if accuracy_status != "pass" and name in CI_SAVE_CACHE_DIR:
-                self.save_cache_dir_in_test_reports(name)
+                self.save_cache_dir(name)
 
             return accuracy_status
 

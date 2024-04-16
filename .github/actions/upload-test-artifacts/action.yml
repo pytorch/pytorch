@@ -57,16 +57,16 @@ runs:
             zip -r "logs-${FILE_SUFFIX}.zip" test -i '*.log'
         fi
 
-    - name: Zip inductor artifacts for upload
+    - name: Zip debugging artifacts for upload
       if: runner.os != 'Windows' && !inputs.use-gha
       shell: bash
       env:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
         # Remove any previous cache artifacts if they exist
-        rm -f inductor-artifacts-*.zip
-        if [ -d 'test/inductor-artifacts' ]; then
-          zip -r "inductor-artifacts-${FILE_SUFFIX}.zip" test/inductor-artifacts
+        rm -f debug-*.zip
+        if [ -d 'test/debug' ]; then
+          zip -r "debug-${FILE_SUFFIX}.zip" test/debug
         fi
 
     # Windows zip
@@ -133,7 +133,7 @@ runs:
         if-no-files-found: ignore
         path: logs-*.zip
 
-    - name: Store Inductor Artifacts on S3
+    - name: Store Debug Artifacts on S3
       uses: seemethere/upload-artifact-s3@v5
       if: ${{ !inputs.use-gha }}
       continue-on-error: true
@@ -143,7 +143,7 @@ runs:
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
         if-no-files-found: ignore
-        path: inductor-artifacts-*.zip
+        path: debug-*.zip
 
     # GHA upload
     - name: Store Test Downloaded JSONs on Github
