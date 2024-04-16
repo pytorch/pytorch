@@ -518,6 +518,14 @@ class BuiltinVariable(VariableTracker):
             def compare_set_items(tx, left, right):
                 return ConstantVariable(op(left.set_items, right.set_items))
 
+            def compare_via_method(tx, left, right):
+                return left.call_method(tx, f"__{op.__name__}__", [right], {})
+
+            if op.__name__.startswith("is_"):
+                compare_user_defined = compare_by_value
+            else:
+                compare_user_defined = compare_via_method
+
             op_var = BuiltinVariable(op)
             result.extend(
                 [
@@ -546,14 +554,13 @@ class BuiltinVariable(VariableTracker):
                         list_compare_check,
                     ),
                     ((has_set_items, has_set_items), compare_set_items),
-                    # TODO(jansel): UserDefinedObjectVariable is wrong and could invoke user code
                     (
                         (UserDefinedObjectVariable, UserDefinedObjectVariable),
-                        compare_by_value,
+                        compare_user_defined,
                     ),
                     (
                         (UserDefinedClassVariable, UserDefinedClassVariable),
-                        compare_by_value,
+                        compare_user_defined,
                     ),
                     (
                         (
@@ -1466,6 +1473,24 @@ class BuiltinVariable(VariableTracker):
             unimplemented("non-const getattr() name")
 
         if tx.output.side_effects.is_attribute_mutation(obj):
+            if isinstance(obj, variables.UnspecializedNNModuleVariable):
+                if (
+                    name
+                    in (
+                        "named_parameters",
+                        "parameters",
+                        "named_buffers",
+                        "buffers",
+                        "named_modules",
+                        "modules",
+                    )
+                    and obj.is_state_mutated
+                    and tx.output.side_effects.has_pending_mutation(obj)
+                ):
+                    unimplemented(
+                        f"pending mutation on nn module, so graph breaking at {name!r} call"
+                    )
+
             try:
                 # re-read a pending side effect?
                 return tx.output.side_effects.load_attr(obj, name)
