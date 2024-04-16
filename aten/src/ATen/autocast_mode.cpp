@@ -565,6 +565,8 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
   KERNEL_CPU(index_copy, promote)
   KERNEL_CPU(index_copy, dimname, promote)
 
+}
+
 TORCH_LIBRARY_IMPL(_, AutocastXPU, m) {
   m.fallback(torch::CppFunction::makeFallthrough());
 }
@@ -604,8 +606,6 @@ TORCH_LIBRARY_IMPL(aten, AutocastXPU, m) {
 
   m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
          TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
-}
-
 }
 
 } // namespace
