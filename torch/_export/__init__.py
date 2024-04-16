@@ -321,6 +321,7 @@ def aot_compile(
     options: Optional[Dict[str, Any]] = None,
     remove_runtime_assertions: bool = False,
     disable_constraint_solver: bool = False,
+    same_signature: bool = True,
 ) -> str:
     """
     Note: this function is not stable yet
@@ -371,6 +372,7 @@ def aot_compile(
             kwargs,
             dynamic_shapes,
             disable_constraint_solver=disable_constraint_solver,
+            same_signature=same_signature,
             # Disabling this flag, because instead we can rely on the mapping
             # dynamo_flat_name_to_original_fqn which is coming from Dynamo.
             restore_fqn=False,
