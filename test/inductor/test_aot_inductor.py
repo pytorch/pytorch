@@ -2632,12 +2632,17 @@ def fail_non_abi_compatible_cuda(is_skip=False):
         is_skip=is_skip,
     )
 
+def fail_non_abi_compatible_cpu(is_skip=False):
+    return TestFailure(
+        ("non_abi_compatible_cpu",),
+        is_skip=is_skip,
+    )
 
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(is_skip=True),
-    "test_bmm_multiple_dynamic": fail_minimal_arrayref_interface(is_skip=True),
+    "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -2646,7 +2651,10 @@ CPU_TEST_FAILURES = {
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/122978
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
-    "test_dynamic_smem_above_default_limit": fail_minimal_arrayref_interface(
+    "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
+    "test_dynamic_smem_above_default_limit": fail_non_abi_compatible_cpu(
         is_skip=True
     ),
     # https://github.com/pytorch/pytorch/issues/122980
