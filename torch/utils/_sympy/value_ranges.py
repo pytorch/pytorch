@@ -860,7 +860,28 @@ def bound_sympy(
     if context and context.fake_mode.shape_env:
         ranges = {**context.fake_mode.shape_env.var_to_range, **ranges}
 
-    unbounded_vars = expr.free_symbols - ranges.keys()
+    # sympy.Expr equality is done via pre-order traversal and hash of each item, which loads cpu => switching to str .name comparison with optimization for len(free_symbols) == 1
+    # unbounded_vars = expr.free_symbols - ranges.keys()
+    unbounded_vars = set()
+    num_fs = len(expr.free_symbols)
+    if  num_fs == 0:
+        pass
+    elif num_fs == 1:
+        fs = next(iter(expr.free_symbols))
+        name = fs.name
+        found = False
+        for r in ranges.keys():
+            if r.name == name:
+                found = True
+                break
+        if not found:
+            unbounded_vars.add(fs)
+    else:
+        ranges_names = [r.name for r in ranges.keys()]
+        for fs in expr.free_symbols:
+            if fs.name not in ranges_names:
+                unbounded_vars.add(fs)
+
     if unbounded_vars:
         # Give some bounds to the free variables via their SymPy assumptions
         # TODO A better way of doing this would be to assign them a range upon creation, as
