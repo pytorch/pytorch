@@ -813,13 +813,18 @@ void passEventsToKineto(
   // Generate Kineto events for each event recorded by the PyTorch profiler.
   for (const auto i : c10::irange(results.size())) {
     const auto& e = results[i];
+    // (TODO): This is a temporary fix for async traces to make sure that we do
+    // not use int64 MIN as end time in Kineto. If we use that value, the
+    // duration will overflow and become a very large positive number. For a
+    // long term solution, add guards in kineto for each activity type
+    int64_t act_end_time = std::max(e->endTimeNS(), e->start_time_ns_);
     auto* activity = cpu_trace.addCPUActivity(
         e->name(),
         e->kinetoType(),
         e->kineto_info_,
         e->correlationID(),
         e->start_time_ns_,
-        e->endTimeNS());
+        act_end_time);
 
     TORCH_INTERNAL_ASSERT(activity || !kKinetoAvailable);
     if (activity) {
