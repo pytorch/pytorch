@@ -210,6 +210,11 @@ def memory_stats(device: Union[Device, int] = None) -> Dict[str, Any]:
     - ``"num_alloc_retries"``: number of failed ``cudaMalloc`` calls that
       result in a cache flush and retry.
     - ``"num_ooms"``: number of out-of-memory errors thrown.
+    - ``"num_sync_all_streams"``: number of ``synchronize_and_free_events`` calls.
+    - ``"num_device_alloc"``: number of CUDA allocation calls. This includes both
+      cuMemMap and cudaMalloc.
+    - ``"num_device_free"``: number of CUDA free calls. This includes both cuMemUnmap
+      and cudaFree.
 
     The caching allocator can be configured via ENV to not split blocks larger than a
     defined size (see Memory Management section of the Cuda Semantics documentation).

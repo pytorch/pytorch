@@ -538,7 +538,7 @@ class BaseSchedulerNode:
         node_bytes = 0
 
         for buf_name in reads | writes:
-            buf_accessed_elems = sum([node_numel for dep in buf_accesses[buf_name]])
+            buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
             buf: Union[ir.Buffer, ir.TensorBox]
             if buf_name in V.graph.name_to_buffer:
                 buf = V.graph.name_to_buffer[buf_name]
@@ -868,8 +868,8 @@ class FusedSchedulerNode(BaseSchedulerNode):
             for dep in set.union(*[x.unmet_dependencies for x in snodes])
             if dep.name not in self.get_names()
         } - self.read_writes.writes
-        self.min_order = min([x.min_order for x in self.snodes])
-        self.max_order = max([x.max_order for x in self.snodes])
+        self.min_order = min(x.min_order for x in self.snodes)
+        self.max_order = max(x.max_order for x in self.snodes)
 
     @cache_on_self
     def get_name(self) -> str:
@@ -2440,8 +2440,9 @@ class Scheduler:
 
             self.enter_context(node)
 
-            if not isinstance(node, NopKernelSchedulerNode):
-                device = node.get_device()
+            if not isinstance(node, NopKernelSchedulerNode) and (
+                device := node.get_device()
+            ):
                 if (
                     device != self.current_device
                     or node.is_extern()
@@ -2484,7 +2485,7 @@ class Scheduler:
 
             if not isinstance(node, NopKernelSchedulerNode):
                 device = node.get_device()
-                if self.get_backend(device).ready_to_flush():
+                if device is not None and self.get_backend(device).ready_to_flush():
                     self.flush()
 
         if self.current_device and device_need_guard(self.current_device.type):
