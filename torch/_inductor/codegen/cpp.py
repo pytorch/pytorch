@@ -2020,7 +2020,9 @@ class CppKernel(Kernel):
 
         if kernel := get_outer_loop_fused_kernel(loop_nest):
             assert isinstance(kernel, OuterLoopFusedKernel)
-            par_depth = kernel.decide_parallel_depth(loop_nest, threads)
+            par_depth = kernel.decide_parallel_depth(
+                loop_nest.max_parallel_depth(), threads
+            )
         else:
             par_depth = self.decide_parallel_depth(
                 self.call_ranges[: loop_nest.max_parallel_depth()], threads
@@ -3581,7 +3583,7 @@ class OuterLoopFusedKernel(CppKernel):
         super().__init__(kernel_group.args, kernel_group.ws.num_threads)
         self.inner: List["LoopLevel"] = []
 
-    def decide_parallel_depth(self, loop_nest, threads) -> int:
+    def decide_parallel_depth(self, outer_loop_fusion_depth, threads) -> int:
         kernels_parallel_depth = []
         nested_kernels: List[List[CppKernel]] = [
             loop.get_kernels() for loop in self.inner
@@ -3595,7 +3597,7 @@ class OuterLoopFusedKernel(CppKernel):
                 kernels[0].decide_parallel_depth(call_ranges, threads)
             )
         return min(
-            loop_nest.max_parallel_depth(),
+            outer_loop_fusion_depth,
             max(kernels_parallel_depth),
         )
 
