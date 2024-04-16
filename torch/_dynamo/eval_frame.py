@@ -340,10 +340,11 @@ class _TorchDynamoContext:
             # User has wrapped the class with compile/disable decorator. Apply
             # disable to init/call method.
             cls_obj = fn
-            # Disable on init is useful for reconstruction of bytecodes where we
-            # want to prevent Dynamo from tracing into the init function. Check
-            # test_reconstruction in test_model_output.py.
-            cls_obj.__init__ = self(cls_obj.__init__)
+            if isinstance(self, DisableContext):
+                # Disable on init is useful for reconstruction of bytecodes where we
+                # want to prevent Dynamo from tracing into the init function. Check
+                # test_reconstruction in test_model_output.py.
+                cls_obj.__init__ = self(cls_obj.__init__)
             cls_obj.__call__ = self(cls_obj.__call__)
             if issubclass(cls_obj, torch.nn.Module):
                 # NN module variable tracker directly inlines the _call_impl. Disable it.
