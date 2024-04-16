@@ -1362,7 +1362,7 @@ TORCH_IMPL_FUNC(mean_out)
         dim_prod *= self.size(d);
       }
     }
-    auto& result_mut = const_cast<Tensor&>(result);
+    auto result_mut = at::empty(result.sizes(), self.options().dtype(dtype));
     // For accuracy reasons, BF16/FP16 mean should be computed via the
     // following approach:
     //  cast_fp32 -> sum -> div -> cast_bf16_or_fp16
@@ -1385,6 +1385,9 @@ TORCH_IMPL_FUNC(mean_out)
     at::sum_out(result_mut, self, opt_dim, keepdim, sum_out_dtype).div_(dim_prod);
     // After sum & div, cast result_mut back to BF16 or FP16, if required.
     result_mut = is_half_type ? result_mut.to(dtype) : result_mut;
+
+    result.copy_(result_mut);
+
   } else {
     // device is not CPU
     auto iter = at::meta::make_reduction_from_out_ty(
