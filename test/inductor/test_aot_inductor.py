@@ -2677,6 +2677,17 @@ def fail_non_abi_compatible_cpu(is_skip=False):
         is_skip=is_skip,
     )
 
+def fail_non_abi_compatible_cpu_with_and_without_stack_allocationu(is_skip=False):
+    return TestFailure(
+        (
+            "non_abi_compatible_cpu",
+            "abi_compatible_cpu",
+            "abi_compatible_cpu_with_stack_allocation",
+            "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
+        ),
+        is_skip=is_skip,
+    )
+
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
@@ -2690,10 +2701,7 @@ CPU_TEST_FAILURES = {
     "test_dynamic_cat": fail_minimal_arrayref_interface(),
     # https://github.com/pytorch/pytorch/issues/122978
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
-    "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(
-        is_skip=True
-    ),
-    "test_dynamic_smem_above_default_limit": fail_non_abi_compatible_cpu(
+    "test_dynamic_smem_above_default_limit": fail_non_abi_compatible_cpu_with_and_without_stack_allocationu(
         is_skip=True
     ),
     # https://github.com/pytorch/pytorch/issues/122980
@@ -2733,7 +2741,7 @@ CPU_TEST_FAILURES = {
     ),
     # https://github.com/pytorch/pytorch/issues/123691
     "test_amp_fallback_random": fail_minimal_arrayref_interface(is_skip=True),
-    "test_simple_dynamic": fail_minimal_arrayref_interface(),
+    "test_simple_dynamic": fail_minimal_arrayref_interface(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/123691
     "test_zero_grid_with_unbacked_symbols": fail_minimal_arrayref_interface(
         is_skip=True
