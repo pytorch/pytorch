@@ -3593,6 +3593,27 @@ class ShapeEnv:
         symbols = list(expr.free_symbols)
 
         # Apply known runtime asserts
+        guards_exprs = []
+        for g in self.guards:
+            e = self.simplify(g.expr)
+            if compute_hint:
+                e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
+            guards_exprs.append(e)
+
+        symbols_unbacked = symbols - self.var_to_val.keys()
+        defra_exprs = {}
+        for s in symbols_unbacked:
+            defras = self.deferred_runtime_asserts.get(s, ())
+            l = []
+            for defra in defras:
+                e = self.simplify(defra.expr)
+                if compute_hint:
+                    e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
+                l.append(e)
+            defra_exprs[s] = l
+
+
+        subst = {}
         for s in symbols:
             # Unbacked symints only
             if s in self.var_to_val:
@@ -3610,10 +3631,7 @@ class ShapeEnv:
                     subst[canonicalize_bool_expr(dual)] = sympy.true
                     subst[canonicalize_bool_expr(sympy.Not(dual))] = sympy.false
 
-            for e in itertools.chain(self.guards, self.deferred_runtime_asserts.get(s, ())):
-                e = e.expr
-                if compute_hint:
-                    e = canonicalize_bool_expr(e.xreplace(self.var_to_val))
+            for e in itertools.chain(guards_exprs, defra_exprs[s]):
                 add_expr(e)
                 # Other relational expressions this expression implies
                 if isinstance(e, sympy.Eq):
@@ -3623,8 +3641,8 @@ class ShapeEnv:
                     add_expr(sympy.Le(e.lhs, e.rhs))
                     add_expr(sympy.Ne(e.lhs, e.rhs))
 
-            # NB: this helps us deal with And/Or connectives
-            expr = expr.subs(subst)
+		# NB: this helps us deal with And/Or connectives
+		expr = expr.subs(subst)
 
         # Simplify making use of value range lower bound
         new_shape_env = {}
