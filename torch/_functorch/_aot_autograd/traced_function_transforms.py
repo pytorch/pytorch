@@ -681,8 +681,8 @@ class PropagateUnbackedSymInts(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
         result = super().run_node(n)
 
-        if "example_value" in n.meta:
-            pytree.tree_map_(check_consistent, result, n.meta["example_value"])
+        if "example_value_snapshot" in n.meta:
+            pytree.tree_map_(check_consistent, result, n.meta["example_value_snapshot"])
 
         return result
 
