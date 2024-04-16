@@ -562,7 +562,7 @@ class _World:
             config_info.append(
                 {
                     "pg_name": self.pg_names[pg],
-                    "uid": _get_process_group_uid(pg),
+                    "pg_desc": pg.group_desc,
                     "backend_config": self.pg_backend_config[pg],
                     "ranks": list(ranks.keys())
                     if len(ranks) != default_pg_size
@@ -1097,7 +1097,7 @@ def _get_pg_config(group: Optional[ProcessGroup] = None) -> Dict[str, Any]:
         pg = group
     return {
         "pg_name": _get_process_group_name(pg),
-        "uid": _get_process_group_uid(pg),
+        "pg_desc": pg.group_desc,
         "backend_config": get_backend_config(pg),
         "pg_size": _get_group_size(pg),
         "ranks": get_process_group_ranks(pg),
@@ -1119,6 +1119,28 @@ def get_pg_count() -> int:
 
     """
     return _world.group_count
+
+def get_node_local_rank() -> int:
+    """
+    Return the local rank of the current process relative to the node.
+
+    Semantically, this is a useful concept for mapping processes to devices.
+    For example, on a node with 8 accelerator you could use the node local rank to decide
+    which accelerator device to bind the process to.
+
+    In practice, the actual assignment of node local ranks is handled by the process launcher outside of pytorch,
+    and communicated via the `LOCAL_RANK` environment variable.
+
+    Torchrun will automatically populate `LOCAL_RANK`, but other launchers may not.  If `LOCAL_RANK` is unspecified,
+    this API will raise an exception.
+
+    """
+    if "LOCAL_RANK" in os.environ:
+        return int(os.environ["LOCAL_RANK"])
+    raise RuntimeError(
+        "LOCAL_RANK is not in the environment, so `get_node_local_rank` can't be used. "
+        "Consider using torchrun or updating your process launcher to specify LOCAL_RANK."
+    )
 
 def _set_pg_timeout(timeout: timedelta, group: Optional[ProcessGroup] = None) -> None:
     """
