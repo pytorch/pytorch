@@ -993,7 +993,8 @@ def _call_overload_packet_from_python(op: OpOverloadPacket, args, kwargs):
     # The following mirrors getOpWithStack.
     # In cpp, we do a schema matching for the arguments, and call ToIValue to
     # to check whether the arguments are valid. But need to do similar things here
-    # and allow toIValue FakeScriptObject.
+    # and check the schema whether the FakeScriptObject is the corresponding fake class
+    # of the actual class used in schema.
     exceptions = {}
     found_op = None
     for overload_name in op.overloads():
