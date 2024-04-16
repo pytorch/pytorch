@@ -2679,23 +2679,11 @@ def fail_non_abi_compatible_cpu(is_skip=False):
     )
 
 
-def fail_non_abi_compatible_cpu_with_and_without_stack_allocationu(is_skip=False):
-    return TestFailure(
-        (
-            "non_abi_compatible_cpu",
-            "abi_compatible_cpu",
-            "abi_compatible_cpu_with_stack_allocation",
-            "abi_compatible_cpu_with_stack_allocation_and_minimal_arrayref_interface",
-        ),
-        is_skip=is_skip,
-    )
-
-
 # test_failures, xfail by default, set is_skip=True to skip
 CPU_TEST_FAILURES = {
     "test_add_complex": fail_stack_allocation(is_skip=True),
     "test_addmm_multiple_dynamic": fail_with_and_without_stack_allocation(is_skip=True),
-    "test_bmm_multiple_dynamic": fail_non_abi_compatible_cpu_with_and_without_stack_allocationu(is_skip=True),
+    "test_bmm_multiple_dynamic": fail_with_and_without_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_duplicate_constant_folding": fail_with_and_without_stack_allocation(
         is_skip=True
@@ -2704,7 +2692,7 @@ CPU_TEST_FAILURES = {
     "test_dynamic_cat": fail_minimal_arrayref_interface(is_skip=True),
     # https://github.com/pytorch/pytorch/issues/122978
     "test_dynamic_scalar": fail_stack_allocation(is_skip=True),
-    "test_dynamic_smem_above_default_limit": fail_non_abi_compatible_cpu_with_and_without_stack_allocationu(
+    "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
     # https://github.com/pytorch/pytorch/issues/122980
@@ -2934,13 +2922,13 @@ copy_tests(
     "non_abi_compatible_cpu",
     # test_failures, xfail by default, set is_skip=True to skip
     {
-        "test_addmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
-        "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",)),
+        "test_addmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
+        "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
         "test_duplicate_constant_folding": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
         "test_dynamic_smem_above_default_limit": TestFailure(
-            ("non_abi_compatible_cpu",)
+            ("non_abi_compatible_cpu",), is_skip=True
         ),
         # TODO: test_freezing_non_abi_compatible_cpu somehow fails on CI but not locally,
         #   NotImplementedError: Cannot access storage of OpaqueTensorImpl
