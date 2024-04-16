@@ -3143,41 +3143,45 @@ class CppKernelDispatcher(CppKernel):
         if len(self.tiling_ranges) == 1:
             # generate 1-d tiling condition
             self.vec_condition.writeline(
-                f"if ({self.itervars[0]} < {self.tiling_ranges[0]})"
+                f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])})"
             )
             self.scalar_condition.writeline(
-                f"if ({self.itervars[0]} >= {self.tiling_ranges[0]})"
+                f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])})"
             )
         elif len(self.tiling_ranges) == 2:
             # generate 2-d tiling condition
             self.tile2d_condition.writeline(
-                f"if ({self.itervars[0]} < {self.tiling_ranges[0]} && {self.itervars[1]} < {self.tiling_ranges[1]})"
+                f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])} && "
+                + f"{self.itervars[1]} < {cexpr_index(self.tiling_ranges[1])})"
             )
             self.vec_condition.writeline(
-                f"if ({self.itervars[0]} < {self.tiling_ranges[0]} && {self.itervars[1]} >= {self.tiling_ranges[1]})"
+                f"if ({self.itervars[0]} < {cexpr_index(self.tiling_ranges[0])} && "
+                + f"{self.itervars[1]} >= {cexpr_index(self.tiling_ranges[1])})"
             )
             self.scalar_condition.writeline(
-                f"if ({self.itervars[0]} >= {self.tiling_ranges[0]} && {self.itervars[1]} >= {self.tiling_ranges[1]})"
+                f"if ({self.itervars[0]} >= {cexpr_index(self.tiling_ranges[0])} && "
+                + f"{self.itervars[1]} >= {cexpr_index(self.tiling_ranges[1])})"
             )
 
     def gen_tiling_loops(self):
         if len(self.tiling_ranges) == 1:
             # generate 1-d tiling loops
             self.scalar_loop.writeline(
-                f"for (long {self.itervars_tail[0]} = {self.tiling_ranges[0]}; "
-                + f"{self.itervars_tail[0]} < {self.sizes[0]}; {self.itervars_tail[0]}++)"
+                f"for (long {self.itervars_tail[0]} = {cexpr_index(self.tiling_ranges[0])}; "
+                + f"{self.itervars_tail[0]} < {cexpr_index(self.sizes[0])}; {self.itervars_tail[0]}++)"
             )
         elif len(self.tiling_ranges) == 2:
             # generate 2-d tiling loops
             self.vec_loop.writeline(
-                f"for (long {self.itervars_tail[1]} = {self.tiling_ranges[1]}; "
-                + f"{self.itervars_tail[1]} < {self.sizes[1]}; {self.itervars_tail[1]}++)"
+                f"for (long {self.itervars_tail[1]} = {cexpr_index(self.tiling_ranges[1])}; "
+                + f"{self.itervars_tail[1]} < {cexpr_index(self.sizes[1])}; {self.itervars_tail[1]}++)"
             )
             self.scalar_loop.writelines(
                 [
-                    f"for (long {self.itervars_tail[0]} = {self.tiling_ranges[0]}; "
-                    + f"{self.itervars_tail[0]} < {self.sizes[0]}; {self.itervars_tail[0]}++)",
-                    f"for (long {self.itervars_tail[1]} = 0; {self.itervars_tail[1]} < {self.sizes[1]}; {self.itervars_tail[1]}++)",
+                    f"for (long {self.itervars_tail[0]} = {cexpr_index(self.tiling_ranges[0])}; "
+                    + f"{self.itervars_tail[0]} < {cexpr_index(self.sizes[0])}; {self.itervars_tail[0]}++)",
+                    f"for (long {self.itervars_tail[1]} = 0; {self.itervars_tail[1]} < {cexpr_index(self.sizes[1])}; "
+                    + f"{self.itervars_tail[1]}++)",
                 ]
             )
 
