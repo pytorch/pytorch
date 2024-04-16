@@ -658,7 +658,7 @@ class VariableBuilder:
                     "device_type": value.device_type,
                 },
             )
-            set_example_value(stream_proxy.node, value)
+            set_example_value(self.tx, stream_proxy.node, value)
             return StreamVariable(
                 stream_proxy,
                 value,
@@ -1546,7 +1546,7 @@ def wrap_fx_proxy_cls(
         # (WARNING: this means that if we mutate metadata on the fake
         # tensor, the stored example value will update too!)
         example_value = _clone_input(example_value)
-        set_example_value(proxy.node, example_value)
+        set_example_value(tx, proxy.node, example_value)
         specialized_props = target_cls.specialize(example_value)
         # TODO: not sure about this fake mode test
         if (
@@ -1578,7 +1578,7 @@ def wrap_fx_proxy_cls(
         sizes = [ConstantVariable.create(x) for x in example_value]
         return SizeVariable(sizes, **options)
     elif isinstance(example_value, (tuple, list)):
-        set_example_value(proxy.node, example_value)
+        set_example_value(tx, proxy.node, example_value)
         unpacked = []
         for i, val in enumerate(example_value):
             if val is None:
@@ -1630,7 +1630,7 @@ def wrap_fx_proxy_cls(
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
-        set_example_value(proxy.node, example_value)
+        set_example_value(tx, proxy.node, example_value)
         return SymNodeVariable(proxy, example_value, **options)
     elif (
         inspect.isclass(proxy.node.target)
@@ -1639,7 +1639,7 @@ def wrap_fx_proxy_cls(
         device_interface.current_stream
         for _, device_interface in get_registered_device_interfaces()
     ]:
-        set_example_value(proxy.node, example_value)
+        set_example_value(tx, proxy.node, example_value)
         return StreamVariable(proxy, example_value, example_value.device, **options)
     elif (
         inspect.isclass(proxy.node.target) and issubclass(proxy.node.target, _EventBase)
@@ -1647,10 +1647,10 @@ def wrap_fx_proxy_cls(
         device_interface.Event
         for _, device_interface in get_registered_device_interfaces()
     ]:
-        set_example_value(proxy.node, example_value)
+        set_example_value(tx, proxy.node, example_value)
         return EventVariable(proxy, example_value, **options)
     elif proxy.node.target == "query" and proxy.node.op == "call_method":
-        set_example_value(proxy.node, example_value)
+        set_example_value(tx, proxy.node, example_value)
         return ConstantVariable(example_value, **options)
     elif (
         example_value is not None
@@ -1658,7 +1658,7 @@ def wrap_fx_proxy_cls(
         and proxy.node.target == "record_event"
         and proxy.node.op == "call_method"
     ):
-        set_example_value(proxy.node, example_value)
+        set_example_value(tx, proxy.node, example_value)
         return EventVariable(proxy, example_value, **options)
     elif isinstance(example_value, int) and proxy.node.target in [
         torch.sym_int,
@@ -1676,18 +1676,18 @@ def wrap_fx_proxy_cls(
         torch._constrain_as_value,
         torch._constrain_as_size,
     ]:
-        set_example_value(proxy.node, example_value)
+        set_example_value(tx, proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif isinstance(example_value, torch.backends.cuda.SDPAParams):
         from .sdpa import SDPAParamsVariable
 
-        set_example_value(proxy.node, example_value)
+        set_example_value(tx, proxy.node, example_value)
         return SDPAParamsVariable(proxy, **options)
     elif isinstance(example_value, bool) and proxy.node.target in [
         torch.backends.cuda.can_use_flash_attention,
         torch.backends.cuda.can_use_efficient_attention,
     ]:
-        set_example_value(proxy.node, example_value)
+        set_example_value(tx, proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     else:
         unimplemented(

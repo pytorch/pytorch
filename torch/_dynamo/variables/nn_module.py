@@ -377,7 +377,7 @@ class NNModuleVariable(VariableTracker):
                 tuple(),
                 {},
             )
-            set_example_value(mod_proxy.node, module)
+            set_example_value(tx, mod_proxy.node, module)
 
             proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
 
