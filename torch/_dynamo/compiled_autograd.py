@@ -5,7 +5,7 @@ from typing import List, Optional
 import torch
 from torch._dynamo.external_utils import call_backward, call_hook
 from torch._dynamo.source import GetItemSource, LocalSource
-from torch._dynamo.utils import counters, lazy_format_graph_code
+from torch._dynamo.utils import counters, lazy_format_graph_code, set_locals_to_steal
 from torch._logging import getArtifactLogger, trace_structured
 from torch._prims_common import clone_preserve_strides
 from torch._subclasses import FakeTensorMode
@@ -199,6 +199,7 @@ class AutogradCompilerInstance:
         graph = GraphModule(
             self.fx_tracer.root, self.fx_tracer.graph, "CompiledAutograd"
         )
+        set_locals_to_steal(graph, ["inputs"])
         compiled_autograd_log.info(
             "%s", lazy_format_graph_code("Compiled autograd graph", graph)
         )

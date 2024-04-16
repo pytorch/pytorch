@@ -334,9 +334,7 @@ class TestForeach(TestCase):
                             [rhs_arg, tensors], is_cuda=False, expect_fastpath=False
                         )
                     ).mean().backward()
-                    sum(
-                        [ref.func(ref_rhs_arg, t) for t in ref_tensors]
-                    ).mean().backward()
+                    sum(ref.func(ref_rhs_arg, t) for t in ref_tensors).mean().backward()
                     self.assertEqual(
                         [t.grad for t in tensors], [t.grad for t in ref_tensors]
                     )
@@ -1207,6 +1205,28 @@ class TestForeach(TestCase):
                     for t, s in zip(ref_input, rhs_tensors):
                         copy_(t, s, non_blocking)
                     self.assertEqual(ref_input, sample.input)
+
+    @onlyCUDA
+    @ops(filter(lambda op: op.name == "_foreach_copy", foreach_binary_op_db))
+    def test_foreach_copy_with_multi_dtypes(self, device, dtype, op):
+        # check (a) multi_tensor_apply is called and (b) numerical parity with for-loop and Tensor.copy_
+        foreach_copy_ = ForeachFuncWrapper(op.inplace_variant)
+        for sample in op.sample_inputs(device, dtype, noncontiguous=False):
+            for src_dtype in floating_types_and(torch.half, torch.bfloat16):
+                if src_dtype == dtype:
+                    continue
+                self_tensors = [t.clone() for t in sample.input]
+                src_tensors = [t.to(src_dtype) for t in self_tensors]
+                out = foreach_copy_(
+                    (self_tensors, src_tensors), is_cuda=True, expect_fastpath=True
+                )
+                self.assertEqual(
+                    out,
+                    [
+                        torch.empty_like(t).copy_(s)
+                        for t, s in zip(self_tensors, src_tensors)
+                    ],
+                )
 
     # Test reverse-mode & forward-mode AD if supported.
     @onlyCUDA
