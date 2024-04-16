@@ -93,6 +93,7 @@ from .variables.builder import (
     VariableBuilder,
     wrap_fx_proxy,
 )
+from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -1001,6 +1002,14 @@ class OutputGraph:
             # while running test_subgraphs.py
             if isinstance(v.source, LocalSource) and v.source.local_name == k:
                 continue  # no need to restore initial state
+            # Do not load variable if it is NULL.
+            if sys.version_info >= (3, 12):
+                # Continuation function will load the NULL for v.
+                if type.__instancecheck__(NullVariable, v):
+                    continue
+            else:
+                # A variable should never be NULL in < 3.12
+                assert not type.__instancecheck__(NullVariable, v)
             if v not in val_to_names:
                 val_to_names[v] = list()
             val_to_names[v].append(k)
