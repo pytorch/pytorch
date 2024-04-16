@@ -192,12 +192,10 @@ def can_generate_trivial_fake_impl(op: torch._ops.OpOverload) -> bool:
     return True
 
 
-def requires_pystub() -> bool:
+def requires_set_python_module() -> bool:
     """If an op was defined in C++ and extended from Python using the
     torch.library APIs, returns if we require that there have been a
-    m.has_python_registration("mylib.ops") call from C++ that associates
+    m.set_python_module("mylib.ops") call from C++ that associates
     the C++ op with a python module.
     """
-    return getattr(
-        _utils_internal, "REQUIRE_PYTHON_REGISTRATION_STUB_FOR_CPP_OPS", True
-    )
+    return getattr(_utils_internal, "REQUIRES_SET_PYTHON_MODULE", True)
