@@ -224,17 +224,17 @@ public:
   RegistrationHandleRAII registerImpl(OperatorName op_name, c10::optional<DispatchKey> dispatch_key, KernelFunction kernel, c10::optional<impl::CppSignature> cpp_signature, std::unique_ptr<FunctionSchema> inferred_function_schema, std::string debug);
 
   /**
-   * Given an operator, tells the Dispatcher that we have implemented an abstract impl
+   * Given an operator, tells the Dispatcher that we have implemented a fake impl
    * for this op in the given Python module. Call this a "pystub".
    */
-  RegistrationHandleRAII registerAbstractImplPyStub(const OperatorName& op_name, const char* pymodule, const char* context);
+  RegistrationHandleRAII registerPythonModule(const OperatorName& op_name, const char* pymodule, const char* context);
 
   /**
-   * Given an operator, throws if we have an abstract impl pystub.
+   * Given an operator, throws if we have a pystub.
    */
-  void throwIfHasAbstractImplPyStub(OperatorName op_name);
+  void throwIfHasPythonModule(OperatorName op_name);
 
-  c10::optional<std::pair<const char*, const char*>> getAbstractImplPyStub(OperatorName op_name);
+  c10::optional<std::pair<const char*, const char*>> getPyStub(OperatorName op_name);
 
   /**
    * Register a new operator by name.

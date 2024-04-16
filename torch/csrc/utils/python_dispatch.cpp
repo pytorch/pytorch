@@ -794,7 +794,7 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
   m.def("_dispatch_pystub", [](const char* name, const char* overload) {
-    return c10::Dispatcher::singleton().getAbstractImplPyStub(
+    return c10::Dispatcher::singleton().getPyStub(
         c10::OperatorName(name, overload));
   });
 
