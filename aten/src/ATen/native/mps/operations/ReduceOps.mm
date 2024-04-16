@@ -318,8 +318,8 @@ static void impl_func_norm_mps(const Tensor& input_tensor,
 
   auto reciprocal_p = 1 / p;
   bool pIsZero = (p == 0.0);
-  bool pIsPosInf = (p == numeric_limits<double>::infinity());
-  bool pIsNegInf = (p == -numeric_limits<double>::infinity());
+  bool pIsPosInf = (p == std::numeric_limits<double>::infinity());
+  bool pIsNegInf = (p == -std::numeric_limits<double>::infinity());
 
   int64_t num_input_dims = input_shape.size();
   int64_t num_reduce_dims = dim.size();
