@@ -20,6 +20,7 @@
 #include <sys/types.h>
 
 #include <type_traits>
+#include <utility>
 
 #include <gloo/allgather.h>
 #include <gloo/allgatherv.h>
@@ -171,9 +172,7 @@ void checkRemainingTime(
 
 typedef void (*ReduceFunc)(void*, const void*, const void*, size_t);
 
-template <
-    typename T,
-    typename std::enable_if<!std::is_integral<T>::value, int>::type = 0>
+template <typename T, std::enable_if_t<!std::is_integral_v<T>, int> = 0>
 ReduceFunc toFunction(const ReduceOp& r) {
   switch (r) {
     case ReduceOp::SUM:
@@ -207,9 +206,7 @@ ReduceFunc toFunction(const ReduceOp& r) {
 }
 
 // Bitwise AND with SFINAE guard for integral types.
-template <
-    typename T,
-    typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
 void band(void* c, const void* a, const void* b, size_t n) {
   auto tc = static_cast<T*>(c);
   auto ta = static_cast<const T*>(a);
@@ -220,9 +217,7 @@ void band(void* c, const void* a, const void* b, size_t n) {
 }
 
 // Bitwise OR with SFINAE guard for integral types.
-template <
-    typename T,
-    typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
 void bor(void* c, const void* a, const void* b, size_t n) {
   auto tc = static_cast<T*>(c);
   auto ta = static_cast<const T*>(a);
@@ -233,9 +228,7 @@ void bor(void* c, const void* a, const void* b, size_t n) {
 }
 
 // Bitwise XOR with SFINAE guard for integral types.
-template <
-    typename T,
-    typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
 void bxor(void* c, const void* a, const void* b, size_t n) {
   auto tc = static_cast<T*>(c);
   auto ta = static_cast<const T*>(a);
@@ -245,9 +238,7 @@ void bxor(void* c, const void* a, const void* b, size_t n) {
   }
 }
 
-template <
-    typename T,
-    typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+template <typename T, std::enable_if_t<std::is_integral_v<T>, int> = 0>
 ReduceFunc toFunction(const ReduceOp& r) {
   switch (r) {
     case ReduceOp::SUM:
@@ -425,7 +416,8 @@ const auto kLoopbackAddress = "127.0.0.1";
 } // namespace
 
 // static
-void ProcessGroupGloo::AsyncWork::execute(c10::intrusive_ptr<AsyncWork> work) {
+void ProcessGroupGloo::AsyncWork::execute(
+    const c10::intrusive_ptr<AsyncWork>& work) {
   if (work->recordFunctionBeforeCallback_) {
     work->recordFunctionBeforeCallback_();
   }
@@ -536,7 +528,8 @@ uint64_t ProcessGroupGloo::AsyncWork::getSequencenumber() const {
   return seq_;
 }
 
-void ProcessGroupGloo::AsyncWork::finishWorkGlooError(std::exception_ptr eptr) {
+void ProcessGroupGloo::AsyncWork::finishWorkGlooError(
+    const std::exception_ptr& eptr) {
   future_->setError(eptr);
   finish(eptr);
 }
@@ -758,7 +751,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     c10::intrusive_ptr<Options> options)
     : Backend(rank, size),
       store_(new GlooStore(store)),
-      options_(options),
+      options_(std::move(options)),
       stop_(false),
       collectiveCounter_(0) {
   auto& devices = options->devices;
@@ -852,7 +845,7 @@ void ProcessGroupGloo::runLoop(int workerIndex) {
     // does not immediately block.
     workConsumeCV_.notify_one();
 
-    AsyncWork::execute(std::move(work));
+    AsyncWork::execute(work);
     lock.lock();
     workInProgress_[workerIndex].reset();
   }
@@ -892,7 +885,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
         tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
-  std::vector<at::Tensor> inputs;
+  std::vector<at::Tensor> inputs{};
   const int rootRank;
   const int rootTensor;
   const uint32_t tag;
@@ -968,8 +961,8 @@ class AsyncBroadcastCUDAWork : public AsyncBroadcastWork {
   }
 
   at::Tensor tmp;
-  std::vector<c10::Stream> streams;
-  std::vector<c10::Event> events;
+  std::vector<c10::Stream> streams{};
+  std::vector<c10::Event> events{};
 };
 
 } // namespace
@@ -1034,11 +1027,11 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
             inputs),
         context(context),
         inputs(inputs),
-        reduceOp(reduceOp),
+        reduceOp(std::move(reduceOp)),
         tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
-  std::vector<at::Tensor> inputs;
+  std::vector<at::Tensor> inputs{};
   const ReduceOp reduceOp;
   const uint32_t tag;
 
@@ -1062,7 +1055,7 @@ class AsyncAllreduceWork : public ProcessGroupGloo::AsyncWork {
 
   gloo::AllreduceOptions::Func getFunction(
       const at::ScalarType& dtype,
-      const ReduceOp op) {
+      const ReduceOp& op) {
     gloo::AllreduceOptions::Func fn;
     GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
     return fn;
@@ -1077,7 +1070,7 @@ class AsyncAllreduceCoalescedWork : public AsyncAllreduceWork {
       ReduceOp reduceOp,
       uint32_t tag,
       uint64_t seq)
-      : AsyncAllreduceWork(context, inputs, reduceOp, tag, seq) {}
+      : AsyncAllreduceWork(context, inputs, std::move(reduceOp), tag, seq) {}
 
   void run() override {
     allreduceCoalesced(inputs);
@@ -1120,7 +1113,7 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
         tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
-  std::vector<at::Tensor> inputs;
+  std::vector<at::Tensor> inputs{};
   const uint32_t tag;
 
   // We share dimensionality about the sparse tensors before collecting
@@ -1141,10 +1134,11 @@ class AsyncSparseAllreduceWork : public ProcessGroupGloo::AsyncWork {
     // Construct from an existing metadata tensor to facilitate structured
     // access to metadata from peers, after gathering it.
     explicit SparseTensorMetadata(at::Tensor metadata)
-        : metadata_(metadata), data_(metadata_.mutable_data_ptr<int64_t>()) {
-      AT_ASSERT(metadata.scalar_type() == at::kLong);
-      AT_ASSERT(metadata.dim() == 1);
-      AT_ASSERT(metadata.size(0) == dim);
+        : metadata_(std::move(metadata)),
+          data_(metadata_.mutable_data_ptr<int64_t>()) {
+      AT_ASSERT(metadata_.scalar_type() == at::kLong);
+      AT_ASSERT(metadata_.dim() == 1);
+      AT_ASSERT(metadata_.size(0) == dim);
     }
 
     // Populate the metadata.
@@ -1384,7 +1378,7 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
       ReduceOp reduceOp,
       uint32_t tag,
       uint64_t seq)
-      : AsyncAllreduceWork(context, inputs, reduceOp, tag, seq) {
+      : AsyncAllreduceWork(context, inputs, std::move(reduceOp), tag, seq) {
     initializeStreamsEvents(inputs, streams, events);
 
     // Kick off copy from CUDA tensors to pinned CPU tensors.
@@ -1423,8 +1417,8 @@ class AsyncAllreduceCUDAWork : public AsyncAllreduceWork {
   }
 
   std::vector<at::Tensor> tmp;
-  std::vector<c10::Stream> streams;
-  std::vector<c10::Event> events;
+  std::vector<c10::Stream> streams{};
+  std::vector<c10::Event> events{};
 };
 
 class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
@@ -1476,9 +1470,9 @@ class AsyncSparseAllreduceCUDAWork : public AsyncSparseAllreduceWork {
     }
   }
 
-  std::vector<at::Tensor> tmp;
-  std::vector<c10::Stream> streams;
-  std::vector<c10::Event> events;
+  std::vector<at::Tensor> tmp{};
+  std::vector<c10::Stream> streams{};
+  std::vector<c10::Event> events{};
 };
 
 } // namespace
@@ -1636,11 +1630,11 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
         inputs(inputs),
         rootRank(rootRank),
         rootTensor(rootTensor),
-        reduceOp(reduceOp),
+        reduceOp(std::move(reduceOp)),
         tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
-  std::vector<at::Tensor> inputs;
+  std::vector<at::Tensor> inputs{};
   const int rootRank;
   const int rootTensor;
   const ReduceOp reduceOp;
@@ -1668,7 +1662,7 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
 
   gloo::ReduceOptions::Func getFunction(
       const at::ScalarType& dtype,
-      const ReduceOp op) {
+      const ReduceOp& op) {
     gloo::ReduceOptions::Func fn;
     GENERATE_ALL_TYPES(dtype, getFunction, fn, op);
     return fn;
@@ -1690,7 +1684,7 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
             inputs,
             rootRank,
             rootTensor,
-            reduceOp,
+            std::move(reduceOp),
             tag,
             seq) {
     initializeStreamsEvents(inputs, streams, events);
@@ -1731,9 +1725,9 @@ class AsyncReduceCUDAWork : public AsyncReduceWork {
     }
   }
 
-  std::vector<at::Tensor> tmp;
-  std::vector<c10::Stream> streams;
-  std::vector<c10::Event> events;
+  std::vector<at::Tensor> tmp{};
+  std::vector<c10::Stream> streams{};
+  std::vector<c10::Event> events{};
 };
 
 } // namespace
@@ -1813,8 +1807,8 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
         tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
-  std::vector<std::vector<at::Tensor>> outputs;
-  std::vector<at::Tensor> inputs;
+  std::vector<std::vector<at::Tensor>> outputs{};
+  std::vector<at::Tensor> inputs{};
   const uint32_t tag;
 
   void allgather(
@@ -1912,13 +1906,13 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
     }
   }
 
-  std::vector<at::Tensor> tmpInputs;
-  std::vector<c10::Stream> inputStreams;
-  std::vector<c10::Event> inputEvents;
+  std::vector<at::Tensor> tmpInputs{};
+  std::vector<c10::Stream> inputStreams{};
+  std::vector<c10::Event> inputEvents{};
 
-  std::vector<std::vector<at::Tensor>> tmpOutputs;
-  std::vector<c10::Stream> outputStreams;
-  std::vector<c10::Event> outputEvents;
+  std::vector<std::vector<at::Tensor>> tmpOutputs{};
+  std::vector<c10::Stream> outputStreams{};
+  std::vector<c10::Event> outputEvents{};
 };
 
 // A work that takes an lambda on construction and calls it on wait.
@@ -1926,7 +1920,7 @@ class AsyncAllgatherCUDAWork : public AsyncAllgatherWork {
 // composing multiple works together.
 class LambdaWork : public Work {
  public:
-  LambdaWork(std::function<void(void)> fn) : fn_(fn) {}
+  LambdaWork(std::function<void(void)> fn) : fn_(std::move(fn)) {}
 
   bool wait(std::chrono::milliseconds /* unused */) override {
     fn_();
@@ -2085,8 +2079,8 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
         tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
-  std::vector<std::vector<at::Tensor>> output_lists;
-  std::vector<at::Tensor> input_list;
+  std::vector<std::vector<at::Tensor>> output_lists{};
+  std::vector<at::Tensor> input_list{};
   const uint32_t tag;
 
   void allgather_coalesced() {
@@ -2229,8 +2223,8 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
         tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
-  std::vector<std::vector<at::Tensor>> outputs;
-  std::vector<at::Tensor> inputs;
+  std::vector<std::vector<at::Tensor>> outputs{};
+  std::vector<at::Tensor> inputs{};
   const int root;
   const uint32_t tag;
 
@@ -2335,13 +2329,13 @@ class AsyncGatherCUDAWork : public AsyncGatherWork {
     }
   }
 
-  std::vector<at::Tensor> tmpInputs;
-  std::vector<c10::Stream> inputStreams;
-  std::vector<c10::Event> inputEvents;
+  std::vector<at::Tensor> tmpInputs{};
+  std::vector<c10::Stream> inputStreams{};
+  std::vector<c10::Event> inputEvents{};
 
-  std::vector<std::vector<at::Tensor>> tmpOutputs;
-  std::vector<c10::Stream> outputStreams;
-  std::vector<c10::Event> outputEvents;
+  std::vector<std::vector<at::Tensor>> tmpOutputs{};
+  std::vector<c10::Stream> outputStreams{};
+  std::vector<c10::Event> outputEvents{};
 };
 
 } // namespace
@@ -2435,8 +2429,8 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
         tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
-  std::vector<at::Tensor> outputs;
-  std::vector<std::vector<at::Tensor>> inputs;
+  std::vector<at::Tensor> outputs{};
+  std::vector<std::vector<at::Tensor>> inputs{};
   const int root;
   const uint32_t tag;
 
@@ -2524,13 +2518,13 @@ class AsyncScatterCUDAWork : public AsyncScatterWork {
     }
   }
 
-  std::vector<at::Tensor> tmpOutputs;
-  std::vector<c10::Stream> outputStreams;
-  std::vector<c10::Event> outputEvents;
+  std::vector<at::Tensor> tmpOutputs{};
+  std::vector<c10::Stream> outputStreams{};
+  std::vector<c10::Event> outputEvents{};
 
-  std::vector<std::vector<at::Tensor>> tmpInputs;
-  std::vector<c10::Stream> inputStreams;
-  std::vector<c10::Event> inputEvents;
+  std::vector<std::vector<at::Tensor>> tmpInputs{};
+  std::vector<c10::Stream> inputStreams{};
+  std::vector<c10::Event> inputEvents{};
 };
 
 } // namespace
@@ -2633,8 +2627,8 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
   std::shared_ptr<gloo::Context> context;
   at::Tensor outputTensor;
   at::Tensor inputTensor;
-  std::vector<int64_t> outputCounts;
-  std::vector<int64_t> inputCounts;
+  std::vector<int64_t> outputCounts{};
+  std::vector<int64_t> inputCounts{};
   const uint32_t tag;
 
   void alltoall(at::Tensor& outputTensor, at::Tensor& inputTensor) {
@@ -2724,12 +2718,12 @@ class AsyncAlltoallCUDAWork : public AsyncAlltoallWork {
   }
 
   at::Tensor cpuOutput;
-  std::vector<c10::Stream> outputStreams;
-  std::vector<c10::Event> outputEvents;
+  std::vector<c10::Stream> outputStreams{};
+  std::vector<c10::Event> outputEvents{};
 
   at::Tensor cpuInput;
-  std::vector<c10::Stream> inputStreams;
-  std::vector<c10::Event> inputEvents;
+  std::vector<c10::Stream> inputStreams{};
+  std::vector<c10::Event> inputEvents{};
 };
 
 } // namespace
@@ -2895,7 +2889,7 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
         tag(tag) {}
 
   std::shared_ptr<gloo::Context> context;
-  std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork;
+  std::vector<c10::weak_intrusive_ptr<AsyncWork>> priorWork{};
   const uint32_t tag;
 
   void run() override {
