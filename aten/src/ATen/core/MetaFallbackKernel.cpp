@@ -8,7 +8,7 @@ static void metaFallback(
     const c10::OperatorHandle& op,
     c10::DispatchKeySet dispatch_keys,
     torch::jit::Stack* stack) {
-  c10::Dispatcher::singleton().throwIfHasPyStub(op.operator_name());
+  c10::Dispatcher::singleton().throwIfHasPythonModule(op.operator_name());
   TORCH_CHECK_NOT_IMPLEMENTED(
       false,
       op.operator_name(),
