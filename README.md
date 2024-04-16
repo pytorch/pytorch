@@ -210,7 +210,7 @@ chmod +x /home/<user>/Downloads/Anaconda3-2024.02-1-Linux-x86_64.sh
 Activate the newly installed Anaconda environment and create a new environment for PyTorch development.
 ```bash
 exec bash
-conda create --name pytorch-dev python=3.11
+conda create --name pytorch-dev python=3.12
 conda activate pytorch-dev
 ```
 Install necessary Python packages for PyTorch.
