@@ -173,9 +173,9 @@ class FSDP:
                 this function.
 
         .. note:: If ``async_op=True``, then the user does not have to call
-            :meth:`wait` on the returned handle if the unshard op can be waited
-            on in the module's pre-forward. FSDP will wait on the pending
-            unshard op in the pre-forward automatically.
+            :meth:`wait` on the returned handle if waiting on the unshard op
+            in the module's pre-forward is tolerable. FSDP will wait on the
+            pending unshard op in the pre-forward automatically.
         """
         state = self._get_fsdp_state()
         if (fsdp_param_group := state._fsdp_param_group) is None:
@@ -277,10 +277,23 @@ class FSDP:
 
 
 class UnshardHandle:
+    """
+    A handle to wait on the unshard op.
+
+    Args:
+        fsdp_param_group (FSDPParamGroup): FSDP parameter group to unshard.
+    """
+
     def __init__(self, fsdp_param_group: FSDPParamGroup):
         self._fsdp_param_group = fsdp_param_group
 
     def wait(self):
+        """
+        Waits on the unshard op.
+
+        This ensures that the current stream can use the unsharded parameters,
+        which are now registered to the module.
+        """
         if hasattr(self, "_fsdp_param_group"):
             self._fsdp_param_group.wait_for_unshard()
             # Avoid keeping a reference
