@@ -1301,7 +1301,7 @@ class OutputGraph:
             # module variable tracker directly inline _call_impl instead of
             # __call__.
             compiled_fn.__call__ = disable(compiled_fn.__call__)
-            compiled_fn._call_impl = disable(compiled_fn._call_impl)
+            compiled_fn._call_impl = disable(compiled_fn._call_impl)  # type: ignore[method-assign]
         else:
             compiled_fn = disable(compiled_fn)
 
