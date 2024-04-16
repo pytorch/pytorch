@@ -4,16 +4,16 @@ import torch
 from torch import Tensor
 
 from .optimizer import (
-    Optimizer,
+    _capturable_doc,
     _default_to_fused_or_foreach,
     _differentiable_doc,
-    _capturable_doc,
     _dispatch_sqrt,
     _foreach_doc,
     _get_scalar_dtype,
     _get_value,
     _use_grad_for_differentiable,
     _view_as_real,
+    Optimizer,
 )
 
 __all__ = ["RAdam", "radam"]
@@ -65,12 +65,19 @@ class RAdam(Optimizer):
             group.setdefault("capturable", False)
             for p in group["params"]:
                 p_state = self.state.get(p, [])
-                if len(p_state) != 0 and not torch.is_tensor(p_state['step']):
+                if len(p_state) != 0 and not torch.is_tensor(p_state["step"]):
                     step_val = float(p_state["step"])
-                    p_state["step"] = (torch.tensor(step_val, dtype=_get_scalar_dtype(), device=p.device) if group['capturable']
-                                       else torch.tensor(step_val, dtype=_get_scalar_dtype()))
+                    p_state["step"] = (
+                        torch.tensor(
+                            step_val, dtype=_get_scalar_dtype(), device=p.device
+                        )
+                        if group["capturable"]
+                        else torch.tensor(step_val, dtype=_get_scalar_dtype())
+                    )
 
-    def _init_group(self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, state_steps):
+    def _init_group(
+        self, group, params_with_grad, grads, exp_avgs, exp_avg_sqs, state_steps
+    ):
         has_complex = False
         for p in group["params"]:
             if p.grad is not None:
@@ -83,9 +90,9 @@ class RAdam(Optimizer):
                 state = self.state[p]
                 # Lazy state initialization
                 if len(state) == 0:
-                    state['step'] = (
+                    state["step"] = (
                         torch.zeros((), dtype=_get_scalar_dtype(), device=p.device)
-                        if group['capturable']
+                        if group["capturable"]
                         else torch.tensor(0.0, dtype=_get_scalar_dtype())
                     )
                     # Exponential moving average of gradient values
@@ -126,7 +133,9 @@ class RAdam(Optimizer):
             state_steps = []
             beta1, beta2 = group["betas"]
 
-            has_complex = self._init_group(group, params_with_grad, grads, exp_avgs, exp_avg_sqs, state_steps)
+            has_complex = self._init_group(
+                group, params_with_grad, grads, exp_avgs, exp_avg_sqs, state_steps
+            )
 
             radam(
                 params_with_grad,
@@ -149,7 +158,8 @@ class RAdam(Optimizer):
         return loss
 
 
-RAdam.__doc__ = r"""Implements RAdam algorithm.
+RAdam.__doc__ = (
+    r"""Implements RAdam algorithm.
 
     .. math::
        \begin{aligned}
@@ -196,7 +206,8 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
     corresponds more closely to the `author's implementation`_ in the RAdam paper. Further information
     about decoupled weight decay can be found in `Decoupled Weight Decay Regularization`_.
 
-    """ + fr"""
+    """
+    + rf"""
     Args:
         params (iterable): iterable of parameters to optimize or dicts defining
             parameter groups
@@ -220,6 +231,7 @@ RAdam.__doc__ = r"""Implements RAdam algorithm.
         https://arxiv.org/abs/1711.05101
 
     """
+)
 
 
 def radam(
@@ -253,7 +265,9 @@ def radam(
         )
 
     if foreach is None:
-        _, foreach = _default_to_fused_or_foreach(params, differentiable, use_fused=False)
+        _, foreach = _default_to_fused_or_foreach(
+            params, differentiable, use_fused=False
+        )
 
     if foreach and torch.jit.is_scripting():
         raise RuntimeError("torch.jit.script not supported with foreach optimizers")
@@ -330,8 +344,8 @@ def _single_tensor_radam(
         exp_avg.lerp_(grad, 1 - beta1)
         exp_avg_sq.mul_(beta2).addcmul_(grad, grad, value=1 - beta2)
 
-        bias_correction1 = 1 - beta1 ** step
-        bias_correction2 = 1 - beta2 ** step
+        bias_correction1 = 1 - beta1**step
+        bias_correction2 = 1 - beta2**step
 
         # correcting bias for the first moving moment
         bias_corrected_exp_avg = exp_avg / bias_correction1
@@ -339,7 +353,7 @@ def _single_tensor_radam(
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1
         # compute the length of the approximated SMA
-        rho_t = rho_inf - 2 * step * (beta2 ** step) / bias_correction2
+        rho_t = rho_inf - 2 * step * (beta2**step) / bias_correction2
 
         def _compute_rect():
             return (
@@ -356,15 +370,23 @@ def _single_tensor_radam(
             else:
                 exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
 
-            return (bias_correction2 ** 0.5) / exp_avg_sq_sqrt
+            return (bias_correction2**0.5) / exp_avg_sq_sqrt
 
         # Compute the variance rectification term and update parameters accordingly
         if capturable:
-            update = torch.where(rho_t > 5.0, _compute_rect() * _compute_adaptive_lr(), 1.0)
+            update = torch.where(
+                rho_t > 5.0, _compute_rect() * _compute_adaptive_lr(), 1.0
+            )
             param.add_(bias_corrected_exp_avg * lr * update, alpha=-1.0)
         else:
             if rho_t > 5.0:
-                param.add_(bias_corrected_exp_avg * lr * _compute_adaptive_lr() * _compute_rect(), alpha=-1.0)
+                param.add_(
+                    bias_corrected_exp_avg
+                    * lr
+                    * _compute_adaptive_lr()
+                    * _compute_rect(),
+                    alpha=-1.0,
+                )
             else:
                 param.add_(bias_corrected_exp_avg * lr, alpha=-1.0)
 
@@ -386,7 +408,6 @@ def _multi_tensor_radam(
     capturable: bool,
     has_complex: bool,
 ):
-
     if len(params) == 0:
         return
 
@@ -394,28 +415,35 @@ def _multi_tensor_radam(
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch._utils.is_compiling() and capturable:
-        assert all(p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)), \
-            "If capturable=True, params and state_steps must be CUDA tensors."
+        assert all(
+            p.is_cuda and step.is_cuda for p, step in zip(params, state_steps)
+        ), "If capturable=True, params and state_steps must be CUDA tensors."
 
-    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype([params, grads, exp_avgs, exp_avg_sqs, state_steps])
-    for ((
+    grouped_tensors = Optimizer._group_tensors_by_device_and_dtype(
+        [params, grads, exp_avgs, exp_avg_sqs, state_steps]
+    )
+    for (
         grouped_params,
         grouped_grads,
         grouped_exp_avgs,
         grouped_exp_avg_sqs,
         grouped_state_steps,
-    ), _) in grouped_tensors.values():
+    ), _ in grouped_tensors.values():
         # Update steps
         # If steps are on CPU, foreach will fall back to the slow path, which is a for-loop calling t.add(1) over
         # and over. 1 will then be wrapped into a Tensor over and over again, which is slower than if we just
         # wrapped it once now. The alpha is required to assure we go to the right overload.
         if grouped_state_steps[0].is_cpu:
-            torch._foreach_add_(grouped_state_steps, torch.tensor(1.0, device='cpu'), alpha=1.0)
+            torch._foreach_add_(
+                grouped_state_steps, torch.tensor(1.0, device="cpu"), alpha=1.0
+            )
         else:
             torch._foreach_add_(grouped_state_steps, 1)
 
         if has_complex:
-            _view_as_real(grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_avg_sqs)
+            _view_as_real(
+                grouped_params, grouped_grads, grouped_exp_avgs, grouped_exp_avg_sqs
+            )
 
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1
@@ -432,21 +460,30 @@ def _multi_tensor_radam(
             torch._foreach_add_(bias_correction2, rho_inf)
             rho_t_list = bias_correction2
         else:
-            rho_t_list = [rho_inf - 2 * _get_value(step) * (beta2 ** _get_value(step)) /
-                          (1 - beta2 ** _get_value(step)) for step in grouped_state_steps]
-
+            rho_t_list = [
+                rho_inf
+                - 2
+                * _get_value(step)
+                * (beta2 ** _get_value(step))
+                / (1 - beta2 ** _get_value(step))
+                for step in grouped_state_steps
+            ]
 
         if weight_decay != 0:
             if decoupled_weight_decay:
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
-                grouped_grads = torch._foreach_add(grouped_grads, grouped_params, alpha=weight_decay)
+                grouped_grads = torch._foreach_add(
+                    grouped_grads, grouped_params, alpha=weight_decay
+                )
 
         # Decay the first and second moment running average coefficient
         torch._foreach_lerp_(grouped_exp_avgs, grouped_grads, 1 - beta1)
 
         torch._foreach_mul_(grouped_exp_avg_sqs, beta2)
-        torch._foreach_addcmul_(grouped_exp_avg_sqs, grouped_grads, grouped_grads, 1 - beta2)
+        torch._foreach_addcmul_(
+            grouped_exp_avg_sqs, grouped_grads, grouped_grads, 1 - beta2
+        )
 
         # Delete the local intermediate since it won't be used anymore to save on peak memory
         del grouped_grads
@@ -457,14 +494,16 @@ def _multi_tensor_radam(
             torch._foreach_mul_(num, sub2)
             del sub2
             torch._foreach_mul_(num, rho_inf)
-            rho_inf = ((rho_inf - 4) * (rho_inf - 2))
+            rho_inf = (rho_inf - 4) * (rho_inf - 2)
             denom = torch._foreach_mul(rho_t_list, rho_inf)
             torch._foreach_div_(num, denom)
             del denom
             torch._foreach_sqrt_(num)
 
             # TODO(mlazos): we should try and get a foreach_where op https://github.com/pytorch/pytorch/issues/117884
-            rect = [torch.where(rho_t > 5.0, n, 0.0) for n, rho_t in zip(num, rho_t_list)]
+            rect = [
+                torch.where(rho_t > 5.0, n, 0.0) for n, rho_t in zip(num, rho_t_list)
+            ]
             del num
             del rho_t_list
             unrect_step_size = [torch.where(rect > 0, 0.0, 1.0) for rect in rect]
@@ -501,13 +540,16 @@ def _multi_tensor_radam(
             ]
             unrectified = [0 if rect > 0 else 1.0 for rect in rect]
 
-            bias_correction1 = [1 - beta1 ** _get_value(step) for step in grouped_state_steps]
-            unrect_step_size = [(lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)]
+            bias_correction1 = [
+                1 - beta1 ** _get_value(step) for step in grouped_state_steps
+            ]
+            unrect_step_size = [
+                (lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)
+            ]
             bias_correction2 = [
                 _dispatch_sqrt(1 - beta2 ** _get_value(step)) * (lr * rect / bc) * -1
                 for step, rect, bc in zip(grouped_state_steps, rect, bias_correction1)
             ]
-
 
         buffer = torch._foreach_sqrt(grouped_exp_avg_sqs)
         torch._foreach_add_(buffer, eps)

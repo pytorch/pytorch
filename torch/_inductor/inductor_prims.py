@@ -16,8 +16,15 @@ def make_prim(
     doc: str = "",
     tags: Optional[Sequence[torch.Tag]] = None,
 ):
-    def meta(*args, **kwargs):
-        return _prims.TensorMeta(impl_aten(*args, **kwargs))
+    if isinstance(return_type, tuple):
+
+        def meta(*args, **kwargs):
+            return tuple(_prims.TensorMeta(o) for o in impl_aten(*args, *kwargs))
+
+    else:
+
+        def meta(*args, **kwargs):
+            return _prims.TensorMeta(impl_aten(*args, **kwargs))
 
     return _prims._make_prim(
         schema=schema,
@@ -96,33 +103,28 @@ fma = make_prim(
 
 
 def _low_memory_max_pool2d_with_offsets_aten(
-    self, kernel_size, stride, padding, dilation, ceil_mode, *, offset_dtype
+    self,
+    kernel_size,
+    stride,
+    padding,
+    dilation,
+    ceil_mode,
 ):
     vals, indices = torch.ops.aten.max_pool2d_with_indices(
         self, kernel_size, stride, padding, dilation, ceil_mode
     )
-    return vals, indices.to(offset_dtype)
+    return vals, indices.to(torch.int8)
 
 
-def _low_memory_max_pool2d_with_offsets_meta(
-    self, kernel_size, stride, padding, dilation, ceil_mode, *, offset_dtype
-):
-    vals, indices = torch.ops.aten.max_pool2d_with_indices(
-        self, kernel_size, stride, padding, dilation, ceil_mode
-    )
-    return _prims.TensorMeta(vals), _prims.TensorMeta(indices.to(offset_dtype))
-
-
-_low_memory_max_pool2d_with_offsets = _prims._make_prim(
-    schema="_low_memory_max_pool2d_with_offsets(Tensor self, SymInt[2] kernel_size, SymInt[2] stride,  SymInt[2] padding, SymInt[2] dilation, bool ceil_mode, *, ScalarType offset_dtype) -> (Tensor, Tensor)",
+_low_memory_max_pool2d_with_offsets = make_prim(
+    "_low_memory_max_pool2d_with_offsets(Tensor self, SymInt[2] kernel_size, SymInt[2] stride,  SymInt[2] padding, SymInt[2] dilation, bool ceil_mode) -> (Tensor, Tensor)",  # noqa: B950
+    _low_memory_max_pool2d_with_offsets_aten,
     return_type=(_prims.RETURN_TYPE.NEW, _prims.RETURN_TYPE.NEW),
-    meta=_low_memory_max_pool2d_with_offsets_meta,
-    impl_aten=_low_memory_max_pool2d_with_offsets_aten,
     doc="Instead of returning indices, returns indices offsets.",
 )
 
 _low_memory_max_pool2d_offsets_to_indices = make_prim(
-    "_low_memory_max_pool2d_offsets_to_indices(Tensor self, SymInt kernel_h, SymInt input_w, SymInt[2] stride, SymInt[2] padding) -> Tensor",
+    "_low_memory_max_pool2d_offsets_to_indices(Tensor self, SymInt kernel_w, SymInt input_w, SymInt[2] stride, SymInt[2] padding) -> Tensor",  # noqa: B950
     lambda self, *args: self.to(torch.int64),
     doc="Convert small int offsets to regular indices.",
 )

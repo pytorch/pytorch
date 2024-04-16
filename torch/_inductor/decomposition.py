@@ -135,7 +135,7 @@ def full(size, fill_value, **kwargs):
     dtype = kwargs.get("dtype")
     if dtype is None:
         kwargs["dtype"] = type_to_dtype(type(fill_value))
-        return aten.full(size, fill_value, **kwargs)
+        return torch.full(size, fill_value, **kwargs)
     return NotImplemented
 
 
@@ -734,12 +734,8 @@ def max_pool2d_with_indices(
         )
         or window_size > torch.iinfo(torch.int8).max
     ):
-        # Hit the lowering where the fallback should be selected
         return NotImplemented
 
-    # If the fallback is not being selected we route through the low-memory path.
-    # int8 offsets will be cached for backward pass.
-    # If the backward is lowered offset->index will be inlined.
     vals, offsets = prims._low_memory_max_pool2d_with_offsets(
         x,
         kernel_size,
@@ -747,9 +743,12 @@ def max_pool2d_with_indices(
         padding,
         dilation,
         ceil_mode,
-        offset_dtype=torch.int8,
     )
     indices = prims._low_memory_max_pool2d_offsets_to_indices(
-        offsets, kernel_size[1], x.size(-1), stride, padding
+        offsets,
+        kernel_size[1],
+        x.size(-1),
+        stride,
+        padding,
     )
     return vals, indices

@@ -292,7 +292,7 @@ class PerChannelDetector(DetectorBase):
         # get the fully qualified name and check if in list of modules to include and list of modules to ignore
         for fqn, module in model.named_modules():
 
-            is_in_include_list = sum([isinstance(module, x) for x in self.supported_modules]) > 0
+            is_in_include_list = any(isinstance(module, x) for x in self.supported_modules)
 
             # check if the module per_channel is supported
             # based on backend
@@ -515,10 +515,10 @@ class DynamicStaticDetector(DetectorBase):
         Returns True if the module is supported by observer, False otherwise
         """
         # check to see if module is of a supported type
-        is_supported_type = sum([isinstance(module, x) for x in self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED]) > 0
+        is_supported_type = any(isinstance(module, x) for x in self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED)
 
         # check if it will be supported
-        future_supported_type = sum([isinstance(module, x) for x in self.DEFAULT_DYNAMIC_STATIC_FUTURE_SUPPORTED]) > 0
+        future_supported_type = any(isinstance(module, x) for x in self.DEFAULT_DYNAMIC_STATIC_FUTURE_SUPPORTED)
 
         # supported
         supported = is_supported_type or future_supported_type
@@ -576,7 +576,7 @@ class DynamicStaticDetector(DetectorBase):
                 post_obs_dist_classif = self.STATIONARY_STR if post_stat > self.tolerance else self.NON_STATIONARY_STR
 
                 # check if current support or future support
-                is_supported_type = sum([isinstance(module, x) for x in self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED]) > 0
+                is_supported_type = any(isinstance(module, x) for x in self.DEFAULT_DYNAMIC_STATIC_CHECK_SUPPORTED)
 
                 # store the set of important information for this module
                 module_info = {
@@ -789,7 +789,7 @@ class InputWeightEqualizationDetector(DetectorBase):
         Returns True if the module is supported by observer, False otherwise
         """
         # check to see if module is of a supported type
-        is_supported_type = sum([type(module) is x for x in self.SUPPORTED_MODULES]) > 0
+        is_supported_type = any(type(module) is x for x in self.SUPPORTED_MODULES)
 
         # this is check for observer insertion
         if insert:

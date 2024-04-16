@@ -339,6 +339,7 @@ class ContinueExecutionCache:
         setup_fn_target_offsets: Tuple[int],  # only used in Python 3.11+
         nstack: int,
         argnames: Tuple[str],
+        argnames_null: Tuple[str],
         setup_fns: Tuple[ReenterWith],
         null_idxes: Tuple[int],
     ) -> types.CodeType:
@@ -356,6 +357,7 @@ class ContinueExecutionCache:
                 setup_fn_target_offsets,
                 nstack,
                 argnames,
+                argnames_null,
                 setup_fns,
                 null_idxes,
             )
@@ -391,7 +393,9 @@ class ContinueExecutionCache:
             code_options["co_posonlyargcount"] = 0
             code_options["co_kwonlyargcount"] = 0
             code_options["co_varnames"] = tuple(
-                args + [v for v in code_options["co_varnames"] if v not in args]
+                args
+                + [v for v in argnames_null if v not in args]
+                + [v for v in code_options["co_varnames"] if v not in args]
             )
             code_options["co_flags"] = code_options["co_flags"] & ~(
                 CO_VARARGS | CO_VARKEYWORDS
@@ -441,6 +445,18 @@ class ContinueExecutionCache:
                 )
 
             assert not hooks
+
+            # 3.12+: store NULL into variables that were NULL
+            if argnames_null:
+                assert sys.version_info >= (3, 12)
+                for v in argnames_null:
+                    assert v not in args
+                    prefix.extend(
+                        [
+                            create_instruction("PUSH_NULL"),
+                            create_instruction("STORE_FAST", argval=v),
+                        ]
+                    )
 
             prefix.append(create_jump_absolute(target))
 
