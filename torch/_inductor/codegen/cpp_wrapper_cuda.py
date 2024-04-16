@@ -1,7 +1,7 @@
 import functools
 import os
 from itertools import chain, count
-from typing import Any, List, Optional
+from typing import Any, List, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -13,6 +13,9 @@ from ..triton_heuristics import grid as default_grid
 from ..virtualized import V
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import SymbolicCallArg
+
+if TYPE_CHECKING:
+    from ..graph import GraphLowering
 
 
 def is_int(s: str) -> bool:
@@ -65,6 +68,7 @@ class CppWrapperCuda(CppWrapperCpu):
                 """
                 #include <c10/cuda/CUDAGuard.h>
                 #include <c10/cuda/CUDAStream.h>
+                #include <ATen/cuda/EmptyTensor.h>
                 """
             )
 
@@ -141,8 +145,9 @@ class CppWrapperCuda(CppWrapperCpu):
 
     def write_get_raw_stream(self, index, graph=None):
         name = f"stream{index}"
+        self.writeline(f"cudaStream_t {name};")
         self.writeline(
-            f"cudaStream_t {name} = at::cuda::getCurrentCUDAStream({index});"
+            f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_current_cuda_stream({index}, (void**)&{name}));"
         )
         return name
 
@@ -156,8 +161,8 @@ class CppWrapperCuda(CppWrapperCpu):
         self.prefix.writeline("\n")
         if not V.graph.aot_mode:
             for kernel in chain(
-                self.src_to_kernel.values(),
-                [entry[0] for entry in self.user_defined_kernel_cache.values()],
+                sorted(self.src_to_kernel.values()),
+                sorted([entry[0] for entry in self.user_defined_kernel_cache.values()]),
             ):
                 self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
             self.prefix.writeline("\n")
@@ -165,7 +170,12 @@ class CppWrapperCuda(CppWrapperCpu):
 
     @functools.lru_cache(None)
     def generate_load_kernel_once(
-        self, name: str, mangled_name: str, cubin_path: str, shared_mem: int
+        self,
+        name: str,
+        mangled_name: str,
+        cubin_path: str,
+        shared_mem: int,
+        graph: "GraphLowering",  # for per-graph caching
     ):
         if V.graph.aot_mode:
             self.writeline(f"if (kernels.{name} == nullptr) {{")
@@ -188,6 +198,8 @@ class CppWrapperCuda(CppWrapperCpu):
             var_name = f"var_{next(self.arg_var_id)}"
             if isinstance(arg, (sympy.Integer, sympy.Symbol, SymbolicCallArg)):
                 self.writeline(f"auto {var_name} = {arg};")
+            elif isinstance(arg, sympy.Float):
+                self.writeline(f"float {var_name} = {self.expr_printer(arg)};")
             elif isinstance(arg, sympy.Expr):
                 self.writeline(f"auto {var_name} = {self.expr_printer(arg)};")
             elif is_int(arg):
@@ -265,7 +277,9 @@ class CppWrapperCuda(CppWrapperCpu):
         ), f"cubin file should already exist at this moment: {cubin_path}"
         shared_mem = params.get("shared_mem", 0)
 
-        self.generate_load_kernel_once(name, mangled_name, cubin_path, shared_mem)
+        self.generate_load_kernel_once(
+            name, mangled_name, cubin_path, shared_mem, V.graph
+        )
 
         # args with value 1 are added into equal_to_1 and constants
         # in triton_meta (in the Python codegen) which makes them

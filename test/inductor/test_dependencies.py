@@ -6,13 +6,13 @@ import torch
 
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, FixedLayout, Pointwise
+from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.virtualized import ops, V
 
-from torch.testing._internal.common_utils import TestCase as TorchTestCase
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA
 
 
-class TestDependencies(TorchTestCase):
+class TestDependencies(InductorTestCase):
     def _create_buffer(self, name, shape, dtype=torch.float32):
         return Buffer(name, FixedLayout(torch.device("cuda:0"), dtype, shape))
 
@@ -58,7 +58,7 @@ class TestDependencies(TorchTestCase):
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
     if HAS_CPU or HAS_CUDA:
         run_tests("sympy")

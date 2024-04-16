@@ -1,5 +1,5 @@
 #include <c10/util/Half.h>
-#include <iostream>
+#include <ostream>
 #include <type_traits>
 
 namespace c10 {

@@ -14,7 +14,7 @@ Background_Matting,pass_due_to_skip,0
 
 
 
-DALLE2_pytorch,pass,11
+DALLE2_pytorch,pass,12
 
 
 
@@ -86,7 +86,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,36
+detectron2_fcos_r_50_fpn,pass,21
 
 
 
@@ -307,6 +307,10 @@ resnext50_32x4d,pass,0
 
 
 sam,pass,0
+
+
+
+sam_fast,pass,0
 
 
 

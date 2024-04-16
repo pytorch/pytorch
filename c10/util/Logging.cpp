@@ -1,12 +1,16 @@
 #include <c10/util/Backtrace.h>
 #include <c10/util/Flags.h>
 #include <c10/util/Logging.h>
+#include <c10/util/env.h>
 #ifdef FBCODE_CAFFE2
 #include <folly/synchronization/SanitizeThread.h>
 #endif
 
+#ifndef _WIN32
+#include <sys/time.h>
+#endif
+
 #include <algorithm>
-#include <cstdlib>
 #include <iostream>
 
 // Common code that we use regardless of whether we use glog or not.
@@ -90,8 +94,8 @@ using DDPUsageLoggerType = std::function<void(const DDPLoggingData&)>;
 
 namespace {
 bool IsAPIUsageDebugMode() {
-  const char* val = getenv("PYTORCH_API_USAGE_STDERR");
-  return val && *val; // any non-empty value
+  auto val = c10::utils::get_env("PYTORCH_API_USAGE_STDERR");
+  return val.has_value() && !val.value().empty(); // any non-empty value
 }
 
 void APIUsageDebug(const string& event) {
@@ -351,27 +355,37 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
 #else // !ANDROID
   tag_ = "";
 #endif // ANDROID
-  /*
-  time_t rawtime;
-  struct tm * timeinfo;
+
+  time_t rawtime = 0;
   time(&rawtime);
-  timeinfo = localtime(&rawtime);
-  std::chrono::nanoseconds ns =
-      std::chrono::duration_cast<std::chrono::nanoseconds>(
-          std::chrono::high_resolution_clock::now().time_since_epoch());
-  */
+
+#ifndef _WIN32
+  struct tm raw_timeinfo = {0};
+  struct tm* timeinfo = &raw_timeinfo;
+  localtime_r(&rawtime, timeinfo);
+#else
+  // is thread safe on Windows
+  struct tm* timeinfo = localtime(&rawtime);
+#endif
+
+#ifndef _WIN32
+  // Get the current nanoseconds since epoch
+  struct timespec ts = {0};
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  long ns = ts.tv_nsec;
+#else
+  long ns = 0;
+#endif
+
   if (GLOBAL_RANK != -1) {
     stream_ << "[rank" << GLOBAL_RANK << "]:";
   }
-  stream_ << "["
-          << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
-          //<< (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
-          //<< std::setfill('0')
-          //<< " " << std::setw(2) << timeinfo->tm_hour
-          //<< ":" << std::setw(2) << timeinfo->tm_min
-          //<< ":" << std::setw(2) << timeinfo->tm_sec
-          //<< "." << std::setw(9) << ns.count() % 1000000000
-          << " " << c10::detail::StripBasename(std::string(file)) << ":" << line
+  stream_ << "[" << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
+          << (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
+          << std::setfill('0') << " " << std::setw(2) << timeinfo->tm_hour
+          << ":" << std::setw(2) << timeinfo->tm_min << ":" << std::setw(2)
+          << timeinfo->tm_sec << "." << std::setw(9) << ns << " "
+          << c10::detail::StripBasename(std::string(file)) << ":" << line
           << "] ";
 }
 
@@ -424,10 +438,10 @@ namespace c10::detail {
 namespace {
 
 void setLogLevelFlagFromEnv() {
-  const char* level_str = std::getenv("TORCH_CPP_LOG_LEVEL");
+  auto level_env = c10::utils::get_env("TORCH_CPP_LOG_LEVEL");
 
   // Not set, fallback to the default level (i.e. WARNING).
-  std::string level{level_str != nullptr ? level_str : ""};
+  std::string level{level_env.has_value() ? level_env.value() : ""};
   if (level.empty()) {
     return;
   }

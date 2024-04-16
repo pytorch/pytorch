@@ -2,6 +2,7 @@
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 import torch
+import torch._dynamo
 import unittest
 import warnings
 import operator
@@ -17,7 +18,7 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_int, GuardOnDataDependentSymNode
 )
 from torch.testing._internal.custom_op_db import custom_op_db
-from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
+from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.common_device_type import ops
 import torch.testing._internal.optests as optests
 from torch._C import _disabled_torch_function_impl
@@ -1412,6 +1413,17 @@ def forward(self, x_1, y_1):
             return r.view(12, -1, 192)
         make_fx(f, tracing_mode="symbolic")(torch.tensor(24))
 
+    def test_view_divisibility_unbacked_relatively_prime(self):
+        # See https://github.com/pytorch/pytorch/issues/123651
+        def f(x):
+            i0 = x.item()
+            torch._check_is_size(i0)
+            # To trigger the original issue, the max bound has to
+            # be chosen such that 448 / 447 < 2 (which it is.)
+            torch._check(i0 <= 448)
+            return torch.zeros(256 * i0).view(-1, 447)
+        make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447))
+
     def test_unbacked_unify_guard(self):
         def f(x, y):
             z = torch.zeros(x.item())
@@ -1886,7 +1898,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.fractional_max_pool2d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
@@ -1927,6 +1938,15 @@ inplace_symbolic_tensor_failures = {
 }
 
 out_symbolic_tensor_failures = {
+    # Cast error details: Unable to cast (...) to Tensor
+    #
+    # This happens because the test is set up to call the out variant using the `out` kwarg:
+    #   torch._some_op(arg1, arg2, out=(out1, out2, out3))
+    #
+    # However, this only works on torch ops, not aten ops. For `_batch_norm_with_update`,
+    # this fails because the op has no python bindings, so it doesn't support the `out` kwarg
+    # way of calling its out variant.
+    xfail('_batch_norm_with_update', ''),
     xfail('_native_batch_norm_legit', ''),
     xfail('angle', ''),
     xfail('argmax', ''),
@@ -1950,7 +1970,6 @@ out_symbolic_tensor_failures = {
     xfail('max', 'reduction_with_dim'),
     xfail('min', 'reduction_with_dim'),
     xfail('nn.functional.avg_pool2d', ''),
-    xfail('nn.functional.linear', ''),
     xfail('scatter_add', ''),
     xfail('scatter', ''),
     xfail('take_along_dim', ''),
@@ -2003,18 +2022,34 @@ def _test_make_fx_helper(self, device, dtype, op, tracing_mode, inplace=False, o
             self.skipTest("Dynamic output shape operation in trace")
 
 
+def skipIfNameMatches(pattern):
+    """
+    Decorator to skip a test if its name matches the given pattern.
+    """
+    def decorator(test_func):
+        def wrapper(*args, **kwargs):
+            if re.match(pattern, test_func.__name__):
+                raise unittest.SkipTest(f"Test '{test_func.__name__}' skipped because its name matches the pattern '{pattern}'")
+            return test_func(*args, **kwargs)
+        return wrapper
+    return decorator
+
+# Auto functionalize shouldn't work with make_fx directly
+filtered_hop_db = [op for op in hop_db if op.name != "auto_functionalize"]
+
+@unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "Cond requires dynamo")
 class TestProxyTensorOpInfo(TestCase):
-    @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_exhaustive', make_fx_failures)
     def test_make_fx_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "real")
 
-    @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_fake_exhaustive', make_fx_failures.union(fake_tensor_failures))
     def test_make_fx_fake_exhaustive(self, device, dtype, op):
         _test_make_fx_helper(self, device, dtype, op, "fake")
 
-    @ops(op_db + custom_op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + filtered_hop_db + custom_op_db, allowed_dtypes=(torch.float,))
     @skipOps('TestProxyTensorOpInfo', 'test_make_fx_symbolic_exhaustive',
              make_fx_failures | fake_tensor_failures | symbolic_tensor_failures)
     def test_make_fx_symbolic_exhaustive(self, device, dtype, op):

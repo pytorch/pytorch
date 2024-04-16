@@ -58,7 +58,6 @@ from typing import (
     Iterator,
     List,
     Optional,
-    Sequence,
     Set,
     Tuple,
     Union,
@@ -128,7 +127,7 @@ class WrappedFunction:
     """
 
     model: Callable[..., Any]
-    static_input_idxs: Sequence[int]
+    static_input_idxs: List[int]
     id: FunctionID
     constants: Tuple[torch.Tensor, ...]
 
@@ -787,6 +786,16 @@ class CUDAGraphNode:
             set(wrapped_function.static_input_idxs) | set(self.cudagraph_managed_idxs)
         )
 
+        self.non_static_input_idx: LevelList[int] = [
+            i for i in range(len(inputs)) if i not in self.static_input_idxs
+        ]
+
+        self.non_managed_static_input_idxs: LevelList[int] = [
+            i
+            for i in wrapped_function.static_input_idxs
+            if i not in self.cudagraph_managed_idxs
+        ]
+
         self.static_input_data_ptrs: InputList[Optional[int]] = [
             (
                 inputs[i].data_ptr()
@@ -917,12 +926,36 @@ class CUDAGraphNode:
 
         self.graph.replay()
 
-    def _copy_input(self, idx, dst, src):
-        expanded_dims = self.expanded_dims[idx]
-        dst = index_expanded_dims(dst, expanded_dims)
-        src = index_expanded_dims(src, expanded_dims)
-        # TODO - one jit kernel across multiple inputs
-        dst.copy_(src)
+    def _copy_inputs_and_remove_from_src(self, dsts, srcs):
+        dst_tensors = []
+        src_tensors = []
+        for idx in self.non_static_input_idx:
+            if not isinstance(srcs[idx], torch.Tensor):
+                continue
+            expanded_dims = self.expanded_dims[idx]
+            dst_tensors.append(index_expanded_dims(dsts[idx], expanded_dims))
+            src_tensors.append(index_expanded_dims(srcs[idx], expanded_dims))
+            srcs[idx] = None
+        # Fails on empty lists
+        if dst_tensors:
+            torch._foreach_copy_(dst_tensors, src_tensors)
+
+    def check_static_inputs_are_stable(self, new_inputs):
+        # avoid checking managed tensor static points since we already checked those in check_invariants
+        if not torch._C._tensors_data_ptrs_at_indices_equal(
+            new_inputs, self.static_input_data_ptrs, self.non_managed_static_input_idxs
+        ):
+            # this should error
+            static_tensors = [new_inputs[i] for i in self.non_managed_static_input_idxs]
+            data_ptrs = [
+                self.static_input_data_ptrs[i]
+                for i in self.non_managed_static_input_idxs
+            ]
+            for t, data_ptr in zip(static_tensors, data_ptrs):
+                torch._check(
+                    t.data_ptr() == data_ptr,
+                    lambda: f"static input data pointer changed from {data_ptr} to {t.data_ptr()}",
+                )
 
     def run_first_inputs(self, new_inputs):
         if config.triton.fast_path_cudagraph_asserts:
@@ -936,30 +969,20 @@ class CUDAGraphNode:
         return outputs
 
     def run(self, new_inputs):
-        if config.triton.fast_path_cudagraph_asserts:
-            self.debug_check_invariants_before_invocation()
+        self.check_static_inputs_are_stable(new_inputs)
 
-        assert len(self.static_input_data_ptrs) == len(new_inputs)
-        # NB: this ranges over non-static inputs too
-        for idx, data_ptr in enumerate(self.static_input_data_ptrs):
-            if idx in self.cudagraph_managed_idxs:
-                continue
-            if not isinstance(new_inputs[idx], torch.Tensor):
-                pass
-            elif data_ptr is not None:
-                # static input, e.g., parameter
-                assert data_ptr == new_inputs[idx].data_ptr()
-            else:
-                # non-static input, need to copy it into CUDA graph
-                dst = self.reconstructed_inputs[idx]
-                src = new_inputs[idx]
-                self._copy_input(idx, dst, src)
-
+        self._copy_inputs_and_remove_from_src(self.reconstructed_inputs, new_inputs)
         new_inputs.clear()
+
         self.run_graph()
 
         outputs = self.reconstruct_outputs()
-        self.debug_check_invariants_after_invocation()
+
+        if config.triton.fast_path_cudagraph_asserts:
+            self.debug_check_invariants_after_invocation()
+
+        if config.triton.force_cudagraph_sync:
+            torch.cuda.synchronize()
 
         return outputs
 
@@ -1497,12 +1520,10 @@ class CUDAGraphNode:
                 elif i not in self.static_input_idxs:
                     # static_input does an allocation!
                     recording_inputs.append(static_input(inp))
-                    # copy over and clear non recording input
-                    self._copy_input(i, recording_inputs[-1], inp)
-                    inputs[i] = None
-                    del inp
                 else:
                     recording_inputs.append(inp)
+
+            self._copy_inputs_and_remove_from_src(recording_inputs, inputs)
 
         return recording_inputs
 
@@ -1513,9 +1534,12 @@ class CUDAGraphNode:
         """
 
         # previously managed data pointers remain stable
-        for idx in self.cudagraph_managed_idxs:
-            if inputs[idx].data_ptr() != self.static_input_data_ptrs[idx]:
-                return False
+        # this is on the hot path so moved to C++. equivalent to:
+        # return all(t.data_ptr() == data_ptr for (t, data_ptr) in zip(tensors, data_ptrs))
+        if not torch._C._tensors_data_ptrs_at_indices_equal(
+            inputs, self.static_input_data_ptrs, self.cudagraph_managed_idxs
+        ):
+            return False
 
         if not self._check_liveness(
             self.expected_dead_indices_before_graph, self.path_weakrefs
@@ -1785,11 +1809,15 @@ class CUDAGraphTreeManager:
         # necessarily use the same addresses as in the warm up. Thus any warm up of a node can only
         # be followed by warm up runs.
         if (
-            not (
-                function_id in self.warmed_up_functions
-                or config.triton.skip_cudagraph_warmup
+            (
+                not (
+                    function_id in self.warmed_up_functions
+                    or config.triton.skip_cudagraph_warmup
+                )
             )
-        ) or self.in_warmup:
+            or self.in_warmup
+            or config.triton.force_cudagraphs_warmup
+        ):
             # If we are in the middle of executing cuda graphs, then we need to checkpoint memory state.
             # Both Recording and Warmup will be reflected in the allocator and dont need changes
             if self.path_state == ExecutionState.EXECUTION:
@@ -1931,7 +1959,7 @@ class CUDAGraphTreeManager:
         self.ids_to_stack_traces[id] = stack_traces
         self.ids_to_funcs[id] = WrappedFunction(
             model,
-            static_input_idxs,
+            list(static_input_idxs),
             id,
             tuple(t for t in constants if isinstance(t, torch.Tensor) and t.is_cuda),
         )

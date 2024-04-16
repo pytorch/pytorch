@@ -128,6 +128,8 @@ class _KinetoProfile:
         privateuse1_backend = _get_privateuse1_backend_name()
         if privateuse1_backend != "privateuseone":
             self.use_device = privateuse1_backend
+        # user-defined metadata to be amended to the trace
+        self.preset_metadata: Dict[str, str] = dict()
 
     def start(self):
         self.prepare_trace()
@@ -141,7 +143,9 @@ class _KinetoProfile:
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
             use_mtia=(ProfilerActivity.MTIA in self.activities),
-            use_device=None,
+            use_device=self.use_device
+            if (ProfilerActivity.PrivateUse1 in self.activities)
+            else None,
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
@@ -186,6 +190,10 @@ class _KinetoProfile:
                     # Workaround: turn off CUPTI teardown when using CUDA Graphs.
                     os.environ["TEARDOWN_CUPTI"] = "0"
 
+            # Insert the preset user metadata to the trace
+            for k, v in self.preset_metadata.items():
+                self.add_metadata_json(k, v)
+
     def stop_trace(self):
         if self.execution_trace_observer:
             self.execution_trace_observer.stop()
@@ -210,18 +218,11 @@ class _KinetoProfile:
             return self.profiler.export_chrome_trace(path)
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
-        """Save stack traces in a file in a format suitable for visualization.
+        """Save stack traces to a file
 
         Args:
             path (str): save stacks file to this location;
             metric (str): metric to use: "self_cpu_time_total" or "self_cuda_time_total"
-
-        .. note::
-            Example of using FlameGraph tool:
-
-            - git clone https://github.com/brendangregg/FlameGraph
-            - cd FlameGraph
-            - ./flamegraph.pl --title "CPU time" --countname "us." profiler.stacks > perf_viz.svg
         """
         assert self.profiler
         return self.profiler.export_stacks(path, metric)
@@ -262,19 +263,32 @@ class _KinetoProfile:
         """
         torch.autograd._add_metadata_json(key, value)
 
+    def preset_metadata_json(self, key: str, value: str):
+        """
+        Preset a user defined metadata when the profiler is not started
+        and added into the trace file later.
+        Metadata is in the format of a string key and a valid json value
+        """
+        self.preset_metadata[key] = value
+
     def _get_distributed_info(self):
         import torch.distributed as dist
 
         if not dist.is_available() or not dist.is_initialized():
             return None
 
-        return {
-            "backend": dist.get_backend(),
+        backend = dist.get_backend()
+        dist_info = {
+            "backend": backend,
             "rank": dist.get_rank(),
             "world_size": dist.get_world_size(),
             "pg_count": dist.get_pg_count(),
             "pg_config": dist.distributed_c10d._get_all_pg_configs(),
         }
+        if backend == "nccl":
+            nccl_version = torch.cuda.nccl.version()
+            dist_info["nccl_version"] = ".".join(str(v) for v in nccl_version)
+        return dist_info
 
     def _memory_profile(self) -> MemoryProfile:
         required = ("record_shapes", "profile_memory", "with_stack")
@@ -702,7 +716,6 @@ class profile(_KinetoProfile):
         if self.record_steps and self.step_rec_fn:
             self.step_rec_fn.__exit__(None, None, None)
         prev_action = self.current_action
-        cur_step = self.step_num
         self.step_num += 1
         self.current_action = self.schedule(self.step_num)
 
@@ -710,7 +723,9 @@ class profile(_KinetoProfile):
         prof.KinetoStepTracker.increment_step(PROFILER_STEP_NAME)
 
         if self.record_steps:
-            self.step_rec_fn = prof.record_function("ProfilerStep#" + str(cur_step))
+            self.step_rec_fn = prof.record_function(
+                "ProfilerStep#" + str(self.step_num)
+            )
             self.step_rec_fn.__enter__()
 
     def _trace_ready(self):
@@ -722,6 +737,11 @@ class profile(_KinetoProfile):
         if action_list:
             for action in action_list:
                 action()
+
+    def _stats(self) -> Optional[prof._ProfilerStats]:
+        if self.profiler is None:
+            return None
+        return self.profiler._stats
 
 
 class ExecutionTraceObserver(_ITraceObserver):
