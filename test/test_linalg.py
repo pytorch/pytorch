@@ -4476,6 +4476,50 @@ class TestLinalg(TestCase):
                 y = make_arg(size_y, noncontiguous=nctg_y)
                 self.check_single_matmul(x, y)
 
+    @onlyCUDA
+    @dtypes(*floating_types_and(torch.half))
+    def test_matmul_small_brute_force_tunableop(self, device, dtype):
+        assert torch.cuda.tunable.is_enabled() is False, "TunableOp should be off by default"
+        assert torch.cuda.tunable.tuning_is_enabled(), "TunableOp's tuning should be enabled by default"
+        torch.cuda.tunable.tuning_enable(False)
+        assert torch.cuda.tunable.tuning_is_enabled() is False
+        torch.cuda.tunable.tuning_enable(True)
+        assert torch.cuda.tunable.tuning_is_enabled()
+        assert torch.cuda.tunable.get_max_tuning_duration() == 30
+        assert torch.cuda.tunable.get_max_tuning_iterations() == 100
+        assert torch.cuda.tunable.get_max_warmup_duration() == 0
+        assert torch.cuda.tunable.get_max_warmup_iterations() == 0
+
+        torch.cuda.tunable.enable()
+        # set these to single iterations to keep it short but still exercise the code
+        torch.cuda.tunable.set_max_tuning_duration(1)
+        torch.cuda.tunable.set_max_tuning_iterations(1)
+        torch.cuda.tunable.set_max_warmup_duration(1)
+        torch.cuda.tunable.set_max_warmup_iterations(1)
+
+        make_arg = partial(make_tensor, device=device, dtype=dtype)
+
+        for (size_x, size_y), nctg_x, nctg_y in product(self.gen_sizes_matmul(1), (True, False), (True, False)):
+            x = make_arg(size_x, noncontiguous=nctg_x)
+            y = make_arg(size_y, noncontiguous=nctg_y)
+            self.check_single_matmul(x, y)
+
+        filename = torch.cuda.tunable.get_filename()
+        ordinal = torch.cuda.current_device()
+        assert filename == f"tunableop_results{ordinal}.csv"
+        assert len(torch.cuda.tunable.get_validators()) > 1
+        assert len(torch.cuda.tunable.get_results()) > 1
+
+        # disables TunableOp, no file will be written, restore to default values
+        torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.set_max_tuning_duration(30)
+        torch.cuda.tunable.set_max_tuning_iterations(100)
+        torch.cuda.tunable.set_max_warmup_duration(0)
+        torch.cuda.tunable.set_max_warmup_iterations(0)
+        assert torch.cuda.tunable.is_enabled() is False, "TunableOp should be off after resetting"
+        assert torch.cuda.tunable.get_max_tuning_iterations() == 100
+        assert torch.cuda.tunable.get_max_warmup_iterations() == 0
+
     @dtypes(torch.float, torch.complex64)
     def test_matmul_out_kernel_errors_with_autograd(self, device, dtype):
         a = torch.empty((256, 512), device=device, dtype=dtype, requires_grad=True).unsqueeze(0)

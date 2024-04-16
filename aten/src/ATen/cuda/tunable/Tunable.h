@@ -31,19 +31,21 @@ static void TunableLog(const std::string& msg) {
 }
 #define TUNABLE_LOG(...) TunableLog(c10::str(__VA_ARGS__))
 
-enum TuningStatus {
+enum TORCH_CUDA_CPP_API TuningStatus {
   OK = 0,
   FAIL = 1,
   UNSUPPORTED = 2,
 };
 
 // Mapping from params signature to kernel id
-class ResultEntry {
+class TORCH_CUDA_CPP_API ResultEntry {
   public:
     explicit ResultEntry(const std::string& key, double time) : key_(key), time_(time) {}
     bool operator==(const ResultEntry& other) { return key_ == other.key_; }
     bool operator!=(const ResultEntry& other) { return key_ != other.key_; }
     operator std::string () { return key_; }
+    std::string GetKey() const { return key_; }
+    double GetTime() const { return time_; }
     friend std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry);
     static ResultEntry Null() { return ResultEntry("Null", 0.0); }
     static ResultEntry Default() { return ResultEntry("Default", 0.0); }
@@ -56,7 +58,7 @@ class ResultEntry {
 typedef std::unordered_map<std::string, ResultEntry> KernelMap;
 typedef std::unordered_map<std::string, KernelMap> ResultsMap;
 
-struct TuningResults {
+struct TORCH_CUDA_CPP_API TuningResults {
   // Validates if these results are compatible with the libraries
   std::unordered_map<std::string, std::string> validators;
 
@@ -64,7 +66,7 @@ struct TuningResults {
   ResultsMap results;
 };
 
-class TuningResultsManager {
+class TORCH_CUDA_CPP_API TuningResultsManager {
   public:
     TuningResultsManager() = default;
     ~TuningResultsManager() = default;
@@ -102,7 +104,7 @@ class TuningResultsManager {
     ResultsMap results_;
 };
 
-class TuningResultsValidator {
+class TORCH_CUDA_CPP_API TuningResultsValidator {
   public:
     using GetFunc = std::function<std::string()>;
     using ValidateFunc = std::function<TuningStatus(const std::string&)>;
@@ -126,7 +128,7 @@ class TuningResultsValidator {
     GetValidateFuncs validators_;
 };
 
-class TuningContext {
+class TORCH_CUDA_CPP_API TuningContext {
   public:
     TuningContext();
     ~TuningContext();
@@ -188,7 +190,7 @@ class TuningContext {
     size_t results_count_from_input_file_;
 };
 
-TuningContext* getTuningContext();
+TORCH_CUDA_CPP_API TuningContext* getTuningContext();
 
 class ITimer {
   public:
