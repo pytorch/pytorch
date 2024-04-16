@@ -795,7 +795,7 @@ class CKGemmOperation:
     a_block_transfer_dst_scalar_per_vector_ak1: int
     a_block_lds_extra_m: bool
 
-    b_block_transfer_thread_cluster_lengths_ybk0_n_bk1: Tuple[int, int, int]  # or sequence[int]?
+    b_block_transfer_thread_cluster_lengths_bk0_n_bk1: Tuple[int, int, int]  # or sequence[int]?
     b_block_transfer_thread_cluster_arrange_order: Tuple[int, int, int]  # or sequence[int]?
     b_block_transfer_src_access_order: Tuple[int, int, int]  # or sequence[int]?
 
@@ -817,8 +817,12 @@ class CKGemmOperation:
     b_compute_dtype: Optional[str]
 
     def name(self):
-        # TBD; must be unique per instance
-        return f"ck_devicegemm_xdl_shuffle_v3_{'_'.join([''.join(iter(f)) if hasattr(f, '__iter__') else f for f in fields(self)])}"
+        # cpp alias for template instance
+        return f"ck_devicegemm_xdl_shuffle_v3_{self.key_name()}"
+
+    def key_name(self):
+        # TBD; must be unique per instance. Intended to use as dict key
+        return f"{'_'.join(['K' + f.name.replace('_', '').lower() + 'V' + ('x'.join(iter(getattr(self, f.name))) if hasattr(getattr(self, f.name), '__iter__') else getattr(self, f.name)) for f in fields(self)])}"
 
 class CKGemmTemplate(CKTemplate):
     gemm_template = r"""
@@ -904,10 +908,12 @@ class CKGemmTemplate(CKTemplate):
 """
         template_params = []
         for f in fields(op):
-            if hasattr(f, "__iter__"):
-                template_params.append(f"ck::Sequence<{', '.join(iter(f))}>")
+            field_value = getattr(op, f.name)
+            if hasattr(field_value, "__iter__"):
+                template_params.append(f"ck::Sequence<{', '.join(iter(field_value))}>")
             else:
-                template_params.append(str(f))
+                if field_value is not None:
+                    template_params.append(str(field_value))
         return self._template_from_string(template_definition).render(
             operation_name=op.name(),
             template_params=", ".join(template_params)), self._template_from_string(template_type).render(operation_name=op.name())
@@ -928,3 +934,72 @@ class CKGemmTemplate(CKTemplate):
             K=kernel.size(X, -1),
             N=kernel.size(W, -1),
         )
+
+    def gen_ops(self):
+        res = []
+        res.append(CKGemmOperation(a_layout="Row", 
+                                   b_layout="Row", 
+                                   c_layout="Row", 
+                                   a_element_dtype="F16", 
+                                   b_element_dtype="F16", 
+                                   c_element_dtype="F16", 
+                                   acc_dtype="F32", 
+                                   c_shuffle_dtype="F16", 
+                                   a_elementwise_op="PassThrough",
+                                   b_elementwise_op="PassThrough",
+                                   gemm_specialization="GemmDefault",
+                                   block_size=256,
+                                   m_per_block=224,
+                                   n_per_block=256,
+                                   k_per_block=64,
+                                   a_k1=8,
+                                   b_k1=2,
+                                   m_per_xdl=16,
+                                   n_per_xdl=16,
+                                   m_xdl_per_wave=7,
+                                   n_xdl_per_wave=8,
+                                   a_block_transfer_thread_cluster_lengths_ak0_m_ak1=(8, 32, 1),
+                                   a_block_transfer_thread_cluster_arrange_order=(1, 0, 2),
+                                   a_block_transfer_src_access_order=(1, 0, 2),
+                                   a_block_transfer_src_vector_dim=2,
+                                   a_block_transfer_src_scalar_per_vector=8,
+                                   a_block_transfer_dst_scalar_per_vector_ak1=8,
+                                   a_block_lds_extra_m=0,
+                                   b_block_transfer_thread_cluster_lengths_bk0_n_bk1=(8, 32, 1),
+                                   b_block_transfer_thread_cluster_arrange_order=(0, 2, 1),
+                                   b_block_transfer_src_access_order=(0, 2, 1),
+                                   b_block_transfer_src_vector_dim=1,
+                                   b_block_transfer_src_scalar_per_vector=8,
+                                   b_block_transfer_dst_scalar_per_vector_bk1=2,
+                                   b_block_lds_extra_n=0,
+                                   c_shuffle_m_xdl_per_wave_per_shuffle=1,
+                                   c_shuffle_n_xdl_per_wave_per_shuffle=2,
+                                   c_shuffle_block_transfer_cluster_lengths_m_block_m_per_block_n_block_n_per_block=(1, 32, 1, 8),
+                                   c_shuffle_block_transfer_scalar_per_vector_n_per_block=8,
+                                   block_gemm_pipeline_scheduler="Intrawave",
+                                   block_gemm_pipeline_version="BlockGemmPipelineVersionV3",
+                                   ))
+        return res
+
+    @staticmethod
+    def add_ck_gemm_choices(
+        choices,
+        layout,
+        input_nodes,
+        alpha=1,
+        beta=0,
+        input_reorder=None,
+    ):
+        template = CKGemmTemplate(
+            input_nodes,
+            layout,
+            alpha=alpha,
+            beta=beta,
+            input_reorder=input_reorder,
+        )
+        ops = template.gen_ops()
+        for op in ops:
+            template.maybe_append_choice(
+                choices,
+                op=op,
+            )

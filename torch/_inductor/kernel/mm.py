@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional
 import torch
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
-from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
+from ..codegen.cuda.gemm_template import CKGemmTemplate, CUTLASSGemmTemplate
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -14,6 +14,7 @@ from ..select_algorithm import (
 )
 from ..utils import (
     use_aten_gemm_kernels,
+    use_ck_template,
     use_cutlass_template,
     use_max_autotune,
     use_triton_template,
@@ -139,6 +140,11 @@ def tuned_mm(mat1, mat2, *, layout=None):
     if m * n != 0 and use_cutlass_template(layout):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
+        )
+
+    if m * n != 0 and use_ck_template(layout):
+        CKGemmTemplate.add_ck_gemm_choices(
+            choices, layout, [mat1, mat2]
         )
 
     from torch._inductor.ir import FixedLayout, FlexibleLayout

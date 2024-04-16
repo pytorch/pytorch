@@ -1002,6 +1002,10 @@ def use_cutlass_template(layout):
     return res
 
 
+def use_ck_template(layout):
+    return torch.version.hip is not None and _use_autotune_backend("CK") and _use_template_for_cuda(layout, [torch.float16])
+
+
 def use_aten_gemm_kernels():
     return not use_max_autotune() or _use_autotune_backend("ATEN")
 
