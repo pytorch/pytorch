@@ -383,8 +383,8 @@ def generate_wheels_matrix(
                             ".", "_"
                         ),
                         "pytorch_extra_install_requirements":
-                        PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]  # fmt: skip
-                        if os != "linux" and arch_version.startswith("cu") else "",
+                        PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.4"]  # fmt: skip
+                        if os != "linux" else "",
                     }
                 )
     return ret
