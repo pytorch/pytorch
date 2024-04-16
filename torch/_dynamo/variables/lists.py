@@ -257,6 +257,12 @@ class CommonListMethodsVariable(BaseListVariable):
             assert not args
             items = list(self.items)
             return self.modified(items, mutable_local=MutableLocal())
+        elif name == "reverse" and self.mutable_local:
+            assert not kwargs
+            assert not args
+            self.items.reverse()
+            tx.output.side_effects.mutation(self)
+            return ConstantVariable.create(None)
         else:
             return super().call_method(tx, name, args, kwargs)
 
