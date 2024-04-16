@@ -178,14 +178,21 @@ class UnflattenedModule(torch.nn.Module):
                 attr_kind=_AttrKind.PARAMETER,
             )
 
+        id_to_buffers: Dict[int, torch.nn.Parameter] = {}
         non_persistent_buffers = set(self.graph_signature.non_persistent_buffers)
         for name in self.graph_signature.buffers:
             if name in non_persistent_buffers:
                 persistent = False
-                cloned = export_module.constants[name].clone()
+                buffer = export_module.constants[name]
             else:
                 persistent = True
-                cloned = state_dict[name].clone()
+                buffer = state_dict[name]
+
+            if id(buffer) in id_to_buffers:
+                cloned = id_to_buffers[id(buffer)]
+            else:
+                cloned = buffer.clone()
+                id_to_buffers[id(buffer)] = cloned
 
             _assign_attr(
                 cloned,

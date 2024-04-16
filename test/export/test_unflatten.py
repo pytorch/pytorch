@@ -676,6 +676,7 @@ class TestUnflatten(TestCase):
             def __init__(self):
                 super().__init__()
                 self.beta = torch.nn.Linear(4, 2)
+
             def forward(self, x):
                 return self.beta(x)
 
@@ -683,6 +684,7 @@ class TestUnflatten(TestCase):
             def __init__(self):
                 super().__init__()
                 self.alpha = torch.nn.Linear(4, 2)
+
             def forward(self, x):
                 return self.alpha(x)
 
@@ -693,21 +695,36 @@ class TestUnflatten(TestCase):
                 self.baz = Baz()
                 self.bar.alpha.weight = self.baz.beta.weight
                 self.w = self.bar.alpha.weight
+
             def forward(self, x):
-                return self.bar(x) + (self.w @ x).T
+                return self.bar(x) + self.baz(x) + (self.w @ x).T
 
         m = Foo()
-        ep = torch.export.export(m, (torch.randn(4, 4),))
+        inps = (torch.randn(4, 4),)
+        ep = torch.export.export(m, inps)
         unflattened = torch.export.unflatten(ep)
-        # state dict should have 5 parameters,
-        # exported program should have 4 inputs (3 params + 1 user input)
+        # test forward
+        self.compare_outputs(m, unflattened, inps)
+        # state dict should have 5 parameters
         self.assertEqual(len(ep.state_dict), 5)
-        self.assertEqual(len(ep.graph_signature.input_specs), 4)
-        self.assertEqual(len(unflattened.state_dict), 5)
+        self.assertEqual(len(unflattened.state_dict()), 5)
         # check ids of unflattened module are shared
         self.assertEqual(id(unflattened.w), id(unflattened.baz.beta.weight))
         self.assertEqual(id(unflattened.w), id(unflattened.bar.alpha.weight))
-        breakpoint()
+
+        # test case where params are unused
+        class Foo2(Foo):
+            def forward(self, x):
+                return self.w @ x
+
+        m = Foo2()
+        ep = torch.export.export(m, inps)
+        unflattened = torch.export.unflatten(ep)
+        # test forward
+        self.compare_outputs(m, unflattened, inps)
+        # state dict should have 1 parameter
+        self.assertEqual(len(ep.state_dict), 5)
+        self.assertEqual(len(unflattened.state_dict()), 1)
 
 
 if __name__ == "__main__":
