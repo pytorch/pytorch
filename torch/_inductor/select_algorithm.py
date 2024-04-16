@@ -892,6 +892,13 @@ class AlgorithmSelectorCache(PersistentCache):
     ):
         from .codegen.cuda.cuda_kernel import CUDATemplateCaller
 
+        # Templates selected with input_gen_fns require specific input data to avoid IMA
+        # Passing custom input gen fns to benchmark_fusion NYI, so skip deferred template selection
+        if input_gen_fns is not None:
+            return_multi_template = False
+
+        # TODO - assert that we have not mutating kernels here
+
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
 
@@ -1310,11 +1317,9 @@ def autotune_select_algorithm(*args, **kwargs):
         _ALGORITHM_SELECTOR_CACHE = AlgorithmSelectorCache()
 
     if "return_multi_template" not in kwargs:
-        # TODO - enable multi templates even if benchmark_fusion not enabled
-        kwargs["return_multi_template"] = (
-            torch._inductor.config.benchmark_multi_templates
-            and torch._inductor.config.benchmark_fusion
-        )
+        kwargs[
+            "return_multi_template"
+        ] = torch._inductor.config.benchmark_multi_templates
 
     return _ALGORITHM_SELECTOR_CACHE(*args, **kwargs)
 
