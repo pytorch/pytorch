@@ -502,7 +502,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             ),
             {},
         )
-        set_example_value(tx, proxy.node, out.value)
+        set_example_value(proxy.node, out.value)
 
         return out
 
