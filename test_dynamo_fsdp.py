@@ -178,7 +178,7 @@ sys.excepthook = handle_exception
 # NOTE: copied from TorchTrain
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import checkpoint_wrapper as ptd_checkpoint_wrapper
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import CheckpointImpl
-from torch.utils.checkpoint import checkpoint
+from torch.utils.checkpoint import checkpoint, _pt2_selective_checkpoint_context_fn_gen
 
 class ACConfigClass:
     mode: str = "selective"
@@ -188,9 +188,14 @@ def checkpoint_wrapper(module, config):
     if config.mode == "selective" and config.selective_ac_option == "op":
 
         def _get_custom_policy(meta):
+            no_recompute_list = [
+                torch.ops.aten.mm.default,
+            ]
             def _custom_policy(mode, func, *args, **kwargs):
                 mm_count_key = f"{mode}_mm_count"
                 if func == torch.ops.aten.mm.default:
+                    if mm_count_key not in meta:
+                        meta[mm_count_key] = 0
                     meta[mm_count_key] += 1
                 # Saves output of all compute ops, except every second mm
                 return func in no_recompute_list and not (
@@ -200,7 +205,7 @@ def checkpoint_wrapper(module, config):
             return _custom_policy
 
         def selective_checkpointing_context_fn():
-            meta = defaultdict(int)
+            meta = {}
             return _pt2_selective_checkpoint_context_fn_gen(_get_custom_policy(meta))
 
         return ptd_checkpoint_wrapper(
@@ -246,14 +251,13 @@ def checkpoint_wrapper(module, config):
         # skip activation checkpointing and store activations for this layer
         else:
             return module
-
     else:
         raise NotImplementedError(
             "Unknown AC type or AC config. Only selective op and selective layer ac implemented currently."
         )
 
 
-test_case = "test_tags_function"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "test_tags_function" / "test_tags_multiple_checkpoints" / "test_compile_selective_checkpoint_gemm_only"
+test_case = "nested_fully_shard"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
 activation_checkpoint = True
@@ -284,8 +288,10 @@ def init():
         fsdp_config = {}
     if activation_checkpoint:
         ac_config = ACConfigClass()
+        # ac_config.mode = "selective"
+        # ac_config.selective_ac_option = "op"
         ac_config.mode = "full"
-        # ac_config.selective_ac_option = "1"
+        torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint = True
     mesh = init_device_mesh("cuda", (world_size,))
     backend = "inductor"
 
@@ -319,53 +325,70 @@ def init():
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
             fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
     elif test_case == "nested_fully_shard":
-        model = nn.Sequential(*[MLP(hidden_dim) for _ in range(3)])
-        if activation_checkpoint:
-            model = checkpoint_wrapper(model, ac_config)
-        if apply_fsdp:
-            for mlp in model:
-                fully_shard(mlp, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
-            fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
-    elif test_case == "test_tags_function":
-        class TestModule(torch.nn.Module):
-            def __init__(self, device):
+        class TestModule(nn.Module):
+            def __init__(self, n_layers):
                 super().__init__()
-                self.param = torch.nn.Parameter(torch.randn(hidden_dim, hidden_dim, device=device))
-
-            def gn(self, x, y):
-                return torch.sigmoid(torch.matmul(x, y))
+                self.layers = torch.nn.ModuleList()
+                for layer_id in range(n_layers):
+                    self.layers.append(MLP(hidden_dim))
 
             def forward(self, x):
-                return self.gn(x, self.param)
+                for layer in self.layers:
+                    x = layer(x)
+                return x
 
-        model = TestModule("cuda")
-        if activation_checkpoint:
-            ac_config = ACConfigClass()
-            ac_config.mode = "full"
-            model = checkpoint_wrapper(model, ac_config)
-        if apply_fsdp:
-            fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+        model = TestModule(n_layers=3)
+        assert activation_checkpoint and apply_fsdp
+        assert mesh is not None
+        for layer_id, mod in enumerate(model.layers):
+            mod = checkpoint_wrapper(mod, ac_config)
+            fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+            model.layers[layer_id] = mod
+        fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+        # if apply_fsdp:
+        #     for mod in model:
+        #         fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+        #     fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+    # elif test_case == "test_tags_function":
+    #     class TestModule(torch.nn.Module):
+    #         def __init__(self, device):
+    #             super().__init__()
+    #             self.param = torch.nn.Parameter(torch.randn(hidden_dim, hidden_dim, device=device))
 
-        graph_count = 0
-        def count_ops_pass(graph):
-            nonlocal graph_count
-            if graph_count == 0:  # assume the first graph is FWD graph, second is BWD graph
-                count_ops(graph, freqs=[1], ops=[torch.ops.aten.mm.default])
-            elif graph_count == 1:
-                count_ops(graph, freqs=[3], ops=[torch.ops.aten.mm.default])
-            else:
-                raise RuntimeError("Unexpected graph_count")
-            graph_count += 1
-            return graph
+    #         def gn(self, x, y):
+    #             return torch.sigmoid(torch.matmul(x, y))
 
-        torch._inductor.config.post_grad_custom_post_pass = count_ops_pass
+    #         def forward(self, x):
+    #             return self.gn(x, self.param)
 
-        # fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
-        # bw_compiler = functools.partial(
-        #     count_ops, freq=3, op=torch.ops.aten.mm.default
-        # )  # mm recomputed in the bwd
-        # backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
-        # self._validate(fn, backend, x, y)
+    #     model = TestModule("cuda")
+    #     if activation_checkpoint:
+    #         ac_config = ACConfigClass()
+    #         ac_config.mode = "full"
+    #         model = checkpoint_wrapper(model, ac_config)
+    #     if apply_fsdp:
+    #         fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+
+    #     # graph_count = 0
+    #     # def count_ops_pass(graph):
+    #     #     nonlocal graph_count
+    #     #     if graph_count == 0:  # assume the first graph is FWD graph, second is BWD graph
+    #     #         count_ops(graph, freqs=[1], ops=[torch.ops.aten.mm.default])
+    #     #     elif graph_count == 1:
+    #     #         count_ops(graph, freqs=[3], ops=[torch.ops.aten.mm.default])
+    #     #     else:
+    #     #         raise RuntimeError("Unexpected graph_count")
+    #     #     graph_count += 1
+    #     #     return graph
+
+    #     # torch._inductor.config.post_grad_custom_post_pass = count_ops_pass
+
+    #     # fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
+    #     # bw_compiler = functools.partial(
+    #     #     count_ops, freq=3, op=torch.ops.aten.mm.default
+    #     # )  # mm recomputed in the bwd
+    #     # backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+    #     # self._validate(fn, backend, x, y)
     # else:
     #     # FSDP1
     #     fsdp_kwargs = {
