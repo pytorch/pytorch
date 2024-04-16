@@ -1699,14 +1699,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             # Applying weight norm on one of them causes it to become a tensor
             l = torch.nn.utils.weight_norm(l, name=name)
             self.assertEqual(
-                sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights]),
+                sum(isinstance(p, torch.nn.Parameter) for p in l._flat_weights),
                 num_params - 1,
             )
 
             # Removing the weight norm reparametrization restores the Parameter
             l = torch.nn.utils.remove_weight_norm(l, name=name)
             self.assertEqual(
-                sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights]),
+                sum(isinstance(p, torch.nn.Parameter) for p in l._flat_weights),
                 num_params,
             )
 
@@ -11737,10 +11737,10 @@ if __name__ == '__main__':
                 # i.e. we don't count the ignored_idx at all.
                 check_equal(loss, (inp1, targ_positive_ignore_index), (inp2[1:], targ_positive_ignore_index[1:]))
 
-    # Ref: https://github.com/pytorch/pytorch/issue/85005
+    # Ref: https://github.com/pytorch/pytorch/issues/85005
     @onlyCUDA
     @largeTensorTest("45GB", "cpu")
-    @largeTensorTest("45GB", "cuda")
+    @largeTensorTest("70GB", "cuda")
     @parametrize_test("reduction", ("none", "mean", "sum"))
     def test_cross_entropy_large_tensor(self, device, reduction):
         logits = torch.randn(int(2 ** 16), int(2 ** 16) + 1, dtype=torch.float32, device='cuda', requires_grad=True)
