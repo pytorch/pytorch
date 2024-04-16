@@ -94,7 +94,7 @@ __all__ = [
     "is_concrete_bool", "is_nested_int", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
     "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
     "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
-    "guard_size_oblivious",
+    "guard_size_oblivious", "check_consistent",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -238,6 +238,29 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     else:
         assert isinstance(expr, bool)
         return expr
+
+def check_consistent(new, old) -> None:
+    """
+    Test that two "meta" values (typically either Tensor or SymInt) have
+    the same values, e.g., after retracing.  If we don't understand the
+    quantities in question, we'll just skip the consistency check.
+    """
+    # TODO: do boolean equality test too, see
+    # https://github.com/pytorch/pytorch/issues/124110
+    scalar_types = (torch.SymInt, torch.SymFloat, int, float)
+
+    if isinstance(new, torch.Tensor):
+        assert isinstance(old, torch.Tensor)
+        torch._check(old.dim() == new.dim(), lambda: f"{old.shape} != {new.shape} (old != new)")
+        # Do this manually so that each individual test is irrefutable
+        # (TODO: should be a helper for this, maybe sym_eq?  That
+        # gives us a compound expression and I'm not sure it
+        # simplifies right now)
+        for i, j in zip(old.shape, new.shape):
+            torch._check(i == j, lambda: f"{old.shape} != {new.shape} (old != new)")
+    elif isinstance(new, scalar_types):
+        assert isinstance(old, scalar_types)
+        torch._check(old == new, lambda: f"{old} != {new} (old != new)")
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
     r""" Canonicalize a boolean expression by transforming it into a lt / le
@@ -4108,7 +4131,7 @@ class ShapeEnv:
                     "version": 2,
                 },
             )
-            log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
+            log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val, stack_info=True)
 
 
     def _get_stack_summary(self, is_debug: bool = False):
