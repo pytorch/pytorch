@@ -137,6 +137,7 @@ from .misc import (
     AutogradFunctionVariable,
     ComptimeVariable,
     DebuggingVariable,
+    DelayGraphBreakVariable,
     GetAttrVariable,
     GetSetDescriptorVariable,
     InspectSignatureVariable,
@@ -972,6 +973,14 @@ class VariableBuilder:
         if len(value.__dict__) == 0:
             unimplemented(f"uninitialized nn.Module: {typestr(value)}")
         if istype(value, OptimizedModule):
+            # Check if the optimized module was disabled
+            if inspect.getattr_static(value.forward, "_torchdynamo_disable", False):
+                # This bytecode is mostly of kind LOAD_ATTR or LOAD_METHOD. If
+                # we graph break here, Dynamo does not know how to create
+                # continuation functions for such bytecodes. So, we delay the
+                # graph break to CALL_FUNCTION.
+                return DelayGraphBreakVariable(source=self.source)
+
             self.install_guards(GuardBuilder.TYPE_MATCH)
             self.source = AttrSource(self.source, "_orig_mod")
             return self.wrap_module(value._orig_mod)
