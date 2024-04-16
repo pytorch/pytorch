@@ -3522,6 +3522,16 @@ def lookup_inner(
                 reasons.add("func name is __torch_function__")
             return UserFunctionVariable
 
+    if not is_direct_call:
+        if (
+            filename
+            and "torch/nn/modules/module.py" in filename
+            and name == "_wrapped_call_impl"
+        ):
+            if reasons is not None:
+                reasons.add("func name is __wrapped_call_impl")
+            return UserFunctionVariable
+
     # Step 3: lookup obj's tracing rule by filename.
     if filename is None:
         filename = getfile(obj)
