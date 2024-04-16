@@ -2039,7 +2039,6 @@ if (custom_op_wrapper.get() == NULL) {
     throw std::runtime_error("Failed to load torch._inductor.codecache.custom_op_wrapper");
 }"""
 
-        # Use ptr here because RAIIPyObject does not have a default constructor
         declarations_before_scope = ["RAIIPyObject custom_op_wrapper;"]
         scope_gil_acquire = self.generate_scoped_gil_acquire(
             declarations_before_scope, lines
