@@ -187,9 +187,9 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: build_cu124_patch
           submodules: recursive
-          repository: pytorch/builder
+          repository: nWEIdia/builder
           path: builder
           quiet-checkout: true
 
