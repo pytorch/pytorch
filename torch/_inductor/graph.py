@@ -78,7 +78,6 @@ from .virtualized import V
 log = logging.getLogger(__name__)
 perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
-aten = torch.ops.aten
 
 
 if config.is_fbcode():
@@ -147,61 +146,6 @@ def getattr_recursive(obj, target):
             )
         attr_itr = getattr(attr_itr, atom)
     return attr_itr
-
-
-def mark_nodes_dislike_padding(g):
-    """
-    Nodes like convolution/convolution_backward want its input to be dense.
-    If we pad their inputs, we result in extra calls to copy kernels!  On the other hand, padding usually helps reduction.
-
-    The pass finds nodes that dislike padding. These are nodes that can be reached
-    from a convolution/convolution_backward in the backward direction without
-    going thru a reduction.
-    """
-    if not config.comprehensive_padding:
-        return
-    ops_dislike_padding = {
-        aten.convolution,
-        aten.convolution_backward,
-    }
-    # what's a better way to collect the reduction ops?
-    ops_like_padding = {
-        aten.var_mean,
-        aten.sum,
-        aten.mean,
-        aten.prod,
-        aten.any,
-        aten.amin,
-        aten.amax,
-        aten.min,
-        aten.max,
-        aten.argmin,
-        aten.argmax,
-        aten.scatter_reduce,
-    }
-
-    def _get_overload_packet(node):
-        return (
-            node.target._overloadpacket
-            if node.op == "call_function" and hasattr(node.target, "_overloadpacket")
-            else None
-        )
-
-    for cur in reversed(g.nodes):
-        op = _get_overload_packet(cur)
-        if not op:
-            continue
-        if op in ops_dislike_padding:
-            cur.meta["dislike_padding"] = True
-
-        if cur.meta.get("dislike_padding", False):
-            # propagate
-            for prior in cur.all_input_nodes:
-                prior_op = _get_overload_packet(prior)
-                if not prior_op:
-                    continue
-                if prior_op not in ops_like_padding:
-                    prior.meta["dislike_padding"] = True
 
 
 class GraphLowering(torch.fx.Interpreter):
@@ -280,7 +224,7 @@ class GraphLowering(torch.fx.Interpreter):
         graph_id=None,
         cpp_wrapper=False,
         aot_mode=False,
-        user_visible_outputs=None,
+        user_visible_outputs=frozenset(),
         layout_opt=None,
         extern_node_serializer=None,
         is_inference=False,
@@ -367,11 +311,8 @@ class GraphLowering(torch.fx.Interpreter):
         self.nodes_prefer_channels_last = (
             self.find_nodes_prefer_channels_last() if self.layout_opt else set()
         )
-        mark_nodes_dislike_padding(gm.graph)
         self._warned_fallback = {"aten.convolution_backward"}
-        self.user_visible_outputs = (
-            user_visible_outputs if user_visible_outputs is not None else {}
-        )
+        self.user_visible_outputs = user_visible_outputs
         self.cache_key: str = ""  # This is the cache key for the compiled artifact
         self.cache_path: str = ""  # This is the path in the filesystem where the compiled artifact is stored
         self.cache_linemap: List[
@@ -1173,14 +1114,7 @@ class GraphLowering(torch.fx.Interpreter):
                         and not is_input_for_as_strided
                     ):
                         stride_order = ir.NHWC_STRIDE_ORDER
-
-                    allow_padding = (
-                        n.name not in self.user_visible_outputs
-                        and not is_input_for_as_strided
-                    )
-                    result = ir.ExternKernel.require_stride_order(
-                        result, stride_order, allow_padding=allow_padding
-                    )
+                    result = ir.ExternKernel.require_stride_order(result, stride_order)
 
             # Realize if (1) any user need inputs realized, or (2) there is
             # already too many reads and rematerializing can be bad.
@@ -1224,9 +1158,7 @@ class GraphLowering(torch.fx.Interpreter):
                                 need_fixed_layout += [torch.ops.mkl._mkl_linear.default]
                         if user.target in need_fixed_layout:
                             result = ir.ExternKernel.require_stride_order(
-                                result,
-                                ir.get_stride_order(n.meta["val"].stride()),
-                                allow_padding=True,
+                                result, ir.get_stride_order(n.meta["val"].stride())
                             )
                     if user.op == "output":
                         if isinstance(result.data.data, (Pointwise, Reduction)):

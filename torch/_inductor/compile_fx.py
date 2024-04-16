@@ -8,7 +8,17 @@ import time
 import warnings
 from itertools import count
 
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    FrozenSet,
+    List,
+    Optional,
+    Sequence,
+    Tuple,
+    Union,
+)
 from unittest import mock
 
 from functorch.compile import min_cut_rematerialization_partition
@@ -312,22 +322,6 @@ def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
     return False
 
 
-def maybe_disable_comprehensive_padding(example_inputs: List[torch.Tensor]):
-    """
-    For CPU backend, enable comprehensive padding causes some unit tests
-    fail due to changing number of generated kernels. Skip for now.
-    """
-    has_cuda = any(
-        t.device.type == "cuda" for t in example_inputs if isinstance(t, torch.Tensor)
-    )
-
-    if config.comprehensive_padding and not has_cuda:
-        perf_hint_log.info("Skip comprehensive padding on CPU")
-        return config.patch(comprehensive_padding=False)
-    else:
-        return contextlib.nullcontext()
-
-
 @DebugContext.wrap
 def count_bytes_inner(
     gm: torch.fx.GraphModule,
@@ -342,9 +336,7 @@ def count_bytes_inner(
         _recursive_post_grad_passes(gm, False)
 
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
-    with V.set_graph_handler(graph), V.set_real_inputs(
-        example_inputs
-    ), maybe_disable_comprehensive_padding(example_inputs):
+    with V.set_graph_handler(graph), V.set_real_inputs(example_inputs):
         graph.run(*example_inputs)
         num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
         metrics.num_bytes_accessed += num_bytes
@@ -410,7 +402,7 @@ def compile_fx_inner(
     aot_mode: bool = False,
     is_inference: bool = False,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-    user_visible_outputs: Optional[Dict[str, None]] = None,
+    user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
@@ -621,9 +613,7 @@ def fx_codegen_and_compile(
     cpp_wrapper: bool = False,
     aot_mode: bool = False,
     is_inference: bool = False,
-    # Use a dict with None value rather than a set for deterministic
-    # iteration order just in case.
-    user_visible_outputs: Optional[Dict[str, None]] = None,
+    user_visible_outputs: FrozenSet[str] = frozenset(),
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
@@ -688,9 +678,7 @@ def fx_codegen_and_compile(
         if config.is_fbcode():
             log_optimus_to_scuba()
 
-    with V.set_fake_mode(fake_mode), maybe_disable_comprehensive_padding(
-        example_inputs
-    ):
+    with V.set_fake_mode(fake_mode):
         const_output_index = None
         const_graph = None
         const_code = None
@@ -1119,9 +1107,9 @@ def fw_compiler_freezing(
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
     model_outputs = model_outputs_node.args[0]
-    user_visible_outputs = dict.fromkeys(
+    user_visible_outputs = [
         n.name for n in model_outputs if isinstance(n, torch.fx.Node)
-    )
+    ]
 
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
@@ -1267,10 +1255,11 @@ def compile_fx(
         fixed = torch._inductor.utils.num_fw_fixed_arguments(
             num_example_inputs, len(example_inputs)
         )
-        user_visible_outputs = {}
+        user_visible_outputs = set()
 
         if config.keep_output_stride:
-            model_outputs_node = output_node(model)
+            *_, model_outputs_node = model.graph.nodes
+            assert model_outputs_node.op == "output"
             model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
             num_model_outputs = len(model_outputs)
 
@@ -1313,11 +1302,11 @@ def compile_fx(
             # of "graph" outputs. Make sure we're within bounds.
             assert orig_output_end_idx <= num_model_outputs
 
-            user_visible_outputs = dict.fromkeys(
+            user_visible_outputs = {
                 n.name
                 for n in model_outputs[original_output_start_index:orig_output_end_idx]
                 if isinstance(n, torch.fx.Node)
-            )
+            }
 
         return inner_compile(
             model,
@@ -1355,14 +1344,6 @@ def compile_fx(
     @dynamo_utils.dynamo_timed
     @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
-        user_visible_outputs = {}
-
-        if config.bw_outputs_user_visible:
-            model_outputs_node = output_node(model)
-            model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
-            user_visible_outputs = dict.fromkeys(
-                n.name for n in model_outputs if isinstance(n, torch.fx.Node)
-            )
         fixed = count_tangents(model)
         return inner_compile(
             model,
@@ -1372,7 +1353,6 @@ def compile_fx(
             is_backward=True,
             graph_id=graph_id,
             boxed_forward_device_index=forward_device,
-            user_visible_outputs=user_visible_outputs,
         )
 
     # TODO: can add logging before/after the call to create_aot_dispatcher_function
