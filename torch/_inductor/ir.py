@@ -4029,7 +4029,7 @@ class ExternKernel(InputsKernel):
             )
         ):
             x_unwrap_view.freeze_layout_with_same_order(
-                x_unwrap_view_node.meta["val"].stride()
+                make_channels_last_strides_for(x_unwrap_view.get_size())
             )
         else:
             x_unwrap_view.freeze_layout()
