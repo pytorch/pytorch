@@ -11,6 +11,7 @@ import operator
 import os
 import random
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -776,6 +777,11 @@ class CommonTemplate:
             load_aoti_eager_cache,
         )
 
+        def clear_aoti_eager_cache():
+            if aoti_eager_cache_dir().exists():
+                shutil.rmtree(aoti_eager_cache_dir())
+
+        clear_aoti_eager_cache()
         kernel_lib_path = aoti_compile_with_persistent_cache(
             ns,
             op_name,
@@ -812,6 +818,7 @@ class CommonTemplate:
             kernel_libs_abs_path.append(kernel_path.as_posix())
 
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
+        clear_aoti_eager_cache()
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_torch_compile_override_registration(self):
