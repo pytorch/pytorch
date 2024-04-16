@@ -24,8 +24,8 @@ from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.symbolic_shapes import (
+    check_consistent,
     definitely_false,
-    rename_unbacked_to,
     sym_eq,
 )
 from torch.nn.utils import stateless
@@ -680,21 +680,9 @@ def aot_dispatch_subclass(
 class PropagateUnbackedSymInts(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
         result = super().run_node(n)
-        scalar_types = (torch.SymInt, torch.SymFloat, torch.SymBool, int, float, bool)
 
-        def check_consistent(new, old):
-            if isinstance(new, torch.Tensor):
-                assert isinstance(old, torch.Tensor)
-                torch._check(old.dim() == new.dim())
-                # Do this manually so that each individual test is irrefutable
-                # (TODO: should be a helper for this, maybe sym_eq?  That
-                # gives us a compound expression and I'm not sure it
-                # simplifies right now)
-                for i, j in zip(old.shape, new.shape):
-                    rename_unbacked_to(i, j)
-            elif isinstance(new, scalar_types):
-                assert isinstance(old, scalar_types)
-                rename_unbacked_to(old, new)
+        if "example_value" in n.meta:
+            pytree.tree_map_(check_consistent, result, n.meta["example_value"])
 
         return result
 
