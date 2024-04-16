@@ -6,6 +6,7 @@ from typing import cast, Optional, Union
 import torch
 import torch.distributed as dist
 from torch.distributed._state_dict_utils import _offload_state_dict_to_cpu
+from torch.distributed.checkpoint import FileSystemWriter
 from torch.distributed.checkpoint.logger import _dcp_method_logger
 from torch.distributed.checkpoint.planner import SavePlan
 from torch.distributed.checkpoint.stateful import Stateful
@@ -215,6 +216,14 @@ def async_save(
         assert (
             torch.device("cpu") in pg._device_types  # type: ignore[attr-defined]
         ), "A CPU backend must be enabled for async save; try initializing process group with 'cpu:gloo,cuda:nccl'"
+
+    storage_writer = cast(
+        StorageWriter, _storage_setup(storage_writer, checkpoint_id, reader=False)
+    )
+    if isinstance(storage_writer, FileSystemWriter):
+        # in the async case, the state dict is already on CPU, so maintaining this
+        # buffer makes no sense
+        storage_writer.per_thread_copy_ahead = 0
 
     cpu_state_dict = _offload_state_dict_to_cpu(
         _stateful_to_state_dict(state_dict), type_check=False
