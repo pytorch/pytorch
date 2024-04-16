@@ -2193,6 +2193,7 @@ class ReduceOpTest(TestCase):
             self.assertFalse(None in (reduce_op, reduce_op_obj))
             self.assertFalse(not_reduceop in (reduce_op, reduce_op_obj))
 
+
 class LocalRankTest(MultiProcessTestCase):
     @property
     def world_size(self):
@@ -2216,6 +2217,7 @@ class LocalRankTest(MultiProcessTestCase):
     def testNodeLocalRank(self):
         os.environ["LOCAL_RANK"] = str(self.rank)
         self.assertEqual(dist.get_node_local_rank(), self.rank)
+
 
 if __name__ == "__main__":
     assert (
