@@ -171,6 +171,7 @@ def mps_ops_grad_modifier(ops):
         'nn.functional.conv_transpose1d': [torch.float16],
         'nn.functional.conv_transpose2d': [torch.float16],
         'nn.functional.conv_transpose3d': [torch.float16],
+        'nn.functional.binary_cross_entropy': [torch.float16]
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
