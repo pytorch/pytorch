@@ -31,6 +31,9 @@ CPU_CXX11_ABI_ARCH = ["cpu-cxx11-abi"]
 CPU_AARCH64_ARCH = ["cpu-aarch64"]
 
 
+CUDA_AARCH64_ARCH = ["cuda-aarch64"]
+
+
 PYTORCH_EXTRA_INSTALL_REQUIREMENTS = {
     "11.8": (
         "nvidia-cuda-nvrtc-cu11==11.8.89; platform_system == 'Linux' and platform_machine == 'x86_64' | "  # noqa: B950
@@ -116,6 +119,8 @@ def arch_type(arch_version: str) -> str:
         return "cpu-cxx11-abi"
     elif arch_version in CPU_AARCH64_ARCH:
         return "cpu-aarch64"
+    elif arch_version in CUDA_AARCH64_ARCH:
+        return "cuda-aarch64"
     else:  # arch_version should always be "cpu" in this case
         return "cpu"
 
@@ -193,6 +198,7 @@ def translate_desired_cuda(gpu_arch_type: str, gpu_arch_version: str) -> str:
         "cpu-aarch64": "cpu",
         "cpu-cxx11-abi": "cpu-cxx11-abi",
         "cuda": f"cu{gpu_arch_version.replace('.', '')}",
+        "cuda-aarch64": "12.4",
         "rocm": f"rocm{gpu_arch_version}",
     }.get(gpu_arch_type, gpu_arch_version)
 
@@ -326,7 +332,7 @@ def generate_wheels_matrix(
             )
 
             # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
-            if arch_version in ["12.1", "11.8"] and os == "linux":
+            if arch_version in ["12.1", "11.8"] and os == "linux" or arch_version == "cuda-aarch64":
                 ret.append(
                     {
                         "python_version": python_version,
@@ -338,7 +344,8 @@ def generate_wheels_matrix(
                         "devtoolset": "",
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
-                        "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version],  # fmt: skip
+                        "pytorch_extra_install_requirements": PYTORCH_EXTRA_INSTALL_REQUIREMENTS[arch_version]
+                        if os != "linux-aarch64" else "",  # fmt: skip
                         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(  # noqa: B950
                             ".", "_"
                         ),
