@@ -63,7 +63,7 @@ from .tensor import (
     TensorVariable,
     UnspecializedPythonVariable,
 )
-from .user_defined import UserDefinedVariable
+from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 log = logging.getLogger(__name__)
 
@@ -952,6 +952,17 @@ class BuiltinVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
+        if self.fn == object and name == "__setattr__":
+            assert len(args) == 3
+            assert len(kwargs) == 0
+            obj, name_var, val = args
+            obj = obj.realize()
+            if (
+                isinstance(obj, UserDefinedObjectVariable)
+                and tx.output.side_effects.is_attribute_mutation(obj)
+                and name_var.is_python_constant()
+            ):
+                return obj.method_setattr_standard(tx, name_var, val)
         if self.fn == dict and name == "fromkeys":
             return BuiltinVariable.call_custom_dict_fromkeys(tx, dict, *args, **kwargs)
         if self.fn == itertools.chain and name == "from_iterable":
