@@ -270,6 +270,7 @@ class profile:
                 self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.PrivateUse1)
+                self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1
 
         assert (
             len(self.kineto_activities) > 0
@@ -316,10 +317,6 @@ class profile:
             return
         if self.use_cuda:
             torch.cuda.synchronize()
-        elif self.use_device and hasattr(torch, self.use_device):
-            privateuse1_module = getattr(torch, self.use_device)
-            if hasattr(privateuse1_module, "synchronize"):
-                privateuse1_module.synchronize()
 
         t0 = perf_counter_ns()
         self.kineto_results = _disable_profiler()
@@ -545,10 +542,7 @@ class profile:
                 and fe.id in device_corr_map
             ):
                 for f_evt in device_corr_map[fe.id]:
-                    if (
-                        f_evt.device_type == DeviceType.CUDA
-                        or f_evt.device_type == DeviceType.PrivateUse1
-                    ):
+                    if f_evt.device_type == DeviceType.CUDA:
                         fe.append_kernel(
                             f_evt.name,
                             f_evt.device_index,
