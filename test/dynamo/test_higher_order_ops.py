@@ -1292,6 +1292,52 @@ def forward(self, getitem, const):
     return (sin,)""",
             )
 
+    def test_map_example_value(self):
+        backend = EagerAndRecordGraphs()
+
+        def fn(x, y):
+            def inner(x, y):
+                return torch.sin(x + y)
+
+            return control_flow.map(inner, x, y.size(0))
+
+        def fn_with_view(x, y):
+            def inner(x, y):
+                return torch.sin(x.view(2, -1) + y)
+
+            return control_flow.map(inner, x, y.size(0))
+
+        y = torch.randn(3, 1)
+        inps = [torch.randn(3), torch.randn(2, 3), torch.randn(2, 3, 4)]
+        for x in inps:
+            out = torch.compile(fn, backend=backend, fullgraph=True)(x, y)
+            map_node = next(
+                node
+                for node in backend.graphs[0].graph.nodes
+                if node.op == "call_function" and "map" in node.name
+            )
+            example_val = map_node.meta["example_value"][0]
+            self.assertEqual(map_node.meta["example_value"][0].size(), x.size())
+            self.assertEqual(map_node.meta["example_value"][0].stride(), x.stride())
+            torch._dynamo.reset()
+            backend.graphs.clear()
+
+        out = torch.compile(fn_with_view, backend=backend, fullgraph=True)(
+            torch.randn(2, 3, 4), y
+        )
+        map_node = next(
+            node
+            for node in backend.graphs[0].graph.nodes
+            if node.op == "call_function" and "map" in node.name
+        )
+        example_val = map_node.meta["example_value"][0]
+        self.assertEqual(
+            map_node.meta["example_value"][0].size(), torch.Size((2, 2, 6))
+        )
+        self.assertEqual(map_node.meta["example_value"][0].stride(), (12, 6, 1))
+        torch._dynamo.reset()
+        backend.graphs.clear()
+
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)

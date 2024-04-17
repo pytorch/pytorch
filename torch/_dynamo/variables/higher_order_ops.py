@@ -5,7 +5,7 @@ import functools
 import logging
 import types
 
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 import torch._C
 import torch.fx
@@ -971,11 +971,21 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         subgraph_example_value = [
             proxy.node.meta["example_value"] for proxy in body_r.as_proxy()
         ]
+
+        def _compute_stride(subgraph_out: torch.Tensor) -> Tuple[int]:
+            if subgraph_out.ndim == 0:
+                return (1,)
+            else:
+                return (
+                    subgraph_out.size()[0] * subgraph_out.stride()[0],
+                    *subgraph_out.stride(),
+                )
+
         with tx.output.fake_mode:
             map_example_out = [
                 torch.empty_strided(
                     size=(sample_shape[0], *t.size()),
-                    stride=(0, *t.stride()),
+                    stride=_compute_stride(t),
                     dtype=t.dtype,
                     layout=t.layout,
                     device=t.device,
