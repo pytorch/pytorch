@@ -854,7 +854,7 @@ class TestSparseSemiStructuredCUTLASS(TestCase):
         if "cutlass" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS:
             self.skipTest('CUTLASS not enabled')
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
+    @unittest.skipIf(TEST_WITH_ROCM or IS_WINDOWS, "ROCm and Windows doesn't support CUTLASS")
     @inference_dtypes
     def test_linear_cutlass(self, device, dtype):
 
