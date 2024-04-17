@@ -2081,6 +2081,26 @@ class ShapeEnv:
         # signpost_event
         self.co_fields = co_fields if co_fields else {}
 
+        # Whenever we allocate a fresh unbacked Symbol, we add it to this
+        # pending list.  Unbacked symbol allocation can occur at unpredictable
+        # points during meta tensor propagation, but at some point, the we
+        # have to know what the binding site for an unbacked symbol is, and
+        # this is computed when we actually place the node in the graph.  The
+        # important thing is that we always actually handle every unaccounted
+        # for unbacked symbol, so this list helps us keep track of them and
+        # then make sure they are all accounted for.
+        #
+        # We could potentially give rise to errors earlier by lexically
+        # scoping when we do propagation, and only allowing unbacked symbols
+        # to be allocated at this point in time.  However this is inconvenient
+        # to do in Dynamo, because fake tensor propagation is far from when we
+        # analyze binding sites (set_example_value), so we do it in a more
+        # mutatey way.
+        #
+        # NB: fresh unbacked symbols NEVER get substitutions applied to them,
+        # they are binding sites!
+        self.pending_fresh_unbacked_symbols: List[sympy.Symbol] = []
+
         # Version counter used to invalidate cached values
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
@@ -2189,7 +2209,7 @@ class ShapeEnv:
             elif key == "name_to_node":
                 # Compare just the set of keys is the same.
                 return set(value.keys())
-            elif key == "symbol_guard_counter":
+            elif key in ["symbol_guard_counter", "pending_fresh_unbacked_symbols"]:
                 # Skip this for comparisons
                 return None
             return value
@@ -2652,6 +2672,7 @@ class ShapeEnv:
         """
         symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.counter["create_unbacked_symbol"] += 1
+        self.pending_fresh_unbacked_symbols.append(symbol)
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges.unknown()
 
@@ -2667,6 +2688,7 @@ class ShapeEnv:
         """Create a symbolic integer without a hint value
         """
         symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
+        self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
@@ -2689,6 +2711,7 @@ class ShapeEnv:
         """Create a symbolic boolean without a hint value
         """
         symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
+        self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges(0, 1)

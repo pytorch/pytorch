@@ -1152,7 +1152,15 @@ def set_example_value(node, example_value):
     # this to accurately reflect what the state of the value was at the time
     # the program was traced).
     node.meta["example_value"] = example_value
-    assert TracingContext.try_get() is not None
+    shape_env = TracingContext.get().fake_mode.shape_env
+    pending = set(shape_env.pending_fresh_unbacked_symbols)
+    if pending:
+        shape_env.pending_fresh_unbacked_symbols.clear()
+        actual = torch.fx.experimental.symbolic_shapes.free_unbacked_symbols(
+            example_value
+        )
+        assert pending <= actual, f"failed {pending} <= {actual}"
+        node.meta["unbacked_bindings"] = pending
 
 
 def _get_fake_tensor(vt):
