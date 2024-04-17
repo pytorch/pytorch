@@ -854,6 +854,10 @@ class CKGemmTemplate(CKTemplate):
         DeviceMem b_k_n_device_buf(sizeof(BDataType) * K * N);
         DeviceMem c_m_n_device_buf(sizeof(CDataType) * M * N);
 
+        a_m_k_device_buf.ToDevice(X);
+        b_k_n_device_buf.ToDevice(W);
+        c_m_n_device_buf.ToDevice(Y);
+
         auto argument = gemm.MakeArgument(
             static_cast<ADataType*>(a_m_k_device_buf.GetDeviceBuffer()),
             static_cast<BDataType*>(b_k_n_device_buf.GetDeviceBuffer()),
@@ -895,11 +899,25 @@ class CKGemmTemplate(CKTemplate):
         res.splice(
             """
                 #include "ck/tensor_operation/gpu/device/impl/device_gemm_xdl_cshuffle_v3.hpp"
+            """
+        )
+        return res
 
+    def globals(self) -> IndentedBuffer:
+        res = super().globals()
+        res.splice(
+            """
                 using Row = ck::tensor_layout::gemm::RowMajor;
                 using Col = ck::tensor_layout::gemm::ColumnMajor;
 
                 using cudaStream_t = hipStream_t; 
+
+                static constexpr auto GemmSpecDefault = ck::tensor_operation::device::GemmSpecialization::Default;
+                static constexpr auto GemmSpecMNPadding = ck::tensor_operation::device::GemmSpecialization::MNPadding;
+                static constexpr auto Intrawave = ck::BlockGemmPipelineScheduler::Intrawave;
+                static constexpr auto BlockGemmPipelineVersionV1 = ck::BlockGemmPipelineVersion::v1;
+                static constexpr auto BlockGemmPipelineVersionV2 = ck::BlockGemmPipelineVersion::v2;
+                static constexpr auto BlockGemmPipelineVersionV3 = ck::BlockGemmPipelineVersion::v3;
             """
         )
         return res
@@ -961,7 +979,7 @@ class CKGemmTemplate(CKTemplate):
                                    a_elementwise_op="PassThrough",
                                    b_elementwise_op="PassThrough",
                                    c_elementwise_op="PassThrough",
-                                   gemm_specialization="GemmDefault",
+                                   gemm_specialization="GemmSpecDefault",
                                    block_size=256,
                                    m_per_block=224,
                                    n_per_block=256,

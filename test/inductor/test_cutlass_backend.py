@@ -94,8 +94,8 @@ class TestCutlassBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        a = torch.randn(100, 10).cuda().half()
-        b = torch.randn(10, 100).cuda().half()
+        a = torch.randn(2240, 4096).cuda().half()
+        b = torch.randn(4096, 4096).cuda().half()
 
         with config.patch(
             {

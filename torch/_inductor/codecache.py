@@ -2364,13 +2364,16 @@ def _hipcc_host_compiler_options() -> List[str]:
 
 
 def _hipcc_device_compiler_options() -> List[str]:
-    return [
+    opts = [
         config.rocm.compile_opt_level,
         "-std=c++17",
         "--offload-arch=native",
         "-fno-gpu-rdc",
         "-fPIC",
     ]
+    if config.rocm.is_debug:
+        opts += ["-DDEBUG_LOG=1", "-g", "--save-temps"]
+    return opts
 
 
 def _hip_compiler() -> Optional[str]:

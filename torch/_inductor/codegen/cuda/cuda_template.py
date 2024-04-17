@@ -296,10 +296,8 @@ class CKTemplate(CUDATemplate):
                 using F16 = ck::half_t;
                 using F32 = float;
 
-                static constexpr auto GemmDefault = ck::tensor_operation::device::GemmSpecialization::MNPadding;
-                static constexpr auto Intrawave = ck::BlockGemmPipelineScheduler::Intrawave;
-                static constexpr auto BlockGemmPipelineVersionV3 = ck::BlockGemmPipelineVersion::v3;
-
+                // DeviceMem methods are defined in composable_kernel/library/src/utility/device_memory.cpp
+                // We can redefine them here unless we link to the library
                 DeviceMem::DeviceMem(std::size_t mem_size) : mMemSize(mem_size) {
                     hip_check_error(hipMalloc(static_cast<void**>(&mpDeviceBuf), mMemSize));
                 }
@@ -309,6 +307,15 @@ class CKTemplate(CUDATemplate):
                 DeviceMem::~DeviceMem() {
                     if(mpDeviceBuf) {
                         hip_check_error(hipFree(mpDeviceBuf));
+                    }
+                }
+
+                void DeviceMem::ToDevice(const void* p) const {
+                    if(mpDeviceBuf) {
+                        hip_check_error(
+                            hipMemcpy(mpDeviceBuf, const_cast<void*>(p), mMemSize, hipMemcpyHostToDevice));
+                    } else {
+                        throw std::runtime_error("ToDevice with an empty pointer");
                     }
                 }
             """
