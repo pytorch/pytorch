@@ -31,6 +31,7 @@ from ..utils import (
     nnmodule_has_hooks,
     object_has_getattribute,
     proxy_args_kwargs,
+    set_example_value,
 )
 from .base import MutableLocal, typestr, VariableTracker
 from .functions import invoke_and_store_as_constant
@@ -376,7 +377,7 @@ class NNModuleVariable(VariableTracker):
                 tuple(),
                 {},
             )
-            mod_proxy.node.meta["example_value"] = module
+            set_example_value(mod_proxy.node, module)
 
             proxy_args, proxy_kwargs = proxy_args_kwargs(args, kwargs)
 

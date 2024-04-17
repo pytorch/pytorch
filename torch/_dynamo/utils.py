@@ -1143,6 +1143,16 @@ def enum_repr(value, local):
     return local_name
 
 
+def set_example_value(node, example_value):
+    # NB: example_value is a bit of a misnomer, because this is always a fake
+    # tensor of some sort.  Furthermore, these example values serve as the
+    # runtime state of Dynamo tracing, which means if metadata mutation
+    # occurs, the example_value gets directly updated (so you can't rely on
+    # this to accurately reflect what the state of the value was at the time
+    # the program was traced).
+    node.meta["example_value"] = example_value
+
+
 def _get_fake_tensor(vt):
     fake_tensor = vt.as_proxy().node.meta.get("example_value")
     if not is_fake(fake_tensor):
