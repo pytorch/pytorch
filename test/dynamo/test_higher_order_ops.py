@@ -1292,51 +1292,46 @@ def forward(self, getitem, const):
     return (sin,)""",
             )
 
-    def test_map_example_value(self):
+    def test_map_example_value_metadata_consistent_with_eager(self):
+        from torch._higher_order_ops.map import map_dense
+
         backend = EagerAndRecordGraphs()
 
-        def fn(x, y):
-            def inner(x, y):
-                return torch.sin(x + y)
+        def inner(x):
+            return x.sin(), x.cos().T, x.sin().view(-1)
 
-            return control_flow.map(inner, x, y.size(0))
-
-        def fn_with_view(x, y):
-            def inner(x, y):
-                return torch.sin(x.view(2, -1) + y)
-
-            return control_flow.map(inner, x, y.size(0))
-
-        y = torch.randn(3, 1)
-        inps = [torch.randn(3), torch.randn(2, 3), torch.randn(2, 3, 4)]
+        inps = [
+            torch.randn(3),
+            torch.randn(3, 4),
+            torch.randn(3, 4, 5, requires_grad=True),
+        ]
         for x in inps:
-            out = torch.compile(fn, backend=backend, fullgraph=True)(x, y)
+            compiled_ret = torch.compile(
+                control_flow.map, backend=backend, fullgraph=True
+            )(inner, x)
+            eager_sin, eager_transpose, eager_view = map_dense(inner, (x,), tuple())
+
             map_node = next(
                 node
                 for node in backend.graphs[0].graph.nodes
                 if node.op == "call_function" and "map" in node.name
             )
-            example_val = map_node.meta["example_value"][0]
-            self.assertEqual(map_node.meta["example_value"][0].size(), x.size())
-            self.assertEqual(map_node.meta["example_value"][0].stride(), x.stride())
+
+            fake_sin, fake_transpose, fake_view = map_node.meta["example_value"]
+
+            def _check_size_stride_contiguous(x, y):
+                self.assertEqual(y.size(), x.size())
+                self.assertEqual(y.stride(), x.stride())
+                self.assertEqual(y.requires_grad, x.requires_grad)
+                self.assertEqual(x.is_contiguous(), True)
+                self.assertEqual(y.is_contiguous(), True)
+
+            _check_size_stride_contiguous(eager_sin, fake_sin)
+            _check_size_stride_contiguous(eager_transpose, fake_transpose)
+            _check_size_stride_contiguous(eager_view, fake_view)
+
             torch._dynamo.reset()
             backend.graphs.clear()
-
-        out = torch.compile(fn_with_view, backend=backend, fullgraph=True)(
-            torch.randn(2, 3, 4), y
-        )
-        map_node = next(
-            node
-            for node in backend.graphs[0].graph.nodes
-            if node.op == "call_function" and "map" in node.name
-        )
-        example_val = map_node.meta["example_value"][0]
-        self.assertEqual(
-            map_node.meta["example_value"][0].size(), torch.Size((2, 2, 6))
-        )
-        self.assertEqual(map_node.meta["example_value"][0].stride(), (12, 6, 1))
-        torch._dynamo.reset()
-        backend.graphs.clear()
 
     def test_cond_subgraph_name_is_valid(self):
         backend = EagerAndRecordGraphs()

@@ -5,7 +5,7 @@ import functools
 import logging
 import types
 
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import torch._C
 import torch.fx
@@ -972,24 +972,14 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             proxy.node.meta["example_value"] for proxy in body_r.as_proxy()
         ]
 
-        def _compute_stride(subgraph_out: torch.Tensor) -> Tuple[int]:
-            if subgraph_out.ndim == 0:
-                return (1,)
-            else:
-                return (
-                    subgraph_out.size()[0] * subgraph_out.stride()[0],
-                    *subgraph_out.stride(),
-                )
-
         with tx.output.fake_mode:
+            # We need to expand the example output from map() so that it has
+            # the same first dimension as the mapped input.
+            # We also do a clone with contiguous_format. This is to be consistent with
+            # eager semantic of map, which stacks the output and turns the memory layout to contiguous.
             map_example_out = [
-                torch.empty_strided(
-                    size=(sample_shape[0], *t.size()),
-                    stride=_compute_stride(t),
-                    dtype=t.dtype,
-                    layout=t.layout,
-                    device=t.device,
-                    requires_grad=t.requires_grad,
+                t.expand(sample_shape[0], *t.size()).clone(
+                    memory_format=torch.contiguous_format
                 )
                 for t in subgraph_example_value
             ]
