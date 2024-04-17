@@ -57,6 +57,7 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
+from tools.testing.target_determination.gen_artifact import gen_ci_artifact
 
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
@@ -1714,6 +1715,8 @@ def main():
 
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
+    if IS_CI:
+        gen_ci_artifact([x.to_json() for x in include], [x.to_json() for x in exclude])
 
     print_to_stderr(test_batch)
     print_to_stderr(test_batch_exclude)
