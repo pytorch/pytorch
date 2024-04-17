@@ -48,7 +48,6 @@ from torch._dynamo.testing import (
     same,
     skipIfNotPy311,
     unsupported,
-    xfailIfPy311,
 )
 from torch._dynamo.utils import CompileProfiler, counters, ifdynstaticdefault
 from torch._inductor.utils import run_and_get_code
@@ -9740,7 +9739,6 @@ fn
             lambda mod: mod.fc,
         )
 
-    @xfailIfPy311
     def test_sequential_module_free(self):
         self._test_compile_model_free(
             lambda: (
@@ -9753,18 +9751,17 @@ fn
             lambda mod: mod[0],
         )
 
-    @unittest.expectedFailure
     def test_linear_module_free(self):
         self._test_compile_model_free(
             lambda: (torch.nn.Linear(100, 100), torch.randn(100, 100)),
             lambda mod: mod,
         )
 
-    def test_dynamo_cache_move_to_front(self):
-        class Mod(torch.nn.Module):
-            def __init__(self):
-                super(Mod, self).__init__()
-                self.fc = torch.nn.Linear(3, 3)
+    def test_outside_linear_module_free(self):
+        # Compared to test_linear_module_free, the linear
+        # layer is not the code object that is directly compiled.
+        def model_inp_ctr():
+            fc = torch.nn.Linear(100, 100)
 
             def forward(self, out):
                 return self.fc(out)

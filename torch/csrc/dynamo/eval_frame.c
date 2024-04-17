@@ -132,7 +132,10 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 #else
 #define THP_EVAL_API_FRAME_OBJECT PyFrameObject
 
-#define THP_PyFrame_FastToLocalsWithError PyFrame_FastToLocalsWithError
+static int
+THP_PyFrame_FastToLocalsWithError(THP_EVAL_API_FRAME_OBJECT *frame, int *free_vars_copied) {
+  return PyFrame_FastToLocalsWithError(frame);
+}
 #endif
 
 PyObject* guard_error_hook = NULL;
@@ -161,7 +164,8 @@ static PyObject* _custom_eval_frame(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
-    PyObject* callback);
+    PyObject* callback,
+    int* should_clear_frame);
 static PyObject *(*previous_eval_frame)(PyThreadState *tstate,
                                         THP_EVAL_API_FRAME_OBJECT* frame, int throw_flag) = NULL;
 
@@ -272,7 +276,8 @@ inline static PyObject* eval_custom_code_impl(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
-    int throw_flag) {
+    int throw_flag,
+    int free_vars_copied) {
 
   DEBUG_NULL_CHECK(tstate);
   DEBUG_NULL_CHECK(frame);
@@ -320,7 +325,14 @@ inline static PyObject* eval_custom_code_impl(
     fastlocals_new[i] = NULL;
   }
 
-  #else
+  // for 3.11+, if free_vars_copied is true, we do not need to
+  // run the first COPY_FREE_VARS since THP_PyFrame_FastToLocalsWithError
+  // already did the equivalent action.
+  if (free_vars_copied && _Py_OPCODE(_PyCode_CODE(shadow->f_code)[0]) == COPY_FREE_VARS) {
+    shadow->prev_instr = _PyCode_CODE(shadow->f_code);
+  }
+
+#else
 
   THP_EVAL_API_FRAME_OBJECT* shadow = PyFrame_New(tstate, code, frame->f_globals, NULL);
   if (shadow == NULL) {
@@ -415,10 +427,22 @@ inline static PyObject* eval_custom_code_impl(
     fastlocals_new[j] = fastlocals_old[i];
   }
 
+  // NOTE: if you want to evaluate frame instead of shadow in 3.12+,
+  // you need to clear_old_frame_if_python_312_plus the shadow frame BEFORE
+  // calling eval_frame_default (i.e. here) and comment out the
+  // clear_old_frame_if_python_312_plus call on the original frame.
+
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
 
   #if IS_PYTHON_3_11_PLUS
 
+  // frame is cleared by caller
+  Py_DECREF(func);
+
+#elif IS_PYTHON_3_11_PLUS
+
+  // In 3.11, shadow has is_entry set to true, so _PyEvalFrameClearAndPop is not called,
+  // so we manually clear and pop the shadow frame.
   THP_PyFrame_Clear(shadow);
   free(shadow);
   Py_DECREF(func);
@@ -437,13 +461,15 @@ inline static PyObject* eval_custom_code(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     PyCodeObject* code,
-    int throw_flag) {
+    int throw_flag,
+    int free_vars_copied) {
   _PytorchRecordFunctionState* rf = _pytorch_record_function_enter("Torch-Compiled Region");
   PyObject* result = eval_custom_code_impl(
     tstate,
     frame,
     code,
-    throw_flag
+    throw_flag,
+    free_vars_copied
   );
   _pytorch_record_function_exit(rf);
   return result;
@@ -464,15 +490,26 @@ static PyObject* _custom_eval_frame_shim(
     return eval_frame_default(tstate, frame, throw_flag);
   }
 
-  return _custom_eval_frame(tstate, frame, throw_flag, callback);
+  int should_clear_frame = 0;
+  PyObject* result = _custom_eval_frame(tstate, frame, throw_flag, callback, &should_clear_frame);
+  if (should_clear_frame) {
+    clear_old_frame_if_python_312_plus(tstate, frame);
+  }
+  return result;
 }
 
+// NOTE: In 3.12+, the frame evaluation function (callee) is responsible for clearing/popping
+// the frame, meaning that unless we default evaluate the original frame,
+// we are responsible for clearing it - via clear_old_frame_if_python_312_plus.
+// The should_clear_frame flag is used to indicate whether the frame should be
+// cleared by _custom_eval_frame's caller.
 static PyObject* _custom_eval_frame(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
     int throw_flag,
-    PyObject* callback) {
-  #if IS_PYTHON_3_11_PLUS
+    PyObject* callback,
+    int* should_clear_frame) {
+#if IS_PYTHON_3_11_PLUS
   DEBUG_TRACE(
       "begin %s %s %i %i",
       get_frame_name(frame),
@@ -525,8 +562,10 @@ static PyObject* _custom_eval_frame(
   }
 
   // TODO(jansel): investigate directly using the "fast" representation
-  if (THP_PyFrame_FastToLocalsWithError(frame) < 0) {
+  int free_vars_copied = 0;
+  if (THP_PyFrame_FastToLocalsWithError(frame, &free_vars_copied) < 0) {
     DEBUG_TRACE("error %s", get_frame_name(frame));
+    *should_clear_frame = 1;
     return NULL;
   }
 
@@ -540,6 +579,7 @@ static PyObject* _custom_eval_frame(
 
     if (maybe_cached_code == NULL) {
       // guard eval failed, keep propagating
+      *should_clear_frame = 1;
       return NULL;
     } else if (maybe_cached_code == Py_None) {
       DEBUG_TRACE("cache miss %s", get_frame_name(frame));
@@ -548,7 +588,8 @@ static PyObject* _custom_eval_frame(
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
     // used cached version
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
-    return eval_custom_code(tstate, frame, cached_code, throw_flag);
+    *should_clear_frame = 1;
+    return eval_custom_code(tstate, frame, cached_code, throw_flag, free_vars_copied);
   }
   DEBUG_CHECK(PyDict_CheckExact(frame->f_locals));
   DEBUG_CHECK(PyDict_CheckExact(frame->f_globals));
@@ -564,6 +605,7 @@ static PyObject* _custom_eval_frame(
   _pytorch_record_function_exit(rf);
   if (maybe_cached_code == NULL) {
     // Python error
+    *should_clear_frame = 1;
     return NULL;
   } else if (maybe_cached_code != Py_None) {
     PyCodeObject* cached_code = (PyCodeObject*)maybe_cached_code;
@@ -571,7 +613,8 @@ static PyObject* _custom_eval_frame(
     DEBUG_TRACE("cache hit %s", get_frame_name(frame));
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
-    return eval_custom_code(tstate, frame, cached_code, throw_flag);
+    *should_clear_frame = 1;
+    return eval_custom_code(tstate, frame, cached_code, throw_flag, free_vars_copied);
   }
   // cache miss
   CacheEntry* cache_entry = extract_cache_entry(extra);
@@ -586,6 +629,7 @@ static PyObject* _custom_eval_frame(
     // cascading failure from internal exceptions.  The upshot is if
     // Dynamo barfs, that's it for Dynamo, even if you catch the exception
     // inside the torch.compile block we won't try to Dynamo anything else.
+    *should_clear_frame = 1;
     return NULL;
   } else if (result != Py_None) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
@@ -602,7 +646,8 @@ static PyObject* _custom_eval_frame(
     // will be cleaned up when set_extra_state is called.
     // Re-enable custom behavior
     eval_frame_callback_set(callback);
-    return eval_custom_code(tstate, frame, CacheEntry_get_code(new_cache_entry), throw_flag);
+    *should_clear_frame = 1;
+    return eval_custom_code(tstate, frame, CacheEntry_get_code(new_cache_entry), throw_flag, free_vars_copied);
   } else {
     DEBUG_TRACE("create skip %s", get_frame_name(frame));
     Py_DECREF(result);
