@@ -20,7 +20,7 @@ def efficient_conv_bn_eval(
 ):
     """
     Implementation based on https://arxiv.org/abs/2305.11624
-    "Tune-Mode ConvBN Blocks For Efficient Transfer Learning"
+    "Efficient ConvBN Blocks for Transfer Learning and Beyond"
     It leverages the associative law between convolution and affine transform,
     i.e., normalize (weight conv feature) = (normalize weight) conv feature.
     It works for Eval mode of ConvBN blocks during validation, and can be used
@@ -75,7 +75,7 @@ def efficient_conv_bn_eval(
     return output
 
 
-def efficient_conv_bn_fn_eval(
+def efficient_conv_bn_eval_decomposed(
     bn_weight,
     bn_bias,
     bn_running_mean,
@@ -89,7 +89,7 @@ def efficient_conv_bn_fn_eval(
 ):
     """
     Implementation based on https://arxiv.org/abs/2305.11624
-    "Tune-Mode ConvBN Blocks For Efficient Transfer Learning"
+    "Efficient ConvBN Blocks for Transfer Learning and Beyond"
     It leverages the associative law between convolution and affine transform,
     i.e., normalize (weight conv feature) = (normalize weight) conv feature.
     It works for Eval mode of ConvBN blocks during validation, and can be used
@@ -148,7 +148,7 @@ def efficient_conv_bn_fn_eval(
     extra_check=lambda match: not inductor_config.freezing
     and inductor_config.efficient_conv_bn_eval_fx_passes,
 )
-def efficient_conv_bn_eval_decomp_graph_transform(match: Match, *args, **kwargs):
+def efficient_conv_bn_eval_graph_transform_decomposed(match: Match, *args, **kwargs):
     bn_node = match.nodes[0]
     graph = match.graph
     assert len(bn_node.args) == 9
@@ -213,7 +213,7 @@ def efficient_conv_bn_eval_decomp_graph_transform(match: Match, *args, **kwargs)
         # create a new node
         new_node = graph.create_node(
             op="call_function",
-            target=efficient_conv_bn_fn_eval,
+            target=efficient_conv_bn_eval_decomposed,
             args=args,
             name="efficient_conv_bn_eval",
         )
