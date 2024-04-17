@@ -14,8 +14,8 @@ from torch.ao.quantization.quantize_pt2e import (
     prepare_qat_pt2e,
 )
 from torch.ao.quantization.quantizer.x86_inductor_quantizer import (
-    X86InductorQuantizer,
     QUANT_ANNOTATION_KEY,
+    X86InductorQuantizer,
 )
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
@@ -337,11 +337,12 @@ class TestHelperModules:
             return self.postop(self.linear(x))
 
     class LinearAddModule(torch.nn.Module):
-        def __init__(self,
-                     inplace_add: bool = False,
-                     linear_pos: NodePosType = NodePosType.left,
-                     use_bias: bool = False,
-                     ) -> None:
+        def __init__(
+            self,
+            inplace_add: bool = False,
+            linear_pos: NodePosType = NodePosType.left,
+            use_bias: bool = False,
+        ) -> None:
             super().__init__()
             self.linear = torch.nn.Linear(
                 in_features=16, out_features=16, bias=use_bias
@@ -378,12 +379,13 @@ class TestHelperModules:
                     return self.linear(x) + self.linear2(x)
 
     class LinearAddReLUModule(torch.nn.Module):
-        def __init__(self,
-                     inplace_add: bool = False,
-                     linear_pos: NodePosType = NodePosType.left,
-                     inplace_relu: bool = False,
-                     use_bias: bool = False,
-                     ) -> None:
+        def __init__(
+            self,
+            inplace_add: bool = False,
+            linear_pos: NodePosType = NodePosType.left,
+            inplace_relu: bool = False,
+            use_bias: bool = False,
+        ) -> None:
             super().__init__()
             self.linear = torch.nn.Linear(
                 in_features=16, out_features=16, bias=use_bias
@@ -421,22 +423,16 @@ class TestHelperModules:
                     return self.relu2(self.linear(x) + self.linear2(x))
 
     class SerialsLinearAddReLUModule(torch.nn.Module):
-        """ Serials of 2 Linear -> Add -> ReLU Pattern.
-        """
-        def __init__(self, ) -> None:
+        """Serials of 2 Linear -> Add -> ReLU Pattern."""
+
+        def __init__(
+            self,
+        ) -> None:
             super().__init__()
-            self.linear = torch.nn.Linear(
-                in_features=16, out_features=16, bias=True
-            )
-            self.linear2 = torch.nn.Linear(
-                in_features=16, out_features=16, bias=True
-            )
-            self.linear3 = torch.nn.Linear(
-                in_features=16, out_features=16, bias=True
-            )
-            self.linear4 = torch.nn.Linear(
-                in_features=16, out_features=16, bias=True
-            )
+            self.linear = torch.nn.Linear(in_features=16, out_features=16, bias=True)
+            self.linear2 = torch.nn.Linear(in_features=16, out_features=16, bias=True)
+            self.linear3 = torch.nn.Linear(in_features=16, out_features=16, bias=True)
+            self.linear4 = torch.nn.Linear(in_features=16, out_features=16, bias=True)
             self.relu = nn.ReLU()
             self.relu2 = nn.ReLU()
 
@@ -447,16 +443,13 @@ class TestHelperModules:
             return res2
 
     class LinearAddModule2(torch.nn.Module):
-        def __init__(self,
-                     inplace_add: bool = False,
-                     ) -> None:
+        def __init__(
+            self,
+            inplace_add: bool = False,
+        ) -> None:
             super().__init__()
-            self.linear = torch.nn.Linear(
-                in_features=16, out_features=16, bias=True
-            )
-            self.linear2 = torch.nn.Linear(
-                in_features=16, out_features=16, bias=True
-            )
+            self.linear = torch.nn.Linear(in_features=16, out_features=16, bias=True)
+            self.linear2 = torch.nn.Linear(in_features=16, out_features=16, bias=True)
             self.inplace_add = inplace_add
 
         def forward(self, x):
@@ -1280,8 +1273,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         for node in gm.graph.nodes:
             if node.target in expected_stat_dict.keys():
                 annotated, is_quant_out = _check_annotation(node)
-                expected_stat_dict[node.target]['annotated'] -= annotated
-                expected_stat_dict[node.target]['is_quant_out'] -= is_quant_out
+                expected_stat_dict[node.target]["annotated"] -= annotated
+                expected_stat_dict[node.target]["is_quant_out"] -= is_quant_out
         for op_stat in expected_stat_dict.values():
             assert all(v == 0 for v in op_stat.values())
 
@@ -1300,7 +1293,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         cases = itertools.product(linear_pos_list, inplace_add_list)
         with override_quantized_engine("x86"), torch.no_grad():
             for linear_pos, inplace_add in cases:
-                m = TestHelperModules.LinearAddModule(inplace_add=inplace_add, linear_pos=linear_pos).eval()
+                m = TestHelperModules.LinearAddModule(
+                    inplace_add=inplace_add, linear_pos=linear_pos
+                ).eval()
                 if linear_pos != NodePosType.both:
                     node_occurrence = {
                         # Only one 1 q-dq for input of the linear
@@ -1326,7 +1321,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.linear.default,
-                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
+                    torch.ops.aten.add_.Tensor
+                    if inplace_add
+                    else torch.ops.aten.add.Tensor,
                 ]
                 fq_m = self._test_quantizer(
                     m,
@@ -1340,16 +1337,12 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 add_op = aten.add_.Tensor if inplace_add else aten.add.Tensor
                 expected_annotation_stat = {
                     aten.linear.default: {
-                        'annotated': 2 if linear_pos == NodePosType.both else 1,
-                        'is_quant_out': 1 if linear_pos == NodePosType.both else 0,
+                        "annotated": 2 if linear_pos == NodePosType.both else 1,
+                        "is_quant_out": 1 if linear_pos == NodePosType.both else 0,
                     },
-                    add_op: {
-                        'annotated': 1,
-                        'is_quant_out': 1
-                    },
+                    add_op: {"annotated": 1, "is_quant_out": 1},
                 }
                 self._check_annotation_stat(fq_m, expected_annotation_stat)
-
 
     @skipIfNoX86
     def test_linear_binary2(self):
@@ -1382,7 +1375,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.linear.default,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
+                    torch.ops.aten.add_.Tensor
+                    if inplace_add
+                    else torch.ops.aten.add.Tensor,
                 ]
                 fq_m = self._test_quantizer(
                     m,
@@ -1396,13 +1391,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 add_op = aten.add_.Tensor if inplace_add else aten.add.Tensor
                 expected_annotation_stat = {
                     aten.linear.default: {
-                        'annotated': 2,
-                        'is_quant_out': 1,
+                        "annotated": 2,
+                        "is_quant_out": 1,
                     },
-                    add_op: {
-                        'annotated': 1,
-                        'is_quant_out': 1
-                    },
+                    add_op: {"annotated": 1, "is_quant_out": 1},
                 }
                 self._check_annotation_stat(fq_m, expected_annotation_stat)
 
@@ -1452,7 +1444,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.linear.default,
-                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
+                    torch.ops.aten.add_.Tensor
+                    if inplace_add
+                    else torch.ops.aten.add.Tensor,
                 ]
                 fq_m = self._test_quantizer(
                     m,
@@ -1468,17 +1462,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 relu_op = aten.relu_.default if inplace_relu else aten.relu.default
                 expected_annotation_stat = {
                     aten.linear.default: {
-                        'annotated': 2 if linear_pos == NodePosType.both else 1,
-                        'is_quant_out': 1 if linear_pos == NodePosType.both else 0,
+                        "annotated": 2 if linear_pos == NodePosType.both else 1,
+                        "is_quant_out": 1 if linear_pos == NodePosType.both else 0,
                     },
-                    add_op: {
-                        'annotated': 1,
-                        'is_quant_out': 0
-                    },
-                    relu_op: {
-                        'annotated': 1,
-                        'is_quant_out': 1
-                    },
+                    add_op: {"annotated": 1, "is_quant_out": 0},
+                    relu_op: {"annotated": 1, "is_quant_out": 1},
                 }
                 self._check_annotation_stat(fq_m, expected_annotation_stat)
 
@@ -1490,7 +1478,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         with override_quantized_engine("x86"), torch.no_grad():
             m = TestHelperModules.SerialsLinearAddReLUModule().eval()
             example_inputs = (torch.randn(2, 16),)
-            quantizer = X86InductorQuantizer().set_global(xiq.get_default_x86_inductor_quantization_config())
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config()
+            )
             node_occurrence = {
                 # quantize_per_tensor: 1 for linear_1, 1 for linear_2/3 (shared), 1 for linear_4
                 # dequantize_per_tensor: 1 for each linear
@@ -1524,17 +1514,11 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             aten = torch.ops.aten
             expected_annotation_stat = {
                 aten.linear.default: {
-                    'annotated': 4,
-                    'is_quant_out': 2,
+                    "annotated": 4,
+                    "is_quant_out": 2,
                 },
-                aten.add.Tensor: {
-                    'annotated': 2,
-                    'is_quant_out': 0
-                },
-                aten.relu.default: {
-                    'annotated': 2,
-                    'is_quant_out': 2
-                },
+                aten.add.Tensor: {"annotated": 2, "is_quant_out": 0},
+                aten.relu.default: {"annotated": 2, "is_quant_out": 2},
             }
             self._check_annotation_stat(fq_m, expected_annotation_stat)
 
