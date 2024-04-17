@@ -263,7 +263,7 @@ DO_NOT_CAST_INPUTS = {"stable_diffusion"}
 # the result status matches one listed.
 CI_PRESERVE_COMPILE_DEBUG = {
     "mnasnet1_0": ["fail_accuracy"],
-    "resnet50":  ["fail_accuracy"],
+    "resnet50": ["fail_accuracy"],
 }
 
 
@@ -2575,6 +2575,10 @@ class BenchmarkRunner:
                     accuracy_status = "fail_accuracy"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
+        # TESTING: delete me
+        if name in CI_PRESERVE_COMPILE_DEBUG:
+            accuracy_status = "fail_accuracy"
+
         return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
     def check_tolerance(
@@ -2822,10 +2826,15 @@ class BenchmarkRunner:
             )
 
     def maybe_preserve_compile_debug(self, name, status):
-        if name in CI_PRESERVE_COMPILE_DEBUG and status in CI_PRESERVE_COMPILE_DEBUG[name]:
+        if (
+            name in CI_PRESERVE_COMPILE_DEBUG
+            and status in CI_PRESERVE_COMPILE_DEBUG[name]
+        ):
             src_dir = torch._dynamo.utils.get_debug_dir()
             if os.path.isdir(src_dir):
-                dbg_dir = os.path.join(os.getcwd(), "test", "debug", "torch_compile_debug")
+                dbg_dir = os.path.join(
+                    os.getcwd(), "test", "debug", "torch_compile_debug"
+                )
                 dst_dir = os.path.join(dbg_dir, os.path.basename(src_dir))
                 try:
                     os.makedirs(dbg_dir, exist_ok=True)
