@@ -341,7 +341,7 @@ inline static PyObject* eval_custom_code_impl(
   // for 3.11+, if free_vars_copied is true, we do not need to
   // run the first COPY_FREE_VARS since THP_PyFrame_FastToLocalsWithError
   // already did the equivalent action.
-  if (free_vars_copied) {
+  if (free_vars_copied && _Py_OPCODE(_PyCode_CODE(shadow->f_code)[0]) == COPY_FREE_VARS) {
     shadow->prev_instr = _PyCode_CODE(shadow->f_code);
   }
 
