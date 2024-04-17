@@ -2280,13 +2280,27 @@ class DictSubclassGuardManager : public DictGuardManager {
   }
 };
 
+bool is_defaultdict(py::handle& obj) {
+  py::module collections = py::module::import("collections");
+  py::object defaultdict = collections.attr("defaultdict");
+  return py::isinstance(obj, defaultdict);
+}
+
+bool is_dict_iter_order_same_as_pydict_next(py::handle& obj) {
+  // return true if any of the following is True
+  //    1. obj is of type dict
+  //    2. obj is of type defaultdict - defaultdict is dict + factory_function,
+  //       so the iter(defaultdict) is same as iter(dict)
+  return PyDict_CheckExact(obj.ptr()) || is_defaultdict(obj);
+}
+
 std::unique_ptr<GuardManager> make_guard_manager(
     RootGuardManager* root,
     std::string source,
     py::handle example_value) {
   // Check if example_value is a dict
   if (py::isinstance<py::dict>(example_value)) {
-    if (PyDict_CheckExact(example_value.ptr())) {
+    if (is_dict_iter_order_same_as_pydict_next(example_value)) {
       return std::make_unique<DictGuardManager>(
           root, std::move(source), example_value);
     }
