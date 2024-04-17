@@ -27,6 +27,7 @@ from torch._prims_common import (
 )
 
 from . import config, inductor_prims
+from .utils import is_gpu
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -164,7 +165,7 @@ def convolution_backward(
     groups,
     output_mask,
 ):
-    if not output_mask[2] or grad_output.device.type != "cuda":
+    if not output_mask[2] or not is_gpu(grad_output.device.type):
         return NotImplemented
     grad_bias = aten.sum(grad_output, [0] + list(range(2, grad_output.dim())))
     grad_inp, grad_weight, _ = aten.convolution_backward(
@@ -654,7 +655,7 @@ def select_decomp_table():
 
 @register_decomposition(aten.masked_scatter)
 def masked_scatter(self, mask, source):
-    if self.device.type == "cuda":
+    if is_gpu(self.device.type):
         # This two-step algorithm is the same as eager CUDA, for eager CPU we
         # use a 1-shot serial iteration.
         self, mask = aten.broadcast_tensors([self, mask])
