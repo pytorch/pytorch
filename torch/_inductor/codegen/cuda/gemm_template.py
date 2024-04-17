@@ -930,7 +930,9 @@ class CKGemmTemplate(CKTemplate):
         template_definition = r"""
     // Gemm operator {{operation_name}}
     using Operation_{{operation_name}} = 
-        ck::tensor_operation::device::DeviceGemm_Xdl_CShuffleV3<{{template_params}}>;
+        ck::tensor_operation::device::DeviceGemm_Xdl_CShuffleV3<
+            {{template_params}}>;
+
 """
         template_type = r"""
     Operation_{{operation_name}}
@@ -939,13 +941,13 @@ class CKGemmTemplate(CKTemplate):
         for f in fields(op):
             field_value = getattr(op, f.name)
             if isinstance(field_value, tuple):
-                template_params.append(f"ck::Sequence<{', '.join(map(str, iter(field_value)))}>")
+                template_params.append(f"/* {f.name} */ S<{', '.join(map(str, iter(field_value)))}>")
             else:
                 if field_value is not None:
-                    template_params.append(str(field_value))
+                    template_params.append(f"/* {f.name} */ {field_value}")
         return self._template_from_string(template_definition).render(
             operation_name=op.name(),
-            template_params=", ".join(template_params)), self._template_from_string(template_type).render(operation_name=op.name())
+            template_params=(",\n" + 12 * " ").join(template_params)), self._template_from_string(template_type).render(operation_name=op.name())
 
     def render(self, kernel: CUDATemplateKernel, op: CKGemmOperation):
         instance_definition, instance_type = self.emit_ck_instance(op)
