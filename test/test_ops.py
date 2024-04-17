@@ -2455,7 +2455,9 @@ class TestFakeTensor(TestCase):
 
             from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
-            allow_dynamic_output_shape_shape_env = ShapeEnv(allow_dynamic_output_shape_ops=True)
+            allow_dynamic_output_shape_shape_env = ShapeEnv(
+                allow_dynamic_output_shape_ops=True
+            )
 
             allow_dynamic_output_shape_mode = FakeTensorMode(
                 shape_env=allow_dynamic_output_shape_shape_env
