@@ -36,6 +36,7 @@ from torch.distributed.fsdp._common_utils import (
     _get_param_to_fqns,
     FSDP_PREFIX,
     FSDP_WRAPPED_MODULE,
+    HandleTrainingState,
     TrainingState,
 )
 from torch.distributed.fsdp._dynamo_utils import _annotate_modules_for_dynamo
@@ -63,6 +64,8 @@ from torch.distributed.fsdp._runtime_utils import (
     _pre_forward,
     _pre_forward_unshard,
     _root_pre_forward,
+    _unshard,
+    _wait_for_computation_stream,
 )
 from torch.distributed.fsdp._wrap_utils import _auto_wrap
 from torch.distributed.fsdp.api import (
@@ -82,7 +85,7 @@ from torch.distributed.fsdp.api import (
     StateDictType,
 )
 from torch.distributed.utils import _p_assert
-from ._flat_param import FlatParameter
+from ._flat_param import FlatParameter, FlatParamHandle
 
 from ._optim_utils import (
     _flatten_optim_state_dict,
@@ -1986,6 +1989,62 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 )
             fsdp_state._comm_hook = hook
             fsdp_state._comm_hook_state = state
+
+    def _unshard(self, async_op: bool = False):
+        class UnshardHandle:
+            def __init__(
+                self,
+                flat_param_handle: Optional[FlatParamHandle],
+                unshard_event: torch.cuda.Event,
+            ):
+                self._flat_param_handle = flat_param_handle
+                self._unshard_event = unshard_event
+
+            def wait(self):
+                if self._flat_param_handle is not None:
+                    current_stream = (
+                        self._flat_param_handle._device_handle.current_stream()
+                    )
+                    current_stream.wait_event(self._unshard_event)
+                    self._flat_param_handle = None
+
+        if self._handle:
+            with self._use_training_state(
+                TrainingState.FORWARD_BACKWARD, HandleTrainingState.FORWARD
+            ):
+                _unshard(
+                    self, self._handle, self._unshard_stream, self._pre_unshard_stream
+                )
+                self._unshard_event = self._unshard_stream.record_event()
+            self._handle._prefetched = True
+        unshard_handle = UnshardHandle(self._handle, self._unshard_stream)
+        if async_op:
+            return unshard_handle
+        unshard_handle.wait()
+        return None
+
+    def _wait_unshard_streams_on_current_stream(self):
+        _wait_for_computation_stream(
+            self._device_handle.current_stream(),
+            self._unshard_stream,
+            self._pre_unshard_stream,
+        )
+
+    @contextlib.contextmanager
+    def _use_training_state(
+        self, training_state: TrainingState, handle_training_state: HandleTrainingState
+    ):
+        prev_training_state = self.training_state
+        self.training_state = training_state
+        if self._handle:
+            prev_handle_training_state = self._handle._training_state
+            self._handle._training_state = handle_training_state
+        try:
+            yield
+        finally:
+            self.training_state = prev_training_state
+            if self._handle:
+                self._handle._training_state = prev_handle_training_state
 
 
 def _get_grad_norm(
