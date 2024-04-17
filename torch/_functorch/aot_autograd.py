@@ -1,7 +1,7 @@
 # mypy: ignore-errors
 
 import itertools
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from functools import partial, wraps
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from unittest.mock import patch
@@ -118,6 +118,7 @@ from ._aot_autograd.utils import (  # noqa: F401
     maybe_to_fresh_input,
     normalize_as_list,
     partial_flatten_asdict,
+    root_module_when_exporting_non_strict,
     strict_zip,
 )
 from .partitioners import default_partition
@@ -548,12 +549,18 @@ def create_aot_dispatcher_function(
             # Patch set_rng_state as set_rng_state with fake tensors is
             # nonsensical. This does not affect the collection of metadata.
             with patch("torch.cuda.set_rng_state", lambda *args: None):
-                fw_metadata = run_functionalized_fw_and_collect_metadata(
-                    flat_fn,
-                    keep_input_mutations=aot_config.keep_inference_input_mutations,
-                    is_train=needs_autograd,
-                    pre_dispatch=aot_config.pre_dispatch,
-                )(*fake_flat_args)
+                mod = root_module_when_exporting_non_strict(flat_fn)
+                if mod is not None:
+                    ctx = _detect_attribute_assignment(mod)
+                else:
+                    ctx = nullcontext()
+                with ctx:
+                    fw_metadata = run_functionalized_fw_and_collect_metadata(
+                        flat_fn,
+                        keep_input_mutations=aot_config.keep_inference_input_mutations,
+                        is_train=needs_autograd,
+                        pre_dispatch=aot_config.pre_dispatch,
+                    )(*fake_flat_args)
 
                 req_subclass_dispatch = requires_subclass_dispatch(
                     fake_flat_args, fw_metadata
@@ -650,7 +657,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
 
         # crappy version of dispatcher
         # TODO: Do this properly
-        if needs_autograd:
+        if needs_autograd and not aot_config.pre_dispatch:
             # For now, aot_dispatch_autograd knows to explicitly return a graph
             # when run with export, and an opaque callable otherwise.
             # In theory we could factor these out, but I wanted to let the dust
@@ -954,10 +961,29 @@ def aot_module_simplified(
             aot_config,
         )
 
+    if isinstance(mod, torch._dynamo.utils.GmWrapper):
+        # This function is called by the flatten_graph_inputs wrapper, which boxes
+        # the inputs so that they can be freed before the end of this scope.
+        # For overhead reasons, this is not the default wrapper, see comment:
+        # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
+        def boxed_forward(runtime_args: List[Any]):
+            flat_args = []
+            flat_args.extend(params_flat)
+            flat_args.extend(runtime_args)
+            runtime_args.clear()
+            return compiled_fn(flat_args)
+
+        # Just for convenience
+        boxed_forward.zero_grad = mod.zero_grad
+        boxed_forward.named_parameters = mod.named_parameters
+        boxed_forward.named_buffers = mod.named_buffers
+        return boxed_forward
+
     # TODO: There is something deeply wrong here; compiled_fn running with
     # the boxed calling convention, but aot_module_simplified somehow
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
+    # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
     def forward(*runtime_args: Tuple[Any]):
         full_args = []
         full_args.extend(params_flat)
@@ -1091,7 +1117,8 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
         ctx = nullcontext
     else:
         # Run under no_grad, so our tracing machinery only traces an inference graph.
-        ctx = torch.no_grad
+        # However if pre_dispatch=True, we want to correctly trace set_grad_enabled calls for training.
+        ctx = nullcontext if pre_dispatch else torch.no_grad
         fn_to_trace = functional_call
 
     full_args = []
@@ -1330,6 +1357,72 @@ def _aot_export_function(
         aot_config,
     )
     return fx_g, meta, in_spec, out_spec.spec
+
+
+@contextmanager
+def _detect_attribute_assignment(mod: torch.nn.Module):
+    # Do not allow assignment of tensor attributes during export unless
+    # the attribute is registered as a buffer.
+
+    STD_ATTRS = {
+        "_backward_hooks",
+        "_backward_pre_hooks",
+        "_buffers",
+        "_forward_hooks",
+        "_forward_hooks_always_called",
+        "_forward_hooks_with_kwargs",
+        "_forward_pre_hooks",
+        "_forward_pre_hooks_with_kwargs",
+        "_is_full_backward_hook",
+        "_load_state_dict_post_hooks",
+        "_load_state_dict_pre_hooks",
+        "_modules",
+        "_non_persistent_buffers_set",
+        "_parameters",
+        "_state_dict_hooks",
+        "_state_dict_pre_hooks",
+        "training",
+    }
+
+    def _get_attributes(mod):
+        # return any attributes of a module that are not standard attributes
+        return {k: v for k, v in mod.__dict__.items() if k not in STD_ATTRS}
+
+    # save state of attributes before enter
+    snapshot = pytree.tree_map(lambda x: x, _get_attributes(mod))
+    try:
+        yield
+    finally:
+        # after exit, compare state of attributes with snapshot
+        # to detect which tensor attributes were assigned
+        assigned_tensor_attributes = []
+
+        def _collect_assigned_tensor_attributes(kp, v, _v):
+            if _v is not v:
+                attr, *rest = kp
+                if isinstance(v, torch.Tensor):
+                    assigned_tensor_attributes.append(
+                        f"self.{attr.key}{pytree.keystr(rest)}"
+                    )
+                # TODO(avik): Assigning all other types are allowed right now.
+                # Maybe in the future we want to limit this to primitive types?
+
+        pytree.tree_map_with_path(
+            _collect_assigned_tensor_attributes, snapshot, _get_attributes(mod)
+        )
+        # restore state of all attributes (including, e.g., of primitive types)
+        mod.__dict__.update(snapshot)
+
+        if assigned_tensor_attributes:
+            if len(assigned_tensor_attributes) > 1:
+                noun, verb = "attributes", "were"
+            else:
+                noun, verb = "attribute", "was"
+            raise ValueError(
+                f"The tensor {noun} {', '.join(assigned_tensor_attributes)} {verb} assigned during export. "
+                "Such attributes must be registered as buffers using the `register_buffer` API "
+                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
+            )
 
 
 compiled_function = aot_function
