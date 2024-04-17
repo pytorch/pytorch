@@ -1576,8 +1576,12 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     }
     TORCH_CHECK(
         storage_initialized(),
-        "The tensor has a non-zero number of elements, but its data is not allocated yet. "
-        "Caffe2 uses a lazy allocation, so you will need to call "
+        "The tensor has a non-zero number of elements, but its data is not allocated yet.\n"
+        "If you're using torch.compile/export/fx, it is likely that we are erroneously "
+        "tracing into a custom kernel. To fix this, please wrap the custom kernel into "
+        "an opaque custom op. Please see the following for details: "
+        "https://docs.google.com/document/d/1W--T6wz8IY8fOI0Vm8BF44PdBgs283QvpelJZWieQWQ\n"
+        "If you're using Caffe2, Caffe2 uses a lazy allocation, so you will need to call "
         "mutable_data() or raw_mutable_data() to actually allocate memory.");
     // Caller does the type check.
     // Note: storage_offset_ can be non-null even for zero-elements tensors
