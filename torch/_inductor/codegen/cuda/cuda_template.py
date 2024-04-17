@@ -163,7 +163,7 @@ class CUDATemplate(KernelTemplate):
         if torch.version.cuda:
             res.splice("using bfloat16 = nv_bfloat16;")
         elif torch.version.hip:
-            res.splice("using bfloat16 = hip_bfloat16")
+            res.splice("// using bfloat16 = hip_bfloat16;")
         return res
 
     def render(self, **kwargs) -> str:
@@ -270,7 +270,7 @@ class CKTemplate(CUDATemplate):
                 // 'ere be headers
                 // #include <initializer_list>
                 // #include <numeric>
-
+                
                 #include "ck/ck.hpp"
                 #include "ck/utility/data_type.hpp"
                 #include "ck/library/utility/check_err.hpp"
@@ -292,6 +292,14 @@ class CKTemplate(CUDATemplate):
                 using S = ck::Sequence<Is...>;
 
                 using PassThrough = ck::tensor_operation::element_wise::PassThrough;
+
+                using F16 = ck::half_t;
+                using F32 = float;
+
+                static constexpr auto GemmDefault = ck::tensor_operation::device::GemmSpecialization::MNPadding;
+                static constexpr auto Intrawave = ck::BlockGemmPipelineScheduler::Intrawave;
+                static constexpr auto BlockGemmPipelineVersionV3 = ck::BlockGemmPipelineVersion::v3;
+                
             """
         )
         return res

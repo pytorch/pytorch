@@ -822,7 +822,7 @@ class CKGemmOperation:
 
     def key_name(self):
         # TBD; must be unique per instance. Intended to use as dict key
-        return f"{'_'.join(['K' + f.name.replace('_', '').lower() + 'V' + ('x'.join(map(str, iter(getattr(self, f.name)))) if hasattr(getattr(self, f.name), '__iter__') else str(getattr(self, f.name))) for f in fields(self)])}"
+        return f"{'_'.join(['K' + f.name.replace('_', '').lower() + 'V' + ('x'.join(map(str, iter(getattr(self, f.name)))) if isinstance(getattr(self, f.name), tuple) else str(getattr(self, f.name))) for f in fields(self)])}"
 
 class CKGemmTemplate(CKTemplate):
     gemm_template = r"""
@@ -885,8 +885,8 @@ class CKGemmTemplate(CKTemplate):
             """
                 #include "ck/tensor_operation/gpu/device/impl/device_gemm_xdl_cshuffle_v3.hpp"
 
-                using Row = tensor_layout::gemm::RowMajor;
-                using Col = tensor_layout::gemm::ColumnMajor;
+                using Row = ck::tensor_layout::gemm::RowMajor;
+                using Col = ck::tensor_layout::gemm::ColumnMajor;
 
                 using cudaStream_t = hipStream_t; 
             """
@@ -909,7 +909,7 @@ class CKGemmTemplate(CKTemplate):
         template_params = []
         for f in fields(op):
             field_value = getattr(op, f.name)
-            if hasattr(field_value, "__iter__"):
+            if isinstance(field_value, tuple):
                 template_params.append(f"ck::Sequence<{', '.join(map(str, iter(field_value)))}>")
             else:
                 if field_value is not None:
