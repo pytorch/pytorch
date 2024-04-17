@@ -616,11 +616,10 @@ class TestFullyShardGradientAccumulation(FSDPTest):
         return min(2, torch.cuda.device_count())
 
     @skip_if_lt_x_gpu(2)
-    def test_set_requires_gradient_sync(self):
+    def test_gradient_accumulation(self):
         """
-        Tests the ``set_requires_gradient_sync`` API to exercise gradient
-        accumulation without gradient reduction. This test includes mixing with
-        gradient accumulation *with* gradient reduction.
+        Tests gradient accumulation with/without gradient reduction and
+        with/without resharding after backward.
         """
         self.run_subtests(
             {
@@ -631,10 +630,10 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                 "mode": ["all", "root_only", "some_mlps"],
                 "reshard_after_backward": [False, True],
             },
-            self._test_set_requires_gradient_sync,
+            self._test_gradient_accumulation,
         )
 
-    def _test_set_requires_gradient_sync(
+    def _test_gradient_accumulation(
         self,
         reshard_after_forward: Union[bool, int],
         mode: str,
