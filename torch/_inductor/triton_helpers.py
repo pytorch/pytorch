@@ -14,7 +14,7 @@ else:
     math = tl
 
 import torch
-import .config
+from . import config
 
 
 @triton.jit
@@ -111,14 +111,13 @@ if torch.version.hip is None:
 
     @triton.jit
     def div_approx(a, b):
-        return a * tl.math.rcp_rn(b)
+        return a * libdevice.rcp_rn(b)
 
 else:
 
     @triton.jit
     def div_approx(a, b):
         return a * (1.0 / b)
-
 
 @triton.jit
 def welford_reduce(value, mean, m2, weight, first_iteration):
