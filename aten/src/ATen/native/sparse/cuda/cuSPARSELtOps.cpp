@@ -28,13 +28,13 @@ thread_local bool handle_initialized = false;
 
 // Look-up table for HIPSPARSELT data types
 #ifdef USE_ROCM
-constexpr static const std::unordered_map<std::string, hipsparseLtDatatype_t> sparseLtDataTypes = {
+constexpr static std::unordered_map<std::string, hipsparseLtDatatype_t> sparseLtDataTypes = {
     {"HIP_R_8I", HIPSPARSELT_R_8I},
     {"HIP_R_16F", HIPSPARSELT_R_16F},
     {"HIP_R_16BF", HIPSPARSELT_R_16BF},
 };
 #else
-constexpr static const std::unordered_map<std::string, cudaDataType> sparseLtDataTypes = {
+constexpr static std::unordered_map<std::string, cudaDataType> sparseLtDataTypes = {
     {"CUDA_R_8I", CUDA_R_8I},
     {"CUDA_R_16F", CUDA_R_16F},
     {"CUDA_R_16BF", CUDA_R_16BF},
