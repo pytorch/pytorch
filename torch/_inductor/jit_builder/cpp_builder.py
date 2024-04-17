@@ -1,3 +1,6 @@
+# This CPP JIT builder is designed to support both Windows and Linux OS.
+# The design document please check this RFC: https://github.com/pytorch/pytorch/issues/124245
+
 import errno
 import functools
 import logging
