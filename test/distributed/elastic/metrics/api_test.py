@@ -34,7 +34,7 @@ class TestMetricsHandler(MetricHandler):
 class Parent(abc.ABC):
     @abc.abstractmethod
     def func(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def base_func(self):
         self.func()
@@ -57,7 +57,7 @@ class MetricsApiTest(TestCase):
 
     @prof
     def throw(self):
-        raise RuntimeError()
+        raise RuntimeError
 
     @prof(group="torchelastic")
     def bar2(self):

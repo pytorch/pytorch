@@ -36,7 +36,7 @@ class ErrorMeta(Exception):
         super().__init__(
             "If you are a user and see this message during normal operation "
             "please file an issue at https://github.com/pytorch/pytorch/issues. "
-            "If you are a developer and working on the comparison functions, please `raise ErrorMeta().to_error()` "
+            "If you are a developer and working on the comparison functions, please `raise ErrorMeta.to_error()` "
             "for user facing errors."
         )
         self.type = type
@@ -336,7 +336,7 @@ class Pair(abc.ABC):
 
     @staticmethod
     def _inputs_not_supported() -> NoReturn:
-        raise UnsupportedInputs()
+        raise UnsupportedInputs
 
     @staticmethod
     def _check_inputs_isinstance(*inputs: Any, cls: Union[Type, Tuple[Type, ...]]):

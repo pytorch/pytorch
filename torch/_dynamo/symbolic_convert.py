@@ -2231,7 +2231,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             return self.f_locals[source.local_name]
         if isinstance(source, GlobalSource):
             return self.f_globals[source.global_name]
-        raise KeyError()
+        raise KeyError
 
     def run(self):
         super().run()
@@ -2388,7 +2388,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             else create_instruction("RETURN_CONST", argval=inst.argval)
         )
         self.output.add_output_instructions([return_inst])
-        raise ReturnValueOp()
+        raise ReturnValueOp
 
     def RETURN_VALUE(self, inst):
         self._return(inst)
@@ -2676,12 +2676,12 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
     def RETURN_VALUE(self, inst):
         self.symbolic_result = self.pop()  # type: ignore[assignment]
         self.instruction_pointer = None
-        raise ReturnValueOp()
+        raise ReturnValueOp
 
     def RETURN_CONST(self, inst):
         self.symbolic_result = self._load_const(inst)
         self.instruction_pointer = None
-        raise ReturnValueOp()
+        raise ReturnValueOp
 
 
 class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
