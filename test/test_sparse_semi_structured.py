@@ -239,6 +239,8 @@ class SparseSemiStructuredTensorCompileTest(torch._dynamo.test_case.TestCase):
             SparseSemiStructuredTensorCompileTest._test_mlp_contiguous_relu_compile("cutlass", dense_input_shape)
 
 
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    @unittest.skipIf("cusparselt" not in SEMI_STRUCTURED_SUPPORTED_BACKENDS, "cusparselt not supported on this machine")
     def test_sp24_compile(self) -> None:
         x = torch.randn([1024, 512], device="cuda", dtype=torch.float16, requires_grad=True)
         e = torch.eye(x.shape[0], x.shape[0], device="cuda", dtype=torch.float16)
