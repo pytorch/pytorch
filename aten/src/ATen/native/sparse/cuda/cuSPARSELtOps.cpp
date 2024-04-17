@@ -68,7 +68,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         case at::ScalarType::BFloat16:
             type = sparseLtDataTypes.at("CUDA_R_16BF";
             break;
-#ifndf USE_ROCM            
+#ifndf USE_ROCM
         case at::ScalarType::Float:
             type = sparseLtDataTypes.at("CUDA_R_32F");
             break;
@@ -168,7 +168,7 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         output_type = sparseLtDataTypes.at("CUDA_R_16BF");
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
-    case at::ScalarType::Float: 
+    case at::ScalarType::Float:
         input_type = sparseLtDataTypes.at("CUDA_R_32F");
         output_type = sparseLtDataTypes.at("CUDA_R_32F");
         compute_type = CUSPARSE_COMPUTE_32F;
