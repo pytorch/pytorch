@@ -920,24 +920,26 @@ class AlgorithmSelectorCache(PersistentCache):
 
         inputs_key = repr([self.key_of(x) for x in input_nodes])
 
-        def precompile(choices):
+        def precompile(choices) -> Callable[[], None]:
+            def no_op(*args, **kwargs):
+                return
+
             if (
                 precompilation_timeout_seconds is None
                 or precompilation_timeout_seconds <= 0
             ):
-                return
+                return no_op
             num_workers = min(
                 config.compile_threads,
                 torch.get_num_threads(),
                 len(choices),
             )
             if num_workers <= 0:
-                return
-            log.info(
-                "Multithreaded precompilation for %d choices using %d worker threads",
-                len(choices),
-                num_workers,
-            )
+                return no_op
+
+            # TODO - debug issue
+            if torch.version.hip:
+                return no_op
 
             # check local and global cache before precompiling
             timings = self.lookup(
@@ -947,9 +949,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 benchmark=None,
             )
 
-            def no_op(*args, **kwargs):
-                return
-
             if timings:
                 return no_op
 
@@ -958,6 +957,12 @@ class AlgorithmSelectorCache(PersistentCache):
             )
             if precompile_func := self.precompile_cache.get(precompile_key):
                 return precompile_func
+
+            log.info(
+                "Multithreaded precompilation for %d choices using %d worker threads",
+                len(choices),
+                num_workers,
+            )
 
             executor = ThreadPoolExecutor(max_workers=num_workers)
             futures = executor.map(
