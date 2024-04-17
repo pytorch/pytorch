@@ -43,6 +43,7 @@ if HAS_CUDA:
         add_kernel_2d_autotuned,
         add_kernel_autotuned,
         add_kernel_with_optional_param,
+        add_kernel_with_scaling,
     )
 
 if IS_WINDOWS and IS_CI:
@@ -56,11 +57,21 @@ if IS_WINDOWS and IS_CI:
 try:
     try:
         from .test_aot_inductor_utils import AOTIRunnerUtil
-        from .test_control_flow import CondModels, prepend_predicates
+        from .test_control_flow import (
+            CondModels,
+            prepend_counters,
+            prepend_predicates,
+            WhileLoopModels,
+        )
         from .test_torchinductor import copy_tests, requires_multigpu, TestFailure
     except ImportError:
         from test_aot_inductor_utils import AOTIRunnerUtil
-        from test_control_flow import CondModels, prepend_predicates
+        from test_control_flow import (
+            CondModels,
+            prepend_counters,
+            prepend_predicates,
+            WhileLoopModels,
+        )
         from test_torchinductor import copy_tests, requires_multigpu, TestFailure
 except (unittest.SkipTest, ImportError) as e:
     if __name__ == "__main__":
@@ -259,6 +270,22 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    def test_large_mmaped_weights(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(512, 250112)
+
+            def forward(self, x, y):
+                return x + self.linear(y)
+
+        example_inputs = (
+            torch.randn(1, 250112, device=self.device),
+            torch.randn(1, 512, device=self.device),
+        )
+        with config.patch({"aot_inductor.force_mmap_weights": True}):
+            self.check_model(Model(), example_inputs)
+
     def test_with_offset(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -312,6 +339,25 @@ class AOTInductorTestsTemplate:
         self.assertEqual(counters["inductor"]["scmerge_split_removed"], 1)
         self.assertEqual(counters["inductor"]["scmerge_cat_removed"], 1)
         self.assertEqual(counters["inductor"]["scmerge_split_sections_removed"], 1)
+
+    def test_amp_fallback_random(self):
+        def fn(x, w):
+            return torch.functional.F.linear(x, w)
+
+        example_inputs = (
+            torch.randn(10, 10, device=self.device),
+            torch.randn(10, 10, device=self.device),
+        )
+        if self.device == "cuda":
+            ctx = torch.cuda.amp.autocast
+        elif self.device == "cpu":
+            ctx = torch.cpu.amp.autocast
+        else:
+            raise AssertionError("Unsupported device")
+
+        with config.patch({"fallback_random": True}):
+            with ctx():
+                self.check_model(fn, example_inputs)
 
     def test_missing_output(self):
         class Model(torch.nn.Module):
@@ -953,6 +999,96 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
+    @skipIfRocm
+    def test_while_loop_simple(self):
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = {
+            "ci": {},
+            "a": {0: dim0_ab, 1: None},
+            "b": {0: dim0_ab, 1: None},
+        }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.Simple(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    @skipIfRocm
+    def test_while_loop_nested(self):
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = {
+            "ci": {},
+            "cj": {},
+            "a": {0: dim0_ab, 1: None},
+            "b": {0: dim0_ab, 1: None},
+        }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.Nested(),
+            prepend_counters(inputs, num_counters=2),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    @skipIfRocm
+    def test_while_loop_with_outer_code(self):
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+        )
+        dim0_ab = Dim("s0", min=2, max=1024)
+        dynamic_shapes = {
+            "c": {},
+            "a": {0: dim0_ab, 1: None},
+            "b": {0: dim0_ab, 1: None},
+        }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.OuterCode(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    @skipIfRocm
+    def test_while_loop_with_parameters(self):
+        inputs = (torch.randn((10, 20), device=self.device),)
+        dim0_a = Dim("s0", min=2, max=1024)
+        dynamic_shapes = {
+            "c": {},
+            "a": {0: dim0_a, 1: None},
+        }
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.Parameters(self.device),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
+    @skipIfRocm
+    def test_while_loop_with_outer_buffers(self):
+        inputs = (
+            torch.randn((10, 20), device=self.device),
+            torch.randn((10, 20), device=self.device),
+        )
+        # dynamic shapes don't work now due to
+        # https://github.com/pytorch/pytorch/issues/123596
+        # dim0_ab = Dim("s0", min=2, max=1024)
+        # dynamic_shapes = {
+        #     "c": {},
+        #     "a": {0: dim0_ab, 1: None},
+        #     "b": {0: dim0_ab, 1: None},
+        # }
+        dynamic_shapes = None
+        self.check_model_with_multiple_inputs(
+            WhileLoopModels.OuterBuffers(),
+            prepend_counters(inputs),
+            dynamic_shapes=dynamic_shapes,
+        )
+
     @config.patch({"is_predispatch": True})
     def test_constant(self):
         class M(torch.nn.Module):
@@ -1210,6 +1346,70 @@ class AOTInductorTestsTemplate:
                     exactly=True,
                 ).run(src_code)
 
+    def test_reuse_kernel_dynamic(self):
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.cst = torch.randn(48, device=device, dtype=torch.float)
+                self.weights = torch.randn(6, 48, 48, device=device, dtype=torch.float)
+                self.cst_1 = torch.randn(48, device=device, dtype=torch.float)
+                self.weights_1 = torch.randn(
+                    6, 48, 48, device=device, dtype=torch.float
+                )
+
+            def forward(self, x, y, z):
+                dim0 = x.size(1)
+                add_0 = z + z
+                expand_2 = add_0.expand(-1, -1, 48)
+                # [s0, 6, 48]
+                mul_3 = add_0 * expand_2
+                # [6, s0, 48]
+                permute_4 = torch.permute(mul_3, (1, 0, 2))
+                # [6, s0, 48]
+                bmm_5 = torch.bmm(permute_4, self.weights)
+                add_6 = bmm_5 + self.cst
+                reshape_7 = torch.reshape(add_6, [6, dim0 * 6, 8])
+                # [6*s0, 6, 8]
+                permute_8 = torch.permute(reshape_7, (1, 0, 2))
+                mul_9 = permute_8 * 0.123
+                reshape_10 = torch.reshape(y, [8, dim0 * 6, 4])
+                # [6*s0, 8, 4]
+                permute_11 = torch.permute(reshape_10, (1, 0, 2))
+                bmm_12 = torch.bmm(mul_9, permute_11)
+
+                add_0_1 = z + z
+                expand_2_1 = add_0_1.expand(-1, -1, 48)
+                # [s0, 6, 48]
+                mul_3_1 = add_0_1 * expand_2_1
+                # [6, s0, 48]
+                permute_4_1 = torch.permute(mul_3_1, (1, 0, 2))
+                # [6, s0, 48]
+                bmm_5_1 = torch.bmm(permute_4_1, self.weights_1)
+                add_6_1 = bmm_5_1 + self.cst_1
+                reshape_7_1 = torch.reshape(add_6_1, [6, dim0 * 6, 8])
+                # [6*s0, 6, 8]
+                permute_8_1 = torch.permute(reshape_7_1, (1, 0, 2))
+                mul_9_1 = permute_8_1 * 0.123
+                reshape_10_1 = torch.reshape(y, [8, dim0 * 6, 4])
+                # [6*s0, 8, 4]
+                permute_11_1 = torch.permute(reshape_10_1, (1, 0, 2))
+                bmm_12_1 = torch.bmm(mul_9_1, permute_11_1)
+                return bmm_12 + bmm_12_1
+
+        x = torch.randn(6, 2, 48, device=self.device, dtype=torch.float)
+        y = torch.randn(48, 2, 4, device=self.device, dtype=torch.float)
+        z = torch.randn(2, 6, 1, device=self.device, dtype=torch.float)
+        dim0 = Dim("dim0", min=1, max=2048)
+        dynamic_shapes = {
+            "x": {1: dim0},
+            "y": {1: dim0},
+            "z": {0: dim0},
+        }
+
+        example_inputs = (x, y, z)
+        m = Model(self.device).to(dtype=torch.float)
+        self.check_model(m, example_inputs, dynamic_shapes=dynamic_shapes)
+
     def test_fake_tensor_device_validation(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -1406,6 +1606,17 @@ class AOTInductorTestsTemplate:
             def forward(self, x):
                 y = torch.sin(x)
                 return y, y
+
+        example_inputs = (torch.randn(3, 10, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
+    def test_view_outputs(self):
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                y = torch.sin(x)
+                y_same_size = y.view(*y.shape)
+                y_diff_size = y.view(1, *y.shape)
+                return y, y_same_size, y_diff_size
 
         example_inputs = (torch.randn(3, 10, device=self.device),)
         self.check_model(Model(), example_inputs)
@@ -1635,6 +1846,44 @@ class AOTInductorTestsTemplate:
         )
 
         self.check_model(Model(), example_inputs)
+
+    @skipIfRocm
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_triton_kernel_equal_to_1_float_arg(self, dynamic):
+        if self.device != "cuda":
+            raise unittest.SkipTest("requires CUDA")
+
+        class Model(torch.nn.Module):
+            def forward(self, x, y):
+                out = torch.empty_like(x)
+                n_elements = x.numel()
+                scaling_factor = (n_elements**0) / 1.0
+                add_kernel_with_scaling[(n_elements,)](
+                    x,
+                    y,
+                    out,
+                    n_elements,
+                    scaling_factor,
+                    BLOCK_SIZE=16,
+                )
+                return out
+
+        dynamic_shapes = None
+        if dynamic:
+            dim0_xy = Dim("s0", min=2, max=1024)
+            dynamic_shapes = {
+                "x": {0: dim0_xy, 1: None},
+                "y": {0: dim0_xy, 1: None},
+            }
+        example_inputs = (
+            torch.randn(2, device=self.device),
+            torch.randn(2, device=self.device),
+        )
+        self.check_model(
+            Model(),
+            example_inputs,
+            dynamic_shapes=dynamic_shapes,
+        )
 
     def test_shifted_constraint_ranges(self):
         class Model(torch.nn.Module):
@@ -2453,8 +2702,11 @@ CPU_TEST_FAILURES = {
         is_skip=True
     ),
     "test_return_view_constant": fail_minimal_arrayref_interface(is_skip=True),
+    # The same issue as https://github.com/pytorch/pytorch/issues/122978
+    "test_reuse_kernel_dynamic": fail_minimal_arrayref_interface(is_skip=True),
     # the test segfaults
     "test_repeat_output": fail_stack_allocation(is_skip=True),
+    "test_view_outputs": fail_stack_allocation(is_skip=True),
     "test_multiple_output_alias": fail_with_and_without_stack_allocation(is_skip=True),
     "test_buffer_mutation_1": fail_stack_allocation(is_skip=True),
     "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
@@ -2478,9 +2730,11 @@ CPU_TEST_FAILURES = {
     "test_shifted_constraint_ranges": fail_with_and_without_stack_allocation(
         is_skip=True
     ),
+    # https://github.com/pytorch/pytorch/issues/123691
+    "test_amp_fallback_random": fail_minimal_arrayref_interface(is_skip=True),
     "test_simple_dynamic": fail_minimal_arrayref_interface(),
-    # https://github.com/pytorch/pytorch/issues/122989
-    "test_zero_grid_with_unbacked_symbols": fail_with_and_without_stack_allocation(
+    # https://github.com/pytorch/pytorch/issues/123691
+    "test_zero_grid_with_unbacked_symbols": fail_minimal_arrayref_interface(
         is_skip=True
     ),
     # failed on MacOS
@@ -2496,6 +2750,11 @@ CPU_TEST_FAILURES = {
     # https://github.com/pytorch/pytorch/issues/122991
     "test_runtime_checks_complex": fail_with_and_without_stack_allocation(is_skip=True),
     "test_runtime_checks_fp8": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_while_loop_simple": fail_stack_allocation(is_skip=True),
+    "test_while_loop_nested": fail_stack_allocation(is_skip=True),
+    "test_while_loop_with_outer_code": fail_stack_allocation(is_skip=True),
+    "test_while_loop_with_parameters": fail_stack_allocation(is_skip=True),
+    "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
 }
 
 CUDA_TEST_FAILURES = {
@@ -2523,6 +2782,7 @@ if TEST_WITH_ROCM:
             "test_bmm_multiple_dynamic": fail_cuda(is_skip=True),
             "test_convolution": fail_cuda(is_skip=True),
             "test_large": fail_cuda(is_skip=True),
+            "test_large_mmaped_weights": fail_cuda(is_skip=True),
             "test_missing_cubin": fail_cuda(is_skip=True),
             "test_multi_device": fail_cuda(is_skip=True),
             "test_poi_multiple_dynamic": fail_cuda(is_skip=True),
@@ -2533,6 +2793,7 @@ if TEST_WITH_ROCM:
             "test_reuse_kernel": fail_cuda(is_skip=True),
             "test_zero_grid_with_unbacked_symbols": fail_cuda(is_skip=True),
             "test_zero_grid_with_backed_symbols": fail_cuda(is_skip=True),
+            "test_reuse_kernel_dynamic": fail_cuda(is_skip=True),
         }
     )
 
@@ -2557,6 +2818,7 @@ if not IS_FBCODE:
             "test_convolution": fail_minimal_arrayref_interface(is_skip=True),
             "test_empty_graph": fail_minimal_arrayref_interface(is_skip=True),
             "test_large": fail_minimal_arrayref_interface(is_skip=True),
+            "test_large_mmaped_weights": fail_minimal_arrayref_interface(is_skip=True),
             "test_missing_output": fail_minimal_arrayref_interface(is_skip=True),
             "test_model_modified_weights": fail_minimal_arrayref_interface(
                 is_skip=True

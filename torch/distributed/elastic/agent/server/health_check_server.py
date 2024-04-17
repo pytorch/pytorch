@@ -45,6 +45,9 @@ class HealthCheckServer:
         log.warning("No health check server started")
 
     def stop(self) -> None:
+        """
+        Function to stop health check server
+        """
         log.info("Stopping noop health check server.")
 
 
