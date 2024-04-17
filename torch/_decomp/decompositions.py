@@ -15,7 +15,6 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
-from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import (
     IntLike,
@@ -30,6 +29,7 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
 
