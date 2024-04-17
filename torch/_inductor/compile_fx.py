@@ -8,17 +8,7 @@ import time
 import warnings
 from itertools import count
 
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    FrozenSet,
-    List,
-    Optional,
-    Sequence,
-    Tuple,
-    Union,
-)
+from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple, Union
 from unittest import mock
 
 from functorch.compile import min_cut_rematerialization_partition
@@ -32,12 +22,11 @@ from torch._dynamo import (
     utils as dynamo_utils,
 )
 from torch._dynamo.utils import (
-    counters,
     detect_fake_mode,
     flatten_graph_inputs,
     lazy_format_graph_code,
-    optimus_scuba_log,
 )
+from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex, get_placeholders
@@ -47,7 +36,7 @@ from torch._inductor.utils import BoxedBool, count_tangents
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._utils_internal import compiletime_sl_profile_meta, signpost_event
+from torch._utils_internal import compiletime_sl_profile_meta
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -71,7 +60,7 @@ from .utils import (
 from .virtualized import V
 
 if config.is_fbcode():
-    from torch._inductor.fb.utils import time_and_log
+    from torch._inductor.fb.utils import log_optimus_to_scuba, time_and_log
 else:
     # no-op decorator
     def time_and_log(attr: str, extra_loggings: Optional[Dict[str, str]] = None):
@@ -323,6 +312,22 @@ def is_tf32_warning_applicable(gm: torch.fx.GraphModule):
     return False
 
 
+def maybe_disable_comprehensive_padding(example_inputs: List[torch.Tensor]):
+    """
+    For CPU backend, enable comprehensive padding causes some unit tests
+    fail due to changing number of generated kernels. Skip for now.
+    """
+    has_cuda = any(
+        t.device.type == "cuda" for t in example_inputs if isinstance(t, torch.Tensor)
+    )
+
+    if config.comprehensive_padding and not has_cuda:
+        perf_hint_log.info("Skip comprehensive padding on CPU")
+        return config.patch(comprehensive_padding=False)
+    else:
+        return contextlib.nullcontext()
+
+
 @DebugContext.wrap
 def count_bytes_inner(
     gm: torch.fx.GraphModule,
@@ -337,7 +342,9 @@ def count_bytes_inner(
         _recursive_post_grad_passes(gm, False)
 
     graph = GraphLowering(gm, shape_env=shape_env, num_static_inputs=num_fixed)
-    with V.set_graph_handler(graph), V.set_real_inputs(example_inputs):
+    with V.set_graph_handler(graph), V.set_real_inputs(
+        example_inputs
+    ), maybe_disable_comprehensive_padding(example_inputs):
         graph.run(*example_inputs)
         num_bytes, nodes_num_elem, node_runtimes = graph.count_bytes()
         metrics.num_bytes_accessed += num_bytes
@@ -403,7 +410,7 @@ def compile_fx_inner(
     aot_mode: bool = False,
     is_inference: bool = False,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
-    user_visible_outputs: FrozenSet[str] = frozenset(),
+    user_visible_outputs: Optional[Dict[str, None]] = None,
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
@@ -607,7 +614,9 @@ def fx_codegen_and_compile(
     cpp_wrapper: bool = False,
     aot_mode: bool = False,
     is_inference: bool = False,
-    user_visible_outputs: FrozenSet[str] = frozenset(),
+    # Use a dict with None value rather than a set for deterministic
+    # iteration order just in case.
+    user_visible_outputs: Optional[Dict[str, None]] = None,
     layout_opt: Optional[bool] = None,
     extern_node_serializer: Optional[Callable[[List[ExternKernelNode]], Any]] = None,
 ) -> Union[CompiledFxGraph, str]:
@@ -669,15 +678,12 @@ def fx_codegen_and_compile(
             "inductor_post_grad_graph",
             payload_fn=lambda: gm.print_readable(print_output=False),
         )
-        optimus_scuba_log["inductor"] = counters["inductor"]
-        signpost_event(
-            "optimus",
-            "compile_fx",
-            optimus_scuba_log,
-        )
-        log.debug("optimus parameter sent to the scuba: %s", optimus_scuba_log)
+        if config.is_fbcode():
+            log_optimus_to_scuba()
 
-    with V.set_fake_mode(fake_mode):
+    with V.set_fake_mode(fake_mode), maybe_disable_comprehensive_padding(
+        example_inputs
+    ):
         const_output_index = None
         const_graph = None
         const_code = None
@@ -1110,9 +1116,9 @@ def fw_compiler_freezing(
     # for freezing, all graph outputs should be user visible
     *_, model_outputs_node = opt_model.graph.nodes
     model_outputs = model_outputs_node.args[0]
-    user_visible_outputs = [
+    user_visible_outputs = dict.fromkeys(
         n.name for n in model_outputs if isinstance(n, torch.fx.Node)
-    ]
+    )
 
     # constant params will be real tensors, not fake
     tracing_context = torch._guards.TracingContext.try_get()
@@ -1258,11 +1264,10 @@ def compile_fx(
         fixed = torch._inductor.utils.num_fw_fixed_arguments(
             num_example_inputs, len(example_inputs)
         )
-        user_visible_outputs = set()
+        user_visible_outputs = {}
 
         if config.keep_output_stride:
-            *_, model_outputs_node = model.graph.nodes
-            assert model_outputs_node.op == "output"
+            model_outputs_node = output_node(model)
             model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
             num_model_outputs = len(model_outputs)
 
@@ -1305,11 +1310,11 @@ def compile_fx(
             # of "graph" outputs. Make sure we're within bounds.
             assert orig_output_end_idx <= num_model_outputs
 
-            user_visible_outputs = {
+            user_visible_outputs = dict.fromkeys(
                 n.name
                 for n in model_outputs[original_output_start_index:orig_output_end_idx]
                 if isinstance(n, torch.fx.Node)
-            }
+            )
 
         return inner_compile(
             model,
@@ -1347,6 +1352,14 @@ def compile_fx(
     @dynamo_utils.dynamo_timed
     @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
+        user_visible_outputs = {}
+
+        if config.bw_outputs_user_visible:
+            model_outputs_node = output_node(model)
+            model_outputs = pytree.arg_tree_leaves(*model_outputs_node.args)
+            user_visible_outputs = dict.fromkeys(
+                n.name for n in model_outputs if isinstance(n, torch.fx.Node)
+            )
         fixed = count_tangents(model)
         return inner_compile(
             model,
@@ -1356,6 +1369,7 @@ def compile_fx(
             is_backward=True,
             graph_id=graph_id,
             boxed_forward_device_index=forward_device,
+            user_visible_outputs=user_visible_outputs,
         )
 
     # TODO: can add logging before/after the call to create_aot_dispatcher_function
@@ -1371,20 +1385,33 @@ def compile_fx(
     )
 
     if V.aot_compilation is True:
-        gm, graph_signature = aot_export_module(
-            model_, example_inputs_, trace_joint=False, decompositions=decompositions
-        )
+        with functorch_config.patch(unlift_effect_tokens=True):
+            gm, graph_signature = aot_export_module(
+                model_,
+                example_inputs_,
+                trace_joint=False,
+                decompositions=decompositions,
+            )
         unlifted_gm = _unlift_graph(model_, gm, graph_signature)
         if "dynamo_flat_name_to_original_fqn" in model_.meta:
             unlifted_gm.meta["dynamo_flat_name_to_original_fqn"] = model_.meta[
                 "dynamo_flat_name_to_original_fqn"
             ]
-        with V.set_fake_mode(fake_mode), compiled_autograd.disable():
+
+        # Disable amp as in aot_dispatch_autograd (https://github.com/pytorch/pytorch/pull/86515)
+        # In inference_compiler (fw_compiler_base), _recursive_joint_graph_passes will call into
+        # _sfdp_init() to register patterns.
+        # When fallback_random is set to True, the sdpa patterns will be traced during runtime.
+        # If amp is turned on, the traced FP32 patterns will have prims.convert_element_type which
+        # will be the same as the generated FP16 patterns.
+        disable_amp = torch._C._is_any_autocast_enabled()
+        context = torch._C._DisableAutocast if disable_amp else contextlib.nullcontext
+        with V.set_fake_mode(fake_mode), compiled_autograd.disable(), context():
             return inference_compiler(unlifted_gm, example_inputs_)
 
     with V.set_fake_mode(fake_mode), torch._guards.tracing(
         tracing_context
-    ), compiled_autograd.disable():
+    ), compiled_autograd.disable(), functorch_config.patch(unlift_effect_tokens=True):
         return aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
