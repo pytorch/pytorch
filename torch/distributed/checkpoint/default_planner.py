@@ -234,6 +234,29 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
         self.keys = keys
         super().__init__(*args, **kwargs)
 
+    def _should_include_key(self, key: str, metadata: Metadata) -> bool:
+        if self.keys is None:
+            return True
+
+        if key in self.keys:
+            True
+
+        unflattened_keys: List[str] = []
+        planner_data = metadata.planner_data.get(key)
+        for unflattened_key in planner_data:
+            if unflattened_keys:
+                unflattened_keys.append(
+                    ".".join([unflattened_keys[-1], unflattened_key])
+                )
+
+            else:
+                unflattened_keys.append(unflattened_key)
+
+        if any(unflattened_key in self.keys for unflattened_key in unflattened_keys):
+            return True
+
+        return False
+
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
@@ -244,7 +267,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
         # rebuild the state dict from the metadata
         for k, v in metadata.state_dict_metadata.items():
-            if self.keys and k not in self.keys:
+            if not self._should_include_key(k, metadata):
                 continue
 
             if isinstance(v, TensorStorageMetadata):
