@@ -291,6 +291,7 @@ class profile:
             return
         if self.entered:
             raise RuntimeError("Profiler context manager is not reentrant")
+        print("enter")
         self._prepare_trace()
         self._start_trace()
         return self
@@ -312,6 +313,7 @@ class profile:
         self.profiling_start_time_ns = t1
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        print("exit", exc_type, exc_val, exc_tb)
         if not self.enabled:
             return
         if self.use_cuda:
