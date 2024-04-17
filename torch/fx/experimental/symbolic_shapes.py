@@ -3976,7 +3976,9 @@ class ShapeEnv:
             return a
         res = self.replacements[a]
         cur_replace = {s: self._find(s) for s in res.free_symbols}
-        self._set_replacement(a, self.replacements[a].xreplace(cur_replace), "find")
+        replaced, changed = self.replacements[a]._xreplace(cur_replace)
+        if changed:
+            self._set_replacement(a, replaced, "find")
         return self.replacements[a]
 
     @lru_cache(256)
