@@ -68,7 +68,7 @@ THP_PyFrame_OpAlreadyRan(_PyInterpreterFrame *frame, int opcode, int oparg)
 
 // https://github.com/python/cpython/blob/0325a8a8cdba6c091bcbbb3c995f3bf1d1217012/Objects/frameobject.c#L1136
 // Initialize frame free variables if needed
-// free_vars_copied argument added in order to let caller know that COPY_FREE_VARS
+// free_vars_copied argument added in order to let caller know that the COPY_FREE_VARS
 // codepath occurred.
 static void
 frame_init_get_vars(_PyInterpreterFrame *frame, int *free_vars_copied)
@@ -251,7 +251,7 @@ THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame, int *free_vars_cop
 #else
 
 // https://github.com/python/cpython/blob/a7715ccfba5b86ab09f86ec56ac3755c93b46b48/Objects/frameobject.c#L1182
-// free_vars_copied argument added in order to let caller know that COPY_FREE_VARS
+// free_vars_copied argument added in order to let caller know that the COPY_FREE_VARS
 // codepath occurred.
 int
 THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame, int *free_vars_copied) {
