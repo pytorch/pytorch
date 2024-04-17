@@ -34,7 +34,7 @@ __global__ void im2col_kernel(
     const int64_t height_col,
     const int64_t width_col,
     dt* data_col) {
-  CUDA_KERNEL_LOOP(index, n) {
+  CUDA_KERNEL_LOOP_TYPE(index, n, int64_t) {
     int64_t w_out = index % width_col;
 
     int64_t idx = index / width_col;

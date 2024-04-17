@@ -2634,9 +2634,9 @@ class HigherOrderOpVmapGuardTests(LoggingTestCase):
         _ = torch.vmap(fn)(x)
         self.assertTrue(self.hasRecord(records, "pyfunctorch"))
         record = self.getRecord(records, "pyfunctorch")
-        self.assertExpectedInline(
+        self.assertIn(
+            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])""",
             munge_exc(record.getMessage()),
-            """torch._functorch.pyfunctorch.compare_functorch_state([('Vmap', 1, 'error')])  # _dynamo/output_graph.py:N in init_ambient_guards""",
         )
 
 

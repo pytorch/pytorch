@@ -1478,7 +1478,7 @@ static Tensor _embedding_bag_dense_backward_cpu_max(
 template<typename index_t>
 static std::vector<index_t> compute_counts(
     int64_t num_weights,
-    index_t* indices_data,
+    const index_t* indices_data,
     int64_t indices_length) {
   std::vector<index_t> counts(num_weights, 0);
   for (const auto i : c10::irange(indices_length)) {
@@ -1499,7 +1499,7 @@ static std::vector<index_t> compute_counts(
 template<typename index_t>
 static std::vector<index_t> compute_counts_uniq(
     int64_t num_weights,
-    index_t* indices_data,
+    const index_t* indices_data,
     int64_t indices_length,
     const std::vector<index_t>& counts) {
   std::vector<index_t> counts_uniq;
@@ -1538,11 +1538,11 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
 
   optional<Tensor> per_sample_weights;
   // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  scalar_t* per_sample_weights_data;
+  const scalar_t* per_sample_weights_data;
   optional<int64_t> per_sample_weights_stride;
   if (per_sample_weights_.defined()) {
     per_sample_weights = per_sample_weights_.index_select(0, ind_sort);
-    per_sample_weights_data = per_sample_weights->data_ptr<scalar_t>();
+    per_sample_weights_data = per_sample_weights->const_data_ptr<scalar_t>();
     per_sample_weights_stride = per_sample_weights->strides()[0];
   }
 
@@ -1554,9 +1554,9 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
     [&indices, &offset2bag, &bag_size_, &num_weights, &numel, &per_sample_weights,
       &per_sample_weights_data, &per_sample_weights_stride, &mode, &scale_grad_by_freq,
       &grad, &index_grad_weight, &padding_idx] {
-    auto* indices_data = indices.data_ptr<index_t>();
-    auto* offset2bag_data = offset2bag.data_ptr<index_t>();
-    auto* bag_size_data = bag_size_.data_ptr<index_t>();
+    auto* indices_data = indices.const_data_ptr<index_t>();
+    auto* offset2bag_data = offset2bag.const_data_ptr<index_t>();
+    auto* bag_size_data = bag_size_.const_data_ptr<index_t>();
 
     auto counts = compute_counts(num_weights, indices_data, numel);
     auto next_unique_index_idx =
@@ -1590,7 +1590,7 @@ void _embedding_bag_dense_backward_cpu_sum_mean(
             }
             int64_t ddim = grad.size(1);
             auto igwd = index_grad_weight.data_ptr<scalar_t>();
-            auto gd = grad.data_ptr<scalar_t>();
+            auto gd = grad.const_data_ptr<scalar_t>();
             at::native::cpublas::axpy<scalar_t>(ddim, (scalar_t)scale, gd + ddim * source, 1,
                         igwd + ddim * index, 1);
           }
@@ -1702,11 +1702,11 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
     offset2bag_ = offset2bag;
   }
 
-  auto* grad_data = grad.data_ptr<scalar_t>();
+  auto* grad_data = grad.const_data_ptr<scalar_t>();
   auto grad_stride0 = grad.strides()[0];
   auto grad_stride1 = grad.strides()[1];
 
-  auto* weight_data = weight.data_ptr<scalar_t>();
+  auto* weight_data = weight.const_data_ptr<scalar_t>();
   auto weight_stride0 = weight.strides()[0];
   auto weight_stride1 = weight.strides()[1];
 
@@ -1716,11 +1716,11 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
     [&indices, &output, &offset2bag_, &num_samples, &embedding_features,
       &grad_data, &grad_stride0, &grad_stride1, &weight_data, &weight_stride0, &weight_stride1,
       &padding_idx] () {
-    auto* indices_data = indices.data_ptr<index_t>();
+    auto* indices_data = indices.const_data_ptr<index_t>();
 
     // The following are contiguous
     auto* output_data = output.data_ptr<scalar_t>();
-    auto* offset2bag_data = offset2bag_.data_ptr<index_t>();
+    auto* offset2bag_data = offset2bag_.const_data_ptr<index_t>();
 
     // XXX: 64 was arbitrarily chosen. There is probably a sweet spot for this number.
     parallel_for(0, num_samples, 64,
@@ -1733,8 +1733,8 @@ Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
         if (embedding_idx != static_cast<index_t>(padding_idx)) {
           output_data[sample_idx] = dot_impl<scalar_t>(
               embedding_features,
-              grad_data + grad_stride0 * bag_idx, grad_stride1,
-              weight_data + weight_stride0 * embedding_idx, weight_stride1);
+              const_cast<scalar_t*>(grad_data + grad_stride0 * bag_idx), grad_stride1,
+              const_cast<scalar_t*>(weight_data + weight_stride0 * embedding_idx), weight_stride1);
         }
       }
     });
