@@ -780,12 +780,6 @@ class OpOverload(OperatorBase):
 # TorchBindOpOverload will skip C++ dispatcher and purely dispatched in python
 # when its inputs contain FakeScriptObject in a similar way as higher order ops.
 class TorchBindOpOverload(OpOverload):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        from torch._higher_order_ops.effects import _EffectType, _register_effectful_op
-
-        _register_effectful_op(self, _EffectType.ORDERED)
-
     def _fallthrough_keys(self) -> List[DispatchKey]:
         # TODO: we should be calling the fallback for these, but a fallthrough is almost close
         # enough to the fallback in most cases that we care about.
@@ -815,14 +809,40 @@ class TorchBindOpOverload(OpOverload):
             if _may_use_fallthrough_instead_of_fallback(key)
         ]
 
+    @contextlib.contextmanager
+    def _register_as_effectful_op_temporarily(self):
+        from torch._higher_order_ops.effects import (
+            _EffectType,
+            _register_effectful_op,
+            SIDE_EFFECTS,
+        )
+
+        try:
+            if self not in SIDE_EFFECTS:
+                _register_effectful_op(self, _EffectType.ORDERED)
+            yield
+        finally:
+            if self in SIDE_EFFECTS:
+                del SIDE_EFFECTS[self]
+
     # use `self_` to avoid naming collide with arguments that
     # are named "self". This way, they can be called by kwargs.
     def __call__(self_, *args, **kwargs):  # noqa: B902
         if _must_dispatch_in_python(args, kwargs):
             # When any inputs are FakeScriptObject, we need to
-            # skip c++ dispatcher and dispatch in python through _get_dispatch of python_dispatcher.
-            return self_._dispatch_in_python(args, kwargs, self_._fallthrough_keys())
-
+            # skip c++ dispatcher and dispatch in python through _get_dispatch of python_dispatcher
+            # because C++ dispatcher will check the schema and cannot recognize FakeScriptObject.
+            #
+            # Note:
+            # 1. We only register the torchbind op temporarily as effectful op because we only want
+            #    the effect token functionalization logic to be applied during tracing. Otherwise, the behavior
+            #    of the eagerly executing the op might change after tracing.
+            # 2. We don't want to register the op as effectful for all torchbind ops in ctor because this might
+            #    cause unexpected behavior for some autograd.profiler ops e.g. profiler._record_function_exit._RecordFunction.
+            with self_._register_as_effectful_op_temporarily():
+                return self_._dispatch_in_python(
+                    args, kwargs, self_._fallthrough_keys()
+                )
         return self_._op(*args, **kwargs)
 
     def _dispatch_in_python(self, args, kwargs, fallthrough_keys):
