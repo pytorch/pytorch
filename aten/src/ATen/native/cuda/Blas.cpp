@@ -252,6 +252,9 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
            scalar_type == at::ScalarType::Half ||
            scalar_type == at::ScalarType::BFloat16) &&
 #endif
+#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12010 && !defined(USE_ROCM))
+          mat2_sizes[0] > 1 && mat2_sizes[1] > 1;
+#else
           mat2_sizes[0] > 1 && mat2_sizes[1] > 1 &&
           mat2_sizes[0] < 65535 * 32 && mat2_sizes[1] < 65535 * 32 &&
           mat1_sizes[0] < 65535 * 32 && mat1_sizes[1] < 65535 * 32 &&
@@ -264,6 +267,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
            (mat2.strides()[1] == 1 && mat2.strides()[0] == mat2_sizes[1]) ||
            (scalar_type != at::ScalarType::Half &&
             scalar_type != at::ScalarType::BFloat16));
+#endif
     }
 #endif
     if (!useLtInterface) {
@@ -908,9 +912,7 @@ _scaled_mm_out_cuda(const Tensor& mat1, const Tensor& mat2,
 
 #if defined(USE_ROCM) && ROCM_VERSION >= 60000
   // rocm's hipblaslt does not yet support amax, so calculate separately
-  auto out_float32 = out.to(kFloat);
-  out_float32.abs_();
-  amax = at::max(out_float32);
+  amax = at::max(at::abs(out.to(kFloat)));
 #endif
 
   return {out, amax};
