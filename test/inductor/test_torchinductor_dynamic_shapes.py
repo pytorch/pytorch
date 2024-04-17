@@ -379,6 +379,21 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
+    def test_cat_unbacked_duplicate_size(self, device):
+        def f(x):
+            device = x.device
+            s, s2 = x.tolist()
+            g = torch.zeros(s, device=device)
+            g2 = torch.ones(s2, device=device)
+            return torch.ops.aten.cat.default([g, g, g2])
+
+        cf = torch.compile(fullgraph=True)(f)
+        arg = torch.tensor([4, 6], device="cuda")
+        self.assertEqual(f(arg), cf(arg))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
         with torch.library._scoped_library("test", "DEF") as lib:

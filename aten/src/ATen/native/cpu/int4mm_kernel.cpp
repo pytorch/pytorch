@@ -139,7 +139,7 @@ inline void tinygemm_kernel(
         // when BLOCK_N = 64, handle each row at a time
         // to reduce de-quantize overhead.
         if constexpr (col == 0) {
-          __m256i b4 = _mm256_load_si256((__m256i*)(B + k * ldb));
+          __m256i b4 = _mm256_loadu_si256((__m256i*)(B + k * ldb));
           if (k + PREFETCH_SIZE_K < K) {
             _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb, _MM_HINT_T0);
           }
@@ -337,6 +337,56 @@ inline void tinygemm_kernel(
   c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
 
+#endif
+
+#if !defined(C10_MOBILE) && defined(__aarch64__)
+#include <arm_neon.h>
+template <int BLOCK_M, int BLOCK_N>
+inline void tinygemm_kernel(
+    const Half* RESTRICT A,
+    const uint8_t* RESTRICT B,
+    const Half* RESTRICT ScaleAndZeros,
+    Half* RESTRICT C,
+    int lda,
+    int ldb,
+    int ldc,
+    int K,
+    int BLOCK_K) {
+  int16_t shift_vals[4] = {0, -4, -8, -12};
+  int16x4_t shifts = vld1_s16(shift_vals);
+  int16x4_t mask = vdup_n_s16(0x0F);
+  int16x4_t offs = vdup_n_s16(8);
+  for (const auto m : c10::irange(BLOCK_M)) {
+    for (int n = 0; n < BLOCK_N; n+= 16) {
+      float32x4_t c_val[4];
+      float32x4_t scales[4], zeros[4];
+      c10::ForcedUnroll<4>{}([&](auto i) {
+          c_val[i] = vdupq_n_f32(0.0);
+      });
+      for (const auto k : c10::irange(K)) {
+        const auto a_val = vdupq_n_f32(static_cast<float>(A[m * lda + k]));
+        if (is_block_start(k, BLOCK_K)) {
+          int kb = k / BLOCK_K;
+          c10::ForcedUnroll<4>{}([&](auto i) {
+            auto scales_and_zeros = vld2_f16(reinterpret_cast<const float16_t*>(ScaleAndZeros + kb * ldc * 2 + n * 2 + i * 8));
+            scales[i] = vcvt_f32_f16(scales_and_zeros.val[0]);
+            zeros[i] = vcvt_f32_f16(scales_and_zeros.val[1]);
+          });
+        }
+        c10::ForcedUnroll<4>{}([&](auto i) {
+          uint16_t b_pack = reinterpret_cast<const uint16_t*>(B + k * ldb + n / 2)[i];
+          int16x4_t b_ints = vsub_s16(vand_u16(vshl_u16(vdup_n_u16(b_pack), shifts), mask), offs);
+          float32x4_t b_vals = vcvtq_f32_s32(vmovl_s16(b_ints));
+          b_vals = vaddq_f32(zeros[i], vmulq_f32(scales[i], b_vals));
+          c_val[i] = vfmaq_f32(c_val[i], b_vals, a_val);
+        });
+      }
+      c10::ForcedUnroll<4>{}([&](auto i) {
+        vst1_f16(reinterpret_cast<float16_t*>(C + m * ldc + n + i * 4), vcvt_f16_f32(c_val[i]));
+      });
+    }
+  }
+}
 #endif
 
 inline float convert_int4_to_float(uint8_t a, bool is_even) {
