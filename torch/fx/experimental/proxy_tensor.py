@@ -174,6 +174,7 @@ def extract_val(val):
 # ADInplaceOrView, but you shouldn't rely on it.)
 def set_meta(proxy, val):
     proxy.node.meta['val'] = extract_val(val)
+
     # Best effort tensor_meta setting; prefer using val!
     if is_fake(val):
         proxy.node.meta['tensor_meta'] = _extract_tensor_metadata(val)
@@ -519,6 +520,11 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
             constant = func(*const_args, **const_kwargs)
     else:
         constant = None
+
+    from .symbolic_shapes import compute_unbacked_bindings
+    if (fake_mode := torch._dynamo.utils.detect_fake_mode()) and fake_mode.shape_env:
+        if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
+            proxy_out.node.meta["unbacked_bindings"] = symbol_to_path
 
     track_tensor_tree(out, proxy_out, constant=constant, tracer=tracer)
     return out

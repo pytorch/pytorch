@@ -2,10 +2,10 @@ from typing import Optional
 
 import torch.fx
 from torch.fx import Node
+from torch.fx.node import map_aggregate
 from torch.fx._compatibility import compatibility
 from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
 from torch.fx.experimental.proxy_tensor import snapshot_fake, py_sym_types
-from torch.utils._pytree import tree_map
 
 __all__ = ['FakeTensorProp']
 
@@ -23,41 +23,31 @@ class FakeTensorProp(torch.fx.Interpreter):
          module (GraphModule): The module to be executed
          mode (Optional[FakeTensorMode]): The dispatch mode used to execute computation indicated by each FX Node.
     """
-    def __init__(self, module: torch.fx.GraphModule, mode: Optional[FakeTensorMode] = None, *, check_consistency: bool = True):
+    def __init__(self, module: torch.fx.GraphModule, mode: Optional[FakeTensorMode] = None):
         super().__init__(module)
         if mode is None:
             mode = FakeTensorMode()
         self._mode = mode
-        self.check_consistency = check_consistency
 
     def run_node(self, n: Node):
+        from torch.fx.experimental.symbolic_shapes import rebind_unbacked
 
         result = super().run_node(n)
+        rebind_unbacked(self._mode.shape_env, n, result)
 
-        nil = object()
-
-        def check_consistent_and_snapshot(new, old=nil):
-            from torch.fx.experimental.symbolic_shapes import check_consistent
-
-            if old is not nil and self.check_consistency:
-                check_consistent(new, old)
-
-            if isinstance(new, FakeTensor):
-                return snapshot_fake(new)
-            elif isinstance(new, torch.Tensor):
+        def extract_val(obj):
+            if isinstance(obj, FakeTensor):
+                return snapshot_fake(obj)
+            elif isinstance(obj, torch.Tensor):
                 # TODO: How is it possible that we get a non fake tensor?  We
                 # should be running under the mode...
-                return snapshot_fake(self._mode.from_tensor(new, static_shapes=True))
-            elif isinstance(new, py_sym_types):
-                return new
+                return snapshot_fake(self._mode.from_tensor(obj, static_shapes=True))
+            elif isinstance(obj, py_sym_types):
+                return obj
             else:
                 return None
 
-        meta_arg = []
-        if 'val' in n.meta and n.meta['val'] is not None:
-            meta_arg = [n.meta['val']]
-
-        meta = tree_map(check_consistent_and_snapshot, result, *meta_arg)
+        meta = map_aggregate(result, extract_val)
         if meta is not None:
             n.meta['val'] = meta
 
