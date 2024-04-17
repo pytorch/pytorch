@@ -183,15 +183,3 @@ runs:
         path: |
           usage_log.txt
           test/**/*.log
-
-    - name: Store Debugging Artifacts on Github
-      uses: actions/upload-artifact@v3
-      if: inputs.use-gha
-      continue-on-error: true
-      with:
-        # Add the run attempt, see [Artifact run attempt]
-        name: debug-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
-        retention-days: 14
-        if-no-files-found: ignore
-        path: |
-          test/debug/

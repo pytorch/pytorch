@@ -2575,10 +2575,6 @@ class BenchmarkRunner:
                     accuracy_status = "fail_accuracy"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
-        # TESTING: delete me
-        if name in CI_PRESERVE_COMPILE_DEBUG:
-            accuracy_status = "fail_accuracy"
-
         return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
     def check_tolerance(
@@ -4031,8 +4027,6 @@ def run(runner, args, original_dir=None):
         if original_dir:
             os.chdir(original_dir)
         model_names = list(runner.iter_model_names(args))
-        # TESTING: delete me
-        model_names = ["mnasnet1_0", "resnet50"]
         nmodels = len(model_names)
         for i, name in enumerate(model_names):
             current_name = name
