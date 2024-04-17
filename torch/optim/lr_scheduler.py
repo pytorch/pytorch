@@ -679,13 +679,15 @@ class SequentialLR(LRScheduler):
                 )
             if isinstance(scheduler, ReduceLROnPlateau):
                 raise ValueError(
-                    f"{self.__class__.__name__} does not support `ReduceLROnPlateau` scheduler, "
+                    f"{self.__class__.__name__} does not support `ReduceLROnPlateau` scheduler as it "
+                    "requires additional kwargs to be specified when calling `step`, "
                     f"but got one at index {scheduler_idx} in the given schedulers sequence."
                 )
-            if scheduler.optimizer != optimizer:
+            if optimizer != scheduler.optimizer:
                 raise ValueError(
                     f"{self.__class__.__name__} expects all schedulers to belong to the same optimizer, but "
-                    f"got schedulers at index {scheduler_idx} to be different than the optimizer passed in."
+                    f"got scheduler {scheduler.__class__.__name__} at index {scheduler_idx} has {scheduler.optimizer}, "
+                    f"which is different from {optimizer.__class__.__name__}."
                 )
 
         if (len(milestones) != len(schedulers) - 1):
@@ -920,17 +922,21 @@ class ChainedScheduler(LRScheduler):
             )
 
         optimizer = optimizer or schedulers[0].optimizer
-        for sch_idx, scheduler in enumerate(schedulers):
-            if not isinstance(scheduler, LRScheduler):
+        for scheduler_idx, scheduler in enumerate(schedulers):
+            if not hasattr(scheduler, 'optimizer'):
                 raise TypeError(
-                    f"{self.__class__.__name__} expects all schedulers to be of type LRScheduler, "
-                    f"but got {type(scheduler)}"
+                    f"{self.__class__.__name__} at index {scheduler_idx} should have `optimizer` as its attribute."
                 )
-
+            if isinstance(scheduler, ReduceLROnPlateau):
+                raise ValueError(
+                    f"{self.__class__.__name__} does not support `ReduceLROnPlateau` scheduler as it "
+                    "requires additional kwargs to be specified when calling `step`, "
+                    f"but got one at index {scheduler_idx} in the given schedulers sequence."
+                )
             if optimizer != scheduler.optimizer:
                 raise ValueError(
                     f"{self.__class__.__name__} expects all schedulers to belong to the same optimizer, but "
-                    f"got scheduler {scheduler.__class__.__name__} at index {sch_idx} has {scheduler.optimizer}, "
+                    f"got scheduler {scheduler.__class__.__name__} at index {scheduler_idx} has {scheduler.optimizer}, "
                     f"which is different from {optimizer.__class__.__name__}."
                 )
         self._schedulers = schedulers
