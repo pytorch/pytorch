@@ -93,7 +93,7 @@ class profile:
         parsed_results = _parse_legacy_records(records)
         self.function_events = EventList(
             parsed_results,
-            use_cuda=self.use_cuda,
+            use_device="cuda" if self.use_cuda else None,
             profile_memory=self.profile_memory,
             with_flops=self.with_flops,
         )
