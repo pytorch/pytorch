@@ -299,7 +299,18 @@ class CKTemplate(CUDATemplate):
                 static constexpr auto GemmDefault = ck::tensor_operation::device::GemmSpecialization::MNPadding;
                 static constexpr auto Intrawave = ck::BlockGemmPipelineScheduler::Intrawave;
                 static constexpr auto BlockGemmPipelineVersionV3 = ck::BlockGemmPipelineVersion::v3;
-                
+
+                DeviceMem::DeviceMem(std::size_t mem_size) : mMemSize(mem_size) {
+                    hip_check_error(hipMalloc(static_cast<void**>(&mpDeviceBuf), mMemSize));
+                }
+
+                void* DeviceMem::GetDeviceBuffer() const { return mpDeviceBuf; }
+
+                DeviceMem::~DeviceMem() {
+                    if(mpDeviceBuf) {
+                        hip_check_error(hipFree(mpDeviceBuf));
+                    }
+                }
             """
         )
         return res
