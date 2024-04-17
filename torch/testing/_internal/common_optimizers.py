@@ -1249,6 +1249,18 @@ optim_db: List[OptimizerInfo] = [
                 active_if=lambda kwargs: TEST_WITH_TORCHDYNAMO
                 and kwargs["dtype"] == torch.float64,
             ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=5e-3, rtol=5e-3),
+                        torch.float16: tol(atol=5e-3, rtol=5e-3),
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_fused_matches_forloop",
+                active_if=lambda kwargs: kwargs["dtype"]
+                in (torch.float16, torch.bfloat16),
+            ),
         ),
         skips=(
             DecorateInfo(
@@ -1445,6 +1457,18 @@ optim_db: List[OptimizerInfo] = [
                 "test_fused_matches_forloop",
                 active_if=lambda kwargs: TEST_WITH_TORCHDYNAMO
                 and kwargs["dtype"] == torch.float64,
+            ),
+            DecorateInfo(
+                toleranceOverride(
+                    {
+                        torch.bfloat16: tol(atol=5e-3, rtol=5e-3),
+                        torch.float16: tol(atol=5e-3, rtol=5e-3),
+                    }
+                ),
+                "TestOptimRenewed",
+                "test_fused_matches_forloop",
+                active_if=lambda kwargs: kwargs["dtype"]
+                in (torch.float16, torch.bfloat16),
             ),
         ),
         skips=(
