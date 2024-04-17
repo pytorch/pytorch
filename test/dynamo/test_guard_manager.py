@@ -11,6 +11,7 @@ from torch.testing._internal.common_utils import set_default_dtype
 
 RootGuardManager = guards.RootGuardManager
 DictGuardManager = guards.DictGuardManager
+DictSubclassGuardManager = guards.DictSubclassGuardManager
 GetAttrGuardAccessor = guards.GetAttrGuardAccessor
 GetItemGuardAccessor = guards.GetItemGuardAccessor
 TypeGuardAccessor = guards.TypeGuardAccessor
@@ -686,6 +687,69 @@ num_guards_executed=0)
         f_locals["d"].pop(100)
         # fails because of len check
         self.assertFalse(root.check(f_locals))
+
+    def test_dict_guard_manager2(self):
+        root = RootGuardManager()
+
+        f_locals = {
+            "d": {"a": 1, 100: torch.randn(4)},
+        }
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictGuardManager)
+        self.assertTrue(root.check(f_locals))
+
+        # defaultdict
+        root = RootGuardManager()
+        from collections import defaultdict
+
+        f_locals = {}
+        f_locals["d"] = defaultdict()
+        f_locals["d"]["a"] = 1
+        f_locals["d"][100] = torch.randn(4)
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictGuardManager)
+        self.assertTrue(root.check(f_locals))
+
+        # ordereddict
+        root = RootGuardManager()
+        from collections import OrderedDict
+
+        f_locals = {}
+        f_locals["d"] = OrderedDict()
+        f_locals["d"]["a"] = 1
+        f_locals["d"][100] = torch.randn(4)
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictSubclassGuardManager)
+        self.assertTrue(root.check(f_locals))
+
+        # dict subclass - should be treated as a dict
+        root = RootGuardManager()
+
+        class MyDict(dict):
+            pass
+
+        f_locals = {}
+        f_locals["d"] = MyDict()
+        f_locals["d"]["a"] = 1
+        f_locals["d"][100] = torch.randn(4)
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictGuardManager)
+        self.assertTrue(root.check(f_locals))
+
+        # dict subclass - with modified keys
+        root = RootGuardManager()
+
+        class ReversedDict(dict):
+            def keys(self):
+                return [10, 100]
+
+        f_locals = {}
+        f_locals["d"] = ReversedDict()
+        f_locals["d"][100] = torch.randn(4)
+        f_locals["d"][10] = torch.randn(4)
+        dict_mgr = root.getitem_manager("d", "", f_locals["d"])
+        self.assertTrue(type(dict_mgr) is DictSubclassGuardManager)
+        self.assertTrue(root.check(f_locals))
 
 
 if __name__ == "__main__":
