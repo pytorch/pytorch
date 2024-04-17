@@ -76,7 +76,7 @@ static Tensor& mse_loss_backward_out_impl(const Tensor& grad_output,
       newCachedGraph->targetTensor = mpsGraphRankedPlaceHolder(mpsGraph, target);
       newCachedGraph->gradOutputTensor = mpsGraphRankedPlaceHolder(mpsGraph, grad_output);
 
-      MPSGraphTensor* normTensor = [mpsGraph constantWithScalar:norm dataType:MPSDataTypeFloat32];
+      MPSGraphTensor* normTensor = [mpsGraph constantWithScalar:norm dataType:[newCachedGraph->inputTensor dataType]];
       MPSGraphTensor* diffTensor = [mpsGraph subtractionWithPrimaryTensor:newCachedGraph->inputTensor
                                                           secondaryTensor:newCachedGraph->targetTensor
                                                                      name:nil];
