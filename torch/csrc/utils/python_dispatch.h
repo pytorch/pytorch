@@ -12,7 +12,7 @@ void python_op_registration_trampoline_impl(
     c10::DispatchKey key,
     c10::DispatchKeySet keyset,
     torch::jit::Stack* stack,
-    bool dispatcher_convention);
+    bool with_keyset);
 
 } // namespace dispatch
 } // namespace impl
