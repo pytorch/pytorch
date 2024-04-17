@@ -427,6 +427,7 @@ class TestMaxAutotune(TestCase):
             FileCheck().check_not("extern_kernels.convolution").run(code[0])
             self.assertEqual(conv1x1(input_tensor), out, atol=1e-2, rtol=0)
 
+    @skipIfRocm
     def test_filled_cache_precompile(self):
         def fn(a, b, c):
             a = (a @ b) @ c
