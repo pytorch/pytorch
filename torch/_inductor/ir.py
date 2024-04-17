@@ -4012,20 +4012,19 @@ class ExternKernel(InputsKernel):
         # NOTE: Don't use extract_read_writes here as it fails when
         # make_loader() inlines the computation
         x_unwrap_view = x.unwrap_view()
-        x_unwrap_view_node = V.graph.get_buffer(
+        x_unwrap_view_fx_node = V.graph.get_buffer(
             x_unwrap_view.get_name()
         ).get_origin_node()
-        # If the node of x.unwrap_view() has meta tensor and the meta tensor is in CL format,
-        # freeze the layout of x.unwrap_view() as CL format.
+        # Prefer channels last format according to how the format is set from eager.
         if (
-            x_unwrap_view_node is not None
-            and "val" in x_unwrap_view_node.meta
+            x_unwrap_view_fx_node is not None
+            and "val" in x_unwrap_view_fx_node.meta
             and isinstance(x_unwrap_view.layout, FlexibleLayout)
             and (
-                x_unwrap_view_node.meta["val"].is_contiguous(
+                x_unwrap_view_fx_node.meta["val"].is_contiguous(
                     memory_format=torch.channels_last
                 )
-                or x_unwrap_view_node.meta["val"].is_contiguous(
+                or x_unwrap_view_fx_node.meta["val"].is_contiguous(
                     memory_format=torch.channels_last_3d
                 )
             )
