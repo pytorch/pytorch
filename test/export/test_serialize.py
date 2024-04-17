@@ -42,6 +42,22 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 
+from torch.testing._internal.torchbind_impls import register_fake_operators
+
+
+def load_torchbind_test_lib():
+    if IS_SANDCASTLE or IS_FBCODE:
+        torch.ops.load_library("//caffe2/test/cpp/jit:test_custom_class_registrations")
+    elif IS_MACOS:
+        raise unittest.SkipTest("non-portable load_library call used in test")
+    else:
+        lib_file_path = find_library_location("libtorchbind_test.so")
+        if IS_WINDOWS:
+            lib_file_path = find_library_location("torchbind_test.dll")
+        torch.ops.load_library(str(lib_file_path))
+
+    register_fake_operators()
+
 
 def get_filtered_export_db_tests():
     return [
@@ -1026,17 +1042,34 @@ class TestSaveLoad(TestCase):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestSerializeCustomClass(TestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            if IS_WINDOWS:
-                lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
+        load_torchbind_test_lib()
+
+        @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
+        class FakeFoo:
+            def __init__(self, x: int, y: int):
+                self.x = x
+                self.y = y
+
+            @classmethod
+            def from_real(cls, foo):
+                (x, y), _ = foo.__getstate__()
+                return cls(x, y)
+
+            def add_tensor(self, z):
+                return (self.x + self.y) * z
+
+        @torch._library.register_fake_class("_TorchScriptTesting::_ContainsTensor")
+        class FakeContainsTensor:
+            def __init__(self, x: torch.Tensor):
+                self.x = x
+
+            @classmethod
+            def from_real(cls, foo):
+                ctx = torch.library.get_ctx()
+                return cls(ctx.to_fake_tensor(foo.get()))
+
+            def get(self):
+                return self.x
 
     def test_custom_class(self):
         custom_obj = torch.classes._TorchScriptTesting._PickleTester([3, 4])
