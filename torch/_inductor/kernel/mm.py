@@ -143,6 +143,13 @@ def tuned_mm(mat1, mat2, *, layout=None):
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
 
+    if use_cpp_packed_gemm_template(layout, mat1, mat2):
+        CppPackedGemmTemplate.add_choices(
+            choices,
+            layout,
+            [mat1, mat2],
+        )
+
     from torch._inductor.ir import FixedLayout, FlexibleLayout
 
     if (
@@ -265,14 +272,6 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             [inp_expanded, mat1, mat2],
             alpha=alpha,
             beta=beta,
-        )
-        choices.append(
-            aten_addmm.bind(
-                (inp_expanded, mat1, mat2),
-                layout,
-                alpha=alpha,
-                beta=beta,
-            )
         )
 
     return autotune_select_algorithm(

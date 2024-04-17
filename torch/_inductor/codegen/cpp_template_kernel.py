@@ -1,3 +1,4 @@
+import itertools
 from typing import Callable, Dict, List, Optional, Union
 
 import sympy
@@ -31,7 +32,6 @@ class CppTemplateKernel(Kernel):
         inputs: List[Buffer],
         outputs: List[Buffer],
         names_str: str = "",
-        input_reorder: Optional[List[int]] = None,
     ) -> str:
         input_names = [inp.get_name() if inp is not None else None for inp in inputs]
         output_names = [out.get_name() for out in outputs]
@@ -46,6 +46,22 @@ class CppTemplateKernel(Kernel):
                 self.args.input_buffers[input_name] = names[i].strip()
         for i, output_name in enumerate(output_names):
             self.args.output_buffers[output_name] = names[i + len(input_names)].strip()
+        inputs_not_none = [inp for inp in inputs if inp is not None]
+        unique_sizevars = {
+            s
+            for input in inputs_not_none
+            for sym in itertools.chain(input.get_size(), input.get_stride())
+            for s in sym.free_symbols
+        }
+        unique_sizevars |= {
+            s
+            for output in outputs
+            for sym in itertools.chain(output.get_size(), output.get_stride())
+            for s in sym.free_symbols
+        }
+        sizevars = sorted(unique_sizevars)
+        for sizevar in sizevars:
+            self.args.sizevars[sizevar] = f"k{sizevar}"
         cpp_argdefs, _, _ = self.args.cpp_argdefs()
         return f"void {self.kernel_name}({', '.join(cpp_argdefs)})"
 
@@ -75,11 +91,12 @@ class CppTemplateKernel(Kernel):
             raise NotImplementedError(f"Unsupported dtype: {node.get_dtype()}")
 
     def size(self, node: Buffer, dim: int) -> str:
-        return str(node.get_size()[dim])
+        return str(self.rename_indexing(node.get_size()[dim]))
 
     def index(self, node: Buffer, indices: List[str]) -> str:
         indexer = node.make_indexer()
         index = indexer([sympy.Symbol(idx) for idx in indices])
+        index = self.rename_indexing(index)
         return f"{self.args.input(node.get_name())}[{cexpr_index(index)}]"
 
 
@@ -122,12 +139,6 @@ class CppTemplateCaller(ChoiceCaller):
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
         return self.bmreq.benchmark(*args, output_tensor=out)
-
-    # def __str__(self):
-    #     return f"CppTemplateCaller(source_file={self.bmreq.source_file})"
-
-    # def call_name(self) -> str:
-    #     return f"cpp_template_kernels.{self.name}"
 
     def hash_key(self) -> str:
         return "-".join(

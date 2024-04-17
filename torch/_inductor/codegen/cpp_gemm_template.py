@@ -22,7 +22,7 @@ extern "C"
     int64_t K = {{kernel.size(X, 1)}};
 
     #pragma omp parallel for collapse(2)
-    for (int64_t i = 0; i < M; ++i) {
+    for (int64_t m = 0; m < M; ++m) {
         for (int64_t j = 0; j < N/{{n_bs}}; ++j) {
             {{kernel.acc_dtype(Y)}} sum[16];
             for (int64_t ni = 0; ni < {{n_bs}}; ++ni) {
@@ -30,17 +30,17 @@ extern "C"
                 sum[ni] = 0;
             {% else %}
                 int64_t n = j * {{n_bs}} + ni;
-                sum[ni] = {{beta}} * {{kernel.index(inp, ["i", "n"])}};
+                sum[ni] = {{beta}} * {{kernel.index(inp, ["m", "n"])}};
             {% endif %}
             }
             for (int64_t k = 0; k < K; ++k) {
                 for (int64_t ni = 0; ni < {{n_bs}}; ++ni) {
-                    sum[ni] += {{kernel.index(X, ["i", "k"])}} * {{kernel.index(W, ["j", "k", "ni"])}};
+                    sum[ni] += {{kernel.index(X, ["m", "k"])}} * {{kernel.index(W, ["j", "k", "ni"])}};
                 }
             }
             for (int64_t ni = 0; ni < {{n_bs}}; ++ni) {
                 int64_t n = j * {{n_bs}} + ni;
-                {{kernel.index(Y, ["i", "n"])}} = {{alpha}} * sum[ni];
+                {{kernel.index(Y, ["m", "n"])}} = {{alpha}} * sum[ni];
             }
         }
     }
