@@ -2724,6 +2724,10 @@ class BenchmarkRunner:
                 eager_latency, eager_peak_mem, _ = warmup(
                     self.model_iter_fn, model, example_inputs, "eager"
                 )
+                if self.args.use_warm_peak_memory:
+                    _, eager_peak_mem, _ = warmup(
+                        self.model_iter_fn, model, example_inputs, "eager", niters=1
+                    )
 
             if self.args.export_aot_inductor:
                 t_0 = time.perf_counter()
@@ -2742,6 +2746,14 @@ class BenchmarkRunner:
                 dynamo_latency, dynamo_peak_mem, dynamo_stats = warmup(
                     optimized_model_iter_fn, model, example_inputs, "dynamo"
                 )
+                if self.args.use_warm_peak_memory:
+                    _, dynamo_peak_mem, _ = warmup(
+                        optimized_model_iter_fn,
+                        model,
+                        example_inputs,
+                        "dynamo",
+                        niters=1,
+                    )
 
             if self.args.profile_dynamo_cache_lookup:
                 with torch.profiler.profile(
@@ -3173,6 +3185,12 @@ def parse_args(args=None):
         "--stats",
         action="store_true",
         help="print graph counter stats",
+    )
+    parser.add_argument(
+        "--use-warm-peak-memory",
+        "--use_warm_peak_memory",
+        action="store_true",
+        help="Measure peak memory using a warm run to reduce autotuning noise",
     )
     parser.add_argument(
         "--print-memory",
