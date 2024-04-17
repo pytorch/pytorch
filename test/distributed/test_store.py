@@ -71,7 +71,7 @@ class StoreTestBase:
     def _create_store(self, i):
         raise RuntimeError("not implemented")
 
-    def _test_set_get(self, fs):
+    def _test_set_get_check(self, fs):
         fs.add("key", 1)
         fs.add("key", 2)
         fs.add("key", 3)
@@ -90,14 +90,16 @@ class StoreTestBase:
         self.assertEqual(b"value1", fs.get("key1"))
         self.assertEqual(b"value2", fs.get("key2"))
         self.assertEqual(b"21", fs.get("key3"))
+        self.assertTrue(fs.check(["key3"]))
+        self.assertFalse(fs.check(["Randomkey3"]))
 
         fs.set("-key3", "7")
         self.assertEqual(b"7", fs.get("-key3"))
         fs.delete_key("-key3")
         self.assertEqual(fs.num_keys(), self.num_keys_total)
 
-    def test_set_get(self):
-        self._test_set_get(self._create_store())
+    def test_set_get_check(self):
+        self._test_set_get_check(self._create_store())
 
     def _test_compare_set(self, store):
         missing_key_result = store.compare_set("cs_key0", "wrong_old_value", "new_value0")
@@ -440,6 +442,12 @@ class PrefixTCPStoreTest(TestCase, StoreTestBase):
     @property
     def num_keys_total(self):
         return 6
+
+    def test_underlying_non_prefix_store(self):
+        store = self._create_store()
+        wrapped_store = dist.PrefixStore(self.prefix, dist.PrefixStore(self.prefix, store))
+        self.assertEqual(self.tcpstore, store._underlying_non_prefix_store)
+        self.assertEqual(self.tcpstore, wrapped_store._underlying_non_prefix_store)
 
 class MyPythonStore(dist.Store):
     def __init__(self):
