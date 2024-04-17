@@ -160,7 +160,7 @@ class RangeVariable(BaseListVariable):
         elif len(items_to_map) == 3:
             start, stop, step = items_to_map
         else:
-            raise AssertionError()
+            raise AssertionError
 
         assert stop is not None
         super().__init__([start, stop, step], **kwargs)
@@ -592,7 +592,7 @@ class SliceVariable(BaseListVariable):
         elif len(items_to_map) == 3:
             start, stop, step = items_to_map
         else:
-            raise AssertionError()
+            raise AssertionError
 
         if isinstance(start, variables.TensorVariable) or isinstance(
             stop, variables.TensorVariable
@@ -644,7 +644,7 @@ class ListIteratorVariable(VariableTracker):
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
-            raise StopIteration()
+            raise StopIteration
         tx.output.side_effects.mutation(self)
         self.index += 1
         return self.items[old_index]
@@ -665,7 +665,7 @@ class ListIteratorVariable(VariableTracker):
 
     def as_python_constant(self):
         if self.index > 0:
-            raise NotImplementedError()
+            raise NotImplementedError
         return iter([x.as_python_constant() for x in self.items])
 
     def unpack_var_sequence(self, tx):
@@ -748,7 +748,7 @@ class RestrictedListSubclassVariable(ListVariable):
         return [x.as_proxy() for x in self.items]
 
     def as_python_constant(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def is_python_constant(self):
         return False
