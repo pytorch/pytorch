@@ -2756,7 +2756,9 @@ CPU_TEST_FAILURES = {
     "test_while_loop_with_parameters": fail_stack_allocation(is_skip=True),
     "test_while_loop_with_outer_buffers": fail_stack_allocation(is_skip=True),
     "test_runtime_checks_dtype_failed": fail_minimal_arrayref_interface(is_skip=True),
-    "test_runtime_checks_shape_failed": fail_with_and_without_stack_allocation(is_skip=True),
+    "test_runtime_checks_shape_failed": fail_with_and_without_stack_allocation(
+        is_skip=True
+    ),
 }
 
 CUDA_TEST_FAILURES = {
@@ -2922,8 +2924,12 @@ copy_tests(
     "non_abi_compatible_cpu",
     # test_failures, xfail by default, set is_skip=True to skip
     {
-        "test_addmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
-        "test_bmm_multiple_dynamic": TestFailure(("non_abi_compatible_cpu",), is_skip=True),
+        "test_addmm_multiple_dynamic": TestFailure(
+            ("non_abi_compatible_cpu",), is_skip=True
+        ),
+        "test_bmm_multiple_dynamic": TestFailure(
+            ("non_abi_compatible_cpu",), is_skip=True
+        ),
         "test_duplicate_constant_folding": TestFailure(
             ("non_abi_compatible_cpu",), is_skip=True
         ),
