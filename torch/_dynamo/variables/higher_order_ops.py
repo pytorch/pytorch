@@ -164,6 +164,9 @@ def validate_args_and_maybe_create_graph_inputs(
         for a in sub_args:
             assert isinstance(a, VariableTracker)
             if set_subgraph_inputs == "automatic":
+                args.append(a)
+                continue
+            elif set_subgraph_inputs == "semi_automatic":
                 if isinstance(a, AutogradFunctionContextVariable):
                     tracer.create_graph_input(a.as_proxy().node.name)
                 elif a.maybe_fx_node() is not None:
@@ -354,6 +357,7 @@ def speculate_subgraph(
 
     assert set_subgraph_inputs in {
         "automatic",
+        "semi_automatic",
         "flatten_manual",
         "manual",
     }, "Please use one of the supported set_subgraph_inputs options."
@@ -1497,7 +1501,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_args,
             kwargs,
             "autograd.Function",
-            set_subgraph_inputs="automatic",
+            set_subgraph_inputs="semi_automatic",
             restore_side_effects=False,
             tracer=fwd_tracer,
         )

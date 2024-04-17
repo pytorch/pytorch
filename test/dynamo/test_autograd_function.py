@@ -3,6 +3,8 @@
 import copy
 import math
 
+from dataclasses import dataclass
+
 import torch
 
 import torch._dynamo.test_case
@@ -467,32 +469,35 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, MyMM.apply(a, a))
         self.assertEqual(cnt.frame_count, 1)
 
-    def test_graph_break_if_lifted_free_variable(self):
-        torch._dynamo.utils.counters.clear()
-        cnt = torch._dynamo.testing.CompileCounter()
-        delta = torch.randn(3)
+    def test_arbitrary_input_types(self):
+        @dataclass
+        class Weird:
+            x: int
+            y: torch.Tensor
 
         class Foo(torch.autograd.Function):
             @staticmethod
-            def forward(ctx, x):
-                return x.clone(), (x + delta).clone()
+            def forward(ctx, x: torch.Tensor, weird: Weird, z: torch.Tensor):
+                ctx.save_for_backward(weird.y)
+                return x.clone() * weird.y
 
             @staticmethod
-            def backward(ctx, grad1, grad2):
-                return grad1 + grad2
+            def backward(ctx, grad):
+                (y,) = ctx.saved_tensors
+                return grad * y, None, grad * 2
 
-        @torch.compile(backend=cnt)
-        def f(x):
-            return Foo.apply(x)
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x, weird, z):
+            return Foo.apply(x, weird, z)
 
-        x = torch.randn(3, requires_grad=True)
-        result = f(x)
+        x = torch.tensor(2.0, requires_grad=True)
+        weird = Weird(1.2, torch.tensor(2.5))
+        z = torch.tensor(3.0, requires_grad=True)
 
-        self.assertEqual(result, Foo.apply(x))
-        self.assertEqual(cnt.frame_count, 1)
-        self.assertEqual(
-            list(torch._dynamo.utils.counters["graph_break"].values()), [1]
-        )
+        result = f(x, weird, z)
+        result.sum().backward()
+
+        self.assertEqual(result, Foo.apply(x, weird, z))
 
     def test_function_with_bound_free_variable(self):
         class LowerBound(torch.autograd.Function):
