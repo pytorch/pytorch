@@ -48,38 +48,6 @@ class PassType(Enum):
     BWD = auto()
 
 
-def benchmark_with_profiler(
-    benchmark_fn,
-    *benchmark_fn_args,
-    **benchmark_fn_kwargs,
-) -> None:
-    torch._C._profiler._set_cuda_sync_enabled_val(False)
-    wait, warmup, active = 1, 1, 2
-    num_steps = wait + warmup + active
-    rank = dist.get_rank()
-    with torch.profiler.profile(
-        activities=[
-            torch.profiler.ProfilerActivity.CPU,
-            torch.profiler.ProfilerActivity.CUDA,
-        ],
-        schedule=torch.profiler.schedule(
-            wait=wait, warmup=warmup, active=active, repeat=1, skip_first=1
-        ),
-        on_trace_ready=(
-            torch.profiler.tensorboard_trace_handler("./") if not rank else None
-        ),
-        record_shapes=True,
-        profile_memory=True,
-        with_stack=True,
-        with_flops=True,
-        with_modules=False,
-    ) as prof:
-        for step_idx in range(1, num_steps + 1):
-            benchmark_fn(*benchmark_fn_args, **benchmark_fn_kwargs)
-            if rank is None or rank == 0:
-                prof.step()
-
-
 class TestCommunication(FSDPTest):
     """Tests ``FullyShardedDataParallel``'s collective communication usage."""
 
@@ -402,13 +370,6 @@ class TestExplicitUnshard(FSDPTest):
 
         torch.manual_seed(42 + self.rank + 1)
         inp = torch.randn((batch_size, dim), device="cuda")
-
-        # def inner():
-        #     model(inp).sum().backward()
-        #     optim.step()
-
-        # benchmark_with_profiler(inner)
-        # exit()
 
         for _ in range(10):
             losses: List[torch.Tensor] = []
