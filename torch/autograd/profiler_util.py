@@ -414,6 +414,10 @@ class FormattedTimesMixin:
     def device_time(self):
         return 0.0 if self.count == 0 else 1.0 * self.device_time_total / self.count  # type: ignore[attr-defined]
 
+    @property
+    def cuda_time(self):  # To be deprecated
+        return device_time(self)
+
 
 class Interval:
     def __init__(self, start, end):
@@ -534,6 +538,11 @@ class FunctionEvent(FormattedTimesMixin):
         )
 
     @property
+    def self_cuda_memory_usage(self):  # To be deprecated
+        self_device_memory_usage(self)
+
+
+    @property
     def cpu_time_total(self):
         if self.device_type == DeviceType.CPU:
             return self.time_range.elapsed_us()
@@ -569,6 +578,11 @@ class FunctionEvent(FormattedTimesMixin):
             return self.time_range.elapsed_us()
 
     @property
+    def cuda_time_total(self):  # To be deprecated
+        device_time_total(self)
+
+
+    @property
     def self_device_time_total(self):
         if self.is_async or not self.use_device:
             return 0
@@ -581,11 +595,15 @@ class FunctionEvent(FormattedTimesMixin):
             return self.device_time_total
 
     @property
+    def self_cuda_time_total(self):  # To be deprecated
+        self_device_time_total(self)
+
+    @property
     def key(self):
         return self.name
 
     def __repr__(self):
-        device_name = "cuda" if not self.use_device else self.use_device
+        device_name = self.use_device
         device_time = self.device_time_str
         device_memory_usage = self.device_memory_usage
         return (
@@ -802,9 +820,9 @@ def _build_table(
     # Running on PrivateUse1 device with profiler but not enable
     # ProfilerActivity.PrivateUse1 can also catch privateuse1 memory usage.
     # Here only need to check has_privateuse1_time if not use_device.
-    if not use_device and use_device == "privateuseone" and has_device_time:
+    if not use_device and has_device_time:
         raise RuntimeError(
-            "use_device is None, but there is private device performance data."
+            "use_device is None, but there is device performance data."
         )
 
     has_input_shapes = any(
@@ -861,8 +879,8 @@ def _build_table(
         "CPU total",
         "CPU time avg",
     ]
+    device_name = use_device.upper()
     if has_device_time:
-        device_name = use_device.upper()
         headers.extend(
             [
                 f"Self {device_name}",
@@ -879,7 +897,6 @@ def _build_table(
             ]
         )
         if has_device_mem:
-            device_name = use_device.upper()
             headers.extend(
                 [
                     f"{device_name} Mem",
@@ -957,13 +974,13 @@ def _build_table(
         result.append(s)
         result.append("\n")  # Yes, newline after the end as well
 
-    sum_self_cpu_time_total = sum([event.self_cpu_time_total for event in events])
+    sum_self_cpu_time_total = 0
     sum_self_device_time_total = 0
     for evt in events:
-        if evt.device_type == DeviceType.CPU:
+        sum_self_cpu_time_total += evt.self_cpu_time_total
+        if evt.device_type == DeviceType.CPU and evt.is_legacy:
             # in legacy profiler, kernel info is stored in cpu events
-            if evt.is_legacy:
-                sum_self_device_time_total += evt.self_device_time_total
+            sum_self_device_time_total += evt.self_device_time_total
         elif evt.device_type in [DeviceType.CUDA, DeviceType.PrivateUse1]:
             # in kineto profiler, there're events with the correct device type (e.g. CUDA)
             sum_self_device_time_total += evt.self_device_time_total
