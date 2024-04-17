@@ -16,6 +16,7 @@ GEMM_TEMPLATE = r"""
 extern "C"
 {{kernel.def_kernel(inputs=[X, W, inp], outputs=[Y], names_str="X, W, inp, Y")}}
 {
+    // TODO: support >2D tensors
     int64_t M = {{kernel.size(Y, 0)}};
     int64_t N = {{kernel.size(Y, 1)}};
     int64_t K = {{kernel.size(X, 1)}};
