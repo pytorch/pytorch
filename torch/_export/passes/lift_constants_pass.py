@@ -239,12 +239,16 @@ def rewrite_script_object_meta(
     constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]] = {}
     for node in gm.graph.nodes:
         if "val" not in node.meta or not isinstance(
-            node.meta["val"], torch.ScriptObject
+            node.meta["val"],
+            (torch.ScriptObject, torch._library.fake_class_registry.FakeScriptObject),
         ):
             continue
 
         old_meta = node.meta["val"]
-        class_fqn = old_meta._type().qualified_name()  # type: ignore[attr-defined]
+        if isinstance(old_meta, torch._library.fake_class_registry.FakeScriptObject):
+            class_fqn = old_meta._qualified_name  # type: ignore[attr-defined]
+        else:
+            class_fqn = old_meta._type().qualified_name()  # type: ignore[attr-defined]
         new_meta = CustomObjArgument(node.name, class_fqn)
         constants[node.name] = old_meta
         node.meta["val"] = new_meta

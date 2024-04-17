@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 
+import contextlib
 import unittest
 
 import torch
@@ -44,6 +45,12 @@ class TestExportTorchbind(TestCase):
     def setUp(self):
         load_torchbind_test_lib()
 
+        test = self
+        test.tq_push_counter = 0
+        test.tq_pop_counter = 0
+        test.tq_size_counter = 0
+        test.foo_add_tensor_counter = 0
+
         @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
         class FakeFoo:
             def __init__(self, x: int, y: int):
@@ -56,12 +63,8 @@ class TestExportTorchbind(TestCase):
                 return cls(x, y)
 
             def add_tensor(self, z):
+                test.foo_add_tensor_counter += 1
                 return (self.x + self.y) * z
-
-        test = self
-        test.tq_push_counter = 0
-        test.tq_pop_counter = 0
-        test.tq_size_counter = 0
 
         @torch._library.register_fake_class("_TorchScriptTesting::_TensorQueue")
         class FakeTensorQueue:
@@ -277,6 +280,19 @@ def forward(self, x, cc):
     add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return (add,)""",
         )
+        # aot_export_function runs the program twice
+        # in run_functionalized_fw_and_collect_metadata and create_aot_dispatcher_function
+        # We also have a re-tracing test, which doubles the count.
+        self.assertEqual(self.foo_add_tensor_counter, 4)
+
+    @contextlib.contextmanager
+    def _register_py_impl_temporially(self, op_overload, key, fn):
+        try:
+            op_overload.py_impl(key)(fn)
+            yield
+        finally:
+            del op_overload.py_kernels[key]
+            op_overload._dispatch_cache.clear()
 
     @parametrize("pre_dispatch", [True, False])
     def test_input_as_custom_op_argument(self, pre_dispatch):
@@ -288,9 +304,28 @@ def forward(self, x, cc):
                 return x + torch.ops._TorchScriptTesting.takes_foo(cc, x)
 
         cc = torch.classes._TorchScriptTesting._Foo(10, 20)
-        ep = self._test_export_same_as_eager(
-            MyModule(), (torch.ones(2, 3), cc), strict=False, pre_dispatch=pre_dispatch
-        )
+        # Even though a C++ implementation for takes_foo.default is registered,
+        # we still need the python implementation for takes_foo.default to trace with FakeFoo.
+        with self.assertRaisesRegex(RuntimeError, "no python implementation is found"):
+            self._test_export_same_as_eager(
+                MyModule(),
+                (torch.ones(2, 3), cc),
+                strict=False,
+                pre_dispatch=pre_dispatch,
+            )
+
+        with self._register_py_impl_temporially(
+            torch.ops._TorchScriptTesting.takes_foo.default,
+            torch._C.DispatchKey.Meta,
+            lambda cc, x: cc.add_tensor(x),
+        ):
+            ep = self._test_export_same_as_eager(
+                MyModule(),
+                (torch.ones(2, 3), cc),
+                strict=False,
+                pre_dispatch=pre_dispatch,
+            )
+
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\

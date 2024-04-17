@@ -66,8 +66,12 @@ def fakify(
     sources: Dict[Tuple[int, int], List[Source]],
 ):
     source = key_path_to_source(kp)
-    if _is_constant_argument(t) or isinstance(t, torch.ScriptObject):
+    if _is_constant_argument(t):
         return t
+
+    if isinstance(t, torch.ScriptObject):
+        return torch._library.fake_class_registry.to_fake_obj(mode, t)
+
     if not isinstance(t, torch.Tensor):
         raise ValueError(f"Unsupported input type {type(t)}")
     n_dims = len(t.shape)

@@ -583,6 +583,8 @@ def _export_non_strict(
             return CustomObjArgument(
                 name=node.name, class_fqn=val._type().qualified_name()  # type: ignore[attr-defined]
             )
+        elif isinstance(val, torch._library.fake_class_registry.FakeScriptObject):
+            return CustomObjArgument(name=node.name, class_fqn=val._qualified_name)
         else:
             # TODO: this branch is likely wrong, all permissible ConstantArgument type
             # should have been handled already
