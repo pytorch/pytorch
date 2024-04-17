@@ -16,6 +16,7 @@ To improve the performance we can move parts of the implementation to C++.
 """
 
 import dataclasses
+import functools
 import importlib
 import json
 import sys
@@ -221,6 +222,34 @@ def register_pytree_node(
         )
 
 
+def _register_namedtuple(
+    cls: Type[Any],
+    *,
+    serialized_type_name: str,
+) -> None:
+    """
+    Registers a namedtuple as a valid pytree node. By default namedtuples are
+    valid pytree nodes, but they are not serializable. This API provides the
+    argument `serialized_type_name` which allows these namedtuples to be
+    serialized.
+
+    Args:
+        cls: the dataclass type to register
+        serialized_type_name: The serialized name for the dataclass. This is
+        required if you want to serialize the pytree TreeSpec containing this
+        namedtuple.
+    """
+    _private_register_pytree_node(
+        cls,
+        _namedtuple_flatten,
+        _namedtuple_unflatten,
+        serialized_type_name=serialized_type_name,
+        to_dumpable_context=_namedtuple_serialize,
+        from_dumpable_context=_namedtuple_deserialize,
+        flatten_with_keys_fn=_namedtuple_flatten_with_keys,
+    )
+
+
 def _register_pytree_node(
     cls: Type[Any],
     flatten_fn: FlattenFunc,
@@ -422,18 +451,34 @@ def _namedtuple_unflatten(values: Iterable[Any], context: Context) -> NamedTuple
 
 
 def _namedtuple_serialize(context: Context) -> DumpableContext:
-    json_namedtuple = {
-        "class_name": context.__name__,
-        "fields": context._fields,
-    }
-    return json_namedtuple
+    if context not in SUPPORTED_SERIALIZED_TYPES:
+        raise NotImplementedError(
+            f"Can't serialize TreeSpec of namedtuple class {context} because we "
+            "didn't register a serializated_type_name. Please register using "
+            "`_register_namedtuple`."
+        )
+
+    serialize_node_def = SUPPORTED_SERIALIZED_TYPES[context]
+    serialized_type_name = serialize_node_def.serialized_type_name
+
+    if serialized_type_name == NO_SERIALIZED_TYPE_NAME_FOUND:
+        raise NotImplementedError(
+            f"Can't serialize TreeSpec of namedtuple class {context} because we "
+            "couldn't find a serializated_type_name. Please register using "
+            "`_register_namedtuple`."
+        )
+    return serialized_type_name
 
 
 def _namedtuple_deserialize(dumpable_context: DumpableContext) -> Context:
-    class_name = dumpable_context["class_name"]
-    assert isinstance(class_name, str)
-    context = namedtuple(class_name, dumpable_context["fields"])  # type: ignore[misc]
-    return context
+    if dumpable_context not in SERIALIZED_TYPE_TO_PYTHON_TYPE:
+        raise NotImplementedError(
+            f"Can't deserialize TreeSpec of namedtuple class {dumpable_context} "
+            "because we couldn't find a serializated name."
+        )
+
+    typ = SERIALIZED_TYPE_TO_PYTHON_TYPE[dumpable_context]
+    return typ
 
 
 def _ordereddict_flatten(d: GenericOrderedDict[Any, Any]) -> Tuple[List[Any], Context]:
@@ -1012,7 +1057,7 @@ def map_only(
         raise TypeError("Argument must be a type, a tuple of types, or a callable.")
 
     def wrapper(func: Callable[[T], Any]) -> Callable[[Any], Any]:
-        # @functools.wraps(func)  # torch dynamo doesn't support this yet
+        @functools.wraps(func)
         def wrapped(x: T) -> Any:
             if pred(x):
                 return func(x)
