@@ -139,7 +139,7 @@ def dont_trace_nn_module_wrapped_call_impl():
     try:
         yield False
     finally:
-        _TLS.inline_nn_module_wrapped_call_impl = True
+        _TLS.inline_nn_module_wrapped_call_impl = old
 
 
 manual_torch_name_rule_map = {
