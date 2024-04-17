@@ -139,7 +139,7 @@ class CustomOpDef:
         return f"<CustomOpDef({self._qualname})>"
 
     def register_impl(
-        self, device_types: device_types_t, fn: Optional[Callable] = None
+        self, device_types: device_types_t, fn: Optional[Callable] = None, /
     ) -> Callable:
         """Register an implementation for a device type for this operator.
 
@@ -233,7 +233,7 @@ class CustomOpDef:
             return inner
         return inner(fn)
 
-    def register_fake(self, fn: Callable) -> Callable:
+    def register_fake(self, fn: Callable, /) -> Callable:
         r"""Register a FakeTensor implementation for this custom op.
 
         This is necessary to get the operator to work efficiently with torch.compile.
@@ -366,16 +366,6 @@ class CustomOpDef:
                 f"Cannot register autograd formula for non-functional operator "
                 f"{self} with schema {schema}. Please create "
                 f"a functional operator and register an autograd formula for that."
-            )
-
-        if any(
-            _library.utils.is_tensorlist_like_type(a.type)
-            for a in (*schema.arguments, *schema.returns)
-        ):
-            raise NotImplementedError(
-                f"NYI: registering autograd formula for operator {self} that "
-                f"accepts or takes Tensor lists. "
-                f"Please open an issue if you want us to prioritize this feature"
             )
 
         self._backward_fn = backward_fn

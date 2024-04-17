@@ -97,6 +97,14 @@ ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_data,
   if (b >= batch_size)
     return;
 
+  if (input_length == 0) {
+    if (threadIdx.x == 0) {
+      scalar_t log_likelihood = target_length == 0 ? 0 : neginf;
+      neg_log_likelihood_data[b] = -log_likelihood;
+    }
+    return;
+  }
+
   // first row (t=0), the three equations for alpha_1 above eq (6)
   for (int64_t block_s = 0; block_s < 2*max_target_length+1; block_s += blockDim.x) {
     int64_t s = threadIdx.x + block_s;
@@ -237,6 +245,9 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   if (targets.dim() == 1) { // concatenated targets
     int64_t pos = 0;
     for (int64_t i = 0; i < batch_size; i++) {
+      TORCH_CHECK(target_lengths[i] >= 0,
+                  "Expected target_lengths to have value at least ", 0, ", but got value ", target_lengths[i],
+                  " (while checking arguments for ", c, ")");
       tg_batch_offsets_data[i] = pos;
       pos += target_lengths[i];
       if (max_target_length < target_lengths[i])
@@ -249,6 +260,9 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
     // dim is 2
     int64_t tg_batch_stride = targets.stride(0);
     for (int64_t i = 0; i < batch_size; i++) {
+      TORCH_CHECK(target_lengths[i] >= 0,
+                  "Expected target_lengths to have value at least ", 0, ", but got value ", target_lengths[i],
+                  " (while checking arguments for ", c, ")");
       tg_batch_offsets_data[i] = i * tg_batch_stride;
       if (max_target_length < target_lengths[i])
         max_target_length = target_lengths[i];
@@ -261,6 +275,9 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   }
   int64_t max_input_length = log_probs.size(0);
   for (int64_t b = 0; b < batch_size; b++) {
+    TORCH_CHECK(input_lengths[b] >= 0,
+             "Expected input_lengths to have value at least ", 0, ", but got value ", input_lengths[b],
+             " (while checking arguments for ", c, ")");
     TORCH_CHECK(input_lengths[b] <= max_input_length,
              "Expected input_lengths to have value at most ", max_input_length, ", but got value ", input_lengths[b],
              " (while checking arguments for ", c, ")");
@@ -320,6 +337,9 @@ ctc_loss_backward_log_beta_gpu_kernel(scalar_t* __restrict__ log_beta_data,
   int64_t tg_batch_offset = tg_batch_offsets[b];
 
   if (b >= batch_size)
+    return;
+
+  if (input_length == 0)
     return;
 
   // "first" row, the beta initialization before eq (10) (t=target_length - differes per batch)

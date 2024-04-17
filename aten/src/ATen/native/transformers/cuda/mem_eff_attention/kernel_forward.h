@@ -149,6 +149,9 @@ struct AttentionKernel {
     // [num_heads, num_queries] - can be null
     lse_scalar_t* logsumexp_ptr = nullptr;
 
+    // Sliding window. ignored if == 0
+    int32_t window_size = 0;
+
     // Scale
     accum_t scale;
 
@@ -617,6 +620,11 @@ struct AttentionKernel {
     TORCH_CHECK(
         p.custom_mask_type < NumCustomMaskTypes,
         "invalid value for `custom_mask_type`");
+    if (p.window_size > 0) {
+      TORCH_CHECK(
+          p.custom_mask_type == CausalFromTopLeft ||
+          p.custom_mask_type == CausalFromBottomRight);
+    }
     return true;
   }
 
@@ -699,6 +707,13 @@ struct AttentionKernel {
     // Iterate through keys
     for (int32_t iter_key_start = 0; iter_key_start < p.num_keys;
          iter_key_start += kKeysPerBlock) {
+      if (p.window_size > 0) {
+        // don't compute anything if below attention band
+        if (iter_key_start + kKeysPerBlock <
+            int32_t(query_start + p.causal_diagonal_offset) - p.window_size) {
+          continue;
+        }
+      }
       int32_t problem_size_0_m =
           cutlass::fast_min((int32_t)kQueriesPerBlock, p.num_queries);
       int32_t problem_size_0_n = cutlass::fast_min(
@@ -856,6 +871,40 @@ struct AttentionKernel {
             },
             [&](int accum_m) {});
       }
+
+      // Mask out lower left corner of block if window_size > 0
+      // only required if current block intersects with the lower left corner
+      // block starts at x_lowerleft = iter_key_start // y = query_start +
+      // kQueriesPerBlock first non masked value at this y is : x_first =
+      // query_start + kQueriesPerBlock - window_size mask if x_fist >
+      // x_lowerleft
+
+      if (p.window_size > 0 &&
+          (query_start + p.causal_diagonal_offset +
+               cutlass::fast_min(
+                   int32_t(kQueriesPerBlock), int32_t(p.num_queries)) -
+               p.window_size >=
+           iter_key_start)) {
+        auto query_start = blockIdx.x * kQueriesPerBlock;
+        auto lane_offset = MM0::AccumLambdaIterator::get_lane_offset(
+            my_lane_id, my_warp_id, iteratorC_tile_offset);
+        int32_t first_col;
+        const int32_t offset = query_start + p.causal_diagonal_offset -
+            p.window_size - iter_key_start;
+        MM0::AccumLambdaIterator::iterateRows(
+            lane_offset,
+            [&](int accum_m) { first_col = accum_m + offset; },
+            [&](int accum_m, int accum_n, int idx) {
+              if (accum_n <= first_col) {
+                accum[idx] =
+                    -cutlass::platform::numeric_limits<accum_t>::infinity();
+              }
+            },
+            [&](int accum_m) {});
+        // print_warp_accum<MM0::AccumLambdaIterator>(accum, lane_offset, 12,
+        // 12);
+      }
+
       // Update `mi` from accum stored in registers
       // Also does accum[i] <- exp(accum[i] - mi)
       iterative_softmax<typename MM0::Mma::Operator::IteratorC>(
@@ -995,8 +1044,20 @@ struct AttentionKernel {
         }
 
         if (!kKeepOutputInRF) {
+          int first_key = 0;
+          if (p.window_size > 0) {
+            first_key = (cutlass::fast_max(
+                             int(query_start + p.causal_diagonal_offset) -
+                                 p.window_size + 1,
+                             0) /
+                         kKeysPerBlock) *
+                kKeysPerBlock;
+          }
+
+          // int first_key_block = 0;
+          // MM1::Mma::drain_cp_asyncs(); # TODO figure out if this is needed for correctness
           DISPATCH_BOOL(
-              iter_key_start == 0, kIsFirst, ([&] {
+              iter_key_start == first_key, kIsFirst, ([&] {
                 DISPATCH_BOOL(
                     (iter_key_start + kKeysPerBlock) >= p.num_keys,
                     kIsLast,

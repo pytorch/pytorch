@@ -379,6 +379,21 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(
         capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
     )
+    def test_cat_unbacked_duplicate_size(self, device):
+        def f(x):
+            device = x.device
+            s, s2 = x.tolist()
+            g = torch.zeros(s, device=device)
+            g2 = torch.ones(s2, device=device)
+            return torch.ops.aten.cat.default([g, g, g2])
+
+        cf = torch.compile(fullgraph=True)(f)
+        arg = torch.tensor([4, 6], device="cuda")
+        self.assertEqual(f(arg), cf(arg))
+
+    @torch._dynamo.config.patch(
+        capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True
+    )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
         with torch.library._scoped_library("test", "DEF") as lib:
@@ -578,7 +593,7 @@ class TestInductorDynamic(TestCase):
         actual = cfn(3)
         self.assertEqual(expect, actual)
 
-    def test_full(self, device):
+    def test_full_symbolic_value(self, device):
         def fn(a):
             return torch.full((3,), a), torch.full((3,), torch.sym_float(a))
 
@@ -586,6 +601,25 @@ class TestInductorDynamic(TestCase):
         expect = fn(5)
         actual = cfn(5)
         self.assertEqual(expect, actual)
+
+    def test_full_recompiles(self, device):
+        def fn(x):
+            _, L = x.shape
+            return torch.full((L, L), torch.finfo(torch.float16).min, device=device)
+
+        cfn = self.compile_fn(fn)
+
+        import functools
+
+        input_fn = functools.partial(torch.randint, 10, 1000, device=device)
+
+        cfn(input_fn((2, 3)))
+        cfn(input_fn((2, 4)))  # expect don't recompile here
+
+        # check compiled times of frame 0
+        from torch._dynamo.convert_frame import FRAME_COMPILE_COUNTER
+
+        self.assertEqual(FRAME_COMPILE_COUNTER[0], 1)
 
     @parametrize(
         "op",
