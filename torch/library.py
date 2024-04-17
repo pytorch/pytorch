@@ -125,6 +125,30 @@ class Library:
         _defs.add(qualname)
         return result
 
+    def _register_fake(self, op_name, fn, _stacklevel=1):
+        r'''Registers the fake impl for an operator defined in the library.'''
+        source = torch._library.utils.get_source(_stacklevel + 1)
+        frame = sys._getframe(_stacklevel)
+        caller_module = inspect.getmodule(frame)
+        # Can be none if you call register_fake from somewhere there isn't a module
+        # (e.g. __main__)
+        caller_module_name = None if caller_module is None else caller_module.__name__
+
+        # TODO(rzou): We're gonna need to stage this change with torchvision,
+        # since torchvision is github first.
+        if caller_module_name is not None and caller_module_name.startswith("torchvision."):
+            caller_module_name = None
+
+        qualname = f"{self.ns}::{op_name}"
+        entry = torch._library.simple_registry.singleton.find(qualname)
+        if caller_module_name is not None:
+            func_to_register = _check_pystubs_once(fn, qualname, caller_module_name)
+        else:
+            func_to_register = fn
+
+        handle = entry.abstract_impl.register(func_to_register, source)
+        self._registration_handles.append(handle)
+
     def impl(self, op_name, fn, dispatch_key=''):
         r'''Registers the function implementation for an operator defined in the library.
 
@@ -491,34 +515,23 @@ def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
         >>> assert torch.allclose(trace(x), torch.ops.mylib.custom_nonzero(x))
 
     """
-    source = torch._library.utils.get_source(_stacklevel + 1)
-    frame = sys._getframe(_stacklevel)
-    caller_module = inspect.getmodule(frame)
-    # Can be none if you call register_fake from somewhere there isn't a module
-    # (e.g. __main__)
-    caller_module_name = None if caller_module is None else caller_module.__name__
+    stacklevel = _stacklevel
 
-    # TODO(rzou): We're gonna need to stage this change with torchvision,
-    # since torchvision is github first.
-    if caller_module_name is not None and caller_module_name.startswith("torchvision."):
-        caller_module_name = None
-
-    def inner(func):
-        entry = torch._library.simple_registry.singleton.find(qualname)
-        if caller_module_name is not None:
-            func_to_register = _check_pystubs_once(func, qualname, caller_module_name)
+    def register(func):
+        namespace, op_name = torch._library.utils.parse_namespace(qualname)
+        if lib is None:
+            use_lib = Library(namespace, "FRAGMENT")
+            _keep_alive.append(use_lib)
         else:
-            func_to_register = func
-
-        handle = entry.abstract_impl.register(func_to_register, source)
-        if lib is not None:
-            lib._registration_handles.append(handle)
+            use_lib = lib
+        use_lib._register_fake(op_name, func, _stacklevel=stacklevel)
         return func
 
     if func is None:
-        return inner
-    return inner(func)
-
+        return register
+    else:
+        stacklevel += 1
+        register(func)
 
 # If the op was defined in C++, then we want to make sure there was an
 # m.set_python_module(module, ...) call and that the module is the
