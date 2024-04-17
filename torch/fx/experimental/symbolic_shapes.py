@@ -286,8 +286,7 @@ def rebind_unbacked(shape_env, n: torch.fx.Node, result):
                 raw_u1 = sympy.sympify(u1)
             else:
                 raw_u1 = u1.node.expr
-            # TODO: replace with rename unbacked to
-            shape_env.defer_runtime_assert(sympy.Eq(raw_u0, raw_u1), "")
+            shape_env._rename_unbacked_to(raw_u0, raw_u1)
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
     r""" Canonicalize a boolean expression by transforming it into a lt / le
@@ -2400,6 +2399,11 @@ class ShapeEnv:
         finally:
             self.is_recording = False
 
+    # Unlike set_replacement, this records a shapeenv event
+    @record_shapeenv_event()
+    def _rename_unbacked_to(self, orig_s: sympy.Expr, new_s: sympy.Expr):
+        self._set_replacement(orig_s, new_s, "rename_unbacked_to")
+
     @record_shapeenv_event()
     def freeze(self):
         """Freeze this ShapeEnv to stop accumulating guards
@@ -4225,31 +4229,32 @@ class ShapeEnv:
                 floor_div_atoms = lhs.atoms(FloorDiv).union(rhs.atoms(FloorDiv))
                 if len(floor_div_atoms) > 0 and any(a.divisor != 1 for a in floor_div_atoms):
                     raise NotImplementedError
-                # short-circuit when no solving is needed
-
-                if isinstance(lhs, sympy.Symbol) and free_unbacked_symbols(lhs):
+                # Never replace unbacked symbols with other unbacked symbols.
+                # This is error prone because you can cause references to
+                # unbacked symbols to time travel backwards.  E.g.,
+                #
+                # u1 = x.item()
+                # ... use of u1 ...
+                # u2 = y.item()
+                # u3 = z.item()
+                # torch._check(u1 == u2 + u3)
+                #
+                # If you replace u1 with u2 + u3, then the use of u1 now
+                # references u2 and u3 prior to them actually being bound at
+                # runtime.  It's pretty inconvenient to setup control
+                # dependencies for substitutions, so ban it entirely.
+                if isinstance(lhs, sympy.Symbol) and free_unbacked_symbols(lhs) and not free_unbacked_symbols(rhs):
+                    # short-circuit when no solving is needed
                     self._set_replacement(lhs, self._find(rhs), "trivial_lhs")
-                elif isinstance(rhs, sympy.Symbol) and free_unbacked_symbols(rhs):
+                elif isinstance(rhs, sympy.Symbol) and free_unbacked_symbols(rhs) and not free_unbacked_symbols(lhs):
                     self._set_replacement(rhs, self._find(lhs), "trivial_rhs")
                 else:
                     r = try_solve(expr, free[0], floordiv_inequality=False)
                     if r is not None and all(t.is_integer for t in sympy.preorder_traversal(r[1])):
                         new_var = self._find(r[1])
-                        ok = False
-                        if self.is_unbacked_symint(free[0]):
-                            # If you have i0 + i1 + i2 = s0, don't substitute i2 =
-                            # s0 - i0 - i1.  Arguably this should be OK but the
-                            # runtime assert machinery is very delicate right now
-                            # so this causes things to fail e.g.,
-                            # test_split_unbacked_sizes
-                            ok = len(free_unbacked_symbols(new_var)) <= 1
-                            msg = "solve_unbacked"
-                        else:
-                            # Never substitute backed with unbacked
-                            ok = len(free_unbacked_symbols(new_var)) == 0
-                            msg = "solve_backed"
+                        ok = len(free_unbacked_symbols(new_var)) == 0
                         if ok:
-                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var, msg)
+                            self._set_replacement(cast(sympy.Symbol, free[0]), new_var, "solve")
             except NotImplementedError:
                 pass
         if expr.has(Mod):
