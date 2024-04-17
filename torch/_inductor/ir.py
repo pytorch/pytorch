@@ -7715,6 +7715,7 @@ class Wait(ExternKernelAlloc):
         inputs,
         constant_args=(),
     ):
+        raise Exception("DEBUG: we don't expect this to be used from full-graph compiled FSDP")
         super().__init__(layout, inputs, constant_args)
 
     def should_allocate(self):
@@ -8399,6 +8400,14 @@ class _WaitKernel(_CollectiveKernel):
         for vr in volatile_reads:
             read_writes.reads.add(dependencies.StarDep(vr.get_name()))
         return read_writes
+
+    def codegen(self, wrapper):
+        super().codegen(wrapper)
+        from .codegen.wrapper import FreeIfNotReusedLine
+        # NOTE(yf225): We assume the returned buffer from wait_tensor is not used in downstream code,
+        # and hence it should be safe to delete it immediately
+        # This is important for being able to release collective memory as soon as possible, by decreasing the collective output's refcount.
+        wrapper.writeline(FreeIfNotReusedLine(wrapper, self))
 
 
 # NB: recursive structure here reflects val_to_arg_str, avoid
