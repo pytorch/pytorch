@@ -976,7 +976,8 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             # We need to expand the example output from map() so that it has
             # the same first dimension as the mapped input.
             # We also do a clone with contiguous_format. This is to be consistent with
-            # eager semantic of map, which stacks the output and turns the memory layout to contiguous.
+            # eager semantic of map, which stacks the outputs. The result is contiguous
+            # as a result of the stack operation.
             map_example_out = [
                 t.expand(sample_shape[0], *t.size()).clone(
                     memory_format=torch.contiguous_format
