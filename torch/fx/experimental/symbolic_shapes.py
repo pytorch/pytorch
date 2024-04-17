@@ -1536,7 +1536,7 @@ class DimConstraints:
             multivariate_inequalities = self._multivariate_inequalities
             self._multivariate_inequalities = set()
             for expr in multivariate_inequalities:
-                self.add(expr.xreplace(s, self._substitutions[s]))
+                self.add(expr.xreplace({s: self._substitutions[s]}))
             self._raise_inconsistencies()
 
         self._specialize_divisor_symbols()
@@ -3276,13 +3276,13 @@ class ShapeEnv:
                     if (
                         not isinstance(expr, sympy.Symbol) and
                         symbol in symbol_to_constraints and
-                        not equalities_inputs.is_derived(source, symbol_to_source[symbol][0], lambda x: expr.xreplace(symbol, x))
+                        not equalities_inputs.is_derived(source, symbol_to_source[symbol][0], lambda x: expr.xreplace({symbol: x}))
                     ):
                         src = symbol_to_source[symbol][0]
                         msg = (
                             f"The values of {self._debug_name(source)} = {source.name()} must always be related to "
                             f"the values of {self._debug_name(src)} = {src.name()} by "
-                            f"{self._debug_name(source)} = {expr.xreplace(symbol, sympy.sympify(self._debug_name(src)))}."
+                            f"{self._debug_name(source)} = {expr.xreplace({symbol: sympy.sympify(self._debug_name(src))})}."
                         )
                         record_constraint_violation(equalities_inputs.warn_only, self._debug_name(source), msg)
 
