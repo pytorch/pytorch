@@ -8828,6 +8828,20 @@ def sample_inputs_pixel_unshuffle(op_info, device, dtype, requires_grad, **kwarg
         ]
     )
 
+def sample_inputs_channel_shuffle(op_info, device, dtype, requires_grad, **kwargs):
+    make_arg = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+
+    shapes_groups = [
+        ((1, 4, 10, 10), 2),
+        ((2, 6, 8, 8), 3),
+        ((2, 8, 5, 5), 4),
+    ]
+
+    yield from (
+        SampleInput(make_arg(shape), args=(groups,))
+        for shape, groups in shapes_groups
+    )
+
 def sample_inputs_binary_cross_entropy(op_info, device, dtype, requires_grad, logits=False, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype)
     # Lower bounds must be greater than 'eps' defined in gradcheck.py::gradgradcheck() -> eps
@@ -11223,7 +11237,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_gradgrad=False,
            assert_autodiffed=False,
-           supports_cow_input_no_materialize_backward=False,
            sample_inputs_func=sample_inputs_cdist),
     UnaryUfuncInfo('ceil',
                    ref=np.ceil,
@@ -11950,7 +11963,6 @@ op_db: List[OpInfo] = [
     OpInfo('sparse.sampled_addmm',
            dtypes=floating_and_complex_types(),
            supports_autograd=True,
-           supports_cow_input_no_materialize_backward=False,
            sample_inputs_func=sample_inputs_sparse_sampled_addmm,
            decorators=[
                skipCUDAIf(not ((_get_torch_cuda_version() >= (11, 3))
@@ -12005,7 +12017,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_gradgrad=False,
            supports_forward_ad=False,
-           supports_cow_input_no_materialize_backward=False,
            sample_inputs_func=sample_inputs_sparse_mm_reduce,
            decorators=[onlyCPU],
            skips=(
@@ -13003,7 +13014,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        supports_cow_input_no_materialize_backward=False,
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-5, rtol=1e-3)}),
@@ -13127,7 +13137,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            assert_jit_shape_analysis=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            sample_inputs_func=sample_inputs_native_layer_norm,
            error_inputs_func=error_inputs_native_layer_norm,
            skips=(
@@ -13147,7 +13156,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            allow_cow_input_materialize_forward=[3, 4],
-           supports_cow_input_no_materialize_backward=False,
+           allow_cow_input_materialize_backward=[3, 4],
            sample_inputs_func=sample_inputs_native_batch_norm,
            skips=(
                # NotImplementedError: Could not run
@@ -13176,7 +13185,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            allow_cow_input_materialize_forward=[3, 4],
-           supports_cow_input_no_materialize_backward=False,
+           allow_cow_input_materialize_backward=[3, 4],
            sample_inputs_func=sample_inputs__native_batch_norm_legit,
            skips=(
                # NotImplementedError: Could not run
@@ -13203,7 +13212,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            allow_cow_input_materialize_forward=[3, 4],
-           supports_cow_input_no_materialize_backward=False,
+           allow_cow_input_materialize_backward=[3, 4],
            sample_inputs_func=sample_inputs__batch_norm_with_update,
            skips=(
                # NotImplementedError: Could not run
@@ -13241,7 +13250,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_adaptive_avg_pool1d,
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
@@ -13261,7 +13269,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_adaptive_avg_pool2d,
            sample_inputs_func=sample_inputs_adaptive_avg_pool2d),
@@ -13286,7 +13293,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_adaptive_avg_pool3d,
            sample_inputs_func=sample_inputs_adaptive_avg_pool3d),
@@ -13297,7 +13303,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # got: Batching rule not implemented for aten::flatten.using_ints
            check_batched_forward_grad=False,
-           supports_cow_input_no_materialize_backward=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_adaptive_max_pool1d,
            sample_inputs_func=sample_inputs_adaptive_max_pool1d),
@@ -13319,7 +13324,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # got: Batching rule not implemented for aten::flatten.using_ints
            check_batched_forward_grad=False,
-           supports_cow_input_no_materialize_backward=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_adaptive_max_pool2d,
            sample_inputs_func=sample_inputs_adaptive_max_pool2d),
@@ -13344,7 +13348,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # got: Batching rule not implemented for aten::flatten.using_ints
            check_batched_forward_grad=False,
-           supports_cow_input_no_materialize_backward=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_adaptive_max_pool3d,
            sample_inputs_func=sample_inputs_adaptive_max_pool3d),
@@ -13354,7 +13357,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -13365,7 +13367,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=floating_types_and(torch.int64),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -13408,7 +13409,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_nn_activation_relu,
         supports_out=False,
         supports_fwgrad_bwgrad=True,
-        supports_cow_input_no_materialize_backward=False,
         supports_forward_ad=True),
     OpInfo('nn.functional.conv_transpose1d',
            # `ref` for this function is backward of
@@ -13423,7 +13423,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           supports_cow_input_no_materialize_backward=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=(
                DecorateInfo(
@@ -13470,7 +13469,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           supports_cow_input_no_materialize_backward=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=[
                DecorateInfo(
@@ -13517,7 +13515,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           supports_cow_input_no_materialize_backward=False,
            # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -13578,7 +13575,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           supports_cow_input_no_materialize_backward=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            decorators=(
                DecorateInfo(
@@ -13619,7 +13615,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           supports_cow_input_no_materialize_backward=False,
            decorators=(
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
@@ -13651,7 +13646,6 @@ op_db: List[OpInfo] = [
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            decorators=(
                DecorateInfo(
                    toleranceOverride({torch.chalf: tol(atol=6e-2, rtol=5e-2)}),
@@ -13694,7 +13688,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            error_inputs_func=error_inputs_group_norm,
            decorators=[
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
@@ -13711,7 +13704,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            allow_cow_input_materialize_forward=['running_mean', 'running_var'],
-           supports_cow_input_no_materialize_backward=False,
            decorators=[
                # RuntimeError: Cannot insert a Tensor that requires grad as a constant.
                # Consider making it a parameter or input, or detaching the gradient
@@ -13731,7 +13723,6 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
-           supports_cow_input_no_materialize_backward=False,
            decorators=[
                DecorateInfo(
                    toleranceOverride({torch.float32: tol(atol=1e-05, rtol=1e-03)}),
@@ -13790,7 +13781,6 @@ op_db: List[OpInfo] = [
            variant_test_name='reflect',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='reflect'),
@@ -13806,7 +13796,6 @@ op_db: List[OpInfo] = [
            variant_test_name='replicate',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_nn_pad, mode='replicate'),
@@ -13822,7 +13811,6 @@ op_db: List[OpInfo] = [
            variant_test_name='replicate_negative',
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=all_types_and_complex_and(torch.bfloat16),
            dtypesIfCUDA=all_types_and_complex_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_nn_pad_replicate_negative,
@@ -13887,7 +13875,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=floating_types_and(torch.uint8, torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_interpolate, 'nearest'),
            skips=(
@@ -13903,7 +13890,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=floating_types_and(torch.half, torch.bfloat16, torch.uint8),
            sample_inputs_func=partial(sample_inputs_interpolate, 'nearest-exact'),
            skips=(
@@ -13926,7 +13912,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_fwgrad_bwgrad=True,
            supports_forward_ad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_interpolate, 'linear'),
            skips=(
@@ -13942,7 +13927,6 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            supports_autograd=True,
            supports_forward_ad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=floating_types_and(torch.uint8, torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -13961,7 +13945,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=floating_types_and(torch.uint8, torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_interpolate, 'bicubic'),
@@ -13980,7 +13963,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_interpolate, 'trilinear'),
@@ -13997,7 +13979,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=floating_types_and(torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=partial(sample_inputs_interpolate, 'area'),
@@ -14013,7 +13994,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=floating_types_and(torch.uint8, torch.half, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
@@ -14037,7 +14017,6 @@ op_db: List[OpInfo] = [
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample_aa, 'bilinear'),
            supports_out=False,
-           supports_cow_input_no_materialize_backward=False,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
                DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
@@ -14058,7 +14037,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=floating_types_and(torch.uint8, torch.half, torch.bfloat16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=partial(sample_inputs_upsample, 'nearest'),
@@ -14084,7 +14062,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         supports_gradgrad=False,
-        supports_cow_input_no_materialize_backward=False,
         sample_inputs_func=sample_inputs_multi_margin_loss,
         reference_inputs_func=reference_inputs_multi_margin_loss,
         error_inputs_func=error_inputs_multi_margin_loss,
@@ -14102,7 +14079,6 @@ op_db: List[OpInfo] = [
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
         supports_out=False,
         supports_gradgrad=False,
-        supports_cow_input_no_materialize_backward=False,
         sample_inputs_func=sample_inputs_multilabel_margin_loss,
         reference_inputs_func=reference_inputs_multilabel_margin_loss,
         error_inputs_func=error_inputs_multilabel_margin_loss,
@@ -14129,7 +14105,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_multilabel_soft_margin_loss,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        supports_cow_input_no_materialize_backward=False,
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
@@ -14156,7 +14131,6 @@ op_db: List[OpInfo] = [
            supports_autograd=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=floating_types_and(torch.int64, torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_avg_pool2d,
@@ -14175,7 +14149,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            test_neg_view=False,
-           supports_cow_input_no_materialize_backward=False,
            sample_inputs_func=sample_inputs_fractional_max_pool2d,
            decorators=(
                # FIXME: AssertionError: False is not true : Tensors failed to compare as equal!
@@ -14196,7 +14169,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            test_neg_view=False,
-           supports_cow_input_no_materialize_backward=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            sample_inputs_func=sample_inputs_fractional_max_pool3d,
            decorators=(
@@ -14219,7 +14191,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            skips=(
@@ -14245,7 +14216,6 @@ op_db: List[OpInfo] = [
            # got: Batching rule not implemented for aten::flatten.using_ints
            check_batched_forward_grad=False,
            assert_jit_shape_analysis=True,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_max_pool2d,
@@ -14286,7 +14256,6 @@ op_db: List[OpInfo] = [
            check_batched_forward_grad=False,
            # TODO: add shape checks
            assert_jit_shape_analysis=False,
-           supports_cow_input_no_materialize_backward=False,
            dtypes=all_types_and(torch.bfloat16, torch.float16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            # TODO: investigate nondeterminism
@@ -14450,7 +14419,6 @@ op_db: List[OpInfo] = [
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            supports_out=False),
     UnaryUfuncInfo(
         'nn.functional.elu',
@@ -14492,7 +14460,6 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        supports_cow_input_no_materialize_backward=False,
         # test_reference_numerics only tests the case when the weight tensor is a scalar
         sample_kwargs=sample_kwargs_prelu_scalar_weight,
         error_inputs_func=error_inputs_prelu,
@@ -14620,7 +14587,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=False,
         supports_fwgrad_bwgrad=True,
         check_batched_forward_grad=False,
-        supports_cow_input_no_materialize_backward=False,
         decorators=[DecorateInfo(toleranceOverride(
             {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon',), ],
         skips=(
@@ -14864,7 +14830,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_gradgrad=True,
-        supports_cow_input_no_materialize_backward=False,
         # autodiff_nonfusible_nodes=["aten::log_sigmoid"],
         decorators=[
             DecorateInfo(
@@ -14962,7 +14927,6 @@ op_db: List[OpInfo] = [
         assert_autodiffed=False,
         supports_gradgrad=True,
         supports_out=False,
-        supports_cow_input_no_materialize_backward=False,
         sample_kwargs=lambda device, dtype, input: ({'threshold': float.fromhex('0x1.3ap-3'),
                                                     'value': -9},
                                                     {'threshold': float.fromhex('0x1.3ap-3'),
@@ -15059,7 +15023,7 @@ op_db: List[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            assert_jit_shape_analysis=True,
            allow_cow_input_materialize_forward=[1, 2],
-           supports_cow_input_no_materialize_backward=False,
+           allow_cow_input_materialize_backward=[1, 2],
            sample_inputs_func=sample_inputs_batch_norm,
            skips=(
                # see https://github.com/pytorch/pytorch/issues/71286
@@ -15083,7 +15047,7 @@ op_db: List[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            allow_cow_input_materialize_forward=[1, 2],
-           supports_cow_input_no_materialize_backward=False,
+           allow_cow_input_materialize_backward=[1, 2],
            decorators=[onlyCUDA, disablecuDNN],
            skips=(
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-04)}),
@@ -15101,7 +15065,6 @@ op_db: List[OpInfo] = [
         supports_autograd=True,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        supports_cow_input_no_materialize_backward=False,
         decorators=(
             # RuntimeError: expected int at position 0, but got: Tensor
             DecorateInfo(
@@ -15268,7 +15231,6 @@ op_db: List[OpInfo] = [
            supports_gradgrad=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            autodiff_nonfusible_nodes=["aten::gelu"],
            skips=(
                # AssertionError: Tensor-likes are not close!
@@ -16832,8 +16794,8 @@ op_db: List[OpInfo] = [
            skips=(
            )),
     OpInfo('unique',
-           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
-           dtypesIfCUDA=all_types_and(torch.bool, torch.float16),
+           dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16, torch.uint16, torch.uint32, torch.uint64),
+           dtypesIfCUDA=all_types_and(torch.bool, torch.float16, torch.uint16, torch.uint32, torch.uint64),
            sample_inputs_func=sample_inputs_unique,
            supports_out=False,
            supports_autograd=False,
@@ -17837,7 +17799,6 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           supports_cow_input_no_materialize_backward=False,
            skips=(
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # Skip operator schema test because this is a functional and not an operator
@@ -17855,7 +17816,6 @@ op_db: List[OpInfo] = [
            check_batched_gradgrad=False,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
-           supports_cow_input_no_materialize_backward=False,
            sample_inputs_func=sample_inputs_unfold),
     OpInfo('msort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
@@ -18372,7 +18332,6 @@ op_db: List[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           supports_cow_input_no_materialize_backward=False,
            skips=(
                # RuntimeError: input->type()->kind() == TypeKind::OptionalTypeINTERNAL ASSERT FAILED
                # at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270, please report a bug to PyTorch.
@@ -18931,7 +18890,6 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
         sample_inputs_func=sample_inputs_embedding,
         allow_cow_input_materialize_forward=[0],
-        supports_cow_input_no_materialize_backward=False,
         error_inputs_func=error_inputs_embedding,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -18971,7 +18929,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_gradgrad=False,
         allow_cow_input_materialize_forward=[0],
-        supports_cow_input_no_materialize_backward=False,
     ),
     OpInfo(
         "nn.functional.multi_head_attention_forward",
@@ -19041,7 +18998,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
-        supports_cow_input_no_materialize_backward=False,
         dtypes=floating_types_and(torch.float16),
         backward_dtypes=floating_types(),
         dtypesIfCUDA=floating_types_and(torch.bfloat16, torch.float16),
@@ -19061,7 +19017,6 @@ op_db: List[OpInfo] = [
         sample_inputs_func=sample_inputs_grid_sample,
         reference_inputs_func=reference_inputs_grid_sample,
         supports_gradgrad=False,
-        supports_cow_input_no_materialize_backward=False,
         gradcheck_nondet_tol=1e-15),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
@@ -19071,7 +19026,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         sample_inputs_func=sample_inputs_grid_sampler_2d,
         supports_gradgrad=False,
-        supports_cow_input_no_materialize_backward=False,
         gradcheck_nondet_tol=1e-15),
     OpInfo(
         "argwhere",
@@ -19426,7 +19380,6 @@ op_db: List[OpInfo] = [
         "nn.functional.ctc_loss",
         dtypes=floating_types(),
         supports_out=False,
-        supports_cow_input_no_materialize_backward=False,
         sample_inputs_func=sample_inputs_ctc_loss,
         skips=(
             # https://github.com/pytorch/pytorch/issues/67462
@@ -19474,7 +19427,6 @@ op_db: List[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         assert_jit_shape_analysis=True,
-        supports_cow_input_no_materialize_backward=False,
         skips=(
             # RuntimeError:
             # undefined value tensor:
@@ -19531,7 +19483,6 @@ op_db: List[OpInfo] = [
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
         supports_out=False,
         supports_forward_ad=True,
-        supports_cow_input_no_materialize_backward=False,
         sample_inputs_func=sample_inputs_huber_loss,
         error_inputs_func=error_inputs_huber_loss,
         skips=(
@@ -19549,7 +19500,6 @@ op_db: List[OpInfo] = [
         dtypes=floating_types(),
         supports_out=False,
         supports_gradgrad=False,
-        supports_cow_input_no_materialize_backward=False,
         skips=(
             DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
         )
@@ -19650,6 +19600,25 @@ op_db: List[OpInfo] = [
         ),
     ),
     OpInfo(
+        "nn.functional.channel_shuffle",
+        sample_inputs_func=sample_inputs_channel_shuffle,
+        dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
+        backward_dtypes=integral_types_and(torch.bool),
+        supports_out=False,
+        supports_autograd=False,
+        allow_cow_input_materialize_forward=[0],
+        skips=(
+            # Skip due to NotImplementedError for MPS device.
+            DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
+            # vmap: calling random operator not supported
+            DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
+            DecorateInfo(unittest.skip("Test expects tensor input"), "TestVmapOperatorsOpInfo", "test_op_has_batch_rule"),
+            DecorateInfo(unittest.expectedFailure, 'TestInductorOpInfo', 'test_comprehensive'),
+            DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
+            DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+        ),
+    ),
+    OpInfo(
         "nn.functional.kl_div",
         sample_inputs_func=sample_inputs_kl_div,
         dtypes=floating_types_and(torch.float16, torch.bfloat16),
@@ -19733,7 +19702,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
         supports_gradgrad=False,
-        supports_cow_input_no_materialize_backward=False,
         sample_inputs_func=sample_inputs_segment_reduce,
         skips=(
             # FIXME: CUDA driver API confirmed a leak in
@@ -19754,7 +19722,6 @@ op_db: List[OpInfo] = [
         supports_out=False,
         # RuntimeError: derivative for aten::_segment_reduce_backward is not implemented
         supports_gradgrad=False,
-        supports_cow_input_no_materialize_backward=False,
         sample_inputs_func=partial(sample_inputs_segment_reduce, mode='offsets'),
         skips=(
             # FIXME: CUDA driver API confirmed a leak in
