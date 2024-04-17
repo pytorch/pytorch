@@ -152,7 +152,23 @@ class OptimizedModule(torch.nn.Module):
             self._forward = self.forward
             self.forward = self._call_lazy_check
 
+    # CHECK-IF-THERE-IS-BETTER-WAY
+    # When Dynamo compiles a nn module, it traces the _wrapped_call_impl (and
+    # eventually inlines forward) and updates the frame object to run guards
+    # etc. The unintended consequence is that since _wrapped_call_impl is a code
+    # object, it is shared between the original nn module and this
+    # OptimizedModule as well. So when OptimizedModule is executed, it calls
+    # _wrapped_call_impl and retriggers Dynamo. We don't want that.  So, here we
+    # override the __call__ to local _call_impl which calls base class
+    # _call_impl. This prevents the call to _wrapped_call_impl and prevents
+    # Dynamo trigger.
+    def _call_impl(self, *args, **kwargs):
+        return super()._call_impl(*args, **kwargs)
+
+    __call__ = _call_impl
+
     def __getstate__(self):
+        # Do we need to pop _call_impl here?
         state = dict(self.__dict__)
         state.pop("forward", None)
         state.pop("__call__", None)

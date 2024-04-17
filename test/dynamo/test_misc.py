@@ -7780,9 +7780,9 @@ def fn():
 
         # Not an exhaustive test of dynamic shapes behavior, but some sanity
         if torch._dynamo.config.assume_static_by_default:
-            base_checker().check("Recompile Reasons").check("'_wrapped_call_impl'").check(
-                "cache_size_limit to 1"
-            ).run(prof.report())
+            base_checker().check("Recompile Reasons").check(
+                "'_wrapped_call_impl'"
+            ).check("cache_size_limit to 1").run(prof.report())
         else:
             base_checker().check("No recompilation detected.").run(prof.report())
 
