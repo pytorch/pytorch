@@ -208,7 +208,7 @@ class EagerAndRecordGraphs:
 
     def __call__(self, gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
         self.graphs.append(gm)
-        return gm.forward
+        return gm
 
 
 def strip_comment(code) -> str:
