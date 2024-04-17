@@ -150,7 +150,7 @@ class Library:
         handle = entry.abstract_impl.register(func_to_register, source)
         self._registration_handles.append(handle)
 
-    def impl(self, op_name, fn, dispatch_key='', *, dispatcher_convention=False):
+    def impl(self, op_name, fn, dispatch_key='', *, with_keyset=False):
         r'''Registers the function implementation for an operator defined in the library.
 
         Args:
@@ -206,7 +206,7 @@ class Library:
                     " for the base ops that it decomposes into.")
 
         assert self.m is not None
-        self.m.impl(name, dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd", fn, dispatcher_convention)
+        self.m.impl(name, dispatch_key if dispatch_key != "" else "CompositeImplicitAutograd", fn, with_keyset)
 
         _impls.add(key)
         self._op_impls.add(key)
@@ -554,29 +554,32 @@ def register_fake(
         return register(func)
 
 
-def register_autograd(op: _op_identifier, setup_context_fn: Callable, backward_fn: Callable, /, *, lib=None) -> None:
+def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], backward_fn: Callable, /, *, lib=None) -> None:
     r"""Register a backward formula for this custom op.
 
     In order for an operator to work with autograd, you need to register
-    a backward formula. There are two pieces to this:
-    1. You must tell us what we need to save from the forward pass for
-    the backward pass. This is the "setup_context" function.
-    2. You must tell us how to compute gradients during the backward pass.
-    This is the "backward" function.
-
-    ``setup_context_fn(ctx, inputs, output)`` runs during the forward pass.
-    Please save quantities needed for backward onto the ``ctx`` object via
-    either :func:`ctx.save_for_backward` or assigning them as attributes of
-    ``ctx``.
+    a backward formula:
+    1. You must tell us how to compute gradients during the backward pass
+    by providing us a "backward" function.
+    2. If you need any values from the forward to compute gradients, you can
+    use `setup_context` to save values for backward.
 
     ``backward_fn`` runs during the backward pass. It accepts ``(ctx, *grads)``:
     - ``grads`` is one or more gradients. The number of gradients matches
     the number of outputs of the operator.
+    The ``ctx`` object is `the same ctx object <context_method_mixins>`_ used by
+    :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
+    same as :meth:`torch.autograd.Function.backward`.
+
+    ``setup_context_fn(ctx, inputs, output)`` runs during the forward pass.
+    Please save quantities needed for backward onto the ``ctx`` object via
+    either :meth:`torch.autograd.function.FunctionCtx.save_for_backward`
+    or assigning them as attributes of ``ctx``.
 
     Both ``setup_context_fn`` and ``backward_fn`` must be traceable. That is,
-    they may not directly access Tensor.data_ptr and they must not depend on
-    or mutate global state. If you need a non-traceable backward, you can make
-    it a separate custom_op that you call inside ``backward_fn``.
+    they may not directly access :meth:`torch.Tensor.data_ptr` and they must
+    not depend on or mutate global state. If you need a non-traceable backward,
+    you can make it a separate custom_op that you call inside ``backward_fn``.
 
     Examples:
         >>> import torch
@@ -631,7 +634,7 @@ def register_autograd(op: _op_identifier, setup_context_fn: Callable, backward_f
     if lib is None:
         lib = Library(namespace, "FRAGMENT")
         _keep_alive.append(lib)
-    lib.impl(opname, autograd_kernel, "Autograd", dispatcher_convention=True)
+    lib.impl(opname, autograd_kernel, "Autograd", with_keyset=True)
 
 
 # If the op was defined in C++, then we want to make sure there was an

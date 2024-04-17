@@ -62,9 +62,9 @@ struct ConcretePyInterpreterVTable final
       c10::DispatchKey key,
       c10::DispatchKeySet keyset,
       torch::jit::Stack* stack,
-      bool dispatcher_convention) const override {
+      bool with_keyset) const override {
     torch::impl::dispatch::python_op_registration_trampoline_impl(
-        op, key, keyset, stack, dispatcher_convention);
+        op, key, keyset, stack, with_keyset);
   }
   void throw_abstract_impl_not_imported_error(
       std::string opname,
