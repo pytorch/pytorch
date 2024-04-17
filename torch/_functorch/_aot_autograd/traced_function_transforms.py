@@ -676,14 +676,20 @@ def aot_dispatch_subclass(
 class PropagateUnbackedSymInts(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
         import sympy
+        from torch.fx.experimental.sym_node import SymNode
 
         result = super().run_node(n)
-        # TODO: handle Tensor returns
-        if "example_value" in n.meta:
-            if isinstance(result, torch.SymInt) and isinstance(
-                result.node.expr, sympy.Symbol
-            ):
-                torch._check(result == n.meta["example_value"])
+        if bindings := n.meta.get("unbacked_bindings"):
+            fake_mode = detect_fake_mode()
+            for raw_u0, path in bindings.items():
+                # TODO: don't hard code int
+                u1 = pytree.key_get(result, path)
+                if isinstance(u1, (int, float, bool)):
+                    raw_u1 = sympy.sympify(u1)
+                else:
+                    raw_u1 = u1.node.expr
+                # TODO: replace with rename unbacked to
+                fake_mode.shape_env.defer_runtime_assert(sympy.Eq(raw_u0, raw_u1), "")
 
         return result
 
