@@ -715,17 +715,17 @@ def index_reduce(
     if reduction_type == "mean" and not needs_fallback_due_to_atomic_add_limitations(
         self.dtype
     ):
-        tmp = (torch.ones_like if include_self else torch.zeros_like)(self)
-        counts = tmp.index_add(dim, index, torch.ones_like(src))
-        out = self if include_self else tmp  # tmp is torch.zeros_like(self)
-        out = out.index_add(dim, index, src)
-        mask = counts < 1
-        if self.dtype.is_floating_point:
-            out = out / counts
+        true_division = self.dtype.is_floating_point or self.dtype.is_complex
+        ones = torch.ones_like(src)
+        if include_self:
+            out = self
+            counts = torch.ones_like(self).index_add(dim, index, ones)
         else:
-            out = out // counts.masked_fill(mask, 1)
-        out = out if include_self else torch.where(mask, self, out)
-        return out
+            out = self.index_fill(dim, index, 0)
+            counts = torch.zeros_like(self).index_add(dim, index, ones)
+            counts = counts.masked_fill(counts < 1, 1)
+        out = out.index_add(dim, index, src)
+        return out / counts if true_division else out // counts
 
     if use_scatter_fallback(
         "aten.scatter_reduce_",
