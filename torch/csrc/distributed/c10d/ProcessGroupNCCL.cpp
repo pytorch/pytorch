@@ -732,8 +732,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   this->setGroupName(options_->group_name);
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
-  abortInDestroyProcessGroup_ =
-      getCvarBool(TORCH_NCCL_ABORT_IN_DESTROY_PG, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
@@ -1109,17 +1107,13 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
   if (!terminateProcessGroup_.load()) {
-    // Only if TORCH_NCCL_ABORT_IN_DESTROY_PG is enabled, terminateProcessGroup_
-    // will be set to true through destroy_process_group
-    if (abortInDestroyProcessGroup_) {
-      LOG(WARNING) << c10::str(
-          "WARNING: process group has NOT been destroyed before it is being destructed. ",
-          "On normal program exit, the application should call destroy_process_group to ",
-          "ensure that any pending NCCL data transfers have finished in this process. "
-          "In rare cases this process can exit before this point and block the progress of "
-          "another member of the process group. This constraint has always been present, "
-          " but this warning has only been added since PyTorch 2.3");
-    }
+    LOG(WARNING) << c10::str(
+        "WARNING: process group has NOT been destroyed before it is being destructed. ",
+        "On normal program exit, the application should call destroy_process_group to ",
+        "ensure that any pending NCCL data transfers have finished in this process. "
+        "In rare cases this process can exit before this point and block the progress of "
+        "another member of the process group. This constraint has always been present, "
+        " but this warning has only been added since PyTorch 2.3");
     // If user haven't explicitly destroy/shutdown process group, destructor
     // needs to do so
     shutdown();
