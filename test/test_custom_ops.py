@@ -2316,39 +2316,87 @@ class TestCustomOpAPI(TestCase):
                 self.assertTrue(called)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_library_register_fake_low_level(self):
+    def test_library_register_autograd(self):
+        for mode in ["function", "qualname", "opoverload"]:
+
+            @torch.library.custom_op("mylib::numpy_sin", mutates_args=())
+            def numpy_sin(x: Tensor) -> Tensor:
+                x_np = x.cpu().numpy()
+                y_np = np.sin(x_np)
+                return torch.from_numpy(y_np).to(device=x.device)
+
+            def setup_context(ctx, inputs, output) -> Tensor:
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            called = False
+
+            def backward(ctx, grad):
+                nonlocal called
+                called = True
+                (x,) = ctx.saved_tensors
+                return grad * x.cos()
+
+            if mode == "function":
+                torch.library.register_autograd(numpy_sin, setup_context, backward)
+            elif mode == "qualname":
+                torch.library.register_autograd(
+                    "mylib::numpy_sin", setup_context, backward
+                )
+            elif mode == "opoverload":
+                torch.library.register_autograd(
+                    torch.ops.mylib.numpy_sin.default, setup_context, backward
+                )
+
+            x = torch.randn(3, requires_grad=True)
+            y = numpy_sin(x)
+            (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
+            self.assertTrue(called)
+            self.assertEqual(grad_x, x.cos())
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_autograd_low_level(self):
         for mode in ["qualname", "opoverload"]:
             with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
-                lib.define("add3(Tensor x, float y) -> Tensor")
+                lib.define("sin5(Tensor x) -> Tensor")
 
-                def add(x: Tensor, y: float) -> Tensor:
-                    x_np = x.cpu().numpy()
-                    out_np = x_np + y
-                    return torch.from_numpy(out_np).to(x.device)
+                def numpy_sin(x: Tensor) -> Tensor:
+                    x_np = x.cpu().detach().numpy()
+                    y_np = np.sin(x_np)
+                    return torch.from_numpy(y_np).to(device=x.device)
 
-                lib.impl("add3", add, "CPU")
+                def setup_context(ctx, inputs, output) -> Tensor:
+                    (x,) = inputs
+                    ctx.save_for_backward(x)
+
+                called = False
+
+                def backward(ctx, grad):
+                    nonlocal called
+                    called = True
+                    (x,) = ctx.saved_tensors
+                    return grad * x.cos()
+
+                lib.impl("sin5", numpy_sin, "CPU")
 
                 called = False
 
                 if mode == "qualname":
-                    dec = torch.library.register_fake("_torch_testing::add3", lib=lib)
-                elif mode == "opoverload":
-                    dec = torch.library.register_fake(
-                        torch.ops._torch_testing.add3.default, lib=lib
+                    torch.library.register_autograd(
+                        "_torch_testing::sin5", setup_context, backward, lib=lib
                     )
-
-                @dec
-                def _(x, y):
-                    nonlocal called
-                    called = True
-                    return torch.empty_like(x)
-
-                with torch._subclasses.fake_tensor.FakeTensorMode():
-                    x = torch.randn(3)
-                    y = 3.14
-                    z = torch.ops._torch_testing.add3(x, y)
-                    self.assertEqual(z.shape, x.shape)
-                    self.assertTrue(called)
+                elif mode == "opoverload":
+                    torch.library.register_autograd(
+                        torch.ops._torch_testing.sin5.default,
+                        setup_context,
+                        backward,
+                        lib=lib,
+                    )
+                x = torch.randn(3, requires_grad=True)
+                y = torch.ops._torch_testing.sin5(x)
+                (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
+                self.assertTrue(called)
+                self.assertEqual(grad_x, x.cos())
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_fake(self):

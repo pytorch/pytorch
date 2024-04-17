@@ -595,6 +595,14 @@ class OpOverload(OperatorBase):
                 is_write = a.alias_info.is_write or is_write
         self.is_view = is_write is not None and not is_write
 
+    @property
+    def _namespace(self):
+        self._schema.name.split("::")[0]
+
+    @property
+    def _opname(self):
+        self._schema.name.split("::")[1]
+
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
