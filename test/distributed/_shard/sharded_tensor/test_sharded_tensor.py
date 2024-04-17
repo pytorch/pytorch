@@ -914,7 +914,10 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
         for shard_rank, shard_metadata in enumerate(shards_metadata):
             self.assertEqual([shard_rank * 5, 0], shard_metadata.shard_offsets)
             self.assertEqual([5, 20], shard_metadata.shard_sizes)
-            self.assertEqual(f'rank:{shard_rank + 2}/cuda:{shard_rank + 2}', str(shard_metadata.placement))
+            self.assertEqual(
+                f"rank:{shard_rank + 2}/cuda:{shard_rank + 2}",
+                str(shard_metadata.placement),
+            )
 
         # Validate remote shards.
         remote_shards = st.remote_shards()
@@ -928,7 +931,9 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
             for remote_shard in shards:
                 shard = remote_shard.to_here()
                 self.assertEqual(rpc_rank, remote_shard.owner().id)
-                self.assertEqual(f'rank:{rpc_rank}/cuda:{rpc_rank}', str(shard.metadata.placement))
+                self.assertEqual(
+                    f"rank:{rpc_rank}/cuda:{rpc_rank}", str(shard.metadata.placement)
+                )
                 self.assertEqual((5, 20), shard.tensor.size())
 
     @with_comms
@@ -1038,8 +1043,7 @@ class TestShardedTensorChunked(ShardedTensorTestBase):
 
         spec = ChunkShardingSpec(dim=0, placements=["rank:5/cuda:1"])
         with self.assertRaisesRegex(
-            ValueError,
-            "Global rank 5 does not exist in input process group"
+            ValueError, "Global rank 5 does not exist in input process group"
         ):
             sharded_tensor.empty(spec, 10, 20)
 
@@ -2054,18 +2058,20 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
     @skip_if_lt_x_gpu(4)
     @requires_nccl()
     def test_new_group(self):
-        spec = EnumerableShardingSpec([
-            ShardMetadata(
-                shard_offsets=[0, 0],
-                shard_sizes=[5, 5],
-                placement="rank:1/cuda:1",
-            ),
-            ShardMetadata(
-                shard_offsets=[5, 0],
-                shard_sizes=[5, 5],
-                placement="rank:3/cuda:3",
-            ),
-        ])
+        spec = EnumerableShardingSpec(
+            [
+                ShardMetadata(
+                    shard_offsets=[0, 0],
+                    shard_sizes=[5, 5],
+                    placement="rank:1/cuda:1",
+                ),
+                ShardMetadata(
+                    shard_offsets=[5, 0],
+                    shard_sizes=[5, 5],
+                    placement="rank:3/cuda:3",
+                ),
+            ]
+        )
 
         pg = dist.new_group(ranks=[1, 2, 3])
 
@@ -2084,7 +2090,10 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
                 (self.rank // 2 * 5, 0), local_shard.metadata.shard_offsets
             )
             self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
-            self.assertEqual(f'rank:{self.rank}/cuda:{self.rank}', str(local_shard.metadata.placement))
+            self.assertEqual(
+                f"rank:{self.rank}/cuda:{self.rank}",
+                str(local_shard.metadata.placement),
+            )
 
         # Verify global metadata.
         st_metadata = st.metadata()
@@ -2093,7 +2102,10 @@ class TestShardedTensorEnumerable(ShardedTensorTestBase):
         for rank, shard_metadata in enumerate(shards_metadata):
             self.assertEqual((rank * 5, 0), shard_metadata.shard_offsets)
             self.assertEqual((5, 5), shard_metadata.shard_sizes)
-            self.assertEqual(f'rank:{rank * 2 + 1}/cuda:{rank * 2 + 1}', str(shard_metadata.placement))
+            self.assertEqual(
+                f"rank:{rank * 2 + 1}/cuda:{rank * 2 + 1}",
+                str(shard_metadata.placement),
+            )
 
         # Validate remote shards.
         remote_shards = st.remote_shards()
@@ -2620,7 +2632,7 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             local_shard_metadata = ShardMetadata(
                 shard_offsets=[5 * (self.rank - 1), 0],
                 shard_sizes=[5, 5],
-                placement=f"rank:{self.rank}/cuda:{self.rank}"
+                placement=f"rank:{self.rank}/cuda:{self.rank}",
             )
             local_shards = [
                 sharded_tensor.Shard(
@@ -2644,7 +2656,10 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
                 ((self.rank - 1) * 5, 0), local_shard.metadata.shard_offsets
             )
             self.assertEqual((5, 5), local_shard.metadata.shard_sizes)
-            self.assertEqual(f'rank:{self.rank}/cuda:{self.rank}', str(local_shard.metadata.placement))
+            self.assertEqual(
+                f"rank:{self.rank}/cuda:{self.rank}",
+                str(local_shard.metadata.placement),
+            )
 
             # Verify global metadata.
             st_metadata = st.metadata()
@@ -2653,8 +2668,9 @@ class TestShardedTensorFromLocalShards(ShardedTensorTestBase):
             for rank, shard_metadata in enumerate(shards_metadata):
                 self.assertEqual((rank * 5, 0), shard_metadata.shard_offsets)
                 self.assertEqual((5, 5), shard_metadata.shard_sizes)
-                self.assertEqual(f'rank:{rank + 1}/cuda:{rank + 1}', str(shard_metadata.placement))
-
+                self.assertEqual(
+                    f"rank:{rank + 1}/cuda:{rank + 1}", str(shard_metadata.placement)
+                )
 
     @with_comms
     @skip_if_lt_x_gpu(4)
