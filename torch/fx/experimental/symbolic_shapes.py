@@ -3641,8 +3641,8 @@ class ShapeEnv:
                     add_expr(sympy.Le(e.lhs, e.rhs))
                     add_expr(sympy.Ne(e.lhs, e.rhs))
 
-		# NB: this helps us deal with And/Or connectives
-		expr = expr.subs(subst)
+        # NB: this helps us deal with And/Or connectives
+        expr = expr.subs(subst)
 
         # Simplify making use of value range lower bound
         new_shape_env = {}
