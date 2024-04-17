@@ -3642,16 +3642,12 @@ def max_pool2d_with_indices_backward(
     new_size = list(x.get_size())
 
     h_window_size = max(
-        [
-            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
-            for h in range(kernel_size[0] * 2)
-        ]
+        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        [
-            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
-            for w in range(kernel_size[1] * 2)
-        ]
+        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        for w in range(kernel_size[1] * 2)
     )
 
     window_size = h_window_size * w_window_size
@@ -4353,16 +4349,12 @@ def avg_pool2d_backward(
     dtype = x.get_dtype()
 
     h_window_size = max(
-        [
-            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
-            for h in range(kernel_size[0] * 2)
-        ]
+        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        [
-            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
-            for w in range(kernel_size[1] * 2)
-        ]
+        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        for w in range(kernel_size[1] * 2)
     )
 
     window_size = h_window_size * w_window_size
@@ -5737,17 +5729,23 @@ def templated_attention(*args, **kwargs):
             choices: List[Any] = []
             from .select_algorithm import autotune_select_algorithm
 
-            sdpa_template.maybe_append_choice(
-                choices=choices,
-                input_nodes=(query, key, value),
-                layout=layout,
-                subgraphs=subgraph_buffer,
-                num_stages=2,
-                num_warps=4,
-                BLOCK_M=64,
-                BLOCK_N=128,
-                BLOCK_DMODEL=query.get_size()[-1],
-            )
+            for BLOCK_M, BLOCK_N, num_warps, num_stages in [
+                (128, 64, 4, 3),
+                (128, 128, 4, 3),
+                (128, 128, 8, 2),
+                (64, 128, 4, 3),
+            ]:
+                sdpa_template.maybe_append_choice(
+                    choices=choices,
+                    input_nodes=(query, key, value),
+                    layout=layout,
+                    subgraphs=subgraph_buffer,
+                    num_stages=num_stages,
+                    num_warps=num_warps,
+                    BLOCK_M=BLOCK_M,
+                    BLOCK_N=BLOCK_N,
+                    BLOCK_DMODEL=query.get_size()[-1],
+                )
             return autotune_select_algorithm(
                 "sdpa", choices, [query, key, value], layout
             )

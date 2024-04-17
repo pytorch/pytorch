@@ -1,5 +1,5 @@
-TorchDynamo Deep Dive
-=====================
+TorchDynamo Overview
+====================
 
 Before you read this section, read :ref:`torch.compiler_overview`.
 
@@ -346,3 +346,5 @@ To summarize, the compiled code is conceptually equivalent to the code below:
 The following diagram demonstrates how ``torch.compile`` transforms and optimizes user-written code: it first extracts computation graphs from the user-written function, and compiles these graphs into optimized functions, then assembles them into a new function, which is functionally equivalent to the user-written code but optimized to have a good computation speed.
 
 .. image:: _static/img/dynamo/flowchart.jpg
+
+To learn more about how all this is implemented internally, see :ref:`torch.compiler_dynamo_deepdive`.
