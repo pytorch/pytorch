@@ -26,6 +26,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
 from torch._utils_internal import TEST_MASTER_PORT as MASTER_PORT
+from torch.utils._python_dispatch import TorchDispatchMode
 from torch.autograd import DeviceType
 from torch.cuda.amp import GradScaler, autocast
 
@@ -10058,6 +10059,44 @@ class DistributedTest:
                 out_ddp_static.backward()
                 for p1, p2 in zip(ddp.parameters(), ddp_static.parameters()):
                     self.assertEqual(p1.grad, p2.grad)
+
+        @skip_if_lt_x_gpu(2)
+        @require_world_size(2)
+        @skip_but_pass_in_sandcastle_if(
+            BACKEND not in DistTestCases.backend_feature["ddp"],
+            f"The {BACKEND} backend does not support DistributedDataParallel",
+        )
+        def test_ddp_sink_noclone(self):
+            "Tests that we can configure DDP to avoid clone"
+
+            class OpPatcher(TorchDispatchMode):
+                def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                    func_packet = func._overloadpacket
+                    if func_packet == torch.ops.aten.clone:
+                        raise RuntimeError("clone encountered!")
+                    kwargs = kwargs if kwargs else {}
+                    return func(*args, **kwargs)
+
+            class MyModel(torch.nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc = torch.nn.Linear(10, 10)
+
+                def forward(self, input):
+                    return self.fc(input)
+
+            model = MyModel().cuda(self.rank)
+            ddp = torch.nn.parallel.DistributedDataParallel(
+                model,
+                device_ids=[self.rank],
+                find_unused_parameters=True,
+            )
+            ddp._set_ddp_sink_clone(False)
+            input = torch.rand(10, 10).cuda(self.rank)
+
+            with OpPatcher() as patcher:
+                ddp(input).sum().backward()
+
 
 
 instantiate_parametrized_tests(DistributedTest._DistTestBase)

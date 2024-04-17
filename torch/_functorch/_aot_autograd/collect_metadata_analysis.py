@@ -33,6 +33,7 @@ from .functional_utils import (
     to_fun,
 )
 from .schemas import (
+    FunctionalTensorMetadataEq,
     InputAliasInfo,
     MutationType,
     OutputAliasInfo,
@@ -532,7 +533,6 @@ from a multi-output view call"
                 and len(outs_with_identical_metadata_that_require_grad) > 0
                 and not o.requires_grad
             ):
-                assert len(outs_with_identical_metadata_that_require_grad) > 0
                 # In theory we could use any of these tensors to regenerate the aliased outputs from,
                 # since they all alias each other and have identical metatadata
                 out_alias = outs_with_identical_metadata_that_require_grad[0]
@@ -549,12 +549,55 @@ from a multi-output view call"
                 }
             else:
                 dynamic_dims = None
+
+            # Save the current FunctionalTensor output.
+            #
+            # This will be used at runtime for reconstructing output views from
+            # their respective base tensors.
+            #
+            # The FunctionalTensor will be saved if one of the 2 conditions below
+            # is true:
+            functional_tensor = None
+            if (
+                # 1. If the output_type is either of:
+                #    (i) alias_of_intermediate;
+                #    (ii) alias_of_intermediate_save_as_output; or
+                #    (iii) alias_of_intermediate_base_is_user_output.
+                #
+                # No need to worry about in-place view operations here, since
+                # this functionalization step elimitates mutations.
+                #
+                # i.e. we have access to the actual base tensor, before the
+                # in-place operation was applied.
+                output_type
+                in (
+                    OutputType.alias_of_intermediate,
+                    OutputType.alias_of_intermediate_save_as_output,
+                    OutputType.alias_of_intermediate_base_is_user_output,
+                )
+            ) or (
+                # 2. If the output_type is alias_of_input, and no in-place view
+                #    operationthe was run on the input (base tensor).
+                #
+                # In this case, we need to check for metadata mutation because
+                # the runtime explicitly reconstructs the inputs, before actually
+                # reconstructing the outputs. Due to in-place view operations, the
+                # fully reconstructed input may not be this output base tensor
+                # anymore.
+                output_type == OutputType.alias_of_input
+                and base_idx is not None
+                and not input_info[base_idx].mutates_metadata
+            ):
+                if isinstance(o, FunctionalTensor):
+                    functional_tensor = FunctionalTensorMetadataEq(o.elem)
+
             out_info = OutputAliasInfo(
                 output_type=output_type,
                 raw_type=type(o),
                 base_idx=base_idx,
                 dynamic_dims=dynamic_dims,
                 requires_grad=isinstance(o, torch.Tensor) and o.requires_grad,
+                functional_tensor=functional_tensor,
             )
             output_info.append(out_info)
 

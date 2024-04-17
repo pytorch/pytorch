@@ -15,9 +15,27 @@ build-backend = "setuptools.build_meta:__legacy__"
 
 
 [tool.black]
-# Uncomment if pyproject.toml worked fine to ensure consistency with flake8
-# line-length = 120
+line-length = 88
 target-version = ["py38", "py39", "py310", "py311"]
+
+
+[tool.isort]
+src_paths = ["caffe2", "torch", "torchgen", "functorch", "tests"]
+extra_standard_library = ["typing_extensions"]
+skip_gitignore = true
+skip_glob = ["third_party/*"]
+atomic = true
+profile = "black"
+indent = 4
+line_length = 88
+lines_after_imports = 2
+multi_line_output = 3
+include_trailing_comma = true
+
+
+[tool.usort.kown]
+first_party = ["caffe2", "torch", "torchgen", "functorch", "tests"]
+standard_library = ["typing_extensions"]
 
 
 [tool.ruff]
