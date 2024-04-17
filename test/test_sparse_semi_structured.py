@@ -262,6 +262,8 @@ class TestSparseSemiStructured(TestCase):
     def setUp(self):
         if not _IS_SM8X:
             self.skipTest('Only runs on SM80')
+        if IS_WINDOWS:
+            self.skipTest("torch.compile not supported on windows")
 
     @inference_dtypes
     @parametrize_backends
