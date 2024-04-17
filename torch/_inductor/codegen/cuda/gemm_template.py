@@ -846,7 +846,18 @@ class CKGemmTemplate(CKTemplate):
         auto b_element_op = PassThrough {};
         auto c_element_op = PassThrough {};
 
+        using ADataType = ck::half_t;
+        using BDataType = ck::half_t;
+        using CDataType = ck::half_t;
+
+        DeviceMem a_m_k_device_buf(sizeof(ADataType) * M * K);
+        DeviceMem b_k_n_device_buf(sizeof(BDataType) * K * N);
+        DeviceMem c_m_n_device_buf(sizeof(CDataType) * M * N);
+
         auto argument = gemm.MakeArgument(
+            static_cast<ADataType*>(a_m_k_device_buf.GetDeviceBuffer()),
+            static_cast<BDataType*>(b_k_n_device_buf.GetDeviceBuffer()),
+            static_cast<CDataType*>(c_m_n_device_buf.GetDeviceBuffer()),
             M,
             N,
             K,
