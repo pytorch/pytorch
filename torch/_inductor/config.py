@@ -491,10 +491,7 @@ decompose_mem_bound_mm: bool = False
 # assume_aligned_inputs means that we assume that inputs will be aligned; we generate
 # code using this assumption, and clone tensors before use if they aren't aligned.
 # In the common case, most inputs will be aligned.
-
-# TODO(dberard) maybe this should initially be set to True, but setting it to False
-# for testing purposes right now.
-assume_aligned_inputs: bool = False
+assume_aligned_inputs: bool = True
 
 
 # config specific to codegen/cpp.py
