@@ -43,3 +43,4 @@ torch.fx.experimental.symbolic_shapes
     statically_known_true
     lru_cache
     check_consistent
+    rebind_unbacked

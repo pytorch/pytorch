@@ -67,6 +67,7 @@ from torch.utils._sympy.singleton_int import SingletonInt
 from torch.utils._traceback import format_frame, CapturedTraceback
 from torch._utils_internal import signpost_event
 from torch._subclasses.meta_utils import is_sparse_any
+import torch.utils._pytree as pytree
 
 from torch._logging import LazyString
 
@@ -94,7 +95,7 @@ __all__ = [
     "is_concrete_bool", "is_nested_int", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
     "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
     "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
-    "guard_size_oblivious", "check_consistent",
+    "guard_size_oblivious", "check_consistent", "rebind_unbacked",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -262,6 +263,29 @@ def check_consistent(new, old) -> None:
     elif isinstance(new, scalar_types) and not isinstance(new, bool):
         assert isinstance(old, scalar_types) and not isinstance(old, bool), f"{old} != {new}"
         torch._check(old == new, lambda: f"{old} != {new} (old != new)")
+
+def rebind_unbacked(shape_env, n: torch.fx.Node, result):
+    """
+    Suppose we are retracing a pre-existing FX graph that previously had
+    fake tensor propagation (and therefore unbacked SymInts).  When we retrace,
+    we re-propagate fake tensors, which results in new unbacked SymInts.
+    When this happens, we need to tell the shape environment about the equivalence
+    of the old and new unbacked SymInts.  Pass us the old torch.fx.Node (which
+    has the old binding information) and the new result (which we can extract the
+    new unbacked SymInts out from).
+    """
+    if bindings := n.meta.get("unbacked_bindings"):
+        for raw_u0, path in bindings.items():
+            u1 = pytree.key_get(result, path)
+            # We should never have bindings for raw bools; instead they should
+            # have been converted to ints via ConvertIntKey
+            assert type(u1) is not bool
+            if isinstance(u1, (int, float)):
+                raw_u1 = sympy.sympify(u1)
+            else:
+                raw_u1 = u1.node.expr
+            # TODO: replace with rename unbacked to
+            shape_env.defer_runtime_assert(sympy.Eq(raw_u0, raw_u1), "")
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
     r""" Canonicalize a boolean expression by transforming it into a lt / le

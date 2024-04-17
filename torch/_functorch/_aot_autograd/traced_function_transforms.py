@@ -23,7 +23,11 @@ from torch import Tensor
 from torch._decomp.decompositions_for_rng import PhiloxStateTracker
 from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
-from torch.fx.experimental.symbolic_shapes import definitely_false, sym_eq
+from torch.fx.experimental.symbolic_shapes import (
+    definitely_false,
+    rebind_unbacked,
+    sym_eq,
+)
 from torch.nn.utils import stateless
 
 from .. import config
@@ -675,21 +679,8 @@ def aot_dispatch_subclass(
 
 class PropagateUnbackedSymInts(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
-        import sympy
-
         result = super().run_node(n)
-        if bindings := n.meta.get("unbacked_bindings"):
-            fake_mode = detect_fake_mode()
-            for raw_u0, path in bindings.items():
-                # TODO: don't hard code int
-                u1 = pytree.key_get(result, path)
-                if isinstance(u1, (int, float, bool)):
-                    raw_u1 = sympy.sympify(u1)
-                else:
-                    raw_u1 = u1.node.expr
-                # TODO: replace with rename unbacked to
-                fake_mode.shape_env.defer_runtime_assert(sympy.Eq(raw_u0, raw_u1), "")
-
+        rebind_unbacked(detect_fake_mode().shape_env, n, result)
         return result
 
 
