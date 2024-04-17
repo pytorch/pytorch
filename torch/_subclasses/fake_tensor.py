@@ -2,7 +2,6 @@
 
 import contextlib
 import functools
-import itertools
 import logging
 import os
 import traceback
@@ -31,12 +30,12 @@ from torch._utils import render_call
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
+from torch.utils._cxx_pytree import PyTree, tree_map
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-from torch.utils._cxx_pytree import PyTree, tree_map
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 
@@ -528,7 +527,7 @@ class FakeTensor(torch.Tensor):
             return NotImplemented
 
         fake_mode = None
-        for arg in pytree.arg_tree_leaves(*args, **kwargs):
+        for arg in pytree.tree_leaves((args, kwargs)):
             if isinstance(arg, FakeTensor):
                 fake_mode = arg.fake_mode
                 break
@@ -752,6 +751,8 @@ class DispatchCacheInfo:
 # new allocations of Tensors which have non-meta storage so
 # memory should not significantly increase.
 
+UNHASHABLE = object()
+
 
 class FakeTensorMode(TorchDispatchMode):
     cache: Dict[_DispatchCacheKey, _DispatchCacheEntry] = {}
@@ -940,11 +941,8 @@ class FakeTensorMode(TorchDispatchMode):
         Create a cache key given the dispatch args. Raises _BypassDispatchCache
         for any situation that precludes caching.
         """
-        key_values = (
+        key_values = [
             func,
-            # Translate any FakeTensor args to metadata.
-            tuple(self._prep_args_for_hash(args)) if args else (),
-            tuple(self._prep_args_for_hash(kwargs)) if kwargs else (),
             # Capture the default_dtype mode since that can affect the output tensor,
             # e.g., when operating on constant float values.
             torch.get_default_dtype(),
@@ -958,8 +956,13 @@ class FakeTensorMode(TorchDispatchMode):
             # Disallowing dynamic shapes can introduce a DynamicOutputShapeException
             # where it wasn't seen on a previous instance of the same op.
             self.shape_env.settings if self.shape_env else None,
-        )
-        return _DispatchCacheKey(key_values)
+        ]
+        # Translate any FakeTensor args to metadata.
+        if args:
+            self._prep_args_for_hash(key_values, args)
+        if kwargs:
+            self._prep_args_for_hash(key_values, kwargs)
+        return _DispatchCacheKey(tuple(key_values))
 
     def _validate_cache_key(
         self,
@@ -1003,7 +1006,7 @@ class FakeTensorMode(TorchDispatchMode):
         self._verify_args_for_hash(args)
         self._verify_args_for_hash(kwargs)
 
-    def _prep_args_for_hash(self, args: Any) -> Any:
+    def _prep_args_for_hash(self, output: List[Any], args: Any):
         """
         Translate the provided args into a form suitable for caching at FakeTensor
         dispatch, i.e., convert unhashable types like lists & dicts into tuples and
@@ -1011,22 +1014,33 @@ class FakeTensorMode(TorchDispatchMode):
         unsupported cases that should bypass caching.
         """
         if isinstance(args, dict):
-            yield from self._prep_args_for_hash(args.keys())
-            yield from self._prep_args_for_hash(args.values())
+            self._prep_args_for_hash(output, args.keys())
+            self._prep_args_for_hash(output, args.values())
             return
 
         for arg in args:
             if isinstance(arg, FakeTensor):
-                yield extract_tensor_metadata(arg)
+                if arg._has_symbolic_sizes_strides:
+                    # This will get caught by _verify_args_for_hash later. We
+                    # can't just ignore it because it's an unhashable value. Use
+                    # a sentinel to indicate the unhashable value (so we don't
+                    # collide with a "good" hash).
+                    output.append(UNHASHABLE)
+                    continue
+                output.append(extract_tensor_metadata(arg))
+            elif isinstance(arg, (torch.SymBool, torch.SymInt, torch.SymFloat)):
+                # Caught by _verify_args_for_hash later.
+                output.append(UNHASHABLE)
             elif isinstance(arg, (list, tuple, dict)):
-                yield from self._prep_args_for_hash(arg)
+                self._prep_args_for_hash(output, arg)
             else:
                 # It's important to capture the type of the arg since, e.g., 1 and 1.0
                 # hash to the same value, but can produce different dtypes for the
                 # output tensor.
-                yield (type(arg), arg)
+                output.append(type(arg))
+                output.append(arg)
 
-    def _verify_args_for_hash(self, args: Any) -> Any:
+    def _verify_args_for_hash(self, args: Any):
         """
         Translate the provided args into a form suitable for caching at FakeTensor
         dispatch, i.e., convert unhashable types like lists & dicts into tuples and
@@ -1043,7 +1057,7 @@ class FakeTensorMode(TorchDispatchMode):
                 if not self.is_our_fake(arg):
                     raise _BypassDispatchCache("not our fake")
                 if arg._has_symbolic_sizes_strides:
-                    raise _BypassDispatchCache("symbolic shape")
+                    raise _BypassDispatchCache("symbolic sizes")
                 if arg.constant is not None:
                     raise _BypassDispatchCache("constant attribute")
                 if arg.is_sparse:
@@ -1235,9 +1249,7 @@ class FakeTensorMode(TorchDispatchMode):
     def _dispatch_impl(self, func, types, args, kwargs):
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
-        flat_arg_fake_tensors = [
-            t for t in flat_args if self.is_our_fake(t)
-        ]
+        flat_arg_fake_tensors = [t for t in flat_args if self.is_our_fake(t)]
         has_symbolic_sizes = any(
             i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors
         ) or any(isinstance(a, torch.SymInt) for a in flat_args)
@@ -1282,7 +1294,9 @@ class FakeTensorMode(TorchDispatchMode):
         # in the stack trace.
         has_unrecognized_types = _check_for_subclass(flat_args)
         if has_unrecognized_types:
-            unrecognized_types = [type(x) for x in flat_args if _check_for_subclass_arg(x)]
+            unrecognized_types = [
+                type(x) for x in flat_args if _check_for_subclass_arg(x)
+            ]
             not_implemented_log.debug(
                 "FakeTensorMode unrecognized subclass(es): %s", unrecognized_types
             )
@@ -1542,7 +1556,7 @@ class FakeTensorMode(TorchDispatchMode):
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )
 
-            if (not is_our_fake and converter is not None):
+            if not is_our_fake and converter is not None:
                 if has_scalar_only_inputs:
                     # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
                     # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.
@@ -1718,6 +1732,7 @@ class FakeCopyMode(TorchFunctionMode):
         else:
             with torch._C.DisableTorchFunctionSubclass():
                 return func(*args, **kwargs)
+
 
 def _device_handler(args):
     # NB: Don't use is_our_fake, just serve the fake information
