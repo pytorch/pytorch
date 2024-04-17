@@ -2174,8 +2174,10 @@ class DictSubclassGuardManager : public DictGuardManager {
     // Points to the key index in the dict
     Py_ssize_t dict_pointer = 0;
 
-    // Use iter(obj) to iterate over the keys
-    PyObject* iterator = PyObject_GetIter(obj); // new reference
+    // Use iter(dict.keys()) to iterate over the keys
+    py::object keys =
+        py::handle(obj).attr("keys")(); // py::object handles the references
+    PyObject* iterator = PyObject_GetIter(keys.ptr()); // new reference
     PyObject* key = nullptr;
 
     while (index_pointer < _indices.size() &&
@@ -2236,8 +2238,10 @@ class DictSubclassGuardManager : public DictGuardManager {
 
     int num_guards_executed = 0;
 
-    // Use iter(obj) to iterate over the keys
-    PyObject* iterator = PyObject_GetIter(obj); // new reference
+    // Use iter(dict.keys()) to iterate over the keys
+    py::object keys =
+        py::handle(obj).attr("keys")(); // py::object handles the references
+    PyObject* iterator = PyObject_GetIter(keys.ptr()); // new reference
     PyObject* key = nullptr;
 
     while (index_pointer < _indices.size() &&
@@ -2280,27 +2284,46 @@ class DictSubclassGuardManager : public DictGuardManager {
   }
 };
 
-bool is_defaultdict(py::handle& obj) {
-  py::module collections = py::module::import("collections");
-  py::object defaultdict = collections.attr("defaultdict");
-  return py::isinstance(obj, defaultdict);
-}
+bool has_base_dict_keys_iter(py::handle& obj) {
+  // Implements `type(obj).keys is type(dict()).keys`
+  py::object obj_type = py::type::of(obj);
+  py::object dict_type = py::type::of(py::dict());
 
-bool is_dict_iter_order_same_as_pydict_next(py::handle& obj) {
-  // return true if any of the following is True
-  //    1. obj is of type dict
-  //    2. obj is of type defaultdict - defaultdict is dict + factory_function,
-  //       so the iter(defaultdict) is same as iter(dict)
-  return PyDict_CheckExact(obj.ptr()) || is_defaultdict(obj);
+  // Fetch keys for both types
+  py::object obj_keys = obj_type.attr("keys");
+  py::object dict_keys = dict_type.attr("keys");
+
+  return obj_keys.ptr() == dict_keys.ptr();
 }
 
 std::unique_ptr<GuardManager> make_guard_manager(
     RootGuardManager* root,
     std::string source,
     py::handle example_value) {
-  // Check if example_value is a dict
   if (py::isinstance<py::dict>(example_value)) {
-    if (is_dict_iter_order_same_as_pydict_next(example_value)) {
+    // The purpose of having both DictGuardManager and DictSubclassGuardManager
+    // is to handle the variability in how dictionaries and their subclasses
+    // manage key ordering.
+
+    // While inserting dictionary guards (check guards.py), we rely on the
+    // list(d.keys()) ordering. Therefore, the cpp guard equivalent must have
+    // the same keys ordering. For standard dictionaries, .keys() API internally
+    // uses PyDict_Next. So, DictGuardManager directly uses PyDict_Next to
+    // speedup the key fetches.
+
+    // But PyDict_Next might not give correct ordering for subclasses of dict.
+    // For example, OrderedDict override the .keys() API without changing the
+    // underlying datastructure. This leads to different keys ordering than the
+    // one given by PyDict_Next. We use DictSubclassGuardManager to account for
+    // this discrepancy. DictSubclassGuardManager directly calls the .keys() API
+    // to accurately capture key ordering. This approach is less efficient than
+    // using PyDict_Next (handled by DictGuardManager), but it ensures
+    // correctness.
+
+    // Since regular dicts are more common than subclasses of dicts with
+    // overridden keys method, we still optimize for the common case with
+    // DictGuardManager by relying on PyDict_Next.
+    if (has_base_dict_keys_iter(example_value)) {
       return std::make_unique<DictGuardManager>(
           root, std::move(source), example_value);
     }
