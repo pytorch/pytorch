@@ -676,7 +676,6 @@ def aot_dispatch_subclass(
 class PropagateUnbackedSymInts(torch.fx.Interpreter):
     def run_node(self, n: torch.fx.Node):
         import sympy
-        from torch.fx.experimental.sym_node import SymNode
 
         result = super().run_node(n)
         if bindings := n.meta.get("unbacked_bindings"):
