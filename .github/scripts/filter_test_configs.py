@@ -449,7 +449,7 @@ def parse_reenabled_issues(s: Optional[str]) -> List[str]:
 
 
 def get_reenabled_issues(pr_body: str = "") -> List[str]:
-    default_branch = os.getenv("GIT_DEFAULT_BRANCH", "main")
+    default_branch = f"origin/{os.environ.get('GIT_DEFAULT_BRANCH', 'main')}"
     try:
         commit_messages = subprocess.check_output(
             f"git cherry -v {default_branch}".split(" ")
