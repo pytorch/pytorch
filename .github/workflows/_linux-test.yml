@@ -200,6 +200,7 @@ jobs:
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           NO_TEST_TIMEOUT: ${{ steps.keep-going.outputs.ci-no-test-timeout }}
           NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
+          TD_DISTRIBUTED: ${{ steps.keep-going.outputs.ci-td-distributed }}
           SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
           SCCACHE_S3_KEY_PREFIX: ${{ github.workflow }}
           SHM_SIZE: ${{ contains(inputs.build-environment, 'cuda') && '2g' || '1g' }}
@@ -252,6 +253,7 @@ jobs:
             -e VERBOSE_TEST_LOGS \
             -e NO_TEST_TIMEOUT \
             -e NO_TD \
+            -e TD_DISTRIBUTED \
             -e PR_LABELS \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e SCCACHE_BUCKET \

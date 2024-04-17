@@ -1,3 +1,4 @@
+import copy
 import io
 import math
 from typing import Any, Callable, Dict, Optional, Tuple, TYPE_CHECKING
@@ -117,7 +118,12 @@ def _iterate_state_dict(
             not isinstance(companion_obj, dict)
             or set(companion_obj.keys()) != set(iter_object.keys())
         ):
-            raise CompanionMismatch()
+            msg = (
+                ""
+                if isinstance(companion_obj, dict)
+                else f"{set(companion_obj.keys())=} {set(iter_object.keys())=}"
+            )
+            raise CompanionMismatch(msg)
 
         ret = {
             key: _iterate_state_dict(
@@ -161,7 +167,7 @@ def _iterate_state_dict(
         if isinstance(iter_object, tuple):
             ret = tuple(ret)
     elif not type_check:
-        ret = iter_object
+        ret = copy.deepcopy(iter_object)
     else:
         raise ValueError(f"Unexpected value type {type(iter_object)}")
 
@@ -312,10 +318,12 @@ def _copy_state_dict(
     state_dict: Dict[str, Any],
     copy_state_dict: Dict[str, Any],
     non_blocking: bool = False,
-):
+) -> Dict[str, Any]:
     """
     Copies all tensors in a given state dict into a different state_dict with the
-    same structure.
+    same structure. Additionally, a copied state dict with the same value references
+    is returned. Editing the keys on this state dict will not affect the
+    passed in copy_state_dict (but the value references are the same).
 
     .. warning::
         It is expected by this function that state_dict and copy_state_dict share
@@ -331,9 +339,12 @@ def _copy_state_dict(
             The state dict we are copying into. This state_dict must have exactly
              the same structure as the source `state_dict`.
         non_blocking: (bool): Whether copy ops should be performed asynchronously
+
+    Returns:
+        State Dict copy
     """
 
-    _iterate_state_dict(
+    return _iterate_state_dict(
         state_dict,
         _identity_func,
         _identity_func,
