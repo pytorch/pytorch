@@ -4319,12 +4319,12 @@ class LoopNestWithSplit:
             self.root = split_loops
         return split_loops
 
-    def get_kernels(self):
-        if self.root:
-            kernels = []
-            for loop in self.root:
-                kernels += loop.get_kernels()
-            return kernels
-        else:
-            assert self.kernel is not None
+    def get_kernels(self) -> List[CppKernel]:
+        """Get all kernel objects under this loop nest"""
+        if self.kernel:
             return [self.kernel]
+        kernels: List[CppKernel] = []
+        assert self.root is not None
+        for loop in self.root:
+            kernels += loop.get_kernels()
+        return kernels
