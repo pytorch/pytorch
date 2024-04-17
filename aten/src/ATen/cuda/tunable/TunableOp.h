@@ -156,19 +156,20 @@ class TunableOp {
         }
 
         // for warmup does user set max duration, max iters, or both?
+        // warmup is allowed to be skipped by setting either iterations or duration to 0
         double max_warmup_duration = ctx->GetMaxWarmupDurationMs();
         int max_warmup_iter = ctx->GetMaxWarmupIterations();
         int warmup_iter = 1; // default
-        if (max_warmup_duration > 0) {
+        if (max_warmup_duration >= 0) {
           int duration_iters = max_warmup_duration / approx_duration;
-          if (max_warmup_iter > 0) {
+          if (max_warmup_iter >= 0) {
             warmup_iter = std::min(max_warmup_iter, duration_iters);
           }
           else {
             warmup_iter = duration_iters;
           }
         }
-        else if (max_warmup_iter > 0) {
+        else if (max_warmup_iter >= 0) {
           warmup_iter = max_warmup_iter;
         }
 
@@ -188,6 +189,8 @@ class TunableOp {
         else if (max_tuning_iter > 0) {
           tuning_iter = max_tuning_iter;
         }
+        // tuning must run at least 1 iteration
+        tuning_iter = std::max(1, tuning_iter);
 
         // do the full warmup followed by tuning
         double warmup_ms = warmup_iter * approx_duration;
