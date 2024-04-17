@@ -7,8 +7,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAUtils.h>
 #include <ATen/Dispatch.h>
-#include <torch/library.h>
-#include <torch/types.h>
 
 #if defined(USE_ROCM) || defined(_MSC_VER) || (defined(CUDA_VERSION) && CUDA_VERSION < 11080)
 #else
@@ -53,7 +51,8 @@ struct MetadataCuSparseLt {
         {(data_scalars + meta_scalars)},
         at::TensorOptions().device(like.device()).dtype(like.dtype()));
 
-    using namespace torch::indexing;
+    using at::indexing::Slice;
+    using at::indexing::None;
     at::Tensor packed = storage.index({Slice(None, data_scalars)})
                             .view({rows, cutlass::ceil_div(cols, 2)});
     at::Tensor metadata = storage.index({Slice(data_scalars, None)});

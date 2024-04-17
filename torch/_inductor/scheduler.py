@@ -538,7 +538,7 @@ class BaseSchedulerNode:
         node_bytes = 0
 
         for buf_name in reads | writes:
-            buf_accessed_elems = sum([node_numel for dep in buf_accesses[buf_name]])
+            buf_accessed_elems = sum(node_numel for dep in buf_accesses[buf_name])
             buf: Union[ir.Buffer, ir.TensorBox]
             if buf_name in V.graph.name_to_buffer:
                 buf = V.graph.name_to_buffer[buf_name]
@@ -868,8 +868,8 @@ class FusedSchedulerNode(BaseSchedulerNode):
             for dep in set.union(*[x.unmet_dependencies for x in snodes])
             if dep.name not in self.get_names()
         } - self.read_writes.writes
-        self.min_order = min([x.min_order for x in self.snodes])
-        self.max_order = max([x.max_order for x in self.snodes])
+        self.min_order = min(x.min_order for x in self.snodes)
+        self.max_order = max(x.max_order for x in self.snodes)
 
     @cache_on_self
     def get_name(self) -> str:
@@ -1835,12 +1835,18 @@ class Scheduler:
             min_ms_fused = float("inf")
             ms_fused_choice = None
 
+            triton_choices = 0
+
             for choice, unfused_time in choice_timings.items():
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
 
                 if unfused_time >= ms1 + ms2:
                     continue
+
+                triton_choices += 1
+                if triton_choices > config.max_epilogue_benchmarked_choices:
+                    break
 
                 # TODO - parallel compile triton templates
                 # TODO - should prune/skip choices that are not within certain % of best choice
@@ -2495,18 +2501,9 @@ class Scheduler:
 
         self.flush()
 
-    def is_unaligned_buffer(self, buf_name):
-        if buf_name in V.graph.graph_inputs:
-            return not config.assume_aligned_inputs
-        if buf_name in V.graph.constants:
-            # all constants are assumed to be aligned
-            return False
+    def get_buffer_layout(self, buf_name: str) -> ir.Layout:
         node = self.name_to_node[buf_name]
-        layout = node.node.get_layout()
-        if isinstance(layout, ir.NonOwningLayout):
-            return not layout.maybe_guard_aligned()
-        else:
-            return False
+        return node.node.get_layout()
 
 
 class BaseScheduling:

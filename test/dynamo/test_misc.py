@@ -3859,6 +3859,25 @@ utils_device.CURRENT_DEVICE == None""".split(
         self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(cnts.op_count, 2)
 
+    def test_clone_sparse_input(self):
+        for layout in [
+            torch.sparse_coo,
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        ]:
+            for sparse_input in self.generate_simple_inputs(
+                layout,
+                device="cpu",
+                dtype=torch.float64,
+                index_dtype=torch.int64,
+            ):
+                # Invoke the dynamo clone input method directly.
+                sparse_copy = torch._dynamo.utils.clone_input(sparse_input)
+                # Make sure sparse clone is successful.
+                self.assertEqual(sparse_input, sparse_copy)
+
     @skipIfNotPy311
     def test_linetable_311_writer1(self):
         def fn():
@@ -7006,7 +7025,7 @@ def fn():
 
     def test_variable_access_in_exception(self):
         def fn():
-            x = torch.ones(3, 3)
+            x = torch.ones(1)
             try:
                 raise RuntimeError("bad")
             except RuntimeError:
@@ -7014,7 +7033,87 @@ def fn():
             return x
 
         opt_fn = torch._dynamo.optimize("eager")(fn)
-        torch.allclose(opt_fn(), torch.tensor([3.0]))
+        self.assertEqual(opt_fn(), torch.tensor([2.0]))
+
+    def test_nested_sequential_with(self):
+        def fn(x):
+            with torch.set_grad_enabled(True):
+                with torch.set_grad_enabled(False):
+                    x = x + 1
+                with torch.set_grad_enabled(True):
+                    x = x + 1
+                return x
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
+
+    def test_nested_sequential_try(self):
+        def fn(x):
+            try:
+                try:
+                    x = x + 1
+                except:
+                    pass
+                try:
+                    try:
+                        x = x + 1
+                    except:
+                        pass
+                except:
+                    pass
+            except:
+                pass
+            return x
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
+
+    def test_nested_sequential_try_with(self):
+        def fn(x):
+            with torch.set_grad_enabled(True):
+                try:
+                    x = x + 1
+                except:
+                    pass
+                try:
+                    with torch.set_grad_enabled(False):
+                        x = x + 1
+                except:
+                    pass
+            return x
+
+        opt_fn = torch._dynamo.optimize("eager")(fn)
+        self.assertEqual(opt_fn(torch.ones(1)), torch.tensor([3.0]))
+
+    def test_nested_sequential_try_with_graph_break(self):
+        def fn(x, n):
+            with torch.set_grad_enabled(True):
+                with torch.set_grad_enabled(False):
+                    x = x + 1
+                    torch._dynamo.graph_break()
+                try:
+                    with torch.set_grad_enabled(False):
+                        x = x + 1
+                        if n == 0:
+                            torch._dynamo.graph_break()
+                except:
+                    pass
+                with torch.set_grad_enabled(False):
+                    x = x + 1
+                    torch._dynamo.graph_break()
+                x = x + 1
+            return x
+
+        counter = CompileCounter()
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+        self.assertEqual(opt_fn(torch.ones(1), 0), torch.tensor([5.0]))
+        self.assertEqual(counter.frame_count, 1)
+
+        torch._dynamo.reset()
+        counter = CompileCounter()
+        opt_fn = torch._dynamo.optimize(counter)(fn)
+        self.assertEqual(opt_fn(torch.ones(1), 1), torch.tensor([5.0]))
+        self.assertEqual(counter.frame_count, 3)
 
     def test_ordered_dict_alias_reconstruct(self):
         od = collections.OrderedDict
@@ -8729,7 +8828,7 @@ def ___make_guard_fn():
 
             return [t * k for t in yield_from_gen(t_list)]
 
-        t_list = [torch.randn([2, 3])] * 3
+        t_list = [torch.randn([2, 3]) for _ in range(3)]
         eager = yield_from_fn(t_list, 2)
         counter = CompileCounter()
         compiled = torch._dynamo.optimize(counter)(yield_from_fn)(t_list, 2)
@@ -8777,6 +8876,34 @@ def ___make_guard_fn():
         )
         self.assertEqual(eager, compiled)
         self.assertEqual(counter.frame_count, 1)
+
+    def test_yield_from_user_stop_iteration(self):
+        class MyIter:
+            def __init__(self, seq):
+                self.seq = seq
+                self.index = 0
+
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                self.index += 1
+                if self.index <= len(self.seq):
+                    return self.seq[self.index - 1]
+                raise StopIteration(self.index)
+
+        def yield_from_iter_fn(seq):
+            def gen(seq):
+                yield from MyIter(seq)
+
+            return [i for i in gen(seq)]
+
+        seq = [torch.randn([2, 3]) for _ in range(3)]
+        eager = yield_from_iter_fn(seq)
+        counter = CompileCounter()
+        compiled = torch._dynamo.optimize(counter)(yield_from_iter_fn)(seq)
+        self.assertEqual(eager, compiled)
+        self.assertEqual(counter.frame_count, 0)
 
     def test_yield_send_to_subgenerator_graph_break(self):
         def subgenerator(tensor):
@@ -9090,6 +9217,18 @@ def ___make_guard_fn():
 
             self.assertEqual(list(eager), list(compiled))
             self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_packaging_version_parse(self):
+        from packaging import version
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            x = torch.zeros(1)
+            if version.parse(torch.__version__) >= version.parse("2.0.0"):
+                return x + 1
+            return x
+
+        self.assertEqual(fn().item(), 1)
 
     def test_itertools_accumulate_tensors_user_defined(self):
         def udo_fn_0(a, b):
@@ -9970,7 +10109,7 @@ fn
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(inp)
 
-    def test_312_binary_slice_with_graph_break(self):
+    def test_312_binary_slice_with_graph_break1(self):
         l1 = torch.nn.Linear(5, 5)
         l2 = torch.nn.Linear(5, 5)
 
@@ -9979,6 +10118,31 @@ fn
             n = torch.nn.Sequential(l1, l2)
             out = n[1:](x)
             return out
+
+        opt_fn = torch.compile(fn, backend="eager")
+        opt_fn(torch.randn(5, 5))
+
+    def test_312_binary_slice_with_graph_break2(self):
+        class Foo:
+            def __setitem__(self, key, val):
+                pass
+
+            def __getitem__(self, key):
+                torch._dynamo.graph_break()
+                return 1
+
+        foo = Foo()
+
+        def fn(x):
+            # graph break in a STORE_SLICE instruction
+            foo[:] = x
+            # graph break in BINARY_SLICE with has_backedge check
+            x = x + foo[:]
+            if x is None:
+                x = x + 1
+            else:
+                x = x + 1
+            return x
 
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(torch.randn(5, 5))
@@ -9996,6 +10160,17 @@ fn
 
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(torch.randn(3, 3))
+
+    def test_load_fast_and_clear_graph_break(self):
+        # Can result in a segfault in 3.12+ if LOAD_FAST_AND_CLEAR
+        # is not handled properly in a graph break
+        def fn():
+            out = torch.cat([torch.randn(r, 5) for r in range(3)])
+            torch._dynamo.graph_break()
+            out = torch.cat([torch.randn(r, 5) for r in range(3)])
+            return out
+
+        self.assertEqual(torch._dynamo.optimize("eager")(fn)().shape, (3, 5))
 
     def test_raises_importerror1(self):
         @torch.compile(backend="eager")
