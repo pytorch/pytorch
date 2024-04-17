@@ -44,8 +44,8 @@ Tensor& glu_backward_cuda_out(const Tensor& grad_output, const Tensor& input,
 
   const auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
-    .add_input(input)
-    .add_input(grad_output)
+    .add_const_input(input)
+    .add_const_input(grad_output)
     .resize_outputs(false)
     .declare_static_shape(iter_shape)
     .build();

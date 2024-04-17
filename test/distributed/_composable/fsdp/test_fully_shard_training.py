@@ -708,6 +708,65 @@ class TestFullyShardGradientAccumulation(FSDPTest):
                 # gradient accumulation with and without communication
                 _optim.zero_grad(set_to_none=(iter_idx % 2))
 
+    @skip_if_lt_x_gpu(2)
+    def test_1f1b_microbatching(self):
+        self.run_subtests(
+            {"use_explicit_unshard": [False, True]},
+            self._test_1f1b_microbatching,
+        )
+
+    def _test_1f1b_microbatching(self, use_explicit_unshard: bool):
+        torch.manual_seed(42)
+        model_args = ModelArgs(dropout_p=0.0)
+        model = Transformer(model_args)
+        ref_model = copy.deepcopy(model).cuda()
+        ref_optim = torch.optim.AdamW(ref_model.parameters(), lr=1e-2)
+        for module in model.modules():
+            if isinstance(module, TransformerBlock):
+                fully_shard(module, reshard_after_forward=False)
+        fully_shard(model, reshard_after_forward=False)
+        optim = torch.optim.AdamW(model.parameters(), lr=1e-2)
+
+        num_microbatches = 3
+        local_batch_size = 2
+        torch.manual_seed(42 + self.rank + 1)
+        inps = [
+            torch.randint(
+                0, model_args.vocab_size, (local_batch_size, 16), device="cuda"
+            )
+            for _ in range(num_microbatches)
+        ]
+
+        # Before pipelining, we may prefer to issue all all-gathers ahead of
+        # time to increase overlap opportunity at no difference in parameter
+        # memory usage since we do not reshard after forward
+        if use_explicit_unshard:
+            for module in model.modules():
+                if isinstance(module, FSDP):
+                    module.unshard(async_op=True)
+
+        # Emulate the 1f1b pipeline schedule and only reduce gradients on the
+        # last microbatch
+        losses: List[torch.Tensor] = []
+        ref_losses: List[torch.Tensor] = []
+        for inp_idx, inp in enumerate(inps):
+            is_last_microbatch = inp_idx == num_microbatches - 1
+            model.set_requires_gradient_sync(is_last_microbatch)
+            model.set_is_last_backward(is_last_microbatch)
+            losses.append(model(inp).sum())
+            losses[-1].backward()
+            ref_losses.append(ref_model(inp).sum())
+            ref_losses[-1].backward()
+        for param in ref_model.parameters():
+            dist.all_reduce(param.grad)
+            param.grad.detach().div_(self.world_size)
+
+        for loss, ref_loss in zip(losses, ref_losses):
+            self.assertEqual(loss, ref_loss)
+        optim.step()
+        ref_optim.step()
+        check_sharded_parity(self, ref_model, model)
+
 
 class TestFullyShard2DTraining(FSDPTest):
     @property
