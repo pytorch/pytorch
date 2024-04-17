@@ -87,7 +87,7 @@ class TritonTemplateKernel(TritonKernel):
         self,
         kernel_name,
         input_nodes,
-        output_nodes: List[ir.Buffer],
+        output_nodes,
         defines,
         num_stages,
         num_warps,
@@ -104,7 +104,7 @@ class TritonTemplateKernel(TritonKernel):
     ):
         # TODO what do do here ?
         super().__init__(
-            sympy_product(output_nodes[0].get_size()), # TODO DONT LAND
+            sympy_product(output_nodes[0].get_size()),  # TODO DONT LAND
             sympy.Integer(1),
             index_dtype=index_dtype,
         )
@@ -242,7 +242,7 @@ class TritonTemplateKernel(TritonKernel):
         self.render_hooks["<DEF_KERNEL>"] = hook
         return "<DEF_KERNEL>"
 
-    def size(self, name: Optional[str], index: int, output_index: int=0):
+    def size(self, name: Optional[str], index: int, out_index: int = 0):
         """
         Hook called from template code to get the size of an arg.
         Will add needed args to pass it in if it is dynamic.
@@ -250,18 +250,18 @@ class TritonTemplateKernel(TritonKernel):
         Args:
             name: If None, get the size of the output tensor. Otherwise, get the size of the named input tensor.
             index: The index of the size to get
-            output_index: Defaults to 0, but can bet set to [0,len(output_nodes)) to get the size of a specific output tensor.
+            out_index: Defaults to 0, but can bet set to [0,len(output_nodes)) to get the size of a specific output tensor.
         """
         assert isinstance(index, int)
         if name is None:
-            val = self.output_nodes[output_index].get_size()[index]
+            val = self.output_nodes[out_index].get_size()[index]
             # val = self.output_node.get_size()[index]
         else:
             assert isinstance(name, str)
             val = self.named_input_nodes[name].get_size()[index]
         return texpr(self.rename_indexing(val))
 
-    def stride(self, name, index, output_index: int=0):
+    def stride(self, name, index, out_index: int = 0):
         """
         Hook called from template code to get the stride of an arg.
         Will add needed args to pass it in if it is dynamic.
@@ -269,11 +269,11 @@ class TritonTemplateKernel(TritonKernel):
         Args:
             name: If None, get the stride of the output tensor. Otherwise, get the stride of the named input tensor.
             index: The index of the stride to get
-            output_index: Defaults to 0, but can bet set to [0,len(output_nodes)) to get the stride of a specific output tensor.
+            out_index: Defaults to 0, but can bet set to [0,len(output_nodes)) to get the stride of a specific output tensor.
         """
         assert isinstance(index, int)
         if name is None:
-            val = self.output_nodes[output_index].get_stride()[index]
+            val = self.output_nodes[out_index].get_stride()[index]
             # val = self.output_node.get_stride()[index]
         else:
             assert isinstance(name, str)
@@ -325,7 +325,7 @@ class TritonTemplateKernel(TritonKernel):
         indices: Union[List[Any], Tuple[Any]],
         val: str,
         mask: Optional[str] = None,
-        output_index: int = 0
+        out_index: int = 0,
     ):
         """
         Hook called from template code to store the final output
@@ -336,7 +336,7 @@ class TritonTemplateKernel(TritonKernel):
             indices: The indices to store the output at
             val: The value to store
             mask: The mask to store with the output
-            output_index: Defaults to 0, but can bet set to [0,len(output_nodes)) to store the output to a specific output tensor.
+            out_index: Defaults to 0, but can bet set to [0,len(output_nodes)) to store the output to a specific output tensor.
         """
         assert isinstance(indices, (list, tuple))
         assert isinstance(val, str)
@@ -344,7 +344,8 @@ class TritonTemplateKernel(TritonKernel):
         assert self.template_mask is None
         indices = list(map(TritonPrinter.paren, indices))
         index_symbols = [sympy.Symbol(x) for x in indices]
-        lengths = [V.graph.sizevars.simplify(s) for s in self.output_nodes[output_index].get_size()]
+        current_output_node = self.output_nodes[out_index]
+        lengths = [V.graph.sizevars.simplify(s) for s in current_output_node.get_size()]
         assert len(indices) == len(lengths)
 
         # glue to make generated code use same indexing from template
@@ -362,7 +363,7 @@ class TritonTemplateKernel(TritonKernel):
         )
         self.template_mask = mask
         self.template_indices = indices
-        output_index = self.output_node.get_layout().make_indexer()(index_symbols)
+        output_index = current_output_node.get_layout().make_indexer()(index_symbols)
         output_index = self.rename_indexing(output_index)
         if output_index == contiguous_index:
             output_index = sympy.Symbol("xindex")
@@ -376,7 +377,7 @@ class TritonTemplateKernel(TritonKernel):
             epilogue_args.append(input_node.make_loader()(index_symbols))
 
         V.ops.store(
-            self.output_nodes[0].get_name(),
+            current_output_node.get_name(),
             output_index,
             self.epilogue_fn(*epilogue_args),
         )
@@ -387,9 +388,10 @@ class TritonTemplateKernel(TritonKernel):
             self.codegen_body()
             return textwrap.indent(self.body.getvalue(), "    ").strip()
 
-        assert "<STORE_OUTPUT>" not in self.render_hooks
-        self.render_hooks["<STORE_OUTPUT>"] = hook
-        return "<STORE_OUTPUT>"
+        render_key = f"<STORE_OUTPUT_{out_index}>"
+        assert render_key not in self.render_hooks  # We have multiple store outputs now
+        self.render_hooks[render_key] = hook
+        return render_key
 
     def render(self, template, kwargs):
         return PartialRender(
@@ -529,7 +531,7 @@ class TritonTemplate(KernelTemplate):
     def generate(
         self,
         input_nodes,
-        layout,
+        layouts,
         num_stages,
         num_warps,
         prefix_args=0,
@@ -544,12 +546,17 @@ class TritonTemplate(KernelTemplate):
             defines.write(f"    {name} : tl.constexpr = {val}\n")
         defines = defines.getvalue()
 
-        fake_out = ir.Buffer("buf_out", layout)
+        fake_outs = []
+        for idx, layout in enumerate(layouts):
+            fake_out = ir.Buffer(f"buf_out_{idx}", layout)
+            fake_outs.append(fake_out)
+
         kernel_name = f"triton_{self.name}"
 
-        numel = sympy_product(layout.size)
-        buffers = itertools.chain(input_nodes, (fake_out,))
-        if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
+        # Check if either output would require 64-bit indexing
+        max_numel = max(sympy_product(layout.size) for layout in layouts)
+        buffers = itertools.chain(input_nodes, fake_outs)
+        if not TritonScheduling.can_use_32bit_indexing(max_numel, buffers):
             raise NotImplementedError(
                 "64-bit indexing is not yet implemented for triton templates"
             )
@@ -561,7 +568,7 @@ class TritonTemplate(KernelTemplate):
             num_warps=num_warps,
             grid_fn=self.grid,
             meta=kwargs,
-            call_sizes=layout.size,
+            call_sizes=[layout.size for layout in layouts],
             prefix_args=prefix_args,
             suffix_args=suffix_args,
             epilogue_fn=epilogue_fn,
@@ -569,10 +576,10 @@ class TritonTemplate(KernelTemplate):
             subgraphs=subgraphs,
         )
         with patch.object(
-            V.graph, "get_dtype", self._fake_get_dtype(fake_out)
+            V.graph, "get_dtype", self._fake_get_dtype(fake_outs)
         ), TritonTemplateKernel(
             kernel_name=kernel_name,
-            output_nodes=[fake_out,],
+            output_nodes=fake_outs,
             use_jit=True,
             **kernel_options,
         ) as kernel:
@@ -600,7 +607,7 @@ class TritonTemplate(KernelTemplate):
             _, call_args, _ = kernel.args.python_argdefs()
 
         expected_args = list(unique(x.get_name() for x in input_nodes))
-        expected_args.extend([fake_out.get_name()])
+        expected_args.extend([fake_out.get_name() for fake_out in fake_outs])
         assert list(call_args)[: len(expected_args)] == expected_args, (
             call_args,
             expected_args,
@@ -615,7 +622,9 @@ class TritonTemplate(KernelTemplate):
         def make_kernel_render(out_node):
             kernel = TritonTemplateKernel(
                 kernel_name=str(Placeholder.KERNEL_NAME),
-                output_node=[out_node,],
+                output_nodes=[
+                    out_node,
+                ],
                 use_jit=False,
                 **kernel_options,
             )
@@ -628,9 +637,11 @@ class TritonTemplate(KernelTemplate):
 
         # create the BenchmarkRequest
         assert mod.__file__ is not None
+        # TODO [ DONT LAND] I know that for Templated Attention we need the first layouts size..
+        # but in we should probably accept the full layouts
         grid = self.grid(
             *V.graph.sizevars.size_hints(
-                layout.size,
+                layouts[0].size,
                 fallback=config.unbacked_symint_fallback,
             ),
             kwargs,
@@ -651,7 +662,7 @@ class TritonTemplate(KernelTemplate):
         return TritonTemplateCaller(
             kernel_hash_name,
             input_nodes,
-            layout,
+            layouts,
             make_kernel_render,
             extra.strip("-").replace("-", ", "),
             bmreq,
@@ -731,7 +742,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         self,
         name,
         input_nodes,
-        layout,
+        layouts,
         make_kernel_render,
         debug_extra,
         bmreq,
@@ -739,7 +750,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
             Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
     ):
-        super().__init__(name, input_nodes, layout)
+        super().__init__(name, input_nodes, layouts)
         self.make_kernel_render = make_kernel_render
         self.debug_extra = debug_extra
         self.bmreq: TritonBenchmarkRequest = bmreq

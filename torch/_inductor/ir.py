@@ -5543,6 +5543,11 @@ class MultiOutput(ExternKernel):
         ]
 
 
+class MultiOutputAlloc(MultiOutput):
+    def should_allocate(self):
+        return True
+
+
 def _prepare_convolution_fusion_create(
     cls,
     x: "TensorBox",
