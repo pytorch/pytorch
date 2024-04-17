@@ -25,7 +25,7 @@ class TestCustomOperators(TestCase):
 
     def test_op_with_no_abstract_impl_pystub(self):
         x = torch.randn(3, device="meta")
-        if utils.requires_pystub():
+        if utils.requires_set_python_module():
             with self.assertRaisesRegex(RuntimeError, "pointwise"):
                 torch.ops.custom.tan(x)
         else:
