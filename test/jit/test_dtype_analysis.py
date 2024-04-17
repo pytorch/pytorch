@@ -7,19 +7,19 @@ from unittest.case import expectedFailure
 import torch
 from torch import complex32, float32, float64, int32, int64
 from torch.jit._passes import _property_propagation
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    ops,
+)
 from torch.testing._internal.common_methods_invocations import (
-    SampleInput,
+    op_db,
     sample_inputs_adaptive_avg_pool2d,
     sample_inputs_conv2d,
+    SampleInput,
 )
-from torch.testing._internal.common_utils import set_default_dtype, first_sample
-from torch.testing._internal.jit_utils import JitTestCase
+from torch.testing._internal.common_utils import first_sample, set_default_dtype
 from torch.testing._internal.jit_metaprogramming_utils import create_traced_fn
-from torch.testing._internal.common_device_type import (
-    ops,
-    instantiate_device_type_tests,
-)
-from torch.testing._internal.common_methods_invocations import op_db
+from torch.testing._internal.jit_utils import JitTestCase
 
 """
 Dtype Analysis relies on symbolic shape analysis, which is still in beta
@@ -274,7 +274,9 @@ class TestDtypeAnalysis(TestDtypeBase):
         ):
             for dtype in (torch.int8, torch.float64):
                 # Gets default version for conv2d
-                sample_input: SampleInput = list(inputs_fn(None, "cpu", dtype, False))[-1]
+                sample_input: SampleInput = list(inputs_fn(None, "cpu", dtype, False))[
+                    -1
+                ]
                 input_args = [sample_input.input, *sample_input.args]
                 self.assert_dtype_equal_custom_args(fn, input_args)
 
@@ -352,7 +354,9 @@ class TestDtypeCustomRules(TestDtypeBase):
         # Run the Dtype Analysis
         graph = traced_fn.graph  # Note this is a cached graph
         input_tensors = [t for t in input_args if isinstance(t, torch.Tensor)]
-        input_tensors += [v for v in sample_input.kwargs.values() if isinstance(v, torch.Tensor)]
+        input_tensors += [
+            v for v in sample_input.kwargs.values() if isinstance(v, torch.Tensor)
+        ]
         self.prop_dtype_on_graph(graph, input_tensors)
         self.assert_output_dtype_equal(expected_res, graph)
 

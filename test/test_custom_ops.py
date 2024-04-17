@@ -688,20 +688,6 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             infer_schema(foo)
 
-        with self.assertRaisesRegex(ValueError, "default value"):
-
-            def foo(x: Optional[Tensor] = None):
-                raise NotImplementedError()
-
-            infer_schema(foo)
-
-        with self.assertRaisesRegex(ValueError, "default value"):
-
-            def foo(x: Optional[Tensor] = None):
-                raise NotImplementedError()
-
-            infer_schema(foo)
-
         with self.assertRaisesRegex(ValueError, "unsupported"):
 
             def foo(x: Tensor) -> Tuple[Tensor, ...]:
@@ -1519,9 +1505,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             op(x)
 
         x = torch.randn(3, device="meta")
-        with self.assertRaisesRegex(
-            NotImplementedError, "no abstract impl or Meta kernel"
-        ):
+        with self.assertRaisesRegex(NotImplementedError, "no fake impl or Meta kernel"):
             op(x)
 
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::bar")
@@ -2151,6 +2135,99 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(z, x + y)
         self.assertTrue(cpu_called)
 
+    def test_supports_tensorlist(self):
+        @torch._library.autograd.supports_tensorlist
+        class Stack(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, xs):
+                return torch.stack(xs)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return list(grad.unbind(0))
+
+        # call two applys, do a backward on the first
+        def t():
+            return torch.randn([], requires_grad=True)
+
+        xs0 = [t(), t(), t()]
+        xs1 = [t(), t(), t(), t()]
+        y0 = Stack.apply(xs0)
+        y1 = Stack.apply(xs1)
+        grads = torch.autograd.grad(y0.sum(), xs0)
+        self.assertEqual(grads, [torch.tensor(1.0) for _ in range(3)])
+
+        # call one apply, do multiple backwards
+        xs = [t(), t(), t()]
+        y = Stack.apply(xs)
+        _ = torch.autograd.grad(y.sum(), xs, retain_graph=True)
+        _ = torch.autograd.grad(y.sum(), xs, retain_graph=True)
+        grads = torch.autograd.grad(y.sum(), xs, retain_graph=True)
+        self.assertEqual(grads, [torch.tensor(1.0) for _ in range(3)])
+
+        # error: on access forward, backward directly
+        with self.assertRaisesRegex(NotImplementedError, "Function.forward directly"):
+            Stack.forward(None, xs)
+        with self.assertRaisesRegex(NotImplementedError, "Function.backward directly"):
+            Stack.backward(None, xs)
+
+        # the recursive case
+        @torch._library.autograd.supports_tensorlist
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, xs):
+                if len(xs) > 0:
+                    return Foo.apply(xs[1:])
+                ctx.len_xs = len(xs)
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad):
+                result = [None] * len_xs
+                result[-1] = grad.cos()
+                return result
+
+        with self.assertRaisesRegex(NotImplementedError, "Recursive call"):
+            Foo.apply(xs)
+
+        # recursive on backward
+        @torch._library.autograd.supports_tensorlist
+        class Bar(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, xs):
+                return [xs[i] + i for i in range(len(xs))]
+
+            @staticmethod
+            def backward(ctx, grads):
+                f1 = Bar.apply(grads[:2])
+                f2 = Bar.apply(grads[2:])
+                return f1 + f2
+
+        xs = [torch.tensor(0.0, requires_grad=True) for _ in range(5)]
+        ys = Bar.apply(xs)
+        sum(ys).backward()
+        result = [xi.grad for xi in xs]
+        self.assertEqual(result, torch.tensor([1.0, 2, 1, 2, 3]).unbind(0))
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_default_values(self):
+        defaults = []
+
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def f(
+            x: Tensor,
+            a: Optional[int] = None,
+            b: float = 3.14,
+            c: bool = True,
+            d: int = 3,
+        ) -> Tensor:
+            defaults.extend([a, b, c, d])
+            return x.clone()
+
+        x = torch.randn(3)
+        f(x)
+        self.assertEqual(defaults, [None, 3.14, True, 3])
+
     def test_mutated_error(self):
         with self.assertRaisesRegex(
             ValueError, r".*{'y'} in mutates_args were not found"
@@ -2301,13 +2378,6 @@ Please use `add.register_fake` to add an fake impl.""",
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_register_autograd_error_cases(self):
-        @torch.library.custom_op("_torch_testing::f", mutates_args=())
-        def f(x: List[Tensor]) -> Tensor:
-            return x[0].sin()
-
-        with self.assertRaises(NotImplementedError):
-            f.register_autograd(lambda: None, lambda: None)
-
         @torch.library.custom_op("_torch_testing::g", mutates_args=())
         def g(x: Tensor) -> Tensor:
             return x.sin()
@@ -2387,6 +2457,30 @@ Please use `add.register_fake` to add an fake impl.""",
         x = x.cuda()
         y = f(x)
         self.assertEqual(y, x.sin())
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_overloading(self):
+        called_f = 0
+        called_f1 = 0
+
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            nonlocal called_f
+            called_f += 1
+            return x.clone()
+
+        x = torch.randn(2, 3)
+        torch.ops._torch_testing.f(x)
+        self.assertEqual(called_f, 1)
+
+        @torch.library.custom_op("_torch_testing::f.overload", mutates_args=())
+        def f1(x: Tensor, y: Tensor) -> Tensor:
+            nonlocal called_f1
+            called_f1 += 1
+            return x.clone()
+
+        torch.ops._torch_testing.f(x, x)
+        self.assertEqual(called_f1, 1)
 
     def test_disallows_output_aliasing(self):
         @torch.library.custom_op("_torch_testing::f", mutates_args=())
