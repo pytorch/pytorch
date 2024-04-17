@@ -1970,7 +1970,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 try:
                     with cm:
                         x.add(y)
-                        raise ValueError()
+                        raise ValueError
                         x.relu()
                 except ValueError:
                     pass

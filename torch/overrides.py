@@ -1910,7 +1910,7 @@ class TorchFunctionMode:
         pass
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def __enter__(self):
         _push_mode(self)

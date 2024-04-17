@@ -1238,7 +1238,7 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
         class AMode(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
                 if func.__name__ == 'randn.default':
-                    raise RuntimeError()
+                    raise RuntimeError
                 return A(torch.zeros(()))
 
         with AMode():
@@ -1254,7 +1254,7 @@ $3: f32[] = torch._ops.aten.add.Tensor($1, $2)""")
 
         class A(TorchDispatchMode):
             def __torch_dispatch__(self, func, types, args=(), kwargs=None):
-                raise ErrorA()
+                raise ErrorA
 
         x = A()
         with self.assertRaises(ErrorA):

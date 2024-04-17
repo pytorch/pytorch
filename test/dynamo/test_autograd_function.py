@@ -752,7 +752,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
                     new_data = args[0]._data.view(*args[1:])
                     return FooTensor(new_data, args[0]._config, args[0]._scale)
 
-                raise NotImplementedError()
+                raise NotImplementedError
 
         class foo_autograd_fn(torch.autograd.Function):
             @staticmethod

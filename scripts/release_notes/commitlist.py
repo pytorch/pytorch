@@ -578,7 +578,7 @@ def main():
             with open(filename, "w") as f:
                 f.writelines(lines)
         return
-    raise AssertionError()
+    raise AssertionError
 
 
 if __name__ == "__main__":

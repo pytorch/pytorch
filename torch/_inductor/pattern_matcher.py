@@ -218,7 +218,7 @@ class PatternExpr:
     def _match(
         self, node: torch.fx.Node, ctx: MatchContext
     ) -> Union[Match, FailedMatch]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def match(self, node: torch.fx.Node) -> Union[Match, FailedMatch]:
         try:
@@ -361,7 +361,7 @@ class _TargetExpr(PatternExpr):
         return isinstance(self.users, Multiple) or self.users > 1
 
     def find_anchor_nodes(self, ctx: MatchContext, searched):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def _match_fns(self, node: torch.fx.Node):
         return (
@@ -803,7 +803,7 @@ class PatternEntry:
     extra_check: Callable[[Match], bool]
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def register(self, pass_dicts, target=None, prepend=False):
         if target is None:
@@ -1507,7 +1507,7 @@ class PatternMatcherPass:
 
 
 def _not_implemented(*args, **kwargs) -> NoReturn:
-    raise NotImplementedError()
+    raise NotImplementedError
 
 
 def fx_to_pattern(

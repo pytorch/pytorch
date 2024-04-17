@@ -422,7 +422,7 @@ class BenchmarkRequest:
     def make_run_fn(
         self, *input_tensors: torch.Tensor, output_tensor: torch.Tensor
     ) -> Callable[[], None]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def cleanup_run_fn(self) -> None:
         pass

@@ -949,11 +949,11 @@ class DeferredLineBase:
 
     def __call__(self) -> Optional[str]:
         """Returns either self.line or None to indicate the line has been 'unwritten'"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def _new_line(self, line: str) -> DeferredLineBase:
         """Returns a new deferred line with the same condition"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def with_prefix(self, prefix):
         return self._new_line(f"{prefix}{self.line}")

@@ -215,7 +215,7 @@ class EphemeralSource(Source):
         return f"<ephemeral{': ' + self.desc if self.desc is not None else ''}>"
 
     def make_guard(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def is_ephemeral(self):
         return True
@@ -277,7 +277,7 @@ class NegateSource(ChainedSource):
         assert self.base is not None
 
     def reconstruct(self, codegen):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def guard_source(self):
         return self.base.guard_source()
@@ -516,7 +516,7 @@ class ConstantSource(Source):
         return self.source_name
 
     def make_guard(self, fn):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 @dataclasses.dataclass(frozen=True)

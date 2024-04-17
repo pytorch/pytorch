@@ -285,7 +285,7 @@ class TestInductorDynamic(TestCase):
 
                 @custom_ops.custom_op("test::foo")
                 def foo(x: torch.Tensor, y: int) -> torch.Tensor:
-                    raise NotImplementedError()
+                    raise NotImplementedError
 
                 @custom_ops.impl("test::foo")
                 def foo_impl(x: torch.Tensor, y: int) -> torch.Tensor:
@@ -401,7 +401,7 @@ class TestInductorDynamic(TestCase):
 
                 @custom_ops.custom_op("test::foo")
                 def foo(x: torch.Tensor) -> torch.Tensor:
-                    raise NotImplementedError()
+                    raise NotImplementedError
 
                 @custom_ops.impl("test::foo")
                 def foo_impl(x: torch.Tensor) -> torch.Tensor:

@@ -222,7 +222,7 @@ class TensorVariable(VariableTracker):
                 return SourcelessBuilder.create(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
-            raise NotImplementedError()
+            raise NotImplementedError
 
         # For local source, we associate the real value. We use this real value
         # for implementing getattr fallthrough on the variable tracker base class.
@@ -238,23 +238,23 @@ class TensorVariable(VariableTracker):
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
             _input_associated_real_value = eval(self.source.name(), scope)
         except Exception as exc:
-            raise NotImplementedError() from exc
+            raise NotImplementedError from exc
 
         if _input_associated_real_value is None:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         if object_has_getattribute(_input_associated_real_value):
-            raise NotImplementedError()
+            raise NotImplementedError
 
         if get_custom_getattr(_input_associated_real_value):
-            raise NotImplementedError()
+            raise NotImplementedError
 
         real_value = getattr(_input_associated_real_value, name)
         if callable(real_value):
             # Callables have more nuanced handling, and we should let the existing system delegate here.
             # Raising was past behavior and so should always be sound to fall back.
             # Note - at a certain point we may want to handle
-            raise NotImplementedError()
+            raise NotImplementedError
 
         from ..guards import GuardBuilder
         from .builder import VariableBuilder
@@ -391,7 +391,7 @@ class TensorVariable(VariableTracker):
             result = self.dynamic_getattr(tx, name)
 
         if result is None:
-            raise NotImplementedError()
+            raise NotImplementedError
         return result
 
     def has_unpack_var_sequence(self, tx):
@@ -1090,7 +1090,7 @@ class NumpyNdarrayVariable(TensorVariable):
         elif name in ["__version__"]:
             unimplemented("delegate np.__version__ to NumPy")
         if result is None:
-            raise NotImplementedError()
+            raise NotImplementedError
         return result
 
     @staticmethod

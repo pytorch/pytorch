@@ -153,7 +153,7 @@ class NNModuleVariable(VariableTracker):
         # Mark the class dynamic unless its module initialization
         if tx.f_code.co_name != "__init__":
             GenerationTracker.mark_class_dynamic(type(mod))
-        raise UnspecializeRestartAnalysis()
+        raise UnspecializeRestartAnalysis
 
     def _custom_getattr_fallback(self, base, tx, name, options):
         """Check for a __getattr__ and handle it specially if it is implemented"""

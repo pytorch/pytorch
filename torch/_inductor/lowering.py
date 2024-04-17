@@ -1629,7 +1629,7 @@ def bernoulli_p(x, *args):
 # This shouldn't be called in general
 @register_lowering(aten._foobar)
 def _foobar(_):
-    raise AssertionError()
+    raise AssertionError
 
 
 @functools.lru_cache(1)

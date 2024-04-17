@@ -2659,7 +2659,7 @@ class CppVecKernel(CppKernel):
                 mean, m2, weight = reduction_project(reduction_type, next_value)
             return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
         else:
-            raise NotImplementedError()
+            raise NotImplementedError
 
     def indirect_assert(self, var, lower, upper, mask=None):
         assert not mask, "do not support mask in indirect_indexing assertion"

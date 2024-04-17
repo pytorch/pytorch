@@ -85,7 +85,7 @@ class OperatorBase:
         self.functorch_table = {}
 
     def __call__(self, *args, **kwargs):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def has_kernel_for_dispatch_key(self, k):
         return k in self.py_kernels
@@ -165,7 +165,7 @@ class OperatorBase:
         return fn
 
     def name(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 is_included_in_alias = torch._C._dispatch_is_included_in_alias

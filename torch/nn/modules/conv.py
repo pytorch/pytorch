@@ -1184,7 +1184,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
     # Function to return the number of spatial dims expected for inputs to the module.
     # This is expected to be implemented by subclasses.
     def _get_num_spatial_dims(self) -> int:
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 # LazyConv1d defines weight as a Tensor but derived class defines it as UnitializeParameter

@@ -396,12 +396,12 @@ class ListConfig:
             if self.resolve:
                 x = x._dereference_node()
                 if x._is_missing():
-                    raise AssertionError()
+                    raise AssertionError
 
             self.index = self.index + 1
             if isinstance(x, ListConfig.ValueNode):
                 return x._value()
-            raise AssertionError()
+            raise AssertionError
 
     def __iter__(self):
         return self._iter_ex(True)
@@ -410,7 +410,7 @@ class ListConfig:
         try:
             return ListConfig.ListIterator(self, resolve)
         except Exception:
-            raise AssertionError()
+            raise AssertionError
 
     def __init__(self):
         self._content = [
@@ -545,7 +545,7 @@ def apply_chunking_to_forward(forward_fn, *input_tensors):
     assert all(input_tensor.shape[1] == tensor_shape for input_tensor in input_tensors)
     num_args_in_forward_chunk_fn = len(inspect.signature(forward_fn).parameters)
     if num_args_in_forward_chunk_fn != len(input_tensors):
-        raise ValueError()
+        raise ValueError
 
     return forward_fn(*input_tensors)
 
@@ -848,7 +848,7 @@ def _merge_criteria_processor_list(default_list, custom_list):
     for default in default_list:
         for custom in custom_list:
             if type(custom) is type(default):
-                raise ValueError()
+                raise ValueError
     default_list.extend(custom_list)
     return default_list
 
@@ -2573,7 +2573,7 @@ class ReproTests(torch._dynamo.test_case.TestCase):
                 if self.i < 3:
                     self.i += 1
                     return self.i
-                raise StopIteration()
+                raise StopIteration
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
