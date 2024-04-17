@@ -30,12 +30,12 @@ from torch._utils import render_call
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
+from torch.utils._cxx_pytree import PyTree, tree_map
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
-from torch.utils._cxx_pytree import PyTree, tree_map
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 
@@ -527,7 +527,7 @@ class FakeTensor(torch.Tensor):
             return NotImplemented
 
         fake_mode = None
-        for arg in pytree.arg_tree_leaves(*args, **kwargs):
+        for arg in pytree.tree_leaves((args, kwargs)):
             if isinstance(arg, FakeTensor):
                 fake_mode = arg.fake_mode
                 break
@@ -1215,9 +1215,7 @@ class FakeTensorMode(TorchDispatchMode):
     def _dispatch_impl(self, func, types, args, kwargs):
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
-        flat_arg_fake_tensors = [
-            t for t in flat_args if self.is_our_fake(t)
-        ]
+        flat_arg_fake_tensors = [t for t in flat_args if self.is_our_fake(t)]
         has_symbolic_sizes = any(
             i._has_symbolic_sizes_strides for i in flat_arg_fake_tensors
         ) or any(isinstance(a, torch.SymInt) for a in flat_args)
@@ -1262,7 +1260,9 @@ class FakeTensorMode(TorchDispatchMode):
         # in the stack trace.
         has_unrecognized_types = _check_for_subclass(flat_args)
         if has_unrecognized_types:
-            unrecognized_types = [type(x) for x in flat_args if _check_for_subclass_arg(x)]
+            unrecognized_types = [
+                type(x) for x in flat_args if _check_for_subclass_arg(x)
+            ]
             not_implemented_log.debug(
                 "FakeTensorMode unrecognized subclass(es): %s", unrecognized_types
             )
@@ -1522,7 +1522,7 @@ class FakeTensorMode(TorchDispatchMode):
                     lambda: f"FakeTensor is wrapped to wrong device, found {e.device}, expected {common_device}",
                 )
 
-            if (not is_our_fake and converter is not None):
+            if not is_our_fake and converter is not None:
                 if has_scalar_only_inputs:
                     # Under FakeTensorMode, op accepts scalar only inputs, such as aten.add/sub/mul/div,
                     # returns a real scalar tensor on CPU. See TensorMeta() in _prims/__init__.py for details.
@@ -1698,6 +1698,7 @@ class FakeCopyMode(TorchFunctionMode):
         else:
             with torch._C.DisableTorchFunctionSubclass():
                 return func(*args, **kwargs)
+
 
 def _device_handler(args):
     # NB: Don't use is_our_fake, just serve the fake information
