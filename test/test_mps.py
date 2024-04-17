@@ -11413,6 +11413,7 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.batch_norm',
         'nn.functional.instance_norm',
         'round', 'xlogy', 'addcmul',
+        'nn.functional.binary_cross_entropy',
         'nn.functional.max_pool2d',
         'nn.functional.gelu',
         'nn.functional.glu',

@@ -240,7 +240,7 @@ static Tensor& bce_loss_out_impl(const Tensor& input,
       if (grad_output.defined()) {
         if (reduction == at::Reduction::Mean) {
           MPSGraphTensor* inputNumel = [mpsGraph constantWithScalar:static_cast<double>(input.numel())
-                                                           dataType:MPSDataTypeFloat32];
+                                                           dataType:[bceLoss dataType]];
           newCachedGraph->gradInputTensor = [mpsGraph divisionWithPrimaryTensor:bceLoss
                                                                 secondaryTensor:inputNumel
                                                                            name:nil];
