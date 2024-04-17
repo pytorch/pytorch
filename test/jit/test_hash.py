@@ -3,9 +3,9 @@
 import os
 import sys
 
-import torch
+from typing import List, Tuple
 
-from typing import Tuple, List
+import torch
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -13,9 +13,12 @@ sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
 
 if __name__ == "__main__":
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
+
 
 class TestHash(JitTestCase):
     def test_hash_tuple(self):
@@ -38,6 +41,7 @@ class TestHash(JitTestCase):
 
     def test_hash_tensor(self):
         """Tensors should hash by identity"""
+
         def fn(t1, t2):
             return hash(t1) == hash(t2)
 
@@ -74,7 +78,7 @@ class TestHash(JitTestCase):
         self.checkScript(fn, (1.2345, 6.789))
         self.checkScript(fn, (1.2345, float("inf")))
         self.checkScript(fn, (float("inf"), float("inf")))
-        self.checkScript(fn, (1.2345, float('nan')))
+        self.checkScript(fn, (1.2345, float("nan")))
         if sys.version_info < (3, 10):
             # Hash of two nans are not guaranteed to be equal. From https://docs.python.org/3/whatsnew/3.10.html :
             # Hashes of NaN values of both float type and decimal.Decimal type now depend on object identity.
@@ -103,9 +107,9 @@ class TestHash(JitTestCase):
         def fn(d1: torch.device, d2: torch.device):
             return hash(d1) == hash(d2)
 
-        gpu0 = torch.device('cuda:0')
-        gpu1 = torch.device('cuda:1')
-        cpu = torch.device('cpu')
+        gpu0 = torch.device("cuda:0")
+        gpu1 = torch.device("cuda:1")
+        cpu = torch.device("cpu")
         self.checkScript(fn, (gpu0, gpu0))
         self.checkScript(fn, (gpu0, gpu1))
         self.checkScript(fn, (gpu0, cpu))

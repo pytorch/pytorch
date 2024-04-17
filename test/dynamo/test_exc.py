@@ -109,7 +109,6 @@ from user code:
     comptime(f)""",
         )
 
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(inject_BUILD_SET_unimplemented_TESTING_ONLY=True)
     @make_logging_test(dynamo=logging.DEBUG)
     def test_unsupported_error(self, records):
