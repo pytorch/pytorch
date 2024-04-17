@@ -119,7 +119,7 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
         determinisitic,
         philox_seed,
         philox_offset);
-    return std::make_tuple(dQuery, dKey, dValue);
+    return std::make_tuple(std::move(dQuery), std::move(dKey), std::move(dValue));
   } else {
     // Dense forward
     auto [dQuery, dKey, dValue, dSoftmax] = pytorch_flash::mha_bwd(

@@ -268,10 +268,12 @@ auto build_graph_and_tensors(
     dtype = fe::DataType_t::BFLOAT16;
   }
   auto mha_graph = std::make_shared<fe::graph::Graph>();
+  // We're baking in float accumulation and scale types
+  // in theory the graph may support other types, but they
+  // have not been tested
   mha_graph->set_io_data_type(dtype)
       .set_intermediate_data_type(fe::DataType_t::FLOAT)
       .set_compute_data_type(fe::DataType_t::FLOAT);
-
   auto Q = mha_graph->tensor(
       fe::graph::Tensor_attributes()
           .set_name("Q")
@@ -295,7 +297,7 @@ auto build_graph_and_tensors(
               params.v_stride.begin(), params.v_stride.end())));
   auto attn_scale =
       mha_graph->tensor(fe::graph::Tensor_attributes()
-                            .set_name("attn_scale")
+                            .set_name("Attn_scale")
                             .set_dim({1, 1, 1, 1})
                             .set_stride({1, 1, 1, 1})
                             .set_is_pass_by_value(true)
@@ -317,7 +319,7 @@ auto build_graph_and_tensors(
                                       .set_data_type(fe::DataType_t::INT32));
   auto scaled_dot_product_flash_attention_options =
       fe::graph::SDPA_attributes()
-          .set_name("flash_attention")
+          .set_name("CUDNN_SDPA")
           .set_is_inference(return_softmaxstats == false)
           .set_causal_mask(is_causal)
           .set_attn_scale(attn_scale)
@@ -328,12 +330,12 @@ auto build_graph_and_tensors(
   }
 
   auto seq_q = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                     .set_name("seq_q")
+                                     .set_name("Seq_q")
                                      .set_dim({b, 1, 1, 1})
                                      .set_stride({1, 1, 1, 1})
                                      .set_data_type(fe::DataType_t::INT32));
   auto seq_kv = mha_graph->tensor(fe::graph::Tensor_attributes()
-                                      .set_name("seq_kv")
+                                      .set_name("Seq_kv")
                                       .set_dim({b, 1, 1, 1})
                                       .set_stride({1, 1, 1, 1})
                                       .set_data_type(fe::DataType_t::INT32));
@@ -403,6 +405,9 @@ auto build_graph_and_tensors_backward(
     dtype = fe::DataType_t::BFLOAT16;
   }
   auto mha_graph = std::make_shared<fe::graph::Graph>();
+  // We're baking in float accumulation and scale types
+  // in theory the graph may support other types, but they
+  // have not been tested
   mha_graph->set_io_data_type(dtype)
       .set_intermediate_data_type(fe::DataType_t::FLOAT)
       .set_compute_data_type(fe::DataType_t::FLOAT);
@@ -426,7 +431,7 @@ auto build_graph_and_tensors_backward(
               std::vector<int64_t>(v.strides().begin(), v.strides().end())));
   auto attn_scale =
       mha_graph->tensor(fe::graph::Tensor_attributes()
-                            .set_name("attn_scale")
+                            .set_name("Attn_scale")
                             .set_dim({1, 1, 1, 1})
                             .set_stride({1, 1, 1, 1})
                             .set_is_pass_by_value(true)
@@ -449,7 +454,7 @@ auto build_graph_and_tensors_backward(
               std::vector<int64_t>(o.strides().begin(), o.strides().end())));
   auto STATS = mha_graph->tensor(
       fe::graph::Tensor_attributes()
-          .set_name("stats")
+          .set_name("Stats")
           .set_dim(std::vector<int64_t>(
               softmaxstats.sizes().begin(), softmaxstats.sizes().end()))
           .set_stride(std::vector<int64_t>(
@@ -457,12 +462,12 @@ auto build_graph_and_tensors_backward(
           .set_data_type(fe::DataType_t::FLOAT));
   auto DO = mha_graph->tensor(
       fe::graph::Tensor_attributes()
-          .set_name("dO")
+          .set_name("DO")
           .set_dim(std::vector<int64_t>(dO.sizes().begin(), dO.sizes().end()))
           .set_stride(
               std::vector<int64_t>(dO.strides().begin(), dO.strides().end())));
   auto sdpa_backward_options = fe::graph::SDPA_backward_attributes()
-                                   .set_name("flash_attention_backward")
+                                   .set_name("CUDNN_SDPA_BACKWARD")
                                    .set_causal_mask(is_causal)
                                    .set_attn_scale(attn_scale);
   if (dropout_probability != 0.0f) {
@@ -584,7 +589,7 @@ void run_cudnn_SDP_fprop(
   auto workspace_size = mha_graph->get_workspace_size();
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(
       mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
   mhagraphcache.update(key, graph_and_tensors_values);
 }
@@ -664,8 +669,8 @@ void run_cudnn_SDP_bprop(
   auto workspace_size = mha_graph->get_workspace_size();
   auto workspace_ptr =
       c10::cuda::CUDACachingAllocator::get()->allocate(workspace_size);
-  TORCH_INTERNAL_ASSERT(!workspace_size || workspace_ptr.get());
-  TORCH_INTERNAL_ASSERT(
+  TORCH_CHECK(!workspace_size || workspace_ptr.get());
+  TORCH_CHECK(
       mha_graph->execute(handle, variant_pack, workspace_ptr.get()).is_good());
   mhagraphbackwardcache.update(key, graph_and_tensors_backward_values);
 }
