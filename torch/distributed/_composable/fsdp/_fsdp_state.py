@@ -36,6 +36,17 @@ class FSDPStateContext:
         self.is_last_backward: bool = True
 
 
+def disable_if_config_true(func):
+    @functools.wraps(func)
+    def fsdp_hook_wrapper(*args, **kwargs):
+        if torch._dynamo.config.skip_fsdp_hooks:
+            return torch._dynamo.disable(func, recursive=True)(*args, **kwargs)
+        else:
+            return func(*args, **kwargs)
+
+    return fsdp_hook_wrapper
+
+
 class FSDPState(_State):
     def __init__(self):
         super().__init__()
@@ -142,6 +153,7 @@ class FSDPState(_State):
             if module in module_to_fsdp_param_group:
                 module_to_fsdp_param_group[module]._module_fqn = module_name
 
+    @disable_if_config_true
     def _pre_forward(
         self, module: nn.Module, args: Tuple[Any, ...], kwargs: Dict[str, Any]
     ) -> Tuple[Tuple[Any, ...], Dict[str, Any]]:
@@ -161,6 +173,7 @@ class FSDPState(_State):
             args, kwargs = self._fsdp_param_group.pre_forward(module, args, kwargs)
         return args, kwargs
 
+    @disable_if_config_true
     def _post_forward(self, module: nn.Module, input: Any, output: Any) -> Any:
         # When composing with module-hook-based activation checkpointing, the
         # post-backward hook is responsible for the reshard
@@ -201,6 +214,9 @@ class FSDPState(_State):
                     # Run post-backward in case forward inputs did not require
                     # gradient so the autograd backward did not run
                     state._fsdp_param_group.post_backward()
+                state._training_state = TrainingState.IDLE
+                if state._fsdp_param_group:
+                    state._fsdp_param_group._training_state = TrainingState.IDLE
                 if self._state_ctx.is_last_backward:
                     state._finalize_backward()
             if self._state_ctx.is_last_backward:
@@ -208,7 +224,6 @@ class FSDPState(_State):
             self._state_ctx.post_backward_final_callback_queued = False
 
     def _finalize_backward(self) -> None:
-        self._training_state = TrainingState.IDLE
         for handle in self._pre_backward_hook_handles:
             handle.remove()
         self._pre_backward_hook_handles.clear()
@@ -220,7 +235,7 @@ class FSDPState(_State):
             return output
 
         flat_outputs, _ = tree_flatten(output)
-        tensors = tuple(t for t in flat_outputs if t.requires_grad)
+        tensors = tuple(t for t in flat_outputs if (t is not None and t.requires_grad))
         if tensors:
             grad_fns = tuple(t.grad_fn for t in tensors if t.grad_fn is not None)
             pre_backward = functools.partial(self._pre_backward, grad_fns)

@@ -58,7 +58,6 @@ hop_that_doesnt_have_opinfo_test_allowlist = [
     "with_effects",
     "strict_mode",
     "_export_tracepoint",
-    "while_loop",
 ]
 
 torch.library.define(
@@ -124,6 +123,24 @@ def sample_inputs_templated_attention(opinfo, device, dtype, reuires_grad, **kwa
         score_mod,
     )
 
+def sample_inputs_while_loop(opinfo, device, dtype, requires_grad, **kwargs):
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=False
+    )
+    yield SampleInput(
+        torch.tensor(3),
+        make_arg(2, 3, 4, low=0.1, high=2),
+    )
+
+def simple_while_loop(iter_t, x):
+    def cond_fn(iter_t, x):
+        return iter_t > 0
+
+    def body_fn(iter_t, x):
+        return iter_t - 1, x.cos()
+
+    return torch._higher_order_ops.while_loop(cond_fn, body_fn, (iter_t, x))
+
 
 hop_db = [
     OpInfo(
@@ -167,6 +184,19 @@ hop_db = [
         variant_test_name="simple",
         op=simple_cond,
         sample_inputs_func=sample_inputs_cond,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=False,
+    ),
+    OpInfo(
+        name="while_loop",
+        variant_test_name="simple",
+        op=simple_while_loop,
+        sample_inputs_func=sample_inputs_while_loop,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
         check_batched_grad=False,
