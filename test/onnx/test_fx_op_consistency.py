@@ -1443,7 +1443,7 @@ SKIP_XFAIL_SUBTESTS_WITH_MATCHER_AND_MODEL_TYPE: tuple[
     ),
     skip(
         "linalg.multi_dot",
-        matcher=lambda sample: sum([torch.numel(input) for input in sample.input]) == 0,
+        matcher=lambda sample: sum(torch.numel(input) for input in sample.input) == 0,
         reason="fixme: Undefined",
     ),
     skip(

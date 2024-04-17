@@ -125,7 +125,7 @@ jobs:
 
   linux-focal-py3_8-clang10-onnx-build:
     name: linux-focal-py3.8-clang10-onnx
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build-rg.yml
     with:
       build-environment: linux-focal-py3.8-clang10-onnx
       docker-image-name: pytorch-linux-focal-py3-clang10-onnx
@@ -148,7 +148,7 @@ jobs:
 
   linux-focal-py3_8-clang10-build:
     name: linux-focal-py3.8-clang10
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build-rg.yml
     with:
       build-environment: linux-focal-py3.8-clang10
       docker-image-name: pytorch-linux-focal-py3.8-clang10
@@ -177,7 +177,7 @@ jobs:
 
   linux-focal-py3_11-clang10-build:
     name: linux-focal-py3.11-clang10
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build-rg.yml
     with:
       build-environment: linux-focal-py3.11-clang10
       docker-image-name: pytorch-linux-focal-py3.11-clang10
@@ -215,6 +215,9 @@ jobs:
           { config: "default", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
           { config: "default", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
           { config: "default", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 1, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 2, num_shards: 3, runner: "linux.2xlarge" },
+          { config: "dynamo", shard: 3, num_shards: 3, runner: "linux.2xlarge" },
         ]}
 
   linux-focal-py3_12-clang10-test:
