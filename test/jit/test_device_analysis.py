@@ -1,12 +1,12 @@
 # Owner(s): ["oncall: jit"]
 
-from itertools import product
 import unittest
+from itertools import product
 
 import torch
+from torch.jit._passes._property_propagation import apply_input_props_using_example
 from torch.testing._internal.common_utils import TEST_CUDA
 from torch.testing._internal.jit_utils import JitTestCase
-from torch.jit._passes._property_propagation import apply_input_props_using_example
 
 try:
     from torchvision import models
