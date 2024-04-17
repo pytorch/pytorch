@@ -868,29 +868,25 @@ class FxGraphCache:
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
         """
-        from filelock import FileLock
 
         compiled_graph = None
         try:
             FxGraphCache._check_can_cache(gm)
             key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
 
-            lock_path = os.path.join(get_lock_dir(), key + ".lock")
-            with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-                compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
-                if compiled_graph is None:
-                    log.debug("fx graph cache miss for key %s", key)
-                    counters["inductor"]["fxgraph_cache_miss"] += 1
-                    compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
-                    FxGraphCache._save_graph(key, compiled_graph, example_inputs)
-                else:
-                    log.debug("fx graph cache hit for key %s", key)
-                    counters["inductor"]["fxgraph_cache_hit"] += 1
+            compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
+            if compiled_graph is None:
+                log.debug("fx graph cache miss for key %s", key)
+                counters["inductor"]["fxgraph_cache_miss"] += 1
+                compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+                FxGraphCache._save_graph(key, compiled_graph, example_inputs)
+            else:
+                log.debug("fx graph cache hit for key %s", key)
+                counters["inductor"]["fxgraph_cache_hit"] += 1
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
-
-        if not compiled_graph:
-            compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+            if not compiled_graph:
+                compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
 
         return compiled_graph
 
@@ -1146,7 +1142,7 @@ class VecNEON(VecISA):
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
-        return "neon"  # Unused
+        return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
@@ -1206,7 +1202,7 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2()]
+supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
