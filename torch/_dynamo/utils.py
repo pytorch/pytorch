@@ -100,6 +100,7 @@ from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
+from torch._guards import TracingContext
 
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
@@ -1151,6 +1152,7 @@ def set_example_value(node, example_value):
     # this to accurately reflect what the state of the value was at the time
     # the program was traced).
     node.meta["example_value"] = example_value
+    assert TracingContext.try_get() is not None
 
 
 def _get_fake_tensor(vt):
