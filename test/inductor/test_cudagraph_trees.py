@@ -375,7 +375,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 mut(mut_inp)
             FileCheck().check("skipping cudagraphs due to mutation on input.").check(
                 "x.add_(2)"
-            ).run(captured_output[0])
+            ).check("Parent node from : ").check("return x + 1").run(captured_output[0])
             self.assertEqual(mut_inp, non_mut(foo(inp)))
 
         @parametrize("backend", ("inductor", "cudagraphs"))

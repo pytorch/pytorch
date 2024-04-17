@@ -1741,7 +1741,7 @@ class CUDAGraphTreeManager:
         self.non_cudagraph_managed_mutation_hint: Dict[
             Optional[GraphID], Dict[FunctionID, bool]
         ] = defaultdict(dict)
-        self.warmup_node_counter = itertools.count(start=1, step=-1)
+        self.warmup_node_counter = itertools.count(start=-1, step=-1)
 
         # whether we the current node is in a state of warmup, recording, execution. If
         # there is no current node the state will be ExecutionState.None.
