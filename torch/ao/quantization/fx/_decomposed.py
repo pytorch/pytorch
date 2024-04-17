@@ -638,18 +638,17 @@ def choose_qparams_per_token_meta(
     )
 
 
-# TODO: move this to https://github.com/pytorch/pytorch/blob/main/torch/ao/quantization/fx/_decomposed.py
 quantized_decomposed_lib.define(
-    "choose_qparams_per_token_asymmetric(Tensor input, ScalarType dtype) -> (Tensor, Tensor)"
+    "_choose_qparams_per_token_asymmetric_impl(Tensor input, ScalarType dtype) -> (Tensor, Tensor)"
 )
 
 
 @impl(
     quantized_decomposed_lib,
-    "choose_qparams_per_token_asymmetric",
-    "CompositeExplicitAutograd",
+    "_choose_qparams_per_token_asymmetric_impl",
+    "CompositeImplicitAutograd",
 )
-def choose_qparams_per_token_asymmetric(
+def _choose_qparams_per_token_asymmetric_impl(
     input: torch.Tensor,
     dtype: torch.dtype,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -667,7 +666,8 @@ def choose_qparams_per_token_asymmetric(
     """
     # Based on https://github.com/google/XNNPACK/blob/df156f0cf3db5a4576cc711123eeb54915f82ffc/src/xnnpack/quantization.h#L18
     qmin, qmax = -128, 127
-    min_val, max_val = torch.aminmax(input, dim=-1, keepdim=True)
+    min_val = torch.amin(input, dim=-1, keepdim=True)
+    max_val = torch.amax(input, dim=-1, keepdim=True)
     min_val_neg = torch.min(min_val, torch.zeros_like(min_val))
     max_val_pos = torch.max(max_val, torch.zeros_like(max_val))
     eps = torch.finfo(torch.float32).eps  # use xnnpack eps?
@@ -689,6 +689,23 @@ def choose_qparams_per_token_asymmetric(
     zero_point = torch.clamp(zero_point, qmin, qmax).round()
 
     return scale.to(torch.float32), zero_point.to(torch.float32)
+
+
+quantized_decomposed_lib.define(
+    "choose_qparams_per_token_asymmetric(Tensor input, ScalarType dtype) -> (Tensor, Tensor)"
+)
+
+
+@impl(
+    quantized_decomposed_lib,
+    "choose_qparams_per_token_asymmetric",
+    "CompositeExplicitAutograd",
+)
+def choose_qparams_per_token_asymmetric(
+    input: torch.Tensor,
+    dtype: torch.dtype,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    return _choose_qparams_per_token_asymmetric_impl(input, dtype)
 
 
 @impl(
