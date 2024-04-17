@@ -481,7 +481,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             new_id = self.get_manager().new_graph_id().id
             self.assertEqual(new_id, 3)
 
-        def _test_unaligned_static_input_impl(self):
+        def _test_unaligned_static_input_impl(self, expected_clones):
             def fn(x, y):
                 return (x + y,)
 
@@ -512,21 +512,21 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             for _ in range(3):
                 with CloneCounterMode() as m:
                     compiled_f(get_unaligned_inputs())
-                    self.assertEqual(m.count, 2)
+                    self.assertEqual(m.count, expected_clones)
 
                     compiled_f(get_aligned_inputs())
-                    self.assertEqual(m.count, 2)
+                    self.assertEqual(m.count, expected_clones)
 
         def test_unaligned_static_input_trees(self):
-            self._test_unaligned_static_input_impl()
+            self._test_unaligned_static_input_impl(expected_clones=2)
 
         @torch._inductor.config.patch("triton.cudagraph_trees", False)
         def test_unaligned_static_input_non_trees(self):
-            self._test_unaligned_static_input_impl()
+            self._test_unaligned_static_input_impl(expected_clones=2)
 
         @torch._inductor.config.patch("triton.cudagraphs", False)
         def test_unaligned_static_input_no_cudagraphs(self):
-            self._test_unaligned_static_input_impl()
+            self._test_unaligned_static_input_impl(expected_clones=0)
 
         def test_sparsity(self):
             def foo(view_6, buf31):
