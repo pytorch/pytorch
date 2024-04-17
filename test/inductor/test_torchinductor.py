@@ -41,6 +41,9 @@ from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
+    aoti_compile_with_persistent_cache,
+    aoti_eager_cache_dir,
+    load_aoti_eager_cache,
     run_and_get_code,
     run_and_get_triton_code,
 )
@@ -692,6 +695,11 @@ def assertGeneratedKernelCountEqual(self: TestCase, expected: int):
     self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
 
 
+def clear_aoti_eager_cache():
+    if aoti_eager_cache_dir().exists():
+        shutil.rmtree(aoti_eager_cache_dir())
+
+
 class SweepInputs2:
     input_gen_types1 = [
         "dense",
@@ -771,16 +779,6 @@ class CommonTemplate:
 
         input_tensor = torch.randn(128, dtype=torch.float, device=device)
 
-        from torch._inductor.utils import (
-            aoti_compile_with_persistent_cache,
-            aoti_eager_cache_dir,
-            load_aoti_eager_cache,
-        )
-
-        def clear_aoti_eager_cache():
-            if aoti_eager_cache_dir().exists():
-                shutil.rmtree(aoti_eager_cache_dir())
-
         clear_aoti_eager_cache()
         kernel_lib_path = aoti_compile_with_persistent_cache(
             ns,
@@ -819,6 +817,43 @@ class CommonTemplate:
 
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
         clear_aoti_eager_cache()
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    def test_eager_aoti_with_scalar(self):
+        namespace_name = "aten"
+        dispatch_key = "CPU"
+        device = torch.device("cpu")
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = torch.device("cuda")
+
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(3, 4, device=device)
+
+        qualified_op_name = f"{namespace_name}::add"
+        _, overload_names = torch._C._jit_get_operation(qualified_op_name)
+        with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            scalar_values = [1.0, 2.0, 3.0]
+            ref_values = []
+            for scalar_value in scalar_values:
+                ref_values.append(torch.add(a, b, alpha=scalar_value))
+
+            for overload_name in overload_names:
+                try:
+                    schema = torch._C._get_schema(qualified_op_name, overload_name)
+                    torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
+                        schema.name, schema.overload_name, dispatch_key
+                    )
+                except Exception as e:
+                    continue
+
+            res_values = []
+            clear_aoti_eager_cache()
+            for scalar_value in scalar_values:
+                res_values.append(torch.add(a, b, alpha=scalar_value))
+
+            for ref_val, res_val in zip(ref_values, res_values):
+                self.assertEqual(ref_val, res_val)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_torch_compile_override_registration(self):
@@ -9687,6 +9722,17 @@ class CommonTemplate:
     def test_complex_memory_overlap(self):
         t = rand_strided((8, 1500, 1), (1504, 1, 1), device=self.device)
         self.assertFalse(complex_memory_overlap(t))
+
+    def test_generate_rand_fp8(self):
+        """
+        PyTorch can not generate fp8 tensors with a normal distribution because of
+        missing needed kernels.
+
+        We work around that in rand_strided by generating an fp16 tensor first and
+        then do casting.
+        """
+        t = rand_strided((2, 3), (3, 1), device=self.device, dtype=torch.float8_e4m3fn)
+        self.assertTrue(t.dtype is torch.float8_e4m3fn)
 
 
 @dataclasses.dataclass
