@@ -52,14 +52,26 @@ def resolve_library_path(path: str) -> str:
 def throw_abstract_impl_not_imported_error(opname, module, context):
     if module in sys.modules:
         raise NotImplementedError(
-            f"{opname}: We could not find the abstract impl for this operator. "
+            f"{opname}: We could not find the fake impl for this operator. "
         )
     else:
         raise NotImplementedError(
-            f"{opname}: We could not find the abstract impl for this operator. "
+            f"{opname}: We could not find the fake impl for this operator. "
             f"The operator specified that you may need to import the '{module}' "
-            f"Python module to load the abstract impl. {context}"
+            f"Python module to load the fake impl. {context}"
         )
+
+
+# Meta only, act as nop otherwise.
+def compiletime_sl_profile_meta(phase_name):
+    def compiletime_sl_profile_inner(function):
+        @functools.wraps(function)
+        def wrapper_function(*args, **kwargs):
+            return function(*args, **kwargs)
+
+        return wrapper_function
+
+    return compiletime_sl_profile_inner
 
 
 # Meta only, see
