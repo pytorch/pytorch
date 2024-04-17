@@ -279,7 +279,7 @@ class TestInductorDynamic(TestCase):
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_item_to_inputs_kernel_nobreak(self, device):
-        @torch.library.custom_op("test::foo")
+        @torch.library.custom_op("test::foo", mutates_args=())
         def foo(x: torch.Tensor, y: int) -> torch.Tensor:
             return x.clone()
 
@@ -385,7 +385,7 @@ class TestInductorDynamic(TestCase):
     )
     @torch._inductor.config.patch(implicit_fallbacks=True)
     def test_dynamic_stride_nobreak(self, device):
-        @torch.library.custom_op("test::foo")
+        @torch.library.custom_op("test::foo", mutates_args=())
         def foo(x: torch.Tensor) -> torch.Tensor:
             stride = x.item()
             return torch.empty_strided((1,), (stride,), device=x.device)
