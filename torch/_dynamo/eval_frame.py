@@ -58,7 +58,7 @@ from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import CacheEntry, DynamoCallback
-from .utils import common_constant_types, compile_times, set_example_value
+from .utils import common_constant_types, compile_times
 
 log = logging.getLogger(__name__)
 
@@ -773,7 +773,8 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "tensor_dict" in self.current_node.meta:
             arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
         if "example_value" in self.current_node.meta:
-            set_example_value(arg.node, self.current_node.meta["example_value"])
+            # NB: intentionally do not use set_example_value
+            arg.node.meta["example_value"] = self.current_node.meta["example_value"]
         return arg
 
     def output(self, target, args, kwargs):
@@ -797,9 +798,10 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "val" in self.current_node.meta:
             result_proxy.node.meta["val"] = self.current_node.meta["val"]
         if "example_value" in self.current_node.meta:
-            set_example_value(
-                result_proxy.node, self.current_node.meta["example_value"]
-            )
+            # NB: intentionally do not use set_example_value
+            result_proxy.node.meta["example_value"] = self.current_node.meta[
+                "example_value"
+            ]
         if self.current_node.op != "output":
             result_proxy.node._rename(
                 getattr(self.current_node, "name", result_proxy.node.name)

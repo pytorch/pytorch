@@ -95,12 +95,12 @@ import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._guards import TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
 from torch.utils._triton import has_triton, has_triton_package
-from torch._guards import TracingContext
 
 
 counters: DefaultDict[str, Counter[str]] = collections.defaultdict(collections.Counter)
