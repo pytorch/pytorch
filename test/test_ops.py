@@ -2507,7 +2507,7 @@ class TestFakeTensor(TestCase):
                                 (input, args, kwargs), res_fake
                             )
                             real_aliasing = outputs_alias_inputs(
-                                (sample.input, sample.args, sample.kwargs), res
+                                (sample.input, sample, args, sample.kwargs), res
                             )
                             self.assertEqual(fake_aliasing, real_aliasing)
 
