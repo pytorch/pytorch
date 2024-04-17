@@ -82,22 +82,23 @@ static PyObject* THPStream_pynew(
   // It requires other device backends override getNewStream method. How the new
   // stream is created is backend specific. Backend should be able to correctly
   // manage the lifetime of streams.
-  c10::Stream stream(c10::Stream::DEFAULT, c10::Device(c10::DeviceType::CPU));
+  c10::optional<c10::Stream> stream_opt;
   if (r.idx == 0) {
     c10::impl::VirtualGuardImpl impl{static_cast<c10::DeviceType>(device_type)};
-    stream = impl.getNewStream(
+    stream_opt = impl.getNewStream(
         c10::Device(static_cast<c10::DeviceType>(device_type), device_index),
         static_cast<int>(priority));
   } else {
-    stream = c10::Stream::unpack3(
+    stream_opt = c10::Stream::unpack3(
         stream_id,
         static_cast<c10::DeviceIndex>(device_index),
         static_cast<c10::DeviceType>(device_type));
   }
 
-  self->stream_id = static_cast<int64_t>(stream.id());
-  self->device_index = static_cast<int64_t>(stream.device_index());
-  self->device_type = static_cast<int64_t>(stream.device_type());
+  TORCH_CHECK(stream_opt.has_value(), "Failed to create stream");
+  self->stream_id = static_cast<int64_t>(stream_opt->id());
+  self->device_index = static_cast<int64_t>(stream_opt->device_index());
+  self->device_type = static_cast<int64_t>(stream_opt->device_type());
 
   return (PyObject*)ptr.release();
   END_HANDLE_TH_ERRORS
