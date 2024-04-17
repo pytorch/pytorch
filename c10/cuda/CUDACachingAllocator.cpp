@@ -66,9 +66,9 @@ namespace Native {
 //   smallest available free block or allocate a new block using cudaMalloc.
 // - To reduce fragmentation, requests between 1MB and 10MB will allocate and
 //   split a 20MB block, if no free block of sufficient size is available.
-// - To further reduce fragmentation, blocks >= 200MB are not allowed to be
-//   split. These oversize cached blocks will still satisfy requests within
-//   20MB of the oversize cached block size.
+// - To further reduce fragmentation, blocks >= max_split_size are not allowed
+//   to be split. These oversize cached blocks will still satisfy requests
+//   within 1MB of the oversize cached block size.
 //
 // With this allocator, allocations and frees should logically be considered
 // "usages" of the memory segment associated with streams, just like kernel
@@ -1149,7 +1149,7 @@ class DeviceCachingAllocator {
           "CUDA out of memory. Tried to allocate ",
           format_size(alloc_size),
           ". GPU ",
-          device,
+          static_cast<int>(device),
           " has a total capacity of ",
           format_size(device_total),
           " of which ",

@@ -480,6 +480,11 @@ def perform_misc_tasks(
         "ci-no-test-timeout", check_for_setting(labels, pr_body, "ci-no-test-timeout")
     )
     set_output("ci-no-td", check_for_setting(labels, pr_body, "ci-no-td"))
+    # Only relevant for the one linux distributed cuda job, delete this when TD
+    # is rolled out completely
+    set_output(
+        "ci-td-distributed", check_for_setting(labels, pr_body, "ci-td-distributed")
+    )
 
     # Obviously, if the job name includes unstable, then this is an unstable job
     is_unstable = job_name and IssueType.UNSTABLE.value in job_name
