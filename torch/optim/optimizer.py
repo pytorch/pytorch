@@ -332,8 +332,6 @@ class Optimizer:
             "param_groups": self.param_groups,
         }
 
-    # See #123400
-    @torch._disable_dynamo
     def __setstate__(self, state: Dict[str, Any]) -> None:
         self.__dict__.update(state)
         if "_optimizer_step_pre_hooks" not in self.__dict__:
