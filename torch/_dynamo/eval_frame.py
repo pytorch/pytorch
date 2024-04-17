@@ -1216,6 +1216,12 @@ def export(
             capture_dynamic_output_shape_ops=True,
             capture_scalar_outputs=True,
         ):
+            # TODO(export-team) - discrepancy between torch.compile and
+            # torch.export because torch.compile is planning to inline the
+            # _call_impl (one level above forward) to inline hooks. But doing
+            # that for export breaks many tests because (1) tests are hardcoded
+            # to assume that tracing starts from forward, and (2) some
+            # discrepancies between strict and non strict mode.
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
                 hooks=Hooks(
@@ -1224,7 +1230,7 @@ def export(
                 ),
                 export=True,
                 export_constraints=constraints,
-            )(f)
+            )(f.forward if isinstance(f, torch.nn.Module) else f)
             # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
             try:
                 result_traced = opt_f(*args, **kwargs)
