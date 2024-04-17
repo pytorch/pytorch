@@ -69,7 +69,12 @@ class MemoryDep(typing.NamedTuple):
         return len(free_unbacked_symbols(self.get_numel())) > 0
 
     def is_contiguous(self) -> bool:
-        return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
+        """
+        2 cases
+        1. self.index is a symbol appearing in self.var_names
+        2. self.index is a interger. This happens for random seed.
+        """
+        return (isinstance(self.index, sympy.Symbol) and self.index in self.var_names) or isinstance(self.index, (sympy.Integer, int))
 
     def is_scalar(self) -> bool:
         if isinstance(self.index, sympy.Symbol):

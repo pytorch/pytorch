@@ -1285,10 +1285,12 @@ class TritonKernel(Kernel):
         reduction_hint=ReductionHint.DEFAULT,
         min_elem_per_thread=0,
         disable_persistent_reduction=False,
+        non_contig_pw=False,
     ):
         if pid_cache is None:
             pid_cache = {}
         super().__init__()
+        self.non_contig_pw = non_contig_pw;
         self.numels = [V.graph.sizevars.simplify(s) for s in groups]
         self.mutations: Set[str] = mutations if mutations is not None else set()
         self.range_trees: List[IterationRangesRoot] = []
@@ -2805,6 +2807,9 @@ class TritonKernel(Kernel):
             "no_x_dim": self.no_x_dim,
             "backend_hash": torch.utils._triton.triton_hash_with_backend(),
         }
+        if self.non_contig_pw:
+            inductor_meta["non_contig_pw"] = self.non_contig_pw
+            print("non_contig_pw in codegen_kernel")
         num_gb = None
         if config.benchmark_kernel or config.profile_bandwidth:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
@@ -3398,22 +3403,26 @@ class TritonScheduling(BaseScheduling):
             return "tl.int32"
         return "tl.int64"
 
-
     def has_non_contiguous_pw_in_reduction_kernel(self, node_schedule, numel, rnumel):
         pointwise_nodes = list(
             filter(
                 lambda n: n not in (EnableReduction, DisableReduction)
                 and not n.is_reduction()
                 and n.group[1][0] == numel * rnumel,
-                node_schedule
+                node_schedule,
             )
         )
         for node in pointwise_nodes:
-            if not all(dep.is_contiguous() for dep in itertools.chain(node.read_writes.reads, node.read_writes.writes)):
+            if not all(
+                dep.is_contiguous()
+                for dep in itertools.chain(
+                    node.read_writes.reads, node.read_writes.writes
+                )
+            ):
                 return True
         return False
 
-    def get_kernel_args(self, node_schedule, numel, reduction_numel):
+    def get_kernel_args(self, node_schedule, numel, reduction_numel, return_non_contig_pw=False):
         reductions = list(
             filter(
                 lambda n: n not in (EnableReduction, DisableReduction)
@@ -3421,6 +3430,7 @@ class TritonScheduling(BaseScheduling):
                 node_schedule,
             )
         )
+        non_contig_pw = False
         if len(reductions) > 0:
             hints = [self.reduction_hint(n) for n in reductions]
             if hints.count(hints[0]) == len(hints):
@@ -3428,9 +3438,23 @@ class TritonScheduling(BaseScheduling):
             else:
                 reduction_hint_val = ReductionHint.DEFAULT
 
-            if reduction_hint_val == ReductionHint.INNER and self.has_non_contiguous_pw_in_reduction_kernel(node_schedule, numel, reduction_numel):
+            if (
+                reduction_hint_val == ReductionHint.INNER
+                and self.has_non_contiguous_pw_in_reduction_kernel(
+                    node_schedule, numel, reduction_numel
+                )
+            ):
                 reduction_hint_val = ReductionHint.DEFAULT
+                # reduction_hint_val = ReductionHint.OUTER
+                # reduction_hint_val = ReductionHint.INNER
+                non_contig_pw = True
+                from torch._inductor import misc
+                misc.dump_node_schedule(node_schedule)
+                # breakpoint()
+                # TODO tag the kernel
             if numel == 26624:
+                # from torch._inductor import misc
+                # misc.dump_node_schedule(node_schedule)
                 # breakpoint() # TODO
                 pass
         else:
@@ -3443,7 +3467,10 @@ class TritonScheduling(BaseScheduling):
 
         index_dtype = self.select_index_dtype(node_schedule, numel, reduction_numel)
 
-        return reduction_hint_val, mutations, index_dtype
+        if return_non_contig_pw:
+            return reduction_hint_val, mutations, index_dtype, non_contig_pw
+        else:
+            return reduction_hint_val, mutations, index_dtype
 
     def codegen_comment(self, node_schedule):
         wrapper = V.graph.wrapper_code
@@ -3477,8 +3504,8 @@ class TritonScheduling(BaseScheduling):
         from torch._inductor.codegen.triton_split_scan import TritonSplitScanKernel
 
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
-        reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
-            node_schedule, numel, reduction_numel
+        reduction_hint_val, mutations, index_dtype, non_contig_pw = self.get_kernel_args(
+            node_schedule, numel, reduction_numel, return_non_contig_pw=True
         )
 
         is_split_scan = any(
@@ -3491,6 +3518,7 @@ class TritonScheduling(BaseScheduling):
             "reduction_hint": reduction_hint_val,
             "mutations": mutations,
             "index_dtype": index_dtype,
+            "non_contig_pw": non_contig_pw,
         }
         kernel = kernel_type(
             *kernel_args,
@@ -3513,6 +3541,7 @@ class TritonScheduling(BaseScheduling):
                 *kernel_args,
                 **kernel_kwargs,
                 disable_persistent_reduction=True,
+                non_contig_pw=non_contig_pw,
             )
             self.codegen_node_schedule_with_kernel(node_schedule, kernel2)
             with V.set_kernel_handler(kernel2):
