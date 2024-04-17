@@ -477,7 +477,7 @@ class CustomOpDef:
 
 
 OPDEF_TO_LIB: Dict[str, "library.Library"] = {}
-OPDEFS: weakref.WeakValueDictionary[str, CustomOpDef] = weakref.WeakValueDictionary()
+OPDEFS: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
 
 def get_library_allowing_overwrite(namespace: str, name: str) -> "library.Library":
