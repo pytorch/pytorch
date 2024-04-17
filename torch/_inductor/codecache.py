@@ -2345,7 +2345,8 @@ def _nvcc_compiler_options() -> List[str]:
 def _ck_include_paths() -> List[str]:
     from torch.utils import cpp_extension
 
-    return [f"-I{cpp_extension._join_rocm_home('include')}"]
+    return [f"{cpp_extension._join_rocm_home('include')}",
+            f"{os.path.join(config.rocm.ck_dir, 'include')}"]
 
 
 def _hip_lib_options() -> List[str]:
