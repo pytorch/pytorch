@@ -74,7 +74,7 @@ def to_fake_obj(fake_mode, x: torch.ScriptObject) -> FakeScriptObject:
 
         return wrapped
 
-    fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name())
+    fake_x_wrapped = FakeScriptObject(fake_x, x._type().qualified_name())  # type: ignore[attr-defined]
     for name in x._method_names():  # type: ignore[attr-defined]
         attr = getattr(fake_x, name, None)
         if attr:
