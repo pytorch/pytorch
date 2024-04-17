@@ -1951,6 +1951,19 @@ class CPUReproTests(TestCase):
             res_grad = test_args_for_opt["input"].grad
             self.assertEqual(ref_grad, res_grad)
 
+    def test_meta_device(self):
+        @torch.compile(fullgraph=True)
+        def fn():
+            x = torch.ops.aten.empty.memory_format(
+                [1024, 128, 128],
+                dtype=torch.float16,
+                device="meta",
+                pin_memory=False,
+            )
+            return x.sin() + 1
+
+        self.assertEqual(fn().shape, [1024, 128, 128])
+
     def test_decomposed_fake_quant_per_channel(self):
         def fq(input, scales, zero_points, axis, quant_min, quant_max):
             res = torch.fake_quantize_per_channel_affine(
