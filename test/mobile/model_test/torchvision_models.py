@@ -14,7 +14,7 @@ class MobileNetV2Module:
         augment_model_with_bundled_inputs(
             optimized_module,
             [
-                (example, ),
+                (example,),
             ],
         )
         optimized_module(example)
@@ -31,7 +31,7 @@ class MobileNetV2VulkanModule:
         augment_model_with_bundled_inputs(
             optimized_module,
             [
-                (example, ),
+                (example,),
             ],
         )
         optimized_module(example)
@@ -48,7 +48,7 @@ class Resnet18Module:
         augment_model_with_bundled_inputs(
             optimized_module,
             [
-                (example, ),
+                (example,),
             ],
         )
         optimized_module(example)

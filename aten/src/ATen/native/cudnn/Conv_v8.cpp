@@ -376,6 +376,12 @@ void run_conv_plan(
     data_ptrs[0] = x.data_ptr();
     data_ptrs[1] = const_cast<void*>(y.const_data_ptr());
     data_ptrs[2] = const_cast<void*>(w.const_data_ptr());
+  } else if (
+      operation ==
+      CUDNN_BACKEND_OPERATION_CONVOLUTION_BACKWARD_FILTER_DESCRIPTOR) {
+    data_ptrs[0] = const_cast<void*>(x.const_data_ptr());
+    data_ptrs[1] = const_cast<void*>(y.const_data_ptr());
+    data_ptrs[2] = w.data_ptr();
   } else {
     data_ptrs[0] = x.data_ptr();
     data_ptrs[1] = y.data_ptr();
