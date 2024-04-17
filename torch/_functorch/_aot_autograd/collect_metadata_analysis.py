@@ -15,6 +15,7 @@ from typing import Callable, DefaultDict, Dict, List
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
+from torch._guards import detect_fake_mode
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -23,7 +24,6 @@ from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     transform_subclass,
 )
-from torch._guards import detect_fake_mode
 from .functional_utils import (
     are_all_mutations_hidden_from_autograd,
     are_all_mutations_under_no_grad_or_inference_mode,

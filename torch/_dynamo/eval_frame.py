@@ -1206,6 +1206,14 @@ def export(
                         graph, fake_params_buffers, fake_graph_inputs
                     )
 
+                    # We reran fake tensor propagation, but we didn't do
+                    # anything with the resulting unbacked SymInts.  Drop them
+                    # from the pending list.
+                    # NB: this is wrong if graph_captured_result has
+                    # data-dependent output size!
+                    if shape_env := ambient_fake_mode.shape_env:
+                        shape_env.pending_fresh_unbacked_symbols.clear()
+
                 return graph_captured_result
 
             return result_capturing_wrapper

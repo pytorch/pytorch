@@ -447,6 +447,17 @@ class CallMethodKey:
         return getattr(o, self.name)()
 
 
+@dataclass(frozen=True)
+class DivideByKey:
+    divisor: int
+
+    def __str__(self) -> str:
+        return f".__floordiv__({self.divisor})"
+
+    def get(self, o: int) -> int:
+        return o // self.divisor
+
+
 def compute_unbacked_bindings(shape_env, example_value):
     """
     After having run fake tensor propagation and producing example_value
@@ -500,6 +511,22 @@ def compute_unbacked_bindings(shape_env, example_value):
             ):
                 r[s] = path
                 pending.remove(s)
+            # When an unbacked SymInt is perfectly divisible by an integer
+            # constant, we replace it with the integer constant to improve
+            # reasoning capabilities.  However, in synthetic examples, it is
+            # then possible that the factor never is explicitly allocated.
+            # Fortunately, we can compute it by division.
+            elif (
+                isinstance(a, torch.SymInt)
+                and isinstance(s := a.node._expr, sympy.Mul)
+                and len(s.args) == 2
+                and isinstance(lhs := s.args[0], sympy.Integer)
+                and isinstance(rhs := s.args[1], sympy.Symbol)
+                and rhs in pending
+            ):
+                # TODO: DivideByKey needs to test divisibility at runtime!
+                r[s] = path + (DivideByKey(int(lhs)),)
+                pending.remove(rhs)
             # The annoyance here arises from the fact that SymBool is
             # allocated by allocating a SymInt and then testing if it's equal
             # to one.  So you have a complicated binding site logic for this.
@@ -517,7 +544,14 @@ def compute_unbacked_bindings(shape_env, example_value):
             return r
 
         symbol_to_path = free_unbacked_symbols_with_path(example_value, ())
-        assert not pending, f"pending {pending} not in {example_value} {repr((example_value.stride(), example_value.storage_offset())) if isinstance(example_value, torch.Tensor) else None}"
+        assert not pending, (
+            f"pending {pending} not in {example_value} " +
+            (
+                repr((example_value.stride(), example_value.storage_offset()))
+                if isinstance(example_value, torch.Tensor)
+                else ""
+            )
+        )
         return symbol_to_path
 
 def definitely_true(a):
