@@ -1652,7 +1652,7 @@ class _ScriptProfile:
         for source_stats in self.profile._dump_stats():
             source_ref = source_stats.source()
             source_lines = source_ref.text().splitlines()
-            dedent = min([len(line) - len(line.lstrip(" ")) for line in source_lines])
+            dedent = min(len(line) - len(line.lstrip(" ")) for line in source_lines)
             source_lines = [line[dedent:] for line in source_lines]
 
             start_line = source_ref.starting_lineno()

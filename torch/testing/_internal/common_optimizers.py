@@ -1040,20 +1040,6 @@ optim_db: List[OptimizerInfo] = [
         supported_impls=("foreach", "differentiable"),
         skips=(
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
                 "test_tensor_lr",
@@ -1077,20 +1063,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_complex_2d",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
             ),
             # Note on tolerances:
             # test_correctness_Adadelta_cuda_float32
@@ -1140,20 +1112,6 @@ optim_db: List[OptimizerInfo] = [
                 active_if=lambda kwargs: not kwargs["contiguous"],
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
                 "test_tensor_lr",
@@ -1184,20 +1142,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_complex_2d",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1249,23 +1193,9 @@ optim_db: List[OptimizerInfo] = [
                 active_if=lambda kwargs: not kwargs["contiguous"],
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("initial_value is incorrect in dynamo, see #123202"),
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
@@ -1296,20 +1226,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "This test uses mocks, which dynamo does not support"
                 ),
                 "TestOptimRenewed",
@@ -1328,20 +1244,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
@@ -1377,20 +1279,6 @@ optim_db: List[OptimizerInfo] = [
                 unittest.skip("Uses too much memory, even for H100, surprisingly."),
                 "TestOptimRenewed",
                 "test_foreach_large_tensor",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1445,20 +1333,6 @@ optim_db: List[OptimizerInfo] = [
                 active_if=lambda kwargs: not kwargs["contiguous"],
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
                 "test_tensor_lr",
@@ -1487,20 +1361,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "This test uses mocks, which dynamo does not support"
                 ),
                 "TestOptimRenewed",
@@ -1514,20 +1374,6 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_asgd,
         supported_impls=("foreach", "differentiable"),
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
@@ -1566,20 +1412,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "This test uses mocks, which dynamo does not support"
                 ),
                 "TestOptimRenewed",
@@ -1601,13 +1433,6 @@ optim_db: List[OptimizerInfo] = [
                 skipIfMps, "TestOptimRenewed", "test_can_load_older_state_dict"
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
-            ),
-            DecorateInfo(
                 unittest.skip("Does not support param groups"),
                 "TestOptimRenewed",
                 "test_param_groups_lr",
@@ -1616,13 +1441,6 @@ optim_db: List[OptimizerInfo] = [
                 unittest.skip("Does not support param groups"),
                 "TestOptimRenewed",
                 "test_param_groups_weight_decay",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
             ),
             DecorateInfo(
                 unittest.skip("LBFGS doesn't support multidevice"),
@@ -1655,20 +1473,6 @@ optim_db: List[OptimizerInfo] = [
                 active_if=lambda kwargs: not kwargs["contiguous"],
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
                 "test_tensor_lr",
@@ -1697,13 +1501,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "See https://github.com/pytorch/pytorch/issues/116499"
                 ),
                 "TestOptimRenewed",
@@ -1726,13 +1523,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "This test uses mocks, which dynamo does not support"
                 ),
                 "TestOptimRenewed",
@@ -1746,20 +1536,6 @@ optim_db: List[OptimizerInfo] = [
         optim_error_inputs_func=optim_error_inputs_func_radam,
         supported_impls=("foreach", "differentiable"),
         skips=(
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
-            ),
             DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
                 "TestOptimRenewed",
@@ -1788,13 +1564,6 @@ optim_db: List[OptimizerInfo] = [
                 "test_complex_2d",
             ),
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
-            ),
-            DecorateInfo(
                 toleranceOverride(
                     {
                         # previously atol=1e-7, rtol=1e-7
@@ -1803,13 +1572,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_foreach_matches_forloop",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -1831,20 +1593,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
@@ -1883,13 +1631,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "fails, https://github.com/pytorch/pytorch/issues/117165"
                 ),
                 "TestOptimRenewed",
@@ -1915,20 +1656,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_forloop_goes_right_direction",
                 active_if=lambda kwargs: not kwargs["contiguous"],
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
             ),
             DecorateInfo(
                 skipIfTorchDynamo("Fails fix point assertion on 3.8, see #97811"),
@@ -1957,17 +1684,10 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
+                    "See https://github.com/pytorch/pytorch/issues/115679"
                 ),
                 "TestOptimRenewed",
-                "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
+                "test_state_dict_with_cuda_params",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
@@ -2021,20 +1741,6 @@ optim_db: List[OptimizerInfo] = [
         ),
         skips=(
             DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_forloop_goes_right_direction_multigpu",
-            ),
-            DecorateInfo(
                 skipIfTorchDynamo("initial_value is incorrect in dynamo, see #123202"),
                 "TestOptimRenewed",
                 "test_param_group_with_lrscheduler_goes_right_direction",
@@ -2082,59 +1788,6 @@ optim_db: List[OptimizerInfo] = [
                 "TestOptimRenewed",
                 "test_mixed_device_dtype",
                 active_if=TEST_WITH_TORCHDYNAMO,
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
-                ),
-                "TestOptimRenewed",
-                "test_step_is_noop_for_zero_grads",
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "No closure handling, https://github.com/pytorch/pytorch/issues/116494"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_deterministic",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
-                ),
-                "TestOptimRenewed",
-                "test_param_groups_weight_decay",
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
-                ),
-                "TestOptimRenewed",
-                "test_param_groups_lr",
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
-                ),
-                "TestOptimRenewed",
-                "test_load_nontensor_step",
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "momentum_buffer inconsistency, https://github.com/pytorch/pytorch/issues/117147"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "fails, https://github.com/pytorch/pytorch/issues/117165"
-                ),
-                "TestOptimRenewed",
-                "test_deepcopy_copies_all_public_attrs",
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
