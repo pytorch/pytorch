@@ -48,6 +48,8 @@ dce = False
 # assume weight tensors are fixed size
 static_weight_shapes = True
 
+_temp_welford_reduction_div_approx = True
+
 # put correctness assertions in generated code
 size_asserts = os.environ.get("TORCHINDUCTOR_SIZE_ASSERTS", "1") == "1"
 nan_asserts = os.environ.get("TORCHINDUCTOR_NAN_ASSERTS") == "1"
