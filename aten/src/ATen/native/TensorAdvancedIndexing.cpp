@@ -106,7 +106,6 @@
 #include <ATen/ops/index_copy_native.h>
 #include <ATen/ops/index_fill_native.h>
 #include <ATen/ops/index_meta.h>
-#include <ATen/ops/index_meta_dispatch.h>
 #include <ATen/ops/index_native.h>
 #include <ATen/ops/index_put_native.h>
 #include <ATen/ops/index_reduce_meta.h>
@@ -681,24 +680,26 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
     return at::clamp(*index, -size, std::max(size - 1, 0L));
   };
 
-  if (self.numel() == 0) {
-    std::vector<int64_t> new_sizes(self.dim());
-    auto compute_new_size = [](const c10::optional<Tensor>& index, auto size) -> int64_t {
-    if (index && size == 0) {
-        return 1;
-    } else {
-        return size;
-    }
-
-    };
-    std::transform(indices.begin(), indices.end(), self.sizes().begin(), new_sizes.begin(), compute_new_size);
-
-    auto result = at::meta::index(self.new_empty(new_sizes), indices);
-    return self.new_full(result.sizes(), fill);
-  }
-
   torch::List<c10::optional<Tensor>> clamped_indices(indices);
   std::transform(indices.begin(), indices.end(), self.sizes().begin(), clamped_indices.begin(), clamp);
+
+  if (self.numel() == 0) {
+      // Returns a tensor filled with `fill` value
+      // We use a hack here since we do not have a method to get the
+      // correct size of the tensor. (except with meta impl which is
+      // not available on mobile builds)
+      std::vector<int64_t> new_sizes(self.dim());
+      auto compute_new_size = [](const c10::optional<Tensor>& index, auto size) -> int64_t {
+          if (index && size == 0) {
+              return 1;
+          } else {
+              return size;
+          }
+      };
+      std::transform(indices.begin(), indices.end(), self.sizes().begin(), new_sizes.begin(), compute_new_size);
+      auto result = self.new_full(new_sizes, fill);
+      return at::_unsafe_index(result, clamped_indices);
+  }
 
   auto result = at::_unsafe_index(self, clamped_indices);
   return result.masked_fill(at::logical_not(mask), fill);
