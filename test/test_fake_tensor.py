@@ -19,7 +19,9 @@ from torch._subclasses.fake_tensor import (
     UnsupportedOperatorException,
     unset_fake_temporarily,
 )
-from torch.fx.experimental.symbolic_shapes import ShapeEnv, DimDynamic, free_symbols, StatelessSymbolicContext, ShapeEnvSettings
+from torch.fx.experimental.symbolic_shapes import (
+    ShapeEnv, DimDynamic, free_symbols, StatelessSymbolicContext, ShapeEnvSettings, statically_known_true
+)
 from torch.testing._internal.custom_op_db import custom_op_db
 from torch.testing._internal.common_device_type import ops
 from torch.testing._internal.common_device_type import instantiate_device_type_tests, OpDTypes
@@ -44,6 +46,7 @@ from torch import distributed as dist
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import TorchDispatchMode
 import torch.utils._pytree as pytree
+from torch.fx.experimental.proxy_tensor import make_fx
 
 aten = torch.ops.aten
 
@@ -1298,6 +1301,32 @@ class FakeTensorPropTest(TestCase):
             another_optional_value = torch.randn(5, 4)
             graph_model = torch.fx.symbolic_trace(model, (value, None, another_optional_value))
             FakeTensorProp(graph_model, fake_mode).propagate(value, None, another_optional_value)
+
+
+    def test_unbacked_shape_realloc(self):
+        def f(x):
+            return x.nonzero()
+        shape_env = ShapeEnv()
+        fake_mode = FakeTensorMode(shape_env=shape_env)
+        with fake_mode:
+            value = torch.randn(5)
+            gm = make_fx(f)(value)
+        nonzero_nodes = [n for n in gm.graph.nodes if n.target is torch.ops.aten.nonzero.default]
+        self.assertEqual(len(nonzero_nodes), 1)
+        self.assertIsInstance(nonzero_nodes[0].meta['val'].shape[0], torch.SymInt)
+        u0 = nonzero_nodes[0].meta['val'].shape[0]
+        FakeTensorProp(gm, fake_mode).propagate(value)
+        u1 = nonzero_nodes[0].meta['val'].shape[0]
+        # Test that this test is actually doing something in that the
+        # FakeTensorProp actually triggered a reallocation.  If this assert is
+        # failing, it could be because we started memoizing the nnz count for
+        # nonzero, which is nice in some sense (no reallocation) but not
+        # helpful for this test, which is checking what we do when we have
+        # to reallocate.  If so, you need to make this example more
+        # complicated (e.g., maybe have a nontrivial computation on the input
+        # before feeding it into nonzero, or have some sort of randomness)
+        self.assertIsNot(u0, u1)
+        self.assertTrue(statically_known_true(u0 == u1))
 
 
     def test_torch_load_with_fake_mode(self):
