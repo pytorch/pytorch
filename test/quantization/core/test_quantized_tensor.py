@@ -1602,6 +1602,14 @@ class TestQuantizedTensor(TestCase):
         self.assertEqual(quantized_X.int_repr(), quantized_decomposed_X)
         self.assertEqual(dequantized_X, dequantized_decomposed_X)
 
+    def test_decomposed_choose_qparams_per_token_asymmetric_backward(self):
+        # register the ops
+        import torch.ao.quantization.fx._decomposed
+        x = torch.randn(2, 3).requires_grad_()
+        (s, zp) = torch.ops.quantized_decomposed._choose_qparams_per_token_asymmetric_impl(x, torch.int8)
+        out = x.div(s).add(zp).round()
+        out.sum().backward()
+
 if __name__ == '__main__':
     raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
                        "\tpython test/test_quantization.py TESTNAME\n\n"

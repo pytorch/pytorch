@@ -1,6 +1,6 @@
 import os  # noqa: C101
 import sys
-from typing import Any, Callable, Dict, Optional, TYPE_CHECKING
+from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING, Union
 
 import torch
 
@@ -23,6 +23,12 @@ verbose_progress = False
 
 # use fx aot graph codegen cache
 fx_graph_cache = os.environ.get("TORCHINDUCTOR_FX_GRAPH_CACHE") == "1"
+
+# enable autotune local cache
+autotune_local_cache = True
+
+# enable autotune remote cache
+autotune_remote_cache = os.environ.get("TORCHINDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
 
 # use cpp wrapper instead of python wrapper
 cpp_wrapper = os.environ.get("TORCHINDUCTOR_CPP_WRAPPER", "0") == "1"
@@ -98,7 +104,7 @@ post_grad_custom_post_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = N
 # use post-grad passes.
 pre_grad_custom_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 
-# Optimize away split cat patterns (Experimental)
+# Deprecated
 split_cat_fx_passes = True
 
 # Optimize conv-batchnorm if batchnorm is in eval mode. Slightly reduces numerical stability.
@@ -113,8 +119,24 @@ group_fusion = False
 # Deprecated
 batch_fusion = True
 
-# Pre grad group/batch fusion and options in order, set to empty dict to disable fusion.
+# Pre grad fusion and options in order, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions()` to see available fusions.
+# batch fusion options:
+# batch_linear
+# batch_linear_lhs
+# batch_layernorm
+# batch_tanh
+# batch_relu
+# batch_sigmoid
+
+# split cat fusion options:
+# normalization_pass
+# remove_split_with_size_one_pass
+# merge_getitem_cat_pass
+# merge_stack_tahn_unbind
+# merge_splits_pass
+# mutate_cat_pass
+# split_cat_pass
 pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
     "batch_linear": {},
     "batch_linear_lhs": {},
@@ -124,7 +146,7 @@ pre_grad_fusion_options: Dict[str, Dict[str, Any]] = {
     "batch_sigmoid": {},
 }
 
-# Post grad group/batch fusion and options, set to empty dict to disable fusion.
+# Post grad fusion and options, set to empty dict to disable fusion.
 # Call `torch._inductor.fx_passes.group_batch_fusion.list_group_batch_fusions(False)` to see available fusions.
 post_grad_fusion_options: Dict[str, Dict[str, Any]] = {}
 
@@ -192,14 +214,6 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
-
-# enable autotune local cache
-use_autotune_local_cache = True
-
-# enable autotune remote cache
-use_autotune_remote_cache = (
-    os.environ.get("TORCH_INDUCTOR_AUTOTUNE_REMOTE_CACHE") == "1"
-)
 
 # force cublas and triton to use the same precision; cublas supports TF32 for matmul operations
 # when m, n, k are multiples of 16, 16, 8, whereas triton supports TF32 for matmul operations
@@ -284,6 +298,10 @@ debug_fusion = os.environ.get("TORCHINDUCTOR_DEBUG_FUSION") == "1"
 benchmark_fusion = os.environ.get("TORCHINDUCTOR_BENCHMARK_FUSION") == "1"
 enabled_metric_tables = os.environ.get("TORCHINDUCTOR_ENABLED_METRIC_TABLES", "")
 
+benchmark_multi_templates = (
+    os.environ.get("TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0") == "1"
+)
+
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
@@ -329,6 +347,29 @@ developer_warnings = is_fbcode() or is_nightly_or_source
 # TODO: fork is not safe in a multithreaded environment, we should evaluate changing
 # the default to spawn.
 worker_start_method = "fork"
+
+# Flags to turn on all_reduce fusion. These 2 flags should be automaticaly turned
+# on by DDP and should not be set by the users.
+_fuse_ddp_communication = False
+_fuse_ddp_bucket_size = 25
+
+# Flag to control which fusion passes to apply. Functions in the list will
+# be applied in order. There are two different different fusion passes
+# --"fuse_ddp_with_concat_op" and "fuse_ddp_with_coalesced_op". The default
+# one is "fuse_ddp_with_concat_op". Users can also change this to a customized
+# fusion function.
+#
+# The fusion currently does not support multiple DDP with different PG or
+# data type. This feature will be added in the future PRs.
+#
+# "schedule_comm_wait" is used to delay the wait ops to maximize comm/comp
+# overlapping. At this moment, this pass performs better than
+# reorder_for_compute_comm_overlap_passes but we will add the logic of
+# "schedule_comm_wait" in the future and remove the one here.
+_fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
+    "fuse_ddp_with_concat_op",
+    "schedule_comm_wait",
+]
 
 
 def decide_compile_threads():
@@ -377,6 +418,17 @@ kernel_name_max_ops = 10
 
 # Pad input tensors of matmul/bmm/addmm to leverage Tensor Cores in NVIDIA GPUs
 shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
+
+# Control if we will do padding for pointwise/reductions
+comprehensive_padding = (
+    os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "0" if is_fbcode() else "1")
+    == "1"
+)
+pad_channels_last = False
+
+# Whether to treat output of the backward graph as user visible.
+# For user visible outputs, inductor will make sure the stride matches with eager.
+bw_outputs_user_visible = True
 
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
@@ -436,6 +488,11 @@ use_minimal_arrayref_interface: bool = False
 # decompose some memory bound matmul/bmm to mul
 decompose_mem_bound_mm: bool = False
 
+# assume_aligned_inputs means that we assume that inputs will be aligned; we generate
+# code using this assumption, and clone tensors before use if they aren't aligned.
+# In the common case, most inputs will be aligned.
+assume_aligned_inputs: bool = True
+
 
 # config specific to codegen/cpp.py
 class cpp:
@@ -444,16 +501,18 @@ class cpp:
 
     # Do not generate loops when the condition doesn't hold, like:
     # for(long i0=4096; i0<4096; i0+=1)
-    no_redundant_loops = True
+    no_redundant_loops = (
+        os.environ.get("TORCHINDUCTOR_CPP_NO_REDUNDANT_LOOPS", "1") == "1"
+    )
 
     # Assume number of threads is dynamic, don't specialize thread number.
     # Kernels don't recompile on thread number changes with this flag on.
     # For single-threaded workload, turning it on would incur a slight
     # performance degradation.
-    dynamic_threads = False
+    dynamic_threads = os.environ.get("TORCHINDUCTOR_CPP_DYNAMIC_THREADS", "0") == "1"
 
     simdlen: Optional[int] = None
-    min_chunk_size = 4096
+    min_chunk_size = int(os.environ.get("TORCHINDUCTOR_CPP_MIN_CHUNK_SIZE", "4096"))
     cxx = (
         None,  # download gcc12 from conda-forge if conda is installed
         # "g++-12",
@@ -464,10 +523,12 @@ class cpp:
         # "g++.par",
     )
     # Allow kernel performance profiling via PyTorch profiler
-    enable_kernel_profile = False
+    enable_kernel_profile = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_KERNEL_PROFILE", "0") == "1"
+    )
 
     # enable weight prepacking to get a better performance; may lead to large memory footprint
-    weight_prepack = True
+    weight_prepack = os.environ.get("TORCHINDUCTOR_CPP_WEIGHT_PREPACK", "1") == "1"
 
     # Inject a bug into our relu implementation; useful for testing our repro
     # extraction and minification functionality.
@@ -483,32 +544,52 @@ class cpp:
     descriptive_names = "original_aten"
 
     # how many nodes to allow into a single horizontal fusion
-    max_horizontal_fusion_size = 16
+    max_horizontal_fusion_size = int(
+        os.environ.get("TORCHINDUCTOR_CPP_MAX_HORIZONTAL_FUSION_SIZE", "16")
+    )
 
     # Make scatter_reduce fallback when reduce is sum to avoid performance regression
     # using atomic_add.
-    fallback_scatter_reduce_sum = True
+    fallback_scatter_reduce_sum = (
+        os.environ.get("TORCHINDUCTOR_CPP_FALLBACK_SCATTER_REDUCE_SUM", "1") == "1"
+    )
 
     # Use funsafe-math-optimizations when compiling
-    enable_unsafe_math_opt_flag = False
+    enable_unsafe_math_opt_flag = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_UNSAFE_MATH_OPT_FLAG", "0") == "1"
+    )
 
     # Use ffp-contract when compiling
-    enable_floating_point_contract_flag = False
+    enable_floating_point_contract_flag = (
+        os.environ.get("TORCHINDUCTOR_CPP_ENABLE_FLOATING_POINT_CONTRACT_FLAG", "0")
+        == "1"
+    )
 
 
 # config specific to codegen/triton.py
 class triton:
     # Use cudagraphs on output code
-    cudagraphs = False
+    cudagraphs = os.environ.get("TORCHINDUCTOR_CUDAGRAPHS") == "1"
 
     # Use cudagraph trees for memory pooling if `cudagraphs` is True
     cudagraph_trees = True
+
+    # Should we skip cudagraphing graphs with dynamic shape inputs
+    # If False, we will re-record a graph for each unique set of shape inputs
+    cudagraph_skip_dynamic_graphs = False
 
     # assertions not on the fast path, steady state
     slow_path_cudagraph_asserts = True
 
     # TODO - need to debug why this prevents cleanup
     cudagraph_trees_history_recording = False
+
+    # synchronize after cudagraph invocation
+    force_cudagraph_sync = False
+
+    # always run cudagraphs in the eager warmup stage
+    # instead of recording and executing cudagraphs
+    force_cudagraphs_warmup = False
 
     # assertions on the fast path
     fast_path_cudagraph_asserts = False
@@ -627,6 +708,10 @@ class aot_inductor:
     # flag to decide whether to create a submodule for constant graph.
     use_runtime_constant_folding: bool = False
 
+    # flag to force weight to be appened to the shared library and mmaped  by the runtime
+    # rather than embedded into the data section. Needed to support 1B+ parameter models
+    force_mmap_weights: bool = False
+
 
 class cuda:
     # CUDA arch to use for CUDA template kernel compilation.
@@ -675,6 +760,9 @@ class cuda:
     # 3）CUDA_HOME environment variable
     # 4) default system search PATH.
     cuda_cxx: Optional[str] = None
+
+    # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
+    cutlass_backend_min_gemm_size: int = 1
 
     # If set to True, it will ensure that only GEMM ops capable of
     # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )

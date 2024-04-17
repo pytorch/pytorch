@@ -159,7 +159,7 @@ function install_torchvision() {
 }
 
 function install_tlparse() {
-  pip_install --user "tlparse==0.3.5"
+  pip_install --user "tlparse==0.3.7"
   PATH="$(python -m site --user-base)/bin:$PATH"
 }
 
