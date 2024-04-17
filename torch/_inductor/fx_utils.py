@@ -6,7 +6,7 @@ import sympy
 
 import torch
 import torch.fx
-from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
+from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq, compute_unbacked_bindings, rebind_unbacked
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
 from .virtualized import V
@@ -161,7 +161,13 @@ class FakeTensorUpdater:
                 new_fake_tensor, node.meta["val"]
             ):
                 continue
+
+            rebind_unbacked(V.fake_mode.shape_env, node, new_fake_tensor)
+
             node.meta["val"] = new_fake_tensor
+            if symbol_to_path := compute_unbacked_bindings(V.fake_mode.shape_env, new_fake_tensor):
+                # Refresh the bindings to the new symbols
+                node.meta["unbacked_bindings"] = symbol_to_path
 
             existing_storages[get_node_storage(node)] += 1
 

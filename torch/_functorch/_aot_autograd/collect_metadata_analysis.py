@@ -15,6 +15,7 @@ from typing import Callable, DefaultDict, Dict, List
 import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
+from torch._guards import detect_fake_mode
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
@@ -699,6 +700,16 @@ from a multi-output view call"
             grad_enabled_mutation=grad_enabled_mutation,
             tokens=mode._tokens,
         )
+        # AOTAutograd collect metadata will do fake tensor propagation, but it
+        # throws out all the resulting fake tensors and doesn't save anything
+        # about sizes (TODO: Actually, the subclass metadata does save size
+        # info, this is likely to be incorrect if unbacked SymInts are
+        # allowed).  The net effect is we generate a bunch of fresh unbacked
+        # symbols that we immediately throw out and don't use.  NB: we don't
+        # want to rename into these symbols, because we aren't going to have
+        # binding sites for them.
+        if (fake_mode := detect_fake_mode()) and fake_mode.shape_env:
+            fake_mode.shape_env.pending_fresh_unbacked_symbols.clear()
         return metadata
 
     return inner
