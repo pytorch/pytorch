@@ -156,7 +156,7 @@ class CacheBase:
         try:
             import triton
 
-            triton_version = triton.__version__
+            triton_version = triton.__version__  # type: ignore[attr-defined]
         except ModuleNotFoundError:
             triton_version = None
 
