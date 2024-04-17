@@ -245,6 +245,16 @@ class TestInductorDynamic(TestCase):
 
         f(torch.tensor([True], device=device))
 
+    @torch._dynamo.config.patch(capture_scalar_outputs=True, capture_dynamic_output_shape_ops=True)
+    def test_noops_tensor_repropagate(self, device):
+        @torch.compile(fullgraph=True)
+        def f(x):
+            b = torch.ops.prims.convert_element_type.default(x, torch.int64)
+            r = b.nonzero()
+            return r * 2
+
+        f(torch.tensor([0, 4, 2, 0, 1], dtype=torch.int64, device=device))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_item_zeros_nobreak(self, device):
         @torch.compile(fullgraph=True)
