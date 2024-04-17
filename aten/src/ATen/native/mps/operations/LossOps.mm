@@ -116,11 +116,12 @@ struct CachedGraph : public MPSCachedGraph {
 
 static MPSGraphTensor* bce_forward_mps(CachedGraph* bceGraph) {
   MPSGraph* mpsGraph = bceGraph->graph();
+  const auto inputType = [bceGraph->inputTensor dataType];
 
   // Forward BCE: L = -w (y ln(x) + (1-y) ln(1-x))
-  MPSGraphTensor* one = [mpsGraph constantWithScalar:1.0 dataType:MPSDataTypeFloat32];
+  MPSGraphTensor* one = [mpsGraph constantWithScalar:1.0 dataType:inputType];
   // -100 is the hard limit value defined in BCELoss Spec. to clamp the log
-  MPSGraphTensor* neg100 = [mpsGraph constantWithScalar:-100.0 dataType:MPSDataTypeFloat32];
+  MPSGraphTensor* neg100 = [mpsGraph constantWithScalar:-100.0 dataType:inputType];
   // 1 - x
   MPSGraphTensor* one_Input = [mpsGraph subtractionWithPrimaryTensor:one
                                                      secondaryTensor:bceGraph->inputTensor
@@ -154,11 +155,12 @@ static MPSGraphTensor* bce_forward_mps(CachedGraph* bceGraph) {
 
 static MPSGraphTensor* bce_backward_mps(CachedGraph* bceGraph) {
   MPSGraph* mpsGraph = bceGraph->graph();
+  const auto inputType = [bceGraph->inputTensor dataType];
 
   // Backward BCE: d(L)/d(x) = -w (y - x) / (x - x^2)
-  MPSGraphTensor* one = [mpsGraph constantWithScalar:1.0 dataType:MPSDataTypeFloat32];
+  MPSGraphTensor* one = [mpsGraph constantWithScalar:1.0 dataType:inputType];
   // epsilon used to clamp the grad input denominator
-  MPSGraphTensor* epsilon = [mpsGraph constantWithScalar:1e-12 dataType:MPSDataTypeFloat32];
+  MPSGraphTensor* epsilon = [mpsGraph constantWithScalar:1e-12 dataType:inputType];
   // 1 - x
   MPSGraphTensor* one_Input = [mpsGraph subtractionWithPrimaryTensor:one
                                                      secondaryTensor:bceGraph->inputTensor
