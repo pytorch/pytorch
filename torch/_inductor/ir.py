@@ -5543,7 +5543,7 @@ class MultiOutput(ExternKernel):
         ]
 
 
-class MultiOutputAlloc(MultiOutput):
+class MultiOutputOut(MultiOutput):
     def should_allocate(self):
         return True
 
