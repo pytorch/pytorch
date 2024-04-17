@@ -184,7 +184,7 @@ class CustomOpDef:
             >>> from torch.library import custom_op
             >>> import numpy as np
             >>>
-            >>> # Example of split cpu and cuda definitions
+            >>> # Create a custom op that works on cpu
             >>> @custom_op("mylib::numpy_sin", mutates_args=(), device_types="cpu")
             >>> def numpy_sin(x: Tensor) -> Tensor:
             >>>     x_np = x.numpy()
