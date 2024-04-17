@@ -541,16 +541,12 @@ class FunctionEvent(FormattedTimesMixin):
     def self_cuda_memory_usage(self):  # To be deprecated
         self_device_memory_usage(self)
 
-
     @property
     def cpu_time_total(self):
         if self.device_type == DeviceType.CPU:
             return self.time_range.elapsed_us()
         else:
             return 0
-        return self.device_memory_usage - sum(
-            child.device_memory_usage for child in self.cpu_children
-        )
 
     @property
     def self_cpu_time_total(self):
