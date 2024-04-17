@@ -1144,6 +1144,16 @@ def enum_repr(value, local):
     return local_name
 
 
+# Analogous to ConvertIntSource
+@dataclasses.dataclass(frozen=True)
+class ConvertIntKey:
+    def __str__(self) -> str:
+        return ".__int__()"
+
+    def get(self, b: bool) -> int:
+        return int(b)
+
+
 def set_example_value(node, example_value):
     import sympy
 
@@ -1166,22 +1176,39 @@ def set_example_value(node, example_value):
             if isinstance(a, (tuple, list)):
                 for i in range(len(a)):
                     r.update(
-                        free_unbacked_symbols_with_path(a[i], path + (pytree.SequenceKey(i),))
+                        free_unbacked_symbols_with_path(
+                            a[i], path + (pytree.SequenceKey(i),)
+                        )
                     )
             elif isinstance(a, torch.Tensor):
                 r.update(
-                    free_unbacked_symbols_with_path(a.shape, path + (pytree.GetAttrKey("shape"),))
+                    free_unbacked_symbols_with_path(
+                        a.shape, path + (pytree.GetAttrKey("shape"),)
+                    )
                 )
                 # TODO: stride / storage offset
             # NB: Intentionally access _expr, not expr, do not want
             # simplification!
             elif (
-                isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool))
+                isinstance(a, (torch.SymInt, torch.SymFloat))
                 and isinstance(s := a.node._expr, sympy.Symbol)
                 and s in pending
             ):
                 r[s] = path
                 pending.remove(s)
+            # The annoyance here arises from the fact that SymBool is
+            # allocated by allocating a SymInt and then testing if it's equal
+            # to one.  So you have a complicated binding site logic for this.
+            elif (
+                isinstance(a, torch.SymBool)
+                and isinstance(s := a.node._expr, sympy.Eq)
+                # This must match create_unbacked_symbool EXACTLY
+                and isinstance(s.lhs, sympy.Symbol)
+                and s.rhs == 1
+                and s.lhs in pending
+            ):
+                r[s.lhs] = path + (ConvertIntKey(),)
+                pending.remove(s.lhs)
 
             return r
 
