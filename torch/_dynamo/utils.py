@@ -1145,6 +1145,8 @@ def enum_repr(value, local):
 
 
 def set_example_value(node, example_value):
+    import sympy
+
     # NB: example_value is a bit of a misnomer, because this is always a fake
     # tensor of some sort.  Furthermore, these example values serve as the
     # runtime state of Dynamo tracing, which means if metadata mutation
@@ -1156,11 +1158,36 @@ def set_example_value(node, example_value):
     pending = set(shape_env.pending_fresh_unbacked_symbols)
     if pending:
         shape_env.pending_fresh_unbacked_symbols.clear()
-        actual = torch.fx.experimental.symbolic_shapes.free_unbacked_symbols(
-            example_value
-        )
-        assert pending <= actual, f"failed {pending} <= {actual}"
-        node.meta["unbacked_bindings"] = pending
+
+        def free_unbacked_symbols_with_path(
+            a, path
+        ) -> Dict[sympy.Symbol, pytree.KeyPath]:
+            r = {}
+            if isinstance(a, (tuple, list)):
+                for i in range(len(a)):
+                    r.update(
+                        free_unbacked_symbols_with_path(path + (pytree.SequenceKey(i),))
+                    )
+            elif isinstance(a, torch.Tensor):
+                r.update(
+                    free_unbacked_symbols_with_path(pth + (pytree.GetAttrKey("shape"),))
+                )
+                # TODO: stride / storage offset
+            # NB: Intentionally access _expr, not expr, do not want
+            # simplification!
+            elif (
+                isinstance(a, torch.SymInt)
+                and isinstance(s := a.node._expr, sympy.Symbol)
+                and s in pending
+            ):
+                r[s] = path
+                pending.remove(s)
+
+            return r
+
+        symbol_to_path = free_unbacked_symbols_with_path(example_value, ())
+        assert not pending, pending
+        node.meta["unbacked_bindings"] = symbol_to_path
 
 
 def _get_fake_tensor(vt):
