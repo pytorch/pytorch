@@ -161,7 +161,7 @@ def get_dequantize_qconv_pt2e_pattern(users=1):
         KeywordArg("padding"),
         KeywordArg("dilation"),
         KeywordArg("groups"),
-        KeywordArg("inv_output_scale"),  # inv_output_scale = 1.0
+        KeywordArg("output_scale"),  # output_scale = 1.0
         KeywordArg("output_zero_point"),  # output_zero_point = 0
         KeywordArg("output_dtype"),  # output_dtype = None
         KeywordArg("attr"),  # attr = "none"
@@ -1496,7 +1496,7 @@ def _register_qconv_weight_prepack_pass(pattern, pass_number, dtype=torch.float3
                 padding,
                 dilation,
                 groups,
-                1.0,  # inv_output_scale
+                1.0,  # output_scale
                 0,  # output_zero_point
                 dtype,  # output_dtype
                 "none",  # attr
