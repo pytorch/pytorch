@@ -133,7 +133,7 @@ THPPyInterpreterFrame* THPPyInterpreterFrame_New(_PyInterpreterFrame* frame) {
 #define THP_EVAL_API_FRAME_OBJECT PyFrameObject
 
 static int
-THP_PyFrame_FastToLocalsWithError(_PyInterpreterFrame *frame, int *free_vars_copied) {
+THP_PyFrame_FastToLocalsWithError(THP_EVAL_API_FRAME_OBJECT *frame, int *free_vars_copied) {
   return PyFrame_FastToLocalsWithError(frame);
 }
 #endif
