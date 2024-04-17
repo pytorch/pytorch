@@ -2020,7 +2020,8 @@ else:
 
 def get_device_module(device: Optional[Union[torch.device, str]] = None):
     """
-    Returns the module associated with a given device(e.g., torch.device('cuda'), "mtia:0", "xpu", ...)
+    Returns the module associated with a given device(e.g., torch.device('cuda'), "mtia:0", "xpu", ...).
+    If no device is given, return the module for the current accelerator or CPU if none is present.
     """
     if isinstance(device, torch.device):
         device_module_name = device.type
