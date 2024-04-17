@@ -1242,7 +1242,7 @@ class InstructionTranslatorBase(
             if (
                 isinstance(val, BuiltinVariable) and val.fn is StopIteration
             ) or isinstance(val, variables.StopIterationVariable):
-                raise exc.UserStopIteration()
+                raise exc.UserStopIteration
             unimplemented(f"raise {exc}")
         else:
             unimplemented("raise ... from ...")
@@ -2637,7 +2637,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                     self.output.root_tx.mutated_closure_cell_contents.add(
                         maybe_cell.source.name()
                     )
-                    raise exc.UnspecializeRestartAnalysis()
+                    raise exc.UnspecializeRestartAnalysis
                 unimplemented("write to __closure__ while inlining")
 
     def LOAD_DEREF(self, inst):

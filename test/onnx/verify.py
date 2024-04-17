@@ -154,7 +154,7 @@ class Errors:
         NB: It is an error to "fail" without having added any errors to
         the error context.
         """
-        raise self.exc_class()
+        raise self.exc_class
 
     def failWith(self, msg):
         """

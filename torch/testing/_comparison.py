@@ -1217,7 +1217,7 @@ def not_close_error_metas(
         )
     except ErrorMeta as error_meta:
         # Explicitly raising from None to hide the internal traceback
-        raise error_meta.to_error() from None
+        raise error_meta.to_error() from None  # noqa: RSE102
 
     error_metas: List[ErrorMeta] = []
     for pair in pairs:
