@@ -263,7 +263,10 @@ if HAS_PYDOT:
                 fname = self._shorten_file_name(parsed_stack_trace.file)
                 label += f"|file={fname}:{parsed_stack_trace.lineno} {parsed_stack_trace.code}" + r"\n"
 
-
+            stream_id = node.meta.get('stream_id', None)
+            if stream_id is not None:
+                label += f"|stream={stream_id}" + r"\n"
+                
             return label + "}"
 
         def _tensor_meta_to_label(self, tm) -> str:

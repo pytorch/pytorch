@@ -421,6 +421,10 @@ _fuse_ddp_communication_passes: List[Union[Callable[..., None], str]] = [
     "schedule_comm_wait",
 ]
 
+# Enable mutiple streams for codegen
+multiple_streams = os.environ.get("TORCHINDUCTOR_MULTIPLE_STREAMS", "1") == "1"
+multiple_streams_profiling = os.environ.get("TORCHINDUCTOR_MULTIPLE_STREAMS_PROFILING", "0") == "1"
+
 
 def decide_compile_threads():
     """
