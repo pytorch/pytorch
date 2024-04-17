@@ -1023,6 +1023,26 @@ def use_cutlass_template(layout, m, n, k):
     return res
 
 
+def use_cpp_packed_gemm_template(layout, mat1, mat2):
+    from . import ir
+
+    layout_dtypes = [torch.float32]
+    _, n = mat2.get_size()
+    if isinstance(mat2, ir.BaseView):
+        mat2 = mat2.unwrap_view()
+    # TODO: decide block size per ISA
+    # TODO: use larger block size for larger batch sizes
+    # TODO: support n % n_block_size != 0
+    n_block_size = 16
+    return (
+        layout.device.type == "cpu"
+        and layout.dtype in layout_dtypes
+        and n % n_block_size == 0
+        and isinstance(mat2, ir.StorageBox)
+        and mat2.is_module_buffer()
+    )
+
+
 def use_aten_gemm_kernels():
     return not use_max_autotune() or _use_autotune_backend("ATEN")
 

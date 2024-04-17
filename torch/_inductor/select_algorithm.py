@@ -905,7 +905,7 @@ class DataProcessorTemplateWrapper:
         if postprocessor is not None:
             self._postprocessor = postprocessor
         else:
-            self._postprocessor = lambda x, y: (x, y)
+            self._postprocessor = lambda x: x
         assert "input_nodes" in kwargs
         assert "layout" in kwargs
         kwargs["input_nodes"], kwargs["layout"] = preprocessor(

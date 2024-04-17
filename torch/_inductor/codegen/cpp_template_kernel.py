@@ -33,7 +33,7 @@ class CppTemplateKernel(Kernel):
         names_str: str = "",
         input_reorder: Optional[List[int]] = None,
     ) -> str:
-        input_names = [inp.get_name() for inp in inputs]
+        input_names = [inp.get_name() if inp is not None else None for inp in inputs]
         output_names = [out.get_name() for out in outputs]
         all_names = input_names + output_names
         assert len(all_names) == len(names_str.split(",")), (
@@ -42,7 +42,8 @@ class CppTemplateKernel(Kernel):
         )
         names = names_str.split(",")
         for i, input_name in enumerate(input_names):
-            self.args.input_buffers[input_name] = names[i].strip()
+            if input_name is not None:
+                self.args.input_buffers[input_name] = names[i].strip()
         for i, output_name in enumerate(output_names):
             self.args.output_buffers[output_name] = names[i + len(input_names)].strip()
         cpp_argdefs, _, _ = self.args.cpp_argdefs()

@@ -3,6 +3,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 import torch
+from torch._inductor.codegen.cpp_gemm_template import CppPackedGemmTemplate
 from torch._inductor.virtualized import V
 from .. import config as inductor_config
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
@@ -14,6 +15,7 @@ from ..select_algorithm import (
 )
 from ..utils import (
     use_aten_gemm_kernels,
+    use_cpp_packed_gemm_template,
     use_cutlass_template,
     use_max_autotune,
     use_triton_template,
@@ -254,6 +256,23 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
             beta=beta,
             input_reorder=[2, 0, 1],
             fuseable=False,
+        )
+
+    if use_cpp_packed_gemm_template(layout, mat1, mat2):
+        CppPackedGemmTemplate.add_choices(
+            choices,
+            layout,
+            [inp_expanded, mat1, mat2],
+            alpha=alpha,
+            beta=beta,
+        )
+        choices.append(
+            aten_addmm.bind(
+                (inp_expanded, mat1, mat2),
+                layout,
+                alpha=alpha,
+                beta=beta,
+            )
         )
 
     return autotune_select_algorithm(

@@ -2,6 +2,7 @@ from typing import List, Optional
 
 import torch
 import torch.utils._pytree as pytree
+from torch._inductor.kernel.mm_common import mm_args
 from . import config, ir
 from .codegen.cpp_gemm_template import CppPackedGemmTemplate
 from .ir import TensorBox
@@ -12,15 +13,9 @@ from .lowering import (
     permute,
     register_lowering,
     to_dtype,
-    view,
 )
-from .select_algorithm import (
-    autotune_select_algorithm,
-    DataProcessorTemplateWrapper,
-    ExternKernelChoice,
-    realize_inputs,
-)
-from .utils import sympy_product
+from .select_algorithm import autotune_select_algorithm, ExternKernelChoice
+from .utils import use_cpp_packed_gemm_template
 from .virtualized import V
 
 
@@ -380,60 +375,18 @@ def register_onednn_fusion_ops():
                     )
                 ]
                 if config.max_autotune or config.max_autotune_gemm:
-                    *m, _ = x.get_size()
-                    n, k = orig_w.get_size()
-                    # TODO: decide block size per ISA
-                    # TODO: use larger block size for larger batch sizes
-                    # TODO: support n % n_block_size != 0
-                    n_block_size = 16
-                    if n % n_block_size == 0:
-
-                        def preprocessor(inputs, layout_or_out):
-                            x = inputs[0]
-                            w = inputs[2]
-                            if isinstance(w, ir.IRNode):
-                                x = view(x, [-1, k])
-                                blocked_w = permute(
-                                    view(w, (n / n_block_size, n_block_size, k)),
-                                    [0, 2, 1],
-                                )
-                                blocked_w = ir.ExternKernel.require_contiguous(
-                                    blocked_w
-                                )
-                                x, blocked_w = realize_inputs(x, blocked_w)
-                                if layout_or_out is None:
-                                    layout_or_out = ir.FixedLayout(
-                                        x.get_device(),
-                                        x.get_dtype(),
-                                        [sympy_product((*m,)), n],
-                                    )
-                            else:
-                                x = x.view([-1, k])
-                                blocked_w = (
-                                    w.reshape(n / n_block_size, n_block_size, k)
-                                    .transpose(1, 2)
-                                    .contiguous()
-                                )
-                            return [x, blocked_w], layout_or_out
-
-                        def postprocessor(out):
-                            if not isinstance(m, (list, tuple)):
-                                return out
-                            if isinstance(out, ir.IRNode):
-                                return view(out, [*m, n])
-                            else:
-                                return out.view([*m, n])
-
-                        template = DataProcessorTemplateWrapper(
-                            CppPackedGemmTemplate,
-                            preprocessor,
-                            postprocessor,
-                            input_nodes=[x, packed_w, orig_w, None, batch_size],
-                            layout=layout,
-                            n_block_size=n_block_size,
+                    transposed_w = permute(orig_w, [1, 0])
+                    *_, layout, x, transposed_w = mm_args(
+                        x, transposed_w, layout=layout
+                    )
+                    if use_cpp_packed_gemm_template(layout, x, transposed_w):
+                        CppPackedGemmTemplate.add_choices(
+                            choices,
+                            layout,
+                            [x, packed_w, orig_w],
+                            trans_w=True,
+                            input_indices=[0, 2],
                         )
-                        layout = template.layout
-                        template.maybe_append_choice(choices)
 
                 assert isinstance(packed_w.data, ir.StorageBox)
                 assert isinstance(packed_w.data.data, ir.ConstantBuffer)
