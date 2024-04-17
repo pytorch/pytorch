@@ -302,6 +302,9 @@ benchmark_multi_templates = (
     os.environ.get("TORCHINDUCTOR_BENCHMARK_MULTI_TEMPLATES", "0") == "1"
 )
 
+# Take how many of the top triton kernels to benchmark epilogue
+max_epilogue_benchmarked_choices = 3
+
 # how many nodes to allow into a single fusion
 max_fusion_size = 64
 
@@ -421,7 +424,8 @@ shape_padding = os.environ.get("TORCHINDUCTOR_SHAPE_PADDING", "1") == "1"
 
 # Control if we will do padding for pointwise/reductions
 comprehensive_padding = (
-    os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "1") == "1"
+    os.environ.get("TORCHINDUCTOR_COMPREHENSIVE_PADDING", "0" if is_fbcode() else "1")
+    == "1"
 )
 pad_channels_last = False
 

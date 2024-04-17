@@ -1678,7 +1678,7 @@ class CTCLoss(_Loss):
           :math:`(\operatorname{sum}(\text{target\_lengths}))`,
           where :math:`N = \text{batch size}` and
           :math:`S = \text{max target length, if shape is } (N, S)`.
-          It represent the target sequences. Each element in the target
+          It represents the target sequences. Each element in the target
           sequence is a class index. And the target index cannot be blank (default=0).
           In the :math:`(N, S)` form, targets are padded to the
           length of the longest sequence, and stacked.
@@ -1686,12 +1686,12 @@ class CTCLoss(_Loss):
           the targets are assumed to be un-padded and
           concatenated within 1 dimension.
         - Input_lengths: Tuple or tensor of size :math:`(N)` or :math:`()`,
-          where :math:`N = \text{batch size}`. It represent the lengths of the
+          where :math:`N = \text{batch size}`. It represents the lengths of the
           inputs (must each be :math:`\leq T`). And the lengths are specified
           for each sequence to achieve masking under the assumption that sequences
           are padded to equal lengths.
         - Target_lengths: Tuple or tensor of size :math:`(N)` or :math:`()`,
-          where :math:`N = \text{batch size}`. It represent lengths of the targets.
+          where :math:`N = \text{batch size}`. It represents lengths of the targets.
           Lengths are specified for each sequence to achieve masking under the
           assumption that sequences are padded to equal lengths. If target shape is
           :math:`(N,S)`, target_lengths are effectively the stop index
