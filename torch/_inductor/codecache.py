@@ -2122,9 +2122,11 @@ class CppCodeCache:
 
         picked_vec_isa = pick_vec_isa()
         isa_seed = CppBuilder("i", ["o"], CppTorchOptions(picked_vec_isa))
-        # write will calc source_code hash, but we need split same code with different
-        # ISAs. get a command_line which contains isa parameters as a seed, what make
-        # hash value different with multiple Isa.
+        # write function will calc source_code hash, the same source code with different
+        # ISA level should be generate different hash.
+        # So we need get a command_line which contains isa related parameter as a hash seed.
+        # And then pass the seed to below write function as extra parameter to guarantee the
+        # source code hash contains ISA difference.
         hash_seed = isa_seed.get_command_line()
         key, input_path = write(source_code, "cpp", extra=hash_seed)
 
