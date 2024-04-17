@@ -26,13 +26,22 @@ namespace at::native {
 thread_local cusparseLtHandle_t handle;
 thread_local bool handle_initialized = false;
 
-// TODO: Add support for hipsparseLt compute types 
 // Look-up table for HIPSPARSELT data types
-constexpr static const std::unordered_map<std::string, hipsparseLT> hipsparseLtDataTypes = {
+#ifdef USE_ROCM
+constexpr static const std::unordered_map<std::string, hipsparseLT> sparseLtDataTypes = {
     {"HIP_R_8I", HIPSPARSELT_R_8I},
     {"HIP_R_16F", HIPSPARSELT_R_16F},
     {"HIP_R_16BF", HIPSPARSELT_R_16BF},
 };
+#else
+constexpr static const std::unordered_map<std::string, cudaDataType> sparseLtDataTypes = {
+    {"CUDA_R_8I", CUDA_R_8I},
+    {"CUDA_R_16F", CUDA_R_16F},
+    {"CUDA_R_16BF", CUDA_R_16BF},
+    {"CUDA_R_32F", CUDA_R_32F},
+};
+#endif
+
 
 at::Tensor _cslt_compress(const Tensor& sparse_input)
 {
@@ -50,18 +59,18 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
     )
     {
         case at::ScalarType::Char:
-            type = CUDA_R_8I;
+            type = sparseLtDataTypes.at("CUDA_R_8I");
             compression_factor = 10;
             break;
         case at::ScalarType::Half:
-            type = CUDA_R_16F;
+            type = sparseLtDataTypes.at("CUDA_R_16F");
             break;
         case at::ScalarType::BFloat16:
-            type = CUDA_R_16BF;
+            type = sparseLtDataTypes.at("CUDA_R_16BF";
             break;
 #ifndf USE_ROCM            
         case at::ScalarType::Float:
-            type = CUDA_R_32F;
+            type = sparseLtDataTypes.at("CUDA_R_32F");
             break;
 #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
         case at::ScalarType::Float8_e4m3fn:
