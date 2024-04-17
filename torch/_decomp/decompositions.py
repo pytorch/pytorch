@@ -2723,7 +2723,7 @@ def _compute_upsample_nearest_indices(input, output_size, scales, exact=False):
 @register_decomposition([aten.upsample_nearest1d.default, aten.upsample_nearest1d.out])
 @aten.upsample_nearest1d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest1d.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def upsample_nearest1d(
     input: Tensor,
     output_size: List[int],
@@ -2737,7 +2737,7 @@ def upsample_nearest1d(
 )
 @aten._upsample_nearest_exact1d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact1d.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def upsample_nearest_exact1d(
     input: Tensor,
     output_size: List[int],
@@ -2746,11 +2746,10 @@ def upsample_nearest_exact1d(
     return _upsample_nearest(input, output_size, [scales], exact=True)
 
 
-@register_decomposition(aten.upsample_nearest2d.default)
 @register_decomposition([aten.upsample_nearest2d.default, aten.upsample_nearest2d.out])
 @aten.upsample_nearest2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest2d.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def upsample_nearest2d(
     input: Tensor,
     output_size: List[int],
@@ -2765,7 +2764,7 @@ def upsample_nearest2d(
 )
 @aten._upsample_nearest_exact2d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact2d.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def _upsample_nearest_exact2d(
     input: Tensor,
     output_size: List[int],
@@ -2778,7 +2777,7 @@ def _upsample_nearest_exact2d(
 @register_decomposition([aten.upsample_nearest3d.default, aten.upsample_nearest3d.out])
 @aten.upsample_nearest3d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten.upsample_nearest3d.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def upsample_nearest3d(
     input: Tensor,
     output_size: List[int],
@@ -2794,7 +2793,7 @@ def upsample_nearest3d(
 )
 @aten._upsample_nearest_exact3d.default.py_impl(DispatchKey.CompositeImplicitAutograd)
 @aten._upsample_nearest_exact3d.default.py_impl(DispatchKey.Autograd)
-@out_wrapper()
+@out_wrapper(preserve_memory_format=True, exact_dtype=True)
 def _upsample_nearest_exact3d(
     input: Tensor,
     output_size: List[int],
