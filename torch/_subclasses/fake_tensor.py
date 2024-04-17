@@ -397,6 +397,31 @@ class FakeTensor(torch.Tensor):
             return None
         return self._nonzero_memo
 
+    # This memorizes the unbacked SymInt representing the number of unique
+    # elements in this tensor.  This is helpful if you do something like
+    # calling torch.unique(x) multiple times and should
+    # give a consistent unbacked SymInt.  It needs to be invalidated in the
+    # same way constant is.
+    # TODO: Generalize this as needed, e.g., into a trie of memos
+    _unique_memo: Optional[torch.SymInt]
+    _unique_memo_vc: Optional[int]
+
+    @property
+    def unique_memo(self):
+        if self._unique_memo is None:
+            return None
+        # Version counter based tracking isn't 100% sound but it's close
+        # enough
+        if self._unique_memo_vc != self._version:
+            self._unique_memo = None
+            return None
+        return self._unique_memo
+
+    @unique_memo.setter
+    def unique_memo(self, value):
+        self._unique_memo = value
+        self._unique_memo_vc = self._version
+
     @property
     def device(self):
         if self.fake_mode.in_kernel_invocation:
@@ -471,6 +496,9 @@ class FakeTensor(torch.Tensor):
         self.constant = constant  # type: ignore[attr-defined]
         self._nonzero_memo = None  # type: ignore[attr-defined]
         self._nonzero_memo_vc = None  # type: ignore[attr-defined]
+        self._unique_memo = None  # type: ignore[attr-defined]
+        self._unique_memo_vc = None  # type: ignore[attr-defined]
+
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
         return self
