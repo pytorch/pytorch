@@ -6027,7 +6027,7 @@ class MKLPackedLinear(ExternKernelAlloc):
         )
 
     @classmethod
-    def create(cls, x, packed_w, orig_w, bias, batch_size):
+    def create(cls, x, packed_w, orig_w, B, batch_size):
         x = cls.require_stride1(cls.realize_input(x))
         orig_w = cls.require_stride1(cls.realize_input(orig_w))
         *m, _ = x.get_size()
@@ -6036,8 +6036,8 @@ class MKLPackedLinear(ExternKernelAlloc):
         output_stride = make_contiguous_strides_for(output_size)
         inputs = [x, packed_w, orig_w]
         constant_args = [batch_size]
-        if bias is not None:
-            inputs += [bias]
+        if B is not None:
+            inputs += [B]
         else:
             constant_args.insert(0, None)
 

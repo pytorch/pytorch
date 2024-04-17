@@ -376,7 +376,7 @@ def register_onednn_fusion_ops():
             ):
                 choices = [
                     aten_mkl_linear.bind(
-                        (x, packed_w, orig_w, None, batch_size), layout
+                        (x, packed_w, orig_w), layout, B=None, batch_size=batch_size
                     )
                 ]
                 if config.max_autotune or config.max_autotune_gemm:
@@ -446,7 +446,7 @@ def register_onednn_fusion_ops():
                 chosen_node: TensorBox = autotune_select_algorithm(
                     "packed_linear",
                     choices,
-                    [x, packed_w, orig_w, None, batch_size],
+                    [x, packed_w, orig_w],
                     layout,
                     input_gen_fns=input_gen_fns,
                 )

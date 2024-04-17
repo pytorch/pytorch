@@ -1106,37 +1106,31 @@ class AlgorithmSelectorCache(PersistentCache):
         unique_example_inputs = {
             x.get_name(): input_gen_fns.get(i, cls.benchmark_example_value)(x)
             for i, x in enumerate(input_nodes)
-            if isinstance(x, ir.IRNode)
         }
-        example_inputs = list(unique_example_inputs.values()) + [
-            x for x in input_nodes if not isinstance(x, ir.IRNode)
-        ]
+        example_inputs = list(unique_example_inputs.values())
         example_inputs_extern = []
         for input_node in input_nodes:
-            if isinstance(input_node, ir.IRNode):
-                example_input = unique_example_inputs[input_node.get_name()]
-                if example_input.is_mkldnn:
-                    example_inputs_extern.append(example_input)
-                else:
-                    example_inputs_extern.append(
-                        torch.as_strided(
-                            example_input,
-                            V.graph.sizevars.size_hints(
-                                input_node.get_size(),
-                                fallback=config.unbacked_symint_fallback,
-                            ),
-                            V.graph.sizevars.size_hints(
-                                input_node.get_stride(),
-                                fallback=config.unbacked_symint_fallback,
-                            ),
-                            V.graph.sizevars.size_hint(
-                                input_node.get_layout().offset,
-                                fallback=config.unbacked_symint_fallback,
-                            ),
-                        )
-                    )
+            example_input = unique_example_inputs[input_node.get_name()]
+            if example_input.is_mkldnn:
+                example_inputs_extern.append(example_input)
             else:
-                example_inputs_extern.append(input_node)
+                example_inputs_extern.append(
+                    torch.as_strided(
+                        example_input,
+                        V.graph.sizevars.size_hints(
+                            input_node.get_size(),
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                        V.graph.sizevars.size_hints(
+                            input_node.get_stride(),
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                        V.graph.sizevars.size_hint(
+                            input_node.get_layout().offset,
+                            fallback=config.unbacked_symint_fallback,
+                        ),
+                    )
+                )
 
         out = cls.benchmark_example_value(layout)
         out_extern = torch.as_strided(
@@ -1160,9 +1154,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 "inputs = [",
             ]
             for x in example_inputs:
-                lines.append(
-                    f"    {tensor_repr(x) if isinstance(x, torch.Tensor) else x},"
-                )
+                lines.append(f"    {tensor_repr(x)},")
             lines += ["]", f"out = {tensor_repr(out)}", ""]
             return "\n".join(lines)
 
@@ -1251,7 +1243,6 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                 )
                 for n in input_nodes
-                if isinstance(n, ir.IRNode)
             ]
         )
         n = None if log.getEffectiveLevel() == logging.DEBUG else 10
@@ -1314,24 +1305,20 @@ class AlgorithmSelectorCache(PersistentCache):
         """
         sizevars = V.graph.sizevars
         return (
-            (
-                node.get_device().type,
-                str(node.get_dtype()),
-                *sizevars.size_hints(
-                    node.get_size(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                *sizevars.size_hints(
-                    node.get_stride(),
-                    fallback=config.unbacked_symint_fallback,
-                ),
-                sizevars.size_hint(
-                    node.get_layout().offset,
-                    fallback=config.unbacked_symint_fallback,
-                ),
-            )
-            if isinstance(node, ir.IRNode)
-            else str(node)
+            node.get_device().type,
+            str(node.get_dtype()),
+            *sizevars.size_hints(
+                node.get_size(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            *sizevars.size_hints(
+                node.get_stride(),
+                fallback=config.unbacked_symint_fallback,
+            ),
+            sizevars.size_hint(
+                node.get_layout().offset,
+                fallback=config.unbacked_symint_fallback,
+            ),
         )
 
 
