@@ -440,6 +440,11 @@ inline static PyObject* eval_custom_code_impl(
     fastlocals_new[j] = fastlocals_old[i];
   }
 
+  // NOTE: if you want to evaluate frame instead of shadow in 3.12+,
+  // you need to clear_old_frame_if_python_312_plus the shadow frame BEFORE
+  // calling eval_frame_default (i.e. here) and comment out the
+  // clear_old_frame_if_python_312_plus call on the original frame.
+
   PyObject* result = eval_frame_default(tstate, shadow, throw_flag);
 
 #if IS_PYTHON_3_12_PLUS
@@ -506,10 +511,11 @@ static PyObject* _custom_eval_frame_shim(
   return result;
 }
 
-// NOTE: In 3.12+, any return NULL; statements must be preceded by
-// clear_old_frame_if_python_312_plus(tstate, frame); since the eval frame function
-// is now responsible for clearing/popping the frame.
-// eval_frame_default/eval_custom_code will clear/pop the frame.
+// NOTE: In 3.12+, the frame evaluation function (callee) is responsible for clearing/popping
+// the frame, meaning that unless we default evaluate the original frame,
+// we are responsible for clearing it - via clear_old_frame_if_python_312_plus.
+// The should_clear_frame flag is used to indicate whether the frame should be
+// cleared by _custom_eval_frame's caller.
 static PyObject* _custom_eval_frame(
     PyThreadState* tstate,
     THP_EVAL_API_FRAME_OBJECT* frame,
