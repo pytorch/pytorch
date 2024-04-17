@@ -677,7 +677,7 @@ Tensor _unsafe_masked_index(const Tensor& self, const Tensor& mask, const torch:
     auto dtype = index->scalar_type();
     TORCH_CHECK(dtype == kLong || dtype == kInt,
                 "_unsafe_masked_index found unexpected index type ", dtype);
-    return at::clamp(*index, -size, std::max(size - 1, 0L));
+    return at::clamp(*index, -size, size - 1);
   };
 
   torch::List<c10::optional<Tensor>> clamped_indices(indices);
