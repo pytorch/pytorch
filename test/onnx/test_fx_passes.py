@@ -65,11 +65,11 @@ class TestFxPasses(common_utils.TestCase):
         def bar_op(x: torch.Tensor) -> torch.Tensor:
             return x + 2
 
-        @foo_op.register_fake()
+        @foo_op.register_fake
         def _(x):
             return torch.empty_like(x)
 
-        @bar_op.register_fake()
+        @bar_op.register_fake
         def _(x):
             return torch.empty_like(x)
 

@@ -1,7 +1,7 @@
 import dataclasses
 from typing import Any, Callable, Optional, Protocol
 
-from .. import _C, autograd, Tensor
+from .. import _C, _ops, autograd, Tensor
 
 from ..utils import _pytree
 from . import utils
@@ -18,8 +18,7 @@ class Info:
     _backward_fn: Optional[Callable]
 
 
-# op actually has type "torch._ops.OpOverload", but we've got some circular import issues.
-def make_autograd_impl(op: Any, info: InfoProtocol) -> Callable:
+def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
     saved_keyset = None
