@@ -985,6 +985,9 @@ def mps_ops_modifier(ops):
         # Unsupported
         # input types 'tensor<1x3x9x9xf16>' and 'tensor<1xf32>' are not broadcast compatible
         'nn.functional.avg_pool2d': [torch.float16],
+        # input types 'tensor<f32>' and 'tensor<1xf16>' are not broadcast compatible
+        # Refer to the issue please: https://github.com/pytorch/pytorch/issues/124252
+        'nn.functional.binary_cross_entropy': [torch.float16]
     }
 
     def addDecorator(op, d) -> None:
