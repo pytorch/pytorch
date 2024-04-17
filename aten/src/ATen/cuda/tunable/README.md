@@ -62,6 +62,12 @@ Default is 0, meaning it is not used.
 #### PYTORCH_TUNABLEOP_MAX_WARMUP_ITERATIONS
 Default is 1.
 
+### Cache Behavior
+The following options may help diminish any variance between tuning and non-tuning scenarios due to cache effects.  During tuning of a workload the various hardware caches will more likely produce hits than when not tuning.  The following options attempt to flush these caches to produce a more faithful profile of the tuned operator.
+
+#### PYTORCH_TUNABLEOP_ICACHE_FLUSH_ITERATIONS
+Default is 0, meaning it is not used.
+
 ## File Output
 
 Assuming you specified a filename, you'll end up with a CSV file with contents like so:

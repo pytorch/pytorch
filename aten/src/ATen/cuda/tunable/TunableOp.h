@@ -10,6 +10,7 @@
 #pragma once
 
 #include <ATen/cuda/tunable/Tunable.h>
+#include <ATen/cuda/Sleep.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
 #ifndef _WIN32
@@ -86,6 +87,14 @@ class TunableOp {
       this->ops_.emplace(name, std::move(op));
     }
 
+    static int GetICacheFlushIterations() {
+      static const char *env = getenv("PYTORCH_TUNABLEOP_ICACHE_FLUSH_ITERATIONS");
+      if (env != nullptr) {
+        return atoi(env);
+      }
+      return 0;
+    }
+
   private:
     static void WarmUp(Callable<ParamsT> *op, ParamsT* param, size_t num_iter) {
       for (size_t i = 0; i < num_iter; i++) {
@@ -94,9 +103,13 @@ class TunableOp {
     }
 
     static double Profile(Callable<ParamsT> *op, ParamsT* param, size_t num_iter) {
+      bool do_flush = GetICacheFlushIterations() > 0;
       TimerT timer{};
       timer.Start();
       for (size_t i = 0; i < num_iter; i++) {
+        if (do_flush) {
+          at::cuda::flush_icache();
+        }
         TORCH_CHECK(op->Call(param) == OK);
       }
       timer.End();
@@ -119,6 +132,14 @@ class TunableOp {
       TUNABLE_LOG("finding fastest for ", op_sig, '(', params_sig, ')', " out of ", op_names_.size(), " candidates");
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
+
+      int flush_iters = GetICacheFlushIterations();
+      if (flush_iters > 0) {
+        TUNABLE_LOG("instruction cache flush is enabled");
+      }
+      for (int i = 0; i < flush_iters; i++) {
+        at::cuda::flush_icache();
+      }
 
       // calcaulte a reference answer for numerical check
       ParamsT* reference_params = params->DeepCopy();
