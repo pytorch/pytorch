@@ -15,6 +15,7 @@ import torch._prims_common as utils
 import torch.nn.functional as F
 from torch import sym_float, sym_int, Tensor
 from torch._decomp import register_decomposition
+from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._prims_common import (
     IntLike,
@@ -3776,7 +3777,7 @@ def constant_pad_nd(
     pad: Tuple[int, ...],
     value: NumberType = 0,
 ) -> Tensor:
-    if builtins.all(p <= 0 for p in pad):
+    if builtins.all(statically_known_true(p <= 0) for p in pad):
         import torch._refs as refs
 
         return refs.constant_pad_nd(input, pad, value)
