@@ -719,7 +719,7 @@ def index_reduce(
         counts = tmp.index_add(dim, index, torch.ones_like(src))
         out = self if include_self else tmp  # tmp is torch.zeros_like(self)
         out = out.index_add(dim, index, src)
-        mask = counts == 0
+        mask = counts < 1
         if self.dtype.is_floating_point:
             out = out / counts
         else:
