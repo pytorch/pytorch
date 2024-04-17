@@ -380,7 +380,10 @@ class TestHelperModules:
                 self.attention_head_size = attention_head_size
 
         def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
-            new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
+            new_x_shape = x.size()[:-1] + (
+                self.num_attention_heads,
+                self.attention_head_size,
+            )
             x = x.view(new_x_shape)
             return x.permute(0, 2, 1, 3)
 
@@ -392,7 +395,7 @@ class TestHelperModules:
                 q = self.transpose_for_scores(q)
                 k = self.transpose_for_scores(k)
                 v = self.transpose_for_scores(v)
-            scores = torch.matmul(q, k.transpose(-1, -2)) / (self.input_dim ** 0.5)
+            scores = torch.matmul(q, k.transpose(-1, -2)) / (self.input_dim**0.5)
             attention = self.softmax(scores)
             weighted = torch.matmul(attention, v)
             return weighted
@@ -1593,11 +1596,17 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
 
                 if annotate_matmul:
-                    quantizer.set_function_type_qconfig(torch.matmul, quantizer.get_global_quantization_config())
+                    quantizer.set_function_type_qconfig(
+                        torch.matmul, quantizer.get_global_quantization_config()
+                    )
 
                 node_occurrence = {
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 5 if annotate_matmul else 1,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 7 if annotate_matmul else 3,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 5
+                    if annotate_matmul
+                    else 1,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 7
+                    if annotate_matmul
+                    else 3,
                     # quantize_per_channel for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
