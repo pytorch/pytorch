@@ -517,8 +517,25 @@ class TritonTemplate(KernelTemplate):
         suffix_args=0,
         epilogue_fn=identity,
         subgraphs=None,
+        mutated_inputs=None,
         **kwargs,
     ):
+        """This function generates a TritonTemplateCaller
+
+        Args:
+            input_nodes: List of input nodes
+            layout: Output layout
+            num_stages: Number of stages for triton launch
+            num_warps: Number of warps for triton launch
+            prefix_args: Number of input nodes to be passed as arguments
+            suffix_args: Number of input nodes to be passed as arguments
+            epilogue_fn: Optional epilogue function to be called on the output
+            subgraphs: Optional subgraphs to be passed as arguments, these will be inlined
+                into the triton template string
+            mutated_inputs: Optional list of input nodes that are mutated by the kernel, this is helpful
+                if you need to return multiple outputs. You can pass them as inputs and mark them as
+                being mutated by the kernel.
+        """
         assert self.template, "requires jinja2"
         defines = StringIO()
         for name, val in kwargs.items():
@@ -649,6 +666,7 @@ class TritonTemplate(KernelTemplate):
                 "allow_tf32": str(kwargs.get("ALLOW_TF32", None)),
                 "acc_type": str(kwargs.get("ACC_TYPE", None)),
             },
+            mutated_inputs=mutated_inputs,
         )
 
 
@@ -719,6 +737,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         log_info: Optional[
             Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]
         ] = None,
+        mutated_inputs=None,
     ):
         super().__init__(name, input_nodes, layout)
         self.make_kernel_render = make_kernel_render
@@ -735,6 +754,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 "num_warps": self.bmreq.num_warps,
             }
         )
+        self.mutated_inputs = mutated_inputs
 
     def benchmark(self, *args, out):
         assert self.bmreq is not None
@@ -761,6 +781,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
                 debug_extra=self.debug_extra,
+                mutated_inputs=self.mutated_inputs,
             )
         )
 

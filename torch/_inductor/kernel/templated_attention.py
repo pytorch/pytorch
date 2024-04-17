@@ -3,7 +3,7 @@ import logging
 from typing import Any, List
 
 import torch
-from ..lowering import lowerings, register_lowering
+from ..lowering import empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 
 log = logging.getLogger(__name__)
@@ -25,7 +25,7 @@ sdpa_template = TritonTemplate(
     name="sdpa",
     grid=sdpa_grid,
     source=r"""
-{{def_kernel("Q", "K", "V")}}
+{{def_kernel("Q", "K", "V", "LSE")}}
     # Sub notation for this kernel:
     # Q: Query, K: Key, V: Value
     # M: Number of queries, N: Number of keys/values, D: Model dimension
@@ -129,11 +129,11 @@ sdpa_template = TritonTemplate(
         # -- compute scaling constant ---
         row_max = tl.max(qk, 1)
         m_i_new = tl.maximum(m_i, row_max)
-        masked_out_rows = (m_i_new == float("-inf"))
 
         alpha = tl.math.exp2(m_i - m_i_new)
         p = tl.math.exp2(qk - m_i_new[:, None])
         if not ROWS_GUARANTEED_SAFE:
+            masked_out_rows = (m_i_new == float("-inf"))
             alpha = tl.where(masked_out_rows, 0, alpha)
             p = tl.where(masked_out_rows[:, None], 0, p)
 
@@ -149,19 +149,21 @@ sdpa_template = TritonTemplate(
         K_block_ptr = tl.advance(K_block_ptr, (0, BLOCK_N))
         V_block_ptr = tl.advance(V_block_ptr, (BLOCK_N, 0))
 
-    # write back l and m
+    # Store output and logsumexp
     acc = acc / l_i[:, None]
-    # TODO For backward support we need to add the Logsumexp
-    # l_ptrs = L + off_hz * N_CTX + offs_m
-    # tl.store(l_ptrs, m_i + tl.math.log2(l_i))
-
     idx_z = tl.program_id(1) // H
     idx_h = tl.program_id(1) % H
     idx_m = offs_m[:, None]
     idx_d = tl.arange(0, BLOCK_DMODEL)[None, :]
+
     # TODO generalize and add proper mask support
     mask = (idx_m != -1) & (idx_d != -1)
     {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "acc")}}
+
+    # TODO dont want to write this if we dont require grad
+    l_ptrs = LSE + off_hz * N_CTX + offs_m
+    lse = m_i + tl.math.log2(l_i)
+    tl.store(l_ptrs, lse)
  """,
 )
 
@@ -256,6 +258,14 @@ def templated_attention(*args, **kwargs):
                 query.get_size(),
                 make_contiguous_strides_for(query.get_size()),
             )
+            # see NOTE:[TritonTemplates with multiple outputs]
+            logsumexp_shape = query.get_size()[:-1]  # [B, H, M]
+            logsumexp = empty_strided(
+                logsumexp_shape,
+                None,
+                dtype=query.get_dtype(),
+                device=output_buffer.get_device(),
+            )
             choices: List[Any] = []
             configs: List[Any] = []
             if query.get_dtype() == torch.float32:
@@ -270,9 +280,12 @@ def templated_attention(*args, **kwargs):
             for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
                 sdpa_template.maybe_append_choice(
                     choices=choices,
-                    input_nodes=(query, key, value),
+                    input_nodes=(query, key, value, logsumexp),
                     layout=layout,
                     subgraphs=subgraph_buffer,
+                    mutated_inputs=[
+                        logsumexp,
+                    ],
                     num_stages=num_stages,
                     num_warps=num_warps,
                     BLOCK_M=BLOCK_M,
@@ -282,7 +295,10 @@ def templated_attention(*args, **kwargs):
                     SCORE_MOD_IS_LINEAR=False,
                     ROWS_GUARANTEED_SAFE=False,
                 )
-            return autotune_select_algorithm(
-                "sdpa", choices, [query, key, value], layout
+            return (
+                autotune_select_algorithm(
+                    "sdpa", choices, [query, key, value, logsumexp], layout
+                ),
+                logsumexp,
             )
     raise ValueError("TemplatedAttention was passed a subgraph with no output node!")
