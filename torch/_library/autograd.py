@@ -21,16 +21,23 @@ class Info:
 def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     name: str = f"GeneratedBackwardFor_{op._namespace}_{op._opname}_{op._overloadname}"
 
+    saved_keyset = None
+
     def forward(ctx, *args):
         with _C._AutoDispatchBelowAutograd():
-            result = op(*args)
+            nonlocal saved_keyset
+            keyset = saved_keyset
+            assert keyset is not None, "Should have been set by autograd_impl"
+            saved_keyset = None
+            result = op.redispatch(keyset & _C._after_autograd_keyset, *args)
             if info._setup_context_fn:
                 info._setup_context_fn(ctx, args, result)
             return result
 
     def backward(ctx, *grads):
         if info._backward_fn:
-            return info._backward_fn(ctx, *grads)
+            result = info._backward_fn(ctx, *grads)
+            return result
         raise RuntimeError(
             f"Trying to backward through {op} but no autograd "
             f"formula was registered. "
@@ -53,7 +60,13 @@ def make_autograd_impl(op: _ops.OpOverload, info: InfoProtocol) -> Callable:
     ):
         Generated = supports_tensorlist(Generated)
 
-    def autograd_impl(*args):
+    def autograd_impl(keyset, *args):
+        # We set a nonlocal to ferry keyset from here to the forward.
+        # This supports recursive calls (we implement the forward carefully so
+        # that it'll read saved_keyset before making a recursive call to the op).
+        nonlocal saved_keyset
+        assert saved_keyset is None
+        saved_keyset = keyset
         result = Generated.apply(*args)  # type: ignore[attr-defined]
         return result
 
