@@ -166,11 +166,14 @@ std::tuple<int64_t, at::Tensor> _cslt_sparse_mm_impl(
         C_type = CUDA_R_16BF;
         compute_type = CUSPARSE_COMPUTE_32F;
         break;
-    case at::ScalarType::Float: //TODO ROCM does not support R_32F
+    case at::ScalarType::Float: 
         input_type = CUDA_R_32F;
         output_type = CUDA_R_32F;
         C_type = CUDA_R_32F;
         compute_type = CUSPARSE_COMPUTE_32F;
+        #ifdef USE_ROCM
+        TORCH_CHECK(false, "HIPSPARSELT does not support R_32F data type.");
+        #endif
         break;
 // if cuSPARSELt >= 6.2.3, we can add Float8 support
 #if defined(CUSPARSELT_VERSION) && CUSPARSELT_VERSION >= 602
