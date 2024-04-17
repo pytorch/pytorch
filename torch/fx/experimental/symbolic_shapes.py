@@ -457,9 +457,11 @@ def compute_unbacked_bindings(shape_env, example_value):
     function, you must call this on the tuple of tensor output, you
     cannot wait!)
     """
-    pending = set(shape_env.pending_fresh_unbacked_symbols)
+    fs = shape_env.pending_fresh_unbacked_symbols
+    pending = set(fs)
     if pending:
-        shape_env.pending_fresh_unbacked_symbols.clear()
+        log.info("compute_unbacked_bindings %s", fs)
+        fs.clear()
 
         def free_unbacked_symbols_with_path(
             a, path
@@ -515,7 +517,7 @@ def compute_unbacked_bindings(shape_env, example_value):
             return r
 
         symbol_to_path = free_unbacked_symbols_with_path(example_value, ())
-        assert not pending, f"pending {pending} not in {example_value}"
+        assert not pending, f"pending {pending} not in {example_value} {repr((example_value.stride(), example_value.storage_offset())) if isinstance(example_value, torch.Tensor) else None}"
         return symbol_to_path
 
 def definitely_true(a):
