@@ -186,6 +186,7 @@ class TestForeach(TestCase):
         + foreach_pointwise_op_db
         + foreach_reduce_op_db
         + foreach_other_op_db,
+        dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
     )
     @parametrize(
         "noncontiguous,inplace",
