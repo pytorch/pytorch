@@ -55,9 +55,6 @@ jobs:
 
   linux-jammy-py3_8-gcc11-test:
     name: linux-jammy-py3.8-gcc11
-    permissions:
-      id-token: write
-      contents: read
     uses: ./.github/workflows/_linux-test-arc.yml
     needs:
       - linux-jammy-py3_8-gcc11-build
