@@ -1,4 +1,5 @@
 import inspect
+import weakref
 from typing import (
     Any,
     Callable,
@@ -314,25 +315,28 @@ class CustomOpDef:
         r"""Register a backward formula for this custom op.
 
         In order for an operator to work with autograd, you need to register
-        a backward formula. There are two pieces to this:
-        1. You must tell us what we need to save from the forward pass for
-           the backward pass. This is the "setup_context" function.
-        2. You must tell us how to compute gradients during the backward pass.
-           This is the "backward" function.
-
-        ``setup_context_fn(ctx, inputs, output)`` runs during the forward pass.
-        Please save quantities needed for backward onto the ``ctx`` object via
-        either :func:`ctx.save_for_backward` or assigning them as attributes of
-        ``ctx``.
+        a backward formula:
+        1. You must tell us how to compute gradients during the backward pass
+        by providing us a "backward" function.
+        2. If you need any values from the forward to compute gradients, you can
+        use `setup_context` to save values for backward.
 
         ``backward_fn`` runs during the backward pass. It accepts ``(ctx, *grads)``:
         - ``grads`` is one or more gradients. The number of gradients matches
-          the number of outputs of the operator.
+        the number of outputs of the operator.
+        The ``ctx`` object is `the same ctx object <context_method_mixins>`_ used by
+        :class:`torch.autograd.Function`. The semantics of ``backward_fn`` are the
+        same as :meth:`torch.autograd.Function.backward`.
+
+        ``setup_context_fn(ctx, inputs, output)`` runs during the forward pass.
+        Please save quantities needed for backward onto the ``ctx`` object via
+        either :meth:`torch.autograd.function.FunctionCtx.save_for_backward`
+        or assigning them as attributes of ``ctx``.
 
         Both ``setup_context_fn`` and ``backward_fn`` must be traceable. That is,
-        they may not directly access Tensor.data_ptr and they must not depend on
-        or mutate global state. If you need a non-traceable backward, you can make
-        it a separate custom_op that you call inside ``backward_fn``.
+        they may not directly access :meth:`torch.Tensor.data_ptr` and they must
+        not depend on or mutate global state. If you need a non-traceable backward,
+        you can make it a separate custom_op that you call inside ``backward_fn``.
 
         Examples:
             >>> import torch
@@ -392,7 +396,7 @@ class CustomOpDef:
         lib._register_fake(self._name, fake_impl)
 
         autograd_impl = _library.autograd.make_autograd_impl(self._opoverload, self)
-        lib.impl(self._name, autograd_impl, "Autograd", dispatcher_convention=True)
+        lib.impl(self._name, autograd_impl, "Autograd", with_keyset=True)
 
         schema = self._opoverload._schema
         if schema.is_mutable:
@@ -418,7 +422,7 @@ class CustomOpDef:
                 self._name,
                 adinplaceorview_impl,
                 "ADInplaceOrView",
-                dispatcher_convention=True,
+                with_keyset=True,
             )
 
     def __call__(self, *args, **kwargs):
@@ -449,7 +453,7 @@ class CustomOpDef:
 
 
 OPDEF_TO_LIB: Dict[str, "library.Library"] = {}
-OPDEFS: Dict[str, CustomOpDef] = {}
+OPDEFS: weakref.WeakValueDictionary[str, CustomOpDef] = weakref.WeakValueDictionary()
 
 
 def get_library_allowing_overwrite(namespace: str, name: str) -> "library.Library":
@@ -479,9 +483,9 @@ def iter_tensors(
         yield from check(kwarg)
 
 
-def _maybe_get_opdef(qualname):
-    if isinstance(qualname, CustomOpDef):
-        return qualname
-    if isinstance(qualname, str) and qualname in OPDEFS:
-        return OPDEFS[qualname]
+def _maybe_get_opdef(op: Union[CustomOpDef, str]) -> Optional[CustomOpDef]:
+    if isinstance(op, CustomOpDef):
+        return op
+    if isinstance(op, str) and op in OPDEFS:
+        return OPDEFS[op]
     return None
