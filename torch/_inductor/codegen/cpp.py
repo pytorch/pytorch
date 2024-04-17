@@ -2007,20 +2007,11 @@ class CppKernel(Kernel):
     def codegen_loops_impl(self, loop_nest, code, worksharing):
         threads = parallel_num_threads()
         assert self.call_ranges is not None
-
-        def get_outer_loop_fused_kernel(loop_nest):
-            # Since OuterLoopFusedKernel has no main/tail loop split at any
-            # outer loop fusion depth, len(loop_nest.root) must equal to 1.
-            if loop_nest.root and len(loop_nest.root) == 1:
-                kernels = loop_nest.root[0].get_kernels()
-                if any(isinstance(kernel, OuterLoopFusedKernel) for kernel in kernels):
-                    assert len(kernels) == 1
-                    return kernels[0]
-            return None
-
-        if kernel := get_outer_loop_fused_kernel(loop_nest):
-            assert isinstance(kernel, OuterLoopFusedKernel)
-            par_depth = kernel.decide_parallel_depth(
+        kernels = loop_nest.get_kernels()
+        if any(isinstance(kernel, OuterLoopFusedKernel) for kernel in kernels):
+            assert len(kernels) == 1
+            assert isinstance(kernels[0], OuterLoopFusedKernel)
+            par_depth = kernels[0].decide_parallel_depth(
                 loop_nest.max_parallel_depth(), threads
             )
         else:
@@ -4327,3 +4318,13 @@ class LoopNestWithSplit:
         if depth == 0:
             self.root = split_loops
         return split_loops
+
+    def get_kernels(self):
+        if self.root:
+            kernels = []
+            for loop in self.root:
+                kernels += loop.get_kernels()
+            return kernels
+        else:
+            assert self.kernel is not None
+            return [self.kernel]
