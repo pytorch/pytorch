@@ -1206,7 +1206,7 @@ class TestTorchFunctionMode(TestCase):
 
         class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
-                raise ErrorA()
+                raise ErrorA
 
         with self.assertRaises(ErrorA):
             with A():
@@ -1218,7 +1218,7 @@ class TestTorchFunctionMode(TestCase):
 
         class A(TorchFunctionMode):
             def __torch_function__(self, *args, **kwargs):
-                raise ErrorA()
+                raise ErrorA
 
         x = A()
         with self.assertRaises(ErrorA):
