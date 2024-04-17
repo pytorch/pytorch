@@ -95,6 +95,7 @@ import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._guards import TracingContext
 from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_compilation_event
 
@@ -1141,6 +1142,79 @@ def enum_repr(value, local):
     scope = "L" if local else "G"
     local_name = f'{scope}["{name}"].{val}'
     return local_name
+
+
+# Analogous to ConvertIntSource
+@dataclasses.dataclass(frozen=True)
+class ConvertIntKey:
+    def __str__(self) -> str:
+        return ".__int__()"
+
+    def get(self, b: bool) -> int:
+        return int(b)
+
+
+def set_example_value(node, example_value):
+    import sympy
+
+    # NB: example_value is a bit of a misnomer, because this is always a fake
+    # tensor of some sort.  Furthermore, these example values serve as the
+    # runtime state of Dynamo tracing, which means if metadata mutation
+    # occurs, the example_value gets directly updated (so you can't rely on
+    # this to accurately reflect what the state of the value was at the time
+    # the program was traced).
+    node.meta["example_value"] = example_value
+    shape_env = TracingContext.get().fake_mode.shape_env
+    pending = set(shape_env.pending_fresh_unbacked_symbols)
+    if pending:
+        shape_env.pending_fresh_unbacked_symbols.clear()
+
+        def free_unbacked_symbols_with_path(
+            a, path
+        ) -> Dict[sympy.Symbol, pytree.KeyPath]:
+            r = {}
+            if isinstance(a, (tuple, list)):
+                for i in range(len(a)):
+                    r.update(
+                        free_unbacked_symbols_with_path(
+                            a[i], path + (pytree.SequenceKey(i),)
+                        )
+                    )
+            elif isinstance(a, torch.Tensor):
+                r.update(
+                    free_unbacked_symbols_with_path(
+                        a.shape, path + (pytree.GetAttrKey("shape"),)
+                    )
+                )
+                # TODO: stride / storage offset
+            # NB: Intentionally access _expr, not expr, do not want
+            # simplification!
+            elif (
+                isinstance(a, (torch.SymInt, torch.SymFloat))
+                and isinstance(s := a.node._expr, sympy.Symbol)
+                and s in pending
+            ):
+                r[s] = path
+                pending.remove(s)
+            # The annoyance here arises from the fact that SymBool is
+            # allocated by allocating a SymInt and then testing if it's equal
+            # to one.  So you have a complicated binding site logic for this.
+            elif (
+                isinstance(a, torch.SymBool)
+                and isinstance(s := a.node._expr, sympy.Eq)
+                # This must match create_unbacked_symbool EXACTLY
+                and isinstance(s.lhs, sympy.Symbol)
+                and s.rhs == 1
+                and s.lhs in pending
+            ):
+                r[s.lhs] = path + (ConvertIntKey(),)
+                pending.remove(s.lhs)
+
+            return r
+
+        symbol_to_path = free_unbacked_symbols_with_path(example_value, ())
+        assert not pending, pending
+        node.meta["unbacked_bindings"] = symbol_to_path
 
 
 def _get_fake_tensor(vt):

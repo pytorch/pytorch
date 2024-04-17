@@ -94,7 +94,7 @@ __all__ = [
     "is_concrete_bool", "is_nested_int", "SHAPEENV_EVENT_KEY", "CURRENT_NODE_KEY",
     "has_free_symbols", "sym_eq", "SymbolicContext", "StatelessSymbolicContext",
     "StatefulSymbolicContext", "SubclassSymbolicContext", "statically_known_true",
-    "guard_size_oblivious",
+    "guard_size_oblivious", "check_consistent",
 ]
 
 # FX node metadata keys for symbolic shape FX graph.
@@ -238,6 +238,30 @@ def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     else:
         assert isinstance(expr, bool)
         return expr
+
+def check_consistent(new, old) -> None:
+    """
+    Test that two "meta" values (typically either Tensor or SymInt) have
+    the same values, e.g., after retracing.  If we don't understand the
+    quantities in question, we'll just skip the consistency check.
+    """
+    # TODO: do boolean equality test too, see
+    # https://github.com/pytorch/pytorch/issues/124110
+    scalar_types = (torch.SymInt, torch.SymFloat, int, float)
+
+    if isinstance(new, torch.Tensor):
+        assert isinstance(old, torch.Tensor)
+        torch._check(old.dim() == new.dim(), lambda: f"{old.shape} != {new.shape} (old != new)")
+        # Do this manually so that each individual test is irrefutable
+        # (TODO: should be a helper for this, maybe sym_eq?  That
+        # gives us a compound expression and I'm not sure it
+        # simplifies right now)
+        for i, j in zip(old.shape, new.shape):
+            torch._check(i == j, lambda: f"{old.shape} != {new.shape} (old != new)")
+    # NB: bool is subclass of int
+    elif isinstance(new, scalar_types) and not isinstance(new, bool):
+        assert isinstance(old, scalar_types) and not isinstance(old, bool), f"{old} != {new}"
+        torch._check(old == new, lambda: f"{old} != {new} (old != new)")
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
     r""" Canonicalize a boolean expression by transforming it into a lt / le
@@ -492,8 +516,8 @@ def guard_scalar(a):
 def _constrain_symbol_range(shape_env, s: sympy.Symbol, compiler_min: int, compiler_max: int):
     upd_vr = ValueRanges(compiler_min, compiler_max)
     old_vr = shape_env.var_to_range.get(s, ValueRanges.unknown())
-    new_vr = shape_env.var_to_range[s] = old_vr & upd_vr
-    if new_vr != old_vr:
+    shape_env._update_var_to_range(s, upd_vr)
+    if (new_vr := shape_env.var_to_range[s]) != old_vr:
         log.info("_constrain_symbol_range %s [%s, %s]", s, new_vr.lower, new_vr.upper)
 
 
@@ -2057,6 +2081,26 @@ class ShapeEnv:
         # signpost_event
         self.co_fields = co_fields if co_fields else {}
 
+        # Whenever we allocate a fresh unbacked Symbol, we add it to this
+        # pending list.  Unbacked symbol allocation can occur at unpredictable
+        # points during meta tensor propagation, but at some point, the we
+        # have to know what the binding site for an unbacked symbol is, and
+        # this is computed when we actually place the node in the graph.  The
+        # important thing is that we always actually handle every unaccounted
+        # for unbacked symbol, so this list helps us keep track of them and
+        # then make sure they are all accounted for.
+        #
+        # We could potentially give rise to errors earlier by lexically
+        # scoping when we do propagation, and only allowing unbacked symbols
+        # to be allocated at this point in time.  However this is inconvenient
+        # to do in Dynamo, because fake tensor propagation is far from when we
+        # analyze binding sites (set_example_value), so we do it in a more
+        # mutatey way.
+        #
+        # NB: fresh unbacked symbols NEVER get substitutions applied to them,
+        # they are binding sites!
+        self.pending_fresh_unbacked_symbols: List[sympy.Symbol] = []
+
         # Version counter used to invalidate cached values
         self._prev_cache_key = self._get_key()
         self._version_counter = 0
@@ -2165,7 +2209,7 @@ class ShapeEnv:
             elif key == "name_to_node":
                 # Compare just the set of keys is the same.
                 return set(value.keys())
-            elif key == "symbol_guard_counter":
+            elif key in ["symbol_guard_counter", "pending_fresh_unbacked_symbols"]:
                 # Skip this for comparisons
                 return None
             return value
@@ -2628,6 +2672,7 @@ class ShapeEnv:
         """
         symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.counter["create_unbacked_symbol"] += 1
+        self.pending_fresh_unbacked_symbols.append(symbol)
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges.unknown()
 
@@ -2643,6 +2688,7 @@ class ShapeEnv:
         """Create a symbolic integer without a hint value
         """
         symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
+        self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
@@ -2665,6 +2711,7 @@ class ShapeEnv:
         """Create a symbolic boolean without a hint value
         """
         symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
+        self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges(0, 1)
@@ -3820,6 +3867,25 @@ class ShapeEnv:
             # problem
         )
 
+    def _update_var_to_range(self, symbol, vr):
+        lower, upper = vr.lower, vr.upper
+
+        # If we have a size-like unbacked SymInt, refuse to refine the range to be
+        # less than two.  This is because when we intersect this range
+        # with [2, inf] for size oblivious tests, the range would be
+        # unsatisfiable.  In other words, once you have a size-like
+        # unbacked SymInt, we can never learn that it is exactly zero or one,
+        # because we would now give inconsistent results for all size
+        # oblivous tests!
+        if upper < 2 and symbol in self.size_like:
+            upper = 2
+
+        # Updates the range and the guards corresponding to each bound of the symbol.
+        if symbol not in self.var_to_range:
+            self.var_to_range[symbol] = ValueRanges(lower, upper)
+        else:
+            self.var_to_range[symbol] &= ValueRanges(lower, upper)
+
     def _set_replacement(self, a: "sympy.Symbol", tgt: "sympy.Expr", msg: str) -> None:
         """
         Adds or updates a replacement for a symbol.
@@ -3852,7 +3918,7 @@ class ShapeEnv:
             # substitution in the end.  This might be a no-op, if a already has
             # a tighter bound
             tgt_bound = self.bound_sympy(tgt)
-            self.var_to_range[a] = src_bound & tgt_bound
+            self._update_var_to_range(a, tgt_bound)
 
             # Next, check if we can update the range of free symbols in tgt
             # based on the range in a. But only do it if:
@@ -4055,9 +4121,9 @@ class ShapeEnv:
                             # Propagate the value ranges.  It doesn't really
                             # matter if we use truediv or floordiv, because we
                             # have established divisibility.
-                            self.var_to_range[i1] = SymPyValueRangeAnalysis.truediv(
+                            self._update_var_to_range(i1, SymPyValueRangeAnalysis.truediv(
                                 self.var_to_range[i0], ValueRanges.wrap(d)
-                            )
+                            ))
                             # Propagate size-like-ness
                             if i0 in self.size_like:
                                 self.size_like.add(i1)
@@ -4108,7 +4174,7 @@ class ShapeEnv:
                     "version": 2,
                 },
             )
-            log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val)
+            log.warning("Ignored guard %s == %s, this could result in accuracy problems", expr, concrete_val, stack_info=True)
 
 
     def _get_stack_summary(self, is_debug: bool = False):
@@ -4484,7 +4550,7 @@ class ShapeEnv:
                 continue
 
             # Updates the range and the guards corresponding to each bound of the symbol.
-            self.var_to_range[symbol] = ValueRanges(lower, upper)
+            self._update_var_to_range(symbol, ValueRanges(lower, upper))
             # Clears the cache, since this update can change the result.
             self._maybe_evaluate_static.cache_clear()
 
