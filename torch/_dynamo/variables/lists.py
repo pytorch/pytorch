@@ -264,6 +264,9 @@ class ListVariable(CommonListMethodsVariable):
     def python_type(self):
         return list
 
+    def __repr__(self):
+        return f"{self.__class__.__name__}(length={len(self.items)}"
+
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
         codegen.append_output(create_instruction("BUILD_LIST", arg=len(self.items)))
@@ -677,9 +680,6 @@ class ListIteratorVariable(VariableTracker):
                 create_instruction("GET_ITER"),
             ]
         )
-
-    def is_exhausted(self):
-        return self.index >= len(self.items)
 
 
 class TupleIteratorVariable(ListIteratorVariable):
