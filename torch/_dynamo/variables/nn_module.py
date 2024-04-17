@@ -649,7 +649,11 @@ class NNModuleVariable(VariableTracker):
 
 
 class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
-    _nonvar_fields = {"value_type", *UserDefinedObjectVariable._nonvar_fields}
+    _nonvar_fields = {
+        "value_type",
+        "is_state_mutated",
+        *UserDefinedObjectVariable._nonvar_fields,
+    }
 
     """
     The above class will specialize on the id() of a module and place
@@ -675,6 +679,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 kwargs["value_type"] = type(value)
 
         super().__init__(value=value, **kwargs)
+        self.is_state_mutated = False
 
     @staticmethod
     @functools.lru_cache(None)
@@ -787,6 +792,44 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
             if id(method.__code__) in self._nn_module_method_ids():
                 unimplemented(f"UnspecializedNNModuleVariable missing {name}")
+
+            # "_parameters" in self.value.__dict__ checks that module is initialized
+            if name == "__setattr__" and "_parameters" in self.value.__dict__:
+                # Record if mutations happens on parameters/buffers/modules. The
+                # mutations on these are not tracked by base class
+                # UserDefinedObject vt. This will be used later to graph break
+                # on seeing a paramters() and family calls.
+                # TODO(anijain2305) - This might not be needed if we let Dynamo
+                # inline both getattr and setattr. In that case, it should see
+                # the lowest level dicts - _parameters and family and
+                # automatically track mutations on those. Investigate if that
+                # can be done.
+                attr_name = args[0].as_python_constant()
+                value = args[1]
+
+                # This is reverse engineered by looking at nn module __setattr__
+                # logic.
+                if (
+                    isinstance(value, variables.TensorVariable)
+                    and value.python_type() is torch.nn.Parameter
+                ) or attr_name in self.value.__dict__["_parameters"]:
+                    # Handle parameters
+                    self.is_state_mutated = True
+                elif attr_name in self.value.__dict__["_buffers"]:
+                    # Handle buffers
+                    self.is_state_mutated = True
+                elif (
+                    isinstance(
+                        value,
+                        (
+                            variables.NNModuleVariable,
+                            variables.UnspecializedNNModuleVariable,
+                        ),
+                    )
+                    or attr_name in self.value.__dict__["_modules"]
+                ):
+                    # Handle submodules
+                    self.is_state_mutated = True
 
         return super().call_method(tx, name, args, kwargs)
 

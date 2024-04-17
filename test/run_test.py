@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import (
     retry_shell,
     set_cwd,
     shell,
+    TEST_CUDA,
     TEST_WITH_ASAN,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
@@ -247,6 +248,7 @@ CI_SERIAL_LIST = [
     "inductor/test_torchinductor",  # OOM on test_large_block_sizes
     "inductor/test_torchinductor_dynamic_shapes",  # OOM on test_large_block_sizes
     "inductor/test_torchinductor_codegen_dynamic_shapes",  # OOM on test_large_block_sizes
+    "test_profiler",  # test_source_multithreaded is probably not compatible with parallelism
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -1180,7 +1182,15 @@ def parse_args():
         action="store_true",
         help="Enables removing tests based on TD",
         default=IS_CI
-        and (TEST_WITH_CROSSREF or TEST_WITH_ASAN)
+        and (
+            TEST_WITH_CROSSREF
+            or TEST_WITH_ASAN
+            or (
+                strtobool(os.environ.get("TD_DISTRIBUTED", "False"))
+                and os.getenv("TEST_CONFIG") == "distributed"
+                and TEST_CUDA
+            )
+        )
         and os.getenv("BRANCH", "") != "main"
         and not strtobool(os.environ.get("NO_TD", "False")),
     )
@@ -1359,7 +1369,6 @@ def get_selected_tests(options) -> List[str]:
 
     # these tests failing in Python 3.12 temporarily disabling
     if sys.version_info >= (3, 12):
-        options.exclude.extend(INDUCTOR_TESTS)
         options.exclude.extend(
             [
                 "functorch/test_dims",
