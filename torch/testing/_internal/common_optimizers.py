@@ -2245,6 +2245,7 @@ class TensorTracker:
     def __init__(self, assert_eq_kwargs=None):
         if assert_eq_kwargs is None:
             self.assert_eq_kwargs = {}
+        self.assert_eq_kwargs = assert_eq_kwargs
         self.tensors = []
 
     def add(self, tensor):
