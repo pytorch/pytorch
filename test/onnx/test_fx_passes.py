@@ -57,11 +57,11 @@ class TestFxPasses(common_utils.TestCase):
         ), f"Expected all names to be unique, got {nodes}"
 
     def test_onnx_dynamo_export_raises_when_model_contains_unsupported_fx_nodes(self):
-        @torch.library.custom_op("mylibrary::foo_op", device_types="cpu")
+        @torch.library.custom_op("mylibrary::foo_op", device_types="cpu", mutates_args=())
         def foo_op(x: torch.Tensor) -> torch.Tensor:
             return x + 1
 
-        @torch.library.custom_op("mylibrary::bar_op", device_types="cpu")
+        @torch.library.custom_op("mylibrary::bar_op", device_types="cpu", mutates_args=())
         def bar_op(x: torch.Tensor) -> torch.Tensor:
             return x + 2
 
