@@ -188,7 +188,6 @@ class FSDPParamGroup:
         self._grad_divide_factors = (factor, data_parallel_world_size / factor)
 
     def lazy_init(self):
-        # Lazy init should be idempotent
         param_names_on_meta = [
             fsdp_param._param_fqn
             for fsdp_param in self.fsdp_params
@@ -434,13 +433,8 @@ class FSDPParamGroup:
         return args, kwargs
 
     def _register_state_dict_hooks(self) -> None:
-        num_pre_save_hooks = len(self._module_to_pre_save_state_dict_hook_handle)
-        num_pre_load_hooks = len(self._module_to_pre_load_state_dict_hook_handle)
-        assert (
-            num_pre_save_hooks == num_pre_load_hooks
-        ), f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
-        if num_pre_save_hooks > 0:
-            return  # already registered
+        assert len(self._module_to_pre_save_state_dict_hook_handle) == 0
+        assert len(self._module_to_pre_load_state_dict_hook_handle) == 0
         modules_with_fsdp_params: Set[nn.Module] = {
             fsdp_param._module_info.module for fsdp_param in self.fsdp_params
         }
