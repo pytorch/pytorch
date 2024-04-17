@@ -1502,6 +1502,8 @@ def _new_process_group_helper(
             # out of sync.
             if split_from:
                 split_from.perform_nocolor_split(_get_default_group().bound_device_id)
+            if backend == Backend.MPI:
+                ProcessGroupMPI.create(global_ranks_in_group)
             return GroupMember.NON_GROUP_MEMBER, None
 
     prefix_store = PrefixStore(f"{group_name}/", store)
