@@ -822,7 +822,7 @@ class CKGemmOperation:
 
     def key_name(self):
         # TBD; must be unique per instance. Intended to use as dict key
-        return f"{'_'.join(['K' + f.name.replace('_', '').lower() + 'V' + ('x'.join(iter(getattr(self, f.name))) if hasattr(getattr(self, f.name), '__iter__') else getattr(self, f.name)) for f in fields(self)])}"
+        return f"{'_'.join(['K' + f.name.replace('_', '').lower() + 'V' + ('x'.join(map(str, iter(getattr(self, f.name)))) if hasattr(getattr(self, f.name), '__iter__') else str(getattr(self, f.name))) for f in fields(self)])}"
 
 class CKGemmTemplate(CKTemplate):
     gemm_template = r"""
@@ -910,7 +910,7 @@ class CKGemmTemplate(CKTemplate):
         for f in fields(op):
             field_value = getattr(op, f.name)
             if hasattr(field_value, "__iter__"):
-                template_params.append(f"ck::Sequence<{', '.join(iter(field_value))}>")
+                template_params.append(f"ck::Sequence<{', '.join(map(str, iter(field_value)))}>")
             else:
                 if field_value is not None:
                     template_params.append(str(field_value))

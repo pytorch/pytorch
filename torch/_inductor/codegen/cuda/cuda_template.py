@@ -162,7 +162,7 @@ class CUDATemplate(KernelTemplate):
         )
         if torch.version.cuda:
             res.splice("using bfloat16 = nv_bfloat16;")
-        elif torch.version.rocm:
+        elif torch.version.hip:
             res.splice("using bfloat16 = hip_bfloat16")
         return res
 
