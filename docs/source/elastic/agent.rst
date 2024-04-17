@@ -86,7 +86,9 @@ Adding interface for health check server which can be extended by starting tcp/h
 server on the specified port number.
 Additionally, health check server will have callback to check watchdog is alive.
 
-.. currentmodule:: torch.distributed.elastic.agent.server.health_check_server
+.. automodule:: torch.distributed.elastic.agent.server.health_check_server
 
 .. autoclass:: HealthCheckServer
    :members:
+
+.. autofunction:: torch.distributed.elastic.agent.server.health_check_server.create_healthcheck_server
