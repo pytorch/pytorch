@@ -1,6 +1,6 @@
 import os
 import warnings
-from typing import Any, cast, Dict, Optional, Union
+from typing import Any, cast, Dict, Optional, Set, Union
 
 import torch
 import torch.distributed as dist
@@ -228,7 +228,7 @@ def _load_state_dict(
 
 
 def _load_state_dict_from_keys(
-    keys: Optional[set] = None,
+    keys: Optional[Union[Set[str], str]] = None,
     *,
     checkpoint_id: Union[str, os.PathLike, None] = None,
     storage_reader: Optional[StorageReader] = None,
@@ -261,7 +261,9 @@ def _load_state_dict_from_keys(
         Rank 0 is assumed to be the coordinator rank.
 
     Args:
-        state_dict (Dict[str, Any]): The state_dict to save.
+        keys (Optional[Union[Set[str], str]]):
+            Loads any key specified in this set. If no keys are specified, the entire checkpoint
+            is loaded.
         checkpoint_id (Union[str, os.PathLike, None]):
             The ID of this checkpoint instance. The meaning of the checkpoint_id
             depends on the storage. It can be a path to a folder or to a file.
@@ -283,12 +285,26 @@ def _load_state_dict_from_keys(
         "torch.distributed.checkpoint._load_state_dict_from_keys"
     )
 
+    no_dist = not (dist.is_available() and dist.is_initialized())
+    if no_dist:
+        warnings.warn(
+            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process."
+        )
+
+    storage_reader = cast(
+        StorageReader, _storage_setup(storage_reader, checkpoint_id, reader=True)
+    )
+
+    if isinstance(keys, str):
+        keys = {keys}
+
     sd: Dict[str, Any] = {}
-    load(
-        sd,
+    _load_state_dict(
+        state_dict=sd,
         storage_reader=storage_reader,
-        planner=_EmptyStateDictLoadPlanner(keys=keys or set()),
         process_group=process_group,
+        no_dist=no_dist,
+        planner=_EmptyStateDictLoadPlanner(keys=keys or set()),
     )
 
     return sd

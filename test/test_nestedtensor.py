@@ -1585,19 +1585,6 @@ class TestNestedTensorDeviceType(TestCase):
             torch.nn.functional.softmax(nt_noncontiguous, -1))
 
     def _test_bmm(self, device, dtype):
-        # error case: one is nested but the other is not
-        nt = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
-        t = torch.randn(4, device=device, dtype=dtype)
-        self.assertRaisesRegex(
-            RuntimeError,
-            "Expected both to be nested, but got a nested self and non-nested other",
-            lambda: nt.bmm(t)
-        )
-        self.assertRaisesRegex(
-            RuntimeError,
-            "Expected both to be nested, but got a non-nested self and nested other",
-            lambda: t.bmm(nt)
-        )
         # error case: not 3D tensors
         nt0 = torch.nested.nested_tensor([], device=device, dtype=dtype)
         nt1 = torch.nested.nested_tensor([torch.randn(2), torch.randn(3)], device=device, dtype=dtype)
@@ -1670,6 +1657,37 @@ class TestNestedTensorDeviceType(TestCase):
         nt1 = torch.nested.nested_tensor([torch.randn((4, 6)), torch.randn((7, 5))], device=device, dtype=dtype)
         actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
         expect = torch.nested.to_padded_tensor(nt0, 0.0).bmm(torch.nested.to_padded_tensor(nt1, 0.0))
+        if dtype == torch.float16:
+            self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
+        else:
+            self.assertEqual(actual, expect)
+
+        # nested tensor bmm normal tensor
+        nt0 = torch.nested.nested_tensor([torch.randn((2, 7)), torch.randn((3, 7))], device=device, dtype=dtype)
+        nt1 = torch.rand(2, 7, 5, dtype=dtype, device=device)
+        actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
+        expect = torch.nested.to_padded_tensor(nt0, 0.0).bmm(nt1)
+        if dtype == torch.float16:
+            self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
+        else:
+            self.assertEqual(actual, expect)
+
+        # nested tensor bmm normal tensor with non-contiguous view
+        nt1 = torch.rand(2, 5, 7, dtype=dtype, device=device)
+        nt1 = nt1.transpose(1, 2)
+        actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
+        expect = torch.nested.to_padded_tensor(nt0, 0.0).bmm(nt1)
+        if dtype == torch.float16:
+            self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
+        else:
+            self.assertEqual(actual, expect)
+
+
+        # normal tensor bmm nested tensor
+        nt0 = torch.rand(2, 5, 7, dtype=dtype, device=device)
+        nt1 = torch.nested.nested_tensor([torch.randn((7, 6)), torch.randn((7, 5))], device=device, dtype=dtype)
+        actual = torch.nested.to_padded_tensor(nt0.bmm(nt1), 0.0)
+        expect = nt0.bmm(torch.nested.to_padded_tensor(nt1, 0.0))
         if dtype == torch.float16:
             self.assertEqual(actual, expect, rtol=1e-3, atol=1e-3)
         else:
@@ -3919,6 +3937,45 @@ class TestNestedTensorSubclass(TestCase):
         nt_t = nt.transpose(1, 2)
         nt_t_copy_dtype = torch.ops.aten._to_copy(nt_t, dtype=torch.float16)
         self.assertEqual(torch.float16, nt_t_copy_dtype.dtype)
+
+    @skipIfTorchDynamo("Dynamo doesn't know how to trace prof.events()")
+    def test_profiler_sequence_nr(self):
+        with torch.profiler.profile() as prof:
+            values = torch.randn(4, 6, requires_grad=True)
+            offsets = torch.tensor([0, 2, 4])
+            values = values * 2
+            l = torch.nn.Linear(6, 8)
+            nt = torch.nested.nested_tensor_from_jagged(values, offsets)
+
+            nt = l(nt)
+            val = nt.values()
+
+            loss = val.sum()
+            loss.backward()
+
+        fwd_seq_nrs = []
+        for evt in prof.events():
+            if "linear" in evt.name.lower() and "backward" not in evt.name.lower() and evt.sequence_nr != -1:
+                fwd_seq_nrs.append(evt.sequence_nr)
+
+        bwd_seq_nrs = []
+        for evt in prof.events():
+            if (
+                "linear" in evt.name.lower() and
+                "backward" in evt.name.lower() and
+                "evaluate_function" not in evt.name.lower() and
+                evt.sequence_nr != -1
+            ):
+                bwd_seq_nrs.append(evt.sequence_nr)
+
+        # There should only be one such event with a sequence number:
+        # the PythonTLSSnapshot event - but, note that it's not terrible if
+        # we end up with multiple events with the same sequence number - so we
+        # could relax this check if it becomes inconvenient to maintain this
+        # property.
+        self.assertEqual(len(fwd_seq_nrs), 1)
+        self.assertEqual(len(bwd_seq_nrs), 1)
+        self.assertEqual(fwd_seq_nrs[0], bwd_seq_nrs[0])
 
     def test_is_same_size(self, device):
         def get_3_tensors():
