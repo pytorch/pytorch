@@ -1021,7 +1021,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
         @skipIfRocm
         @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
         # Explicit workspace allocation is no longer needed for cuBLAS in CUDA 12.2+
-        @unittest.skipIf(_get_torch_cuda_version() >= (12, 2))
+        @unittest.skipIf(_get_torch_cuda_version() >= (12, 2), "explicit workspace unnecessary in 12.2+")
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         def test_workspace_allocation_error(self):
             torch._C._cuda_clearCublasWorkspaces()
