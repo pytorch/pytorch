@@ -310,7 +310,7 @@ class CustomOpDef:
         return fn
 
     def register_autograd(
-        self, setup_context_fn: Callable, backward_fn: Callable, /
+        self, setup_context_fn: Optional[Callable], backward_fn: Callable, /
     ) -> None:
         r"""Register a backward formula for this custom op.
 
