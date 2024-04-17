@@ -18,7 +18,7 @@ from torch._inductor.test_case import TestCase as InductorTestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 
-from torch.testing._internal.common_cuda import TEST_MULTIGPU
+from torch.testing._internal.common_cuda import _get_torch_cuda_version, TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_CI,
@@ -1020,6 +1020,8 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @skipIfRocm
         @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+        # Explicit workspace allocation is no longer needed for cuBLAS in CUDA 12.2+
+        @unittest.skipIf(_get_torch_cuda_version() >= (12, 2))
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         def test_workspace_allocation_error(self):
             torch._C._cuda_clearCublasWorkspaces()
