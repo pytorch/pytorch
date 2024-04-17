@@ -1176,7 +1176,7 @@ def set_example_value(node, example_value):
             # NB: Intentionally access _expr, not expr, do not want
             # simplification!
             elif (
-                isinstance(a, torch.SymInt)
+                isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool))
                 and isinstance(s := a.node._expr, sympy.Symbol)
                 and s in pending
             ):
