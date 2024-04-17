@@ -3124,16 +3124,17 @@ class TestQuantizeFx(QuantizationTestCase):
         b.seek(0)
 
         # Load the stats into new model
-        model_2 = orig
-        model_2 = prepare_fx(model_2, qconfig_dict, example_inputs=(x,))
+        for weights_only in [True, False]:
+            model_2 = orig
+            model_2 = prepare_fx(model_2, qconfig_dict, example_inputs=(x,))
 
-        loaded_dict = torch.load(b)
-        torch.ao.quantization.load_observer_state_dict(model_2, loaded_dict)
+            loaded_dict = torch.load(b, weights_only=weights_only)
+            torch.ao.quantization.load_observer_state_dict(model_2, loaded_dict)
 
-        quant_2 = convert_fx(model_2)
+            quant_2 = convert_fx(model_2)
 
-        # Verify that loaded state dict produces same results.
-        self.assertEqual(quant(x), quant_2(x))
+            # Verify that loaded state dict produces same results.
+            self.assertEqual(quant(x), quant_2(x))
 
     @skipIfNoFBGEMM
     def test_custom_module_class(self):
@@ -4278,15 +4279,16 @@ class TestQuantizeFx(QuantizationTestCase):
         checkModel(m, data, ref_weight, ref_bias, ref_res)
 
         # Test save to disk and load back
-        m = M2().eval()
-        m = prepare_fx(m, qconfig_dict, example_inputs=(data,))
-        m = convert_fx(m)
-        m.load_state_dict(state_dict)
-        with TemporaryFileName() as fname:
-            torch.save(m.state_dict(), fname)
-            m.load_state_dict(torch.load(fname))
+        for weights_only in [True, False]:
+            m = M2().eval()
+            m = prepare_fx(m, qconfig_dict, example_inputs=(data,))
+            m = convert_fx(m)
+            m.load_state_dict(state_dict)
+            with TemporaryFileName() as fname:
+                torch.save(m.state_dict(), fname)
+                m.load_state_dict(torch.load(fname, weights_only=weights_only))
 
-        checkModel(m, data, ref_weight, ref_bias, ref_res)
+            checkModel(m, data, ref_weight, ref_bias, ref_res)
 
     @skipIfNoFBGEMM
     def test_preserve_qconfig(self):

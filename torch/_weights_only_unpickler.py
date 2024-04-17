@@ -106,9 +106,20 @@ def _get_allowed_globals():
             )
         else:
             rc[f"{ts.__module__}.{ts.__name__}"] = ts
+    # Quantization specific
+    for qt in [
+        torch.per_tensor_affine,
+        torch.per_tensor_symmetric,
+        torch.per_channel_affine,
+        torch.per_channel_symmetric,
+        torch.per_channel_affine_float_qparams,
+    ]:
+        rc[str(qt)] = qt
     # Rebuild functions
     for f in [
         torch._utils._rebuild_parameter,
+        torch._utils._rebuild_parameter_with_state,
+        torch._utils._rebuild_qtensor,
         torch._utils._rebuild_tensor,
         torch._utils._rebuild_tensor_v2,
         torch._utils._rebuild_tensor_v3,
@@ -121,6 +132,7 @@ def _get_allowed_globals():
     # Handles Tensor Subclasses, Tensor's with attributes.
     # NOTE: It calls into above rebuild functions for regular Tensor types.
     rc["torch._tensor._rebuild_from_type_v2"] = torch._tensor._rebuild_from_type_v2
+
     return rc
 
 
