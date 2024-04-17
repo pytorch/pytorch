@@ -2252,7 +2252,7 @@ class View(GenericView):
                     size_old = size_old * modulus
                 V.graph.sizevars.guard_equals(size_new, size_old)
             else:
-                raise AssertionError()
+                raise AssertionError
 
         while stack_old:
             size_old = stack_old.pop()
@@ -2818,7 +2818,7 @@ class FlexibleLayout(Layout):
                 "stride_ordered_for_memory_format, unsuppored memory_format: %s",
                 memory_format,
             )
-            raise NotImplementedError()
+            raise NotImplementedError
 
     @staticmethod
     def same_ordered(sizes, stride):
@@ -3666,16 +3666,16 @@ class ChoiceCaller:
         return do_bench(lambda: algo(*args, out=out))
 
     def call_name(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def to_callable(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def hash_key(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def output_node(self) -> "TensorBox":
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
@@ -3684,7 +3684,7 @@ class ChoiceCaller:
 
 class TritonTemplateCallerBase(ChoiceCaller):
     def get_make_kernel_render(self) -> Any:
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class MultiTemplateBuffer(TritonTemplateBuffer):
@@ -3872,7 +3872,9 @@ class ConcatKernel(NopKernel):
         for i in range(len(inputs)):
             input_buffer = cls.realize_into(
                 inputs[i],
-                SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
+                SliceView.create(
+                    kernel, dim, offsets_start[i], offsets_end[i], clamp=False
+                ),
             )
             concat_kernel.inputs.append(input_buffer)
 
@@ -4031,7 +4033,7 @@ class ExternKernel(InputsKernel):
             wrapper.writeline(origin_str)
 
     def codegen(self, wrapper):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_kernel_name(self):
         return self.cpp_kernel_name if V.graph.cpp_wrapper else self.python_kernel_name
@@ -4155,7 +4157,7 @@ class ExternKernel(InputsKernel):
                 offset,
                 index,
             )
-            raise NotImplementedError()
+            raise NotImplementedError
 
         return ReinterpretView(
             data=x.data,
