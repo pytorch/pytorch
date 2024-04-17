@@ -1,4 +1,5 @@
 import inspect
+import weakref
 from typing import (
     Any,
     Callable,
@@ -442,7 +443,7 @@ class CustomOpDef:
 
 
 OPDEF_TO_LIB: Dict[str, "library.Library"] = {}
-OPDEFS: Dict[str, CustomOpDef] = {}
+OPDEFS: weakref.WeakValueDictionary[str, CustomOpDef] = weakref.WeakValueDictionary()
 
 
 def get_library_allowing_overwrite(namespace: str, name: str) -> "library.Library":
@@ -472,9 +473,9 @@ def iter_tensors(
         yield from check(kwarg)
 
 
-def _maybe_get_opdef(qualname):
-    if isinstance(qualname, CustomOpDef):
-        return qualname
-    if isinstance(qualname, str) and qualname in OPDEFS:
-        return OPDEFS[qualname]
+def _maybe_get_opdef(op: Union[CustomOpDef, str]) -> Optional[CustomOpDef]:
+    if isinstance(op, CustomOpDef):
+        return op
+    if isinstance(op, str) and op in OPDEFS:
+        return OPDEFS[op]
     return None
