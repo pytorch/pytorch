@@ -332,7 +332,7 @@ def raise_all_gather_to_overlap_with_prev_layer_compute(mod):
     mod.recompile()
 
 
-def sink_reduce_scatter_wait_to_end_of_graph(mod):
+def sink_prev_reduce_scatter_wait_to_before_next_reduce_scatter(mod):
     """
     # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:287 in reduce_scatter_tensor, code: tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
     reduce_scatter_tensor_1: "f32[6423040]" = torch.ops._c10d_functional.reduce_scatter_tensor.default(view_390, 'avg', 8, '0');  view_390 = None
@@ -340,38 +340,41 @@ def sink_reduce_scatter_wait_to_end_of_graph(mod):
     # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:144 in wait_tensor, code: return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
     wait_tensor_20: "f32[6423040]" = torch.ops._c10d_functional.wait_tensor.default(reduce_scatter_tensor_1);  reduce_scatter_tensor_1 = None
 
-    # No stacktrace found for following nodes
-    as_strided_321: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 0)
-    as_strided_322: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 524288)
-    as_strided_323: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 1048576)
-    as_strided_324: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 1572864)
-    as_strided_325: "f32[704, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [704, 2048], [2048, 1], 2097152)
-    as_strided_326: "f32[256, 5632]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 5632], [5632, 1], 3538944)
-    as_strided_327: "f32[704, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [704, 2048], [2048, 1], 4980736)
-    as_strided_328: "f32[256]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256], [1], 6422528)
-    as_strided_329: "f32[256]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256], [1], 6422784);  wait_tensor_20 = None
-
+    ... (as_strided nodes using wait_tensor_20)
     ... (some other nodes)
 
-    return [as_strided_321, as_strided_322, as_strided_323, as_strided_324, as_strided_325, as_strided_326, as_strided_327, as_strided_328, as_strided_329]
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:287 in reduce_scatter_tensor, code: tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
+    reduce_scatter_tensor_2: "f32[6423040]" = torch.ops._c10d_functional.reduce_scatter_tensor.default(view_X, 'avg', 8, '0');  view_390 = None
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:144 in wait_tensor, code: return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
+    wait_tensor_21: "f32[6423040]" = torch.ops._c10d_functional.wait_tensor.default(reduce_scatter_tensor_1);  reduce_scatter_tensor_1 = None
+
+    ... (as_strided nodes using wait_tensor_21)
+    ... (some other nodes)
 
     ->
 
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:287 in reduce_scatter_tensor, code: tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
     reduce_scatter_tensor_1: "f32[6423040]" = torch.ops._c10d_functional.reduce_scatter_tensor.default(view_390, 'avg', 8, '0');  view_390 = None
 
     ... (some other nodes)
 
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:144 in wait_tensor, code: return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
     wait_tensor_20: "f32[6423040]" = torch.ops._c10d_functional.wait_tensor.default(reduce_scatter_tensor_1);  reduce_scatter_tensor_1 = None
-    as_strided_321: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 0)
-    as_strided_322: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 524288)
-    as_strided_323: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 1048576)
-    as_strided_324: "f32[256, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 2048], [2048, 1], 1572864)
-    as_strided_325: "f32[704, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [704, 2048], [2048, 1], 2097152)
-    as_strided_326: "f32[256, 5632]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256, 5632], [5632, 1], 3538944)
-    as_strided_327: "f32[704, 2048]" = torch.ops.aten.as_strided.default(wait_tensor_20, [704, 2048], [2048, 1], 4980736)
-    as_strided_328: "f32[256]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256], [1], 6422528)
-    as_strided_329: "f32[256]" = torch.ops.aten.as_strided.default(wait_tensor_20, [256], [1], 6422784);  wait_tensor_20 = None
-    return [as_strided_321, as_strided_322, as_strided_323, as_strided_324, as_strided_325, as_strided_326, as_strided_327, as_strided_328, as_strided_329]
+
+    ... (as_strided nodes using wait_tensor_20)
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:287 in reduce_scatter_tensor, code: tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
+    reduce_scatter_tensor_2: "f32[6423040]" = torch.ops._c10d_functional.reduce_scatter_tensor.default(view_X, 'avg', 8, '0');  view_390 = None
+
+    ... (some other nodes)
+
+    # File: /data/users/willfeng/pytorch_yf225/torch/distributed/_functional_collectives.py:144 in wait_tensor, code: return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
+    wait_tensor_21: "f32[6423040]" = torch.ops._c10d_functional.wait_tensor.default(reduce_scatter_tensor_1);  reduce_scatter_tensor_1 = None
+
+    ... (as_strided nodes using wait_tensor_21)
+
+    ...
     """
     node_list = list(mod.graph.nodes)
     return_op = None
@@ -393,10 +396,15 @@ def sink_reduce_scatter_wait_to_end_of_graph(mod):
                 "reduce_scatter_wait_node": reduce_scatter_wait_node,
                 "as_strided_nodes": as_strided_nodes,
             })
-    for block in reduce_scatter_wait_blocks:
+    for i, block in enumerate(reduce_scatter_wait_blocks):
         reduce_scatter_wait_node = block["reduce_scatter_wait_node"]
         as_strided_nodes = block["as_strided_nodes"]
-        with mod.graph.inserting_before(return_op):
+        if i < len(reduce_scatter_wait_blocks) - 1:
+            next_reduce_scatter_node = reduce_scatter_wait_blocks[i+1]["reduce_scatter_wait_node"].args[0]
+            insert_before = next_reduce_scatter_node
+        else:
+            insert_before = return_op
+        with mod.graph.inserting_before(insert_before):
             new_reduce_scatter_wait_node = _create_new_node_and_replace(mod, reduce_scatter_wait_node, propagate_meta=True)
             for as_strided_node in as_strided_nodes:
                 new_as_strided_node = _create_new_node_and_replace(mod, as_strided_node, propagate_meta=True)

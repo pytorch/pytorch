@@ -148,7 +148,7 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     # else:
     fsdp_fx_passes.replace_noop_consecutive_permutes_with_original_input_if_first_permute_out_has_no_other_use(gm)
     fsdp_fx_passes.raise_all_gather_to_overlap_with_prev_layer_compute(gm)
-    fsdp_fx_passes.sink_reduce_scatter_wait_to_end_of_graph(gm)
+    fsdp_fx_passes.sink_prev_reduce_scatter_wait_to_before_next_reduce_scatter(gm)
     fsdp_fx_passes.decompose_all_gather_copy_in(gm)
 
     decompose_auto_functionalized(gm.graph)
