@@ -625,7 +625,7 @@ class TestOptimRenewed(TestCase):
                 models.append(model)
                 optimizers.append(optimizer)
 
-            tracker = TensorTracker()
+            tracker = TensorTracker(assert_eq_kwargs)
             for i in range(kIterations):
 
                 state, updated_params = [], []
