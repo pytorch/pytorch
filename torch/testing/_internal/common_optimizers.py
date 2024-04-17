@@ -2239,7 +2239,9 @@ class TensorTracker:
     numerical discrepancies, and so when the test fails, it is likely a real problem.
     """
 
-    def __init__(self):
+    def __init__(self, assert_eq_kwargs=None):
+        if assert_eq_kwargs is None:
+            self.assert_eq_kwargs = {}
         self.tensors = []
 
     def add(self, tensor):
@@ -2259,7 +2261,7 @@ class TensorTracker:
         ref = self.tensors.pop(0)
 
         testcase.assertTrue(isinstance(ref, Tensor), f"{type(ref)=}")
-        testcase.assertEqual(tensor_to_set, ref)
+        testcase.assertEqual(tensor_to_set, ref, **self.assert_eq_kwargs)
 
         with torch.no_grad():
             tensor_to_set.copy_(ref)
