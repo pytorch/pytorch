@@ -30,7 +30,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         self._mode = mode
 
     def run_node(self, n: Node):
-        from torch.fx.experimental.symbolic_shapes import rebind_unbacked
+        from torch.fx.experimental.symbolic_shapes import rebind_unbacked, compute_unbacked_bindings
 
         result = super().run_node(n)
         rebind_unbacked(self._mode.shape_env, n, result)
@@ -50,6 +50,8 @@ class FakeTensorProp(torch.fx.Interpreter):
         meta = map_aggregate(result, extract_val)
         if meta is not None:
             n.meta['val'] = meta
+            if symbol_to_path := compute_unbacked_bindings(self._mode.shape_env, result):
+                n.meta["unbacked_bindings"] = symbol_to_path
 
         return result
 
