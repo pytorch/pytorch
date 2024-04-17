@@ -721,6 +721,8 @@ void initDispatchBindings(PyObject* module) {
       c10::impl::ForceDispatchKeyGuard,
       c10::DispatchKeySet,
       c10::DispatchKeySet>(m, "_ForceDispatchKeyGuard");
+  py_context_manager<c10::impl::ForceDispatchKeyGuard>(
+      m, "_PreserveDispatchKeyGuard");
   py_context_manager<c10::impl::IncludeDispatchKeyGuard, c10::DispatchKey>(
       m, "_IncludeDispatchKeyGuard");
   py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
@@ -792,7 +794,7 @@ void initDispatchBindings(PyObject* module) {
   m.def(
       "_dispatch_is_main_interpreter", []() { return isMainPyInterpreter(); });
   m.def("_dispatch_pystub", [](const char* name, const char* overload) {
-    return c10::Dispatcher::singleton().getAbstractImplPyStub(
+    return c10::Dispatcher::singleton().getPyStub(
         c10::OperatorName(name, overload));
   });
 
