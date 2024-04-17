@@ -568,7 +568,7 @@ def compile_fx_inner(
                 assert manager is not None
 
                 def compiled_artifact(new_inputs):
-                    manager.set_to_running_backward()
+                    manager.set_to_running_backward()  # type: ignore[union-attr]
                     return compiled_graph_callable(new_inputs)
 
                 compiled_graph.current_callable = compiled_artifact
