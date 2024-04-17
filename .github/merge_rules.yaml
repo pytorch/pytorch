@@ -28,7 +28,6 @@
   - caffe2/python/onnx/**
   approved_by:
   - BowenBao
-  - abock
   - justinchuby
   - shubhambhokare1
   - thiagocrepaldi
