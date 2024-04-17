@@ -1170,7 +1170,7 @@ def set_example_value(node, example_value):
                     )
             elif isinstance(a, torch.Tensor):
                 r.update(
-                    free_unbacked_symbols_with_path(pth + (pytree.GetAttrKey("shape"),))
+                    free_unbacked_symbols_with_path(path + (pytree.GetAttrKey("shape"),))
                 )
                 # TODO: stride / storage offset
             # NB: Intentionally access _expr, not expr, do not want
