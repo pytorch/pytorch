@@ -2184,12 +2184,16 @@ class DictSubclassGuardManager : public DictGuardManager {
         KeyValueManager& key_value_manager = _key_value_managers[dict_pointer];
         std::unique_ptr<GuardManager>& key_manager = key_value_manager.first;
         if (key_manager && !key_manager->check_nopybind(key)) {
+          Py_DECREF(key);
+          Py_DECREF(iterator);
           return false;
         }
 
         PyObject* value = PyDict_GetItem(obj, key); // borrowed ref
         std::unique_ptr<GuardManager>& value_manager = key_value_manager.second;
         if (value_manager && !value_manager->check_nopybind(value)) {
+          Py_DECREF(key);
+          Py_DECREF(iterator);
           return false;
         }
 
@@ -2245,6 +2249,8 @@ class DictSubclassGuardManager : public DictGuardManager {
           GuardDebugInfo debug_info = key_manager->check_verbose_nopybind(key);
           num_guards_executed += debug_info.num_guards_executed;
           if (!debug_info.result) {
+            Py_DECREF(key);
+            Py_DECREF(iterator);
             return GuardDebugInfo(
                 false, debug_info.verbose_code_parts, num_guards_executed);
           }
@@ -2257,6 +2263,8 @@ class DictSubclassGuardManager : public DictGuardManager {
               value_manager->check_verbose_nopybind(value);
           num_guards_executed += debug_info.num_guards_executed;
           if (!debug_info.result) {
+            Py_DECREF(key);
+            Py_DECREF(iterator);
             return GuardDebugInfo(
                 false, debug_info.verbose_code_parts, num_guards_executed);
           }
