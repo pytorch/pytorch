@@ -1,4 +1,5 @@
 import inspect
+import weakref
 from typing import (
     Any,
     Callable,
@@ -14,7 +15,7 @@ from typing import (
 
 from torch.utils._exposed_in import exposed_in
 
-from .. import _C, _library, autograd, library, Tensor
+from .. import _C, _library, _ops, autograd, library, Tensor
 
 
 device_types_t = Optional[Union[str, Sequence[str]]]
@@ -130,6 +131,7 @@ class CustomOpDef:
 
         self._lib = get_library_allowing_overwrite(self._namespace, self._name)
         self._register_to_dispatcher()
+        OPDEFS[self._qualname] = self
 
     @property
     def _qualname(self) -> str:
@@ -441,6 +443,7 @@ class CustomOpDef:
 
 
 OPDEF_TO_LIB: Dict[str, "library.Library"] = {}
+OPDEFS: weakref.WeakValueDictionary = weakref.WeakValueDictionary()
 
 
 def get_library_allowing_overwrite(namespace: str, name: str) -> "library.Library":
@@ -468,3 +471,16 @@ def iter_tensors(
         yield from check(arg)
     for kwarg in kwargs.values():
         yield from check(kwarg)
+
+
+def _maybe_get_opdef(
+    op: Union[CustomOpDef, _ops.OpOverload, str]
+) -> Optional[CustomOpDef]:
+    if isinstance(op, CustomOpDef):
+        return op
+    if isinstance(op, _ops.OpOverload):
+        op = op._name
+    assert isinstance(op, str)
+    if op in OPDEFS:
+        return OPDEFS[op]
+    return None

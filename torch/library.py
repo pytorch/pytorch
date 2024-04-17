@@ -1,5 +1,5 @@
 from ._ops import OpOverload
-from typing import Any, Optional, Set, List
+from typing import Any, Optional, Set, List, Union, Callable
 import traceback
 import torch
 import weakref
@@ -9,7 +9,7 @@ import re
 import contextlib
 import sys
 import warnings
-from torch._library.custom_ops import custom_op
+from torch._library.custom_ops import custom_op, _maybe_get_opdef
 
 
 __all__ = [
@@ -420,8 +420,17 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
     return register_fake(qualname, func, lib=lib, _stacklevel=_stacklevel + 1)
 
 
+_op_identifier = Union[str, "torch._ops.OpOverload", "torch._library.custom_ops.CustomOpDef"]
 
-def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
+
+
+def register_fake(
+        op: _op_identifier,
+        func: Optional[Callable] = None,
+        /,
+        *,
+        lib: Optional[Library] = None,
+        _stacklevel: int = 1):
     r"""Register a FakeTensor implementation ("fake impl") for this operator.
 
     Also sometimes known as a "meta kernel", "abstract impl".
@@ -451,9 +460,9 @@ def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
         >>> from torch import Tensor
         >>>
         >>> # Example 1: an operator without data-dependent output shape
-        >>> torch.library.define(
-        >>>     "mylib::custom_linear",
-        >>>     "(Tensor x, Tensor weight, Tensor bias) -> Tensor")
+        >>> @torch.library.custom_op("mylib::custom_linear", mutates_args=())
+        >>> def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
+        >>>     raise NotImplementedError("Implementation goes here")
         >>>
         >>> @torch.library.register_fake("mylib::custom_linear")
         >>> def _(x, weight, bias):
@@ -475,7 +484,11 @@ def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
         >>> assert y.shape == (2, 3)
         >>>
         >>> # Example 2: an operator with data-dependent output shape
-        >>> torch.library.define("mylib::custom_nonzero", "(Tensor x) -> Tensor")
+        >>> @torch.library.custom_op("mylib::custom_nonzero", mutates_args=())
+        >>> def custom_nonzero(x: Tensor) -> Tensor:
+        >>>     x_np = x.numpy(force=True)
+        >>>     res = np.stack(np.nonzero(x_np), axis=1)
+        >>>     return torch.tensor(res, device=x.device)
         >>>
         >>> @torch.library.register_fake("mylib::custom_nonzero")
         >>> def _(x):
@@ -489,12 +502,6 @@ def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
         >>>     result = x.new_empty(shape, dtype=torch.int64)
         >>>     return result
         >>>
-        >>> @torch.library.impl("mylib::custom_nonzero", "cpu")
-        >>> def custom_nonzero_cpu(x):
-        >>>     x_np = x.numpy()
-        >>>     res = np.stack(np.nonzero(x_np), axis=1)
-        >>>     return torch.tensor(res, device=x.device)
-        >>>
         >>> from torch.fx.experimental.proxy_tensor import make_fx
         >>>
         >>> x = torch.tensor([0, 1, 2, 3, 4, 0])
@@ -504,10 +511,22 @@ def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
         >>> assert torch.allclose(trace(x), torch.ops.mylib.custom_nonzero(x))
 
     """
+    if not isinstance(op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)):
+        raise ValueError("register_fake(op): got unexpected type for op: {type(op)}")
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        if func is None:
+            return opdef.register_fake
+        else:
+            return opdef.register_fake(func)
+    assert isinstance(op, str)
+
     stacklevel = _stacklevel
 
     def register(func):
-        namespace, op_name = torch._library.utils.parse_namespace(qualname)
+        namespace, op_name = torch._library.utils.parse_namespace(op)
         if lib is None:
             use_lib = Library(namespace, "FRAGMENT")
             _keep_alive.append(use_lib)
@@ -520,7 +539,8 @@ def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
         return register
     else:
         stacklevel += 1
-        register(func)
+        return register(func)
+
 
 # If the op was defined in C++, then we want to make sure there was an
 # m.set_python_module(module, ...) call and that the module is the
