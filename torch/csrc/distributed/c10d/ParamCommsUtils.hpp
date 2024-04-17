@@ -89,8 +89,8 @@ class TORCH_API ParamCommsDebugInfo : public c10::DebugInfoBase {
   at::ScalarType dType_ = at::kByte;
   std::vector<int64_t> inputSplitSizes_;
   std::vector<int64_t> outputSplitSizes_;
-  int globalRankStart_;
-  int globalRankStride_;
+  int globalRankStart_{};
+  int globalRankStride_{};
   std::vector<int64_t> groupRanks_{};
 };
 
