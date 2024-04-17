@@ -59,6 +59,7 @@ at::Tensor _cslt_compress(const Tensor& sparse_input)
         case at::ScalarType::BFloat16:
             type = CUDA_R_16BF;
             break;
+#ifndf USE_ROCM            
         case at::ScalarType::Float:
             type = CUDA_R_32F;
             break;
