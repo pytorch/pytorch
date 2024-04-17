@@ -286,6 +286,7 @@ class profile:
                 self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1_FALLBACK
             else:
                 self.kineto_activities.add(ProfilerActivity.PrivateUse1)
+                self.profiler_kind = ProfilerState.KINETO_PRIVATEUSE1
 
         assert (
             len(self.kineto_activities) > 0
@@ -553,10 +554,7 @@ class profile:
                 and fe.id in device_corr_map
             ):
                 for f_evt in device_corr_map[fe.id]:
-                    if (
-                        f_evt.device_type == DeviceType.CUDA
-                        or f_evt.device_type == DeviceType.PrivateUse1
-                    ):
+                    if f_evt.device_type == DeviceType.CUDA:
                         fe.append_kernel(
                             f_evt.name,
                             f_evt.device_index,
