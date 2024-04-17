@@ -1085,6 +1085,9 @@ def _has_sufficient_memory(device, size):
             device = 'cuda:0'
         return torch.cuda.memory.mem_get_info(device)[0] >= size
 
+    if device == 'xpu':
+        raise unittest.SkipTest('TODO: Memory availability checks for Intel GPU?')
+
     if device == 'xla':
         raise unittest.SkipTest('TODO: Memory availability checks for XLA?')
 
