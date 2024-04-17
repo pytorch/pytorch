@@ -1222,6 +1222,10 @@ def export(
             # that for export breaks many tests because (1) tests are hardcoded
             # to assume that tracing starts from forward, and (2) some
             # discrepancies between strict and non strict mode.
+            f_to_trace = f
+            if isinstance(f, torch.nn.Module) and not len(f._forward_pre_hooks):
+                f_to_trace = f.forward
+
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
                 hooks=Hooks(
@@ -1230,7 +1234,7 @@ def export(
                 ),
                 export=True,
                 export_constraints=constraints,
-            )(f.forward if isinstance(f, torch.nn.Module) else f)
+            )(f_to_trace)
             # TODO(voz): We may have instances of `f` that mutate inputs, we should track sideeffects and reject.
             try:
                 result_traced = opt_f(*args, **kwargs)
