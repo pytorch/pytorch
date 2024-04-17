@@ -164,6 +164,22 @@ def validate_args_and_maybe_create_graph_inputs(
         for a in sub_args:
             assert isinstance(a, VariableTracker)
             if set_subgraph_inputs == "automatic":
+                if isinstance(a, AutogradFunctionContextVariable):
+                    tracer.create_graph_input(a.as_proxy().node.name)
+                elif a.maybe_fx_node() is not None:
+                    node = a.maybe_fx_node()
+                    new_proxy = tracer.create_graph_input(node.name)
+                    example_value = (
+                        node.meta["example_value"]
+                        if "example_value" in node.meta
+                        else None
+                    )
+                    a = wrap_fx_proxy_cls(
+                        target_cls=type(a),
+                        tx=tx,
+                        proxy=new_proxy,
+                        example_value=example_value,
+                    )
                 args.append(a)
                 continue
 
@@ -1481,13 +1497,10 @@ class AutogradFunctionApplyVariable(VariableTracker):
             fwd_args,
             kwargs,
             "autograd.Function",
-            set_subgraph_inputs="manual",
+            set_subgraph_inputs="automatic",
             restore_side_effects=False,
             tracer=fwd_tracer,
         )
-
-        if fwd_freevars:
-            unimplemented("NYI")
 
         if ctx.mutable_local in tx.output.side_effects.store_attr_mutations:
             if (
@@ -1587,7 +1600,18 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         tx.output.side_effects = prev_side_effects
 
-        p_args = (fwd_node, bwd_node, *(arg.as_proxy() for arg in args))
+        args = [
+            x
+            for x in args
+            if isinstance(
+                x, (variables.TensorVariable, variables.AutogradFunctionContextVariable)
+            )
+        ]
+        p_args = (
+            fwd_node,
+            bwd_node,
+            *([arg.as_proxy() for arg in args] + list(fwd_freevars.keys())),
+        )
         example_value = pytree.tree_map_only(
             torch.fx.Proxy,
             lambda a: a.node.meta["example_value"],
