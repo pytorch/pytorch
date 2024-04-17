@@ -154,7 +154,12 @@ class TestOptimRenewed(TestCase):
 
             initial_value = closure().item()
             for _ in range(20):
-                loss = optimizer.step(closure)
+                if optim_info.step_requires_closure:
+                    loss = optimizer.step(closure)
+                else:
+                    loss = closure()
+                    optimizer.step()
+
                 for scheduler in schedulers:
                     if isinstance(scheduler, ReduceLROnPlateau):
                         scheduler.step(loss)
