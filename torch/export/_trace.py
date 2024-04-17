@@ -306,10 +306,8 @@ def _rename_constants_nodes(
     const_prefix = placeholder_prefixes[InputKind.CONSTANT_TENSOR]
     buffer_to_constant = {}
     for spec in graph_signature.input_specs:
-        if (
-            spec.kind == InputKind.CONSTANT_TENSOR
-            and isinstance(spec.arg, TensorArgument)
-            and not spec.arg.name.startswith(const_prefix)
+        if spec.kind == InputKind.CONSTANT_TENSOR and not spec.arg.name.startswith(
+            const_prefix
         ):
             if spec.arg.name.startswith(buffer_prefix):  # map from buffer to constants
                 c_name = rename_constant(
@@ -320,8 +318,6 @@ def _rename_constants_nodes(
             buffer_to_constant[spec.arg.name] = c_name
             spec.arg.name = c_name
     for spec in graph_signature.output_specs:
-        if isinstance(spec.arg, ConstantArgument):
-            continue
         if spec.arg.name in buffer_to_constant:
             spec.arg.name = buffer_to_constant[spec.arg.name]
 
@@ -392,67 +388,6 @@ def _make_module_call_graph(
         inputs=[], outputs=[], in_spec=in_spec, out_spec=out_spec
     )
     return ret
-
-
-def _get_attributes(mod):
-    # return any attributes of a module that are not standard attributes
-    STD_ATTRS = {
-        "_backward_hooks",
-        "_backward_pre_hooks",
-        "_buffers",
-        "_forward_hooks",
-        "_forward_hooks_always_called",
-        "_forward_hooks_with_kwargs",
-        "_forward_pre_hooks",
-        "_forward_pre_hooks_with_kwargs",
-        "_is_full_backward_hook",
-        "_load_state_dict_post_hooks",
-        "_load_state_dict_pre_hooks",
-        "_modules",
-        "_non_persistent_buffers_set",
-        "_parameters",
-        "_state_dict_hooks",
-        "_state_dict_pre_hooks",
-        "training",
-    }
-    return {k: v for k, v in mod.__dict__.items() if k not in STD_ATTRS}
-
-
-@contextmanager
-def detect_attribute_assignment(mod: torch.nn.Module):
-    # Do not allow assignment of tensor attributes during export unless
-    # the attribute is registered as a buffer.
-
-    # save state of attributes before enter
-    snapshot = pytree.tree_map(lambda x: x, _get_attributes(mod))
-    try:
-        yield
-    finally:
-        # after exit, compare state of attributes with snapshot
-        # to detect which attributes were assigned
-        assigned_attributes = []
-
-        def _collect_assigned_attributes(kp, t, _t):
-            if isinstance(t, torch.Tensor) and _t is not t:
-                attr, *rest = kp
-                assigned_attributes.append(
-                    f"self.{attr.key}{torch.utils._pytree.keystr(rest)}"
-                )
-
-        pytree.tree_map_with_path(
-            _collect_assigned_attributes, snapshot, _get_attributes(mod)
-        )
-
-        if assigned_attributes:
-            if len(assigned_attributes) > 1:
-                msg = f"attributes {', '.join(assigned_attributes)} were"
-            else:
-                msg = f"attribute {assigned_attributes[0]} was"
-            raise ValueError(
-                f"The {msg} assigned during export. "
-                "Such attributes must be registered as buffers using the `register_buffer` API "
-                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
-            )
 
 
 def _export_to_torch_ir(
@@ -631,7 +566,7 @@ def _export_non_strict(
     def make_argument_spec(i, node) -> ArgumentSpec:
         if isinstance(node, (int, bool, float, type(None))):
             # For const outputs we just directly return this
-            return ConstantArgument(value=node)
+            return ConstantArgument(name="", value=node)
 
         assert (
             "val" in node.meta
@@ -651,7 +586,7 @@ def _export_non_strict(
         else:
             # TODO: this branch is likely wrong, all permissible ConstantArgument type
             # should have been handled already
-            return ConstantArgument(value=val)
+            return ConstantArgument(name=node.name, value=val)
 
     input_specs, output_specs = _sig_to_specs(
         user_inputs=set(graph_signature.user_inputs),
@@ -834,11 +769,7 @@ def _verify_placeholder_names(gm: torch.fx.GraphModule, sig: ExportGraphSignatur
     - User input nodes: no restrictions, should match the original forward() signature
     - Params/buffers/constants/custom_obj/token nodes: should start with prefixes defined in <placeholder_prefixes>
     """
-    name_to_kind = {
-        spec.arg.name: spec.kind
-        for spec in sig.input_specs
-        if not isinstance(spec.arg, ConstantArgument)
-    }
+    name_to_kind = {spec.arg.name: spec.kind for spec in sig.input_specs}
     for mod in gm.modules():
         if not isinstance(mod, torch.fx.GraphModule):
             continue
@@ -1006,8 +937,7 @@ def _export(
                                     *args, **kwargs
                                 )
                         else:
-                            with detect_attribute_assignment(self._export_root):
-                                tree_out = self._export_root(*args, **kwargs)
+                            tree_out = self._export_root(*args, **kwargs)
                         flat_outs, out_spec = pytree.tree_flatten(tree_out)
                         return tuple(flat_outs)
 
