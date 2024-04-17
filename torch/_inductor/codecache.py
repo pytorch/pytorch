@@ -446,7 +446,7 @@ def _reduce_tensor(t):
         # TODO: These tensors don't currently pickle, so we can't cache a
         # compiled graph containing them. Just fail now. If mkldnn tensors
         # get pickling support, we can remove this.
-        raise BypassFxGraphCache()
+        raise BypassFxGraphCache
 
     # Very large tensors could be expensive to copy to cpu and hash. Let's
     # at least report if we find slowness.
@@ -598,7 +598,7 @@ class FxGraphHashDetails:
             # Some configs options are callables, e.g., post_grad_custom_pre_pass,
             # and may not pickle.
             log.debug("Can't pickle inductor config: %s", e)
-            raise BypassFxGraphCache() from e
+            raise BypassFxGraphCache from e
 
     def debug_str(self) -> str:
         """
@@ -843,19 +843,19 @@ class FxGraphCache:
         """
         # Freezing can embed constants that wouldn't be static across runs.
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
-            raise BypassFxGraphCache()
+            raise BypassFxGraphCache
 
         # The treatment of guards in the caching implementation requires that
         # we have a shape env.
         if FxGraphCache._get_shape_env() is None:
             log.debug("fx graph cache no shape env")
-            raise BypassFxGraphCache()
+            raise BypassFxGraphCache
 
         # HigherOrderOperators should be handled on a case-by-case basis.
         # Currently, we just skip caching if we have any.
         for node in gm.graph.nodes:
             if isinstance(node.target, torch._ops.HigherOrderOperator):
-                raise BypassFxGraphCache()
+                raise BypassFxGraphCache
 
     @staticmethod
     def load(
@@ -868,29 +868,25 @@ class FxGraphCache:
         Load a compiled graph from the cache. If a cached entry does not exist,
         compile the graph and save it to the cache.
         """
-        from filelock import FileLock
 
         compiled_graph = None
         try:
             FxGraphCache._check_can_cache(gm)
             key = compiled_fx_graph_hash(gm, example_inputs, fx_kwargs)
 
-            lock_path = os.path.join(get_lock_dir(), key + ".lock")
-            with FileLock(lock_path, timeout=LOCK_TIMEOUT):
-                compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
-                if compiled_graph is None:
-                    log.debug("fx graph cache miss for key %s", key)
-                    counters["inductor"]["fxgraph_cache_miss"] += 1
-                    compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
-                    FxGraphCache._save_graph(key, compiled_graph, example_inputs)
-                else:
-                    log.debug("fx graph cache hit for key %s", key)
-                    counters["inductor"]["fxgraph_cache_hit"] += 1
+            compiled_graph = FxGraphCache._lookup_graph(key, example_inputs)
+            if compiled_graph is None:
+                log.debug("fx graph cache miss for key %s", key)
+                counters["inductor"]["fxgraph_cache_miss"] += 1
+                compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+                FxGraphCache._save_graph(key, compiled_graph, example_inputs)
+            else:
+                log.debug("fx graph cache hit for key %s", key)
+                counters["inductor"]["fxgraph_cache_hit"] += 1
         except BypassFxGraphCache:
             counters["inductor"]["fxgraph_cache_bypass"] += 1
-
-        if not compiled_graph:
-            compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
+            if not compiled_graph:
+                compiled_graph = compile_fx_fn(gm, example_inputs, **fx_kwargs)
 
         return compiled_graph
 
@@ -994,7 +990,7 @@ def cpp_compiler_search(search: str) -> str:
             return cxx
         except (subprocess.SubprocessError, FileNotFoundError, ImportError):
             continue
-    raise exc.InvalidCxxCompiler()
+    raise exc.InvalidCxxCompiler
 
 
 def install_gcc_via_conda() -> str:
@@ -1146,7 +1142,7 @@ class VecNEON(VecISA):
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
-        return "neon"  # Unused
+        return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
 
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__
 
@@ -1206,7 +1202,7 @@ class InvalidVecISA(VecISA):
 
 
 invalid_vec_isa = InvalidVecISA()
-supported_vec_isa_list = [VecAVX512(), VecAVX2()]
+supported_vec_isa_list = [VecAVX512(), VecAVX2(), VecNEON()]
 
 
 # Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
@@ -2749,7 +2745,7 @@ def _worker_compile_triton(
 
 class CodeCacheFuture:
     def result(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class TritonFuture(CodeCacheFuture):
