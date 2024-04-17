@@ -60,10 +60,22 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 import torch
 
+_marked_safe_globals_list: List[Callable] = []
+
+def _mark_safe_globals(safe_globals: List[Callable]):
+    global _marked_safe_globals_list
+    _marked_safe_globals_list += safe_globals
+
+# Separate these because of the lru_cache on _get_allowed_globals
+def _get_user_allowed_globals():
+    rc: Dict[str, Any] = {}
+    for f in _marked_safe_globals_list:
+        rc[f'{f.__module__}.{f.__name__}'] = f
+    return rc
 
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
@@ -75,6 +87,7 @@ def _get_allowed_globals():
         "torch.serialization._get_layout": torch.serialization._get_layout,
         "torch.Size": torch.Size,
         "torch.Tensor": torch.Tensor,
+        "torch.device": torch.device,
     }
     # dtype
     for t in [
@@ -126,6 +139,7 @@ def _get_allowed_globals():
         torch._utils._rebuild_sparse_tensor,
         torch._utils._rebuild_meta_tensor_no_storage,
         torch._utils._rebuild_nested_tensor,
+        torch._utils._rebuild_wrapper_subclass,
     ]:
         rc[f"torch._utils.{f.__name__}"] = f
 
@@ -165,6 +179,8 @@ class Unpickler:
                 full_path = f"{module}.{name}"
                 if full_path in _get_allowed_globals():
                     self.append(_get_allowed_globals()[full_path])
+                elif full_path in _get_user_allowed_globals():
+                    self.append(_get_user_allowed_globals()[full_path])
                 else:
                     raise RuntimeError(f"Unsupported class {full_path}")
             elif key[0] == NEWOBJ[0]:
@@ -176,7 +192,7 @@ class Unpickler:
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
                 func = self.stack[-1]
-                if func not in _get_allowed_globals().values():
+                if func not in _get_allowed_globals().values() and func not in _get_user_allowed_globals().values():
                     raise RuntimeError(
                         f"Trying to call reduce for unrecognized function {func}"
                     )

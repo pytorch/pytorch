@@ -15,6 +15,7 @@ import pickle
 import shutil
 import pathlib
 import platform
+from collections import OrderedDict
 from copy import deepcopy
 from itertools import product
 
@@ -30,6 +31,7 @@ from torch.testing._internal.common_utils import (
     parametrize, instantiate_parametrized_tests, AlwaysWarnTypedStorageRemoval)
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_dtype import all_types_and_complex_and
+from torch.testing._internal.two_tensor import TwoTensor
 
 # These tests were all copied from `test/test_torch.py` at some point, so see
 # the actual blame, see this revision
@@ -4095,6 +4097,25 @@ class TestSubclassSerialization(TestCase):
             torch.save(tensor, f)
             f.seek(0)
             tensor2 = torch.load(f)
+
+    def test_allowlist_for_weights_only(self):
+        t = TwoTensor(torch.randn(2, 3), torch.randn(2, 3))
+        p = torch.nn.Parameter(t)
+        sd = OrderedDict([('t', t), ('p', p)])
+
+        with tempfile.NamedTemporaryFile() as f:
+            torch.save(sd, f)
+            f.seek(0)
+            with self.assertRaisesRegex(pickle.UnpicklingError, "Weights only load failed"):
+                sd = torch.load(f, weights_only=True)
+
+            f.seek(0)
+            torch.serialization.mark_safe_globals([TwoTensor])
+            sd = torch.load(f, weights_only=True)
+            self.assertEqual(sd['t'], t)
+            self.assertEqual(sd['p'], p)
+
+
 
 
 instantiate_device_type_tests(TestBothSerialization, globals())

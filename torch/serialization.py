@@ -51,6 +51,7 @@ __all__ = [
     'LoadEndianness',
     'get_default_load_endianness',
     'set_default_load_endianness',
+    'mark_safe_globals',
 ]
 
 
@@ -104,6 +105,15 @@ def set_default_load_endianness(endianness):
     if not isinstance(endianness, LoadEndianness) and endianness is not None:
         raise TypeError("Invalid argument type in function set_default_load_endianness")
     _default_load_endian = endianness
+
+def mark_safe_globals(safe_globals: List[Callable]):
+    '''
+    Marks the given globals as safe for ``weights_only`` load.
+
+    Args:
+        safe_globals (List[Callable]): list of globals to mark as safe
+    '''
+    _weights_only_unpickler._mark_safe_globals(safe_globals)
 
 def _is_zipfile(f) -> bool:
     # This is a stricter implementation than zipfile.is_zipfile().
