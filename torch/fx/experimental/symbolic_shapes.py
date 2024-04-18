@@ -409,6 +409,7 @@ class ConvertIntKey:
         return ".__int__()"
 
     def get(self, b: bool) -> int:
+        """Get the int value from bool"""
         return int(b)
 
 
@@ -420,6 +421,7 @@ class CallMethodKey:
         return f".{self.name}()"
 
     def get(self, o: Any) -> Any:
+        """Call the method on object"""
         return getattr(o, self.name)()
 
 
