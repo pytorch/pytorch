@@ -522,7 +522,17 @@ def proxy_call(proxy_mode, func, pre_dispatch, args, kwargs):
         constant = None
 
     from .symbolic_shapes import compute_unbacked_bindings
-    if (fake_mode := torch._dynamo.utils.detect_fake_mode()) and fake_mode.shape_env:
+    # Can't use detect_fake_mode here,
+    #
+    # python test/distributed/_tensor/test_dtensor_compile.py -k
+    # test_tp_compile_fullgraph_is_seq_parallel_False
+    #
+    # will fail.  Very strange, it probably isn't right for them to be using
+    # two fake modes there...
+    fake_mode = torch._C._get_dispatch_mode(
+        torch._C._TorchDispatchModeKey.FAKE
+    )
+    if fake_mode and fake_mode.shape_env:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
             proxy_out.node.meta["unbacked_bindings"] = symbol_to_path
 
