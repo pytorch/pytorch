@@ -197,7 +197,7 @@ class CutlassEVTEpilogueTypeFormatter:
         return f"cutlass::epilogue::fusion::Sm90EVT<cutlass::epilogue::fusion::Sm90Compute<cutlass::maximum, ElementAcc, ElementAcc, RoundStyle>,{a}, {const_zero}>"  # noqa: B950
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        raise CUTLASSEVTOpNotImplementedError()
+        raise CUTLASSEVTOpNotImplementedError
 
     # Add more ops here...
     def getvalue(self, result) -> str:
@@ -354,7 +354,7 @@ class CutlassEVTEpilogueArgumentFormatter:
         return a
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        raise CUTLASSEVTOpNotImplementedError()
+        raise CUTLASSEVTOpNotImplementedError
 
     def getvalue(self, result) -> str:
         return "{" + str(result) + "}"
