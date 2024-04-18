@@ -52,6 +52,11 @@ class Dep(abc.ABC):
     def is_contiguous(self) -> bool:
         pass
 
+    @property
+    @abc.abstractmethod
+    def index(self):
+        pass
+
 
 @dataclasses.dataclass(frozen=True)
 class MemoryDep(Dep):
