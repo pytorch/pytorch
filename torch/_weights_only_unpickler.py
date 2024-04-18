@@ -9,6 +9,7 @@
 # - `torch.nn.Parameter`
 # - `collections.Counter`
 # - `collections.OrderedDict`
+# Additionally, users can allowlist classes they have deemed as safe using `_mark_safe_globals()`
 
 # Based of https://github.com/python/cpython/blob/main/Lib/pickle.py
 # Expected to be useful for loading PyTorch model weights
@@ -66,16 +67,25 @@ import torch
 
 _marked_safe_globals_list: List[Callable] = []
 
+
 def _mark_safe_globals(safe_globals: List[Callable]):
     global _marked_safe_globals_list
     _marked_safe_globals_list += safe_globals
 
-# Separate these because of the lru_cache on _get_allowed_globals
+
+# Separate from _get_allowed_globals because of the lru_cache on _get_allowed_globals
+# For example if user had a script like
+#   torch.load(file_a)
+#   torch.serialization._mark_safe_globals([torch.foo])
+#   torch.load(file_b)
+# the dynamic additions to safe_globals would not be picked up by
+# _get_allowed_globals due to the lru_cache
 def _get_user_allowed_globals():
     rc: Dict[str, Any] = {}
     for f in _marked_safe_globals_list:
-        rc[f'{f.__module__}.{f.__name__}'] = f
+        rc[f"{f.__module__}.{f.__name__}"] = f
     return rc
+
 
 # Unpickling machinery
 @_functools.lru_cache(maxsize=1)
@@ -192,7 +202,10 @@ class Unpickler:
             elif key[0] == REDUCE[0]:
                 args = self.stack.pop()
                 func = self.stack[-1]
-                if func not in _get_allowed_globals().values() and func not in _get_user_allowed_globals().values():
+                if (
+                    func not in _get_allowed_globals().values()
+                    and func not in _get_user_allowed_globals().values()
+                ):
                     raise RuntimeError(
                         f"Trying to call reduce for unrecognized function {func}"
                     )
