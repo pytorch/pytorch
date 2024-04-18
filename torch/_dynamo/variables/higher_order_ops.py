@@ -1615,17 +1615,24 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         tx.output.side_effects = prev_side_effects
 
-        args = [
-            x
-            for x in args
-            if isinstance(
-                x, (variables.TensorVariable, variables.AutogradFunctionContextVariable)
-            )
-        ]
+        # The type of original args can be arbitrary, but we only support basic type in FX graph.
+        # So the speculated subgraph input includes original tensor args and the lifted freevars.
+        # We need to filter out the original tensor args and concat them with the lifted freevars
+        # to generate the proxy args for the FX call_function node.
+        filtered_args = []
+        # A boolean list to mark if the type of corresponding argument is tensor.
+        # This is used to determine if a FX node's argument should be an argument of
+        # ApplyTemplate.forward and if we should skip the output from ApplyTemplate.backward
+        # at torch._functorch.autograd_function.AutogradFunctionApply.
+        args_tensor_mask = [False] * len(args)
+        for i, arg in enumerate(args):
+            if isinstance(arg, variables.TensorVariable):
+                filtered_args.append(arg)
+                args_tensor_mask[i] = True
         p_args = (
             fwd_node,
             bwd_node,
-            *([arg.as_proxy() for arg in args] + list(fwd_freevars.keys())),
+            *([arg.as_proxy() for arg in filtered_args] + list(fwd_freevars.keys())),
         )
         example_value = pytree.tree_map_only(
             torch.fx.Proxy,
@@ -1642,7 +1649,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
                 "call_function",
                 autograd_function_apply,
                 args=p_args,
-                kwargs={},
+                kwargs={"args_tensor_mask": args_tensor_mask},
             ),
             example_value=example_value,
         )

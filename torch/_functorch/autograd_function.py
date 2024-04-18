@@ -686,21 +686,30 @@ class AutogradFunctionApply(HigherOrderOperator):
     def __init__(self):
         super().__init__("autograd_function_apply")
 
-    def __call__(self, fwd, bwd, *fwd_args):
+    def __call__(self, fwd, bwd, *fwd_args, **fwd_kwargs):
         saved_values = None
+        args_tensor_mask = fwd_kwargs["args_tensor_mask"]
+        length_of_tensor_args = sum(args_tensor_mask)
+        # Filter out the original tensor args from fwd_args,
+        # lifted freevars should not be args of ApplyTemplate.apply
+        # since we don't need to calculate the gradients of them.
+        new_fwd_args = fwd_args[:length_of_tensor_args]
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
             def forward(ctx, *args):
                 nonlocal saved_values
-                output, saved_values = fwd(None, *args)
+                output, saved_values = fwd(None, *fwd_args)
                 return output
 
             @staticmethod
             def backward(ctx, *grad):
-                return bwd(None, *grad, *saved_values)
+                output = bwd(None, *grad, *saved_values)
+                # The output includes the gradients of all original args, which can be None for non-Tensor args.
+                # We need to filter out the None values.
+                return tuple([x for x, mask in zip(output, args_tensor_mask) if mask])
 
-        return ApplyTemplate.apply(*fwd_args)
+        return ApplyTemplate.apply(*new_fwd_args)
 
 
 autograd_function_apply = AutogradFunctionApply()
