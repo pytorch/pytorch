@@ -75,6 +75,11 @@ class MemoryDep(typing.NamedTuple):
         """
         Whether the stride for the last dimension is 1.
         """
+        # python test/inductor/test_torchinductor_opinfo.py -k test_comprehensive_masked_scatter_cuda_float16
+        # will exercise thru this corner case.
+        if len(self.var_names) == 0:
+            return True
+
         terms = self.index.args if isinstance(self.index, sympy.Add) else [self.index]
 
         last_sym = self.var_names[-1]

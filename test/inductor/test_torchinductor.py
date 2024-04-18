@@ -10337,6 +10337,11 @@ if HAS_GPU and RUN_GPU and not TEST_WITH_ASAN:
                 "benchmark_kernel": True,
             }
         )
+        @skipIfRocm
+        @unittest.skipIf(
+            torch.cuda.get_device_capability() < (9, 0),
+            "Triton does not support fp8 on A100",
+        )
         def test_red_followed_by_transposed_pointwise(self):
             bs = 26624
             dim = 1024
