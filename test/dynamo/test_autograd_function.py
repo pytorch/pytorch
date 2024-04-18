@@ -469,7 +469,7 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, MyMM.apply(a, a))
         self.assertEqual(cnt.frame_count, 1)
 
-    def test_arbitrary_input_types(self):
+    def test_user_defined_object_as_input(self):
         @dataclass
         class Weird:
             x: int
@@ -499,6 +499,86 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         result.sum().backward()
 
         self.assertEqual(result, Foo.apply(x, weird, z))
+
+    def test_tensor_list_as_input(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, tl):
+                ctx.save_for_backward(tl[0], tl[1])
+                return x.clone() * (tl[0] + tl[1])
+
+            @staticmethod
+            def backward(ctx, grad):
+                tl0, tl1 = ctx.saved_tensors
+                return grad * (tl0 + tl1), None
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x, tl):
+            return Foo.apply(x, tl)
+
+        x = torch.tensor(2.0, requires_grad=True)
+        tl = [torch.tensor(3.0), torch.tensor(4.0)]
+
+        result = f(x, tl)
+        result.sum().backward()
+
+        self.assertEqual(result, Foo.apply(x, tl))
+
+    def test_multiple_different_non_tensor_inputs(self):
+        @dataclass
+        class Weird:
+            x: int
+            b: torch.Tensor
+            c: torch.Tensor
+
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, weird, z, tl):
+                ctx.save_for_backward(weird.b, weird.c, tl[0], tl[1])
+                return x.clone() * weird.b * weird.c * tl[0]
+
+            @staticmethod
+            def backward(ctx, grad):
+                b, c, tl0, _ = ctx.saved_tensors
+                return grad * b * c * tl0, None, grad * 2, None
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x, weird, z, tl):
+            return Foo.apply(x, weird, z, tl)
+
+        x = torch.tensor(2.0, requires_grad=True)
+        weird = Weird(1.2, torch.tensor(2.5), torch.tensor(3.5))
+        z = torch.tensor(3.0, requires_grad=True)
+        tl = [torch.tensor(0.5), torch.tensor(0.6)]
+
+        result = f(x, weird, z, tl)
+        result.sum().backward()
+
+        self.assertEqual(result, Foo.apply(x, weird, z, tl))
+
+    def test_backward_returns_none_for_tensor_input(self):
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(y)
+                return x.clone() * y
+
+            @staticmethod
+            def backward(ctx, grad):
+                (y,) = ctx.saved_tensors
+                return grad * y, None
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x, y):
+            return Foo.apply(x, y)
+
+        x = torch.tensor(2.0, requires_grad=True)
+        y = torch.tensor(3.0)
+
+        result = f(x, y)
+        result.sum().backward()
+
+        self.assertEqual(result, Foo.apply(x, y))
 
     def test_function_with_bound_free_variable(self):
         class LowerBound(torch.autograd.Function):
