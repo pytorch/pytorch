@@ -195,7 +195,7 @@ void MPSProfiler::initialize() {
   }
 }
 
-void MPSProfiler::StartTrace(const string& mode, bool waitUntilCompleted) {
+void MPSProfiler::StartTrace(const std::string& mode, bool waitUntilCompleted) {
   TORCH_CHECK(m_profile_options == ProfileOptions::OPTIONS_NONE, "Tracing Signposts is already enabled ");
 
   std::stringstream ss(mode);
