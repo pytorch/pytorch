@@ -1812,9 +1812,9 @@ class AotCodeCompiler:
             )
             # TODO: Fix mmap weights with cuda
             use_mmap_weights = (
-                not cuda and not config.is_fbcode() and consts_size > 2_000_000_000
+                not config.is_fbcode() and consts_size > 2_000_000_000
             )
-            if config.aot_inductor.force_mmap_weights and not cuda:
+            if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
             compile_cmd = cpp_compile_command(
                 input=input_path,
