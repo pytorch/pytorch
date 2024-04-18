@@ -25,10 +25,11 @@ at::Tensor mkldnn_tensor_from_data_ptr(
     int64_t serialized_md_size) {
   std::vector<uint8_t> vector_serialized_md{
       serialized_md, serialized_md + serialized_md_size};
+  ideep::tensor::desc deserialized_ideep_desc;
   // TODO: test ideep versioning
 #if IDEEP_PREREQ(3, 4, 1, 2)
   // groups is needed for grouped conv
-  ideep::tensor::desc deserialized_ideep_desc(vector_serialized_md);
+  deserialized_ideep_desc = ideep::tensor::desc(vector_serialized_md);
 #else
   TORCH_CHECK(false, "Unexpected IDeep version to do weight deserialization.");
 #endif
