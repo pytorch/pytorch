@@ -23,4 +23,3 @@ Example::
    :members:
    :undoc-members:
    :inherited-members:
-
