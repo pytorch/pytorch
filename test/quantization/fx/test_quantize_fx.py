@@ -4288,7 +4288,7 @@ class TestQuantizeFx(QuantizationTestCase):
             # Don't test weights_only here as this is loading a ScriptModule
             m.load_state_dict(torch.load(fname))
 
-            checkModel(m, data, ref_weight, ref_bias, ref_res)
+        checkModel(m, data, ref_weight, ref_bias, ref_res)
 
     @skipIfNoFBGEMM
     def test_preserve_qconfig(self):

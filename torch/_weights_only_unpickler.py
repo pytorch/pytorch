@@ -132,7 +132,6 @@ def _get_allowed_globals():
     # Handles Tensor Subclasses, Tensor's with attributes.
     # NOTE: It calls into above rebuild functions for regular Tensor types.
     rc["torch._tensor._rebuild_from_type_v2"] = torch._tensor._rebuild_from_type_v2
-
     return rc
 
 
