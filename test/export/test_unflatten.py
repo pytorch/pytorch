@@ -40,6 +40,12 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TestCase,
 )
+
+from torch.testing._internal.torchbind_impls import (
+    load_torchbind_test_lib,
+    register_fake_classes,
+    register_fake_operators,
+)
 from torch.utils._pytree import (
     LeafSpec,
     tree_flatten,
@@ -48,22 +54,6 @@ from torch.utils._pytree import (
     treespec_dumps,
     treespec_loads,
 )
-
-
-def load_torchbind_test_lib():
-    from torch.testing._internal.torchbind_impls import register_fake_operators
-
-    if IS_SANDCASTLE or IS_FBCODE:
-        torch.ops.load_library("//caffe2/test/cpp/jit:test_custom_class_registrations")
-    elif IS_MACOS:
-        raise unittest.SkipTest("non-portable load_library call used in test")
-    else:
-        lib_file_path = find_library_location("libtorchbind_test.so")
-        if IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-        torch.ops.load_library(str(lib_file_path))
-
-    register_fake_operators()
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo isn't support")

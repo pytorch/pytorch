@@ -57,3 +57,54 @@ def register_fake_operators():
         torch.ops._TorchScriptTesting.takes_foo_tuple_return.default.py_impl(
             torch._C.DispatchKey.Meta
         )(meta_takes_foo_tuple_return)
+
+
+def register_fake_classes():
+    @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
+    class FakeFoo:
+        def __init__(self, x: int, y: int):
+            self.x = x
+            self.y = y
+
+        @classmethod
+        def from_real(cls, foo):
+            (x, y), _ = foo.__getstate__()
+            return cls(x, y)
+
+        def add_tensor(self, z):
+            return (self.x + self.y) * z
+
+    @torch._library.register_fake_class("_TorchScriptTesting::_ContainsTensor")
+    class FakeContainsTensor:
+        def __init__(self, x: torch.Tensor):
+            self.x = x
+
+        @classmethod
+        def from_real(cls, foo):
+            ctx = torch.library.get_ctx()
+            return cls(ctx.to_fake_tensor(foo.get()))
+
+        def get(self):
+            return self.x
+
+
+def load_torchbind_test_lib():
+    import unittest
+
+    from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
+        find_library_location,
+        IS_FBCODE,
+        IS_MACOS,
+        IS_SANDCASTLE,
+        IS_WINDOWS,
+    )
+
+    if IS_SANDCASTLE or IS_FBCODE:
+        torch.ops.load_library("//caffe2/test/cpp/jit:test_custom_class_registrations")
+    elif IS_MACOS:
+        raise unittest.SkipTest("non-portable load_library call used in test")
+    else:
+        lib_file_path = find_library_location("libtorchbind_test.so")
+        if IS_WINDOWS:
+            lib_file_path = find_library_location("torchbind_test.dll")
+        torch.ops.load_library(str(lib_file_path))

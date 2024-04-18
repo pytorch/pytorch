@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: export"]
 
 import contextlib
-import unittest
 
 import torch
 import torch.utils._pytree as pytree
@@ -12,38 +11,25 @@ from torch.export import export
 from torch.export._trace import _export
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
-    find_library_location,
     instantiate_parametrized_tests,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
-    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
 )
-from torch.testing._internal.torchbind_impls import register_fake_operators
-
-
-def load_torchbind_test_lib():
-    if IS_SANDCASTLE or IS_FBCODE:
-        torch.ops.load_library("//caffe2/test/cpp/jit:test_custom_class_registrations")
-    elif IS_MACOS:
-        raise unittest.SkipTest("non-portable load_library call used in test")
-    else:
-        lib_file_path = find_library_location("libtorchbind_test.so")
-        if IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-        torch.ops.load_library(str(lib_file_path))
-
-    register_fake_operators()
+from torch.testing._internal.torchbind_impls import (
+    load_torchbind_test_lib,
+    register_fake_classes,
+    register_fake_operators,
+)
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
 class TestExportTorchbind(TestCase):
     def setUp(self):
         load_torchbind_test_lib()
+        register_fake_classes()
+        register_fake_operators()
 
         test = self
         test.tq_push_counter = 0

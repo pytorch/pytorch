@@ -45,14 +45,15 @@ from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
-    find_library_location,
-    IS_FBCODE,
-    IS_MACOS,
-    IS_SANDCASTLE,
     IS_WINDOWS,
     run_tests,
     skipIfTorchDynamo,
     TestCase,
+)
+from torch.testing._internal.torchbind_impls import (
+    load_torchbind_test_lib,
+    register_fake_classes,
+    register_fake_operators,
 )
 from torch.utils import _pytree as pytree
 
@@ -205,22 +206,6 @@ def _sequential_split_inline_tests():
     }
 
 
-def load_torchbind_test_lib():
-    from torch.testing._internal.torchbind_impls import register_fake_operators
-
-    if IS_SANDCASTLE or IS_FBCODE:
-        torch.ops.load_library("//caffe2/test/cpp/jit:test_custom_class_registrations")
-    elif IS_MACOS:
-        raise unittest.SkipTest("non-portable load_library call used in test")
-    else:
-        lib_file_path = find_library_location("libtorchbind_test.so")
-        if IS_WINDOWS:
-            lib_file_path = find_library_location("torchbind_test.dll")
-        torch.ops.load_library(str(lib_file_path))
-
-    register_fake_operators()
-
-
 @skipIfTorchDynamo("recursively running dynamo on export is unlikely")
 @unittest.skipIf(not is_dynamo_supported(), "Dynamo not supported")
 class TestPasses(TestCase):
@@ -230,20 +215,8 @@ class TestPasses(TestCase):
         self.SET_GRAD_ENABLED_TESTS = _set_grad_enabled_tests()
 
         load_torchbind_test_lib()
-
-        @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
-        class FakeFoo:
-            def __init__(self, x: int, y: int):
-                self.x = x
-                self.y = y
-
-            @classmethod
-            def from_real(cls, foo):
-                (x, y), _ = foo.__getstate__()
-                return cls(x, y)
-
-            def add_tensor(self, z):
-                return (self.x + self.y) * z
+        register_fake_classes()
+        register_fake_operators()
 
     def tearDown(self):
         self.SEQUENTIAL_SPLIT_INLINE_TESTS.clear()
