@@ -84,6 +84,7 @@ from .utils import (
     LazyString,
     nn_module_proxy,
     same,
+    set_example_value,
 )
 from .variables.base import VariableTracker
 from .variables.builder import (
@@ -93,6 +94,7 @@ from .variables.builder import (
     VariableBuilder,
     wrap_fx_proxy,
 )
+from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -433,7 +435,7 @@ class OutputGraph:
                 "dynamo_backward_state", BackwardState, source=BackwardStateSource()
             )
             self.backward_state_proxy.node.meta["grapharg"] = BackwardStateGraphArg()
-            self.backward_state_proxy.node.meta["example_value"] = BackwardState()
+            set_example_value(self.backward_state_proxy.node, BackwardState())
             self.backward_state_var = self.new_var()
         return self.backward_state_proxy
 
@@ -654,7 +656,7 @@ class OutputGraph:
                 before=True,
                 source=prop,
             )
-            proxy.node.meta["example_value"] = s
+            set_example_value(proxy.node, s)
             proxy.node.meta["grapharg"] = GraphArg(
                 prop,
                 s,
@@ -852,66 +854,65 @@ class OutputGraph:
 
         raise AssertionError("unreachable")
 
-    def get_attr_mutations_on_stolen_lists(
-        self,
-    ) -> Dict[str, List[AttributeMutationExisting]]:
-        attr_mutations_on_stolen_lists: Dict[str, List[AttributeMutationExisting]] = {}
+    def handle_aliases_for_stolen_lists(self, tx):
+        # If list inputs are stolen, but still needed after the function call, create aliases to keep them alive
+        alias_insts = []
+
+        needs_alias: Dict[
+            str, List[Union[VariableTracker, AttributeMutationExisting]]
+        ] = {}
         maybe_gm = self.local_scope.get("self")
         stolen_list_names = get_locals_to_steal(maybe_gm)
-        for attr_mutation in self.side_effects.store_attr_mutations.keys():
-            if (
-                not isinstance(attr_mutation, AttributeMutationExisting)
-                or not isinstance(attr_mutation.source, GetItemSource)
-                or not isinstance(attr_mutation.source.base, LocalSource)
+        for x in [
+            *tx.stack,
+            *tx.symbolic_locals.values(),
+            *self.side_effects.store_attr_mutations.keys(),
+        ]:
+            if not (
+                isinstance(x, (VariableTracker, AttributeMutationExisting))
+                and isinstance(x.source, GetItemSource)
+                and isinstance(x.source.base, LocalSource)
+                and x.source.base.local_name in stolen_list_names
             ):
                 continue
 
-            list_name = attr_mutation.source.base.local_name
-            if list_name not in stolen_list_names:
-                continue
+            stolen_name = x.source.base.local_name
+            if stolen_name not in needs_alias:
+                needs_alias[stolen_name] = []
+            needs_alias[stolen_name].append(x)
 
-            # mutation is of type `stolen_list[i].attr_name`, so we need to keep stolen_list[i] alive
-            if list_name not in attr_mutations_on_stolen_lists:
-                attr_mutations_on_stolen_lists[list_name] = []
-            attr_mutations_on_stolen_lists[list_name].append(attr_mutation)
-        return attr_mutations_on_stolen_lists
-
-    def handle_mutations_on_stolen_list_inputs(self):
-        # When mutations happen on inputs list elements, those elements must be kept alive after the function call.
-        # If the input list is stolen, we perform the mutation on aliases.
-        alias_insts = []
-        attr_mutations_on_stolen_lists = self.get_attr_mutations_on_stolen_lists()
+        visited = set()
         for arg in self.graphargs:
             if not (
                 isinstance(arg._example, list)
                 and isinstance(arg.source, LocalSource)
-                and arg.source.local_name in attr_mutations_on_stolen_lists
+                and arg.source.local_name in needs_alias
             ):
                 continue
 
             # arg is a list that will be cleared by the compiled function
             list_name = arg.source.local_name
             assert list_name in self.code_options["co_varnames"]
-            for mutation in attr_mutations_on_stolen_lists[list_name]:
-                assert mutation.source is not None
-                assert isinstance(mutation.source, GetItemSource)
-                list_idx = mutation.source.index
+            for x in needs_alias[list_name]:
+                list_idx = x.source.index
                 alias_name = self.new_var(
                     f"{list_name}_ref"
                 )  # self.new_var already adds unique id suffix
 
-                # bytecode of `alias_name = list_name[list_idx]`
-                alias_insts.extend(
-                    [
-                        create_instruction("LOAD_FAST", argval=list_name),
-                        create_instruction("LOAD_CONST", argval=list_idx),
-                        create_instruction("BINARY_SUBSCR"),
-                        create_instruction("STORE_FAST", argval=alias_name),
-                    ]
-                )
+                if list_idx not in visited:
+                    visited.add(list_idx)
+                    # bytecode of `alias_name = list_name[list_idx]`
+                    alias_insts.extend(
+                        [
+                            create_instruction("LOAD_FAST", argval=list_name),
+                            create_instruction("LOAD_CONST", argval=list_idx),
+                            create_instruction("BINARY_SUBSCR"),
+                            create_instruction("STORE_FAST", argval=alias_name),
+                        ]
+                    )
 
-                # perform mutation on alias, handled by suffix codegen
-                mutation.source = LocalSource(alias_name)
+                # operate on alias, handled by suffix codegen
+                x.source = LocalSource(alias_name)
 
         return alias_insts
 
@@ -955,7 +956,7 @@ class OutputGraph:
             self.pregraph_bytecode and self.export
         ), "export does not support pregraph_bytecode"
         prefix_insts.extend(self.pregraph_bytecode)
-        prefix_insts.extend(self.handle_mutations_on_stolen_list_inputs())
+        prefix_insts.extend(self.handle_aliases_for_stolen_lists(tx))
 
         def append_prefix_insts():
             self.add_output_instructions(prefix_insts)
@@ -1001,6 +1002,14 @@ class OutputGraph:
             # while running test_subgraphs.py
             if isinstance(v.source, LocalSource) and v.source.local_name == k:
                 continue  # no need to restore initial state
+            # Do not load variable if it is NULL.
+            if sys.version_info >= (3, 12):
+                # Continuation function will load the NULL for v.
+                if type.__instancecheck__(NullVariable, v):
+                    continue
+            else:
+                # A variable should never be NULL in < 3.12
+                assert not type.__instancecheck__(NullVariable, v)
             if v not in val_to_names:
                 val_to_names[v] = list()
             val_to_names[v].append(k)
@@ -1262,6 +1271,30 @@ class OutputGraph:
 
         with self.restore_global_state():
             compiled_fn = self.call_user_compiler(gm)
+
+        from torch.fx._lazy_graph_module import _LazyGraphModule
+
+        if isinstance(compiled_fn, _LazyGraphModule) or (
+            isinstance(getattr(compiled_fn, "__self__", None), _LazyGraphModule)
+            and compiled_fn.__name__ == "_lazy_forward"
+        ):
+            # Since dynamo will run the forward method for the GraphModule shortly
+            # anyways, it does not hurt to do the real recompilation here if
+            # this is a _LazyGraphModule. This makes it easier for dynamo to
+            # optimize a _LazyGraphModule.
+
+            lazy_gm = (
+                compiled_fn
+                if isinstance(compiled_fn, _LazyGraphModule)
+                else compiled_fn.__self__
+            )
+
+            _LazyGraphModule.force_recompile(lazy_gm)
+
+            if not isinstance(compiled_fn, _LazyGraphModule):
+                # replace compiled_fn with the real forward method
+                compiled_fn = lazy_gm.forward
+
         compiled_fn = disable(compiled_fn)
 
         counters["stats"]["unique_graphs"] += 1
@@ -2107,7 +2140,7 @@ class SubgraphTracer(fx.Tracer):
         if proxy in self.lifted_freevars:
             return self.lifted_freevars[proxy]
         new_proxy = self.create_graph_input(proxy.node.name)
-        new_proxy.node.meta["example_value"] = proxy.node.meta["example_value"]
+        set_example_value(new_proxy.node, proxy.node.meta["example_value"])
         self.lifted_freevars[proxy] = new_proxy
         if self.parent is not None and proxy.tracer != self.parent:
             self.parent.lift_tracked_freevar_to_input(proxy)

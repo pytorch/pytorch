@@ -126,6 +126,7 @@ select = [
     "PT025",
     "PT026",
     "PYI",
+    "RSE",
     "RUF008", # mutable dataclass default
     "RUF015", # access first ele in constant time
     "RUF016", # type error non-integer index
