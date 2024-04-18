@@ -7,7 +7,6 @@ import collections
 import itertools
 import os
 import re
-import sys
 import typing
 
 import torch._custom_ops as custom_ops
@@ -27,9 +26,6 @@ import numpy as np
 
 def requires_compile(fun):
     fun = unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")(fun)
-    fun = unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )(fun)
     return fun
 
 
@@ -666,7 +662,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         )
 
         self.assertExpectedInline(
-            infer_schema(g, mutated_args={"x", "w", "z"}),
+            infer_schema(g, mutates_args={"x", "w", "z"}),
             """(Tensor(a0!) x, Tensor[] y, Tensor(a2!)[] z, Tensor(a3!)?[] w) -> ()""",
         )
 
@@ -692,20 +688,6 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             infer_schema(foo)
 
-        with self.assertRaisesRegex(ValueError, "default value"):
-
-            def foo(x: Optional[Tensor] = None):
-                raise NotImplementedError()
-
-            infer_schema(foo)
-
-        with self.assertRaisesRegex(ValueError, "default value"):
-
-            def foo(x: Optional[Tensor] = None):
-                raise NotImplementedError()
-
-            infer_schema(foo)
-
         with self.assertRaisesRegex(ValueError, "unsupported"):
 
             def foo(x: Tensor) -> Tuple[Tensor, ...]:
@@ -718,7 +700,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             def foo(x: Tensor, y: int) -> Tensor:
                 raise NotImplementedError()
 
-            infer_schema(foo, mutated_args={"y"})
+            infer_schema(foo, mutates_args={"y"})
 
     def _generate_examples(self, typ):
         if typ is int:
@@ -1567,9 +1549,6 @@ def forward(self, x_1):
         )
 
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     def test_data_dependent_compile(self):
         import torch._dynamo.testing
         from torch._dynamo.utils import counters
@@ -1748,6 +1727,50 @@ dynamic shape operator: _torch_testing.numpy_nonzero.default
         qualname = f"{self.test_ns}::foo"
         lib.impl("foo", lambda x: x.sin().cos(), key)
         self._test_backward_impl_raises(qualname, key)
+
+    def test_is_functional_schema(self):
+        tests = {
+            "foo(Tensor x) -> Tensor": True,
+            "foo(Tensor(a) x) -> Tensor": True,
+            "foo(Tensor(a!) x) -> Tensor": False,
+            "foo(Tensor(a) x) -> Tensor(a)": False,
+            "foo(Tensor x) -> ()": False,
+        }
+        for schema_str, expected in tests.items():
+            res = torch._library.utils.is_functional_schema(schema_str)
+            self.assertEqual(res, expected)
+
+            from torchgen.model import FunctionSchema
+
+            schema = FunctionSchema.parse(schema_str)
+            res = torch._library.utils.is_functional_schema(schema)
+            self.assertEqual(res, expected)
+
+            schema = torch._C.parse_schema(schema_str)
+            res = torch._library.utils.is_functional_schema(schema)
+            self.assertEqual(res, expected)
+
+    def test_is_tensorlist_like_type(self):
+        tensorlists = [
+            # Tensor[]
+            torch.ops.aten.where.default._schema.returns[0].type,
+            # Tensor?[]
+            torch.ops.aten.index.Tensor._schema.arguments[1].type,
+            # Tensor[]?
+            torch._C.parse_schema("foo(Tensor[]? x) -> ()").arguments[0].type,
+            # Tensor?[]?
+            torch._C.parse_schema("foo(Tensor?[]? x) -> ()").arguments[0].type,
+        ]
+        non_tensorlists = [
+            # Tensor
+            torch.ops.aten.sin.default._schema.arguments[0].type,
+            # IntList
+            torch.ops.aten.sum.dim_IntList._schema.arguments[1].type,
+        ]
+        for a in tensorlists:
+            self.assertTrue(torch._library.utils.is_tensorlist_like_type(a))
+        for a in non_tensorlists:
+            self.assertFalse(torch._library.utils.is_tensorlist_like_type(a))
 
     def test_backward_impl_on_existing_op(self):
         lib = self.lib()
@@ -2089,7 +2112,7 @@ class MiniOpTest(CustomOpTestCaseBase):
 class TestCustomOpAPI(TestCase):
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_basic(self):
-        @torch.library.custom_op("_torch_testing::add", mutated_args=())
+        @torch.library.custom_op("_torch_testing::add", mutates_args=())
         def add(x: Tensor, y: float) -> Tensor:
             x_np = x.numpy(force=True)
             out_np = x_np + y
@@ -2114,12 +2137,157 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(z, x + y)
         self.assertTrue(cpu_called)
 
+    def test_supports_tensorlist(self):
+        @torch._library.autograd.supports_tensorlist
+        class Stack(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, xs):
+                return torch.stack(xs)
+
+            @staticmethod
+            def backward(ctx, grad):
+                return list(grad.unbind(0))
+
+        # call two applys, do a backward on the first
+        def t():
+            return torch.randn([], requires_grad=True)
+
+        xs0 = [t(), t(), t()]
+        xs1 = [t(), t(), t(), t()]
+        y0 = Stack.apply(xs0)
+        y1 = Stack.apply(xs1)
+        grads = torch.autograd.grad(y0.sum(), xs0)
+        self.assertEqual(grads, [torch.tensor(1.0) for _ in range(3)])
+
+        # call one apply, do multiple backwards
+        xs = [t(), t(), t()]
+        y = Stack.apply(xs)
+        _ = torch.autograd.grad(y.sum(), xs, retain_graph=True)
+        _ = torch.autograd.grad(y.sum(), xs, retain_graph=True)
+        grads = torch.autograd.grad(y.sum(), xs, retain_graph=True)
+        self.assertEqual(grads, [torch.tensor(1.0) for _ in range(3)])
+
+        # error: on access forward, backward directly
+        with self.assertRaisesRegex(NotImplementedError, "Function.forward directly"):
+            Stack.forward(None, xs)
+        with self.assertRaisesRegex(NotImplementedError, "Function.backward directly"):
+            Stack.backward(None, xs)
+
+        # the recursive case
+        @torch._library.autograd.supports_tensorlist
+        class Foo(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, xs):
+                if len(xs) > 0:
+                    return Foo.apply(xs[1:])
+                ctx.len_xs = len(xs)
+                return x.sin()
+
+            @staticmethod
+            def backward(ctx, grad):
+                result = [None] * len_xs
+                result[-1] = grad.cos()
+                return result
+
+        with self.assertRaisesRegex(NotImplementedError, "Recursive call"):
+            Foo.apply(xs)
+
+        # recursive on backward
+        @torch._library.autograd.supports_tensorlist
+        class Bar(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, xs):
+                return [xs[i] + i for i in range(len(xs))]
+
+            @staticmethod
+            def backward(ctx, grads):
+                f1 = Bar.apply(grads[:2])
+                f2 = Bar.apply(grads[2:])
+                return f1 + f2
+
+        xs = [torch.tensor(0.0, requires_grad=True) for _ in range(5)]
+        ys = Bar.apply(xs)
+        sum(ys).backward()
+        result = [xi.grad for xi in xs]
+        self.assertEqual(result, torch.tensor([1.0, 2, 1, 2, 3]).unbind(0))
+
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
+    def test_default_values(self):
+        defaults = []
+
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def f(
+            x: Tensor,
+            a: Optional[int] = None,
+            b: float = 3.14,
+            c: bool = True,
+            d: int = 3,
+        ) -> Tensor:
+            defaults.extend([a, b, c, d])
+            return x.clone()
+
+        x = torch.randn(3)
+        f(x)
+        self.assertEqual(defaults, [None, 3.14, True, 3])
+
+    def test_mutated_error(self):
+        with self.assertRaisesRegex(
+            ValueError, r".*{'y'} in mutates_args were not found"
+        ):
+
+            @torch.library.custom_op(
+                "_torch_testing::numpy_sin_inplace",
+                mutates_args={"y"},
+                device_types="cpu",
+            )
+            def numpy_sin_inplace(x: Tensor) -> None:
+                x_np = x.numpy()
+                np.sin(x_np, out=x_np)
+
+    def test_mutated(self):
+        @torch.library.custom_op(
+            "_torch_testing::numpy_sin_inplace", mutates_args={"x"}, device_types="cpu"
+        )
+        def numpy_sin_inplace(x: Tensor) -> None:
+            x_np = x.numpy()
+            np.sin(x_np, out=x_np)
+
+        x = torch.randn(3)
+        version = x._version
+        expected = x.sin()
+        numpy_sin_inplace(x)
+        self.assertEqual(x, expected)
+        self.assertGreater(x._version, version)
+
+        @torch.library.custom_op("_torch_testing::f", mutates_args={"y", "z", "w"})
+        def f(
+            x: Tensor, y: Optional[Tensor], z: List[Tensor], w: List[Optional[Tensor]]
+        ) -> None:
+            return
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        z = [torch.randn(3), torch.randn(3)]
+        w = [torch.randn(3), None, torch.randn(3)]
+        initial_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y, z, w)
+        )
+        f(x, y, z, w)
+        new_versions = pytree.tree_map_only(
+            torch.Tensor, lambda x: x._version, (x, y, z, w)
+        )
+
+        self.assertEqual(initial_versions[0], new_versions[0])
+        initial_versions, _ = pytree.tree_flatten(initial_versions[1:])
+        new_versions, _ = pytree.tree_flatten(new_versions[1:])
+        for prev, after in zip(initial_versions, new_versions):
+            if prev is None and after is None:
+                continue
+            self.assertGreater(after, prev)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_fake(self):
-        @torch.library.custom_op("_torch_testing::add", mutated_args=())
+        @torch.library.custom_op("_torch_testing::add", mutates_args=())
         def add(x: Tensor, y: float) -> Tensor:
             x_np = x.cpu().numpy()
             out_np = x_np + y
@@ -2174,14 +2342,11 @@ Please use `add.register_fake` to add an fake impl.""",
 
     @skipIfTorchDynamo("recursive dynamo")
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work on windows")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
     def test_compile(self):
         called_impl = False
         called_abstract = False
 
-        @torch.library.custom_op("_torch_testing::linear", mutated_args=())
+        @torch.library.custom_op("_torch_testing::linear", mutates_args=())
         def custom_linear(x: Tensor, weight: Tensor, bias: Tensor) -> Tensor:
             nonlocal called_impl
             called_impl = True
@@ -2214,8 +2379,19 @@ Please use `add.register_fake` to add an fake impl.""",
         self.assertTrue(called_abstract)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_register_autograd_error_cases(self):
+        @torch.library.custom_op("_torch_testing::g", mutates_args=())
+        def g(x: Tensor) -> Tensor:
+            return x.sin()
+
+        x = torch.randn(3, requires_grad=True)
+        y = g(x)
+        with self.assertRaisesRegex(RuntimeError, "no autograd formula"):
+            y.sum().backward()
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_replacement(self):
-        @torch.library.custom_op("_torch_testing::f", mutated_args=())
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
         def f(x: Tensor) -> Tensor:
             return x.sin()
 
@@ -2223,7 +2399,7 @@ Please use `add.register_fake` to add an fake impl.""",
         y = f(x)
         self.assertEqual(y, x.sin())
 
-        @torch.library.custom_op("_torch_testing::f", mutated_args=())
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
         def f(x: Tensor) -> Tensor:
             return x.cos()
 
@@ -2237,7 +2413,7 @@ Please use `add.register_fake` to add an fake impl.""",
         cuda_call_count = 0
 
         @torch.library.custom_op(
-            "_torch_testing::f", mutated_args=(), device_types="cpu"
+            "_torch_testing::f", mutates_args=(), device_types="cpu"
         )
         def f(x: Tensor) -> Tensor:
             nonlocal cpu_call_count
@@ -2270,7 +2446,7 @@ Please use `add.register_fake` to add an fake impl.""",
     @unittest.skipIf(not TEST_CUDA, "requires CUDA")
     def test_multi_types(self):
         @torch.library.custom_op(
-            "_torch_testing::f", mutated_args=(), device_types=("cpu", "cuda")
+            "_torch_testing::f", mutates_args=(), device_types=("cpu", "cuda")
         )
         def f(x: Tensor) -> Tensor:
             x_np = x.cpu().numpy()
@@ -2284,8 +2460,32 @@ Please use `add.register_fake` to add an fake impl.""",
         y = f(x)
         self.assertEqual(y, x.sin())
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_overloading(self):
+        called_f = 0
+        called_f1 = 0
+
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            nonlocal called_f
+            called_f += 1
+            return x.clone()
+
+        x = torch.randn(2, 3)
+        torch.ops._torch_testing.f(x)
+        self.assertEqual(called_f, 1)
+
+        @torch.library.custom_op("_torch_testing::f.overload", mutates_args=())
+        def f1(x: Tensor, y: Tensor) -> Tensor:
+            nonlocal called_f1
+            called_f1 += 1
+            return x.clone()
+
+        torch.ops._torch_testing.f(x, x)
+        self.assertEqual(called_f1, 1)
+
     def test_disallows_output_aliasing(self):
-        @torch.library.custom_op("_torch_testing::f", mutated_args=())
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
         def f(x: Tensor) -> Tensor:
             return x.view(-1)
 
@@ -2293,13 +2493,25 @@ Please use `add.register_fake` to add an fake impl.""",
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             f(x)
 
-        @torch.library.custom_op("_torch_testing::f", mutated_args=())
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
         def f(x: Tensor) -> Tensor:
             return x
 
         x = torch.randn(3)
         with self.assertRaisesRegex(RuntimeError, "may not alias"):
             f(x)
+
+        @torch.library.custom_op(
+            "_torch_testing::f", mutates_args={"x"}, device_types="cpu"
+        )
+        def numpy_sin_inplace(x: Tensor) -> Tensor:
+            x_np = x.numpy()
+            np.sin(x_np, out=x_np)
+            return x
+
+        x = torch.randn(3)
+        with self.assertRaisesRegex(RuntimeError, "may not alias"):
+            numpy_sin_inplace(x)
 
 
 class MiniOpTestOther(CustomOpTestCaseBase):

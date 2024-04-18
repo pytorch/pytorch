@@ -27,7 +27,6 @@ from torch.distributed.tensor.parallel import (
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
-    run_with_native_funcol,
     skip_if_lt_x_gpu,
     skip_if_rocm,
 )
@@ -276,7 +275,6 @@ class ReplicateTest(MultiProcessTestCase):
         self.assertEqual(counters["inductor"]["ddp_buckets"], 3)
         return code
 
-    @run_with_native_funcol
     def test_bucketing_coalesced_op(self):
         torch._inductor.config._fuse_ddp_communication_passes = [
             "fuse_ddp_with_coalesced_op",
@@ -309,7 +307,6 @@ class ReplicateTest(MultiProcessTestCase):
 
         fc.run(code)
 
-    @run_with_native_funcol
     def test_bucketing_concat_op(self):
         torch._inductor.config._fuse_ddp_communication_passes = [
             "fuse_ddp_with_concat_op",

@@ -205,7 +205,6 @@ def dcp_to_torch_save(
         To avoid OOM, it's recommended to only run this function on a single rank.
     """
     sd: STATE_DICT_TYPE = {}
-
     _load_state_dict(
         sd,
         storage_reader=FileSystemReader(dcp_checkpoint_dir),
@@ -263,13 +262,15 @@ if __name__ == "__main__":
     checkpoint_missing_warning = (
         f"No checkpoint found at {args.src}. Skipping conversion."
     )
-    if args.mode == FormatMode.TORCH_TO_DCP:
+    if args.mode == FormatMode.TORCH_TO_DCP.value:
         if os.path.isfile(args.src):
             torch_save_to_dcp(args.src, args.dst)
         else:
             print(checkpoint_missing_warning)
-    elif args.mode == FormatMode.DCP_TO_TORCH:
+    elif args.mode == FormatMode.DCP_TO_TORCH.value:
         if os.path.isdir(args.src):
             dcp_to_torch_save(args.src, args.dst)
         else:
             print(checkpoint_missing_warning)
+    else:
+        raise ValueError(f"Unknown conversion mode: {args.mode}")

@@ -242,9 +242,11 @@ class _DDPSink(Function):
         # None and are not filled with zeros.
         ctx.set_materialize_grads(False)
         ctx.ddp_weakref = ddp_weakref
-        ret = tuple(
-            inp.clone() if isinstance(inp, torch.Tensor) else inp for inp in inputs
-        )
+        ret = inputs
+        if ddp_weakref()._ddp_sink_clone:
+            ret = tuple(
+                inp.clone() if isinstance(inp, torch.Tensor) else inp for inp in inputs
+            )
         return ret
 
     @staticmethod
@@ -895,11 +897,15 @@ class DistributedDataParallel(Module, Joinable):
             torch._dynamo.trace_rules.LEGACY_MOD_INLINELIST.add(
                 "torch.nn.parallel.distributed"
             )
+            torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
         self._force_to_disable_cpp_reducer = (
             optimize_ddp == "python_reducer_without_compiled_forward"
         )
         if self._use_python_reducer:
             self._register_accum_grad_hook()
+
+        # Whether or not DDPSink performs a clone.
+        self._ddp_sink_clone = True
 
     def _register_accum_grad_hook(self):
         import torch.distributed._functional_collectives as fcol
@@ -924,6 +930,8 @@ class DistributedDataParallel(Module, Joinable):
                 param.grad.copy_(gradient)
 
         for index, param in enumerate(self._module_parameters):
+            if not param.requires_grad:
+                continue
             self._accum_grad_hooks.append(
                 param.register_post_accumulate_grad_hook(
                     functools.partial(
@@ -951,7 +959,7 @@ class DistributedDataParallel(Module, Joinable):
         # 1. Create gradient buffer
         device = torch.device("cpu") if device_ids is None else device_ids[0]
         self._delay_grad_buffer = torch.zeros(
-            sum([p.numel() for p in self._delay_all_reduce_params]),
+            sum(p.numel() for p in self._delay_all_reduce_params),
             device=device,
         )
 
@@ -1458,9 +1466,9 @@ class DistributedDataParallel(Module, Joinable):
         self._lazy_init_ran = True
 
     def _should_disable_cpp_reducer(self) -> bool:
-        return self._use_python_reducer and (
-            torch._utils.is_compiling() or self._force_to_disable_cpp_reducer
-        )
+        if torch._utils.is_compiling() and self._use_python_reducer:
+            self._force_to_disable_cpp_reducer = True
+        return self._use_python_reducer and self._force_to_disable_cpp_reducer
 
     def _pre_forward(self, *inputs, **kwargs):
         if self._should_disable_cpp_reducer():
@@ -2361,3 +2369,16 @@ class DistributedDataParallel(Module, Joinable):
         if not _rank_not_in_group(new_process_group):
             self.process_group = new_process_group
             self.reducer._update_process_group(new_process_group)
+
+    def _set_ddp_sink_clone(self, val: bool):
+        """
+        Sets whether or not DDPSink should clone the output tensors or not.
+        The default is True since if the loss is modified in place we run
+        into the view is modified in-place error.
+
+        Although, cloning the tensors can add significant memory and
+        performance hit if the number and size of tensors are large. As
+        a result, this can be set to False if you are not modifying the
+        loss in place.
+        """
+        self._ddp_sink_clone = val

@@ -5,20 +5,20 @@
 # LICENSE file in the root directory of this source tree.
 
 import itertools
-import torch
-from functorch import vmap
-import torch.utils._pytree as pytree
-from functorch_additional_op_db import additional_op_db
-from torch.testing._internal.common_methods_invocations import DecorateInfo
-from torch.testing._internal.common_methods_invocations import op_db
-from torch.testing._internal.common_modules import module_db
 import os
 import unittest
-from torch.testing._internal.common_device_type import toleranceOverride
-from torch.testing._internal.autograd_function_db import autograd_function_db
 from collections import namedtuple
 
-IS_FBCODE = os.getenv('FUNCTORCH_TEST_FBCODE') == '1'
+import torch
+import torch.utils._pytree as pytree
+from functorch import vmap
+from functorch_additional_op_db import additional_op_db
+from torch.testing._internal.autograd_function_db import autograd_function_db
+from torch.testing._internal.common_device_type import toleranceOverride
+from torch.testing._internal.common_methods_invocations import DecorateInfo, op_db
+from torch.testing._internal.common_modules import module_db
+
+IS_FBCODE = os.getenv("FUNCTORCH_TEST_FBCODE") == "1"
 
 
 def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
@@ -28,7 +28,10 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
         flat_args, args_spec = pytree.tree_flatten(batched_args)
         flat_dims, dims_spec = pytree.tree_flatten(in_dims)
         assert args_spec == dims_spec
-        new_args = [a.select(in_dim, idx) if in_dim is not None else a for a, in_dim in zip(flat_args, flat_dims)]
+        new_args = [
+            a.select(in_dim, idx) if in_dim is not None else a
+            for a, in_dim in zip(flat_args, flat_dims)
+        ]
         out = op(*pytree.tree_unflatten(new_args, args_spec), **kwarg_values)
         flat_out, out_spec = pytree.tree_flatten(out)
         outs.append(flat_out)
@@ -40,7 +43,17 @@ def loop(op, in_dims, out_dim, batch_size, *batched_args, **kwarg_values):
 
 # Like loop helper function but for 2 levels of vmap. If we need more levels than this, probably possible
 # to generalize the loops function but it seemed too complicated for this
-def loop2(op, in_dims1, in_dims2, out_dim1, out_dim2, batch_size1, batch_size2, *batched_args, **kwarg_values):
+def loop2(
+    op,
+    in_dims1,
+    in_dims2,
+    out_dim1,
+    out_dim2,
+    batch_size1,
+    batch_size2,
+    *batched_args,
+    **kwarg_values,
+):
     outs = []
     flat_args, args_spec = pytree.tree_flatten(batched_args)
     flat_dims1, dims_spec1 = pytree.tree_flatten(in_dims1)
@@ -50,9 +63,15 @@ def loop2(op, in_dims1, in_dims2, out_dim1, out_dim2, batch_size1, batch_size2, 
     assert len(flat_dims1) == len(flat_dims2)
     for idx1 in range(batch_size1):
         out_split = []
-        arg_split = [a.select(in_dim1, idx1) if in_dim1 is not None else a for a, in_dim1 in zip(flat_args, flat_dims1)]
+        arg_split = [
+            a.select(in_dim1, idx1) if in_dim1 is not None else a
+            for a, in_dim1 in zip(flat_args, flat_dims1)
+        ]
         for idx2 in range(batch_size2):
-            new_args = [a.select(in_dim, idx2) if in_dim is not None else a for a, in_dim in zip(arg_split, flat_dims2)]
+            new_args = [
+                a.select(in_dim, idx2) if in_dim is not None else a
+                for a, in_dim in zip(arg_split, flat_dims2)
+            ]
             out = op(*pytree.tree_unflatten(new_args, args_spec), **kwarg_values)
             out_split.append(out)
         outs.append(out_split)
@@ -103,6 +122,7 @@ def memoize(fn):
         if args not in memo:
             memo[args] = fn(*args)
         return memo[args]
+
     return wrapped
 
 
@@ -123,10 +143,13 @@ def get_bdim_choices(num_tensors):
     assert choices[-1] == (None,) * num_tensors
     return tuple(choices[:-1])
 
+
 # NB: This is O(2 ** num_tensors).
 # num_tensors ranges from 1 to 10, with 2-4 being most common.
 # Try not to extravagate it if you're modifying it.
-def get_bdim_choices_batch_norm(num_tensors, _, running_mean=None, running_var=None, *args):
+def get_bdim_choices_batch_norm(
+    num_tensors, _, running_mean=None, running_var=None, *args
+):
     choices = []
     options = (-1, None)
 
@@ -176,13 +199,20 @@ def construct_in_dims(bdim_choice_for_tensors, is_tensors):
 
 
 def is_batch_norm_training(op_name, kwarg_values):
-    batch_norm_fns = ("nn.functional.batch_norm", "nn.functional.instance_norm")  # instance norm calls batch norm
+    batch_norm_fns = (
+        "nn.functional.batch_norm",
+        "nn.functional.instance_norm",
+    )  # instance norm calls batch norm
     if op_name not in batch_norm_fns:
         return False
 
     # batch norm and instance norm require the value to be a plain bool
-    default_training = op_name == "nn.functional.instance_norm"  # instance norm defaults to training, batch norm doesn't
-    is_training = tuple(arg for arg in tuple(kwarg_values.values()) if isinstance(arg, bool))
+    default_training = (
+        op_name == "nn.functional.instance_norm"
+    )  # instance norm defaults to training, batch norm doesn't
+    is_training = tuple(
+        arg for arg in tuple(kwarg_values.values()) if isinstance(arg, bool)
+    )
     if len(is_training) == 0:
         return default_training
     else:
@@ -190,7 +220,9 @@ def is_batch_norm_training(op_name, kwarg_values):
         return is_training[0]
 
 
-def generate_vmap_inputs(arg_values, kwarg_values, is_batch_norm_and_training=False, batch_size=2):
+def generate_vmap_inputs(
+    arg_values, kwarg_values, is_batch_norm_and_training=False, batch_size=2
+):
     flat_args, arg_spec = pytree.tree_flatten(tuple(arg_values))
     is_tensors = [isinstance(a, torch.Tensor) for a in flat_args]
     num_tensors = sum(is_tensors)
@@ -198,8 +230,11 @@ def generate_vmap_inputs(arg_values, kwarg_values, is_batch_norm_and_training=Fa
     # batch it since running_mean/var will be seen as unbatched tensors
     if num_tensors == 1 and is_batch_norm_and_training:
         return
-    bdim_choices = get_bdim_choices_batch_norm(
-        num_tensors, *arg_values) if is_batch_norm_and_training else get_bdim_choices(num_tensors)
+    bdim_choices = (
+        get_bdim_choices_batch_norm(num_tensors, *arg_values)
+        if is_batch_norm_and_training
+        else get_bdim_choices(num_tensors)
+    )
 
     @memoize
     def get_batched_arg(arg, bdim):
@@ -211,8 +246,10 @@ def generate_vmap_inputs(arg_values, kwarg_values, is_batch_norm_and_training=Fa
     for bdim_choice in bdim_choices:
         flat_in_dims = construct_in_dims(bdim_choice, is_tensors)
 
-        flat_batched_args = tuple(arg if in_dim is None else get_batched_arg(arg, in_dim)
-                                  for arg, in_dim in zip(flat_args, flat_in_dims))
+        flat_batched_args = tuple(
+            arg if in_dim is None else get_batched_arg(arg, in_dim)
+            for arg, in_dim in zip(flat_args, flat_in_dims)
+        )
         batched_args = pytree.tree_unflatten(flat_batched_args, arg_spec)
         in_dims = pytree.tree_unflatten(flat_in_dims, arg_spec)
         yield batched_args, in_dims, kwarg_values
@@ -223,13 +260,19 @@ def clone_if_tensor(x):
         return x.clone()
     return x
 
+
 # Helper function to compare output of `vmap` against the
 # `for-loop` version.
 def _compute_quantities_for_vmap_test(
-        op, orig_batched_args, orig_kwarg_values, in_dims,
-        out_dim, batch_size, compute_loop_out=True,
-        clone_inputs=False):
-
+    op,
+    orig_batched_args,
+    orig_kwarg_values,
+    in_dims,
+    out_dim,
+    batch_size,
+    compute_loop_out=True,
+    clone_inputs=False,
+):
     def maybe_clone_inputs():
         if clone_inputs:
             batched_args = pytree.tree_map(clone_if_tensor, orig_batched_args)
@@ -251,7 +294,9 @@ def _compute_quantities_for_vmap_test(
     # t = make_fx(vmap(f, in_dims=in_dims, out_dims=out_dim))(*batched_args, **kwarg_values)
     # print(in_dims, [arg.shape for arg in batched_args], kwarg_values)
     batched_args, kwarg_values = maybe_clone_inputs()
-    batched_out = vmap(op, in_dims=in_dims, out_dims=out_dim)(*batched_args, **kwarg_values)
+    batched_out = vmap(op, in_dims=in_dims, out_dims=out_dim)(
+        *batched_args, **kwarg_values
+    )
 
     # Tests case where we dispatch to a batching rule with no bdims
     # This should be handled by autogenerated plumbing. For vmap support
@@ -270,7 +315,9 @@ def _compute_quantities_for_vmap_test(
     inner_in_dims = (0,) + pytree.tree_map(lambda x: None, in_dims)
     outer_in_dims = (0,) + in_dims
     batched_args, kwarg_values = maybe_clone_inputs()
-    vmapvmap_output = vmap(vmap(f, inner_in_dims), outer_in_dims)(dummy, *batched_args, **kwarg_values)
+    vmapvmap_output = vmap(vmap(f, inner_in_dims), outer_in_dims)(
+        dummy, *batched_args, **kwarg_values
+    )
 
     yield (batched_out, loop_out, vmapvmap_output, vmapvmap_expected)
 
@@ -278,16 +325,36 @@ def _compute_quantities_for_vmap_test(
 # Function with more friendly return types
 # compared to `_compute_quantities_for_vmap_test`
 def compute_quantities_for_vmap_test(
-        op, orig_batched_args, orig_kwarg_values, in_dims,
-        out_dim=0, batch_size=2, compute_loop_out=True,
-        clone_inputs=False):
-    for quantities in _compute_quantities_for_vmap_test(op, orig_batched_args, orig_kwarg_values, in_dims,
-                                                        out_dim, batch_size, compute_loop_out, clone_inputs):
+    op,
+    orig_batched_args,
+    orig_kwarg_values,
+    in_dims,
+    out_dim=0,
+    batch_size=2,
+    compute_loop_out=True,
+    clone_inputs=False,
+):
+    for quantities in _compute_quantities_for_vmap_test(
+        op,
+        orig_batched_args,
+        orig_kwarg_values,
+        in_dims,
+        out_dim,
+        batch_size,
+        compute_loop_out,
+        clone_inputs,
+    ):
         yield (quantities[0], quantities[1])
         yield (quantities[2], quantities[3])
 
 
-def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, is_batch_norm_and_training=False, compute_loop_out=True):
+def get_fallback_and_vmap_exhaustive(
+    op,
+    arg_values,
+    kwarg_values,
+    is_batch_norm_and_training=False,
+    compute_loop_out=True,
+):
     out_dim = 0
     batch_size = 2
 
@@ -303,60 +370,82 @@ def get_fallback_and_vmap_exhaustive(op, arg_values, kwarg_values, is_batch_norm
     # expand it based on the `out_dim` and `batch_size`.
     expected_unbatched = op(*arg_values, **kwarg_values)
     expected_batched = pytree.tree_map(make_batched, expected_unbatched)
-    generator = generate_vmap_inputs(arg_values, kwarg_values, is_batch_norm_and_training)
+    generator = generate_vmap_inputs(
+        arg_values, kwarg_values, is_batch_norm_and_training
+    )
     for batched_args, in_dims, kwarg_values in generator:
         for quantities in _compute_quantities_for_vmap_test(
-                op, batched_args, kwarg_values, in_dims, out_dim, batch_size,
-                compute_loop_out=False):
+            op,
+            batched_args,
+            kwarg_values,
+            in_dims,
+            out_dim,
+            batch_size,
+            compute_loop_out=False,
+        ):
             assert quantities[1] is None
             yield (quantities[0], expected_batched)
             yield (quantities[2], quantities[3])
 
 
 def opinfo_in_dict(opinfo, d):
-    return (opinfo.name in d) or (f'{opinfo.name}.{opinfo.variant_test_name}' in d)
+    return (opinfo.name in d) or (f"{opinfo.name}.{opinfo.variant_test_name}" in d)
 
 
-DecorateMeta = namedtuple("DecorateMeta", [
-    "op_name",
-    "variant_name",
-    "decorator",
-    "device_type",
-    "dtypes",
-])
+DecorateMeta = namedtuple(
+    "DecorateMeta",
+    [
+        "op_name",
+        "variant_name",
+        "decorator",
+        "device_type",
+        "dtypes",
+    ],
+)
 
 
-def decorate(op_name, variant_name='', *, decorator=None, device_type=None, dtypes=None):
+def decorate(
+    op_name, variant_name="", *, decorator=None, device_type=None, dtypes=None
+):
     assert decorator is not None
-    return DecorateMeta(op_name=op_name,
-                        variant_name=variant_name,
-                        decorator=decorator,
-                        device_type=device_type,
-                        dtypes=dtypes)
+    return DecorateMeta(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=decorator,
+        device_type=device_type,
+        dtypes=dtypes,
+    )
 
 
-def xfail(op_name, variant_name='', *, device_type=None, dtypes=None):
-    return decorate(op_name=op_name,
-                    variant_name=variant_name,
-                    decorator=unittest.expectedFailure,
-                    device_type=device_type,
-                    dtypes=dtypes)
+def xfail(op_name, variant_name="", *, device_type=None, dtypes=None):
+    return decorate(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=unittest.expectedFailure,
+        device_type=device_type,
+        dtypes=dtypes,
+    )
 
 
-def skip(op_name, variant_name='', *, device_type=None, dtypes=None):
-    return decorate(op_name=op_name,
-                    variant_name=variant_name,
-                    decorator=unittest.skip("Skipped!"),
-                    device_type=device_type,
-                    dtypes=dtypes)
+def skip(op_name, variant_name="", *, device_type=None, dtypes=None):
+    return decorate(
+        op_name=op_name,
+        variant_name=variant_name,
+        decorator=unittest.skip("Skipped!"),
+        device_type=device_type,
+        dtypes=dtypes,
+    )
 
 
 def skipOps(test_case_name, base_test_name, to_skip):
     all_opinfos = op_db + additional_op_db + autograd_function_db
     for decorate_meta in to_skip:
-        matching_opinfos = [o for o in all_opinfos
-                            if o.name == decorate_meta.op_name and
-                            o.variant_test_name == decorate_meta.variant_name]
+        matching_opinfos = [
+            o
+            for o in all_opinfos
+            if o.name == decorate_meta.op_name
+            and o.variant_test_name == decorate_meta.variant_name
+        ]
         assert len(matching_opinfos) > 0, f"Couldn't find OpInfo for {decorate_meta}"
         assert len(matching_opinfos) == 1, (
             "OpInfos should be uniquely determined by their (name, variant_name). "
@@ -364,39 +453,55 @@ def skipOps(test_case_name, base_test_name, to_skip):
         )
         opinfo = matching_opinfos[0]
         decorators = list(opinfo.decorators)
-        new_decorator = DecorateInfo(decorate_meta.decorator,
-                                     test_case_name, base_test_name,
-                                     device_type=decorate_meta.device_type,
-                                     dtypes=decorate_meta.dtypes)
+        new_decorator = DecorateInfo(
+            decorate_meta.decorator,
+            test_case_name,
+            base_test_name,
+            device_type=decorate_meta.device_type,
+            dtypes=decorate_meta.dtypes,
+        )
         decorators.append(new_decorator)
         opinfo.decorators = tuple(decorators)
 
     # This decorator doesn't modify fn in any way
     def wrapped(fn):
         return fn
+
     return wrapped
 
 
 def decorateForModules(decorator, module_classes, device_type=None, dtypes=None):
-
     # This decorator doesn't modify fn in any way
-    def wrapped(fn, module_classes=module_classes, decorator=decorator,
-                device_type=device_type, dtypes=dtypes):
-        name_parts = fn.__qualname__.split('.')
-        assert len(name_parts) == 2, "Decorator only applies to a test function of a test class"
+    def wrapped(
+        fn,
+        module_classes=module_classes,
+        decorator=decorator,
+        device_type=device_type,
+        dtypes=dtypes,
+    ):
+        name_parts = fn.__qualname__.split(".")
+        assert (
+            len(name_parts) == 2
+        ), "Decorator only applies to a test function of a test class"
         test_case_name, base_test_name = name_parts
         for module_cls in module_classes:
             matching_module_infos = [m for m in module_db if m.module_cls == module_cls]
-            assert len(matching_module_infos) == 1, f"Couldn't find single ModuleInfo for {module_cls}"
+            assert (
+                len(matching_module_infos) == 1
+            ), f"Couldn't find single ModuleInfo for {module_cls}"
             module_info = matching_module_infos[0]
             decorators = list(module_info.decorators)
-            new_decorator = DecorateInfo(decorator,
-                                         test_case_name, base_test_name,
-                                         device_type=device_type,
-                                         dtypes=dtypes)
+            new_decorator = DecorateInfo(
+                decorator,
+                test_case_name,
+                base_test_name,
+                device_type=device_type,
+                dtypes=dtypes,
+            )
             decorators.append(new_decorator)
             module_info.decorators = tuple(decorators)
         return fn
+
     return wrapped
 
 
@@ -405,6 +510,7 @@ def expectedFailureIf(condition):
         if condition:
             return unittest.expectedFailure(fn)
         return fn
+
     return decorator
 
 
@@ -413,26 +519,35 @@ def tol2(op_name, variant_name, override_dct, *, device_type=None):
 
 
 def tol1(op_name, override_dct, *, device_type=None):
-    return tol2(op_name, '', override_dct, device_type=device_type)
+    return tol2(op_name, "", override_dct, device_type=device_type)
 
 
 def opsToleranceOverride(test_case_name, base_test_name, overrides):
     all_opinfos = op_db + additional_op_db
     for override in overrides:
         op_name, variant_name, override, device_type = override
-        matching_opinfos = [o for o in all_opinfos
-                            if o.name == op_name and o.variant_test_name == variant_name]
+        matching_opinfos = [
+            o
+            for o in all_opinfos
+            if o.name == op_name and o.variant_test_name == variant_name
+        ]
         assert len(matching_opinfos) == 1, f"Couldn't find OpInfo for {override}"
         opinfo = matching_opinfos[0]
         decorators = list(opinfo.decorators)
-        decorators.append(DecorateInfo(
-            toleranceOverride(override),
-            test_case_name, base_test_name, device_type=device_type))
+        decorators.append(
+            DecorateInfo(
+                toleranceOverride(override),
+                test_case_name,
+                base_test_name,
+                device_type=device_type,
+            )
+        )
         opinfo.decorators = tuple(decorators)
 
     # This decorator doesn't modify fn in any way
     def wrapped(fn):
         return fn
+
     return wrapped
 
 

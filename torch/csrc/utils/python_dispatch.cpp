@@ -721,6 +721,8 @@ void initDispatchBindings(PyObject* module) {
       c10::impl::ForceDispatchKeyGuard,
       c10::DispatchKeySet,
       c10::DispatchKeySet>(m, "_ForceDispatchKeyGuard");
+  py_context_manager<c10::impl::ForceDispatchKeyGuard>(
+      m, "_PreserveDispatchKeyGuard");
   py_context_manager<c10::impl::IncludeDispatchKeyGuard, c10::DispatchKey>(
       m, "_IncludeDispatchKeyGuard");
   py_context_manager<c10::impl::ExcludeDispatchKeyGuard, c10::DispatchKeySet>(
@@ -730,6 +732,8 @@ void initDispatchBindings(PyObject* module) {
 
   py_context_manager_DEPRECATED<at::AutoDispatchBelowAutograd>(
       m, "_AutoDispatchBelowAutograd");
+  py_context_manager<at::AutoDispatchBelowADInplaceOrView>(
+      m, "_AutoDispatchBelowADInplaceOrView");
 
   // Prints out the name of every operator that has a kernel registered to the
   // Dispatcher under [dispatch_key]. If no arguments are specified, it'll print

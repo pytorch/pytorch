@@ -143,7 +143,9 @@ class _KinetoProfile:
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
             use_mtia=(ProfilerActivity.MTIA in self.activities),
-            use_device=None,
+            use_device=self.use_device
+            if (ProfilerActivity.PrivateUse1 in self.activities)
+            else None,
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
@@ -735,6 +737,11 @@ class profile(_KinetoProfile):
         if action_list:
             for action in action_list:
                 action()
+
+    def _stats(self) -> Optional[prof._ProfilerStats]:
+        if self.profiler is None:
+            return None
+        return self.profiler._stats
 
 
 class ExecutionTraceObserver(_ITraceObserver):

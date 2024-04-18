@@ -82,6 +82,8 @@ class _ReplicateState(_State):
         device_mesh = kwargs.get("device_mesh", None)
         self.module = module
         ignored_params = {p for m in ignored_modules for p in m.parameters()}
+        from torch.distributed.tensor.parallel.ddp import _localize_dtensor
+        _localize_dtensor(module)
         self._collect_params(module, ignored_modules, ignored_params)
 
         if "device_id" in kwargs:
@@ -205,7 +207,6 @@ def replicate(
 
     state = cast(_ReplicateState, replicate.state(module))
     module.register_forward_pre_hook(state.forward_pre_hook, with_kwargs=True)
-    module.register_forward_hook(state.forward_post_hook)  # type: ignore[arg-type]
     device_mesh = kwargs.get("device_mesh", None)
     if device_mesh is not None:
         from torch.distributed.device_mesh import _mesh_resources
@@ -217,9 +218,12 @@ def replicate(
             #
             # This won't conflict with what is done in DDP class as the module
             # replicate is going to pass is NOT the original module.
-            from torch.distributed.tensor.parallel.ddp import _pre_dp_module_transform
+            from torch.distributed.tensor.parallel.ddp import _reconstruct_dtensor
+            from torch.distributed.tensor.parallel.ddp import _localize_dtensor
+            module.register_forward_pre_hook(_reconstruct_dtensor)
+            module.register_forward_hook(_localize_dtensor)
+    module.register_forward_hook(state.forward_post_hook)  # type: ignore[arg-type]
 
-            _pre_dp_module_transform(module)
     state.record_init_args(module, ignored_modules, **kwargs)
 
     # Place DDP leftmost for highest priority in the method resolution order
