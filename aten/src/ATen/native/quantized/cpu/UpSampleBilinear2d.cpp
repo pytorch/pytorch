@@ -22,7 +22,7 @@ namespace at {
 namespace native {
 namespace {
 
-// pre calcuate interpolation params on width
+// pre calculate interpolation params on width
 struct UpsampleBilinearParamW {
   int64_t w1, w1p;
   float w0lambda, w1lambda;
@@ -48,14 +48,14 @@ static void upsample_bilinear2d_out_frame(
     bool align_corners,
     c10::optional<double> scales_h,
     c10::optional<double> scales_w) {
-  auto* idata = static_cast<scalar_t*>(input.data_ptr());
+  auto* idata = static_cast<const scalar_t*>(input.const_data_ptr());
   auto* odata = static_cast<scalar_t*>(output.data_ptr());
 
   channels = channels * nbatch;
   if (channels == 0 || output_height == 0 || output_width == 0) {
     return;
   }
-  auto* i_p = reinterpret_cast<typename scalar_t::underlying*>(idata);
+  auto* i_p = reinterpret_cast<const typename scalar_t::underlying*>(idata);
   auto* o_p = reinterpret_cast<typename scalar_t::underlying*>(odata);
 
   // special case: just copy

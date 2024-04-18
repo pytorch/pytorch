@@ -290,71 +290,6 @@ static void THPStorage_subclass_dealloc(PyObject* self) {
   Py_DECREF(type);
 }
 
-c10::intrusive_ptr<c10::StorageImpl> make_storage_impl(
-    c10::StorageImpl::use_byte_size_t use_byte_size,
-    c10::SymInt size_bytes,
-    c10::Allocator* allocator,
-    bool resizable,
-    c10::optional<int64_t> allocator_opt,
-    c10::optional<at::Device> device_opt) {
-  at::OptionalDeviceGuard device_guard;
-  // This will be non-nullptr only when there is a custom StorageImpl
-  // constructor for the given device
-  c10::StorageImplCreateHelper fptr = nullptr;
-  // For directly passing allocator scenarios, only c10::StorageImpl objects can
-  // be created. If you need to create a storageimpl object of a subclass, you
-  // need to pass in the device information.
-  if (allocator_opt.has_value()) {
-    // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    allocator = reinterpret_cast<c10::Allocator*>(allocator_opt.value());
-  } else if (device_opt.has_value()) {
-    at::Device device = device_opt.value();
-    // We only need to check this here as this is the only case where we can
-    // have a device that is not CPU (and thus for which the StorageImpl
-    // constructor can be overwritten).
-    fptr = c10::GetStorageImplCreate(device.type());
-    if (device.type() == at::kCPU) {
-      allocator = c10::GetDefaultCPUAllocator();
-#ifdef USE_CUDA
-    } else if (device.type() == at::kCUDA) {
-      at::globalContext().lazyInitCUDA();
-      allocator = c10::cuda::CUDACachingAllocator::get();
-#endif
-#ifdef USE_MPS
-    } else if (device.type() == at::kMPS) {
-      allocator = at::mps::GetMPSAllocator();
-#endif
-      // NOLINTBEGIN(bugprone-branch-clone)
-    } else if (device.type() == at::DeviceType::XPU) {
-      allocator = c10::GetAllocator(device.type());
-    } else if (device.type() == at::DeviceType::HPU) {
-      allocator = c10::GetAllocator(device.type());
-    } else if (device.type() == at::DeviceType::Meta) {
-      allocator = c10::GetAllocator(device.type());
-    } else if (device.type() == at::DeviceType::PrivateUse1) {
-      allocator = c10::GetAllocator(device.type());
-    } else {
-      // NOLINTEND(bugprone-branch-clone)
-      TORCH_CHECK(
-          false,
-          THPStorageStr,
-          "(): Storage device not recognized: ",
-          device.type());
-    }
-    device_guard.reset_device(device);
-  } else {
-    allocator = c10::GetDefaultCPUAllocator();
-  }
-
-  if (fptr != nullptr) {
-    return fptr(use_byte_size, std::move(size_bytes), allocator, resizable);
-  }
-
-  // Create a c10::StorageImpl object.
-  return c10::make_intrusive<c10::StorageImpl>(
-      use_byte_size, std::move(size_bytes), allocator, resizable);
-}
-
 static PyObject* THPStorage_pynew(
     PyTypeObject* type,
     PyObject* args,
@@ -392,6 +327,48 @@ static PyObject* THPStorage_pynew(
 
   PyObject* self = nullptr;
   c10::Allocator* allocator = nullptr;
+  at::OptionalDeviceGuard device_guard;
+
+  if (allocator_opt.has_value()) {
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    allocator = reinterpret_cast<c10::Allocator*>(allocator_opt.value());
+  } else if (device_opt.has_value()) {
+    at::Device device = device_opt.value();
+    if (device.type() == at::kCPU) {
+      allocator = c10::GetDefaultCPUAllocator();
+#ifdef USE_CUDA
+    } else if (device.type() == at::kCUDA) {
+      at::globalContext().lazyInitCUDA();
+      allocator = c10::cuda::CUDACachingAllocator::get();
+#endif
+#ifdef USE_MPS
+    } else if (device.type() == at::kMPS) {
+      allocator = at::mps::GetMPSAllocator();
+#endif
+      // NOLINTBEGIN(bugprone-branch-clone)
+    } else if (device.type() == at::DeviceType::XPU) {
+      allocator = c10::GetAllocator(device.type());
+    } else if (device.type() == at::DeviceType::HPU) {
+      allocator = c10::GetAllocator(device.type());
+    } else if (device.type() == at::DeviceType::Meta) {
+      allocator = c10::GetAllocator(device.type());
+    } else if (device.type() == at::DeviceType::PrivateUse1) {
+      at::globalContext().lazyInitPrivateUse1();
+      allocator = c10::GetAllocator(device.type());
+    } else if (device.type() == at::DeviceType::ORT) {
+      allocator = c10::GetAllocator(device.type());
+    } else {
+      // NOLINTEND(bugprone-branch-clone)
+      TORCH_CHECK(
+          false,
+          THPStorageStr,
+          "(): Storage device not recognized: ",
+          device.type());
+    }
+    device_guard.reset_device(device);
+  } else {
+    allocator = c10::GetDefaultCPUAllocator();
+  }
 
   // torch.Storage(*, ...)
   if (r.idx == 0) {
@@ -400,9 +377,9 @@ static PyObject* THPStorage_pynew(
         make_storage_impl(
             c10::StorageImpl::use_byte_size_t(),
             0,
+            at::DataPtr(),
             allocator,
             /*resizable=*/true,
-            allocator_opt,
             device_opt),
         c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
 
@@ -414,9 +391,9 @@ static PyObject* THPStorage_pynew(
         make_storage_impl(
             c10::StorageImpl::use_byte_size_t(),
             size,
+            at::DataPtr(),
             allocator,
             /*resizable=*/true,
-            allocator_opt,
             device_opt),
         c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
 
@@ -439,9 +416,9 @@ static PyObject* THPStorage_pynew(
         make_storage_impl(
             c10::StorageImpl::use_byte_size_t(),
             length,
+            at::DataPtr(),
             allocator,
             /*resizable=*/true,
-            allocator_opt,
             device_opt),
         c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
     THPObjectPtr item;
@@ -458,12 +435,13 @@ static PyObject* THPStorage_pynew(
         }
       }
     } catch (const std::exception& e) {
-      THPUtils_setError(
-          THPStorageStr
-          "(): tried to construct a storage from a sequence (%s), "
-          "but one of the items was of type %s instead of int",
+      TORCH_CHECK(
+          THPStorageStr "(): tried to construct a storage from a sequence (",
           THPUtils_typename(sequence),
-          THPUtils_typename(item.get()));
+          "), ",
+          "but one of the items was of type ",
+          THPUtils_typename(item.get()),
+          " instead of int");
       return nullptr;
     }
   }
@@ -507,10 +485,11 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
     }
     slicelength = PySlice_AdjustIndices(len, &start, &stop, step);
     if (step != 1) {
-      THPUtils_setError(
-          "Trying to slice with a step of %lld, but only a step of "
-          "1 is supported",
-          (long long)step);
+      TORCH_CHECK(
+          "Trying to slice with a step of ",
+          step,
+          ", but only a step of "
+          "1 is supported");
       return nullptr;
     }
 
@@ -519,7 +498,8 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
 
     at::StorageImpl* old_storage_impl = storage.unsafeGetStorageImpl();
     c10::raw::intrusive_ptr::incref(old_storage_impl);
-    auto new_storage_impl = c10::make_intrusive<at::StorageImpl>(
+    c10::optional<at::Device> device_opt = old_storage_impl->device();
+    auto new_storage_impl = make_storage_impl(
         c10::StorageImpl::use_byte_size_t(),
 #ifdef THQUANTIZED
         slicelength * sizeof(quantized_t),
@@ -534,7 +514,8 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
             },
             old_storage_impl->device()),
         old_storage_impl->allocator(),
-        /* resizable */ false);
+        /* resizable */ false,
+        device_opt);
 
     PyObject* _ret = THPStorage_NewWithStorage(
         Py_TYPE(self),
@@ -555,10 +536,10 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
   if (!THPByteUtils_checkReal(value)) {
-    THPUtils_setError(
-        "can only set storage content with a int types, but got "
-        "%s instead",
-        THPUtils_typename(value));
+    TORCH_CHECK(
+        "can only set storage content with a int types, but got ",
+        THPUtils_typename(value),
+        " instead");
     return -1;
   }
 
@@ -577,10 +558,11 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
     }
     PySlice_AdjustIndices(len, &start, &stop, step);
     if (step != 1) {
-      THPUtils_setError(
-          "Trying to slice with a step of %lld, but only a step of "
-          "1 is supported",
-          (long long)step);
+      TORCH_CHECK(
+          "Trying to slice with a step of ",
+          step,
+          ", but only a step of "
+          "1 is supported");
       return 0;
     }
     // TODO: check the bounds only once
@@ -589,8 +571,8 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
       storage_set(storage, start, rvalue);
     return 0;
   }
-  THPUtils_setError(
-      "can't index a " THPStorageStr " with %s", THPUtils_typename(index));
+  TORCH_CHECK(
+      "can't index a " THPStorageStr " with ", THPUtils_typename(index));
   return -1;
   END_HANDLE_TH_ERRORS_RET(-1)
 }

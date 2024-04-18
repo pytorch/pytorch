@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import torch
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_methods_invocations import wrapper_set_seed

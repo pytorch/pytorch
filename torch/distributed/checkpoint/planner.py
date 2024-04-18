@@ -2,12 +2,18 @@ import abc
 import io
 from dataclasses import dataclass
 from enum import auto, Enum
+from functools import reduce
 from typing import Any, List, Optional, Tuple, Union
 
 import torch
-from torch.distributed._shard.sharded_tensor.metadata import TensorProperties
 
-from .metadata import ChunkStorageMetadata, Metadata, MetadataIndex, STATE_DICT_TYPE
+from .metadata import (
+    ChunkStorageMetadata,
+    Metadata,
+    MetadataIndex,
+    STATE_DICT_TYPE,
+    TensorProperties,
+)
 
 
 __all__ = [
@@ -43,11 +49,27 @@ class TensorWriteData:
 
 @dataclass(frozen=True)
 class WriteItem:
+    """Dataclass which holds information about what needs to be written to storage."""
+
     index: MetadataIndex
     type: WriteItemType
 
     # Value present if it's a tensor write
     tensor_data: Optional[TensorWriteData] = None
+
+    def tensor_storage_size(self) -> Optional[int]:
+        """
+        Calculates the storage size of the underlying tensor, or None if this is not a tensor write.
+
+        Returns:
+            Optional[int] storage size, in bytes of underlying tensor if any.
+        """
+        if self.tensor_data is None:
+            return None
+
+        numels = reduce(lambda x, y: x * y, self.tensor_data.size, 1)
+        dtype_size = torch._utils._element_size(self.tensor_data.properties.dtype)
+        return numels * dtype_size
 
 
 @dataclass(frozen=True)
@@ -355,6 +377,14 @@ class LoadPlanner:
         the checkpoint being loaded.
         """
         pass
+
+    def resolve_bytes(self, read_item: ReadItem) -> io.BytesIO:
+        """
+        Return the BytesIO to be used by the StorageReader to load `read_item`.
+
+        The BytesIO should alias with one on the underlying state_dict as StorageReader will replace its contents.
+        """
+        raise NotImplementedError("LoadPlanner.resolve_bytes is not implemented")
 
     @abc.abstractmethod
     def resolve_tensor(self, read_item: ReadItem) -> torch.Tensor:

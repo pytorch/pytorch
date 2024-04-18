@@ -22,6 +22,9 @@ jobs:
   stale:
     if: ${{ github.repository == 'pytorch/pytorch' }}
     runs-on: linux.large.arc
+    permissions:
+      contents: read
+      pull-requests: write
 
     steps:
       - uses: actions/github-script@v6

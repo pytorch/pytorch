@@ -12,8 +12,14 @@ namespace torch::onnx {
 // ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT8E4M3FN
 constexpr auto TensorProto_DataType_FLOAT8E4M3FN =
     static_cast<::ONNX_NAMESPACE::TensorProto_DataType>(17);
+// ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT8E4M3FNUZ
+constexpr auto TensorProto_DataType_FLOAT8E4M3FNUZ =
+    static_cast<::ONNX_NAMESPACE::TensorProto_DataType>(18);
 // ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT8E5M2
 constexpr auto TensorProto_DataType_FLOAT8E5M2 =
     static_cast<::ONNX_NAMESPACE::TensorProto_DataType>(19);
+// ::ONNX_NAMESPACE::TensorProto_DataType_FLOAT8E5M2FNUZ
+constexpr auto TensorProto_DataType_FLOAT8E5M2FNUZ =
+    static_cast<::ONNX_NAMESPACE::TensorProto_DataType>(20);
 
 } // namespace torch::onnx

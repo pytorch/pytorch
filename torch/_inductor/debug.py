@@ -80,7 +80,7 @@ def draw_buffers(nodes: List[BaseSchedulerNode], print_graph=False, fname=None):
         if isinstance(node, ir.ComputedBuffer):
             dtype = node.data.dtype
 
-        metadata = TensorMetadata(group, dtype, None, None, None, None, None)
+        metadata = TensorMetadata(group, dtype, None, None, None, None, None)  # type: ignore[arg-type]
         node.meta["tensor_meta"] = metadata
 
     if print_graph:
@@ -328,20 +328,27 @@ class DebugContext:
         if not self._path:
             return
         assert new_path.endswith(".debug"), new_path
-        if os.path.exists(new_path):
-            shutil.rmtree(new_path)
+        from filelock import FileLock
+
         try:
-            shutil.copytree(self._path, new_path)
-            self._path = new_path
+            with FileLock(f"{new_path}.lock"):
+                if os.path.exists(new_path):
+                    shutil.rmtree(new_path)
+                shutil.copytree(self._path, new_path)
         except OSError:
             log.warning(
                 "Failed to copy debug files from %s to %s", self._path, new_path
             )
-            pass
 
-    def fopen(self, filename: str):
+    def fopen(self, filename: str, write_mode: str = "w", *args, **kwargs):
         assert self._path
-        return open(os.path.join(self._path, filename), "w")
+        return open(os.path.join(self._path, filename), write_mode, *args, **kwargs)
+
+    @contextlib.contextmanager
+    def fopen_context(self, filename: str, write_mode: str = "w", *args, **kwargs):
+        assert self._path
+        with open(os.path.join(self._path, filename), write_mode, *args, **kwargs) as f:
+            yield f
 
     def filename(self, suffix: str):
         assert self._path
@@ -435,6 +442,7 @@ class DebugContext:
 class DebugFormatter:
     def __init__(self, handler):
         self.fopen = handler.fopen
+        self.fopen_context = handler.fopen_context
         self.filename = handler.filename
         self.handler = handler
 
@@ -480,6 +488,96 @@ class DebugFormatter:
 
     def output_code(self, filename):
         shutil.copy(filename, self.filename("output_code.py"))
+
+    def log_autotuning_results(
+        self,
+        name: str,
+        input_nodes: List[ir.IRNode],
+        timings: Dict["ChoiceCaller", float],  # type: ignore[name-defined] # noqa: F821
+        elapse: float,
+        precompile_elapse: float,
+    ):
+        import json
+
+        from .ir import FixedLayout
+
+        def build_node_info(node: ir.IRNode):
+            if hasattr(node, "name"):
+                node_name = node.name
+            else:
+                node_name = ""
+            node_info = {
+                "name": node_name,
+                "type": type(node).__name__,
+            }
+            try:
+                layout = node.get_layout()
+                if isinstance(layout, FixedLayout):
+                    offset = 0
+                    try:
+                        offset = int(layout.offset)
+                    except Exception:
+                        try:
+                            offset = V.graph.sizevars.size_hint(
+                                layout.offset, fallback=0
+                            )
+                        except Exception:
+                            pass
+                    static_layout = FixedLayout(
+                        layout.device,
+                        dtype=layout.dtype,
+                        size=list(V.graph.sizevars.size_hints(layout.size)),
+                        stride=list(V.graph.sizevars.size_hints(layout.stride)),
+                        offset=offset,
+                    )
+                    node_info["layout"] = str(static_layout)
+                else:
+                    node_info["layout"] = str(node.get_layout())
+            except Exception as e:
+                pass
+            try:
+                node_info["dtype"] = str(node.get_dtype())
+            except Exception as e:
+                pass
+            try:
+                node_info["device"] = str(node.get_device())
+            except Exception as e:
+                pass
+            try:
+                node_info["stride"] = str(
+                    V.graph.sizevars.size_hints(node.get_stride())
+                )
+            except Exception as e:
+                pass
+            try:
+                node_info["size"] = str(V.graph.sizevars.size_hints(node.get_size()))
+            except Exception as e:
+                pass
+            try:
+                node_info["numel"] = str(V.graph.sizevars.size_hint(node.get_numel()))
+            except Exception as e:
+                pass
+            if hasattr(node, "data") and isinstance(node.data, ir.IRNode):
+                node_info["data"] = build_node_info(node.data)
+            return node_info
+
+        general_properties = {
+            "op_name": name,
+            "cuda_device_name": torch.cuda.get_device_name(),
+            "cuda_device_count": torch.cuda.device_count(),
+            "input_nodes": [build_node_info(node) for node in input_nodes],
+            "autotuning_time": elapse,
+            "precompile_time": precompile_elapse,
+        }
+        with self.fopen_context(
+            "autotuning_result_json_list.txt", "at", encoding="utf-8"
+        ) as fd:
+            for caller, time in timings.items():
+                info_dict = dict(caller.info_dict())
+                info_dict.update(general_properties)
+                info_dict["benchmark_result"] = time
+                json.dump(info_dict, fd)
+                fd.write("\n")
 
 
 @dataclasses.dataclass

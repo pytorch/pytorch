@@ -43,7 +43,7 @@ from hypothesis import strategies as st
 import torch.testing._internal.hypothesis_utils as hu
 hu.assert_deadline_disabled()
 from torch.testing._internal.common_cuda import TEST_MULTIGPU, TEST_CUDA
-from torch.testing._internal.common_utils import TestCase
+from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     AnnotatedSingleLayerLinearModel,
@@ -357,6 +357,31 @@ class TestObserver(QuantizationTestCase):
             result = torch.softmax(input + dequant_mask, dim=1)
             self.assertEqual(result, ref_result)
 
+    def test_histogram_observer_handle_OOM_due_to_close_min_max_value(self):
+        obser = HistogramObserver.with_args(reduce_range=False)()
+        # close min and max value in the 1st forward() pass of observer tends
+        # to cause OOM in the following pass.
+        # This is due to the allocation of histogram tensor during _combine_histograms().
+        # With sanity check on the size of histogram tensor, we expect the histogram observer
+        # can still work by resetting the histogram
+        x1 = torch.tensor([0, 1e-9])
+        obser(x1)
+
+        x2 = torch.tensor([2.0, 3.0])
+        obser(x2)
+
+    def test_histogram_observer_handle_OOM_due_to_large_upsample_rate(self):
+        # a large upsample rate leads to OOM due to the allocation of histogram tensor
+        # during _combine_histograms(). With sanity check on the size of histogram tensor,
+        # we expect the histogram observer can still work by resetting the histogram
+        obser = HistogramObserver.with_args(upsample_rate=(8000**2), reduce_range=False)()
+
+        x1 = torch.tensor([0, 1.0])
+        obser(x1)
+
+        x2 = torch.tensor([2, 2 + 1e-9])
+        obser(x2)
+
     def test_histogram_observer_save_load_state_dict(self):
         """
         Smoke test on saving/loading state_dict
@@ -448,6 +473,18 @@ class TestObserver(QuantizationTestCase):
             scale, zero_point = torch._choose_qparams_per_tensor(x)
             self.assertEqual(scale, params[0])
             self.assertEqual(zero_point, params[1])
+
+    def test_per_channel_observers_load_state_dict(self):
+        observer_list = [PerChannelMinMaxObserver, MovingAveragePerChannelMinMaxObserver]
+
+        for obs_cls in observer_list:
+            obs = obs_cls()
+            obs(torch.randn((32, 32)))
+            new_obs = obs_cls()
+            # make sure the state_dict can be loaded
+            new_obs.load_state_dict(obs.state_dict())
+            self.assertTrue(torch.equal(obs.min_val, new_obs.min_val))
+            self.assertTrue(torch.equal(obs.max_val, new_obs.max_val))
 
 # HistogramObserver that works like it does on master
 class _ReferenceHistogramObserver(HistogramObserver):
@@ -725,6 +762,7 @@ class TestHistogramObserver(QuantizationTestCase):
         self.assertEqual(myobs.max_val, 8.0)
         self.assertEqual(myobs.histogram, [2., 3., 3.])
 
+    @skipIfTorchDynamo("too slow")
     @given(N=st.sampled_from([10, 1000]),
            bins=st.sampled_from([256, 512, 1024, 2048]),
            dtype=st.sampled_from([torch.qint8, torch.quint8]),

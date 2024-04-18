@@ -159,7 +159,7 @@ class SpatialBNFakeLoweredFp16Op : public Operator<CPUContext> {
     const int stride = C * HxW;
     const float* X_ptr = X;
     float* Y_ptr = Y;
-    for (const auto i : c10::irange(N)) {
+    for ([[maybe_unused]] const auto i : c10::irange(N)) {
       EigenArrayMap<float>(Y_ptr, HxW, C) =
           ConstEigenArrayMap<float>(X_ptr, HxW, C).rowwise() -
           mean_arr.transpose();
@@ -356,7 +356,7 @@ class SpatialBNFakeFp16Op : public Operator<CPUContext> {
     float* Y_ptr = Y;
 
     // Do Y = X * scale + bias
-    for (const auto i : c10::irange(N)) {
+    for ([[maybe_unused]] const auto i : c10::irange(N)) {
       for (const auto j : c10::irange(C)) {
         for (const auto k : c10::irange(HxW)) {
           Y_ptr[HxW * j + k] = bias[j];

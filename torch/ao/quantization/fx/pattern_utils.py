@@ -15,7 +15,7 @@ __all__ = [
 QuantizeHandler = Any
 
 # pattern for conv bn fusion
-_DEFAULT_FUSION_PATTERNS = OrderedDict()
+_DEFAULT_FUSION_PATTERNS: Dict[Pattern, QuantizeHandler] = OrderedDict()
 def _register_fusion_pattern(pattern):
     def insert(fn):
         _DEFAULT_FUSION_PATTERNS[pattern] = fn
@@ -25,13 +25,13 @@ def _register_fusion_pattern(pattern):
 def get_default_fusion_patterns() -> Dict[Pattern, QuantizeHandler]:
     return copy.copy(_DEFAULT_FUSION_PATTERNS)
 
-_DEFAULT_QUANTIZATION_PATTERNS = OrderedDict()
+_DEFAULT_QUANTIZATION_PATTERNS: Dict[Pattern, QuantizeHandler] = OrderedDict()
 
 # Mapping from pattern to activation_post_process(observer/fake_quant) constructor for output activation
 # e.g. pattern: torch.sigmoid,
 #      output_activation_post_process: default_fixed_qparams_range_0to1_fake_quant
-_DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP = {}
-_DEFAULT_OUTPUT_OBSERVER_MAP = {}
+_DEFAULT_OUTPUT_FAKE_QUANTIZE_MAP: Dict[Pattern, QuantizeHandler] = {}
+_DEFAULT_OUTPUT_OBSERVER_MAP: Dict[Pattern, QuantizeHandler] = {}
 
 # Register pattern for both static quantization and qat
 def _register_quant_pattern(pattern, fixed_qparams_observer=None):

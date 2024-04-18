@@ -1,16 +1,17 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
+import inspect
 import warnings
-from typing import Callable, cast, Optional, Sequence, Tuple
+from typing import Any, Callable, cast, Optional, Sequence, Tuple
 
 import torch
 
-import torch.distributed._functional_collectives as funcol
 import torch.distributed._tensor.dispatch as op_dispatch
 import torch.distributed._tensor.random as random
 import torch.nn as nn
 from torch.distributed._tensor._collective_utils import mesh_broadcast
 from torch.distributed._tensor._utils import compute_global_tensor_info
 from torch.distributed._tensor.placement_types import (
+    _Partial,
     DTensorSpec,
     Placement,
     Replicate,
@@ -63,14 +64,10 @@ class _ToTorchTensor(torch.autograd.Function):
         ctx,
         input: "DTensor",
         grad_placements: Optional[Sequence[Placement]],
-        async_output: bool,
     ):
         ctx.dtensor_spec = input._spec
         ctx.grad_placements = grad_placements
         local_tensor = input._local_tensor
-        if not async_output and isinstance(local_tensor, funcol.AsyncCollectiveTensor):
-            # synchronously wait for any pending collectives to get the result tensor
-            local_tensor = local_tensor.wait()
 
         # We need to return a fresh Tensor object there as autograd metadata
         # will be inplaced into it. So we don't want to pollute the Tensor
@@ -84,26 +81,22 @@ class _ToTorchTensor(torch.autograd.Function):
         grad_placements = ctx.grad_placements
         dtensor_meta = dtensor_spec.tensor_meta
 
-        if grad_placements is not None:
-            grad_spec = DTensorSpec(mesh, grad_placements)
-            grad_output = redistribute_local_tensor(
-                grad_output, grad_spec, dtensor_spec
-            )
-
         _, tensor_stride = compute_global_tensor_info(
             grad_output, mesh, dtensor_spec.placements
         )
+        tensor_stride = tuple(tensor_stride)
+        grad_placements = grad_placements or dtensor_spec.placements
+
         return (
             DTensor(
                 grad_output,
                 mesh,
-                dtensor_spec.placements,
+                grad_placements,
                 shape=dtensor_meta.shape,
                 dtype=dtensor_meta.dtype,
                 requires_grad=grad_output.requires_grad,
-                stride=tuple(tensor_stride),
+                stride=tensor_stride,
             ),
-            None,
             None,
         )
 
@@ -226,7 +219,7 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             already have tensor initialized and want to shard this tensor),
             consider using `distribute_tensor`.
         """
-        if requires_grad != local_tensor.requires_grad:
+        if local_tensor.requires_grad and not requires_grad:
             warnings.warn(
                 "To construct DTensor from torch.Tensor, it's recommended to "
                 "use local_tensor.detach() and make requires_grad consistent."
@@ -280,7 +273,19 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             stride=outer_stride,
         )
 
-    __torch_function__ = torch._C._disabled_torch_function_impl
+    def __coerce_tangent_metadata__(self):
+        if not any(isinstance(p, _Partial) for p in self.placements):
+            return self
+        placements = [
+            Replicate() if isinstance(p, _Partial) else p for p in self.placements
+        ]
+        return self.redistribute(device_mesh=self.device_mesh, placements=placements)
+
+    def __coerce_same_metadata_as_tangent__(self, metadata_tensor):
+        return self.redistribute(
+            device_mesh=self.device_mesh,
+            placements=metadata_tensor.placements,
+        )
 
     @classmethod
     # pyre-fixme[3]: Return type must be annotated.
@@ -402,13 +407,15 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         if grad_placements is not None and not isinstance(grad_placements, tuple):
             grad_placements = tuple(grad_placements)
         return _ToTorchTensor.apply(
-            self, grad_placements, True
+            self, grad_placements
         )  # pyre-ignore[16]: autograd func
 
     def redistribute(
         self,
         device_mesh: Optional[DeviceMesh] = None,
         placements: Optional[Sequence[Placement]] = None,
+        *,
+        async_op: bool = False,
     ) -> "DTensor":
         """
         `redistribute` performs necessary collective operations that redistribute the current
@@ -423,6 +430,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
             placements (List[:class:`Placement`], optional): the new placements that
                 describes how to place the DTensor into the DeviceMesh, must
                 have the same number of elements as `device_mesh.ndim`.
+
+        Keyword args:
+            async_op (bool, optional): whether to perform the DTensor redistribute operation
+                asynchronously or not. Default: False
 
         Returns:
             A :class:`DTensor` object
@@ -450,12 +461,8 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
                 placements[i] = Shard(placement.dim + self.ndim)
         placements = tuple(placements)
 
-        # Early return the original DTensor if the placements are the same.
-        if self._spec.placements == placements:
-            return self
-
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
-        return Redistribute.apply(self, device_mesh, placements)
+        return Redistribute.apply(self, device_mesh, placements, async_op)
 
     def full_tensor(
         self, *, grad_placements: Optional[Sequence[Placement]] = None
@@ -483,10 +490,10 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         .. note:: `full_tensor` is differentiable.
         """
 
-        # TODO: fix issue with full_tensor() for uneven-sharded tensor
-        # https://github.com/pytorch/pytorch/issues/115310
-        redist_res = self.redistribute(placements=[Replicate()] * self.device_mesh.ndim)
-        return _ToTorchTensor.apply(redist_res, grad_placements, False)
+        redist_res = self.redistribute(
+            placements=[Replicate()] * self.device_mesh.ndim, async_op=False
+        )
+        return _ToTorchTensor.apply(redist_res, grad_placements)
 
     @property
     def device_mesh(self) -> DeviceMesh:
@@ -546,13 +553,19 @@ def distribute_tensor(
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
     device_type = device_mesh.device_type
     if device_type == "xla":
-        # call PyTorch/XLA SPMD for `xla` backend type device mesh.
-        # This returns XLAShardedTensor
-        from torch.distributed._tensor._xla import xla_distribute_tensor
+        try:
+            # call PyTorch/XLA SPMD for `xla` backend type device mesh.
+            # This returns XLAShardedTensor
+            from torch_xla.distributed.spmd import (  # type:ignore[import]
+                xla_distribute_tensor,
+            )
 
-        return xla_distribute_tensor(
-            tensor, device_mesh, placements
-        )  # type:ignore[return-value]
+            return xla_distribute_tensor(
+                tensor, device_mesh, placements
+            )  # type:ignore[return-value]
+        except ImportError as e:
+            msg = "To use DTensor API with xla, you must install the torch_xla package!"
+            raise ImportError(msg) from e
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
@@ -580,8 +593,10 @@ def distribute_tensor(
             f"Found placements length: {len(placements)}, and device_mesh.ndim: {device_mesh.ndim}."
         )
     if isinstance(tensor, DTensor):
-        # if the tensor is already a DTensor, we just need to check if the
-        # device mesh and placements are the same
+        # if the tensor is already a DTensor, we need to check:
+        # 1. if the we can further shard this DTensor if the two device mesh belong to
+        #   the same parenet mesh and further sharding is possible.
+        # 2. check if device mesh and placements are the same
         if tensor.device_mesh != device_mesh:
             raise ValueError(
                 f"Cannot distribute a DTensor with device mesh {tensor.device_mesh} "
@@ -634,8 +649,8 @@ def distribute_module(
     module: nn.Module,
     device_mesh: Optional[DeviceMesh] = None,
     partition_fn: Optional[Callable[[str, nn.Module, DeviceMesh], None]] = None,
-    input_fn: Optional[Callable[..., None]] = None,
-    output_fn: Optional[Callable[..., None]] = None,
+    input_fn: Optional[Callable[[nn.Module, Any, DeviceMesh], None]] = None,
+    output_fn: Optional[Callable[[nn.Module, Any, DeviceMesh], None]] = None,
 ) -> nn.Module:
     """
     This function converts all module parameters to :class:`DTensor` parameters
@@ -657,11 +672,32 @@ def distribute_module(
 
     Returns:
         A module that contains parameters/buffers that are all `DTensor`s.
+
+    Note:
+        When initialize the DeviceMesh with the `xla` device_type, `distribute_module`
+        return nn.Module with PyTorch/XLA SPMD annotated parameters. See [link](https://github.com/pytorch/pytorch/issues/92909)
+        for more details. The XLA integration is experimental and subject to change.
     """
 
     torch._C._log_api_usage_once("torch.dtensor.distribute_module")
 
     device_mesh = device_mesh or _mesh_resources.get_current_mesh()
+    device_type = device_mesh.device_type
+    if device_type == "xla":
+        try:
+            # This function annotates all module parameters for auto-partitioning with
+            # PyTorch/XLA SPMD or explicitly partition to :class:`XLAShardedTensor` parameters
+            # according to the `partition_fn` specified.
+            from torch_xla.distributed.spmd import (  # type:ignore[import]
+                xla_distribute_module,
+            )
+
+            return xla_distribute_module(
+                module, device_mesh, partition_fn, input_fn, output_fn
+            )  # type:ignore[return-value]
+        except ImportError as e:
+            msg = "To use DTensor API with xla, you must install the torch_xla package!"
+            raise ImportError(msg) from e
 
     def replicate_module_params_buffers(m: nn.Module, mesh: DeviceMesh) -> None:
         # This function loop over the immediate module parameters and
@@ -695,11 +731,43 @@ def distribute_module(
 
     # register input_fn as module forward pre hook
     if input_fn is not None:
-        module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs, device_mesh))  # type: ignore[misc]
-    # register input_fn as module forward hook
+        # check the input_fn signature
+        num_args = len(inspect.signature(input_fn).parameters)
+        if num_args == 2:
+            # input_fn only takes in inputs and device mesh
+            warnings.warn(
+                "Deprecating input_fn that takes two arguments (inputs, device_mesh), "
+                "please use input_fn that takes in (module, inputs, device_mesh) instead!",
+            )
+            module.register_forward_pre_hook(lambda _, inputs: input_fn(inputs, device_mesh))  # type: ignore[call-arg]
+        elif num_args == 3:
+            # input_fn takes in module, inputs, device mesh
+            module.register_forward_pre_hook(
+                lambda mod, inputs: input_fn(mod, inputs, device_mesh)
+            )
+        else:
+            raise ValueError(
+                f"input_fn should take in 3 arguments, but got {num_args} arguments!"
+            )
+    # register output_fn as module forward hook
     if output_fn is not None:
-        module.register_forward_hook(
-            lambda mod, inputs, outputs: output_fn(outputs, device_mesh)  # type: ignore[misc]
-        )
+        num_args = len(inspect.signature(output_fn).parameters)
+        if num_args == 2:
+            # output_fn only takes in outputs and device mesh
+            warnings.warn(
+                "Deprecating output_fn that takes two arguments (inputs, device_mesh), "
+                "please use output_fn that takes in (module, inputs, device_mesh) instead!",
+            )
+            module.register_forward_hook(
+                lambda mod, inputs, outputs: output_fn(outputs, device_mesh)  # type: ignore[call-arg]
+            )
+        elif num_args == 3:
+            module.register_forward_hook(
+                lambda mod, inputs, outputs: output_fn(mod, outputs, device_mesh)
+            )
+        else:
+            raise ValueError(
+                f"output_fn should take in 3 arguments, but got {num_args} arguments!"
+            )
 
     return module

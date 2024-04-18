@@ -299,44 +299,12 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
   const uint32_t nDim = iter.ndim();
   constexpr uint32_t nOffsets = 3;
   const uint32_t numThreads = iter.numel();
-  dispatch_sync(mpsStream->queue(), ^() {
+  dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      MTLSize gridSize = MTLSizeMake(numThreads, 1, 1);
-      const IntArrayRef& iterShape = iter.shape();
-      std::vector<uint32_t> iterShapeData(iterShape.size());
-      std::vector<std::array<uint32_t, nOffsets>> strides(nDim);
-
-      for (const auto i : c10::irange(iterShape.size())) {
-        TORCH_CHECK(i <= UINT32_MAX);
-        iterShapeData[i] = (uint32_t)(iterShape[i]);
-      }
-
-      for (const auto i : c10::irange(nDim)) {
-        for (const auto offset : c10::irange(nOffsets)) {
-          strides[i][offset] = iter.strides(offset)[i];
-        }
-      }
-
-      id<MTLComputePipelineState> kernelDataOffsetsPSO =
-          MPSDevice::getInstance()->metalIndexingPSO("kernel_index_offsets");
-      id<MTLBuffer> kernelDataOffsets = [[device newBufferWithLength:numThreads * sizeof(simd_uint3)
-                                                             options:0] autorelease];
-      [computeEncoder setComputePipelineState:kernelDataOffsetsPSO];
-      [computeEncoder setBytes:strides.data() length:sizeof(uint32_t) * nDim * nOffsets atIndex:0];
-      [computeEncoder setBuffer:kernelDataOffsets offset:0 atIndex:1];
-      [computeEncoder setBytes:iterShapeData.data() length:sizeof(uint32_t) * iterShape.size() atIndex:2];
-      [computeEncoder setBytes:&nDim length:sizeof(uint32_t) atIndex:3];
-      [computeEncoder setBytes:&nOffsets length:sizeof(uint32_t) atIndex:4];
-
-      NSUInteger kernelOffsetsTGSize = kernelDataOffsetsPSO.maxTotalThreadsPerThreadgroup;
-      if (kernelOffsetsTGSize > numThreads)
-        kernelOffsetsTGSize = numThreads;
-
-      MTLSize kernelOffsetsThreadGroupSize = MTLSizeMake(kernelOffsetsTGSize, 1, 1);
-      [computeEncoder dispatchThreads:gridSize threadsPerThreadgroup:kernelOffsetsThreadGroupSize];
-
       const std::string kernel = func_name + "_" + scalarToMetalTypeString(input.scalar_type());
+      auto kernelDataOffsets = generateKernelDataOffsets(computeEncoder, iter);
+
       id<MTLComputePipelineState> binaryPSO = binaryPipelineState(device, kernel);
 
       // this function call is a no-op if MPS Profiler is not enabled
@@ -355,7 +323,7 @@ static void binary_mps_impl(TensorIteratorBase& iter, const std::string func_nam
 }
 
 void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& output) {
-  TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) && c10::isComplexType(other.scalar_type()));
+  TORCH_INTERNAL_ASSERT(c10::isComplexType(input.scalar_type()) || c10::isComplexType(other.scalar_type()));
   auto new_size = at::infer_size(input.sizes(), other.sizes());
   if (!output.sizes().equals(new_size)) {
     output.resize_(new_size);
@@ -364,9 +332,10 @@ void complex_mul_out(const Tensor& input, const Tensor& other, const Tensor& out
   if (length == 0) {
     return;
   }
+  auto common_dtype = output.scalar_type();
   auto output_as_real = at::view_as_real(output).select(output.dim(), 0);
-  auto input_as_real = at::view_as_real(input).select(input.dim(), 0);
-  auto other_as_real = at::view_as_real(other).select(other.dim(), 0);
+  auto input_as_real = at::view_as_real(input.to(kMPS, common_dtype)).select(input.dim(), 0);
+  auto other_as_real = at::view_as_real(other.to(kMPS, common_dtype)).select(other.dim(), 0);
   auto iter =
       TensorIteratorConfig().add_output(output_as_real).add_input(input_as_real).add_input(other_as_real).build();
 

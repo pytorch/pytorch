@@ -243,8 +243,6 @@ try:
     #   2. Calls an operation that corresponds to 'op', but works with Z3
     #      inhabitants (left as is if it works as is)
     def z3op(op: Callable, validator: "TranslationValidator") -> Callable:
-        from torch.fx.experimental.sym_node import sym_sqrt
-
         # Operations that have booleans as their argument.
         # This is needed because the argument of some FX nodes were
         # literal integers, instead of booleans. So, whenever this flag
@@ -297,7 +295,7 @@ try:
             torch.sym_max: lift(ops.max),
             torch.sym_min: lift(ops.min),
             torch.sym_ite: lift(lambda b, t, f: t if b else f),
-            sym_sqrt: lift(ops.sqrt),
+            torch._sym_sqrt: lift(ops.sqrt),  # type: ignore[attr-defined]
             # Not lifted because we only use this function as a
             # marker for adding the expression as validator input.
             torch._assert: torch._assert,
@@ -328,9 +326,8 @@ try:
 
         def call_function(self, target: Target, args: Tuple[Argument, ...], kwargs: Dict[str, Any]) -> Any:
             if target != torch._assert:
-                # Actually runs the node target function (which is already
-                # lifted) with its arguments.
-                return super().call_function(target, args, kwargs)
+                # Lift and runs the node target function
+                return super().call_function(z3op(target, self.validator), args, kwargs)  # type: ignore[arg-type]
             # Adds the Z3 expression corresponding to the first argument
             # as a validator input.
             assert len(args) == 1, f"expected 1 argument on assertion. Got: {len(args)} "
@@ -701,7 +698,7 @@ def bisect(shape_env):
         shape_env.graph.lint()
         return check_shapeenv_fails(shape_env, events[number].tracked_fakes)
 
-    last_exception = check_shapeenv_fails(shape_env, shape_env.snapshot_tracked_fakes())
+    last_exception = check_shapeenv_fails(shape_env, shape_env._snapshot_tracked_fakes())
 
     if not last_exception:
         # We don't actually fail due to a produce_guards call.

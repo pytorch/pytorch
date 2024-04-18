@@ -26,17 +26,21 @@
 #include <ATen/cpu/vec/intrinsics.h>
 #include <ATen/native/Math.h>
 #include <ATen/NumericUtils.h>
-#include <c10/util/C++17.h>
 #include <c10/util/Half.h>
 #include <c10/util/BFloat16.h>
 #include <c10/util/BFloat16-math.h>
 #include <c10/util/copysign.h>
-#include <c10/util/math_compat.h>
 #include <ATen/native/cpu/zmath.h>
 #include <c10/util/TypeCast.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
 #include <c10/util/Load.h>
+
+#if defined(__GNUC__)
+#define __FORCE_INLINE __attribute__((always_inline)) inline
+#elif defined(_MSC_VER)
+#define __FORCE_INLINE __forceinline
+#endif
 
 // These macros helped us unify vec_base.h
 #ifdef CPU_CAPABILITY_AVX512
@@ -68,9 +72,9 @@ inline namespace CPU_CAPABILITY {
 template <typename T>
 struct is_floating_point:
     std::integral_constant<bool,
-      std::is_floating_point<T>::value ||
-      std::is_same<T, at::Half>::value ||
-      std::is_same<T, at::BFloat16>::value> {
+      std::is_floating_point_v<T> ||
+      std::is_same_v<T, at::Half> ||
+      std::is_same_v<T, at::BFloat16>> {
 };
 
 template<typename T>
@@ -79,8 +83,8 @@ constexpr bool is_floating_point_v = is_floating_point<T>::value;
 template <typename T>
 struct is_reduced_floating_point:
     std::integral_constant<bool,
-      std::is_same<T, at::Half>::value ||
-      std::is_same<T, at::BFloat16>::value> {
+      std::is_same_v<T, at::Half> ||
+      std::is_same_v<T, at::BFloat16>> {
 };
 
 template <typename T>
@@ -147,9 +151,8 @@ public:
   // versions GCC/Clang have buggy determinations on whether or not an
   // identifier is odr-used or not, and in any case it's hard to tell if
   // a variable is odr-used or not.  So best to just cut the problem at the root.
-  static constexpr size_type size_T = sizeof(T);  // Workaround to compile with VS2022.
   static constexpr size_type size() {
-    return VECTOR_WIDTH / size_T;
+    return VECTOR_WIDTH / sizeof(T);
   }
   Vectorized() : values{static_cast<T>(0)} {}
   Vectorized(T val) {
@@ -231,6 +234,11 @@ public:
     std::memcpy(vector.values, ptr, count * sizeof(T));
     return vector;
   }
+  static Vectorized<T> loadu_one_fourth(const void* ptr) {
+    static_assert(std::is_same_v<T, signed char> || std::is_same_v<T, unsigned char>, "For byte types only");
+    return Vectorized::loadu(ptr, 8);
+  }
+
   void store(void* ptr, int count = size()) const {
     std::memcpy(ptr, values, count * sizeof(T));
   }
@@ -255,6 +263,14 @@ public:
     }
     return vector;
   }
+  bool has_inf_nan() const {
+    for (int64_t i = 0; i != size(); i++) {
+      if(_isnan(values[i]) || _isinf(values[i])) {
+        return true;
+      }
+    }
+    return false;
+  }
   Vectorized<T> map(T (*const f)(T)) const {
     Vectorized<T> ret;
     for (int64_t i = 0; i != size(); i++) {
@@ -270,94 +286,97 @@ public:
     return ret;
   }
   template <typename other_t_abs = T,
-            typename std::enable_if<!is_floating_point_v<other_t_abs> && !c10::is_complex<other_t_abs>::value, int>::type = 0>
+            typename std::enable_if_t<!is_floating_point_v<other_t_abs> && !c10::is_complex<other_t_abs>::value, int> = 0>
   Vectorized<T> abs() const {
     // other_t_abs is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<other_t_abs, T>::value, "other_t_abs must be T");
+    static_assert(std::is_same_v<other_t_abs, T>, "other_t_abs must be T");
     return map([](T x) -> T { return x < static_cast<T>(0) ? -x : x; });
   }
   template <typename float_t_abs = T,
-            typename std::enable_if<is_floating_point_v<float_t_abs>, int>::type = 0>
+            typename std::enable_if_t<is_floating_point_v<float_t_abs>, int> = 0>
   Vectorized<T> abs() const {
     // float_t_abs is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<float_t_abs, T>::value, "float_t_abs must be T");
+    static_assert(std::is_same_v<float_t_abs, T>, "float_t_abs must be T");
     // Specifically deal with floating-point because the generic code above won't handle -0.0 (which should result in
     // 0.0) properly.
     return map([](T x) -> T { return std::abs(x); });
   }
   template <typename complex_t_abs = T,
-            typename std::enable_if<c10::is_complex<complex_t_abs>::value, int>::type = 0>
+            typename std::enable_if_t<c10::is_complex<complex_t_abs>::value, int> = 0>
   Vectorized<T> abs() const {
     // complex_t_abs is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<complex_t_abs, T>::value, "complex_t_abs must be T");
+    static_assert(std::is_same_v<complex_t_abs, T>, "complex_t_abs must be T");
     // Specifically map() does not perform the type conversion needed by abs.
     return map([](T x) { return static_cast<T>(std::abs(x)); });
   }
 
   template <typename other_t_sgn = T,
-            typename std::enable_if<c10::is_complex<other_t_sgn>::value, int>::type = 0>
+            typename std::enable_if_t<c10::is_complex<other_t_sgn>::value, int> = 0>
   Vectorized<T> sgn() const {
     return map(at::native::sgn_impl);
   }
 
   template <typename other_t_angle = T,
-            typename std::enable_if<!c10::is_complex<other_t_angle>::value, int>::type = 0>
+            typename std::enable_if_t<!c10::is_complex<other_t_angle>::value, int> = 0>
   Vectorized<T> angle() const {
     // other_t_angle is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<other_t_angle, T>::value, "other_t_angle must be T");
+    static_assert(std::is_same_v<other_t_angle, T>, "other_t_angle must be T");
     return map(at::native::angle_impl<T>);  // compiler is unable to resolve the overload without <T>
   }
   template <typename complex_t_angle = T,
-            typename std::enable_if<c10::is_complex<complex_t_angle>::value, int>::type = 0>
+            typename std::enable_if_t<c10::is_complex<complex_t_angle>::value, int> = 0>
   Vectorized<T> angle() const {
     // complex_t_angle is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<complex_t_angle, T>::value, "complex_t_angle must be T");
+    static_assert(std::is_same_v<complex_t_angle, T>, "complex_t_angle must be T");
     return map([](T x) { return static_cast<T>(std::arg(x)); });
   }
   template <typename other_t_real = T,
-            typename std::enable_if<!c10::is_complex<other_t_real>::value, int>::type = 0>
+            typename std::enable_if_t<!c10::is_complex<other_t_real>::value, int> = 0>
   Vectorized<T> real() const {
     // other_t_real is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<other_t_real, T>::value, "other_t_real must be T");
+    static_assert(std::is_same_v<other_t_real, T>, "other_t_real must be T");
     return *this;
   }
   template <typename complex_t_real = T,
-            typename std::enable_if<c10::is_complex<complex_t_real>::value, int>::type = 0>
+            typename std::enable_if_t<c10::is_complex<complex_t_real>::value, int> = 0>
   Vectorized<T> real() const {
     // complex_t_real is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<complex_t_real, T>::value, "complex_t_real must be T");
+    static_assert(std::is_same_v<complex_t_real, T>, "complex_t_real must be T");
     return map([](T x) { return static_cast<T>(x.real()); });
   }
   template <typename other_t_imag = T,
-            typename std::enable_if<!c10::is_complex<other_t_imag>::value, int>::type = 0>
+            typename std::enable_if_t<!c10::is_complex<other_t_imag>::value, int> = 0>
   Vectorized<T> imag() const {
     // other_t_imag is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<other_t_imag, T>::value, "other_t_imag must be T");
+    static_assert(std::is_same_v<other_t_imag, T>, "other_t_imag must be T");
     return Vectorized(0);
   }
   template <typename complex_t_imag = T,
-            typename std::enable_if<c10::is_complex<complex_t_imag>::value, int>::type = 0>
+            typename std::enable_if_t<c10::is_complex<complex_t_imag>::value, int> = 0>
   Vectorized<T> imag() const {
     // complex_t_imag is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<complex_t_imag, T>::value, "complex_t_imag must be T");
+    static_assert(std::is_same_v<complex_t_imag, T>, "complex_t_imag must be T");
     return map([](T x) { return static_cast<T>(x.imag()); });
   }
   template <typename other_t_conj = T,
-            typename std::enable_if<!c10::is_complex<other_t_conj>::value, int>::type = 0>
+            typename std::enable_if_t<!c10::is_complex<other_t_conj>::value, int> = 0>
   Vectorized<T> conj() const {
     // other_t_conj is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<other_t_conj, T>::value, "other_t_conj must be T");
+    static_assert(std::is_same_v<other_t_conj, T>, "other_t_conj must be T");
     return *this;
   }
   template <typename complex_t_conj = T,
-            typename std::enable_if<c10::is_complex<complex_t_conj>::value, int>::type = 0>
+            typename std::enable_if_t<c10::is_complex<complex_t_conj>::value, int> = 0>
   Vectorized<T> conj() const {
     // complex_t_conj is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<complex_t_conj, T>::value, "complex_t_conj must be T");
+    static_assert(std::is_same_v<complex_t_conj, T>, "complex_t_conj must be T");
     return map([](T x) { return static_cast<T>(std::conj(x)); });
   }
   Vectorized<T> acos() const {
     return map(std::acos);
+  }
+  Vectorized<T> acosh() const {
+    return map(std::acosh);
   }
   Vectorized<T> asin() const {
     return map(std::asin);
@@ -414,7 +433,7 @@ public:
     typename std::enable_if_t<is_floating_point_v<U>, int> = 0>
   Vectorized<T> fmod(const Vectorized<T>& q) const {
     // U is for SFINAE purposes only. Make sure it is not changed.
-    static_assert(std::is_same<U, T>::value, "U must be T");
+    static_assert(std::is_same_v<U, T>, "U must be T");
     Vectorized<T> ret;
     for (const auto i : c10::irange(size())) {
       ret[i] = std::fmod(values[i], q[i]);
@@ -431,17 +450,17 @@ public:
     return map(std::log1p);
   }
   template <typename other_t_log2 = T,
-            typename std::enable_if<!c10::is_complex<other_t_log2>::value, int>::type = 0>
+            typename std::enable_if_t<!c10::is_complex<other_t_log2>::value, int> = 0>
   Vectorized<T> log2() const {
     // other_t_log2 is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<other_t_log2, T>::value, "other_t_log2 must be T");
+    static_assert(std::is_same_v<other_t_log2, T>, "other_t_log2 must be T");
     return map(std::log2);
   }
   template <typename complex_t_log2 = T,
-            typename std::enable_if<c10::is_complex<complex_t_log2>::value, int>::type = 0>
+            typename std::enable_if_t<c10::is_complex<complex_t_log2>::value, int> = 0>
   Vectorized<T> log2() const {
     // complex_t_log2 is for SFINAE and clarity. Make sure it is not changed.
-    static_assert(std::is_same<complex_t_log2, T>::value, "complex_t_log2 must be T");
+    static_assert(std::is_same_v<complex_t_log2, T>, "complex_t_log2 must be T");
     const T log_2 = T(std::log(2.0));
     return Vectorized(map(std::log))/Vectorized(log_2);
   }
@@ -613,6 +632,12 @@ template <class T> Vectorized<T> inline operator/(const Vectorized<T> &a, const 
   return c;
 }
 
+template <class T,
+          typename std::enable_if_t<!is_floating_point_v<T>, int> = 0>
+Vectorized<T> inline operator%(const Vectorized<T> &a, const Vectorized<T> &b) __ubsan_ignore_float_divide_by_zero__ {
+  return a - a / b * b;
+}
+
 template <class T> Vectorized<T> inline operator||(
     const Vectorized<T> &a, const Vectorized<T> &b) {
   Vectorized<T> c;
@@ -625,7 +650,7 @@ template <class T> Vectorized<T> inline operator||(
 // Implements the IEEE 754 201X `maximum` operation, which propagates NaN if
 // either input is a NaN.
 template <class T,
-          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
+          typename std::enable_if_t<!c10::is_complex<T>::value, int> = 0>
 Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
@@ -641,7 +666,7 @@ Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
 }
 
 template <class T,
-          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
+          typename std::enable_if_t<c10::is_complex<T>::value, int> = 0>
 Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
@@ -659,7 +684,7 @@ Vectorized<T> inline maximum(const Vectorized<T> &a, const Vectorized<T> &b) {
 // Implements the IEEE 754 201X `minimum` operation, which propagates NaN if
 // either input is a NaN.
 template <class T,
-          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
+          typename std::enable_if_t<!c10::is_complex<T>::value, int> = 0>
 Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
@@ -675,7 +700,7 @@ Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
 }
 
 template <class T,
-          typename std::enable_if<c10::is_complex<T>::value, int>::type = 0>
+          typename std::enable_if_t<c10::is_complex<T>::value, int> = 0>
 Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
@@ -691,7 +716,7 @@ Vectorized<T> inline minimum(const Vectorized<T> &a, const Vectorized<T> &b) {
 }
 
 template <class T,
-          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
+          typename std::enable_if_t<!c10::is_complex<T>::value, int> = 0>
 Vectorized<T> inline clamp(const Vectorized<T> &a, const Vectorized<T> &min_vec, const Vectorized<T> &max_vec) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
@@ -701,7 +726,7 @@ Vectorized<T> inline clamp(const Vectorized<T> &a, const Vectorized<T> &min_vec,
 }
 
 template <class T,
-          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
+          typename std::enable_if_t<!c10::is_complex<T>::value, int> = 0>
 Vectorized<T> inline clamp_max(const Vectorized<T> &a, const Vectorized<T> &max_vec) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
@@ -711,7 +736,7 @@ Vectorized<T> inline clamp_max(const Vectorized<T> &a, const Vectorized<T> &max_
 }
 
 template <class T,
-          typename std::enable_if<!c10::is_complex<T>::value, int>::type = 0>
+          typename std::enable_if_t<!c10::is_complex<T>::value, int> = 0>
 Vectorized<T> inline clamp_min(const Vectorized<T> &a, const Vectorized<T> &min_vec) {
   Vectorized<T> c;
   for (int i = 0; i != Vectorized<T>::size(); i++) {
@@ -821,8 +846,8 @@ inline Vectorized<T> operator^(const Vectorized<T>& a, const Vectorized<T>& b) {
 
 template<class T, typename std::enable_if_t<!std::is_base_of<Vectorizedi, Vectorized<T>>::value, int> = 0>
 inline Vectorized<T> operator~(const Vectorized<T>& a) {
-  Vectorized<T> ones;  // All bits are 1
-  memset((T*) ones, 0xFF, VECTOR_WIDTH);
+  using int_t = int_same_size_t<T>;
+  Vectorized<T> ones(c10::bit_cast<T>((int_t)(~(int_t)0)));  // All bits are 1
   return a ^ ones;
 }
 
@@ -980,6 +1005,19 @@ inline Vectorized<IntType> convert_to_int_of_same_size(const Vectorized<T>& src)
   return Vectorized<IntType>::loadu(static_cast<const void*>(buffer.data()));
 }
 
+template <typename T, typename IntType = int_same_size_t<T>>
+inline Vectorized<T> convert_to_fp_of_same_size(const Vectorized<IntType>& src) {
+  static_assert(sizeof(T) == sizeof(IntType));
+  static constexpr int size = Vectorized<T>::size();
+
+  std::array<IntType, size> src_arr;
+  src.store(static_cast<void*>(src_arr.data()));
+  std::array<T, size> buffer;
+  std::transform(src_arr.cbegin(), src_arr.cend(), buffer.begin(),
+                 [](const IntType& x) { return static_cast<T>(x); });
+  return Vectorized<T>::loadu(static_cast<const void*>(buffer.data()));
+}
+
 // Example inputs for AVX512:
 // a   Vectorized<float>   = {a0, b0, a1, b1, a2, b2, a3, b3, a4, b4, a5, b5, a6, b6, a7, b7}
 // b   Vectorized<float>   = {a8, b8, a9, b9, a10, b10, a11, b11, a12, b12, a13, b13, a14, b14, a15, b15}
@@ -1079,3 +1117,8 @@ inline void transpose_mxn(const T* src, int64_t ld_src, T* dst, int64_t ld_dst) 
 }
 
 }} // namespace at::vec::CPU_CAPABILITY
+
+// additional headers for more operations that depend on vec_base
+#include <ATen/cpu/vec/vec_n.h>
+#include <ATen/cpu/vec/vec_mask.h>
+#include <ATen/cpu/vec/vec_convert.h>

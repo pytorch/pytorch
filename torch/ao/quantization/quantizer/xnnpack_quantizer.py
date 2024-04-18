@@ -106,6 +106,10 @@ def get_symmetric_quantization_config(
     is_per_channel: bool = False,
     is_qat: bool = False,
     is_dynamic: bool = False,
+    act_qmin: int = -128,
+    act_qmax: int = 127,
+    weight_qmin: int = -127,
+    weight_qmax: int = 127,
 ):
     extra_args: Dict[str, Any] = {"eps": 2**-12}
     if is_qat:
@@ -125,8 +129,8 @@ def get_symmetric_quantization_config(
 
     act_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
-        quant_min=-128,
-        quant_max=127,
+        quant_min=act_qmin,
+        quant_max=act_qmax,
         qscheme=torch.per_tensor_affine,
         is_dynamic=is_dynamic,
         observer_or_fake_quant_ctr=act_observer_or_fake_quant_ctr.with_args(
@@ -153,8 +157,8 @@ def get_symmetric_quantization_config(
             extra_args["observer"] = MovingAveragePerChannelMinMaxObserver  # type: ignore[dict-item]
     weight_quantization_spec = QuantizationSpec(
         dtype=torch.int8,
-        quant_min=-127,
-        quant_max=127,
+        quant_min=weight_qmin,
+        quant_max=weight_qmax,
         qscheme=weight_qscheme,
         ch_axis=0,
         is_dynamic=False,
@@ -207,9 +211,15 @@ def _get_module_name_filter(module_name: str):
         # }
         # get_attr nodes doesn't have nn_module_stack?
         nn_module_stack = n.meta.get("nn_module_stack", {})
-        names = [
-            n[len("L__self___") :].replace("_", ".") for n in nn_module_stack.keys()
-        ]
+
+        def _normalize_path(n):
+            prefix = 0
+            # TODO This is non standard behavior and should be removed when we migrate off capture_pre_autograd_graph.
+            if n.startswith("L['self']."):
+                prefix = len("L['self'].")
+            return n[prefix:]
+
+        names = [_normalize_path(n) for n, _ in nn_module_stack.values()]
         return module_name in names
 
     return module_name_filter
@@ -257,13 +267,18 @@ class XNNPACKQuantizer(Quantizer):
     STATIC_QAT_ONLY_OPS = [
         "conv_bn_relu",
         "conv_bn",
+        "conv_transpose_bn_relu",
+        "conv_transpose_bn",
     ]
 
     # static quantization ops (both PTQ and QAT)
+    # Preserve the order that fusions come before singular ops
     STATIC_OPS = [
+        "linear_relu",
         "linear",
         "conv_relu",
         "conv",
+        "conv_transpose_relu",
         "adaptive_avg_pool2d",
         # TODO: move this to BoltNNQuantizer?
         "gru_io_only",

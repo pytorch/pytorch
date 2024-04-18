@@ -89,6 +89,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   std::vector<c10::List<at::Tensor>> tensorlist_args;
   std::vector<int> tensorlist_args_indices;
 
+  c10::optional<c10::Device> tgt_device = c10::nullopt;
   // save converted cpu tensor for TensorList
   std::vector<c10::IValue> tensorlist_cpu_args;
 
@@ -108,6 +109,25 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
       auto cpu_ivalue = c10::IValue(c10::List<at::Tensor>(to_cpu(ivalue.toTensorList().vec())));
       tensorlist_cpu_args.push_back(cpu_ivalue);
       (*stack)[arguments_begin + idx] = std::move(cpu_ivalue);
+      tensorlist_args.push_back(ivalue.toTensorList());
+    } else if (ivalue.isOptionalTensorList()) {
+      auto opt_tensors = ivalue.toOptionalTensorList().vec();
+      std::vector<at::Tensor> need_convert_tensors;
+      std::vector<int> need_convert_tensors_index;
+      for (auto i : c10::irange(opt_tensors.size())) {
+        if (!opt_tensors[i].has_value() || !opt_tensors[i]->defined()) continue;
+        need_convert_tensors.push_back(opt_tensors[i].value());
+        need_convert_tensors_index.push_back(i);
+      }
+      auto cpu_tensors = to_cpu(need_convert_tensors);
+      for (const auto i : c10::irange(need_convert_tensors_index.size())) {
+        auto idx = need_convert_tensors_index[i];
+        opt_tensors[idx] = cpu_tensors[i];
+      }
+      (*stack)[arguments_begin + idx] = c10::IValue(opt_tensors);
+    } else if (ivalue.isDevice()) {
+      tgt_device = ivalue.toDevice();
+      (*stack)[arguments_begin + idx] = c10::IValue(c10::Device(kCPU));
     }
   }
   // XLA requires all of the tensor arguments to be gathered up and converted to CPU together.
@@ -151,7 +171,7 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   // the temporary CPU output tensor that we created.
   //
   // Note [CPU Fallback Does Not Handle View Operators]
-  // Also note that we are incapable of handling immutable alises properly.
+  // Also note that we are incapable of handling immutable aliases properly.
   // Why?
   // Schemas with an immutable alias'd tensor outputs correspond to view operators.
   // For example, the `view_as` schema from native_functions.yaml:
@@ -168,8 +188,9 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack, bool 
   auto returns = torch::jit::last(stack, num_returns);
   const auto returns_begin = stack->size() - num_returns;
 
-  c10::optional<c10::Device> tgt_device =
-      compute_target_device(tensor_args, tensorlist_args);
+  if (tgt_device == c10::nullopt) {
+    tgt_device = compute_target_device(tensor_args, tensorlist_args);
+  }
 
   for (const auto idx : c10::irange(returns.size())) {
     const AliasInfo* alias_info = schema_returns[idx].alias_info();

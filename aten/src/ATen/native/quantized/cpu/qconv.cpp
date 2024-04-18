@@ -1633,34 +1633,25 @@ static at::Tensor _quantized_convolution_onednn(
                         output.data_ptr());
     }
   }
-  ideep::attr_t op_attr;
-  // attr
+  static ideep::tensor::desc dummy_accum_desc;
+  ideep::attr_t op_attr = onednn_utils::create_attr_by_post_op(
+    binary_attr.has_value() ? binary_attr.value() : "none",
+    binary_alpha.has_value() ? binary_alpha.value().to<double>() : 1.0,
+    accum_scale,
+    accum_zero_point,
+    dummy_accum_desc,
+    unary_attr.has_value() ? unary_attr.value() : "none",
+    unary_scalars,
+    unary_algorithm.has_value() ? unary_algorithm.value() : ""
+  );
+  // set accum scale/zero point to dst
   if (has_accum_postop_sum) {
-    op_attr = (has_unary_post_op && unary_attr.value()=="relu") ? ideep::attr_t::residual_with_sum_zero_point() : ideep::attr_t::fuse_sum();
     const ideep::scale_t accum_ideep_scale = ideep::scale_t(1, 1.0/accum_scale);
     const ideep::zero_point_t accum_ideep_zero_points = ideep::zero_point_t(1, accum_zero_point);
     // Set the dst scale and zero point with the value of accum.
     // The true scale and zero point is stored in ideep::scale_t(scale_size, inv_output_scale) and dst_zero_points.
     dst.set_scale(accum_ideep_scale);
     dst.set_zero_point(accum_ideep_zero_points);
-  } else {
-    if (has_unary_post_op && unary_attr.value()=="relu") {
-      op_attr = ideep::attr_t::fuse_relu();
-    } else if (has_unary_post_op && unary_attr.value()=="hardtanh") {
-      TORCH_CHECK(
-          unary_scalars.size() == 2 &&
-              unary_scalars[0].get().toOptional<at::Scalar>().has_value() &&
-              unary_scalars[1].get().toOptional<at::Scalar>().has_value(),
-          "hardtanh is expected to have two scalar input: min_val and max_val");
-
-      auto lower_bound_value =
-          unary_scalars[0].get().toOptional<at::Scalar>().value().to<float>();
-      auto upper_bound_value =
-          unary_scalars[1].get().toOptional<at::Scalar>().value().to<float>();
-      op_attr = ideep::attr_t::fuse_clamp(lower_bound_value, upper_bound_value);
-    } else {
-      op_attr = ideep::attr_t();
-    }
   }
 
   // Weight Reorder
@@ -1851,8 +1842,8 @@ class QConvoneDNN final {
     } else {
       // Conv2D post op check
       TORCH_CHECK(
-        attr == "none" || attr == "relu" || attr == "hardtanh",
-        "none post_op or post_op relu/hardtanh is supported for quantized pointwise conv2d. Got unary_post_op: ",
+        attr == "none" || attr == "relu" || attr == "hardtanh" || attr == "hardswish" || attr == "swish",
+        "none post_op or post_op relu/hardtanh/hardswish is supported for quantized pointwise conv2d. Got unary_post_op: ",
         attr,
         ".")
     }

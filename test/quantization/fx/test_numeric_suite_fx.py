@@ -36,6 +36,7 @@ from torch.testing._internal.common_quantization import (
     skip_if_no_torchvision,
     TwoLayerLinearModel
 )
+from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.ao.quantization.quantization_mappings import (
     get_default_static_quant_module_mappings,
     get_default_dynamic_quant_module_mappings,
@@ -792,6 +793,7 @@ class TestFXGraphMatcher(QuantizationTestCase):
 
 class TestFXGraphMatcherModels(QuantizationTestCase):
 
+    @skipIfTorchDynamo("too slow")
     @skipIfNoFBGEMM
     @skip_if_no_torchvision
     def test_mobilenet_v2(self):
@@ -2281,6 +2283,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         # stats should be empty, but comparisons should be there
         _check_logger_count(msq, 0, 1)
 
+    @skipIfTorchDynamo("too slow")
     @skip_if_no_torchvision
     @withQNNPACKBackend
     def test_mobilenet_v2(self):
@@ -2736,6 +2739,7 @@ class TestFXNumericSuiteNShadows(FXNumericSuiteQuantizationTestCase):
         ):
             self._test_add_loggers_impl(m, example_input, qconfig_mapping)
 
+    @skipIfTorchDynamo("too slow")
     @skip_if_no_torchvision
     @withQNNPACKBackend
     def test_add_loggers_mobilenet_v2(self):
@@ -2887,6 +2891,7 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
                 results_len=3,
                 should_log_inputs=should_log_inputs)
 
+    @skipIfTorchDynamo("too slow")
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
     def test_resnet18(self):
@@ -2898,6 +2903,7 @@ class TestFXNumericSuiteCoreAPIsModels(FXNumericSuiteQuantizationTestCase):
             qconfig_dict=qconfig_dict,
             should_log_inputs=False)
 
+    @skipIfTorchDynamo("too slow")
     @skip_if_no_torchvision
     @skipIfNoFBGEMM
     def test_mobilenet_v2(self):

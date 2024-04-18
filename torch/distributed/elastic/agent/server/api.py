@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+# mypy: ignore-errors
 
 # Copyright (c) Facebook, Inc. and its affiliates.
 # All rights reserved.
@@ -22,21 +22,29 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import torch.distributed.elastic.rendezvous as rdzv
 import torch.distributed.elastic.utils.store as store_util
+from torch.distributed.elastic.rendezvous import RendezvousGracefulExitError
 from torch.distributed import Store
 from torch.distributed.elastic.events import Event, EventSource, record
 from torch.distributed.elastic.metrics import prof, put_metric
 from torch.distributed.elastic.multiprocessing import (
     ProcessFailure,
     SignalException,
-    Std,
 )
 from torch.distributed.elastic.utils.logging import get_logger
 
-__all__ = ['WorkerSpec', 'Worker', 'WorkerState', 'WorkerGroup', 'RunResult', 'ElasticAgent', 'SimpleElasticAgent']
+__all__ = [
+    "WorkerSpec",
+    "Worker",
+    "WorkerState",
+    "WorkerGroup",
+    "RunResult",
+    "ElasticAgent",
+    "SimpleElasticAgent",
+]
 _TERMINAL_STATE_SYNC_ID = "torchelastic/agent/terminal_state"
 
 DEFAULT_ROLE = "default"
-log = get_logger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -81,8 +89,6 @@ class WorkerSpec:
     master_port: Optional[int] = None
     master_addr: Optional[str] = None
     local_addr: Optional[str] = None
-    redirects: Union[Std, Dict[int, Std]] = Std.NONE
-    tee: Union[Std, Dict[int, Std]] = Std.NONE
 
     def __post_init__(self):
         assert self.local_world_size > 0
@@ -377,7 +383,7 @@ def _get_socket_with_port() -> socket.socket:
             return s
         except OSError as e:
             s.close()
-            log.info("Socket creation attempt failed.", exc_info=e)
+            logger.info("Socket creation attempt failed.", exc_info=e)
     raise RuntimeError("Failed to create a socket")
 
 
@@ -414,7 +420,7 @@ class ElasticAgent(abc.ABC):
       if group_result.is_failed():
         # workers failed
         failure = group_result.failures[0]
-        log.exception("worker 0 failed with exit code : %s", failure.exit_code)
+        logger.exception("worker 0 failed with exit code : %s", failure.exit_code)
       else:
         return group_result.return_values[0] # return rank 0's results
 
@@ -433,7 +439,7 @@ class ElasticAgent(abc.ABC):
         Raises:
             Exception - any other failures NOT related to worker process
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def get_worker_group(self, role: str = DEFAULT_ROLE) -> WorkerGroup:
@@ -444,7 +450,7 @@ class ElasticAgent(abc.ABC):
         Implementors are encouraged (but not required) to return
         a defensive read-only copy.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class SimpleElasticAgent(ElasticAgent):
@@ -471,7 +477,7 @@ class SimpleElasticAgent(ElasticAgent):
         This is according to worker spec for the worker group .
         Returns a map of ``local_rank`` to worker ``id``.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _stop_workers(self, worker_group: WorkerGroup) -> None:
@@ -481,7 +487,7 @@ class SimpleElasticAgent(ElasticAgent):
         ``WorkerState``. That is, it must gracefully handle stopping
         non-existent workers, unhealthy (stuck) workers, etc.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _monitor_workers(self, worker_group: WorkerGroup) -> RunResult:
@@ -489,7 +495,7 @@ class SimpleElasticAgent(ElasticAgent):
 
         This function also returns the new state of the worker group.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
@@ -498,7 +504,7 @@ class SimpleElasticAgent(ElasticAgent):
         Args:
             death_sig: Signal to send to the child process, SIGTERM is default
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def _set_master_addr_port(
@@ -559,7 +565,7 @@ class SimpleElasticAgent(ElasticAgent):
         master_addr, master_port = self._get_master_addr_port(store)
         restart_count = spec.max_restarts - self._remaining_restarts
 
-        log.info(
+        logger.info(
             "[%(role)s] Rendezvous complete for workers. Result:\n"
             "  restart_count=%(restart_count)s\n"
             "  master_addr=%(master_addr)s\n"
@@ -690,7 +696,7 @@ class SimpleElasticAgent(ElasticAgent):
         of state to ``_monitor_workers()`` method
         """
         role = worker_group.spec.role
-        log.info("[%s] Rendezvous'ing worker group", role)
+        logger.info("[%s] Rendezvous'ing worker group", role)
 
         # TODO after stopping workers, wait at least monitor_interval*2 for
         # workers on different nodes to fail on a collective op before waiting
@@ -698,7 +704,7 @@ class SimpleElasticAgent(ElasticAgent):
         # at around the same time and reduce false positive rdzv timeout errors
         self._rendezvous(worker_group)
 
-        log.info("[%s] Starting worker group", role)
+        logger.info("[%s] Starting worker group", role)
         worker_ids = self._start_workers(worker_group)
         for local_rank, w_id in worker_ids.items():
             worker = worker_group.workers[local_rank]
@@ -712,7 +718,7 @@ class SimpleElasticAgent(ElasticAgent):
     def _restart_workers(self, worker_group: WorkerGroup) -> None:
         """Restart (stops, rendezvous, starts) all local workers in the group."""
         role = worker_group.spec.role
-        log.info("[%s] Stopping worker group", role)
+        logger.info("[%s] Stopping worker group", role)
         self._stop_workers(worker_group)
         worker_group.state = WorkerState.STOPPED
         self._initialize_workers(worker_group)
@@ -729,8 +735,10 @@ class SimpleElasticAgent(ElasticAgent):
             self._record_metrics(result)
             self._record_worker_events(result)
             return result
+        except RendezvousGracefulExitError as e:
+            logger.info("Rendezvous gracefully exited: %s", e)
         except SignalException as e:
-            log.warning("Received %s death signal, shutting down workers", e.sigval)
+            logger.warning("Received %s death signal, shutting down workers", e.sigval)
             self._shutdown(e.sigval)
             shutdown_called = True
             raise
@@ -855,7 +863,7 @@ class SimpleElasticAgent(ElasticAgent):
         spec = self._worker_group.spec
         role = spec.role
 
-        log.info(
+        logger.info(
             "[%s] starting workers for entrypoint: %s", role, spec.get_entrypoint_name()
         )
 
@@ -874,7 +882,7 @@ class SimpleElasticAgent(ElasticAgent):
             put_metric(f"workers.{role}.{state.name.lower()}", 1)
 
             if state == WorkerState.SUCCEEDED:
-                log.info(
+                logger.info(
                     "[%s] worker group successfully finished."
                     " Waiting %s seconds for other agents to finish.",
                     role, self._exit_barrier_timeout
@@ -883,7 +891,7 @@ class SimpleElasticAgent(ElasticAgent):
                 return run_result
             elif state in {WorkerState.UNHEALTHY, WorkerState.FAILED}:
                 if self._remaining_restarts > 0:
-                    log.info(
+                    logger.info(
                         "[%s] Worker group %s. "
                         "%s/%s attempts left;"
                         " will restart worker group",
@@ -900,7 +908,7 @@ class SimpleElasticAgent(ElasticAgent):
                 num_nodes_waiting = rdzv_handler.num_nodes_waiting()
                 group_rank = self._worker_group.group_rank
                 if num_nodes_waiting > 0:
-                    log.info(
+                    logger.info(
                         "[%s] Detected %s "
                         "new nodes from group_rank=%s; "
                         "will restart worker group",
@@ -919,7 +927,7 @@ class SimpleElasticAgent(ElasticAgent):
         acts as a safety guard against user scripts that terminate at different
         times.
         """
-        log.info(
+        logger.info(
             "Local worker group finished (%s). "
             "Waiting %s seconds for other agents to finish",
             self._worker_group.state, self._exit_barrier_timeout
@@ -933,14 +941,14 @@ class SimpleElasticAgent(ElasticAgent):
                 key_prefix=_TERMINAL_STATE_SYNC_ID,
                 barrier_timeout=self._exit_barrier_timeout,
             )
-            log.info(
+            logger.info(
                 "Done waiting for other agents. Elapsed: %s seconds", time.time() - start
             )
         except SignalException as e:
-            log.warning("Got termination signal: %s", e.sigval)
+            logger.warning("Got termination signal: %s", e.sigval)
             raise
         except Exception:
-            log.exception(
+            logger.exception(
                 "Error waiting on exit barrier. Elapsed: %s seconds",
                 time.time() - start
             )

@@ -9,25 +9,18 @@ from tools.testing.target_determination.heuristics.utils import (
     python_test_file_to_test_name,
     query_changed_files,
 )
+from tools.testing.test_run import TestRun
 
 
 class EditedByPR(HeuristicInterface):
     def __init__(self, **kwargs: Dict[str, Any]):
         super().__init__(**kwargs)
 
-    def get_test_priorities(self, tests: List[str]) -> TestPrioritizations:
-        # Tests must always be returned in a deterministic order.
-        # Otherwise it breaks our test sharding logic
-        critical_tests = sorted(_get_modified_tests())
-        test_rankings = TestPrioritizations(
-            tests_being_ranked=tests, high_relevance=critical_tests
-        )
-
-        return test_rankings
-
-    def get_prediction_confidence(self, tests: List[str]) -> Dict[str, float]:
+    def get_prediction_confidence(self, tests: List[str]) -> TestPrioritizations:
         critical_tests = _get_modified_tests()
-        return {test: 1 for test in critical_tests if test in tests}
+        return TestPrioritizations(
+            tests, {TestRun(test): 1 for test in critical_tests if test in tests}
+        )
 
 
 def _get_modified_tests() -> Set[str]:

@@ -13,46 +13,13 @@ jobs:
   do_update_viablestrict:
     if: ${{ github.repository_owner == 'pytorch' }}
     runs-on: ubuntu-20.04
-    environment: mergebot
+    environment: ${{ (github.event_name == 'schedule') && 'mergebot' || '' }}
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - name: Update viable/strict
+        uses: pytorch/test-infra/.github/actions/update-viablestrict@main
         with:
-          fetch-depth: 0
-          token: ${{ secrets.MERGEBOT_TOKEN }}
-
-      - name: Setup Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: '3.8'
-          architecture: x64
-          check-latest: false
-          cache: pip
-          cache-dependency-path: |
-            **/.ci/docker/requirements-ci.txt
-            **/.github/requirements-gha-cache.txt
-
-      - name: Install Python Packages
-        run: |
-          pip3 install rockset==1.0.3
-          pip3 install boto3==1.19.12
-
-      - name: Get latest viable commit
-        env:
-          ROCKSET_API_KEY: ${{ secrets.ROCKSET_API_KEY }}
-        run: |
-          output=$(python3 .github/scripts/fetch_latest_green_commit.py)
-          echo "latest_viable_sha=$output" >> "${GITHUB_OUTPUT}"
-        id: get-latest-commit
-
-      - name: Push SHA to viable/strict branch
-        if: steps.get-latest-commit.outputs.latest_viable_sha != 'None'
-        env:
-          GITHUB_TOKEN: ${{ secrets.MERGEBOT_TOKEN }}
-        run: |
-          git config --global user.email "pytorchmergebot@users.noreply.github.com"
-          git config --global user.name "PyTorch MergeBot"
-          echo "Set the latest sha variable to be ${{ steps.get-latest-commit.outputs.latest_viable_sha }}"
-          # Pushing an older green commit here will fail because it's non-fast-forward, which is ok
-          # to ignore because we already have the later green commit in visable/strict
-          git push origin "${{ steps.get-latest-commit.outputs.latest_viable_sha }}":viable/strict || true
+          repository: pytorch/pytorch
+          stable-branch: viable/strict
+          requires: '[\"pull\", \"trunk\", \"lint\", \"linux-binary\"]'
+          secret-bot-token: ${{ secrets.MERGEBOT_TOKEN }}
+          rockset-api-key: ${{ secrets.ROCKSET_API_KEY }}

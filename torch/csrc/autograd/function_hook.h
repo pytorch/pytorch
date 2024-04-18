@@ -12,8 +12,7 @@ class SwapSavedVariables;
 
 // A hook that's called on gradients
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 using Variable = at::Tensor;
 using variable_list = std::vector<Variable>;
@@ -62,5 +61,4 @@ struct TORCH_API PostAccumulateGradHook {
   }
 };
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

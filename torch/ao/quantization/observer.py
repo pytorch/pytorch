@@ -762,7 +762,7 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         error_msgs: List[str],
     ):
         version = local_metadata.get("version", None)
-        if version is None or version < 3:
+        if version is not None and version < 3:
             local_state = ["min_vals", "max_vals"]
             expected_min_name = "min_vals"
             expected_max_name = "max_vals"
@@ -1189,6 +1189,18 @@ class HistogramObserver(UniformQuantizationObserverBase):
         orig_hist = orig_hist + interpolated_histogram.to(torch.float)
         return orig_hist
 
+    def reset_histogram(self, x: torch.Tensor, min_val: torch.Tensor, max_val: torch.Tensor) -> None:
+        self.min_val.resize_(min_val.shape)
+        self.min_val.copy_(min_val)
+        self.max_val.resize_(max_val.shape)
+        self.max_val.copy_(max_val)
+        assert (
+            min_val.numel() == 1 and max_val.numel() == 1
+        ), "histogram min/max values must be scalar."
+        torch.histc(
+            x, self.bins, min=min_val, max=max_val, out=self.histogram  # type: ignore[arg-type]
+        )
+
     def forward(self, x_orig: torch.Tensor) -> torch.Tensor:
         if x_orig.numel() == 0:
             return x_orig
@@ -1206,19 +1218,13 @@ class HistogramObserver(UniformQuantizationObserverBase):
         min_val = self.min_val
         max_val = self.max_val
         same_values = min_val.item() == max_val.item()
+        # When (max_val - min_val) is very small, downsample_rate will be large.
+        # This can cause OOM issue in the allocation of histogram_with_output_range tensor.
+        close_values = (self.max_val - self.min_val) < 1e-6
         is_uninitialized = min_val == float("inf") and max_val == float("-inf")
-        if is_uninitialized or same_values:
+        if is_uninitialized or same_values or close_values:
             min_val, max_val = x_min, x_max
-            self.min_val.resize_(min_val.shape)
-            self.min_val.copy_(min_val)
-            self.max_val.resize_(max_val.shape)
-            self.max_val.copy_(max_val)
-            assert (
-                min_val.numel() == 1 and max_val.numel() == 1
-            ), "histogram min/max values must be scalar."
-            torch.histc(
-                x, self.bins, min=min_val, max=max_val, out=self.histogram  # type: ignore[arg-type]
-            )
+            self.reset_histogram(x, min_val, max_val)
         else:
             new_min, new_max = x_min, x_max
             combined_min = torch.min(new_min, min_val)
@@ -1246,21 +1252,29 @@ class HistogramObserver(UniformQuantizationObserverBase):
             if combined_min == min_val and combined_max == max_val:
                 combined_histogram += self.histogram
             else:
-                combined_histogram = self._combine_histograms(
-                    combined_histogram,
-                    self.histogram,
-                    self.upsample_rate,
-                    downsample_rate,
-                    start_idx,
-                    self.bins,
-                )
+                MAX_HISTOGRAM_SIZE = 1e9  # 1 GB
+                histogram_size = self.bins * downsample_rate * 4
+                if histogram_size > MAX_HISTOGRAM_SIZE:
+                    warnings.warn(
+                        "Fail to combine histograms. Fall back to reset histogram."
+                    )
+                    self.reset_histogram(x, x_min, x_max)
+                else:
+                    combined_histogram = self._combine_histograms(
+                        combined_histogram,
+                        self.histogram,
+                        self.upsample_rate,
+                        downsample_rate,
+                        start_idx,
+                        self.bins,
+                    )
+                    self.histogram.detach_().resize_(combined_histogram.shape)
+                    self.histogram.copy_(combined_histogram)
+                    self.min_val.detach_().resize_(combined_min.shape)
+                    self.min_val.copy_(combined_min)
+                    self.max_val.detach_().resize_(combined_max.shape)
+                    self.max_val.copy_(combined_max)
 
-            self.histogram.detach_().resize_(combined_histogram.shape)
-            self.histogram.copy_(combined_histogram)
-            self.min_val.detach_().resize_(combined_min.shape)
-            self.min_val.copy_(combined_min)
-            self.max_val.detach_().resize_(combined_max.shape)
-            self.max_val.copy_(combined_max)
         return x_orig
 
     @torch.jit.export

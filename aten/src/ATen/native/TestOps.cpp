@@ -4,6 +4,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/FunctionalInverses.h>
 #include <ATen/ScalarOps.h>
+#include <ATen/Parallel.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -13,6 +14,7 @@
 #include <ATen/ops/_test_autograd_multiple_dispatch_native.h>
 #include <ATen/ops/_test_autograd_multiple_dispatch_view_native.h>
 #include <ATen/ops/_test_check_tensor_native.h>
+#include <ATen/ops/_test_parallel_materialize_native.h>
 #include <ATen/ops/_test_optional_filled_intlist_native.h>
 #include <ATen/ops/_test_optional_floatlist_native.h>
 #include <ATen/ops/_test_optional_intlist_native.h>
@@ -111,14 +113,29 @@ Tensor _test_check_tensor(const Tensor& self) {
   return self.clone();
 }
 
+Tensor _test_parallel_materialize(const Tensor& self, int64_t num_parallel, bool skip_first) {
+  at::parallel_for(0, num_parallel, 1, [&](int64_t begin, int64_t end){
+    // NOTE: skip_first is meant to avoid triggering the materialization from
+    // the first thread, to ensure that the subthreads throw the error
+    // correctly. On some platforms, the first thread is the main thread and it
+    // begins executing the loop function much earlier than the subthreads.
+    if (skip_first && begin == 0 && end == 1) {
+      return;
+    } else {
+      self.mutable_data_ptr();
+    }
+  });
+  return self;
+}
+
 } // namespace at::native
 
 namespace at::functionalization {
 
-// view_copy ops must have a functional inverse registered
-Tensor FunctionalInverses::_test_autograd_multiple_dispatch_view_copy_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
+// view ops must have a functional inverse registered
+Tensor FunctionalInverses::_test_autograd_multiple_dispatch_view_inverse(const at::Tensor& base, const at::Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
     TORCH_INTERNAL_ASSERT(false,
-    "Attempted to call _test_autograd_multiple_dispatch_view_copy_inverse() during the functionalization pass. ",
+    "Attempted to call _test_autograd_multiple_dispatch_view_inverse() during the functionalization pass. ",
     "This function is for testing only and should never be called.");
     return Tensor();
 }

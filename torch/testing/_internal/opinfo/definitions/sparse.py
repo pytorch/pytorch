@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import os
 
 import torch
@@ -574,7 +576,10 @@ def _validate_sample_input_elementwise_binary_sparse_mul(sample):
     if layout is torch.sparse_csr and batch_dim > 0 and t_args[0].ndim > 0:
         return ErrorInput(
             sample,
-            error_regex="crow_indices is supposed to be a vector, but got 2 dimensional tensor",
+            error_regex=(
+                "coo_to_sparse_csr: conversion from Sparse to SparseCsr for input"
+                " tensors with sparse_dim[(][)]!=2 is not supported"
+            ),
         )
     elif layout is torch.sparse_csc and t_args[0].ndim > 0:
         return ErrorInput(
@@ -793,15 +798,7 @@ def _validate_sample_input_sparse_like_fns(op_info, sample, check_validate=False
         torch.sparse_csc,
         torch.sparse_bsr,
         torch.sparse_bsc,
-    }:
-        if sample.kwargs.get("device", sample.input.device) != sample.input.device:
-            return ErrorInput(
-                sample,
-                error_regex=(
-                    "device of (ccol|crow)_indices \\(=(cpu|cuda.*)\\) must"
-                    " match device of values \\(=(cuda.*|cpu)\\)"
-                ),
-            )
+    } and op_info.name not in {"zeros_like"}:
         if sample.kwargs.get("layout", sample.input.layout) != sample.input.layout:
             return ErrorInput(
                 sample,

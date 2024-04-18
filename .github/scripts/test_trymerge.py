@@ -16,6 +16,8 @@ from typing import Any, Dict, List, Optional
 from unittest import main, mock, skip, TestCase
 from urllib.error import HTTPError
 
+from github_utils import gh_graphql
+
 from gitutils import get_git_remote_name, get_git_repo_dir, GitRepo
 
 from trymerge import (
@@ -26,7 +28,6 @@ from trymerge import (
     get_drci_classifications,
     get_rockset_results,
     gh_get_team_members,
-    gh_graphql,
     GitHubPR,
     JobCheckState,
     main as trymerge_main,
@@ -140,11 +141,14 @@ def mock_parse_args(revert: bool = False, force: bool = False) -> Any:
             self.comment_id = 0
             self.reason = "this is for testing"
             self.ignore_current = False
+            self.check_mergeability = False
 
     return Object()
 
 
-def mock_remove_label(org: str, repo: str, pr_num: str, label: str) -> None:
+def mock_remove_label(
+    org: str, repo: str, pr_num: str, label: str, dry_run: bool
+) -> None:
     pass
 
 
@@ -201,7 +205,6 @@ def mocked_read_merge_rules(repo: Any, org: str, project: str) -> List[MergeRule
             approved_by=["pytorch/metamates", "ngimel"],
             mandatory_checks_name=[
                 "Lint",
-                "Facebook CLA Check",
                 "pull / linux-xenial-cuda11.3-py3.7-gcc7 / build",
             ],
             ignore_flaky_failures=True,
@@ -394,7 +397,7 @@ class TestTryMerge(TestCase):
     def test_gql_retrieve_checksuites(self, *args: Any) -> None:
         "Fetch comments and conclusions for PR with 60 commits"
         pr = GitHubPR("pytorch", "pytorch", 94787)
-        self.assertEqual(len(pr.get_checkrun_conclusions()), 183)
+        self.assertEqual(len(pr.get_checkrun_conclusions()), 182)
 
     def test_team_members(self, *args: Any) -> None:
         "Test fetching team members works"
@@ -430,6 +433,13 @@ class TestTryMerge(TestCase):
         self.assertGreater(len(approved_by), 0)
         assert pr._reviews is not None  # to pacify mypy
         self.assertGreater(len(pr._reviews), 100)
+
+    def get_co_authors(self, *args: Any) -> None:
+        """Tests that co-authors are recognized"""
+        pr = GitHubPR("pytorch", "pytorch", 118347)
+        authors = pr.get_authors()
+        self.assertIn("kit1980", authors)
+        self.assertIn("Co-authored-by:", pr.gen_commit_message())
 
     def test_get_checkruns_many_runs(self, *args: Any) -> None:
         """Tests that all checkruns can be fetched"""
@@ -821,6 +831,41 @@ class TestBypassFailures(TestCase):
         self.assertTrue(len(ignorable["IGNORE_CURRENT_CHECK"]) == 0)
         self.assertTrue(len(ignorable["FLAKY"]) == 4)
         self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 2)
+
+    def test_get_classifications_wrong_workflow_name(self, *args: Any) -> None:
+        pr = GitHubPR("pytorch", "pytorch", 123104)
+        checks = pr.get_checkrun_conclusions()
+
+        check_name = "linux-binary-conda / conda-py3_8-cuda11_8-build / build"
+        check_name_workflow_path = ".github/workflows/generated-linux-binary-conda-nightly.yml / conda-py3_8-cuda11_8-build / build"
+
+        # Mock a check where the workflow name uses the full path
+        checks[check_name_workflow_path] = JobCheckState(
+            check_name_workflow_path,
+            checks[check_name].url,
+            checks[check_name].status,
+            checks[check_name].classification,
+            checks[check_name].job_id,
+            checks[check_name].title,
+            checks[check_name].summary,
+        )
+        del checks[check_name]
+
+        checks = get_classifications(
+            pr.pr_num,
+            pr.project,
+            checks,
+            [],
+        )
+        pending, failed, ignorable = categorize_checks(
+            checks,
+            list(checks.keys()),
+        )
+
+        self.assertTrue(len(pending) == 0)
+        self.assertTrue(len(failed) == 0)
+        self.assertTrue(len(ignorable["FLAKY"]) == 1)
+        self.assertTrue(len(ignorable["BROKEN_TRUNK"]) == 0)
 
     @mock.patch("trymerge.read_merge_rules", side_effect=xla_merge_rules)
     def test_dont_ignore_flaky_failures(self, *args: Any) -> None:

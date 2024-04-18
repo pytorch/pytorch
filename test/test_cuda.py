@@ -1,6 +1,6 @@
 # Owner(s): ["module: cuda"]
 
-from itertools import product, chain
+from itertools import product
 import collections
 import contextlib
 from copy import deepcopy
@@ -28,9 +28,9 @@ from torch.utils.checkpoint import checkpoint_sequential
 from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run_tests, \
     NO_MULTIPROCESSING_SPAWN, skipIfRocm, load_tests, IS_WINDOWS, \
     slowTest, skipCUDANonDefaultStreamIf, skipCUDAMemoryLeakCheckIf, TEST_CUDA, TEST_CUDA_GRAPH, TEST_WITH_ROCM, TEST_NUMPY, \
-    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX
+    get_cycles_per_ms, parametrize, instantiate_parametrized_tests, subtest, IS_JETSON, gcIfJetson, NoTest, IS_LINUX, IS_ARM64
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
-    _create_scaling_case, _create_scaling_models_optimizers, _get_torch_cuda_version
+    _create_scaling_case, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 from torch.utils.viz._cycles import observe_tensor_cycles
 
@@ -171,7 +171,6 @@ class TestCuda(TestCase):
         tensor.fill_(1)
         self.assertTrue((tensor == 1).all())
 
-
     @unittest.skipIf(TEST_CUDAMALLOCASYNC or IS_JETSON, "Segmentation fault (core dumped)")
     def test_out_of_memory_retry(self):
         torch.cuda.empty_cache()
@@ -247,6 +246,14 @@ class TestCuda(TestCase):
         y = torch.ones(10000000 - 1, dtype=torch.uint8).cuda()
         _test_copy_non_blocking(x, y)
 
+    def test_copy_non_blocking_type_conversion(self):
+        a = torch.ones(1, device="cuda")
+        b = torch.zeros(1, device="cpu", pin_memory=True)
+        c = torch.empty(1, device="cuda", dtype=torch.long)
+        torch.cuda._sleep(int(100 * get_cycles_per_ms()))
+        b.copy_(a, non_blocking=True)
+        c.copy_(b, non_blocking=True)
+        self.assertEqual(a, c, exact_dtype=False)
 
     def test_to_non_blocking(self):
         stream = torch.cuda.current_stream()
@@ -374,7 +381,6 @@ class TestCuda(TestCase):
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = not orig
         self.assertEqual(torch._C._get_cublas_allow_bf16_reduced_precision_reduction(), not orig)
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = orig
-
 
     def test_cudnn_allow_tf32_get_set(self):
         with torch.backends.cudnn.flags(enabled=None, benchmark=None, deterministic=None, allow_tf32=False):
@@ -1097,203 +1103,24 @@ torch.cuda.synchronize()
 """])
                 self.assertTrue(r != 0)
 
-
-    def test_grad_scaling_update_scale(self, device="cuda", dtype=torch.float):
-        growth = 2.0
-        backoff = 0.25
-        growth_interval = 2
-        scale = torch.full((1,), 4.0, dtype=dtype, device=device)
-        growth_tracker = torch.full((1,), 0.0, dtype=torch.int32, device=device)
-        found_inf = torch.full((1,), 0.0, dtype=torch.float, device="cuda:0")
-
-        # Simulates 2 consecutive unskipped iterations
-        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
-        self.assertEqual(growth_tracker, 1)
-        self.assertEqual(scale, 4.0)
-        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
-        self.assertEqual(growth_tracker, 0)
-        self.assertEqual(scale, 8.0)
-
-        # Simulates a skipped iteration
-        found_inf.fill_(1.0)
-        torch._amp_update_scale_(scale, growth_tracker, found_inf, growth, backoff, growth_interval)
-        self.assertEqual(growth_tracker, 0)
-        self.assertEqual(scale, 2.0)
-
-    def test_grad_scaling_unscale_sparse(self, device="cuda", dtype=torch.float):
-        scaler = torch.cuda.amp.GradScaler()
-
-        inv_scale = torch.full((1,), 0.25, dtype=dtype, device=device)
-        found_inf = torch.empty((1,), dtype=dtype, device=device)
-        cur = found_inf.device
-
-        i = torch.tensor([[0, 1, 1],
-                          [2, 0, 2]], device="cuda", dtype=torch.int64)
-        v = torch.tensor([16., 32., 64.], device="cuda", dtype=torch.float)
-        s = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=dtype)
-
-        p = s.clone()
-        assert p.is_sparse
-        opt = torch.optim.SGD([p], lr=1.)
-
-        p.grad = s.clone()
-        found_inf.zero_()
-        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, False)[cur]
-        self.assertEqual(found_inf, 0.0)
-        self.assertEqual(p.grad.to_dense(), (s / 4).to_dense())
-
-        v = torch.FloatTensor([16., 32., float('inf')])
-        p.grad = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=dtype)
-        found_inf.zero_()
-        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, False)[cur]
-        self.assertEqual(found_inf, 1.0)
-
-        v = torch.FloatTensor([16., 32., float('nan')])
-        p.grad = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=dtype)
-        found_inf.zero_()
-        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, False)[cur]
-        self.assertEqual(found_inf, 1.0)
-
-        p = s.clone().half()
-        assert p.is_sparse
-        opt = torch.optim.SGD([p], lr=1.)
-
-        p.grad = s.clone().half()
-        found_inf.zero_()
-        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, True)[cur]
-        self.assertEqual(found_inf, 0.0)
-        self.assertEqual(p.grad.to_dense(), (s.half() / 4).to_dense())
-
-        # Creates fp16 sparse tensor with duplicated indices (uncoalesced).  The uncoalesced representation
-        # does not overflow in fp16, but the coalesced representation would, because 64000 + 64000 > fp16 max.
-        # _amp_non_finite_check_and_unscale_ should report an overflow here.
-        i = torch.LongTensor([[0, 1, 0],
-                              [2, 0, 2]])
-        v = torch.FloatTensor([64000., 32., 64000.])
-        p.grad = torch.sparse_coo_tensor(i, v, torch.Size([2, 3]), device="cuda", dtype=torch.float16)
-        found_inf.zero_()
-        found_inf = scaler._unscale_grads_(opt, inv_scale, found_inf, True)[cur]
-        self.assertEqual(found_inf, 1.0)
-
-    def test_grad_scaling_state_dict(self):
-        for lazy_init_scale in True, False:
-            s0 = torch.cuda.amp.GradScaler(init_scale=3., growth_factor=4., backoff_factor=.5, growth_interval=2)
-            s1 = torch.cuda.amp.GradScaler(init_scale=6., growth_factor=7., backoff_factor=.8, growth_interval=1)
-
-            # sets a random value for load_state_dict to overwrite
-            s1._init_growth_tracker = 7
-
-            if lazy_init_scale:
-                # Dummy scale() call to ensure the scale tensor is lazily initialized.
-                s1.scale(torch.full((1,), 4.0, dtype=torch.float32, device="cuda:0"))
-                self.assertTrue(isinstance(s1._scale, torch.cuda.FloatTensor))
-
-            s1.load_state_dict(s0.state_dict())
-
-            self.assertEqual(s1.get_scale(), 3.)
-            self.assertEqual(s1.get_growth_factor(), 4.)
-            self.assertEqual(s1.get_backoff_factor(), .5)
-            self.assertEqual(s1.get_growth_interval(), 2)
-            self.assertEqual(s1._init_growth_tracker, 0)
-
-    # _run_scaling_case generalizes some single-optimizer test logic to avoid too much copy-pasting below.
-    def _run_scaling_case(self, run, unskipped, skipped, atol=1e-7, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
-        # Ensure scaling can be disabled without changing user control flow.
-        for enabled in True, False:
-            (
-                mod_control, mod_scaling, opt_control, opt_scaling, data, loss_fn, skip_iter,
-            ) = _create_scaling_case(optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs)
-
-            # For functionality, test with a modest initial scale, and an unrealistically-large growth factor
-            # so any potential errors with the growth factor handling will be magnified.
-            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
-
-            _ = run(data, mod_control, opt_control, scaler, loss_fn, skip_iter, False)
-            ret = run(data, mod_scaling, opt_scaling, scaler, loss_fn, skip_iter, True)
-
-            # Allows run() to optionally return a different scaler instance.
-            scaler = ret if ret else scaler
-
-            # If scaling was enabled, the scale factor should have been multiplied by the growth factor
-            # len(data) - skipped times and the backoff factor "skipped" times.
-            if enabled:
-                net_growth = scaler.get_growth_factor()**unskipped if unskipped > 0 else 1.0
-                net_backoff = scaler.get_backoff_factor()**skipped if skipped > 0 else 1.0
-                self.assertTrue(scaler.get_scale() == (128. * net_growth * net_backoff))
-            else:
-                self.assertTrue(scaler.get_scale() == 1.0)
-
-            for c, s in zip(mod_control.parameters(), mod_scaling.parameters()):
-                self.assertEqual(c.grad, s.grad, atol=atol, rtol=1e-05)
-
-                c_state, s_state = opt_control.state[c], opt_scaling.state[s]
-                for k in c_state:
-                    self.assertEqual(c_state[k], s_state[k], atol=atol, rtol=1e-05, msg=k)
-
-                self.assertEqual(c, s, atol=atol, rtol=1e-05)
-
-    # Compares no scaling + no autocasting against scaling + autocasting.
-    def _grad_scaling_autocast_test(self, *, atol=1e-3, optimizer_ctor=torch.optim.SGD, optimizer_kwargs=None):
-        try_pickle = False
-
-        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
-            for i, (input, target) in enumerate(data):
-                optimizer.zero_grad()
-                with torch.autocast('cuda', enabled=try_scaling_api):
-                    output = model(input)
-                    loss = loss_fn(output, target)
-                if try_scaling_api:
-                    scaler.scale(loss).backward()
-                    if i == skip_iter and scaler.is_enabled():
-                        with torch.no_grad():
-                            model[1].weight.grad.fill_(float('inf'))
-                    scaler.step(optimizer)
-                    scaler.update()
-                    if try_pickle:
-                        scaler = pickle.loads(pickle.dumps(scaler))
-                else:
-                    loss.backward()
-                    if (not scaler.is_enabled()) or (i != skip_iter):
-                        optimizer.step()
-            return scaler
-
-        # NOTE(mkozuki): With current way of testing, `torch.optim.Adam` is failing in spite of `foreach` and `fused`.
-        #   Giving some flexibility to this test might help.
-        context = contextlib.nullcontext
-        if optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
-            from functools import partial
-            context = partial(self.assertRaises, AssertionError)
-        with context():
-            # sets atol=1e-3 because we're comparing pure fp32 arithmetic vs a mixture of fp16 and fp32
-            self._run_scaling_case(
-                run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
-            )
-            # this will be picked up by try_pickle within run():
-            try_pickle = True
-            self._run_scaling_case(
-                run, unskipped=3, skipped=1, atol=atol, optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
-            )
-
-    def test_grad_scaling_autocast(self):
-        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor)
-
-    def test_grad_scaling_autocast_foreach(self):
-        for optimizer_ctor in (torch.optim.SGD, torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"foreach": True})
-
-    def test_grad_scaling_autocast_fused(self):
-        for optimizer_ctor in (torch.optim.Adam, torch.optim.AdamW):
-            self._grad_scaling_autocast_test(optimizer_ctor=optimizer_ctor, optimizer_kwargs={"fused": True})
-
     # Compare non-fused optimizer vs fused one as the fused one unscales gradients
     # inside its cuda kernel unlike the other.
     def test_grad_scaling_autocast_fused_optimizers(self):
-        for optimizer_ctor, optimizer_kwargs, separate_unscale in product(
+        for optimizer_ctor, optimizer_kwargs, separate_unscale in list(product(
             (torch.optim.Adam, torch.optim.AdamW),
             ({"fused": True, "amsgrad": False}, {"fused": True, "amsgrad": True}),
             (False, True),
-        ):
+        )) + list(product(
+            (torch.optim.SGD,),
+            [
+                {"momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
+                for d, w, n in product((0.0, 0.5), (0.0, 0.5), (False,))
+            ] + [
+                {"momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
+                for d, w, n in product((0.0,), (0.0, 0.5), (True, False))
+            ],
+            (False, True),
+        )):
             with self.subTest(optim=optimizer_ctor, kwargs=optimizer_kwargs, separate_unscale=separate_unscale):
                 self._grad_scaling_autocast_fused_optimizers(
                     optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs, separate_unscale=separate_unscale)
@@ -1339,244 +1166,6 @@ torch.cuda.synchronize()
                     if k == "step":
                         actual = actual.squeeze()
                     self.assertEqual(state_control[k], actual)
-
-    # Make sure that the parameters become nonsense when scaled gradients are finite
-    # but they get invalidated before `optimizer.step`, after `GradScaler.unscale_`
-    def test_params_invalidated_with_grads_invalidated_between_unscale_and_step(self):
-        for optimizer_ctor, optimizer_kwargs in product(
-            (torch.optim.Adam, torch.optim.AdamW),
-            (
-                {"foreach": False, "fused": False},
-                {"foreach": True, "fused": False},
-                {"foreach": False, "fused": True},
-            ),
-        ):
-            with self.subTest(optimizer=optimizer_ctor, optimizer_kwargs=optimizer_kwargs):
-                self._test_grads_invalidated_between_unscale_and_step(optimizer_ctor, optimizer_kwargs)
-
-    def _test_grads_invalidated_between_unscale_and_step(self, optimizer_ctor, optimizer_kwargs):
-        model, _, optimizer, _, data, loss_fn, _ = _create_scaling_case(
-            optimizer_ctor=optimizer_ctor, optimizer_kwargs=optimizer_kwargs,
-        )
-        scaler = torch.cuda.amp.GradScaler(init_scale=128.0)
-
-        for input, target in data:
-            optimizer.zero_grad()
-            with torch.autocast('cuda', enabled=True):
-                output = model(input)
-                loss = loss_fn(output, target)
-            scaler.scale(loss).backward()
-            scaler.unscale_(optimizer)
-
-            # deliberately break grads
-            for j, param in enumerate(model.parameters()):
-                param.grad.copy_(torch.inf if j % 2 else torch.nan)
-
-            scaler.step(optimizer)
-            scaler.update()
-
-        self.assertTrue(all((p.isnan().any() or p.isinf().any()) for p in model.parameters()))
-
-    def test_grad_scale_will_not_overflow(self):
-        model = torch.nn.Linear(5, 1).cuda()
-        optimizer = torch.optim.Adam(model.parameters())
-        scaler = torch.cuda.amp.GradScaler(growth_interval=1, growth_factor=2**4, init_scale=1e38)
-        optimizer.zero_grad()
-        x = torch.randn(1, 5).cuda()
-        y = 1e-30 * torch.randn(1, 1).cuda()
-        l = ((model(x) - y)**2).mean()
-        scaler.scale(l).backward()
-        scaler.step(optimizer)
-        scaler.update()
-        assert scaler._scale != float('inf') and scaler._scale != float('nan')
-
-    def test_grad_scaling_clipping(self):
-        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
-            max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
-            for i, (input, target) in enumerate(data):
-                optimizer.zero_grad()
-                output = model(input)
-                loss = loss_fn(output, target)
-                if try_scaling_api:
-                    scaler.scale(loss).backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm * scaler.get_scale())
-                    if i == skip_iter and scaler.is_enabled():
-                        model[1].weight.grad.data.fill_(float('inf'))
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-                    if (not scaler.is_enabled()) or (i != skip_iter):
-                        optimizer.step()
-
-        self._run_scaling_case(run, unskipped=3, skipped=1, atol=1e-5)
-
-    def test_grad_scaling_clipping_separate_unscale(self):
-        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
-            max_norm = 0.2  # A reasonable value that actually has an effect, based on printouts of grads
-            for i, (input, target) in enumerate(data):
-                optimizer.zero_grad()
-                output = model(input)
-                loss = loss_fn(output, target)
-                if try_scaling_api:
-                    scaler.scale(loss).backward()
-                    if i == skip_iter and scaler.is_enabled():
-                        model[1].weight.grad.data.fill_(float('inf'))
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm, error_if_nonfinite=False)
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm)
-                    if (not scaler.is_enabled()) or (i != skip_iter):
-                        optimizer.step()
-
-        self._run_scaling_case(run, unskipped=3, skipped=1)
-
-    @unittest.skipIf(IS_WINDOWS, 'FIXME: fix this test for Windows')
-    def test_grad_scaling_penalty(self):
-        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
-            for i, (input, target) in enumerate(data):
-                optimizer.zero_grad()
-                output = model(input)
-                loss = loss_fn(output, target)
-
-                if try_scaling_api:
-                    grad_params = torch.autograd.grad(scaler.scale(loss),
-                                                      model.parameters(), create_graph=True)
-                    inv_scale = 1. / scaler.get_scale()
-                    grad_params = [p * inv_scale for p in grad_params]
-                else:
-                    grad_params = torch.autograd.grad(loss, model.parameters(), create_graph=True)
-
-                grad_norm = 0
-                for grad in grad_params:
-                    grad_norm += grad.pow(2).sum()
-                grad_norm = grad_norm.sqrt()
-                loss = loss + grad_norm
-
-                if try_scaling_api:
-                    scaler.scale(loss).backward()
-                    if i == skip_iter and scaler.is_enabled():
-                        model[1].weight.grad.data.fill_(float('inf'))
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    loss.backward()
-                    if (not scaler.is_enabled()) or (i != skip_iter):
-                        optimizer.step()
-
-        self._run_scaling_case(run, unskipped=3, skipped=1)
-
-    def test_grad_scaling_accumulation(self):
-        def run(data, model, optimizer, scaler, loss_fn, skip_iter, try_scaling_api):
-            iters_to_accumulate = 2
-            for i, (input, target) in enumerate(data):
-                output = model(input)
-                loss = loss_fn(output, target)
-                loss = loss / iters_to_accumulate
-                if try_scaling_api:
-                    scaler.scale(loss).backward()
-                else:
-                    loss.backward()
-                if (i + 1) % iters_to_accumulate == 0:
-                    if try_scaling_api:
-                        scaler.step(optimizer)
-                        scaler.update()
-                        optimizer.zero_grad()
-                    else:
-                        optimizer.step()
-                        optimizer.zero_grad()
-
-        self._run_scaling_case(run, unskipped=2, skipped=0)
-
-    def test_grad_scaling_multiple(self):
-        # Tests gradient scaling with 2 models and 2 optimizers that both receive gradients from 2 losses.
-        # Some of the logic here cannot reuse the generic helper functions created for the 1-optimizer cases.
-        for enabled in True, False:
-            mod_control0, mod_scaling0, opt_control0, opt_scaling0, data, loss_fn, skip_iter = \
-                _create_scaling_case()
-            mod_control1, mod_scaling1, opt_control1, opt_scaling1 = \
-                _create_scaling_models_optimizers()
-
-            scaler = torch.cuda.amp.GradScaler(init_scale=128., growth_factor=2.0, enabled=enabled, growth_interval=1)
-
-            def run(model0, model1, optimizer0, optimizer1, try_scaling_api):
-                for i, (input, target) in enumerate(data):
-                    optimizer0.zero_grad()
-                    optimizer1.zero_grad()
-                    output0 = model0(input)
-                    output1 = model1(input)
-                    loss0 = loss_fn(0.3 * output0 + 0.7 * output1, target)
-                    loss1 = loss_fn(0.6 * output0 - 0.4 * output1, target)
-
-                    if try_scaling_api:
-                        scaler.scale(loss0).backward(retain_graph=True)
-                        scaler.scale(loss1).backward()
-                        if i == skip_iter and scaler.is_enabled():
-                            model1[1].weight.grad.data.fill_(float('inf'))
-
-                        # As an additional stress test, separately unscale for one of the optimizers.
-                        scaler.unscale_(optimizer0)
-
-                        scaler.step(optimizer0)
-                        scaler.step(optimizer1)
-                        scaler.update()
-                    else:
-                        loss0.backward(retain_graph=True)
-                        loss1.backward()
-                        optimizer0.step()
-                        if (not scaler.is_enabled()) or (i != skip_iter):
-                            optimizer1.step()
-
-            run(mod_control0, mod_control1, opt_control0, opt_control1, False)
-            run(mod_scaling0, mod_scaling1, opt_scaling0, opt_scaling1, True)
-
-            # The loss scale should have been multiplied by the growth factor 3 times and the backoff factor once.
-            self.assertTrue(scaler.get_scale() == (128. * scaler.get_growth_factor()**3 *
-                                                   scaler.get_backoff_factor()**1) if enabled else 1.0)
-
-            for c, s in zip(chain(mod_control0.parameters(), mod_control1.parameters()),
-                            chain(mod_scaling0.parameters(), mod_scaling1.parameters())):
-                self.assertEqual(c, s, rtol=1e-5, atol=1e-7)
-
-    def test_grad_scaler_pass_itself(self):
-        class _PlaceHolderOptimizer(torch.optim.Optimizer):
-            tester = self
-
-            def __init__(self, params, defaults=None):
-                if defaults is None:
-                    defaults = {}
-                super().__init__(params, defaults)
-                self._step_supports_amp_scaling = True
-
-        class Optimizer1(_PlaceHolderOptimizer):
-            def step(self, closure=None, *, grad_scaler=None):
-                self.tester.assertTrue(isinstance(grad_scaler, torch.cuda.amp.GradScaler))
-                self.tester.assertFalse(hasattr(self, "grad_scale"))
-                self.tester.assertFalse(hasattr(self, "found_inf"))
-
-        class Optimizer2(_PlaceHolderOptimizer):
-            def step(self, closure=None):
-                self.tester.assertTrue(isinstance(self.grad_scale, torch.Tensor))
-                self.tester.assertTrue(isinstance(self.found_inf, torch.Tensor))
-
-        x = torch.randn(4, 4).cuda()
-        m = torch.nn.Linear(4, 1).cuda()
-        o1 = Optimizer1(m.parameters())
-        o2 = Optimizer2(m.parameters())
-        scaler = torch.cuda.amp.GradScaler(init_scale=2.0)
-
-        with torch.cuda.amp.autocast():
-            y = m(x)
-            loss = y.mean()
-        scaler.scale(loss).backward()
-        with self.assertWarns(FutureWarning):
-            scaler.step(o1)
-        scaler.step(o2)
-        scaler.update()
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "FAIL")
     def test_cublas_multiple_threads_same_device(self):
@@ -1837,8 +1426,7 @@ torch.cuda.synchronize()
                     ('TORCH_CUDNN_V8_API_DISABLED' in os.environ and
                      int(os.environ['TORCH_CUDNN_V8_API_DISABLED']) or
                      torch.cuda.get_device_capability() < (8, 0))
-                should_error_from_not_implemented = should_error_from_cudnn or 'thnn' in op \
-                    or 'fused' in op or 'gru' in op or op == '_thnn_fused_lstm_cell' or op == 'lstm_cell'
+                should_error_from_not_implemented = should_error_from_cudnn
                 if not skip_test:
                     if should_error_from_not_implemented:
                         with self.assertRaises(RuntimeError, msg=str(op) + ' should not be supported for bfloat16!'):
@@ -1871,8 +1459,6 @@ torch.cuda.synchronize()
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
             for op, args in self.autocast_lists.nn_fp16:
                 self._run_autocast_outofplace(op, args, torch.float16, module=torch._C._nn)
-
-
 
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_nn_bf16(self):
@@ -2045,7 +1631,6 @@ torch.cuda.synchronize()
     # cudnn RNNs require special backend handling (weights are cast to FP16 and reflattened)
     # so they get a dedicated test.
     # Despite the large number of RNN cases it tries, the test takes < 15 seconds on a Titan V (similar to V100).
-    @skipIfRocm
     @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
     def test_autocast_rnn(self):
         with torch.backends.cudnn.flags(enabled=True, deterministic=True):
@@ -2094,7 +1679,7 @@ torch.cuda.synchronize()
                 # Autocast wrapper requires at::_cudnn_rnn is autograd-exposed.  This check can't guarantee
                 # at::_cudnn_rnn is autograd-exposed, but if it fires, it indicates some funny business has
                 # occurred and we should double check that at::_cudnn_rnn remains autograd-exposed.
-                self.assertEqual(out.grad_fn.name(), "CudnnRnnBackward0")
+                self.assertEqual(out.grad_fn.name(), "MiopenRnnBackward0" if torch.version.hip else "CudnnRnnBackward0")
                 out.sum().backward()
                 grads = [p.grad.clone() for p in rnn.parameters()]
 
@@ -2192,6 +1777,163 @@ torch.cuda.synchronize()
         g.replay()
 
         self.assertTrue(b.sum().item() == 11000.)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graphsafe_set_get_rng_state(self):
+
+        # Define a function to create generator states, with optional graph registration
+        def create_states(generator):
+            """Initializes generator states and registers them with a CUDA graph if provided."""
+            # Ensure the CUDA generator is initialized
+            torch.rand(1, device="cuda")
+            generator.manual_seed(0)
+
+            # Save the current state of the generator
+            old_state = generator.graphsafe_get_state()
+            # Create and save a cloned state of the generator
+            new_state = generator.clone_state()
+            # Return the original generator and its two states
+            return generator, old_state, new_state
+
+        def register_states_to_graph(generator_state, graph):
+            generator, old_state, new_state = generator_state
+            graph.register_generator_state(old_state)
+            graph.register_generator_state(new_state)
+
+        # Define a function to perform specific RNG actions using the generator's states
+        def perform_random_generation_steps(generator_state):
+            generator, old_state, new_state = generator_state
+            random_values = []
+
+            # Generate random numbers with the new generator state
+            generator.graphsafe_set_state(new_state)
+            random_values.append(torch.rand(5, device="cuda", generator=generator))
+
+            # Generate random numbers twice with the old generator state
+            generator.graphsafe_set_state(old_state)
+            random_values.extend(
+                [torch.rand(5, device="cuda", generator=generator) for _ in range(2)]
+            )
+
+            return random_values
+
+        # Define a function to retrieve the final offsets of the original and new generator states
+        def get_final_offsets_of_states(generator_state):
+            generator, old_state, new_state = generator_state
+            old_state_offset = old_state.get_offset()
+            new_state_offset = new_state.get_offset()
+            return old_state_offset, new_state_offset
+
+        # Set up and test a new CUDA generator
+        generator = torch.Generator(device="cuda")
+        generator_state = create_states(generator)
+
+        # Set up and test the default CUDA generator with a CUDA Graph
+        g = torch.cuda.CUDAGraph()
+        s = torch.cuda.Stream()
+        default_generator = torch.cuda.default_generators[0]
+        default_generator_state = create_states(default_generator)
+        register_states_to_graph(default_generator_state, g)
+
+        # Perform random number generation within a CUDA graph
+        with torch.cuda.stream(s):
+            g.capture_begin()
+            graphed_random_values = perform_random_generation_steps(
+                default_generator_state
+            )
+            g.capture_end()
+
+        # Synchronize the streams and replay the graph
+        torch.cuda.current_stream().wait_stream(s)
+        for _ in range(3):
+            random_values = perform_random_generation_steps(generator_state)
+            g.replay()
+            offset = get_final_offsets_of_states(generator_state)
+            graph_offset = get_final_offsets_of_states(default_generator_state)
+
+            # Compare the final offsets of states for both generators to ensure consistency
+            self.assertTrue(offset == graph_offset)
+            # Compare the states generated outside and inside the graph
+            self.assertEqual(random_values, graphed_random_values)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_memory_stats_of_multiple_generators_and_graphs(self):
+        # Function to clear CUDA cache and collect garbage
+        def clear_cuda_cache():
+            gc.collect()
+            torch.cuda.empty_cache()
+
+        # Executes a simple graph task which includes capturing and executing a random number generation within a CUDA graph.
+        def simple_graph_task(graph):
+            s = torch.cuda.Stream()
+            with torch.cuda.stream(s):
+                graph.capture_begin()
+                torch.rand(1, device="cuda")
+                graph.capture_end()
+            torch.cuda.current_stream().wait_stream(s)
+            graph.replay()  # Replays the captured operations
+
+        def get_memory_stats():
+            stats = torch.cuda.memory_stats()
+            num_blocks = stats["active.all.current"]
+            total_size = stats["active_bytes.all.current"]
+            return num_blocks, total_size
+
+        def test(num_graphs, num_generators):
+            baseline = get_memory_stats()
+            baseline_num_blocks, baseline_total_size = baseline
+
+            # Allocate CUDA graphs
+            graphs = [torch.cuda.CUDAGraph() for _ in range(num_graphs)]
+
+            # Allocate and manage generator states
+            default_generator = torch.cuda.default_generators[0]
+            generators = [default_generator.graphsafe_get_state()]
+
+            # Starts from 1 as one state is already added
+            for _ in range(1, num_generators):
+                generators.append(default_generator.clone_state())
+
+            for graph in graphs:
+                for generator_state in generators:
+                    graph.register_generator_state(generator_state)
+                simple_graph_task(graph)
+
+            # Assert conditions after graph tasks
+            num_blocks, total_size = get_memory_stats()
+            # The allocated blocks should only be proportional to the number of generators
+            expected_blocks_diff = 2 * num_generators
+            expected_size_diff = 2 * 512 * num_generators  # Each block's size is 512
+
+            self.assertTrue(
+                (num_blocks - baseline_num_blocks) == expected_blocks_diff,
+                "Unexpected number of active blocks.",
+            )
+            self.assertTrue(
+                (total_size - baseline_total_size) == expected_size_diff,
+                "Unexpected total memory size.",
+            )
+
+            # Cleanup graphs and clear CUDA cache
+            while graphs:
+                graph = graphs.pop()
+                del graph
+            clear_cuda_cache()
+
+            # Assert that memory stats return to baseline after cleanup
+            self.assertTrue(
+                get_memory_stats() == baseline,
+                "Memory stats do not match baseline after cleanup.",
+            )
+
+        # Running the test function with different parameters
+        test(1, 1)
+        test(3, 2)
+        test(10, 20)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_capture_reset_recapture(self):
@@ -2742,14 +2484,18 @@ exit(2)
 
         s = torch.cuda.Stream()
 
-        for (numel,
-             delta_cudaMallocs,
-             delta_cudaMalloc_bytes,
-             delta_cudaMalloc_bytes_post_del_g,
-             pool_string) in cases:
+        for (
+            numel,
+            delta_cudaMallocs,
+            delta_cudaMalloc_bytes,
+            delta_cudaMalloc_bytes_post_del_g,
+            pool_string,
+        ) in cases:
             if pool_string == "small_pool":
                 delta_active_blocks = 3  # one from "b" plus a sneaky two from CUDAGraph's one-element rng seed and offset holders
-                delta_active_bytes = numel * elem + 1024  # + 1024 for CUDAGraph's rng seed and offset holders each
+                delta_active_bytes = (
+                    numel * elem + 1024
+                )  # + 1024 for CUDAGraph's rng seed and offset holders each
             else:
                 delta_active_blocks = 1  # We only check the large pool, which isn't affected by rng offset holder
                 delta_active_bytes = numel * elem
@@ -2887,6 +2633,10 @@ exit(2)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
     def test_graph_grad_scaling(self):
+        for foreach, fused in ((False, False), (True, False), (False, True)):
+            self._test_graph_grad_scaling(foreach, fused)
+
+    def _test_graph_grad_scaling(self, foreach, fused):
         torch.cuda.empty_cache()
 
         scaler = torch.cuda.amp.GradScaler(init_scale=4.)
@@ -2894,7 +2644,7 @@ exit(2)
         s = torch.cuda.Stream()
 
         weight = torch.ones((100,), device="cuda", requires_grad=True)
-        opt = torch.optim.SGD([weight], lr=0.1)
+        opt = torch.optim.SGD([weight], lr=0.1, foreach=foreach, fused=fused)
         static_input = torch.ones_like(weight)
         static_grad = torch.ones_like(weight)
 
@@ -3057,6 +2807,46 @@ exit(2)
             model_graphed({"x": real_inputs[0]}), model_control({"x": real_inputs[0]})
         )
 
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    def test_graph_make_graphed_callables_same_pool(self):
+        torch.manual_seed(5)
+        torch.cuda.manual_seed(5)
+        models = []
+        num_models = 3
+        for _ in range(num_models):
+            models.append(
+                torch.nn.Sequential(
+                    torch.nn.Linear(32, 128),
+                    torch.nn.ReLU(),
+                    torch.nn.Linear(128, 128),
+                ).cuda()
+            )
+        # we will reuse the same pool for all graph captures
+        mempool = torch.cuda.graph_pool_handle()
+        graphed_models = []
+        for model in models:
+            x = torch.randn([64, 32], device="cuda")
+            graphed_model = deepcopy(model)
+            graphed_model = torch.cuda.make_graphed_callables(graphed_model, (x,), pool=mempool)
+            graphed_models.append(graphed_model)
+
+        for model, graphed_model in zip(models, graphed_models):
+            x = torch.randn([64, 32], device="cuda")
+            y = model(x)
+            yg = graphed_model(x)
+            l = y.norm()
+            lg = yg.norm()
+            l.backward()
+            lg.backward()
+
+            self.assertEqual(y, yg)
+            self.assertEqual(l, lg)
+            for p, pg in zip(model.parameters(), graphed_model.parameters()):
+                self.assertEqual(p, pg)
+                self.assertEqual(p.grad, pg.grad)
+                self.assertNotEqual(p.data_ptr(), pg.data_ptr())
+                self.assertNotEqual(p.grad.data_ptr, pg.grad.data_ptr)
+
     def _test_graphed_optimizer(self, steps_warmup, steps_train, optimizer_ctor, kwargs):
         for actually_do_graphs in (True, False):
             params = [
@@ -3110,9 +2900,12 @@ exit(2)
         # Needs generalization if we want to extend this test to non-Adam-like optimizers.
         cases = [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach,
-                              "decoupled_weight_decay": decoupled_weight_decay})
-            for optimizer_ctor, foreach, decoupled_weight_decay in product(
-                (torch.optim.NAdam,), (False, True), (False, True),)
+                              "decoupled_weight_decay": decoupled_weight_decay, "weight_decay": weight_decay})
+            for optimizer_ctor, foreach, decoupled_weight_decay, weight_decay in product(
+                (torch.optim.NAdam, torch.optim.RAdam,), (False, True,), (False, True,), (0.0, 0.1,))
+        ] + [
+            (torch.optim.Rprop, {"lr": 0.1, "foreach": foreach, "maximize": maximize})
+            for foreach, maximize in product((False, True,), (False, True,))
         ] + [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "foreach": foreach, "amsgrad": amsgrad})
             for optimizer_ctor, foreach, amsgrad in product(
@@ -3121,10 +2914,11 @@ exit(2)
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
         ] + [
-            (torch.optim.ASGD, {"lr": 0.1, "foreach": True, "maximize": maximize, "weight_decay": weight_decay})
-            for maximize, weight_decay in product((False, True), (0.0, 0.1))
+            (optimizer_ctor, {"lr": 0.1, "foreach": foreach, "maximize": maximize, "weight_decay": weight_decay})
+            for optimizer_ctor, foreach, maximize, weight_decay in product((torch.optim.Adamax, torch.optim.ASGD,
+                                                                            torch.optim.Adadelta, torch.optim.RMSprop),
+                                                                           (False, True), (False, True), (0, 0.1))
         ]
-
 
         for optimizer_ctor, kwargs in cases:
             with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
@@ -3135,7 +2929,10 @@ exit(2)
         # mimicking `_test_graphed_optimizer` maladroitly to pass two param_groups to optimizer.__init__
         n_warmup, n_replay = 3, 2
         for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW,
-                                                                 torch.optim.NAdam), (True, False)):
+                                                                 torch.optim.ASGD, torch.optim.Adamax,
+                                                                 torch.optim.NAdam, torch.optim.RAdam,
+                                                                 torch.optim.Adadelta, torch.optim.RMSprop,
+                                                                 torch.optim.Rprop), (True, False)):
             ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             grads1, grads2 = ([torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2))
@@ -3181,13 +2978,23 @@ exit(2)
         cases = [
             (optimizer_ctor, {"lr": 0.1, "betas": (0.8, 0.7), "fused": True, "amsgrad": amsgrad})
             for optimizer_ctor, amsgrad in product((torch.optim.Adam, torch.optim.AdamW), (False, True))
-        ]
+        ] + list(product(
+            (torch.optim.SGD,),
+            [
+                {"lr": 0.1, "momentum": 0.0, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
+                for d, w, n in product((0.0, 0.5), (0.0, 0.5), (False,))
+            ] + [
+                {"lr": 0.1, "momentum": 0.5, "dampening": d, "weight_decay": w, "nesterov": n, "fused": True}
+                for d, w, n in product((0.0,), (0.0, 0.5), (True, False))
+            ],
+        ))
 
         steps_warmup = 3
         steps_train = 2
 
         for OptClass, kwargs in cases:
-            for actually_do_graphs in (True, False):
+            has_capturable_arg = OptClass in (torch.optim.Adam, torch.optim.AdamW)
+            for actually_do_graphs in (True, False) if has_capturable_arg else (True,):
                 params = [torch.randn((i + 5, i + 5), device="cuda") for i in range(2)]
                 params_control = [p.clone().requires_grad_() for p in params]
                 params_graphed = [p.clone().requires_grad_() for p in params]
@@ -3209,8 +3016,9 @@ exit(2)
                     scaler_for_graphed._lazy_init_scale_growth_tracker(torch.device("cuda"))
 
                 # Control (capturable=False)
-
-                opt = OptClass(params_control, capturable=False, **kwargs)
+                if has_capturable_arg:
+                    kwargs["capturable"] = False
+                opt = OptClass(params_control, **kwargs)
 
                 for i in range(steps_warmup + steps_train):
                     for j, p in enumerate(params_control):
@@ -3219,8 +3027,9 @@ exit(2)
                     scaler_for_control.update()
 
                 # capturable=True
-
-                opt = OptClass(params_graphed, capturable=True, **kwargs)
+                if has_capturable_arg:
+                    kwargs["capturable"] = True
+                opt = OptClass(params_graphed, **kwargs)
 
                 for i in range(steps_warmup):
                     for j, p in enumerate(params_graphed):
@@ -3419,11 +3228,39 @@ exit(2)
     @unittest.skipIf(TEST_MULTIGPU, "Testing on one GPU is sufficient")
     def test_lazy_init(self):
         """ Validate that no CUDA calls are made during `import torch` call"""
-        from subprocess import check_output
+        def check_output(script: str) -> str:
+            return subprocess.check_output([sys.executable, "-c", script]).decode("ascii").strip()
+
         VISIBLE_DEVICES = "HIP_VISIBLE_DEVICES" if TEST_WITH_ROCM else "CUDA_VISIBLE_DEVICES"
         test_script = f"import os; import torch;os.environ['{VISIBLE_DEVICES}']='32';print(torch.cuda.device_count())"
-        rc = check_output([sys.executable, '-c', test_script]).decode("ascii").strip()
+        rc = check_output(test_script)
         self.assertEqual(rc, "0")
+        if not TEST_WITH_ROCM:
+            # Check that `cuInit` was not called during the import
+            # By using ctypes and calling cuDeviceCountGet() and expect CUDA_ERROR_NOT_INITIALIZED == 3
+            # See https://github.com/pytorch/pytorch/issues/116276 for more details
+            libcuda_name = "libcuda.so.1" if not IS_WINDOWS else "nvcuda.dll"
+            cuda_driver_api_call = f"ctypes.CDLL('{libcuda_name}').cuDeviceGetCount(ctypes.byref(x))"
+            rc = check_output(f"import torch; import ctypes;x=ctypes.c_int(-1);print({cuda_driver_api_call})")
+            self.assertEqual(rc, "3")
+
+    @unittest.skipIf(not TEST_MULTIGPU, "requires multiple devices")
+    @unittest.skipIf(TEST_WITH_ROCM, "too lazy to debug this on ROCm")
+    def test_device_count_not_cached_pre_init(self):
+        test_script = """\
+import torch
+import os
+r1 = torch.cuda.device_count()
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+r2 = torch.cuda.device_count()
+torch.empty(10, device='cuda')
+print(f"{r1}, {r2}")
+"""
+
+        r = subprocess.check_output([sys.executable, "-c", test_script]).decode("ascii").strip()
+
+        x = torch.cuda.device_count()
+        self.assertEqual(f"{x}, 1", r)
 
 
 @torch.testing._internal.common_utils.markDynamoStrictTest
@@ -3475,7 +3312,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @unittest.skipIf(not IS_LINUX, "linux only cpp unwinding")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "x86 linux only cpp unwinding")
     def test_direct_traceback(self):
         from torch._C._profiler import gather_traceback, symbolize_tracebacks
         c = gather_traceback(True, True, True)
@@ -3485,7 +3322,7 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue("unwind" in r)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
     def test_memory_snapshot_with_cpp(self):
         try:
             torch.cuda.memory.empty_cache()
@@ -3504,7 +3341,6 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-
     @skipIfRocm
     def test_memory_profiler_viz(self):
         with torch.profiler.profile(
@@ -3521,7 +3357,7 @@ class TestCudaMallocAsync(TestCase):
         self.assertTrue('category' in plot)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
     def test_cycles(self):
         fired = False
 
@@ -3558,7 +3394,7 @@ class TestCudaMallocAsync(TestCase):
             disarm()
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
     def test_memory_plots(self):
         for context, stacks in (("all", "all" if IS_LINUX else "python"), ("all", "python"), (None, "python")):
             try:
@@ -3586,7 +3422,7 @@ class TestCudaMallocAsync(TestCase):
                 torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
-    @unittest.skipIf(not IS_LINUX, "cpp contexts are linux only")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
     def test_memory_plots_free_stack(self):
         for context in ["alloc", "all", "state"]:
             try:
@@ -3610,6 +3446,57 @@ class TestCudaMallocAsync(TestCase):
             finally:
                 torch.cuda.memory._record_memory_history(None)
 
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    def test_memory_plots_history_context(self):
+        try:
+            torch.cuda.memory.empty_cache()
+            x = None
+
+            def should_capture1():
+                nonlocal x
+                x = torch.rand(4, 4, device='cuda')
+
+            def should_not_capture():
+                nonlocal x
+                x = torch.rand(3, 4, device='cuda')
+
+            def should_capture2():
+                nonlocal x
+                x = torch.rand(4, 4, device='cuda')
+
+            # Recording with context and python call stacks should capture the call stack.
+            torch.cuda.memory._record_memory_history(context="all", stacks="python")
+            should_capture1()
+            # Recording with context=None should not capture the call stack.
+            torch.cuda.memory._record_memory_history(context=None)
+            should_not_capture()
+            # Recording with context and python call stacks should capture the call stack.
+            torch.cuda.memory._record_memory_history(context="all", stacks="python")
+            should_capture2()
+
+            ss = json.dumps(torch.cuda.memory._snapshot())
+            self.assertTrue('should_capture1' in ss)
+            self.assertTrue('should_not_capture' not in ss)
+            self.assertTrue('should_capture2' in ss)
+        finally:
+            torch.cuda.memory._record_memory_history(None)
+
+    @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
+    @unittest.skipIf(IS_ARM64 or not IS_LINUX, "cpp contexts are x86 linux only")
+    def test_memory_plots_free_segment_stack(self):
+        for context in ["alloc", "all", "state"]:
+            try:
+                torch.cuda.memory.empty_cache()
+                torch.cuda.memory._record_memory_history(context=context)
+                x = torch.rand(3, 4, device='cuda')
+                del x
+                torch.cuda.memory.empty_cache()
+
+                ss = json.dumps(torch.cuda.memory._snapshot())
+                self.assertTrue(('empty_cache' in ss) == (context == 'all'))
+            finally:
+                torch.cuda.memory._record_memory_history(None)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "setContextRecorder not supported by CUDAMallocAsync")
     def test_memory_snapshot_script(self):
@@ -3736,8 +3623,16 @@ class TestCudaMallocAsync(TestCase):
         with self.assertRaises(RuntimeError):
             torch.cuda.memory._set_allocator_settings("pinned_num_register_threads:1024")
 
-
-    def test_raises_oom(self):
+    @parametrize(
+        "max_split_size_mb_setting", [False, True]
+    )
+    def test_raises_oom(self, max_split_size_mb_setting):
+        if max_split_size_mb_setting:
+            # CudaCachingAllocator does early return when searching available blocks
+            # if max_split_size_mb is not set
+            # Setting this triggers more parts of the code
+            torch.cuda.memory._set_allocator_settings("max_split_size_mb:1024")
+            torch.cuda.memory.empty_cache()
         with self.assertRaises(torch.cuda.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device='cuda')
 
@@ -4255,6 +4150,7 @@ class TestBlockStateAbsorption(TestCase):
 
 
 instantiate_parametrized_tests(TestCuda)
+instantiate_parametrized_tests(TestCudaMallocAsync)
 
 if __name__ == '__main__':
     run_tests()

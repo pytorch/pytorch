@@ -98,9 +98,7 @@ Tensor& eye_out_mps(int64_t n, int64_t m, Tensor& result) {
     // Create dictionary of inputs/feeds and outputs/results
     // In this case, there are no inputs, so the feeds are nil
     NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* feeds = nil;
-
-    NSDictionary<MPSGraphTensor*, MPSGraphTensorData*>* results =
-        @{outputPlaceholder.getMPSGraphTensor() : outputPlaceholder.getMPSGraphTensorData()};
+    auto results = dictionaryFromPlaceholders(outputPlaceholder);
 
     // Run the graph
     runMPSGraph(stream, cachedGraph->graph(), feeds, results);

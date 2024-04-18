@@ -1,4 +1,4 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import DFIterDataPipe, IterDataPipe
@@ -92,7 +92,7 @@ class Capture:
         if attrname == 'kwarg' or attrname == 'kwargs':
             raise Exception('no kwargs!')
         if attrname in ['__deepcopy__']:
-            raise AttributeError()
+            raise AttributeError
         result = CaptureGetAttr(self, attrname, ctx=self.ctx)
         return result
 
@@ -416,7 +416,7 @@ class CaptureDataFrameWithDataPipeOps(CaptureDataFrame):
 
 @functional_datapipe('trace_as_dataframe')
 class DataFrameTracer(CaptureDataFrameWithDataPipeOps, IterDataPipe):  # type: ignore[misc]
-    source_datapipe = None
+    source_datapipe: Optional[Any] = None
 
     # TODO(VitalyFedyunin): Must implement all special functions of datapipes
 

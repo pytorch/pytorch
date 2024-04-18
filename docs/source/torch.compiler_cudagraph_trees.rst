@@ -42,7 +42,7 @@ Like Graph Callables, CUDA Graph Trees use a single memory pool across all graph
 
 .. code-block:: python
 
-    @torch.compile
+    @torch.compile(mode="reduce-overhead")
     def foo(x):
         # GRAPH 1
         y = x * x * x

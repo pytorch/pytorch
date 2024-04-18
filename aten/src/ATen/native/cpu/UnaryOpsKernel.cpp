@@ -18,7 +18,6 @@
 #include <ATen/native/cpu/zmath.h>
 #include <ATen/OpMathType.h>
 
-#include <c10/util/math_compat.h>
 #include <c10/util/MathConstants.h>
 #include <c10/core/Scalar.h>
 #include <c10/util/TypeSafeSignMath.h>
@@ -45,8 +44,7 @@ static void sigmoid_kernel(TensorIteratorBase& iter) {
             return static_cast<float>(1) / (static_cast<float>(1) + std::exp((-a0)));
           },
           [=](Vectorized<scalar_t> a) {
-            Vectorized<float> a0, a1;
-            std::tie(a0, a1) = convert_to_float<scalar_t>(a);
+            auto [a0, a1] = convert_to_float<scalar_t>(a);
             a0 = (Vectorized<float>(static_cast<float>(1)) + a0.neg().exp()).reciprocal();
             a1 = (Vectorized<float>(static_cast<float>(1)) + a1.neg().exp()).reciprocal();
             return convert_from_float<scalar_t>(a0, a1);
@@ -145,6 +143,7 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
         const scalar_t eps = eps_scalar.to<scalar_t>();
         if (at::hasMKL() && iter.is_contiguous()) {
           LogitMKLKernel<scalar_t>(eps, &iter);
+          iter.cast_outputs();
         } else if (eps < scalar_t(0)) {
           const Vectorized<scalar_t> kOneVec(scalar_t(1));
           cpu_kernel_vec(
@@ -180,9 +179,9 @@ static void logit_kernel(TensorIteratorBase& iter, const Scalar& eps_scalar) {
 }
 
 #if !defined(C10_MOBILE)
-#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)                   \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(                   \
-            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn,       \
+#define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)                                                 \
+        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND6(                                                 \
+            kHalf, kBFloat16, kFloat8_e5m2, kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, \
             TYPE, NAME, __VA_ARGS__)
 #else
 #define _AT_DISPATCH_ABS_TYPES(TYPE, NAME, ...)          \
@@ -356,8 +355,9 @@ static void sinc_kernel(TensorIteratorBase& iter) {
           if (a == scalar_t(0)) {
             return scalar_t(1);
           } else {
-            scalar_t product = c10::pi<scalar_t> * a;
-            return std::sin(product) / product;
+            using opmath_t = at::opmath_type<scalar_t>;
+            opmath_t product = c10::pi<opmath_t> * opmath_t{a};
+            return static_cast<scalar_t>(std::sin(product) / product);
           }
         });
   });
@@ -523,8 +523,8 @@ static void kaiser_window_kernel(TensorIteratorBase& iter, int64_t window_length
     using opmath_t = at::opmath_type<scalar_t>;
     const opmath_t alpha = static_cast<opmath_t>((window_length - 1) / 2.0);
     const opmath_t beta_ = static_cast<opmath_t>(beta);
-    cpu_kernel(iter, [=](scalar_t a){
-        return calc_i0(beta_ * std::sqrt(1 - std::pow((static_cast<opmath_t>(a) - alpha) / alpha, static_cast<opmath_t>(2.0)))) / calc_i0(beta_);
+    cpu_kernel(iter, [=](scalar_t a) -> scalar_t {
+        return calc_i0(beta_ * std::sqrt(std::abs(1 - std::pow((static_cast<opmath_t>(a) - alpha) / alpha, static_cast<opmath_t>(2.0))))) / calc_i0(beta_);
     });
   });
 }

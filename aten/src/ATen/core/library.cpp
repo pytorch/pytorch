@@ -51,6 +51,10 @@ CppFunction::CppFunction(c10::KernelFunction func, c10::optional<c10::impl::CppS
 
 CppFunction::~CppFunction() = default;
 
+void Library::reset() {
+  registrars_.clear();
+}
+
 #define ERROR_CONTEXT "(Error occurred while processing ", toString(kind_), " block at ", file_, ":", line_, ")"
 
 Library::Library(Kind kind, std::string ns, c10::optional<c10::DispatchKey> k, const char* file, uint32_t line)
@@ -129,12 +133,12 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
   }
   switch (rv) {
     case _RegisterOrVerify::REGISTER:
-      if (impl_abstract_pystub_.has_value()) {
+      if (python_module_.has_value()) {
         registrars_.emplace_back(
-          c10::Dispatcher::singleton().registerAbstractImplPyStub(
+          c10::Dispatcher::singleton().registerPythonModule(
             schema.operator_name(),
-            impl_abstract_pystub_->first,
-            impl_abstract_pystub_->second)
+            python_module_->first,
+            python_module_->second)
         );
       }
       registrars_.emplace_back(
@@ -153,6 +157,7 @@ Library& Library::_def(c10::FunctionSchema&& schema, c10::OperatorName* out_name
 }
 #undef DEF_PRELUDE
 
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 Library& Library::_def(std::variant<c10::OperatorName, c10::FunctionSchema>&& name_or_schema, CppFunction&& f, const std::vector<at::Tag>& tags) & {
   c10::FunctionSchema schema = [&] {
     if (std::holds_alternative<c10::FunctionSchema>(name_or_schema)){
@@ -214,6 +219,7 @@ at::OperatorName Library::_parseNameForLib(const char* name_str) const {
   return name;
 }
 
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 Library& Library::_impl(const char* name_str, CppFunction&& f, _RegisterOrVerify rv) & {
   at::OperatorName name = _parseNameForLib(name_str);
   // See Note [Redundancy in registration code is OK]
@@ -253,6 +259,7 @@ c10::OperatorName Library::_resolve(const char* name_str) const {
 }
 #undef IMPL_PRELUDE
 
+// NOLINTNEXTLINE(cppcoreguidelines-rvalue-reference-param-not-moved)
 Library& Library::_fallback(CppFunction&& f) & {
   TORCH_CHECK(kind_ == IMPL,
     "fallback(...): Cannot define an operator inside of a ", toString(kind_), " block.  "
@@ -275,8 +282,8 @@ Library& Library::_fallback(CppFunction&& f) & {
     registrars_.emplace_back(
       c10::Dispatcher::singleton().registerFallback(
         k,
-        std::move(f.func_),
-        debugString(std::move(f.debug_), file_, line_)
+        f.func_,
+        debugString(f.debug_, file_, line_)
       )
     );
   }

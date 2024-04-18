@@ -403,7 +403,7 @@ def _shard_orig_param_state(
             and value.dim() > 0
             and fsdp_state.sharding_strategy != ShardingStrategy.NO_SHARD
         ):
-            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1]  # type: ignore[operator]
+            value = value.flatten()[intra_param_start_idx : intra_param_end_idx + 1].clone()  # type: ignore[operator]
         new_optim_state[state_name] = value
     return new_optim_state
 
@@ -1419,7 +1419,7 @@ def _convert_all_state_info(
                 )
                 gathered_state[name] = scalar_tensor_value
 
-    return dtype, state_buffers
+    return dtype, state_buffers  # type: ignore[possibly-undefined]
 
 
 def _unflatten_orig_param_states(
@@ -1507,7 +1507,7 @@ def _allgather_orig_param_states(
     all tensor states and restore non-tensor states from ``gathered_state_info``.
     """
     fsdp_state = fsdp_param_info.state
-    if fsdp_state.rank == 0:
+    if fsdp_state.rank == 0 and dist.get_debug_level() == dist.DebugLevel.DETAIL:
         logger.warning(
             "CUDA Memory Summary before calling to _allgather_orig_param_states %s",
             torch.cuda.memory_summary(),
@@ -2081,11 +2081,6 @@ def _set_optim_use_dtensor(
                 "Found state_dict_type LOCAL_STATE_DICT.",
                 "DeviceMesh is not compatible with LOCAL_STATE_DICT.",
                 "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict.",
-            )
-        elif state_dict_type == StateDictType.FULL_STATE_DICT:
-            logger.warning(
-                "Found both state_dict_type FULL_STATE_DICT and device_mesh. "  # noqa: G004
-                "Please set state_dict_type to SHARDED_STATE_DICT to get DTensor state_dict."
             )
         else:
             state_dict_settings.optim_state_dict_config._use_dtensor = True

@@ -19,6 +19,12 @@ cmake_policy(SET CMP0069 NEW)
 # nice when it's possible, and it's possible on our Windows configs.
 cmake_policy(SET CMP0092 NEW)
 
+# Prohibit in-source builds
+if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_BINARY_DIR})
+message(FATAL_ERROR "In-source build are not supported")
+endif()
+
+
 # ---[ Project and semantic versioning.
 project(Torch CXX C)
 
@@ -43,10 +49,14 @@ set(CMAKE_C_STANDARD   11 CACHE STRING "The C standard whose features are reques
 # ---[ Utils
 include(cmake/public/utils.cmake)
 
-# --- [ Check that minimal gcc version is 9.4+
-if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.4)
-  message(FATAL "GCC-9.4 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}")
+# --- [ Check that minimal gcc version is 9.3+
+if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.3)
+  message(FATAL_ERROR "GCC-9.3 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}")
 endif()
+
+# This define is needed to preserve behavior given anticpated changes to cccl/thrust
+# https://nvidia.github.io/libcudacxx/standard_api/numerics_library/complex.html
+string(APPEND CMAKE_CUDA_FLAGS "-DLIBCUDACXX_ENABLE_SIMPLIFIED_COMPLEX_OPERATIONS")
 
 if(LINUX)
   include(cmake/CheckAbi.cmake)
@@ -57,7 +67,6 @@ if(LINUX)
   else()
     # Please note this is required in order to ensure compatibility between gcc 9 and gcc 7
     # This could be removed when all Linux PyTorch binary builds are compiled by the same toolchain again
-    include(CheckCXXCompilerFlag)
     append_cxx_flag_if_supported("-fabi-version=11" CMAKE_CXX_FLAGS)
   endif()
 endif()
@@ -187,7 +196,6 @@ cmake_dependent_option(
 option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
 option(BUILD_AOT_INDUCTOR_TEST "Build C++ test binaries for aot-inductor" OFF)
 option(BUILD_STATIC_RUNTIME_BENCHMARK "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
-option(BUILD_TENSOREXPR_BENCHMARK "Build C++ binaries for tensorexpr benchmarks (need gbenchmark)" OFF)
 option(BUILD_MOBILE_BENCHMARK "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_MOBILE_TEST "Build C++ test binaries for mobile (ARM) targets(need gtest and gbenchmark)" OFF)
 option(BUILD_JNI "Build JNI bindings" OFF)
@@ -200,6 +208,9 @@ option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
 option(USE_CUDA "Use CUDA" ON)
+cmake_dependent_option(
+    USE_XPU "Use XPU. Only available on Linux." ON
+    "LINUX" OFF)
 cmake_dependent_option(
      BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON "USE_CUDA AND LINUX AND BUILD_PYTHON" OFF)
 cmake_dependent_option(USE_ROCM "Use ROCm" ON "LINUX" OFF)
@@ -346,6 +357,8 @@ cmake_dependent_option(
     "NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(
     BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
+cmake_dependent_option(
+    BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin fodler" OFF "USE_CUDA" OFF)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance on Windows.
@@ -729,19 +742,42 @@ if(MSVC)
   append_cxx_flag_if_supported("/utf-8" CMAKE_CXX_FLAGS)
 endif()
 
+# Note for ROCM platform:
+# 1. USE_ROCM is always ON until include(cmake/Dependencies.cmake)
+# 2. USE_CUDA will become OFF during re-configuration
+# Truth Table:
+# CUDA 1st pass: USE_CUDA=True;USE_ROCM=True, FLASH evaluates to ON by default
+# CUDA 2nd pass: USE_CUDA=True;USE_ROCM=False, FLASH evaluates to ON by default
+# ROCM 1st pass: USE_CUDA=True;USE_ROCM=True, FLASH evaluates to ON by default
+# ROCM 2nd pass: USE_CUDA=False;USE_ROCM=True, FLASH evaluates to ON by default
+# CPU 1st pass: USE_CUDA=False(Cmd Option);USE_ROCM=True, FLASH evaluates to OFF by default
+# CPU 2nd pass: USE_CUDA=False(Cmd Option);USE_ROCM=False, FLASH evaluates to OFF by default
+# Thus we cannot tell ROCM 2nd pass and CPU 1st pass
+#
+# The only solution is to include(cmake/Dependencies.cmake), and defer the
+# aotriton build decision later.
+
 include(cmake/Dependencies.cmake)
 
-# Moved this cmake set option down here because CMAKE_CUDA_COMPILER_VERSION is not avaialble until now
 cmake_dependent_option(
   USE_FLASH_ATTENTION
-  "Whether to build the flash_attention kernel for scaled dot product attention" ON
-  "USE_CUDA AND NOT ROCM AND NOT MSVC AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+  "Whether to build the flash_attention kernel for scaled dot product attention.\
+  Will be disabled if not supported by the platform" ON
+  "USE_CUDA OR USE_ROCM;NOT MSVC" OFF)
 
+# We are currenlty not using alibi attention for Flash
+# So we disable this feature by default
+# We dont currently document this feature because we don't
+# Suspect users building from source will need this
+add_definitions(-DFLASHATTENTION_DISABLE_ALIBI)
+
+# CAVEAT: Again, do not check USE_ROCM here
 # Flash Attention2 will error while building for sm52 while Mem Eff Attention won't
 cmake_dependent_option(
   USE_MEM_EFF_ATTENTION
-  "Enable memory-efficient attention for scaled dot product attention" ON
-  "USE_CUDA AND NOT ROCM AND NOT CMAKE_CUDA_COMPILER_VERSION VERSION_LESS 11.6" OFF)
+  "Enable memory-efficient attention for scaled dot product attention.\
+  Will be disabled if not supported by the platform" ON
+  "USE_CUDA" OFF)
 
 if(DEBUG_CUDA)
   string(APPEND CMAKE_CUDA_FLAGS_DEBUG " -lineinfo")
@@ -1144,6 +1180,7 @@ if(BUILD_SHARED_LIBS)
       COMPONENT dev)
   install(FILES
       ${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake
+      ${PROJECT_SOURCE_DIR}/cmake/public/xpu.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/mkl.cmake
@@ -1163,6 +1200,10 @@ if(BUILD_SHARED_LIBS)
       COMPONENT dev)
   install(FILES
       ${PROJECT_SOURCE_DIR}/cmake/Modules/FindCUSPARSELT.cmake
+      DESTINATION share/cmake/Caffe2/
+      COMPONENT dev)
+  install(FILES
+      ${PROJECT_SOURCE_DIR}/cmake/Modules/FindSYCLToolkit.cmake
       DESTINATION share/cmake/Caffe2/
       COMPONENT dev)
 
@@ -1226,4 +1267,13 @@ if(DEFINED USE_CUSTOM_DEBINFO)
     # Link everything with debug info when any file is in debug mode
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -g")
     set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -g")
+endif()
+
+# Bundle PTXAS if needed
+if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
+   if(NOT EXISTS "${PROJECT_SOURCE_DIR}/build/bin/ptxas")
+     message(STATUS "Copying PTXAS into the bin folder")
+     file(COPY "${CUDAToolkit_BIN_DIR}/ptxas" DESTINATION "${PROJECT_BINARY_DIR}")
+   endif()
+   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas" DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()

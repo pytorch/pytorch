@@ -163,14 +163,18 @@ def exponential(
 
 @_add_docstr(
     r"""
-Computes a window with a simple cosine waveform.
-Also known as the sine window.
+Computes a window with a simple cosine waveform, following the same implementation as SciPy.
+This window is also known as the sine window.
 
 The cosine window is defined as follows:
 
 .. math::
-    w_n = \cos{\left(\frac{\pi n}{M} - \frac{\pi}{2}\right)} = \sin{\left(\frac{\pi n}{M}\right)}
-    """,
+    w_n = \sin\left(\frac{\pi (n + 0.5)}{M}\right)
+
+This formula differs from the typical cosine window formula by incorporating a 0.5 term in the numerator,
+which shifts the sample positions. This adjustment results in a window that starts and ends with non-zero values.
+
+""",
     r"""
 
 {normalization}
@@ -366,18 +370,22 @@ def kaiser(
     if M == 1:
         return torch.ones((1,), dtype=dtype, layout=layout, device=device, requires_grad=requires_grad)
 
+    # Avoid NaNs by casting `beta` to the appropriate dtype.
+    beta = torch.tensor(beta, dtype=dtype, device=device)
+
     start = -beta
     constant = 2.0 * beta / (M if not sym else M - 1)
+    end = torch.minimum(beta, start + (M - 1) * constant)
 
     k = torch.linspace(start=start,
-                       end=start + (M - 1) * constant,
+                       end=end,
                        steps=M,
                        dtype=dtype,
                        layout=layout,
                        device=device,
                        requires_grad=requires_grad)
 
-    return torch.i0(torch.sqrt(beta * beta - torch.pow(k, 2))) / torch.i0(torch.tensor(beta, device=device))
+    return torch.i0(torch.sqrt(beta * beta - torch.pow(k, 2))) / torch.i0(beta)
 
 
 @_add_docstr(

@@ -35,7 +35,7 @@ from torchgen.model import (
 )
 
 
-_valueT = None
+_valueT: Optional[BaseCppType] = None
 
 
 # A ValueT is an IR type which represents the computation of a Tensor.  In other
@@ -273,9 +273,9 @@ class LazyIrProperties:
     )
 
     def __init__(self, *default_properties: str):
-        properties: Dict[Tuple[str, ...], Optional[str]] = {
-            p: None for p in LazyIrProperties.Properties
-        }
+        properties: Dict[Tuple[str, ...], Optional[str]] = dict.fromkeys(
+            LazyIrProperties.Properties
+        )
         self.__dict__["properties"] = properties
         for p in default_properties:
             setattr(self, p, True)

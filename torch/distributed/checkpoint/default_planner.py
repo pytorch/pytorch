@@ -6,12 +6,12 @@ import logging
 import operator
 from collections import ChainMap
 from functools import reduce
-from typing import Any, cast, Dict, List, Tuple, Union
+from typing import Any, cast, Dict, List, Optional, Tuple, Union
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed._tensor import DTensor
-from torch.distributed.checkpoint._dedup_tensors import dedup_tensors
+from torch.distributed.checkpoint._dedup_save_plans import dedup_save_plans
 from torch.distributed.checkpoint._nested_dict import (
     FLATTEN_MAPPING,
     flatten_state_dict,
@@ -40,6 +40,7 @@ from torch.distributed.checkpoint.planner_helpers import (
     _create_default_metadata_only_plan,
     _create_read_items,
     _create_write_items,
+    _init_state_dict,
 )
 from torch.distributed.checkpoint.utils import find_state_dict_object
 
@@ -64,12 +65,18 @@ class DefaultSavePlanner(SavePlanner):
         self,
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
-        dedup_replicated_tensors: bool = True,
+        dedup_replicated_tensors: Optional[bool] = None,
     ) -> None:
         self.flatten_state_dict = flatten_state_dict
         self.flatten_sharded_tensors = flatten_sharded_tensors
-        self.dedup_replicated_tensors = dedup_replicated_tensors
         self.mappings = {}
+
+        if dedup_replicated_tensors is not None:
+            logger.warning(
+                "DefaultSavePlanner's `dedup_replicated_tensors` argument is being "
+                "deprecated, and no longer has any effect. Please remove this argument "
+                "from your call."
+            )
 
     def set_up_planner(self, state_dict: STATE_DICT_TYPE, is_coordinator: bool) -> None:
         if self.flatten_state_dict:
@@ -90,8 +97,7 @@ class DefaultSavePlanner(SavePlanner):
     def create_global_plan(
         self, all_plans: List[SavePlan]
     ) -> Tuple[List[SavePlan], Metadata]:
-        if self.dedup_replicated_tensors:
-            all_plans = dedup_tensors(all_plans)
+        all_plans = dedup_save_plans(all_plans)
 
         global_plan, metadata = create_default_global_save_plan(all_plans)
 
@@ -162,6 +168,7 @@ class DefaultLoadPlanner(LoadPlanner):
         metadata: Metadata,
         is_coordinator: bool,
     ) -> None:
+        _init_state_dict(state_dict)
         self.original_state_dict = state_dict
 
         if self.flatten_sharded_tensors:
@@ -207,6 +214,70 @@ class DefaultLoadPlanner(LoadPlanner):
     def transform_tensor(self, read_item: ReadItem, tensor: torch.Tensor):
         """Extension from the planner interface to make it easy to extend the default planner."""
         return narrow_tensor_by_index(tensor, read_item.dest_offsets, read_item.lengths)
+
+
+class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
+    """
+    Extension of DefaultLoadPlanner, which rebuilds state_dict from the saved metadata.
+    Useful for loading in state_dict without first initializing a model, such as
+    when converting a DCP checkpoint into a Torch save file.
+
+    . N.B. `state_dict` must be an empty dictionary when used with this LoadPlanner
+
+    .. warning::
+        Because the entire state dict is initialized, It's recommended to only utilize
+        this LoadPlanner on a single rank or process to avoid OOM.
+
+    """
+
+    def __init__(self, keys=None, *args, **kwargs):
+        self.keys = keys
+        super().__init__(*args, **kwargs)
+
+    def _should_include_key(self, key: str, metadata: Metadata) -> bool:
+        if self.keys is None:
+            return True
+
+        if key in self.keys:
+            True
+
+        unflattened_keys: List[str] = []
+        planner_data = metadata.planner_data.get(key)
+        for unflattened_key in planner_data:
+            if unflattened_keys:
+                unflattened_keys.append(
+                    ".".join([unflattened_keys[-1], unflattened_key])
+                )
+
+            else:
+                unflattened_keys.append(unflattened_key)
+
+        if any(unflattened_key in self.keys for unflattened_key in unflattened_keys):
+            return True
+
+        return False
+
+    def set_up_planner(
+        self,
+        state_dict: STATE_DICT_TYPE,
+        metadata: Metadata,
+        is_coordinator: bool,
+    ) -> None:
+        assert not state_dict
+
+        # rebuild the state dict from the metadata
+        for k, v in metadata.state_dict_metadata.items():
+            if not self._should_include_key(k, metadata):
+                continue
+
+            if isinstance(v, TensorStorageMetadata):
+                v = torch.empty(v.size, dtype=v.properties.dtype)  # type: ignore[assignment]
+            if k in metadata.planner_data:
+                set_element(state_dict, metadata.planner_data[k], v)
+            else:
+                state_dict[k] = v
+
+        super().set_up_planner(state_dict, metadata, is_coordinator)
 
 
 def create_default_local_load_plan(

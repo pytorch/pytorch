@@ -197,6 +197,6 @@ device_types = ("cpu", "cuda")
 instantiate_device_type_tests(TestDecomp, globals(), only_for=device_types)
 
 if __name__ == "__main__":
-    # We don't support torch.compile() on Windows presently
+    # We don't support torch.compile() on Windows
     if not IS_WINDOWS:
         run_tests()

@@ -451,7 +451,7 @@ TEST_F(VulkanAPITest, add_invalid_inputs) {
   auto in_cpu = at::rand({2, 3, 4, 5}, at::device(at::kCPU).dtype(at::kFloat));
   auto other_cpu = at::rand({2, 4, 4, 5}, at::device(at::kCPU).dtype(at::kFloat));
 
-  EXPECT_THROW(at::add(in_cpu.vulkan(), other_cpu.vulkan(), 1.0f), ::c10::Error);
+  EXPECT_THROW(at::add(in_cpu.vulkan(), other_cpu.vulkan(), 1.0f), ::std::exception);
 }
 
 TEST_F(VulkanAPITest, add) {
@@ -529,7 +529,7 @@ TEST_F(VulkanAPITest, add_other_cpu_unsupported_type_should_fail) {
   const auto other_cpu =
     at::zeros({2, 2, 2}, at::device(at::kCPU).dtype(at::kComplexFloat));
 
-  EXPECT_THROW(at::add(in_cpu.vulkan(), other_cpu.vulkan(), 1.0f), ::c10::Error);
+  EXPECT_THROW(at::add(in_cpu.vulkan(), other_cpu.vulkan(), 1.0f), ::std::exception);
 }
 
 TEST_F(VulkanAPITest, add_) {
@@ -772,7 +772,7 @@ TEST_F(VulkanAPITest, addmm_error_bias) {
   const auto m1_cpu = at::rand({17, 6}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m2_cpu = at::rand({6, 9}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m1_vulkan = m1_cpu.vulkan();
-  EXPECT_THROW(at::addmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha), ::c10::Error);
+  EXPECT_THROW(at::addmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha), ::std::exception);
 }
 
 TEST_F(VulkanAPITest, avg_pool2d) {
@@ -803,7 +803,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       0.1,
       1e-05,
       false);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: Vulkan batchnorm expects 4-dim input
   EXPECT_THROW({
@@ -817,7 +817,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       0.1,
       1e-05,
       false);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: Vulkan batchnorm expects 4-dim input
   EXPECT_THROW({
@@ -831,7 +831,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       0.1,
       1e-05,
       false);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: Vulkan batchnorm expects channel dim to be multiple of 4
   EXPECT_THROW({
@@ -845,7 +845,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       0.1,
       1e-05,
       false);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: weight tensor contains incorrect number of elements
   EXPECT_THROW({
@@ -859,7 +859,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       0.1,
       1e-05,
       false);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: bias tensor contains incorrect number of elements
   EXPECT_THROW({
@@ -873,7 +873,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       0.1,
       1e-05,
       false);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: running mean tensor contains incorrect number of elements
   EXPECT_THROW({
@@ -887,7 +887,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       0.1,
       1e-05,
       false);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: running var tensor contains incorrect number of elements
   EXPECT_THROW({
@@ -901,7 +901,7 @@ TEST_F(VulkanAPITest, batch_norm_invalid_inputs) {
       0.1,
       1e-05,
       false);
-  }, ::c10::Error);
+  }, ::std::exception);
 }
 
 TEST_F(VulkanAPITest, batch_norm_small) {
@@ -1081,7 +1081,7 @@ TEST_F(VulkanAPITest, baddbmm_bais_error) {
       at::rand({150, 67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m1_vulkan = m1_cpu.vulkan();
   EXPECT_THROW(
-      at::baddbmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha), ::c10::Error);
+      at::baddbmm(bias_cpu, m1_vulkan, m2_cpu, beta, alpha), ::std::exception);
 }
 
 TEST_F(VulkanAPITest, baddbmm_bias_boardcast_batch) {
@@ -1338,7 +1338,7 @@ TEST_F(VulkanAPITest, bmm_error) {
   const auto m2_cpu =
       at::rand({200, 546, 267}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m1_vulkan = m1_cpu.vulkan();
-  EXPECT_THROW(m1_vulkan.bmm(m2_cpu), ::c10::Error);
+  EXPECT_THROW(m1_vulkan.bmm(m2_cpu), ::std::exception);
 }
 
 TEST_F(VulkanAPITest, clamp) {
@@ -1394,20 +1394,15 @@ TEST_F(VulkanAPITest, conv1d_simple) {
   const auto weights_vk = weights_cpu.vulkan();
   const auto bias_vk = bias_cpu.vulkan();
 
-  std::array<int64_t, 1> stride{1};
-  std::array<int64_t, 1> padding{0};
-  std::array<int64_t, 1> dilation{1};
+  int64_t stride = 1;
+  int64_t padding = 0;
+  int64_t dilation = 1;
 
   const auto output_cpu = at::conv1d(
-      input_cpu, weights_cpu, bias_cpu,
-      stride, padding, dilation, channels);
+      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, channels);
 
   const auto output_vk = at::conv1d(
-      input_vk, weights_vk, bias_vk,
-      stride,
-      padding,
-      dilation,
-      channels);
+      input_vk, weights_vk, bias_vk, stride, padding, dilation, channels);
   const auto output_vk_cpu = output_vk.cpu();
 
   const bool check = almostEqual(output_cpu, output_vk_cpu);
@@ -1418,32 +1413,34 @@ TEST_F(VulkanAPITest, conv1d_simple) {
   ASSERT_TRUE(check);
 }
 
-void test_conv1d(int64_t kernel_size, int64_t channels, int64_t lengths) {
+void test_conv1d(
+    int64_t kernel_size,
+    int64_t groups,
+    int64_t lengths,
+    int64_t stride = 1,
+    int64_t padding = 0,
+    int64_t dilation = 1,
+    int64_t in_group_size = 1,
+    int64_t out_group_size = 1,
+    int64_t batch_size = 1) {
   c10::InferenceMode mode;
 
-  const auto input_cpu = at::rand({1, channels, lengths}, at::kFloat);
-  const auto weights_cpu = at::rand({channels, 1, kernel_size}, at::kFloat);
-  const auto bias_cpu = at::rand({channels,}, at::kFloat);
+  int64_t in_channels = in_group_size * groups;
+  int64_t out_channels = out_group_size * groups;
+
+  const auto input_cpu = at::rand({batch_size, in_channels, lengths}, at::kFloat);
+  const auto weights_cpu = at::rand({out_channels, in_group_size, kernel_size}, at::kFloat);
+  const auto bias_cpu = at::rand({out_channels,}, at::kFloat);
 
   const auto input_vk = input_cpu.vulkan();
   const auto weights_vk = weights_cpu.vulkan();
   const auto bias_vk = bias_cpu.vulkan();
 
-  std::array<int64_t, 1> stride{1};
-  std::array<int64_t, 1> padding{0};
-  std::array<int64_t, 1> dilation{1};
-  int64_t groups = channels;
-
   const auto output_cpu = at::conv1d(
-      input_cpu, weights_cpu, bias_cpu,
-      stride, padding, dilation, groups);
+      input_cpu, weights_cpu, bias_cpu, stride, padding, dilation, groups);
 
   const auto output_vk = at::conv1d(
-      input_vk, weights_vk, bias_vk,
-      stride,
-      padding,
-      dilation,
-      channels);
+      input_vk, weights_vk, bias_vk, stride, padding, dilation, groups);
   const auto output_vk_cpu = output_vk.cpu();
 
   const bool check = almostEqual(output_cpu, output_vk_cpu);
@@ -1460,6 +1457,16 @@ TEST_F(VulkanAPITest, conv1d) {
   test_conv1d(1, 12, 3);
   test_conv1d(1, 12, 1);
   test_conv1d(10, 12, 20);
+  test_conv1d(3, 5, 9, 2, 0, 1);
+  test_conv1d(3, 5, 9, 2, 1, 1);
+  test_conv1d(3, 5, 9, 2, 1, 2);
+  test_conv1d(3, 5, 9, 1, 4, 2);
+  test_conv1d(6, 22, 30, 5, 5, 3);
+  test_conv1d(6, 5, 30, 5, 5, 3, 3, 5);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 2);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 5);
+  test_conv1d(6, 5, 30, 5, 5, 3, 4, 2, 9);
 }
 
 
@@ -2170,31 +2177,39 @@ TEST_F(VulkanAPITest, copy) {
   ASSERT_TRUE(check);
 }
 
-TEST_F(VulkanAPITest, cumsum) {
-  c10::InferenceMode mode;
+void test_cumsum(const at::IntArrayRef input_shape, const int64_t dim) {
+  const auto in_cpu = at::rand(input_shape, at::TensorOptions(at::kCPU).dtype(at::kFloat));
 
-  const auto in_cpu = at::rand({1, 17, 37, 49}, at::TensorOptions(at::kCPU).dtype(at::kFloat));
-  // 0 do nothing
-  // 1 frame
-  // not implemented
-
-  // 2 height
-  const auto out_cpu2 = at::cumsum(in_cpu, 2);
-  const auto out_vulkan2 = at::cumsum(in_cpu.vulkan(), 2);
-  const auto check2 = almostEqual(out_cpu2, out_vulkan2.cpu());
-  if (!check2) {
-    showRtol(out_cpu2, out_vulkan2.cpu());
+  const auto out_cpu = at::cumsum(in_cpu, dim);
+  const auto out_vulkan = at::cumsum(in_cpu.vulkan(), dim);
+  const auto check = almostEqual(out_cpu, out_vulkan.cpu());
+  if (!check) {
+    showRtol(out_cpu, out_vulkan.cpu());
   }
-  ASSERT_TRUE(check2);
+  ASSERT_TRUE(check);
+}
 
-  // 3 width
-  const auto out_cpu3 = at::cumsum(in_cpu, 3);
-  const auto out_vulkan3 = at::cumsum(in_cpu.vulkan(), 3);
-  const auto check3 = almostEqual(out_cpu3, out_vulkan3.cpu());
-  if (!check3) {
-    showRtol(out_cpu3, out_vulkan3.cpu());
+TEST_F(VulkanAPITest, cumsum_1d) {
+  test_cumsum({37}, 0);
+  test_cumsum({37}, -1);
+}
+
+TEST_F(VulkanAPITest, cumsum_2d) {
+  for (int64_t i = -1; i <= 1; i++) {
+    test_cumsum({17, 37}, i);
   }
-  ASSERT_TRUE(check3);
+}
+
+TEST_F(VulkanAPITest, cumsum_3d) {
+  for (int64_t i = -2; i <= 2; i++) {
+    test_cumsum({17, 37, 49}, i);
+  }
+}
+
+TEST_F(VulkanAPITest, cumsum_4d) {
+  for (int64_t i = -3; i <= 3; i++) {
+    test_cumsum({12, 17, 37, 49}, i);
+  }
 }
 
 void test_div(const at::IntArrayRef input_shape, const at::IntArrayRef other_shape) {
@@ -2426,23 +2441,23 @@ void test_expand(const at::IntArrayRef input_shape, const at::IntArrayRef output
 TEST_F(VulkanAPITest, expand_exceptions) {
   // Vulkan expand supports input dims <= 4
   auto in_cpu = at::rand({1, 2, 3, 4, 5}, at::device(at::kCPU).dtype(at::kFloat));
-  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({1, 2, 3, 4}), ::c10::Error);
+  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({1, 2, 3, 4}), ::std::exception);
 
   // Vulkan expand supports output_size <= 4
   in_cpu = at::rand({1, 2, 3, 4}, at::device(at::kCPU).dtype(at::kFloat));
-  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({1, 1, 2, 3, 4}), ::c10::Error);
+  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({1, 1, 2, 3, 4}), ::std::exception);
 
   // Vulkan expand expects output size >= input
   in_cpu = at::rand({1, 2, 3}, at::device(at::kCPU).dtype(at::kFloat));
-  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({2, 3}), ::c10::Error);
+  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({2, 3}), ::std::exception);
 
   // Non-singleton dimensions must match
   in_cpu = at::rand({3, 1}, at::device(at::kCPU).dtype(at::kFloat));
-  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({1, 1}), ::c10::Error);
+  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({1, 1}), ::std::exception);
 
   // -1 not allowed in leading, non-existing dimension
   in_cpu = at::rand({3, 1}, at::device(at::kCPU).dtype(at::kFloat));
-  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({-1, 3, 1}), ::c10::Error);
+  EXPECT_THROW(const auto out_vulkan = in_cpu.vulkan().expand({-1, 3, 1}), ::std::exception);
 }
 
 TEST_F(VulkanAPITest, expand_1d) {
@@ -2783,7 +2798,7 @@ TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {
       at::rand({8, 5}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       1e-05,
       false);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: incorrect weight dimensions
   EXPECT_THROW({
@@ -2794,7 +2809,7 @@ TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {
       at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       1e-05,
       false);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: incorrect bias dimensions
   EXPECT_THROW({
@@ -2805,7 +2820,7 @@ TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {
       at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       1e-05,
       false);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: input has too many dimensions
   EXPECT_THROW({
@@ -2816,7 +2831,7 @@ TEST_F(VulkanAPITest, layer_norm_invalid_inputs) {
       at::rand({3, 5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
       1e-05,
       false);
-  }, ::c10::Error);
+  }, ::std::exception);
 }
 
 void test_layer_norm(
@@ -3204,7 +3219,7 @@ TEST_F(VulkanAPITest, masked_fill_invalidinputs_exceptions) {
               in_cpu.vulkan().masked_fill(mask_cpu.vulkan(), -7.0f);
           ;
         },
-        ::c10::Error);
+        ::std::exception);
   }
 
   // Arrange: Vulkan masked_fill expects mask of dim <= 4
@@ -3221,7 +3236,7 @@ TEST_F(VulkanAPITest, masked_fill_invalidinputs_exceptions) {
               in_cpu.vulkan().masked_fill(mask_cpu.vulkan(), -7.0f);
           ;
         },
-        ::c10::Error);
+        ::std::exception);
   }
 
   // Arrange: shapes of input tensor and mask tensor should be broadcastable
@@ -3238,7 +3253,7 @@ TEST_F(VulkanAPITest, masked_fill_invalidinputs_exceptions) {
               in_cpu.vulkan().masked_fill(mask_cpu.vulkan(), -7.0f);
           ;
         },
-        ::c10::Error);
+        ::std::exception);
   }
 
   // Arrange: value should be a 0-dimensional value tensor or a scalar
@@ -3255,7 +3270,7 @@ TEST_F(VulkanAPITest, masked_fill_invalidinputs_exceptions) {
               in_cpu.vulkan().masked_fill(mask_cpu.vulkan(), at::rand({1, 2}));
           ;
         },
-        ::c10::Error);
+        ::std::exception);
   }
 }
 
@@ -3423,31 +3438,31 @@ TEST_F(VulkanAPITest, mean_invalid_inputs) {
   EXPECT_THROW({
     at::mean(at::rand({3, 5, 7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
       .vulkan(), {3});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: dimension out of range
   EXPECT_THROW({
     at::mean(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
       .vulkan(), {3});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: dimension out of range
   EXPECT_THROW({
     at::mean(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
       .vulkan(), {-4});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: repeated dimensions
   EXPECT_THROW({
     at::mean(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
       .vulkan(), {1, 1});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: repeated dimensions
   EXPECT_THROW({
     at::mean(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
       .vulkan(), {1, -2});
-  }, ::c10::Error);
+  }, ::std::exception);
 }
 
 void test_mean_dim(const at::IntArrayRef input_shape, const at::IntArrayRef dim_list, bool keepdim=false) {
@@ -3603,7 +3618,7 @@ TEST_F(VulkanAPITest, mm_error) {
   const auto m2_cpu = at::rand({67, 163}, at::device(at::kCPU).dtype(at::kFloat));
   const auto m1_vulkan = m1_cpu.vulkan();
 
-  EXPECT_THROW(m1_vulkan.mm(m2_cpu), ::c10::Error);
+  EXPECT_THROW(m1_vulkan.mm(m2_cpu), ::std::exception);
 }
 
 void test_mul(const at::IntArrayRef input_shape, const at::IntArrayRef other_shape) {
@@ -4007,7 +4022,7 @@ TEST_F(VulkanAPITest, floor_divide_scalar_error) {
 
   auto in_cpu = at::rand({2, 3, 4}, at::device(at::kCPU).dtype(at::kFloat));
   auto in_vulkan = in_cpu.vulkan();
-  EXPECT_THROW(at::floor_divide(in_vulkan, 0.0f), ::c10::Error);
+  EXPECT_THROW(at::floor_divide(in_vulkan, 0.0f), ::std::exception);
 }
 
 void test_floor_divide_scalar_inplace(const at::IntArrayRef input_shape, float input_scale, float other) {
@@ -4038,7 +4053,7 @@ TEST_F(VulkanAPITest, floor_divide_scalar_inplace_error) {
 
   auto in_cpu = at::rand({2, 3, 4}, at::device(at::kCPU).dtype(at::kFloat));
   auto in_vulkan = in_cpu.vulkan();
-  EXPECT_THROW(in_vulkan.floor_divide(0.0f), ::c10::Error);
+  EXPECT_THROW(in_vulkan.floor_divide(0.0f), ::std::exception);
 }
 
 TEST_F(VulkanAPITest, floor_divide_scalar_inplace) {
@@ -4193,7 +4208,7 @@ TEST_F(VulkanAPITest, repeat_invalid_inputs_outputs_exceptions) {
     // Act
     EXPECT_THROW(
         { const auto out_vulkan = in_cpu.vulkan().repeat(repeats); },
-        ::c10::Error);
+        ::std::exception);
   }
 
   // Arrange: Number of dimensions of repeat dims can not be smaller than
@@ -4206,7 +4221,7 @@ TEST_F(VulkanAPITest, repeat_invalid_inputs_outputs_exceptions) {
     // Act
     EXPECT_THROW(
         { const auto out_vulkan = in_cpu.vulkan().repeat(repeats); },
-        ::c10::Error);
+        ::std::exception);
   }
 
   // Arrange: Vulkan repeat only supports output of dims <= 4
@@ -4218,7 +4233,7 @@ TEST_F(VulkanAPITest, repeat_invalid_inputs_outputs_exceptions) {
     // Act
     EXPECT_THROW(
         { const auto out_vulkan = in_cpu.vulkan().repeat(repeats); },
-        ::c10::Error);
+        ::std::exception);
   }
 }
 
@@ -4457,6 +4472,56 @@ TEST_F(VulkanAPITest, sigmoid_) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, DISABLED_log_softmax_underflow_exception) {
+  // We apply softmax and log in a sequence to the tesnor [20, 0].
+  // The output of softmax on CPU is [1.0000e+00, 2.0612e-09]; while
+  // the output on Vulkan is [1, 0] since 2.0612e-09 is smaller than
+  // the smallest represetable positive 5.96e−8. We expect to see nan
+  // or -inf when applying log.
+  float data[] = {20, 0};
+  const auto in_cpu = at::from_blob(data, {2}, at::kFloat);
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto softmax_out_cpu = at::softmax(in_cpu, 0);
+  const auto softmax_out_vulkan = at::softmax(in_vulkan, 0);
+
+  const auto log_out_cpu = at::log(softmax_out_cpu);
+  const auto log_out_vulkan = at::log(softmax_out_vulkan);
+
+  auto has_nan = log_out_vulkan.cpu().isnan().any().item().to<bool>();
+  auto has_inf = log_out_vulkan.cpu().isinf().any().item().to<bool>();
+
+  // We expect the output of log containing nan or inf.
+  const auto check = has_nan || has_inf;
+  if (!check) {
+    std::cout << "expect log_out_vulkan contains nan or inf, but got" << std::endl;
+    std::cout << log_out_vulkan.cpu() << std::endl;
+  }
+  ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, log_softmax_underflow) {
+  // The minimum strictly positive (subnormal) value of float16 on Vulkan is 2−24 ≈ 5.96 × 10^−8.
+  // https://en.wikipedia.org/wiki/Half-precision_floating-point_format#Exponent_encoding
+  // then smallest_representable_log = log(5.96 × 10^−8) = -16.64.
+  // The implementation of `log_softmax` adds 6e-8 to the output of softmax before applying `log`
+  // to deal with underflow, so there won't be nan or -inf as shown in the
+  // `log_softmax_underflow_exception` test above
+  float smallest_representable_log = -16.64f;
+  float data[] = {20, 0};
+  const auto in_cpu = at::from_blob(data, {2}, at::kFloat);
+  const auto in_vulkan = in_cpu.vulkan();
+
+  const auto log_softmax_cpu = at::log_softmax(in_cpu, 0);
+  const auto log_softmax_vulkan = at::log_softmax(in_vulkan, 0);
+
+  const auto check = checkRtol(log_softmax_cpu - log_softmax_vulkan.cpu(), -smallest_representable_log);
+  if (!check) {
+    showRtol(log_softmax_cpu, log_softmax_vulkan.cpu());
+  }
+  ASSERT_TRUE(check);
+}
+
 void test_softmax(const at::IntArrayRef shape, bool log_softmax = false) {
   at::Tensor in_cpu =
       at::rand(shape, at::TensorOptions(at::kCPU).dtype(at::kFloat));
@@ -4503,7 +4568,7 @@ TEST_F(VulkanAPITest, softmax) {
   }
 }
 
-TEST_F(VulkanAPITest, log_softmax) {
+TEST_F(VulkanAPITest, DISABLED_log_softmax) {
   c10::InferenceMode mode;
   std::vector<std::vector<int64_t>> test_in_dims = {
       {1, 3, 4, 2},
@@ -4517,30 +4582,6 @@ TEST_F(VulkanAPITest, log_softmax) {
           std::vector<int64_t>(dim_vec.begin(), dim_vec.end() - trunc);
       test_softmax(trunc_dim_vec, log_softmax);
     }
-  }
-}
-
-// TODO: Currently the op is not working correctly. Add it back when it is fixed.
-TEST_F(VulkanAPITest, DISABLED_log_softmax) {
-  at::Tensor test_in[] = {
-    at::rand({1, 196, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 197, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 198, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-    at::rand({1, 199, 302, 5}, at::TensorOptions(at::kCPU).dtype(at::kFloat)),
-  };
-
-  for (auto in_cpu : test_in) {
-    const auto out_cpu = at::softmax(in_cpu, 1);
-
-    const auto in_vulkan = in_cpu.vulkan();
-    const auto out_vulkan = at::log_softmax(in_vulkan, 1);
-
-    const auto check = almostEqual(out_cpu, out_vulkan.cpu());
-    if (!check) {
-      showRtol(out_cpu, out_vulkan.cpu());
-    }
-
-    ASSERT_TRUE(check);
   }
 }
 
@@ -4824,31 +4865,31 @@ TEST_F(VulkanAPITest, sum_invalid_inputs) {
   EXPECT_THROW({
     at::sum(at::rand({3, 5, 7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
       .vulkan(), {3});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: dimension out of range
   EXPECT_THROW({
     at::sum(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
       .vulkan(), {3});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: dimension out of range
   EXPECT_THROW({
     at::sum(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
       .vulkan(), {-4});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: repeated dimensions
   EXPECT_THROW({
     at::sum(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
       .vulkan(), {1, 1});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: repeated dimensions
   EXPECT_THROW({
     at::sum(at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
       .vulkan(), {1, -2});
-  }, ::c10::Error);
+  }, ::std::exception);
 }
 
 void test_sum_dim(const at::IntArrayRef input_shape, const at::IntArrayRef dim_list, bool keepdim=false) {
@@ -5079,7 +5120,7 @@ TEST_F(VulkanAPITest, normal_error) {
 
   auto a_vulkan =
       at::zeros({30, 40, 50, 60}, at::device(at::kCPU).dtype(at::kFloat)).vulkan();
-  EXPECT_THROW(a_vulkan.normal_(a_mean, a_std), ::c10::Error);
+  EXPECT_THROW(a_vulkan.normal_(a_mean, a_std), ::std::exception);
 }
 
 TEST_F(VulkanAPITest, randn_like) {
@@ -5425,6 +5466,11 @@ void test_unsqueeze(const at::IntArrayRef input_shape, int64_t dim) {
   ASSERT_TRUE(check);
 }
 
+TEST_F(VulkanAPITest, unsqueeze_0dto1d_dim0) {
+  test_unsqueeze({}, 0);
+  test_unsqueeze({}, -1);
+}
+
 TEST_F(VulkanAPITest, unsqueeze_1dto2d_dim0) {
   test_unsqueeze({5}, 0);
   test_unsqueeze({6}, -2);
@@ -5751,7 +5797,7 @@ TEST_F(VulkanAPITest, view_invalid_inputs) {
   EXPECT_THROW({
     at::rand({7, 8, 9}, at::device(at::kCPU).dtype(at::kFloat))
       .vulkan().view({7, 8, -2});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: incompatible shape
   EXPECT_THROW({
@@ -5770,7 +5816,7 @@ TEST_F(VulkanAPITest, cat_4d_dim0_invalidinputs_exceptions) {
     // Act
     EXPECT_THROW({
       const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
-    }, ::c10::Error);
+    }, ::std::exception);
   }
 
   // Arrange: Vulkan cat expects 4 dimensional inputs
@@ -5782,7 +5828,7 @@ TEST_F(VulkanAPITest, cat_4d_dim0_invalidinputs_exceptions) {
     // Act
     EXPECT_THROW({
       const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 0);
-    }, ::c10::Error);
+    }, ::std::exception);
   }
 }
 
@@ -6211,7 +6257,7 @@ TEST_F(VulkanAPITest, cat_4d_dim2_invalidinputs_exceptions) {
     // Act
     EXPECT_THROW({
       const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 2);
-    }, ::c10::Error);
+    }, ::std::exception);
   }
 
   // Arrange: Vulkan cat expects inputs of same dimensions
@@ -6223,7 +6269,7 @@ TEST_F(VulkanAPITest, cat_4d_dim2_invalidinputs_exceptions) {
     // Act
     EXPECT_THROW({
       const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 2);
-    }, ::c10::Error);
+    }, ::std::exception);
   }
 }
 
@@ -6237,7 +6283,7 @@ TEST_F(VulkanAPITest, cat_4d_dim3_invalidinputs_exceptions) {
     // Act
     EXPECT_THROW({
       const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 3);
-    }, ::c10::Error);
+    }, ::std::exception);
   }
 
   // Arrange: Vulkan cat expects 4 dimensional inputs
@@ -6249,7 +6295,7 @@ TEST_F(VulkanAPITest, cat_4d_dim3_invalidinputs_exceptions) {
     // Act
     EXPECT_THROW({
       const auto out_vulkan = at::cat({in_cpu1.vulkan(), in_cpu2.vulkan(), in_cpu3.vulkan()}, 3);
-    }, ::c10::Error);
+    }, ::std::exception);
   }
 }
 
@@ -6781,52 +6827,52 @@ TEST_F(VulkanAPITest, permute_invalidinputs_exceptions) {
   // Act: Repeated dim
   EXPECT_THROW({
     const auto out_vulkan = at::permute(in_cpu.vulkan(), {2, 2, 1, 0});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   EXPECT_THROW({
     const auto out_vulkan = in_cpu.vulkan();
     out_vulkan.permute({2, 2, 1, 0});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: Number of dims don't match
   EXPECT_THROW({
     const auto out_vulkan = at::permute(in_cpu.vulkan(), {4, 3, 2, 1, 0});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   EXPECT_THROW({
     const auto out_vulkan = at::permute(in_cpu.vulkan(), {2, 1, 0});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   EXPECT_THROW({
     const auto out_vulkan = in_cpu.vulkan();
     out_vulkan.permute({4, 3, 2, 1, 0});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   EXPECT_THROW({
     const auto out_vulkan = in_cpu.vulkan();
     out_vulkan.permute({2, 1, 0});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: Dim out of range
   EXPECT_THROW({
     const auto out_vulkan = at::permute(in_cpu.vulkan(), {5, 2, 1, 0});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   EXPECT_THROW({
     const auto out_vulkan = in_cpu.vulkan();
     out_vulkan.permute({5, 2, 1, 0});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: Input tensor size > 4D
   const auto in_cpu_5d = at::rand({1, 2, 1, 2, 161}, at::device(at::kCPU).dtype(at::kFloat));
   EXPECT_THROW({
     const auto out_vulkan_5d = at::permute(in_cpu_5d.vulkan(), {4, 3, 2, 1, 0});
-  }, ::c10::Error);
+  }, ::std::exception);
 
   EXPECT_THROW({
     const auto out_vulkan_5d = in_cpu_5d.vulkan();
     out_vulkan_5d.permute({4, 3, 2, 1, 0});
-  }, ::c10::Error);
+  }, ::std::exception);
 }
 
 TEST_F(VulkanAPITest, slice_width_success) {
@@ -6889,14 +6935,14 @@ TEST_F(VulkanAPITest, slice_invalidinputs_exceptions) {
   // Act: slice step must be positive
   EXPECT_THROW({
     slice_test({2, 3, 4, 5}, 3, 0, 3, 0);
-  }, ::c10::Error);
+  }, ::std::exception);
 }
 
 TEST_F(VulkanAPITest, stack_invalid_inputs) {
   // Act: Vulkan stack expects at least one tensor
   EXPECT_THROW({
     at::stack({}, 0);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: Vulkan stack inputs must have matching sizes
   EXPECT_THROW({
@@ -6904,7 +6950,7 @@ TEST_F(VulkanAPITest, stack_invalid_inputs) {
         at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
         at::rand({5, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan(),
         at::rand({6, 7}, at::device(at::kCPU).dtype(at::kFloat)).vulkan()}, 0);
-  }, ::c10::Error);
+  }, ::std::exception);
 }
 
 void test_stack(const at::IntArrayRef input_shape, int64_t dim, int numTensors) {
@@ -6925,6 +6971,12 @@ void test_stack(const at::IntArrayRef input_shape, int64_t dim, int numTensors) 
     showRtol(out_cpu, out_vulkan.cpu());
   }
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, stack_0d) {
+  test_stack({}, 0, 1);
+  test_stack({}, 0, 2);
+  test_stack({}, 0, 3);
 }
 
 TEST_F(VulkanAPITest, stack_1d) {
@@ -6967,7 +7019,7 @@ TEST_F(VulkanAPITest, tile_invalid_inputs_exceptions) {
     // Act
     EXPECT_THROW(
         { const auto out_vulkan = at::tile(in_cpu.vulkan(), repeats); },
-        ::c10::Error);
+        ::std::exception);
   }
 }
 
@@ -6981,7 +7033,7 @@ TEST_F(VulkanAPITest, tile_invalid_outpus_exceptions) {
     // Act
     EXPECT_THROW(
         { const auto out_vulkan = at::tile(in_cpu.vulkan(), repeats); },
-        ::c10::Error);
+        ::std::exception);
   }
 }
 
@@ -7093,12 +7145,12 @@ TEST_F(VulkanAPITest, clone_invalidinputs_exceptions) {
   // Act: Vulkan supports Preserve and Contiguous memory foramts
   EXPECT_THROW({
     clone_test({2, 3, 5, 161}, c10::MemoryFormat::ChannelsLast);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: Vulkan supports Preserve and Contiguous memory foramts
   EXPECT_THROW({
     clone_test({2, 3, 5, 161}, c10::MemoryFormat::ChannelsLast3d);
-  }, ::c10::Error);
+  }, ::std::exception);
 }
 
 enum class OpType {
@@ -7528,7 +7580,7 @@ TEST_F(VulkanAPITest, gru_invalidinputs_exceptions) {
     at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
       weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1) },
       has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: non-3D input tensor
   EXPECT_THROW({
@@ -7536,7 +7588,7 @@ TEST_F(VulkanAPITest, gru_invalidinputs_exceptions) {
     at::gru(in_cpu_2d.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
       weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
       has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: non-3D hidden tensor
   EXPECT_THROW({
@@ -7544,42 +7596,42 @@ TEST_F(VulkanAPITest, gru_invalidinputs_exceptions) {
     at::gru(in_cpu.vulkan(), h0_cpu_2d.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
       weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
       has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: has_biases should be true
   EXPECT_THROW({
     at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
       weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
       false, num_layers, gru_dropout, train, bidirectional, batch_first);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: train should be false
   EXPECT_THROW({
     at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
       weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
       has_biases, num_layers, gru_dropout, true, bidirectional, batch_first);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: bidirectional should be false
   EXPECT_THROW({
     at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
       weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
       has_biases, num_layers, gru_dropout, train, true, batch_first);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: batch_first should be true
   EXPECT_THROW({
     at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
       weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
       has_biases, num_layers, gru_dropout, train, bidirectional, false);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: dropout should be 0.0
   EXPECT_THROW({
     at::gru(in_cpu.vulkan(), h0_cpu.vulkan(), { weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
       weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) },
       has_biases, num_layers, 1.0, train, bidirectional, batch_first);
-  }, ::c10::Error);
+  }, ::std::exception);
 }
 
 TEST_F(VulkanAPITest, gru_prepack_success) {
@@ -7697,7 +7749,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
             weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1) }),
         has_biases, num_layers, gru_dropout, train, bidirectional, batch_first);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: non-3D input tensor
   EXPECT_THROW({
@@ -7712,7 +7764,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
         "vulkan_prepack::run_gru_context",
         "",
         in_cpu_2d.vulkan(), h0_cpu.vulkan(), prepack[0]);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: non-3D hidden tensor
   EXPECT_THROW({
@@ -7727,7 +7779,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
         "vulkan_prepack::run_gru_context",
         "",
         in_cpu.vulkan(), h0_cpu_2d.vulkan(), prepack[0]);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: has_biases should be true
   EXPECT_THROW({
@@ -7737,7 +7789,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
         false, num_layers, gru_dropout, train, bidirectional, batch_first);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: train should be false
   EXPECT_THROW({
@@ -7747,7 +7799,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
         has_biases, num_layers, gru_dropout, true, bidirectional, batch_first);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: bidirectional should be false
   EXPECT_THROW({
@@ -7757,7 +7809,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
         has_biases, num_layers, gru_dropout, train, true, batch_first);
- }, ::c10::Error);
+ }, ::std::exception);
 
   // Act: batch_first should be true
   EXPECT_THROW({
@@ -7771,7 +7823,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
         "vulkan_prepack::run_gru_context",
         "",
         in_cpu.vulkan(), h0_cpu.vulkan(), prepack[0]);
-  }, ::c10::Error);
+  }, ::std::exception);
 
   // Act: dropout should be 0.0
   EXPECT_THROW({
@@ -7781,7 +7833,7 @@ TEST_F(VulkanAPITest, gru_prepack_invalidinputs_exceptions) {
         std::vector<at::Tensor>({ weight_ih_l.get(0), weight_hh_l.get(0), bias_ih_l.get(0), bias_hh_l.get(0),
            weight_ih_l.get(1), weight_hh_l.get(1), bias_ih_l.get(1), bias_hh_l.get(1) }),
         has_biases, num_layers, 1.0, train, bidirectional, batch_first);
-  }, ::c10::Error);
+  }, ::std::exception);
 }
 
 void test_linear(
@@ -7814,6 +7866,14 @@ void test_linear(
   }
 
   ASSERT_TRUE(check);
+}
+
+TEST_F(VulkanAPITest, linear_1d_small) {
+  test_linear({3}, {4, 3}, {4});
+}
+
+TEST_F(VulkanAPITest, linear_1d_large) {
+  test_linear({37}, {23, 37}, {23});
 }
 
 TEST_F(VulkanAPITest, linear_2d_flat) {

@@ -9,7 +9,7 @@ Demo applications with code walk-through can be find in [this github repo](https
 ##### Release
 Release artifacts are published to jcenter:
 
-```
+```groovy
 repositories {
     jcenter()
 }
@@ -32,7 +32,7 @@ dependencies {
 Nightly(snapshots) builds are published every night from `master` branch to [nexus sonatype snapshots repository](https://oss.sonatype.org/#nexus-search;quick~pytorch_android)
 
 To use them repository must be specified explicitly:
-```
+```groovy
 repositories {
     maven {
         url "https://oss.sonatype.org/content/repositories/snapshots"
@@ -62,7 +62,7 @@ The current nightly(snapshots) version is the value of `VERSION_NAME` in `gradle
 In some cases you might want to use a local build of pytorch android, for example you may build custom libtorch binary with another set of operators or to make local changes.
 
 For this you can use `./scripts/build_pytorch_android.sh` script.
-```
+```bash
 git clone https://github.com/pytorch/pytorch.git
 cd pytorch
 git submodule update --init --recursive
@@ -91,14 +91,14 @@ They are specified as environment variables:
 
 After successful build you should see the result as aar file:
 
-```
+```bash
 $ find pytorch_android/build/ -type f -name *aar
 pytorch_android/build/outputs/aar/pytorch_android.aar
 pytorch_android_torchvision/build/outputs/aar/pytorch_android.aar
 ```
 
 It can be used directly in android projects, as a gradle dependency:
-```
+```groovy
 allprojects {
     repositories {
         flatDir {
@@ -126,7 +126,7 @@ You can check out [test app example](https://github.com/pytorch/pytorch/blob/mas
 In some cases, you may want to use libtorch from your android native build.
 You can do it without building libtorch android, using native libraries from PyTorch android gradle dependency.
 For that, you will need to add the next lines to your gradle build.
-```
+```groovy
 android {
 ...
     configurations {
@@ -181,7 +181,7 @@ The added task will unpack them to gradle build directory.
 In your native build you can link to them adding these lines to your CMakeLists.txt:
 
 
-```
+```cmake
 # Relative path of gradle build directory to CMakeLists.txt
 set(build_DIR ${CMAKE_SOURCE_DIR}/build)
 
@@ -209,7 +209,7 @@ target_link_libraries(${PROJECT_NAME}
 If your CMakeLists.txt file is located in the same directory as your build.gradle, `set(build_DIR ${CMAKE_SOURCE_DIR}/build)` should work for you. But if you have another location of it, you may need to change it.
 
 After that, you can use libtorch C++ API from your native code.
-```
+```cpp
 #include <string>
 #include <ATen/NativeFunctions.h>
 #include <torch/script.h>

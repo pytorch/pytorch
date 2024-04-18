@@ -6,11 +6,10 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Work.hpp>
 
-namespace c10d {
-namespace intra_node_comm {
+namespace c10d::intra_node_comm {
 
 constexpr size_t kMaxDevices = 8;
-constexpr size_t kMaxIntraNodeSize = 10 * 1024 * 1024;
+constexpr size_t kDefaultBufferSize = 10ull * 1024 * 1024;
 
 using NvlMesh = std::array<std::array<size_t, kMaxDevices>, kMaxDevices>;
 using HybridCubeMesh = std::array<std::array<int, 4>, kMaxDevices>;
@@ -22,27 +21,25 @@ enum class AllReduceAlgo { NONE = 0, ONE_SHOT = 1, TWO_SHOT = 2, HCM = 3 };
 class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
  public:
   IntraNodeComm(
-      Topology topology,
-      std::array<void*, kMaxDevices> p2pStates,
-      std::array<void*, kMaxDevices> buffers,
-      void* p2pStatesDev,
-      void* buffersDev,
-      void* topoInfo,
+      c10::intrusive_ptr<c10d::Store> store,
       size_t rank,
-      size_t worldSize);
+      size_t worldSize,
+      c10::optional<size_t> bufferSize = c10::nullopt);
 
-  ~IntraNodeComm();
+  ~IntraNodeComm() override;
+
+  static bool isEnabled();
 
   /**
-   * Rendezvous via a c10d::Store.
-   * This function may return nullptr if intra-node comm is not applicable.
-   * It guarantees all participants either succeeds or abort.
+   * Performs rendezvous.
+   * If rendezvous fails, the IntraNodeComm object will be in an invalid
+   * state and it is the caller's responsibility to dispose it.
    */
-  static c10::intrusive_ptr<IntraNodeComm> rendezvous(
-      c10::intrusive_ptr<c10d::Store> store,
-      const std::string& prefix,
-      size_t rank,
-      size_t worldSize);
+  bool rendezvous();
+
+  size_t getBufferSize() {
+    return bufferSize_;
+  }
 
   /**
    * Selects a AllReduceAlgo that we think will outperform nccl.
@@ -52,15 +49,51 @@ class TORCH_API IntraNodeComm : public c10::intrusive_ptr_target {
 
   at::Tensor allReduce(const at::Tensor& input, AllReduceAlgo algo);
 
+  /**
+   * Perform a barrier among the specified ranks.
+   */
+  void barrier(c10::optional<std::vector<int64_t>> ranks = c10::nullopt);
+
+  /**
+   * Puts the given tensor into the p2p buffer of the current rank at the
+   * specified offset.
+   */
+  void put(const at::Tensor& tensor, int64_t offset = 0);
+
+  /**
+   * Fills the given tensor with the data from the specified rank's p2p buffer
+   * at the specified offset.
+   */
+  void get(size_t rank, at::Tensor tensor, int64_t offset = 0);
+
  private:
-  Topology topology_;
-  std::array<void*, kMaxDevices> p2pStates_;
-  std::array<void*, kMaxDevices> buffers_;
-  void* p2pStatesDev_;
-  void* buffersDev_;
-  void* topoInfo_;
+  at::Tensor oneShotAllReduce(
+      const at::Tensor& input,
+      at::cuda::CUDAStream& stream);
+
+  at::Tensor twoShotAllReduce(
+      const at::Tensor& input,
+      at::cuda::CUDAStream& stream);
+
+  at::Tensor hybridCubeMeshAllReduce(
+      const at::Tensor& input,
+      at::cuda::CUDAStream& stream);
+
+  c10::intrusive_ptr<Store> store_;
   size_t rank_;
   size_t worldSize_;
+  size_t bufferSize_;
+
+  /**
+   * Members initialized after rendezvous
+   */
+  bool isInitialized_ = false;
+  Topology topology_ = Topology::UNKNOWN;
+  std::array<void*, kMaxDevices> p2pStates_{};
+  std::array<void*, kMaxDevices> buffers_{};
+  void* p2pStatesDev_{};
+  void* buffersDev_{};
+  void* topoInfo_{};
 };
 
 /**
@@ -102,5 +135,4 @@ class IntraNodeCommWork : public c10d::Work {
 
 TORCH_API int64_t getIntraNodeCommUsageCounter();
 
-} // namespace intra_node_comm
-} // namespace c10d
+} // namespace c10d::intra_node_comm

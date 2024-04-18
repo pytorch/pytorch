@@ -5,6 +5,7 @@ import unittest
 import torch
 from torch._export import capture_pre_autograd_graph
 from torch.ao.quantization import generate_numeric_debug_handle
+from torch.ao.quantization.pt2e.export_utils import _WrapperModule
 from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
 from torch.ao.quantization.quantizer.xnnpack_quantizer import (
     get_symmetric_quantization_config,
@@ -37,7 +38,9 @@ def _extract_conv2d_pattern_debug_handle_map(model):
         torch.randn(1, 1, 1, 1),  # weight
         torch.randn(1),  # bias
     )
-    conv_gm = capture_pre_autograd_graph(conv_pattern, conv_pattern_example_inputs)
+    conv_gm = capture_pre_autograd_graph(
+        _WrapperModule(conv_pattern), conv_pattern_example_inputs
+    )
     conv_pm = SubgraphMatcherWithNameNodeMap(conv_gm)
     matches = conv_pm.match(model.graph)
     assert len(matches) == 1, "Expecting to have one match"

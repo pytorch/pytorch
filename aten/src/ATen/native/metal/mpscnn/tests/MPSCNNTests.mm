@@ -647,7 +647,7 @@ bool test_view2() {
 }
 
 bool test_view3() {
-  // nonarry -> array
+  // nonarray -> array
   __block std::vector<int64_t> size{5, 8};
   return TEST(size, __PRETTY_FUNCTION__, ^bool {
     auto X1 = at::rand(size, at::TensorOptions(at::kCPU).dtype(at::kFloat));

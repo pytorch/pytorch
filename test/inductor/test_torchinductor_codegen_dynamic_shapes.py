@@ -6,17 +6,18 @@ import unittest
 
 import torch
 from torch._inductor.compile_fx import compile_fx
+from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_WINDOWS,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    TestCase,
 )
 from torch.testing._internal.inductor_utils import (
     _check_has_dynamic_shape,
+    GPU_TYPE,
     HAS_CPU,
-    HAS_CUDA,
+    HAS_GPU,
 )
 
 if IS_WINDOWS and IS_CI:
@@ -55,19 +56,20 @@ def check_codegen(
 
     if is_cpp_code is False:
         if hasattr(model, "to"):
-            model = model.to("cuda")
+            model = model.to(device=GPU_TYPE)
 
         def copy_fn(x):
             # preserve strides of the input on the device
             if not isinstance(x, torch.Tensor):
                 return x
             return torch.empty_strided(
-                x.size(), x.stride(), device="cuda", dtype=x.dtype
+                x.size(), x.stride(), device=GPU_TYPE, dtype=x.dtype
             ).copy_(x)
 
         example_inputs = tuple(copy_fn(x) for x in example_inputs)
 
     torch._dynamo.reset()
+    torch._inductor.codecache.FxGraphCache.clear()
     torch._inductor.metrics.reset()
 
     called = False
@@ -141,6 +143,8 @@ test_failures = {
     #
     "test_complex_fallback_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_adaptive_avg_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_adaptive_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_fractional_max_pool2d2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_argmax_to_float_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_avg_pool2d7_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_avg_pool2d_backward4_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -153,7 +157,10 @@ test_failures = {
     "test_conv_backward_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_conv_functional_bn_fuse_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_convolution2_dynamic_shapes": TestFailure(("cpu",)),
+    "test_cumprod_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
     "test_cumsum_dynamic_shapes": TestFailure(("cpu",)),
+    "test_cumsum_no_mask_dynamic_shapes": TestFailure(("cpu",)),
+    "test_cumsum_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
     "test_div8_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_embedding_bag_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_empty1_dynamic_shapes": TestFailure(("cpu", "cuda")),
@@ -165,6 +172,8 @@ test_failures = {
     "test_like_rands_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace2_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linspace3_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_logcumsumexp_dynamic_shapes": TestFailure(("cpu",)),
+    "test_logcumsumexp_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
     "test_max_pool2d6_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d8_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(
@@ -174,22 +183,59 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_misaligned_address_issue1_dynamic_shapes": TestFailure(("cpu",)),
-    "test_multilayer_cumsum_dynamic_shapes": TestFailure(("cpu",)),
     "test_mm_views_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_empty_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_empty_strided_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_new_ones_dynamic_shapes": TestFailure(("cpu",)),
     "test_permute2_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_pointwise_airy_ai_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_digamma_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_gammainc_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_gammaincc_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_i0e_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_i1e_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_modified_bessel_k0_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_modified_bessel_k1_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_ndtri_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_polygamma_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_psi_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_scaled_modified_bessel_k0_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_scaled_modified_bessel_k1_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_spherical_bessel_j0_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_zeta_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_chebyshev_polynomial_t_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_chebyshev_polynomial_u_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_chebyshev_polynomial_v_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_chebyshev_polynomial_w_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_shifted_chebyshev_polynomial_t_dynamic_shapes": TestFailure(
+        ("cuda",)
+    ),
+    "test_pointwise_shifted_chebyshev_polynomial_u_dynamic_shapes": TestFailure(
+        ("cuda",)
+    ),
+    "test_pointwise_shifted_chebyshev_polynomial_v_dynamic_shapes": TestFailure(
+        ("cuda",)
+    ),
+    "test_pointwise_shifted_chebyshev_polynomial_w_dynamic_shapes": TestFailure(
+        ("cuda",)
+    ),
+    "test_pointwise_hermite_polynomial_h_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_hermite_polynomial_he_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_laguerre_polynomial_l_dynamic_shapes": TestFailure(("cuda",)),
+    "test_pointwise_legendre_polynomial_p_dynamic_shapes": TestFailure(("cuda",)),
     "test_randn_generator_dynamic_shapes": TestFailure(("cpu",)),
     "test_randn_like_empty_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_single_elem_dynamic_shapes": TestFailure(("cpu",)),
     "test_single_elem_indirect_dynamic_shapes": TestFailure(("cpu",)),
     "test_sort_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_split_cumsum_dynamic_shapes": TestFailure(("cpu",)),
+    "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu",)),
+    "test_split_cumprod_dynamic_shapes": TestFailure(("cpu",)),
+    "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu",)),
     "test_split_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_topk_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_unbind_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_views5_dynamic_shapes": TestFailure(("cpu", "cuda")),
-    "test_views6_dynamic_shapes": TestFailure(("cpu",)),
     "test_view_detach_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_view_on_aliased_dynamic_shapes": TestFailure(("cpu", "cuda")),
     "test_linear_float64_dynamic_shapes": TestFailure("cpu"),
@@ -197,6 +243,10 @@ test_failures = {
         ("cpu", "cuda")
     ),
     "test_zero_element_mutation_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_custom_op_3_dynamic_shapes": TestFailure(("cpu", "cuda")),
+    "test_custom_op_fixed_layout_sequential_dynamic_shapes": TestFailure(
+        ("cpu", "cuda")
+    ),
     "test_cat_uint8_dynamic_shapes": TestFailure(
         ("cpu",)
     ),  # cat on uint8 input is using aten fallback on cpu
@@ -223,6 +273,7 @@ test_failures = {
     "test_forced_buffer_realize_dynamic_shapes": TestFailure(
         ("cpu", "cuda"), is_skip=True
     ),
+    "test_tmp_not_defined_issue3_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_gather2_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_inplace_add_dynamic_shapes": TestFailure(("cpu", "cuda"), is_skip=True),
     "test_inplace_mixed_dtype_ops_dynamic_shapes": TestFailure(
@@ -287,10 +338,12 @@ test_failures = {
 if TEST_WITH_ROCM:
     test_failures.update(
         {
-            "test_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_split_cumsum_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_split_cumsum_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_split_cumprod_dynamic_shapes": TestFailure(("cpu", "cuda")),
+            "test_split_cumprod_low_prec_dynamic_shapes": TestFailure(("cpu", "cuda")),
         }
     )
-
 
 DynamicShapesCodegenCommonTemplate = make_dynamic_cls(
     CommonTemplate, xfail_prop="_expected_failure_codegen_dynamic"
@@ -320,11 +373,11 @@ if HAS_CPU:
     )
 
 
-if HAS_CUDA and not TEST_WITH_ASAN:
+if HAS_GPU and not TEST_WITH_ASAN:
 
-    class DynamicShapesCodegenCudaTests(TestCase):
+    class DynamicShapesCodegenGPUTests(TestCase):
         maxDiff = None
-        device = "cuda"
+        device = GPU_TYPE
 
         def common(self: TestCase, model, example_inputs, kwargs=None, **_rest):
             return check_codegen(
@@ -337,14 +390,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
     copy_tests(
         DynamicShapesCodegenCommonTemplate,
-        DynamicShapesCodegenCudaTests,
-        "cuda",
+        DynamicShapesCodegenGPUTests,
+        GPU_TYPE,
         test_failures,
     )
 
 
 if __name__ == "__main__":
-    from torch._dynamo.test_case import run_tests
+    from torch._inductor.test_case import run_tests
 
-    if HAS_CPU or HAS_CUDA:
+    if HAS_CPU or HAS_GPU:
         run_tests(needs="filelock")

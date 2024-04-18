@@ -1,4 +1,5 @@
 import contextlib
+import warnings
 
 from typing import Union
 
@@ -15,6 +16,8 @@ __all__ = [
     "matmul",
     "SDPBackend",
     "SDPAParams",
+    "enable_cudnn_sdp",
+    "cudnn_sdp_enabled",
     "enable_flash_sdp",
     "flash_sdp_enabled",
     "enable_mem_efficient_sdp",
@@ -207,8 +210,8 @@ def preferred_linalg_library(
 from torch._C import _SDPAParams as SDPAParams, _SDPBackend as SDPBackend
 
 # Set the __module__ attribute
-SDPBackend.__module__ = "torch.backends.cuda"
 SDPAParams.__module__ = "torch.backends.cuda"
+SDPAParams.__name__ = "SDPAParams"
 
 
 def flash_sdp_enabled():
@@ -305,11 +308,30 @@ def can_use_efficient_attention(params: SDPAParams, debug: bool = False) -> bool
     return torch._C._can_use_mem_efficient_attention(params, debug)
 
 
+def cudnn_sdp_enabled():
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Returns whether cuDNN scaled dot product attention is enabled or not.
+    """
+    return torch._C._get_cudnn_sdp_enabled()
+
+
+def enable_cudnn_sdp(enabled: bool):
+    r"""
+    .. warning:: This flag is beta and subject to change.
+
+    Enables or disables cuDNN scaled dot product attention.
+    """
+    torch._C._set_sdp_use_cudnn(enabled)
+
+
 @contextlib.contextmanager
 def sdp_kernel(
     enable_flash: bool = True,
     enable_math: bool = True,
     enable_mem_efficient: bool = True,
+    enable_cudnn: bool = True,
 ):
     r"""
     .. warning:: This flag is beta and subject to change.
@@ -317,18 +339,32 @@ def sdp_kernel(
     This context manager can be used to temporarily enable or disable any of the three backends for scaled dot product attention.
     Upon exiting the context manager, the previous state of the flags will be restored.
     """
-    previous_flash: bool = flash_sdp_enabled()
-    previous_mem_efficient: bool = mem_efficient_sdp_enabled()
-    previous_math: bool = math_sdp_enabled()
-    try:
-        enable_flash_sdp(enable_flash)
-        enable_mem_efficient_sdp(enable_mem_efficient)
-        enable_math_sdp(enable_math)
-        yield {}
-    finally:
-        enable_flash_sdp(previous_flash)
-        enable_mem_efficient_sdp(previous_mem_efficient)
-        enable_math_sdp(previous_math)
+    warnings.warn(
+        (
+            "torch.backends.cuda.sdp_kernel() "
+            "is deprecated. In the future, this context manager will be removed. "
+            "Please see, torch.nn.attention.sdpa_kernel() for the new context manager, with updated "
+            "signature."
+        ),
+        FutureWarning,
+    )
+    from torch.nn.attention import sdpa_kernel, SDPBackend
+
+    backend_list = []
+    if enable_flash:
+        backend_list.append(SDPBackend.FLASH_ATTENTION)
+    if enable_mem_efficient:
+        backend_list.append(SDPBackend.EFFICIENT_ATTENTION)
+    if enable_math:
+        backend_list.append(SDPBackend.MATH)
+    if enable_cudnn:
+        backend_list.append(SDPBackend.CUDNN_ATTENTION)
+
+    with sdpa_kernel(backend_list) as context:
+        try:
+            yield context
+        finally:
+            pass
 
 
 cufft_plan_cache = cuFFTPlanCacheManager()

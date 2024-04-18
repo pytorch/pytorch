@@ -1,7 +1,6 @@
 #pragma once
 
-#include <torch/csrc/inductor/aoti_runtime/model.h>
-#include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/csrc/inductor/aoti_runtime/utils.h>
 
 #include <assert.h>
 #include <cstdint>
@@ -351,6 +350,17 @@ inline RAIIAtenTensorHandle expensive_copy_to_tensor_if_needed(
 inline AtenTensorHandle expensive_copy_to_tensor_if_needed(
     AtenTensorHandle handle) {
   return handle;
+}
+
+template <typename T>
+const T& convert_arrayref_tensor_to_tensor(const T& t) {
+  return t;
+}
+
+template <typename T>
+RAIIAtenTensorHandle convert_arrayref_tensor_to_tensor(
+    const ArrayRefTensor<T>& art) {
+  return art.expensiveCopyToTensor();
 }
 
 } // namespace aot_inductor

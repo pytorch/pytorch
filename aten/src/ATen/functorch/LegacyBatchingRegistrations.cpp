@@ -19,8 +19,7 @@
 
 #include <utility>
 
-namespace at {
-namespace functorch {
+namespace at::functorch {
 
 
 // NOTE: [What is a batching rule?]
@@ -259,6 +258,18 @@ std::vector<Tensor> split_with_sizes_batching_rule(const Tensor& self, SymIntArr
   return result;
 }
 
+std::vector<Tensor> split_with_sizes_copy_batching_rule(const Tensor& self, SymIntArrayRef split_sizes, int64_t dim) {
+  if (!participatesInCurrentLevel(self)) {
+    c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
+    return split_with_sizes_copy_symint(self, split_sizes, dim);
+  }
+  auto self_physical = MultiBatchVmapTransform::logicalToPhysical(self);
+  auto dim_physical = self_physical.getPhysicalDim(dim);
+  auto result = split_with_sizes_copy_symint(self_physical.tensor(), split_sizes, dim_physical);
+  self_physical.getPhysicalToLogicalMap().applyInplace(result);
+  return result;
+}
+
 std::vector<Tensor> unbind_batching_rule(const Tensor& self, int64_t dim) {
   if (!participatesInCurrentLevel(self)) {
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::FuncTorchBatched);
@@ -275,7 +286,7 @@ std::vector<Tensor> unbind_batching_rule(const Tensor& self, int64_t dim) {
 // can be indexed (or nullopt if such a location doesn't exist, e.g., tensors
 // with zero-size dims).
 static optional<c10::SymInt> maximum_indexable_location(
-    c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides, c10::SymInt storage_offset) {
+    c10::SymIntArrayRef sizes, c10::SymIntArrayRef strides, const c10::SymInt& storage_offset) {
   auto result = native::storage_size_for(sizes, strides);
   if (result == 0) {
     return nullopt;
@@ -292,7 +303,7 @@ static void checkBasicAsStridedValidForSlice(
     int64_t num_batch_dims,
     c10::SymIntArrayRef sizes,
     c10::SymIntArrayRef strides,
-    optional<c10::SymInt> maybe_storage_offset) {
+    const optional<c10::SymInt>& maybe_storage_offset) {
   auto slice_sizes = physical_tensor.sym_sizes().slice(num_batch_dims);
   auto slice_strides = physical_tensor.sym_strides().slice(num_batch_dims);
   auto base_offset = physical_tensor.sym_storage_offset();
@@ -682,17 +693,17 @@ Tensor new_empty_strided_batching_rule(
 }
 
 Tensor nested_cat_batching_rule(const ITensorListRef& tensors, int64_t dim) {
-  TORCH_CHECK(tensors.size() > 0, "cat() not supported on empty tensor list");
+  TORCH_CHECK(!tensors.empty(), "cat() not supported on empty tensor list");
 
   std::vector<std::vector<Tensor>> unbound;
-  for (auto tensor_iter = tensors.begin(); tensor_iter != tensors.end(); ++tensor_iter) {
-    auto* maybe_batched_impl = maybeGetBatchedImpl(*tensor_iter);
+  for (const auto & tensor : tensors) {
+    auto* maybe_batched_impl = maybeGetBatchedImpl(tensor);
     TORCH_CHECK(maybe_batched_impl, "Tried to run batching rule for cat() on a non-batched tensor");
     auto nt = maybe_batched_impl->value();
     TORCH_CHECK(nt.is_nested(), "Tried to run batching rule for cat() on a non-nested tensor");
     c10::impl::ExcludeDispatchKeyGuard guard(DispatchKey::BatchedNestedTensor);
     auto this_unbound = nt.unbind();
-    if (unbound.size() > 0) {
+    if (!unbound.empty()) {
       TORCH_INTERNAL_ASSERT(unbound.front().size() == this_unbound.size(),
           "cat() not supported for differently-sized nested arguments");
     }
@@ -725,6 +736,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   // still legacy b/c teturns multiple tensors
   m.impl("split.Tensor", split_batching_rule);
   m.impl("split_with_sizes", split_with_sizes_batching_rule);
+  m.impl("split_with_sizes_copy", split_with_sizes_copy_batching_rule);
   m.impl("unbind.int", unbind_batching_rule);
   m.impl("cat", cat_batching_rule);
   m.impl("block_diag", block_diag_batching_rule);
@@ -751,5 +763,5 @@ TORCH_LIBRARY_IMPL(_, BatchedNestedTensor, m) {
 TORCH_LIBRARY_IMPL(aten, BatchedNestedTensor, m) {
   m.impl("cat", nested_cat_batching_rule);
 }
-} // namespace functorch
-} // namespace at
+
+} // namespace at::functorch
