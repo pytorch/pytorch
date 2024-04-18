@@ -1085,7 +1085,7 @@ class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
             if target_frame.early_stop and target_frame.recomp_counter[gid] == len(
                 target_frame.weak_holders
             ):
-                raise _StopRecomputationError()
+                raise _StopRecomputationError
             # See Rule 6: [ retain_graph is True ] above
             return x.detach()
 
