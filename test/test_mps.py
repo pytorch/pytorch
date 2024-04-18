@@ -8832,8 +8832,9 @@ class TestLinalgMPS(TestCaseMPS):
             )
 
             # compare pivots
+            # add 1 here as mps pivots are 0 based and cpu pivots are 1 based
             self.assertEqual(
-                pivots_cpu, pivot_mps_cpu,
+                pivots_cpu, pivot_mps_cpu + 1,
                 f"Pivots differ between CPU and MPS for shape {shape}"
             )
 
@@ -8861,6 +8862,7 @@ class TestLinalgMPS(TestCaseMPS):
                 info_cpu, info_mps_cpu,
                 f"Info differ between CPU and MPS for shape {shape}"
             )
+
     def test_matrix_rank(self, device="mps", dtype=torch.float32):
         matrix_rank = torch.linalg.matrix_rank
 

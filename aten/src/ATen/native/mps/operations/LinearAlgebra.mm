@@ -581,7 +581,6 @@ static void lu_factor_stub_mps(const Tensor& LU, const Tensor& pivots, const Ten
 
   dispatch_sync(mpsStream->queue(), ^() {
     @autoreleasepool {
-      mpsStream->endKernelCoalescing();
       id<MTLCommandBuffer> commandBuffer = mpsStream->commandBuffer();
 
       MPSMatrixDescriptor* luDescriptor = [MPSMatrixDescriptor matrixDescriptorWithRows:luRows
@@ -631,8 +630,9 @@ static void lu_factor_stub_mps(const Tensor& LU, const Tensor& pivots, const Ten
 
   // copy calculated pivots into pivots tensor
   pivots.copy_(pivots_);
-  // add 1 to pivots to match the 1-based indexing in CPU
-  pivots.add_(1);
+
+  // uncomment next line to match the 1-based indexing on CPU
+  // pivots.add_(1);
 
   // set info to first index +1 where the diagonal is zero
   auto diagonal_zeros = LU_.diagonal(0, -2, -1).eq_(0);
