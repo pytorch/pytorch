@@ -3,6 +3,8 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 
+import contextlib
+
 # Owner(s): ["oncall: export"]
 import copy
 import io
@@ -339,17 +341,21 @@ class TestSerialize(TestCase):
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")
 class TestDeserialize(TestCase):
     def setUp(self):
-        if IS_SANDCASTLE or IS_FBCODE:
-            torch.ops.load_library(
-                "//caffe2/test/cpp/jit:test_custom_class_registrations"
-            )
-        elif IS_MACOS:
-            raise unittest.SkipTest("non-portable load_library call used in test")
-        else:
-            lib_file_path = find_library_location("libtorchbind_test.so")
-            if IS_WINDOWS:
-                lib_file_path = find_library_location("torchbind_test.dll")
-            torch.ops.load_library(str(lib_file_path))
+        load_torchbind_test_lib()
+
+        @torch._library.register_fake_class("_TorchScriptTesting::_Foo")
+        class FakeFoo:
+            def __init__(self, x: int, y: int):
+                self.x = x
+                self.y = y
+
+            @classmethod
+            def from_real(cls, foo):
+                (x, y), _ = foo.__getstate__()
+                return cls(x, y)
+
+            def add_tensor(self, z):
+                return (self.x + self.y) * z
 
     def _check_graph_nodes(self, gm1, gm2, _check_meta=True):
         # TODO: The _check_meta flag bypasses checking for
@@ -804,6 +810,15 @@ class TestDeserialize(TestCase):
         model = MyModule().eval().cuda()
         self.check_graph(model, (inp,))
 
+    @contextlib.contextmanager
+    def _register_py_impl_temporially(self, op_overload, key, fn):
+        try:
+            op_overload.py_impl(key)(fn)
+            yield
+        finally:
+            del op_overload.py_kernels[key]
+            op_overload._dispatch_cache.clear()
+
     def test_custom_obj_tuple_out(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -818,7 +833,11 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with enable_torchbind_tracing():
+        with self._register_py_impl_temporially(
+            torch.ops._TorchScriptTesting.takes_foo.default,
+            torch._C.DispatchKey.Meta,
+            lambda cc, x: cc.add_tensor(x),
+        ):
             self.check_graph(m, inputs, strict=False)
 
     def test_custom_obj(self):
@@ -834,7 +853,11 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with enable_torchbind_tracing():
+        with self._register_py_impl_temporially(
+            torch.ops._TorchScriptTesting.takes_foo.default,
+            torch._C.DispatchKey.Meta,
+            lambda cc, x: cc.add_tensor(x),
+        ):
             self.check_graph(m, inputs, strict=False)
 
     def test_custom_obj_list_out(self):
@@ -851,7 +874,11 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with enable_torchbind_tracing():
+        with self._register_py_impl_temporially(
+            torch.ops._TorchScriptTesting.takes_foo.default,
+            torch._C.DispatchKey.Meta,
+            lambda cc, x: cc.add_tensor(x),
+        ):
             self.check_graph(m, inputs, strict=False)
 
 
