@@ -444,6 +444,89 @@ class TestNew2dParallelStateDict(DTensorTestBase):
                 else:
                     self.assertEqual(new_state, state)
 
+CHECKPOINT_DIR = f"checkpoint_reshard_test"
+
+from torch.distributed.checkpoint.state_dict import (
+    get_model_state_dict,
+    set_model_state_dict,
+)
+
+from torch.distributed._tensor._utils import compute_local_shape_and_global_offset
+
+class ReproModule(nn.Module):
+    def __init__(self):
+        super().__init__()
+        torch.manual_seed(0)
+        self.net1 = nn.Linear(1, 8)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = F.relu(self.net1(x))
+        return x
+
+    def get_input(self):
+        return torch.rand(1, 1, device="cuda")
+
+
+class Test2DReshardingSave(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    @with_comms
+    @skip_if_lt_x_gpu(4)
+    def test_save_state_dict(self):
+        model = ReproModule().cuda()
+
+        torch.manual_seed(0)
+        mesh_2d = init_device_mesh(
+            self.device_type, (4, 2), mesh_dim_names=("dp", "tp")
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+        parallelize_plan = {"net1": ColwiseParallel(),}
+        model_2d = parallelize_module(model, tp_mesh, parallelize_plan)
+        model_2d = FSDP(model_2d, device_mesh=dp_mesh, use_orig_params=True)
+
+        state_dict_2d = get_model_state_dict(model_2d)
+        for k,v in state_dict_2d.items():
+            print(f"rank:{self.rank}, {k}, {v.to_local().shape}")
+
+        import torch.distributed.checkpoint as dcp
+
+        dcp.save(state_dict_2d, checkpoint_id=CHECKPOINT_DIR)
+
+
+class Test2DReshardingLoad(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 6
+
+    @with_comms
+    def test_load_state_dict(self):
+        model = ReproModule().cuda()
+
+        torch.manual_seed(0)
+        mesh_2d = init_device_mesh(
+            self.device_type, (3, 2), mesh_dim_names=("dp", "tp")
+        )
+        tp_mesh = mesh_2d["tp"]
+        dp_mesh = mesh_2d["dp"]
+        parallelize_plan = {"net1": ColwiseParallel(),}
+        model_2d = parallelize_module(model, tp_mesh, parallelize_plan)
+        model_2d = FSDP(model_2d, device_mesh=dp_mesh, use_orig_params=True)
+
+        state_dict_2d = get_model_state_dict(model_2d)
+        for k,v in state_dict_2d.items():
+            print(f"rank:{self.rank}, {k}, {v.to_local().shape}")
+
+        shape, offset = compute_local_shape_and_global_offset((8, 1),mesh_2d, (Shard(0), Shard(0)))
+        print(f"compute_local_shape_and_global_offset -- {self.rank=}, {shape=}, {offset=}")
+
+        import torch.distributed.checkpoint as dcp
+        dcp.load(state_dict_2d, checkpoint_id=CHECKPOINT_DIR)
+
+
 
 instantiate_parametrized_tests(TestNew2dParallelStateDict)
 if __name__ == "__main__":
