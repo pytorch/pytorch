@@ -354,16 +354,14 @@ class AOTInductorTestsTemplate:
                 self.check_model(Model(self.device), example_inputs)
 
     def test_deconv_freezing(self):
-        import itertools
-
         for dtype, groups in itertools.product([torch.bfloat16, torch.float], [2, 1]):
             iC = 2
-            oC = 3
+            oC = 2
 
             class Model(torch.nn.Module):
                 def __init__(self, device):
                     super().__init__()
-                    self.weight = torch.randn(iC, oC * groups, 3, 3, device=device).to(
+                    self.weight = torch.randn(iC, oC * groups, 2, 2, device=device).to(
                         dtype
                     )
 
@@ -372,7 +370,7 @@ class AOTInductorTestsTemplate:
                         y, self.weight, groups=groups
                     )
 
-            example_inputs = (torch.randn(2, iC, 10, 10, device=self.device).to(dtype),)
+            example_inputs = (torch.randn(1, iC, 3, 3, device=self.device).to(dtype),)
 
             with config.patch({"freezing": True}):
                 self.check_model(Model(self.device), example_inputs)
