@@ -502,6 +502,56 @@ def _sfdp_replacement_18(query, key, value, causal_mask, dropout_p):
     )
 
 
+def _sfdp_pattern_19(query, key, value, attn_mask):
+    # For huggingface bert
+    query = query.permute(0, 2, 1, 3)
+    key = key.permute(0, 2, 1, 3)
+    value = value.permute(0, 2, 1, 3)
+    attention_scores = torch.matmul(query, key.transpose(-1, -2))
+    attention_scores = attention_scores / math.sqrt(query.size(-1))
+    attention_scores = attention_scores + attn_mask
+    attention_probs = torch.nn.functional.softmax(attention_scores, -1)
+    # dropout would create a clone() if eval() or p = 0
+    attention_probs = attention_probs.clone()
+    return torch.matmul(attention_probs, value)
+
+
+def _sfdp_replacement_19(query, key, value, attn_mask):
+    counters["inductor"]["fuse_attention"] += 1
+    return aten.scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask,
+        dropout_p=0.0,
+        is_causal=False,
+    )
+
+
+def _sfdp_pattern_20(query, key, value, attn_mask):
+    # No dropout version of pattern 16
+    query = query.permute(0, 2, 1, 3)
+    key = key.permute(0, 2, 1, 3)
+    value = value.permute(0, 2, 1, 3)
+    attention_scores = torch.matmul(query, key.transpose(-1, -2))
+    attention_scores = attention_scores / math.sqrt(query.size(-1))
+    attention_scores = attention_scores + attn_mask
+    attention_probs = torch.nn.functional.softmax(attention_scores, -1)
+    return torch.matmul(attention_probs, value)
+
+
+def _sfdp_replacement_20(query, key, value, attn_mask):
+    counters["inductor"]["fuse_attention"] += 1
+    return aten.scaled_dot_product_attention(
+        query.transpose(1, 2),
+        key.transpose(1, 2),
+        value.transpose(1, 2),
+        attn_mask=attn_mask,
+        dropout_p=0.0,
+        is_causal=False,
+    )
+
+
 def _sfdp_params_check(match):
     assert all(k in match.kwargs for k in ("query", "key", "value"))
     query = match.kwargs["query"].meta["val"]
@@ -771,6 +821,20 @@ def _get_sfdp_patterns():
                 d,
                 # CUDA AOT Inductor CI job's GPT2ForSequenceClassification accuracy test failed
                 _sfdp_extra_check(disable_cuda=True),
+            ),
+            (
+                _sfdp_pattern_19,
+                _sfdp_replacement_19,
+                [g(), g(), g(), m()],
+                {},
+                _sfdp_params_check,
+            ),
+            (
+                _sfdp_pattern_20,
+                _sfdp_replacement_20,
+                [g(), g(), g(), m()],
+                {},
+                _sfdp_params_check,
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
