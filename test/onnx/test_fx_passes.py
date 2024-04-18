@@ -3,6 +3,7 @@ import torch
 import torch._dynamo
 import torch.fx
 
+from torch._custom_op import impl as custom_op
 from torch.onnx._internal.fx.passes import _utils as pass_utils
 from torch.testing._internal import common_utils
 
@@ -57,21 +58,29 @@ class TestFxPasses(common_utils.TestCase):
         ), f"Expected all names to be unique, got {nodes}"
 
     def test_onnx_dynamo_export_raises_when_model_contains_unsupported_fx_nodes(self):
-        @torch.library.custom_op("mylibrary::foo_op", device_types="cpu", mutates_args=())
+        @custom_op.custom_op("mylibrary::foo_op")
         def foo_op(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @custom_op.custom_op("mylibrary::bar_op")
+        def bar_op(x: torch.Tensor) -> torch.Tensor:
+            ...
+
+        @foo_op.impl_abstract()
+        def foo_op_impl_abstract(x):
+            return torch.empty_like(x)
+
+        @foo_op.impl("cpu")
+        def foo_op_impl(x):
             return x + 1
 
-        @torch.library.custom_op("mylibrary::bar_op", device_types="cpu", mutates_args=())
-        def bar_op(x: torch.Tensor) -> torch.Tensor:
+        @bar_op.impl_abstract()
+        def bar_op_impl_abstract(x):
+            return torch.empty_like(x)
+
+        @bar_op.impl("cpu")
+        def bar_op_impl(x):
             return x + 2
-
-        @foo_op.register_fake
-        def _(x):
-            return torch.empty_like(x)
-
-        @bar_op.register_fake
-        def _(x):
-            return torch.empty_like(x)
 
         torch._dynamo.allow_in_graph(foo_op)
         torch._dynamo.allow_in_graph(bar_op)
