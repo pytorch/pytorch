@@ -426,7 +426,7 @@ class NNModuleVariable(VariableTracker):
                 # in case they are saved for the backward.
                 mod = tx.output.get_submodule(self.module_key)
                 fn = mod.forward.__func__
-                # TODO(JackCaoG): considering using source and regualr builder instead of
+                # TODO(JackCaoG): considering using source and regular builder instead of
                 # SourcelessBuilder.
                 fn_source = AttrSource(self.source, "__call__")
                 fn_source = AttrSource(fn_source, "__func__")
@@ -455,7 +455,7 @@ class NNModuleVariable(VariableTracker):
                         )
                     self_params_as_vt.append(current_obj)
 
-                # stich the args togther and pass it to decompose_and_inline_function_with_makefx
+                # Concatenate args and pass it to decompose_and_inline_function_with_makefx
                 complete_tensor_variable_args = self_params_as_vt + args
                 res = decompose_and_inline_function_with_makefx(
                     tx,
