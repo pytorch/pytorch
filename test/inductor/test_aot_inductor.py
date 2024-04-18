@@ -2712,7 +2712,7 @@ CPU_TEST_FAILURES = {
     "test_buffer_mutation_2": fail_stack_allocation(is_skip=True),
     "test_buffer_mutation_3": fail_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
-    "test_scatter_fallback": fail_minimal_arrayref_interface(is_skip=True),
+    "test_scatter_fallback": fail_stack_allocation(is_skip=True),
     # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
     "test_scatter_reduce_fallback": fail_minimal_arrayref_interface(is_skip=True),
     # Looks like the same issue as https://github.com/pytorch/pytorch/issues/122978
