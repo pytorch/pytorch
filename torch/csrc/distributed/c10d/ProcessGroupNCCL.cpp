@@ -1591,14 +1591,6 @@ void ProcessGroupNCCL::watchdogHandler() {
           }
         }
 
-        if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
-          // Abort work and corresponding communicators
-          work.abort();
-          // PG level abort, which would abort all other communicators on this
-          // rank
-          abort();
-        }
-
         // Report desync state in case of timeout
         if (timedOut) {
           LOG(ERROR) << c10::str(
@@ -1627,6 +1619,10 @@ void ProcessGroupNCCL::watchdogHandler() {
                   << " Please file an issue.";
             }
           }
+        }
+        if (SHOULD_CLEAN_UP(asyncErrorHandling_)) {
+          // Abort all communicators
+          abort();
         }
         // Throw exception
         work.handleException(asyncErrorHandling_);
