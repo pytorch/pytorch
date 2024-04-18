@@ -704,15 +704,7 @@ class AutogradFunctionApply(HigherOrderOperator):
 
             @staticmethod
             def backward(ctx, *grad):
-                output = bwd(None, *grad, *saved_values)
-                # The output includes the gradients of all original args, which can be None for non-Tensor args.
-                # We need to filter out the None values.
-                if isinstance(output, tuple):
-                    return tuple(
-                        [x for x, mask in zip(output, args_tensor_mask) if mask]
-                    )
-                else:
-                    return output
+                return bwd(None, *grad, *saved_values)
 
         return ApplyTemplate.apply(*new_fwd_args)
 

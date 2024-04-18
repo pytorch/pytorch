@@ -1581,14 +1581,14 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # we have to manually add the bwd_freevars as output of fwd_graph.
         # However, the bwd_freevars got from speculate_subgraph use the Proxies in the bwd_graph,
         # we need to convert them to Proxies in the fwd_graph and then generate new fwd_graph output.
-        fwd_proxies_of_bwd_freevars = []
+        fwd_proxy_of_bwd_freevars = []
         for k in bwd_freevars.keys():
             if k in fwd_freevars:
-                fwd_proxies_of_bwd_freevars.append(fwd_freevars[k])
+                fwd_proxy_of_bwd_freevars.append(fwd_freevars[k])
             else:
-                fwd_proxies_of_bwd_freevars.append(k)
+                fwd_proxy_of_bwd_freevars.append(k)
 
-        new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxies_of_bwd_freevars)
+        new_fwd_graph_outputs = (fwd_out.as_proxy(), fwd_proxy_of_bwd_freevars)
         new_fwd_graph_outputs = pytree.tree_map(lambda x: x.node, new_fwd_graph_outputs)
         fwd_graph.output(new_fwd_graph_outputs)
         fwd_graph.lint()
@@ -1602,18 +1602,6 @@ class AutogradFunctionApplyVariable(VariableTracker):
         )
 
         fwd_node = make_attr(tx, fwd_name)
-
-        # Store bwd_body
-        bwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
-        bwd_name = add_subgraph(
-            tx,
-            "bwd_body",
-            torch.fx.GraphModule(bwd_nn_modules.nn_modules, bwd_graph),
-        )
-
-        bwd_node = make_attr(tx, bwd_name)
-
-        tx.output.side_effects = prev_side_effects
 
         # The type of original args can be arbitrary, but we only support basic type in FX graph.
         # So the speculated subgraph input includes original tensor args and the lifted freevars.
@@ -1629,6 +1617,57 @@ class AutogradFunctionApplyVariable(VariableTracker):
             if isinstance(arg, (variables.TensorVariable, variables.SymNodeVariable)):
                 filtered_args.append(arg)
                 args_tensor_mask[i] = True
+
+        # Rewrite the output of bwd_graph to remove the grad output for the non-Tensor args.
+        new_bwd_graph_outputs = None
+        for node in bwd_graph.find_nodes(op="output"):
+            bwd_graph.erase_node(node)
+            break
+
+        # The same as the above fwd proxies, we need to use the bwd proxies in the bwd_graph
+        # if some of the output is from fwd_freevars.
+        bwd_out_proxy = bwd_out.as_proxy()
+        bwd_proxy_of_fwd_freevars = []
+        if isinstance(bwd_out_proxy, (tuple, list)):
+            for k in bwd_out_proxy:
+                if k in bwd_freevars:
+                    bwd_proxy_of_fwd_freevars.append(bwd_freevars[k])
+                else:
+                    bwd_proxy_of_fwd_freevars.append(k)
+        else:
+            if bwd_out_proxy in bwd_freevars:
+                bwd_proxy_of_fwd_freevars = bwd_freevars[bwd_out_proxy]
+            else:
+                bwd_proxy_of_fwd_freevars = bwd_out_proxy
+
+        # Remove bwd output for non-Tensor args.
+        output_proxy = bwd_proxy_of_fwd_freevars
+        if isinstance(output_proxy, (tuple, list)):
+            new_bwd_graph_outputs = tuple(
+                [x for x, mask in zip(output_proxy, args_tensor_mask) if mask]
+            )
+        else:
+            new_bwd_graph_outputs = output_proxy
+
+        # Update the bwd graph output.
+        new_bwd_graph_outputs = pytree.tree_map(
+            lambda x: None if x is None else x.node, new_bwd_graph_outputs
+        )
+        bwd_graph.output(new_bwd_graph_outputs)
+        bwd_graph.lint()
+
+        # Store bwd_body
+        bwd_nn_modules = tx.output.tracing_context.module_context.copy_graphstate()
+        bwd_name = add_subgraph(
+            tx,
+            "bwd_body",
+            torch.fx.GraphModule(bwd_nn_modules.nn_modules, bwd_graph),
+        )
+
+        bwd_node = make_attr(tx, bwd_name)
+
+        tx.output.side_effects = prev_side_effects
+
         p_args = (
             fwd_node,
             bwd_node,
