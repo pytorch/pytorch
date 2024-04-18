@@ -439,7 +439,7 @@ class ElasticAgent(abc.ABC):
         Raises:
             Exception - any other failures NOT related to worker process
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def get_worker_group(self, role: str = DEFAULT_ROLE) -> WorkerGroup:
@@ -450,7 +450,7 @@ class ElasticAgent(abc.ABC):
         Implementors are encouraged (but not required) to return
         a defensive read-only copy.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class SimpleElasticAgent(ElasticAgent):
@@ -477,7 +477,7 @@ class SimpleElasticAgent(ElasticAgent):
         This is according to worker spec for the worker group .
         Returns a map of ``local_rank`` to worker ``id``.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _stop_workers(self, worker_group: WorkerGroup) -> None:
@@ -487,7 +487,7 @@ class SimpleElasticAgent(ElasticAgent):
         ``WorkerState``. That is, it must gracefully handle stopping
         non-existent workers, unhealthy (stuck) workers, etc.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _monitor_workers(self, worker_group: WorkerGroup) -> RunResult:
@@ -495,7 +495,7 @@ class SimpleElasticAgent(ElasticAgent):
 
         This function also returns the new state of the worker group.
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abc.abstractmethod
     def _shutdown(self, death_sig: signal.Signals = signal.SIGTERM) -> None:
@@ -504,7 +504,7 @@ class SimpleElasticAgent(ElasticAgent):
         Args:
             death_sig: Signal to send to the child process, SIGTERM is default
         """
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @staticmethod
     def _set_master_addr_port(
