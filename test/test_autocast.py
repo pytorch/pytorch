@@ -65,9 +65,7 @@ class TestAutocastCPU(TestCase):
                 if isinstance(output_method, torch.Tensor):
                     self.assertTrue(
                         out_type == output_method.dtype,
-                        "autocast for torch.{} produced {}, should produce torch.{}".format(
-                            op, output_method.dtype, out_type
-                        ),
+                        f"autocast for torch.{op} produced {output_method.dtype}, should produce torch.{out_type}",
                     )
 
             self.assertTrue(
