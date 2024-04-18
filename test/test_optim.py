@@ -22,7 +22,7 @@ from torch.testing._internal.common_optimizers import (
     optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS, TEST_WITH_ROCM, onlyNativeDeviceTypes)
-from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase, TEST_CUDA
 from torch.testing._internal.common_cuda import _create_scaling_case
 from torch.testing._internal.common_dtype import floating_types_and
 
@@ -582,6 +582,47 @@ class TestOptimRenewed(TestCase):
             self.assertTrue(a1_grad_imags.all_popped())
             self.assertTrue(losses.all_popped())
 
+    def _compare_between(self, input, models, optimizers, assert_eq_kwargs=None, assert_step_dtype=None):
+        # why 7? iteration 7 is where we start to see differences for RAdam
+        # params interacting with the small eps value, because that's right
+        # after rho_t becomes greater than 5 in step 6.
+        if assert_eq_kwargs is None:
+            assert_eq_kwargs = {}
+        kIterations = 7
+        tracker = TensorTracker(assert_eq_kwargs)
+        for i in range(kIterations):
+            state, updated_params = [], []
+            for model, optimizer in zip(models, optimizers):
+                optimizer.zero_grad()
+
+                # Test that step behaves as expected (a no-op) when grads are set to None
+                if i != 3:
+                    output = model(input)
+                    loss = output.sum()
+                    loss.backward()
+
+                optimizer.step()
+                state.append(optimizer.state)
+                updated_params.append(model.parameters())
+
+            og_state, new_state = state
+            for og_p, new_p in zip(updated_params[0], updated_params[1]):
+                tracker.add(og_p)
+                tracker.pop_check_set(new_p, self)
+
+                # check that optimizer states are the same
+                og_p_state = og_state[og_p]
+                new_p_state = new_state[new_p]
+                if assert_step_dtype is not None:
+                    if torch.is_tensor(og_p_state.get("step", None)):
+                        self.assertEqual(og_p_state["step"].dtype, assert_step_dtype)
+                    if torch.is_tensor(new_p_state.get("step", None)):
+                        self.assertEqual(new_p_state["step"].dtype, assert_step_dtype)
+                for k in og_p_state:
+                    tracker.add(og_p_state[k])
+                    tracker.pop_check_set(new_p_state[k], self)
+
+            self.assertTrue(tracker.all_popped())
 
     def _test_derived_optimizers(self, device, dtype, optim_info, flag, reduced_precision=False, assert_step_dtype=None):
         """
@@ -591,10 +632,6 @@ class TestOptimRenewed(TestCase):
         """
         assert flag in ("foreach", "fused")
         assert_eq_kwargs = {} if not reduced_precision else FP16_REDUCED_PRECISION
-        # why 7? iteration 7 is where we start to see differences for RAdam
-        # params interacting with the small eps value, because that's right
-        # after rho_t becomes greater than 5 in step 6.
-        kIterations = 7
 
         optim_inputs = optim_info.optim_inputs_func(device=device, dtype=dtype)
         optim_cls = optim_info.optim_cls
@@ -630,41 +667,7 @@ class TestOptimRenewed(TestCase):
                 models.append(model)
                 optimizers.append(optimizer)
 
-            tracker = TensorTracker(assert_eq_kwargs)
-            for i in range(kIterations):
-
-                state, updated_params = [], []
-                for model, optimizer in zip(models, optimizers):
-                    optimizer.zero_grad()
-
-                    # Test that step behaves as expected (a no-op) when grads are set to None
-                    if i != 3:
-                        output = model(input)
-                        loss = output.sum()
-                        loss.backward()
-
-                    optimizer.step()
-                    state.append(optimizer.state)
-                    updated_params.append(model.parameters())
-
-                    if assert_step_dtype is not None:
-                        p_state = optimizer.state[params[0]]
-                        if torch.is_tensor(p_state.get("step", None)):
-                            self.assertEqual(p_state["step"].dtype, assert_step_dtype)
-
-                og_state, new_state = state
-                for og_p, new_p in zip(updated_params[0], updated_params[1]):
-                    tracker.add(og_p)
-                    tracker.pop_check_set(new_p, self)
-
-                    # check that optimizer states are the same
-                    og_p_state = og_state[og_p]
-                    new_p_state = new_state[new_p]
-
-                    for k in og_p_state:
-                        tracker.add(og_p_state[k])
-                        tracker.pop_check_set(new_p_state[k], self)
-                self.assertTrue(tracker.all_popped())
+            self._compare_between(input, models, optimizers, assert_eq_kwargs, assert_step_dtype)
 
     @skipMPS  # MPS doesn't support torch.float64, see https://github.com/pytorch/pytorch/issues/115350
     @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float64])
@@ -1628,6 +1631,50 @@ class TestOptimRenewed(TestCase):
             res1 = optim_inf.step(closure)
             res2 = optim_neg_inf.step(closure)
             self.assertEqual(type(res1), type(res2))
+
+    @onlyCPU
+    @optims(
+        [optim for optim in optim_db if "fused" in optim.supported_impls],
+        dtypes=floating_types_and(torch.bfloat16, torch.float16, )
+    )
+    def test_fused_cpu_matches_cuda(self, device, dtype, optim_info):
+        if not TEST_CUDA:
+            self.skipTest("skip since cuda is not available")
+        optim_cls = optim_info.optim_cls
+        if device not in optim_info.supports_fused_on or "cuda" not in optim_info.supports_fused_on:
+            self.skipTest(f"{device} or cuda is not supported for fused on {optim_cls.__name__}")
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+        for optim_input in optim_inputs:
+            models, optimizers = [], []
+            for device in ('cpu', 'cuda'):
+                kwargs = deepcopy(optim_input.kwargs)
+                if kwargs.get("capturable", False):
+                    # capturable is not supported on CPU
+                    continue
+                input = torch.tensor(
+                    [0.1, 0.2, 0.3, 0.4, 0.5, 0.6], dtype=dtype, device=device
+                ).reshape(3, 2)
+
+                torch.manual_seed(1)
+                model = torch.nn.Sequential(
+                    torch.nn.Linear(2, 3),
+                    torch.nn.Sigmoid(),
+                    torch.nn.Linear(3, 1),
+                    torch.nn.Sigmoid(),
+                )
+                model.to(dtype=dtype, device=device)
+
+                # foreach/fused optimizers should be tested with a
+                # zero_size tensor as its last param.
+                # ref: https://github.com/pytorch/pytorch/issues/100701
+                empty_param = torch.empty((), device=device, dtype=dtype, requires_grad=True)
+                empty_param.grad = torch.rand_like(empty_param)
+                params = list(model.parameters()) + [empty_param]
+
+                optimizer = optim_cls(params, **kwargs)
+                models.append(model)
+                optimizers.append(optimizer)
+        self._compare_between(input, models, optimizers)
 
     @onlyCPU
     @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float32])
