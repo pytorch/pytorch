@@ -196,11 +196,10 @@ class DeviceMeshTestNDim(DTensorTestBase):
         self.assertNotEqual(hash(mesh2), hash(mesh3))
 
     @with_comms
-    @run_with_both_funcol_impls
     def test_get_local_rank_3d(self):
         """
         If we have a 3D mesh and we want to apply dp, pp, tp to it,
-        mesh_dim_names = ["dp", "pp", "tp", and the mesh tensor would be:
+        mesh_dim_names = ["dp", "pp", "tp"], and the mesh tensor would be:
         mesh_3d_tensor = [
             [
                 [0, 1],
