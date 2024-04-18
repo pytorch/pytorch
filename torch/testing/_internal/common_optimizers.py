@@ -1259,8 +1259,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
-                active_if=lambda kwargs: kwargs["dtype"]
-                in (torch.float16, torch.bfloat16),
             ),
         ),
         skips=(
@@ -1468,8 +1466,6 @@ optim_db: List[OptimizerInfo] = [
                 ),
                 "TestOptimRenewed",
                 "test_fused_matches_forloop",
-                active_if=lambda kwargs: kwargs["dtype"]
-                in (torch.float16, torch.bfloat16),
             ),
         ),
         skips=(
