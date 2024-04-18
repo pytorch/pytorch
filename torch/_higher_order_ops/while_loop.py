@@ -1,3 +1,5 @@
+from typing import Callable, Tuple, Union
+
 import torch
 import torch.utils._pytree as pytree
 
@@ -21,31 +23,53 @@ from torch.fx.experimental.proxy_tensor import (
 
 
 class WhileLoopOp(HigherOrderOperator):
-    def __call__(self, cond_fn, body_fn, operands):
-        if not isinstance(cond_fn, torch.fx.GraphModule) or not isinstance(
-            body_fn, torch.fx.GraphModule
+    def __init__(self):
+        super().__init__("while_loop")
+
+    def __call__(
+        self,
+        cond_fn: Callable,
+        body_fn: Callable,
+        carried_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
+        additional_inputs: Tuple[Union[torch.Tensor, int, float, bool]],
+        /,
+    ):
+        if not isinstance(carried_inputs, tuple):
+            raise RuntimeError(
+                f"carried_inputs must be a tuple, got {type(carried_inputs)}"
+            )
+        if not isinstance(additional_inputs, tuple):
+            raise RuntimeError(
+                f"additional_inputs must be a tuple, got {type(additional_inputs)}"
+            )
+        if not all(
+            isinstance(t, (torch.Tensor, int, float, bool)) for t in carried_inputs
         ):
             raise RuntimeError(
-                "cond_fn and body_fn must be torch.fx.GraphModule, got "
-                f"{type(cond_fn)} and {type(body_fn)}"
+                "carried_inputs must be a tuple of tensors, ints, floats, or bools, got "
+                f"{carried_inputs}"
             )
-        if not isinstance(operands, tuple):
-            raise RuntimeError("operands must be a tuple, got " f"{type(operands)}")
-        if not all(isinstance(t, (torch.Tensor, int, float, bool)) for t in operands):
+
+        if not all(
+            isinstance(t, (torch.Tensor, int, float, bool)) for t in additional_inputs
+        ):
             raise RuntimeError(
-                "operands must be a tuple of tensors, ints, floats, or bools, got "
-                f"{operands}"
+                "additional_inputs must be a tuple of tensors, ints, floats, or bools, got "
+                f"{additional_inputs}"
             )
-        return super().__call__(cond_fn, body_fn, operands)
+        return super().__call__(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
-while_loop_op = HigherOrderOperator("while_loop")
+while_loop_op = WhileLoopOp()
+# Override while_loop_op.__module__ to "torch.ops.higher_order" so that in the generated
+# graph module, while_loop node's target is correctedly printed as torch.ops.higher_order.while_loop
+while_loop_op.__module__ = "torch.ops.higher_order"
 
 
-def while_loop(cond_fn, body_fn, operands):
+def while_loop(cond_fn, body_fn, carried_inputs):
     r"""
-    Run body_fn(*operands) while cond_fn(*operands) returns a True scalar tensor. Returns the output of body_fn or
-    initial operands.
+    Run body_fn(*carried_inputs) while cond_fn(*carried_inputs) returns a True scalar tensor. Returns the output of body_fn or
+    initial carried_inputs.
 
     .. warning::
         `torch.while_loop` is a prototype feature in PyTorch. It has limited support for input and output types and
@@ -56,8 +80,8 @@ def while_loop(cond_fn, body_fn, operands):
 
     `while_loop` is equivalent to the following:
 
-        def while_loop(cond_fn, body_fn, operands):
-            val = operands
+        def while_loop(cond_fn, body_fn, carried_inputs):
+            val = carried_inputs
             while cond_fn(*val):
                 val = body_fn(*val)
             return val
@@ -67,7 +91,7 @@ def while_loop(cond_fn, body_fn, operands):
 
         body_fn (Callable): A callable function that takes the same inputs as `cond_fn` and returns a tuple of tensors
 
-        operands (Tuple of possibly nested dict/list/tuple of tensors): A tuple of inputs to cond_fn and body_fn. It's also
+        carried_inputs (Tuple of possibly nested dict/list/tuple of tensors): A tuple of inputs to cond_fn and body_fn. It's also
             the initial value of states that are carried across iterations.
 
     Example:
@@ -84,7 +108,7 @@ def while_loop(cond_fn, body_fn, operands):
 
         - body_fn must return tensors with the same metadata (e.g.shape, dtype) as inputs.
 
-        - body_fn and cond_fn must not in-place mutate the operands. A clone before the mutation is required.
+        - body_fn and cond_fn must not in-place mutate the carried_inputs. A clone before the mutation is required.
 
         - body_fn and cond_fn must not mutate python varialbles (e.g. list/dict) created outside of the body_fn.
 
@@ -96,32 +120,36 @@ def while_loop(cond_fn, body_fn, operands):
         - 'while_loop' only supports **inference** right now. Autograd will be supported in the future.
 
     """
-    if torch.compiler.is_dynamo_compiling():
-        return while_loop_op(cond_fn, body_fn, operands)
 
-    def _validate_input(cond_fn, body_fn, operands):
+    # Currently, additional_inputs is not a user-facing input. It will be automatically set in dynamo.
+    # parameters and buffers accessed in cond_fn or body_fn or tensor closures will become additional_inputs.
+    additional_inputs: Tuple = tuple()
+    if torch.compiler.is_dynamo_compiling():
+        return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
+
+    def _validate_input(cond_fn, body_fn, carried_inputs):
         if not callable(cond_fn) or not callable(body_fn):
             raise RuntimeError("Expect cond_fn and body_fn to be callbale.")
 
-        if not isinstance(operands, (tuple, list)) or pytree.tree_any(
-            lambda t: not isinstance(t, torch.Tensor), operands
+        if not isinstance(carried_inputs, (tuple, list)) or pytree.tree_any(
+            lambda t: not isinstance(t, torch.Tensor), carried_inputs
         ):
             raise RuntimeError(
-                "Expect operands to be a tuple of possibly nested dict/list/tuple that only"
-                f"consists of tensor leaves, but got {operands}."
+                "Expect carried_inputs to be a tuple of possibly nested dict/list/tuple that only"
+                f"consists of tensor leaves, but got {carried_inputs}."
             )
 
-    _validate_input(cond_fn, body_fn, operands)
+    _validate_input(cond_fn, body_fn, carried_inputs)
 
     with _set_compilation_env(), torch._dynamo.utils.disable_cache_limit():
         return torch.compile(while_loop_op, backend="eager", fullgraph=True)(
-            cond_fn, body_fn, operands
+            cond_fn, body_fn, carried_inputs, additional_inputs
         )
 
 
 @while_loop_op.py_impl(DispatchKey.CompositeExplicitAutograd)
-def while_loop_dense(cond_fn, body_fn, operands):
-    init_val = operands
+def while_loop_dense(cond_fn, body_fn, carried_inputs, additional_inputs):
+    carried_vals = carried_inputs
 
     def _is_boolean_scalar_tensor(pred):
         return (
@@ -130,23 +158,25 @@ def while_loop_dense(cond_fn, body_fn, operands):
             and pred.dtype == torch.bool
         )
 
-    if not isinstance(operands, tuple):
-        raise RuntimeError(f"operands must be a tuple but got {type(operands)}")
+    if not isinstance(carried_inputs, tuple):
+        raise RuntimeError(
+            f"carried_inputs must be a tuple but got {type(carried_inputs)}"
+        )
 
-    while pred := cond_fn(*init_val):
+    while pred := cond_fn(*carried_vals, *additional_inputs):
         if not _is_boolean_scalar_tensor(pred):
             raise RuntimeError(
                 f"cond_fn must return a boolean scalar tensor but got {pred}"
             )
-        out = body_fn(*init_val)
+        out = body_fn(*carried_vals, *additional_inputs)
         assert isinstance(
             out, tuple
         ), f"body_fn should return a tuple but got {type(out)}"
         assert len(out) == len(
-            init_val
-        ), "body_fn should return the same number of elements as operands"
-        init_val = out
-    return init_val
+            carried_inputs
+        ), "body_fn should return the same number of elements as carried_inputs"
+        carried_vals = out
+    return carried_vals
 
 
 while_loop_op.py_impl(DispatchKey.Autograd)(
@@ -155,12 +185,18 @@ while_loop_op.py_impl(DispatchKey.Autograd)(
 
 
 @while_loop_op.py_impl(ProxyTorchDispatchMode)
-def while_loop_tracing(mode, cond_fn, body_fn, operands):
-    def _trace_while_loop(proxy_mode, while_loop_op, cond_fn, body_fn, operands):
+def while_loop_tracing(mode, cond_fn, body_fn, carried_inputs, additional_inputs):
+    def _trace_while_loop(
+        proxy_mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
+    ):
         pre_dispatch = getattr(proxy_mode, "pre_dispatch", False)
         with disable_proxy_modes_tracing():
-            cond_graph = reenter_make_fx(cond_fn, pre_dispatch)(*operands)
-            body_graph = reenter_make_fx(body_fn, pre_dispatch)(*operands)
+            cond_graph = reenter_make_fx(cond_fn, pre_dispatch)(
+                *carried_inputs, *additional_inputs
+            )
+            body_graph = reenter_make_fx(body_fn, pre_dispatch)(
+                *carried_inputs, *additional_inputs
+            )
 
         next_name = None
         i = 0
@@ -177,7 +213,7 @@ def while_loop_tracing(mode, cond_fn, body_fn, operands):
         proxy_mode.tracer.root.register_module(cond_graph_name, cond_graph)
         proxy_mode.tracer.root.register_module(body_graph_name, body_graph)
 
-        args = (cond_graph, body_graph, operands)
+        args = (cond_graph, body_graph, carried_inputs, additional_inputs)
 
         proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)
 
@@ -185,28 +221,34 @@ def while_loop_tracing(mode, cond_fn, body_fn, operands):
             "call_function", while_loop_op, proxy_args, {}, name="while_loop"
         )
 
-        # body_fn return output with the same pytree and tensor meta data as operands
+        # body_fn return output with the same pytree and tensor meta data as carried_inputs
         # so we could just return the output after one iteration.
-        out = body_fn(*operands)
+        out = body_fn(*carried_inputs, *additional_inputs)
         return track_tensor_tree(
             out, out_proxy, constant=None, tracer=proxy_mode.tracer
         )
 
     if mode.enable_tracing:
-        return _trace_while_loop(mode, while_loop_op, cond_fn, body_fn, operands)
+        return _trace_while_loop(
+            mode, while_loop_op, cond_fn, body_fn, carried_inputs, additional_inputs
+        )
     else:
-        return while_loop_op(cond_fn, body_fn, operands)
+        return while_loop_op(cond_fn, body_fn, carried_inputs, additional_inputs)
 
 
 @while_loop_op.py_impl(FakeTensorMode)
-def while_loop_fake_tensor_mode(mode, cond_fn, body_fn, operands):
+def while_loop_fake_tensor_mode(
+    mode, cond_fn, body_fn, carried_inputs, additional_inputs
+):
     with mode:
-        return body_fn(*operands)
+        return body_fn(*carried_inputs, *additional_inputs)
 
 
 @while_loop_op.py_functionalize_impl
-def while_loop_func(ctx, cond_fn, body_fn, operands):
-    unwrapped_operands = ctx.unwrap_tensors(operands)
+def while_loop_func(ctx, cond_fn, body_fn, carried_inputs, additional_inputs):
+    unwrapped_carried_inputs = ctx.unwrap_tensors(carried_inputs)
+    unwrapped_additional_inputs = ctx.unwrap_tensors(additional_inputs)
+    unwrapped_inputs = unwrapped_carried_inputs + unwrapped_additional_inputs
     with ctx.redispatch_to_next() as m:
         functional_cond_fn = ctx.functionalize(cond_fn)
         functional_body_fn = ctx.functionalize(body_fn)
@@ -216,17 +258,22 @@ def while_loop_func(ctx, cond_fn, body_fn, operands):
             (functional_body_fn, "body_fn"),
         ]:
             if _has_potential_branch_input_mutation(
-                fn, unwrapped_operands, pre_dispatch=pre_dispatch
+                fn, unwrapped_inputs, pre_dispatch=pre_dispatch
             ):
                 raise UnsupportedAliasMutationException(
                     f"torch.while_loop's {fn_name} might be modifying the input!"
                 )
 
             if _has_potential_branch_input_alias(
-                fn, unwrapped_operands, pre_dispatch=pre_dispatch
+                fn, unwrapped_inputs, pre_dispatch=pre_dispatch
             ):
                 raise UnsupportedAliasMutationException(
                     f"torch.while_loop's {fn_name} might be aliasing the input!"
                 )
-        ret = while_loop_op(functional_cond_fn, functional_body_fn, unwrapped_operands)
+        ret = while_loop_op(
+            functional_cond_fn,
+            functional_body_fn,
+            unwrapped_carried_inputs,
+            unwrapped_additional_inputs,
+        )
         return ctx.wrap_tensors(ret)
