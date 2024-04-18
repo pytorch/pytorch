@@ -18,7 +18,7 @@ from typing import Any, List, NamedTuple, Optional, Pattern
 def scm_root() -> str:
     path = os.path.abspath(os.getcwd())
     while True:
-        if os.path.isdir(os.path.join(path, ".git")):
+        if os.path.exists(os.path.join(path, ".git")):
             return path
         if os.path.isdir(os.path.join(path, ".hg")):
             return path
