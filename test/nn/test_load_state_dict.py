@@ -451,6 +451,23 @@ class TestLoadStateDict(NNTestCase):
         ):
             m.load_state_dict(state_dict)
 
+    @swap([True, False])
+    def test_load_state_dict_with_unexpected_key(self):
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(5, 10)
+
+        m = MyModule()
+        state_dict = m.state_dict()
+        state_dict["fc1.weight.bad_suffix"] = torch.randn(5, 10)
+        with self.assertRaisesRegex(RuntimeError, "Unexpected key"):
+            m.load_state_dict(state_dict)
+
+        self.assertEqual(
+            len(m.load_state_dict(state_dict, strict=False).unexpected_keys), 1
+        )
+
 
 def load_torch_function_handler(cls, func, types, args=(), kwargs=None):
     kwargs = {} if kwargs is None else kwargs
