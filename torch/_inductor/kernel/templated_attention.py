@@ -129,11 +129,11 @@ sdpa_template = TritonTemplate(
         # -- compute scaling constant ---
         row_max = tl.max(qk, 1)
         m_i_new = tl.maximum(m_i, row_max)
+        masked_out_rows = (m_i_new == float("-inf"))
 
         alpha = tl.math.exp2(m_i - m_i_new)
         p = tl.math.exp2(qk - m_i_new[:, None])
         if not ROWS_GUARANTEED_SAFE:
-            masked_out_rows = (m_i_new == float("-inf"))
             alpha = tl.where(masked_out_rows, 0, alpha)
             p = tl.where(masked_out_rows[:, None], 0, p)
 

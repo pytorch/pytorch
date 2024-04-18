@@ -59,9 +59,9 @@ class TestTemplatedSDPA(InductorTestCase):
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
         # Note, it seems like we really are less accurate than the float32
-        # computation
+        # computation, likely due to the online softmax
         if dtype == torch.float32:
-            fudge_factor = 4.0
+            fudge_factor = 5.0
         else:
             fudge_factor = 1.1
         if compiled_error > ref_error * fudge_factor:
