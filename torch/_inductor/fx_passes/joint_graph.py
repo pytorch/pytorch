@@ -1,3 +1,4 @@
+import itertools
 import logging
 import typing
 from collections import Counter
@@ -417,26 +418,6 @@ def _other_is_broadcasted_in_dim(match):
     return all(statically_known_true(other_shape[d] == 1) for d in dim)
 
 
-@register_graph_pattern(
-    _partial_softmax_pattern(aten.mul.Tensor),
-    pass_dict=pass_patterns[1],
-    extra_check=_other_is_broadcasted_in_dim,
-)
-@register_graph_pattern(
-    _partial_softmax_pattern(aten.mul.Tensor, reverse=True),
-    pass_dict=pass_patterns[1],
-    extra_check=_other_is_broadcasted_in_dim,
-)
-@register_graph_pattern(
-    _partial_softmax_pattern(aten.mul.Tensor, to_dtype=True),
-    pass_dict=pass_patterns[1],
-    extra_check=_other_is_broadcasted_in_dim,
-)
-@register_graph_pattern(
-    _partial_softmax_pattern(aten.mul.Tensor, reverse=True, to_dtype=True),
-    pass_dict=pass_patterns[1],
-    extra_check=_other_is_broadcasted_in_dim,
-)
 def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
         if not isinstance(other, torch.Tensor):
@@ -451,16 +432,14 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         match.replace_by_example(repl, [inp, other])
 
 
-@register_graph_pattern(
-    _partial_softmax_pattern(aten.div.Tensor),
-    pass_dict=pass_patterns[1],
-    extra_check=_other_is_broadcasted_in_dim,
-)
-@register_graph_pattern(
-    _partial_softmax_pattern(aten.div.Tensor, to_dtype=True),
-    pass_dict=pass_patterns[1],
-    extra_check=_other_is_broadcasted_in_dim,
-)
+for reverse, to_dtype in itertools.product((False, True), repeat=2):
+    register_graph_pattern(
+        _partial_softmax_pattern(aten.mul.Tensor, reverse=reverse, to_dtype=to_dtype),
+        pass_dict=pass_patterns[1],
+        extra_check=_other_is_broadcasted_in_dim,
+    )(mul_softmax_pattern)
+
+
 def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
         if not isinstance(other, torch.Tensor):
@@ -473,3 +452,11 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
     with V.fake_mode:
         match.replace_by_example(repl, [inp, other])
+
+
+for to_dtype in (False, True):
+    register_graph_pattern(
+        _partial_softmax_pattern(aten.div.Tensor, to_dtype=to_dtype),
+        pass_dict=pass_patterns[1],
+        extra_check=_other_is_broadcasted_in_dim,
+    )(div_softmax_pattern)

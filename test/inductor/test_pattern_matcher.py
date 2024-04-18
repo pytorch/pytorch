@@ -6,7 +6,6 @@ import torch
 import torch._dynamo.config as dynamo_config
 import torch._inductor.config as inductor_config
 import torch.nn.functional as F
-from torch.utils import _pytree as pytree
 from torch._dynamo.utils import count_calls, counters
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch._inductor.fx_passes import joint_graph
@@ -34,6 +33,7 @@ from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_utils import IS_LINUX, skipIfRocm
 from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.utils import _pytree as pytree
 
 
 class TestPatternMatcher(TestCase):
@@ -49,7 +49,9 @@ class TestPatternMatcher(TestCase):
         counters.clear()
         torch.manual_seed(42)
         if reference_in_float:
-            ref_inputs = pytree.tree_map_only(torch.Tensor, lambda x: x.to(torch.float32), args)
+            ref_inputs = pytree.tree_map_only(
+                torch.Tensor, lambda x: x.to(torch.float32), args
+            )
         else:
             ref_inputs = args
         expected = fn(*ref_inputs)
@@ -1227,7 +1229,6 @@ class TestPatternMatcher(TestCase):
         self.common(mul_softmax, (x, scale), 0, 0)
         self.common(mul_softmax, (scale, x), 0, 0)
         self.common(div_softmax, (x, scale), 0, 0)
-
 
 
 if __name__ == "__main__":
