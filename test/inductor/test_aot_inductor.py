@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import copy
+import itertools
 import os
 import sys
 import tempfile
@@ -329,8 +330,6 @@ class AOTInductorTestsTemplate:
                 self.check_model(Model(self.device), example_inputs)
 
     def test_conv_freezing(self):
-        import itertools
-
         for dtype, groups in itertools.product([torch.bfloat16, torch.float], [1, 2]):
             iC = 2
             oC = 3
@@ -3013,5 +3012,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA or sys.platform == "darwin":
-        run_tests(needs="filelock")
+    # if HAS_CUDA or sys.platform == "darwin":
+    run_tests(needs="filelock")
