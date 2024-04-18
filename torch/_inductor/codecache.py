@@ -1811,9 +1811,7 @@ class AotCodeCompiler:
                 if name not in graph.folded_constants
             )
             # TODO: Fix mmap weights with cuda
-            use_mmap_weights = (
-                not config.is_fbcode() and consts_size > 2_000_000_000
-            )
+            use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
             if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
             compile_cmd = cpp_compile_command(
