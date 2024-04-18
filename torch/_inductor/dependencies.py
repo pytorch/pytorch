@@ -77,16 +77,22 @@ class MemoryDep(typing.NamedTuple):
         """
         terms = self.index.args if isinstance(self.index, sympy.Add) else [self.index]
 
-        last_sym = self.var_names[-1] 
+        last_sym = self.var_names[-1]
         for term in terms:
             if term is last_sym:
                 return True
 
             # Having a >1 stride for the last dimension is bad for perf
             # return False.
-            if isinstance(term, sympy.Mul) and len(term.args) == 2 and term.args[1] is last_sym and isinstance(term.args[0], (int, sympy.Integer)) and term.args[0] > 1:
+            if (
+                isinstance(term, sympy.Mul)
+                and len(term.args) == 2
+                and term.args[1] is last_sym
+                and isinstance(term.args[0], (int, sympy.Integer))
+                and term.args[0] > 1
+            ):
                 return False
-        
+
         return result_for_complex_expression
 
     def is_scalar(self) -> bool:
