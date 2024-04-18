@@ -68,11 +68,15 @@ def boxed_nop(fx_g, example_inputs):
 # Useful for debugging purpose
 # aot_eager uses AOT Autograd backend with nop compiler. It is helpful in debugging.
 aot_eager = aot_autograd(
-    fw_compiler=boxed_nop, partition_fn=min_cut_rematerialization_partition
+    fw_compiler=boxed_nop,
+    partition_fn=min_cut_rematerialization_partition,
+    keep_inference_input_mutations=True,
 )
 register_backend(name="aot_eager", compiler_fn=aot_eager)
 
-aot_eager_default_partitioner = aot_autograd(fw_compiler=boxed_nop)
+aot_eager_default_partitioner = aot_autograd(
+    fw_compiler=boxed_nop, keep_inference_input_mutations=True
+)
 register_backend(
     name="aot_eager_default_partitioner", compiler_fn=aot_eager_default_partitioner
 )
@@ -125,7 +129,7 @@ class TestingOnlyCompileError(Exception):
 def relu_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs):
     for node in gm.graph.nodes:
         if node.target == torch.relu:
-            raise ReluCompileError()
+            raise ReluCompileError
     return gm
 
 
@@ -161,7 +165,7 @@ def non_leaf_compile_error_TESTING_ONLY(gm: torch.fx.GraphModule, example_inputs
         return gm
     for t in example_inputs:
         if not t.is_leaf:
-            raise TestingOnlyCompileError()
+            raise TestingOnlyCompileError
     return gm
 
 

@@ -171,6 +171,9 @@ TORCH_API void set_version_counter(
     const Variable&,
     const c10::VariableVersion& version_counter);
 
+/// Sets the grad_fn of this `Variable` to an Error node.
+TORCH_API void forbid_in_autograd(const Variable&);
+
 /// Retrieves this `Variable`s version counter.
 TORCH_API const c10::VariableVersion& version_counter(const Variable&);
 

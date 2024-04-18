@@ -900,8 +900,8 @@ class MetaConverter:
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
+                        torch.autograd.graph.forbid_in_autograd(r)
                         with torch.enable_grad():
-                            r = r.clone()
                             r._coalesced_(t.is_coalesced)
                 elif is_sparse_compressed_layout(t.layout):
                     is_leaf = t.is_leaf
@@ -937,8 +937,7 @@ class MetaConverter:
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
-                        with torch.enable_grad():
-                            r = r.clone()
+                        torch.autograd.graph.forbid_in_autograd(r)
                 elif t.is_nested and not t.is_traceable_wrapper_subclass:
                     # TODO: Handle this better in Dynamo?
                     # There are checks there now, but this can still be triggered by a dense
@@ -962,8 +961,7 @@ class MetaConverter:
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
-                        with torch.enable_grad():
-                            r = r.clone()
+                        torch.autograd.graph.forbid_in_autograd(r)
                 elif t.is_functorch_wrapped:
                     if t.is_view:
                         from torch._dynamo.exc import unimplemented
@@ -1011,8 +1009,7 @@ class MetaConverter:
                             if t.requires_grad and safe_is_leaf(r):
                                 r.requires_grad = True
                             elif t.requires_grad and not is_leaf:
-                                with torch.enable_grad():
-                                    r = r.clone()
+                                torch.autograd.graph.forbid_in_autograd(r)
                         elif t.is_functional:
                             assert t.unwrapped is not None
                             assert t.current_level is not None
@@ -1203,11 +1200,15 @@ class MetaConverter:
                         r.requires_grad = t.requires_grad
                         if not is_leaf:
                             # Fake up some autograd history.
-                            with torch.enable_grad():
-                                # preserve_format is the default, but we want to
-                                # emphasize how important it is to preserve
-                                # format here
-                                r = r.clone(memory_format=torch.preserve_format)
+                            # Note: we *used* to call .clone() here to mock up some autograd history.
+                            # This is bad for subclasses.
+                            # Consider the case where you have a wrapper subclass that is contiguous,
+                            # but its inner tensor is noncontiguous().
+                            # .clone() (or other ops) will have the side effect of changing
+                            # the metadata of the inner tensor.
+                            # So instead, we now have a dedicated fn to set autograd history,
+                            # without inadvertently changing other metadata.
+                            torch.autograd.graph.forbid_in_autograd(r)
 
                     # Graph-Break for wrapped tensors
                     if (
