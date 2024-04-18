@@ -30,6 +30,13 @@ sdpa_template = TritonTemplate(
     # Q: Query, K: Key, V: Value
     # M: Number of queries, N: Number of keys/values, D: Model dimension
     # z: Batch size, h: Number of heads, m: Number of queries per head, k: Number of keys per head
+    # (Modifiable) Config options:
+    # BLOCK_M
+    # BLOCK_N
+    # SCORE_MOD_IS_LINEAR: Is the score modifier linear? If so, we can lift the
+    # change of base out of the loop
+    # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
+    # is not masked out? If so, we can skip an extra safety check
 
     # Define Q Strides
     stride_qz = {{stride("Q", 0)}}
@@ -91,6 +98,8 @@ sdpa_template = TritonTemplate(
     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
 
     q = tl.load(Q_block_ptr)
+    if SCORE_MOD_IS_LINEAR:
+        qk_scale *= 1.44269504
     q = (q * qk_scale).to(MATMUL_PRECISION)
     # loop over k, v and update accumulator
     lo = 0
@@ -113,7 +122,8 @@ sdpa_template = TritonTemplate(
             out="qk"
         ) | indent_except_first(2) }}
         # TODO: In the case that score_mod is linear, this can be LICMed
-        qk *= 1.44269504
+        if not SCORE_MOD_IS_LINEAR:
+            qk *= 1.44269504
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # -- compute scaling constant ---
@@ -123,8 +133,9 @@ sdpa_template = TritonTemplate(
 
         alpha = tl.math.exp2(m_i - m_i_new)
         p = tl.math.exp2(qk - m_i_new[:, None])
-        alpha = tl.where(masked_out_rows, 0, alpha)
-        p = tl.where(masked_out_rows[:, None], 0, p)
+        if not ROWS_GUARANTEED_SAFE:
+            alpha = tl.where(masked_out_rows, 0, alpha)
+            p = tl.where(masked_out_rows[:, None], 0, p)
 
         # -- scale and update acc --
         acc_scale = l_i * 0 + alpha  # workaround some compiler bug
@@ -263,6 +274,9 @@ def templated_attention(*args, **kwargs):
                     BLOCK_M=BLOCK_M,
                     BLOCK_N=BLOCK_N,
                     BLOCK_DMODEL=query.get_size()[-1],
+                    # For now, we always assume the "sound" option
+                    SCORE_MOD_IS_LINEAR=False,
+                    ROWS_GUARANTEED_SAFE=False,
                 )
             return autotune_select_algorithm(
                 "sdpa", choices, [query, key, value], layout
