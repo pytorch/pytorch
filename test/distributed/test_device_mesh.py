@@ -195,6 +195,44 @@ class DeviceMeshTestNDim(DTensorTestBase):
         self.assertNotEqual(hash(mesh), hash(mesh3))
         self.assertNotEqual(hash(mesh2), hash(mesh3))
 
+    @with_comms
+    def test_get_local_rank_3d(self):
+        """
+        If we have a 3D mesh and we want to apply dp, pp, tp to it,
+        mesh_dim_names = ["dp", "pp", "tp"], and the mesh tensor would be:
+        mesh_3d_tensor = [
+            [
+                [0, 1],
+                [2, 3],
+            ],
+            [
+                [4, 5],
+                [6, 7],
+            ]
+
+        ]
+        """
+        mesh_shape = (2, 2, 2)
+        mesh_3d = init_device_mesh(
+            self.device_type, mesh_shape, mesh_dim_names=("dp", "pp", "tp")
+        )
+
+        # tp_rank_0: [0, 2, 4, 6], tp_rank_1: [1, 3, 5, 7]
+        tp_rank = mesh_3d.get_local_rank("tp")
+        print(f"{self.rank=}, {tp_rank=}")
+        expected_tp_rank = self.rank % 2
+        self.assertEqual(tp_rank, expected_tp_rank)
+
+        # pp_rank_0: [0, 1, 4, 5], pp_rank_1: [2, 3, 6, 7]
+        pp_rank = mesh_3d.get_local_rank("pp")
+        expected_pp_rank = 0 if self.rank % 4 <= 1 else 1
+        self.assertEqual(pp_rank, expected_pp_rank)
+
+        # dp_rank_0: [0, 1, 2, 3], dp_rank_1: [4, 5, 6, 7]
+        dp_rank = mesh_3d.get_local_rank("dp")
+        expected_dp_rank = self.rank // 4
+        self.assertEqual(dp_rank, expected_dp_rank)
+
 
 class InitDeviceMeshTest(DTensorTestBase):
     @property
