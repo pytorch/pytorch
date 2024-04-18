@@ -482,10 +482,11 @@ static std::vector<Tensor> mkldnn_reorder_mkldnn_rnn_layer_weight(
 static Tensor mkldnn_serialize(const Tensor& self) {
   const ideep::tensor packed_w = itensor_from_tensor(self);
   auto packed_w_desc = packed_w.get_desc();
+  std::vector<uint8_t> serialized_wei_desc;
 
   // TODO: test ideep versioning
 #if IDEEP_PREREQ(3, 4, 1, 2)
-  std::vector<uint8_t> serialized_wei_desc = packed_w_desc.get_blob();
+  serialized_wei_desc = packed_w_desc.get_blob();
 #else
       TORCH_CHECK(false, "Unexpected IDeep version to do weight serialization.");
 #endif

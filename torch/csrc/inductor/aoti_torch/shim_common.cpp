@@ -1,5 +1,6 @@
 #include <c10/core/DeviceType.h>
 #include <c10/core/GradMode.h>
+#include <c10/core/Layout.h>
 #include <c10/core/ScalarType.h>
 #include <c10/util/Exception.h>
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
@@ -91,6 +92,14 @@ AOTI_TORCH_DTYPE_IMPL(complex32, ComplexHalf)
 AOTI_TORCH_DTYPE_IMPL(complex64, ComplexFloat)
 AOTI_TORCH_DTYPE_IMPL(complex128, ComplexDouble)
 #undef AOTI_TORCH_DTYPE_IMPL
+
+int32_t aoti_torch_layout_strided() {
+  return (int32_t)at::kStrided;
+}
+
+int32_t aoti_torch_layout__mkldnn() {
+  return (int32_t)at::kMkldnn;
+}
 
 #define AOTI_TORCH_ITEM_IMPL(dtype, ctype)                     \
   AOTITorchError aoti_torch_item_##dtype(                      \

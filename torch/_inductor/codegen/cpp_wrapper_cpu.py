@@ -49,6 +49,7 @@ class CppWrapperCpu(WrapperCodeGen):
         self.arg_var_id = count()
         self.used_cached_devices = set()
         self.used_cached_dtypes = set()
+        self.used_cached_layouts = set()
         self.cached_output_id = count()
         self.scalar_to_tensor_id = count()
         self.custom_op_wrapper_loaded = False
@@ -739,6 +740,7 @@ class CppWrapperCpu(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].stride = {{{stride_str}}};"
                 )
+                #: TODO: ‘kStrided’ is not a member of ‘at’ in ABI compatible mode
                 self.prefix.writeline(
                     f"constants_info_[{idx}].layout = static_cast<int8_t>({self.codegen_layout(tensor.layout)});"
                 )
@@ -894,6 +896,8 @@ class CppWrapperCpu(WrapperCodeGen):
                 cached_dtypes_buffer.writeline(f"CACHE_TORCH_DTYPE({dtype});")
             for device in self.used_cached_devices:
                 cached_dtypes_buffer.writeline(f"CACHE_TORCH_DEVICE({device});")
+            for layout in self.used_cached_layouts:
+                cached_dtypes_buffer.writeline(f"CACHE_TORCH_LAYOUT({layout});")
         cached_dtypes_buffer.splice(self.prefix)
         self.prefix = cached_dtypes_buffer
 
@@ -1455,9 +1459,15 @@ class CppWrapperCpu(WrapperCodeGen):
             return DTYPE_TO_ATEN[dtype]
 
     def codegen_layout(self, layout):
-        from .cpp import LAYOUT_TO_ATEN
+        if config.abi_compatible:
+            print("layout: ", layout)
+            layout_str = str(layout).split(".")[-1]
+            self.used_cached_layouts.add(layout_str)
+            return f"cached_torch_layout_{layout_str}"
+        else:
+            from .cpp import LAYOUT_TO_ATEN
 
-        return LAYOUT_TO_ATEN[layout]
+            return LAYOUT_TO_ATEN[layout]
 
     @functools.lru_cache(None)
     def codegen_int_array_var(

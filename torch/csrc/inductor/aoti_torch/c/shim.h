@@ -104,6 +104,9 @@ AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex32();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex64();
 AOTI_TORCH_EXPORT int32_t aoti_torch_dtype_complex128();
 
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout_strided();
+AOTI_TORCH_EXPORT int32_t aoti_torch_layout__mkldnn();
+
 // Functions for converting a single-element tensor to a scalar value
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_item_float32(AtenTensorHandle tensor, float* ret_value);
