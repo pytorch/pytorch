@@ -1110,6 +1110,15 @@ PyObject* THPModule_increment_version(PyObject* _unused, PyObject* tensor) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPModule_forbid_in_autograd(PyObject* _unused, PyObject* tensor) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK(
+      THPVariable_Check(tensor), "forbid_in_autograd expect a Tensor as input");
+  torch::autograd::forbid_in_autograd((THPVariable_Unpack(tensor)));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = { // NOLINT
     {"_set_grad_enabled",
@@ -1155,6 +1164,7 @@ static PyMethodDef methods[] = { // NOLINT
      nullptr},
     {"set_autocast_cache_enabled", set_autocast_cache_enabled, METH_O, nullptr},
     {"_increment_version", THPModule_increment_version, METH_O, nullptr},
+    {"_forbid_in_autograd", THPModule_forbid_in_autograd, METH_O, nullptr},
     {"set_anomaly_enabled",
      castPyCFunctionWithKeywords(set_anomaly_mode_enabled),
      METH_VARARGS | METH_KEYWORDS,

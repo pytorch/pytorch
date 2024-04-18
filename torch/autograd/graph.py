@@ -38,6 +38,7 @@ __all__ = [
     "GradientEdge",
     "get_gradient_edge",
     "increment_version",
+    "forbid_in_autograd",
 ]
 
 
@@ -201,6 +202,21 @@ def increment_version(tensor):
     is not problematic.
     """
     torch._C._increment_version(tensor)
+
+
+def forbid_in_autograd(tensor):
+    """Replaces the current tensor's grad_fn with an Error node.
+
+    This effectively forbids the tensor from having a gradient computed during backward.
+    If the tensor was originally an autograd leaf (tensor.is_leaf == False),
+    setting the tensor's grad_fn to an error node will flip tensor.is_leaf to True.
+
+    This is a convenient API used in torch.compile internals, when we need to
+    take a graph input (potentially a non-leaf), and generate a fresh FakeTensor
+    for it: we need the FakeTensor to have accurate is_leaf information,
+    even though we don't actually plan to run autograd through the graph input.
+    """
+    torch._C._forbid_in_autograd(tensor)
 
 
 class saved_tensors_hooks:
