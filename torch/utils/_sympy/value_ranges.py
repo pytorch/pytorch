@@ -472,15 +472,46 @@ class SymPyValueRangeAnalysis:
         else:
             return ValueRanges.coordinatewise_monotone_map(a, b, operator.floordiv)
 
-    @staticmethod
-    def mod(x, y):
+    @classmethod
+    def mod(cls, x, y):
         x = ValueRanges.wrap(x)
         y = ValueRanges.wrap(y)
-        if x.is_singleton() and y.is_singleton() and y.lower != 0:
-            return ValueRanges.wrap(x.lower % y.lower)
-        if y.lower <= 0:
+        # nb. We implement C semantics
+
+        def c_mod(a, b):
+            ret = abs(a) % abs(b)
+            if a < 0:
+                ret *= -1
+            return ret
+
+        def c_div(a, b):
+            x = a / b
+            return sympy.Integer(x) if x.is_finite else x
+
+        if 0 in y:
             return ValueRanges.unknown()
-        return ValueRanges(0, y.upper)
+        elif y.is_singleton():
+            y_val = abs(y.lower)
+            # If it wraps, we need to take the whole interval
+
+            # The function is locally linear if they are in the same class
+            if c_div(x.lower, y_val) == c_div(x.upper, y_val):
+                return ValueRanges.increasing_map(x, lambda u: c_mod(u, y_val))
+            if x.upper < 0:
+                # Negative case
+                return ValueRanges(-y_val + 1, 0)
+            elif x.lower > 0:
+                # Positive case
+                return ValueRanges(0, y_val - 1)
+            else:
+                # Mixed case
+                lower = max(-y_val + 1, x.lower)
+                upper = min(y_val - 1, x.upper)
+                return ValueRanges(lower, upper)
+        else:
+            # Too difficult, we bail out
+            upper = cls.abs(y).upper - 1
+            return ValueRanges(-upper, upper)
 
     @classmethod
     def modular_indexing(cls, a, b, c):
@@ -714,6 +745,13 @@ class SymPyValueRangeAnalysis:
     def atan(x):
         return ValueRanges.increasing_map(x, OpaqueUnaryFn_atan)
 
+    @staticmethod
+    def trunc(x):
+        def trunc(x):
+            return sympy.Integer(x) if x.is_finite else x
+
+        return ValueRanges.increasing_map(x, trunc)
+
 
 class ValueRangeAnalysis(SymPyValueRangeAnalysis):
     def __init__(self):
@@ -798,10 +836,7 @@ class ValueRangeAnalysis(SymPyValueRangeAnalysis):
         if x == ValueRanges.unknown():
             return x
 
-        def trunc(x):
-            return sympy.Integer(x) if x.is_finite else x
-
-        return ValueRanges.increasing_map(x, trunc)
+        return cls.trunc(x)
 
     @classmethod
     def sub(cls, a, b):

@@ -12,6 +12,7 @@ import os
 import signal
 import socket
 from string import Template
+import time
 import uuid
 from typing import Any, Dict, Optional, Tuple
 
@@ -25,6 +26,10 @@ from torch.distributed.elastic.agent.server.api import (
     WorkerSpec,
     WorkerState,
 )
+from torch.distributed.elastic.agent.server.health_check_server import (
+    create_healthcheck_server,
+    HealthCheckServer,
+)
 from torch.distributed.elastic.events.api import EventMetadataValue
 from torch.distributed.elastic.metrics.api import prof
 from torch.distributed.elastic.multiprocessing import PContext, start_processes, LogsSpecs
@@ -37,9 +42,11 @@ __all__ = [
     "LocalElasticAgent",
     "TORCHELASTIC_ENABLE_FILE_TIMER",
     "TORCHELASTIC_TIMER_FILE",
+    "TORCHELASTIC_HEALTH_CHECK_PORT",
 ]
 
 TORCHELASTIC_ENABLE_FILE_TIMER = "TORCHELASTIC_ENABLE_FILE_TIMER"
+TORCHELASTIC_HEALTH_CHECK_PORT = "TORCHELASTIC_HEALTH_CHECK_PORT"
 TORCHELASTIC_TIMER_FILE = "TORCHELASTIC_TIMER_FILE"
 
 class LocalElasticAgent(SimpleElasticAgent):
@@ -146,6 +153,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         self._log_line_prefix_template = log_line_prefix_template
         self._worker_watchdog: Optional[timer.FileTimerServer] = None
         self._logs_specs = logs_specs
+        self._health_check_server: Optional[HealthCheckServer] = None
 
 
     def _setup_local_watchdog(self, envs: Dict[int, Dict[str, str]]) -> None:
@@ -170,6 +178,37 @@ class LocalElasticAgent(SimpleElasticAgent):
         if watchdog_file_path is not None:
             for worker_env in envs.values():
                 worker_env[watchdog_file_env_name] = watchdog_file_path
+
+    @staticmethod
+    def _get_current_time_secs() -> int:
+        return int(time.time())
+
+    def _setup_healthcheck(self) -> None:
+        healthcheck_port_env_name = TORCHELASTIC_HEALTH_CHECK_PORT
+        healthcheck_port = os.getenv(healthcheck_port_env_name)
+        if healthcheck_port is not None:
+            logger.info(
+                "Found healthcheck port %s: %s",
+                healthcheck_port_env_name,
+                healthcheck_port,
+            )
+            if self._worker_watchdog is None:
+                logger.info("FileTimerServer doesn't exist, using current time as dummy callback")
+                alive_callback = LocalElasticAgent._get_current_time_secs
+            else:
+                alive_callback = self._worker_watchdog.get_last_progress_time
+
+            self._health_check_server = create_healthcheck_server(
+                alive_callback=alive_callback,
+                port=int(healthcheck_port),
+                timeout=60,
+            )
+            self._health_check_server.start()
+        else:
+            logger.info(
+                "Environment variable '%s' not found. Do not start health check.",
+                healthcheck_port_env_name,
+            )
 
 
     def _get_fq_hostname(self) -> str:
@@ -273,6 +312,7 @@ class LocalElasticAgent(SimpleElasticAgent):
             args[local_rank] = tuple(worker_args)
 
         self._setup_local_watchdog(envs=envs)
+        self._setup_healthcheck()
 
         assert spec.entrypoint is not None
         assert self._logs_specs is not None
@@ -292,6 +332,9 @@ class LocalElasticAgent(SimpleElasticAgent):
         if self._worker_watchdog is not None:
             self._worker_watchdog.stop()
             self._worker_watchdog = None
+        if self._health_check_server is not None:
+            self._health_check_server.stop()
+            self._health_check_server = None
         if self._pcontext:
             self._pcontext.close(death_sig)
         if self._rdzv_handler:
