@@ -2740,13 +2740,13 @@ CPU_TEST_FAILURES = {
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
     # TODO: test_conv_freezing_abi_compatible_cpu fails,
     #   AssertionError: None, i.e. optional output is not supported
-    "test_conv_freezing": fail_with_and_without_stack_allocation(is_skip=True), 
+    "test_conv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # TODO: test_deconv_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported    
+    #   AssertionError: None, i.e. optional output is not supported
     "test_deconv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # TODO: test_freezing_abi_compatible_cpu fails,
-    #   AssertionError: None, i.e. optional output is not supported    
-    "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),    
+    #   AssertionError: None, i.e. optional output is not supported
+    "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
