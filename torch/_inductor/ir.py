@@ -4494,9 +4494,7 @@ class UserDefinedTritonKernel(ExternKernel):
             for key, arg in kernel_args.items()
             if isinstance(arg, TensorBox) and key in tensors_to_clone
         ]
-        mark_node_as_mutating(
-            self, *mutable_args
-        )
+        mark_node_as_mutating(self, *mutable_args)
 
     def get_inputs_that_alias_output(self):
         return [i.get_name() for i in self.inputs]
