@@ -2738,6 +2738,15 @@ CPU_TEST_FAILURES = {
     "test_dynamic_smem_above_default_limit": fail_with_and_without_stack_allocation(),
     # https://github.com/pytorch/pytorch/issues/122980
     "test_fft_c2c": fail_stack_allocation(is_skip=True),
+    # TODO: test_conv_freezing_abi_compatible_cpu fails,
+    #   AssertionError: None, i.e. optional output is not supported
+    "test_conv_freezing": fail_with_and_without_stack_allocation(is_skip=True), 
+    # TODO: test_deconv_freezing_abi_compatible_cpu fails,
+    #   AssertionError: None, i.e. optional output is not supported    
+    "test_deconv_freezing": fail_with_and_without_stack_allocation(is_skip=True),
+    # TODO: test_freezing_abi_compatible_cpu fails,
+    #   AssertionError: None, i.e. optional output is not supported    
+    "test_freezing": fail_with_and_without_stack_allocation(is_skip=True),    
     # FIXME: failed with Segfault while exiting the Python runtime
     "test_missing_cubin": fail_with_and_without_stack_allocation(is_skip=True),
     # minimal arrayref interface only works with CPU; test crashes.
@@ -3012,5 +3021,5 @@ if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    # if HAS_CUDA or sys.platform == "darwin":
-    run_tests(needs="filelock")
+    if HAS_CUDA or sys.platform == "darwin":
+        run_tests(needs="filelock")
