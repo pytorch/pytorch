@@ -94,8 +94,8 @@ class TestCutlassBackend(TestCase):
         def mm(a, b):
             return a @ b
 
-        a = torch.randn(2240, 4096).cuda().half()
-        b = torch.randn(4096, 2048).cuda().half()
+        a = torch.randn(2240, 256).cuda().half()
+        b = torch.randn(256, 2048).cuda().half()
 
         with config.patch(
             {
@@ -108,7 +108,7 @@ class TestCutlassBackend(TestCase):
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
-            torch.testing.assert_close(Y_compiled, Y, atol=2e-4, rtol=1e-3)
+            torch.testing.assert_close(Y_compiled, Y)
 
     def _test_max_autotune_cutlass_backend_epilogue_fusion(
         self,
