@@ -49,18 +49,25 @@ class TestTemplatedSDPA(InductorTestCase):
         q = torch.randn((4, 8, 2048, 64), dtype=dtype, device="cuda")
         k = torch.randn((4, 8, 2048, 64), dtype=dtype, device="cuda")
         v = torch.randn((4, 8, 2048, 64), dtype=dtype, device="cuda")
-        ref_out = sdpa_partial(
+        golden_out = sdpa_partial(
             q.to(torch.float64), k.to(torch.float64), v.to(torch.float64)
         )
+        ref_out = sdpa_partial(q, k, v)
         compiled_out = compiled_sdpa(q, k, v)
 
-        tolerance = Tolerances(atol=2e-2, rtol=2e-2)
-        torch.testing.assert_close(
-            ref_out.to(dtype=torch.float32),
-            compiled_out.to(dtype=torch.float32),
-            atol=tolerance.atol,
-            rtol=tolerance.rtol,
-        )
+        compiled_error = (golden_out - compiled_out).abs().mean()
+        ref_error = (golden_out - ref_out).abs().mean()
+        if compiled_error > ref_error * 1.1:
+            msg = f"Compiled error {compiled_error} is greater than ref error {ref_error} by more than 10%."
+            self.assertTrue(False, msg)
+        # self.assertTrue(compiled_error <= ref_error * 1.1)
+        # tolerance = Tolerances(atol=2e-2, rtol=2e-2)
+        # torch.testing.assert_close(
+        #     ref_out.to(dtype=torch.float32),
+        #     compiled_out.to(dtype=torch.float32),
+        #     atol=tolerance.atol,
+        #     rtol=tolerance.rtol,
+        # )
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
@@ -99,6 +106,14 @@ class TestTemplatedSDPA(InductorTestCase):
     def test_rel_causal(self, dtype: torch.dtype):
         def score_mod(score, b, h, m, n):
             return torch.where(m <= n, score + (m - n), float("-inf"))
+
+        self.run_test(score_mod, dtype)
+
+    @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes)
+    def test_skip_odd_keys(self, dtype: torch.dtype):
+        def score_mod(score, b, h, q, kv):
+            return torch.where(kv % 2 == 0, score, float("-inf"))
 
         self.run_test(score_mod, dtype)
 

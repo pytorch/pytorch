@@ -49,10 +49,8 @@ sdpa_template = TritonTemplate(
     H = {{size("Q", 1)}}
     N_CTX = {{size("Q", 2)}}
 
-    # TODO I think we should do some performance work
-    # to find the optimal calls for perf/accuracy to tl.dot
     qk_scale = 1.0
-    MATMUL_PRECISION = tl.float16
+    MATMUL_PRECISION = tl.float32
 
     start_m = tl.program_id(0)
     off_hz = tl.program_id(1)
@@ -89,11 +87,7 @@ sdpa_template = TritonTemplate(
     m_i = tl.zeros([BLOCK_M], dtype=tl.float32) - float("inf")
     l_i = tl.zeros([BLOCK_M], dtype=tl.float32)
     acc = tl.zeros([BLOCK_M, BLOCK_DMODEL], dtype=tl.float32)
-    # scale sm_scale by log_2(e) and use
-    # 2^x instead of exp in the loop because CSE and LICM
-    # don't work as expected with `exp` in the loop
-    # TODO fix me
-    # qk_scale = sm_scale * 1.44269504
+
     q = tl.load(Q_block_ptr)
     q = (q * qk_scale).to(MATMUL_PRECISION)
     # loop over k, v and update accumulator
@@ -108,7 +102,6 @@ sdpa_template = TritonTemplate(
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         qk += tl.dot(q, k.to(MATMUL_PRECISION))
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-
         {{ modification(
             score="qk",
             b="off_hz // H",
@@ -117,6 +110,8 @@ sdpa_template = TritonTemplate(
             n="start_n + offs_n[None, :]",
             out="qk"
         ) | indent_except_first(2) }}
+        # TODO: In the case that score_mod is linear, this can be LICMed
+        qk *= 1.44269504
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         # -- compute scaling constant ---
@@ -124,12 +119,9 @@ sdpa_template = TritonTemplate(
         m_i_new = tl.maximum(m_i, row_max)
         masked_out_rows = (m_i_new == float("-inf"))
 
-        # TODO FIX ME and use 2^x instead of exp
-        # alpha = tl.math.exp2(m_i - m_i_new)
-        # p = tl.math.exp2(qk - m_i_new[:, None])
-        alpha = tl.math.exp(m_i - m_i_new)
+        alpha = tl.math.exp2(m_i - m_i_new)
+        p = tl.math.exp2(qk - m_i_new[:, None])
         alpha = tl.where(masked_out_rows, 0, alpha)
-        p = tl.math.exp(qk - m_i_new[:, None])
         p = tl.where(masked_out_rows[:, None], 0, p)
 
         # -- scale and update acc --
