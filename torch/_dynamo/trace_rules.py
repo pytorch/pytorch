@@ -133,13 +133,13 @@ _TLS = threading.local()
 
 
 @contextmanager
-def dont_trace_nn_module_wrapped_call_impl():
-    old = getattr(_TLS, "inline_nn_module_wrapped_call_impl", True)
-    _TLS.inline_nn_module_wrapped_call_impl = False
+def dont_trace_nn_module_call_impl():
+    old = getattr(_TLS, "trace_top_level_nn_module_call_impl", True)
+    _TLS.trace_top_level_nn_module_call_impl = False
     try:
         yield False
     finally:
-        _TLS.inline_nn_module_wrapped_call_impl = old
+        _TLS.trace_top_level_nn_module_call_impl = old
 
 
 manual_torch_name_rule_map = {
@@ -3537,14 +3537,16 @@ def lookup_inner(
                 reasons.add("func name is __torch_function__")
             return UserFunctionVariable
 
-    if not is_direct_call and getattr(_TLS, "inline_nn_module_wrapped_call_impl", True):
+    if not is_direct_call and getattr(
+        _TLS, "trace_top_level_nn_module_call_impl", True
+    ):
         if (
             filename
             and "torch/nn/modules/module.py" in filename
-            and name == "_wrapped_call_impl"
+            and name == "_call_impl"
         ):
             if reasons is not None:
-                reasons.add("func name is __wrapped_call_impl")
+                reasons.add("func name is _call_impl")
             return UserFunctionVariable
 
     # Step 3: lookup obj's tracing rule by filename.
