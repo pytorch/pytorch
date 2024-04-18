@@ -22128,6 +22128,10 @@ python_ref_db = [
         validate_view_consistency=False,
     ),
     PythonRefInfo(
+        "_refs.select_scatter",
+        torch_opinfo_name="select_scatter",
+    ),
+    PythonRefInfo(
         "_refs.stack",
         torch_opinfo_name="stack",
         validate_view_consistency=False,

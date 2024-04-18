@@ -6157,6 +6157,25 @@ def vdot(self, other):
     return (self.conj_physical() * other).sum()
 
 
+def _validate_dim(x, dim, offset=0):
+    ndim = x.ndim
+    if dim < 0:
+        dim += ndim + offset
+    assert 0 <= dim < ndim + offset
+    return dim
+
+
+@register_decomposition(aten.select_scatter)
+@out_wrapper()
+def select_scatter(x: TensorLikeType, src: TensorLikeType, dim: int, index: int):
+    dim = _validate_dim(x, dim, 0)
+    mask_shape = [1] * x.ndim
+    mask_shape[dim] = -1
+    mask = torch.arange(x.shape[dim], device=x.device).view(mask_shape) == index
+    src = aten.expand(torch.unsqueeze(src, dim), x.shape)
+    return torch.where(mask, src, x)
+
+
 # inplace
 abs_ = _make_inplace(abs)
 acos_ = _make_inplace(acos)
