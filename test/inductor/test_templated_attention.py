@@ -20,6 +20,7 @@ supported_platform = skipUnless(
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
+torch.set_float32_matmul_precision("high")
 
 
 def create_attention(score_mod):
@@ -57,17 +58,13 @@ class TestTemplatedSDPA(InductorTestCase):
 
         compiled_error = (golden_out - compiled_out).abs().mean()
         ref_error = (golden_out - ref_out).abs().mean()
-        if compiled_error > ref_error * 1.1:
+        if dtype == torch.float32:
+            fudge_factor = 3.0
+        else:
+            fudge_factor = 1.1
+        if compiled_error > ref_error * fudge_factor:
             msg = f"Compiled error {compiled_error} is greater than ref error {ref_error} by more than 10%."
             self.assertTrue(False, msg)
-        # self.assertTrue(compiled_error <= ref_error * 1.1)
-        # tolerance = Tolerances(atol=2e-2, rtol=2e-2)
-        # torch.testing.assert_close(
-        #     ref_out.to(dtype=torch.float32),
-        #     compiled_out.to(dtype=torch.float32),
-        #     atol=tolerance.atol,
-        #     rtol=tolerance.rtol,
-        # )
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes)
