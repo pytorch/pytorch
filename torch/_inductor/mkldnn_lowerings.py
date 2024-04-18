@@ -396,14 +396,13 @@ def register_onednn_fusion_ops():
                     1: lambda x: V.graph.constants[x.get_name()],
                     2: lambda x: V.graph.constants[x.get_name()],
                 }
-                chosen_node: TensorBox = autotune_select_algorithm(
+                result: TensorBox = autotune_select_algorithm(
                     "packed_linear",
                     choices,
                     [x, packed_w, orig_w],
                     layout,
                     input_gen_fns=input_gen_fns,
                 )
-                result = TensorBox.create(chosen_node)
                 if b is not None:
                     result = add(result, b)
                 return result

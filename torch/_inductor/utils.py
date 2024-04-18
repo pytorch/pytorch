@@ -1023,6 +1023,10 @@ def use_cutlass_template(layout, m, n, k):
     return res
 
 
+def _use_template_for_cpu(layout):
+    return use_max_autotune() and layout.device.type == "cpu"
+
+
 def use_cpp_packed_gemm_template(layout, mat1, mat2):
     from . import ir
 
@@ -1035,7 +1039,7 @@ def use_cpp_packed_gemm_template(layout, mat1, mat2):
     # TODO: support n % n_block_size != 0
     n_block_size = 16
     return (
-        layout.device.type == "cpu"
+        _use_template_for_cpu(layout)
         and layout.dtype in layout_dtypes
         and n % n_block_size == 0
         and isinstance(mat2, ir.StorageBox)
