@@ -274,8 +274,8 @@ class TestBundledInputs(TestCase):
             torch.utils.bundled_inputs.augment_model_with_bundled_inputs(
                 m,
                 inputs=[
-                    torch.ones(1, 2),
-                ],  # type: ignore[list-item]
+                    torch.ones(1, 2),  # type: ignore[list-item]
+                ],
             )
 
     def test_double_augment_fail(self):
