@@ -23,6 +23,7 @@ from ..utils import (
     iter_contains,
     namedtuple_fields,
     odict_values,
+    set_example_value,
 )
 from .base import MutableLocal, VariableTracker
 from .constant import ConstantVariable
@@ -256,6 +257,12 @@ class CommonListMethodsVariable(BaseListVariable):
             assert not args
             items = list(self.items)
             return self.modified(items, mutable_local=MutableLocal())
+        elif name == "reverse" and self.mutable_local:
+            assert not kwargs
+            assert not args
+            self.items.reverse()
+            tx.output.side_effects.mutation(self)
+            return ConstantVariable.create(None)
         else:
             return super().call_method(tx, name, args, kwargs)
 
@@ -442,11 +449,14 @@ class SizeVariable(TupleVariable):
             return torch.Size(proxies)
 
         proxy = tracer.create_proxy("call_function", torch.Size, (proxies,), {})
-        proxy.node.meta["example_value"] = torch.Size(
-            [
-                p.node.meta["example_value"] if not isinstance(p, int) else p
-                for p in proxies
-            ]
+        set_example_value(
+            proxy.node,
+            torch.Size(
+                [
+                    p.node.meta["example_value"] if not isinstance(p, int) else p
+                    for p in proxies
+                ]
+            ),
         )
         return proxy
 

@@ -58,7 +58,7 @@ from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import CacheEntry, DynamoCallback
-from .utils import common_constant_types, compile_times
+from .utils import common_constant_types, compile_times, set_example_value
 
 log = logging.getLogger(__name__)
 
@@ -152,21 +152,7 @@ class OptimizedModule(torch.nn.Module):
             self._forward = self.forward
             self.forward = self._call_lazy_check
 
-    # CHECK-IF-THERE-IS-BETTER-WAY
-    # When Dynamo compiles a nn module, it traces the _call_impl (and eventually
-    # inlines forward) and updates the frame object to run guards etc. The
-    # unintended consequence is that since _call_impl is a code object, it is
-    # shared between the original nn module and this OptimizedModule as well. So
-    # when OptimizedModule is executed, it calls _call_impl and retriggers
-    # Dynamo. We don't want that.  So, here we override the __call__ directly to
-    # forward method. This skips the _call_impl of the base class.
-    # ISSUE - IF ONE ADDS A HOOK ON OPTIMIZED MODULE, IT WONT WORK. MAYBE WE
-    # SHOULD OVERRIDE THOSE METHODS THEN AND BAN.
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)  # type: ignore[misc]
-
     def __getstate__(self):
-        # Do we need to pop _call_impl here?
         state = dict(self.__dict__)
         state.pop("forward", None)
         state.pop("__call__", None)
@@ -780,7 +766,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "tensor_dict" in self.current_node.meta:
             arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
         if "example_value" in self.current_node.meta:
-            arg.node.meta["example_value"] = self.current_node.meta["example_value"]
+            set_example_value(arg.node, self.current_node.meta["example_value"])
         return arg
 
     def output(self, target, args, kwargs):
@@ -804,9 +790,9 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "val" in self.current_node.meta:
             result_proxy.node.meta["val"] = self.current_node.meta["val"]
         if "example_value" in self.current_node.meta:
-            result_proxy.node.meta["example_value"] = self.current_node.meta[
-                "example_value"
-            ]
+            set_example_value(
+                result_proxy.node, self.current_node.meta["example_value"]
+            )
         if self.current_node.op != "output":
             result_proxy.node._rename(
                 getattr(self.current_node, "name", result_proxy.node.name)
@@ -1229,13 +1215,7 @@ def export(
             automatic_dynamic_shapes=False,
             capture_dynamic_output_shape_ops=True,
             capture_scalar_outputs=True,
-        ), trace_rules.dont_trace_nn_module_call_impl():
-            # TODO(export-team) - discrepancy between torch.compile and
-            # torch.export because torch.compile is planning to inline the
-            # _call_impl (one level above forward) to inline hooks. But doing
-            # that for export breaks many tests because (1) tests are hardcoded
-            # to assume that tracing starts from forward, and (2) some
-            # discrepancies between strict and non strict mode.
+        ):
             opt_f = optimize_assert(
                 dynamo_normalization_capturing_compiler,
                 hooks=Hooks(
