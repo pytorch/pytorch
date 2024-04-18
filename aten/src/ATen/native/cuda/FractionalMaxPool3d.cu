@@ -120,8 +120,8 @@ __global__ void fractional_max_pool3d_out_frame(
 template <typename scalar_t>
 __global__ void fractional_max_pool3d_backward_out_frame(
   PackedTensorAccessor64<scalar_t, 5> gradInput,
-  PackedTensorAccessor64<scalar_t, 5> gradOutput,
-  PackedTensorAccessor64<int64_t, 5> indices) {
+  PackedTensorAccessor64<const scalar_t, 5> gradOutput,
+  PackedTensorAccessor64<const int64_t, 5> indices) {
   // Output (h, w) point that this thread is responsible for
   int64_t ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
   int64_t plane = blockIdx.y;
@@ -235,8 +235,8 @@ void fractional_max_pool3d_backward_out_cuda_template(
         fractional_max_pool3d_backward_out_frame<scalar_t>
         <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
           gradInput_.packed_accessor64<scalar_t, 5>(),
-          gradOutput_.packed_accessor64<scalar_t, 5>(),
-          indices_.packed_accessor64<int64_t, 5>()
+          gradOutput_.packed_accessor64<const scalar_t, 5>(),
+          indices_.packed_accessor64<const int64_t, 5>()
         );
         C10_CUDA_KERNEL_LAUNCH_CHECK();
       }

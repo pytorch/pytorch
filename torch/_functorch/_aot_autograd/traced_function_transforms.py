@@ -416,7 +416,11 @@ def create_functionalized_fn(
                     ), "Found a graph input that had its metadata mutated in the backward. This is not supported"
                 # Allow data mutations on fw inputs during the bw, but only if they do not require grad
                 # So we can guarantee that we can keep the mutations in the graph
-                if has_data_mutation(f_inpt) and not inpt_info.mutates_data:
+                if (
+                    has_data_mutation(f_inpt)
+                    and not inpt_info.mutates_data
+                    and not inpt_info.mutates_storage_metadata
+                ):
                     assert (
                         not inpt_info.requires_grad
                     ), "Found a graph input that requires_grad and was mutated in the backward. This is not supported"
@@ -469,22 +473,46 @@ def create_functionalized_fn(
                 assert is_fun(inpt_f)
                 inpt_new = from_fun(inpt_f)
                 if meta.input_info[i].mutation_type == MutationType.MUTATED_IN_GRAPH:
+                    # See Note [set_() Input Mutations in AOTAutograd]
+                    # all mutations on the input must be under no_grad, so it is safe to put in the graph
+                    # Here, we're saying that if an input experienced a set call, inp.set_(other),
+                    # then we can effectively not have to worry about whether its data was mutated.
+                    # There are 3 cases:
+                    # (1) We mutate inp *after* the set_() call. other is a graph intermediate.
+                    #     In this case, we're not really mutating the input storage of "inp";
+                    #     we're mutating the storage of an intermdiate value (other),
+                    #     and slamming that storage into the input tensor. So no data mutation is necessary.
+                    # (2) We mutate inp *after* the set_() call. other is a graph *input*.
+                    #     In this case, the data mutation will be properly handled in the runtime
+                    #     epilogue during the processing of "other"
+                    # (3) We mutate inp *before* the set_() call.
+                    #     This case is *not* currently handled.
+                    if meta.input_info[i].mutates_storage_metadata:
+                        with torch.no_grad():
+                            inpt_old.set_(inpt_new)
+
                     # We found an input that had a (data-only) mutation.
                     # Since keep_input_mutations is set, we need to faithfully apply a copy_()
                     # so the compiler will see the input mutation in the graph.
-                    if meta.input_info[i].mutations_hidden_from_autograd:
+                    if (
+                        meta.input_info[i].mutates_data
+                        and meta.input_info[i].mutations_hidden_from_autograd
+                    ):
                         # Hidden from autograd = run under no_grad, **and** don't bump VC
                         with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
                             inpt_old
                         ):
                             inpt_old.copy_(inpt_new)
-                    elif meta.input_info[i].mutations_under_no_grad_or_inference_mode:
+                    elif (
+                        meta.input_info[i].mutates_data
+                        and meta.input_info[i].mutations_under_no_grad_or_inference_mode
+                    ):
                         # Under no_grad = run under no_grad (we still bump the VC though)
                         # (inference_mode will also bump the VC, as long as the tensor in question
                         # was created outside of inference_mode)
                         with torch.no_grad():
                             inpt_old.copy_(inpt_new)
-                    else:
+                    elif meta.input_info[i].mutates_data:
                         inpt_old.copy_(inpt_new)
 
             # When an output tensor is a functionalized mutated input, and we
@@ -505,7 +533,8 @@ def create_functionalized_fn(
                     meta.input_info[info.base_idx].mutation_type
                     == MutationType.MUTATED_IN_GRAPH
                 ):
-                    flat_outs[i] = args[info.base_idx]
+                    fw_args = args[0] if trace_joint else args
+                    flat_outs[i] = fw_args[info.base_idx]
             return pytree.tree_unflatten(flat_outs, outs_spec)
 
         return pytree.tree_map(from_fun, f_outs)

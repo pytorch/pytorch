@@ -159,6 +159,10 @@ inline void increment_version(const at::Tensor& t) {
   impl::bump_version(t);
 }
 
+inline void forbid_in_autograd(const at::Tensor& t) {
+  impl::forbid_in_autograd(t);
+}
+
 struct Flatten : IterArgs<Flatten> {
   Flatten(variable_list& out) : out(out) {}
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)

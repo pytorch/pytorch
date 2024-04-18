@@ -68,6 +68,19 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 aten = torch.ops.aten
 
 
+def _force_contiguous(x):
+    if not isinstance(x, torch.Tensor):
+        return x
+    x = x.contiguous()
+    if not is_traceable_wrapper_subclass(x):
+        return x
+    for attr in x.__tensor_flatten__()[0]:
+        elem = getattr(x, attr)
+        if not elem.is_contiguous():
+            setattr(x, attr, elem.contiguous())
+    return x
+
+
 def _compute_output_meta_with_inductor_strides(fw_module, fwd_output_strides):
     out = [n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])]
     # will only be set for inductor
@@ -162,7 +175,7 @@ def aot_dispatch_base(
 
     # Create a wrapper to set up the rng functionalize bits
     @wraps(compiled_fw)
-    def rng_functionalization_wrapper(args):
+    def rng_functionalization_wrapper(args: List[Any]):
         # see note: [Returning Fake Tensors on First AOT Autograd Call]
         nonlocal fakified_out
         if fakified_out is not None:
@@ -170,7 +183,6 @@ def aot_dispatch_base(
             fakified_out = None
             return out
 
-        # args is a list because compiled_fw is boxed_call
         if fw_metadata.is_rng_op_functionalized:
             # Add the seed and offset to args
             seed, offset = CUDARngStateHelper.get_torch_state_as_tuple()
@@ -370,8 +382,24 @@ def aot_dispatch_autograd(
                 len(bw_outs)
                 == len(fw_metadata.input_info) + inner_meta.num_outputs_rng_offset
             )
-            for i, (bw_out) in enumerate(bw_outs):
-                if bw_out is None and _can_detach(_input_node(fx_g, i)):
+            bw_outs_no_rng = bw_outs
+            if inner_meta.num_outputs_rng_offset > 0:
+                bw_outs_no_rng = bw_outs[: -inner_meta.num_outputs_rng_offset]
+            assert len(bw_outs_no_rng) == len(fw_metadata.input_info)
+
+            for i, (bw_out) in enumerate(bw_outs_no_rng):
+                # If our input experiences a metadata mutation inside the graph (e.g. set_()),
+                # we *must* not detach, otherwise it will be the detach'd input that gets the metadata mutation
+                metadata_mutation_in_graph = (
+                    fw_metadata.input_info[i].mutation_type
+                    == MutationType.MUTATED_IN_GRAPH
+                    and fw_metadata.input_info[i].mutates_storage_metadata
+                )
+                if (
+                    bw_out is None
+                    and not metadata_mutation_in_graph
+                    and _can_detach(_input_node(fx_g, i))
+                ):
                     _indices_of_inps_to_detach.append(i)
 
         if aot_config.enable_log:
@@ -872,11 +900,8 @@ Got grad_output types: {str(grad_output_types)}"""
             # Make the tangents contiguous. Note that we must do this after subclass desugaring
             # because inputs to inductor have to be contiguous
             all_args = [
-                t.contiguous()
-                if (
-                    (tangents_start_idx <= i < tangents_end_idx)
-                    and (not t.is_contiguous())
-                )
+                _force_contiguous(t)
+                if (tangents_start_idx <= i < tangents_end_idx)
                 else t
                 for i, t in enumerate(all_args)
             ]
@@ -993,7 +1018,7 @@ Got grad_output types: {str(grad_output_types)}"""
     ]
 
     @wraps(compiled_function)
-    def debug_compiled_function(*args):
+    def debug_compiled_function(args: List[Any]):
         # TODO: Check aliasing relationships
         # TODO: Check strides for metadata mutation
         # (NB: ideally, this logic is factored out of this function and
@@ -1013,6 +1038,6 @@ Got grad_output types: {str(grad_output_types)}"""
                     f"{describe_input(i, aot_config)} would not require grad",
                 )
 
-        return compiled_function(*args)
+        return compiled_function(args)
 
     return debug_compiled_function

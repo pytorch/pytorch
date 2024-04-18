@@ -7,6 +7,7 @@
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/functions/tensor.h>
+#include <torch/csrc/autograd/functions/utils.h>
 #include <torch/csrc/autograd/generated/Functions.h>
 #include <torch/csrc/autograd/generated/ViewFuncs.h>
 #include <torch/csrc/autograd/utils/error_messages.h>
@@ -361,6 +362,16 @@ void set_version_counter(
 void bump_version(const Variable& self) {
   TORCH_CHECK(self.defined(), "cannot call bump_version() on undefined tensor");
   self.unsafeGetTensorImpl()->bump_version();
+}
+
+void forbid_in_autograd(const Variable& self) {
+  TORCH_CHECK(
+      self.defined(), "cannot call forbid_in_autograd() on undefined tensor");
+  auto new_grad_fn = std::shared_ptr<torch::autograd::Error>(
+      new torch::autograd::Error(
+          "Cannot backprop through Error node, file a bug in PyTorch"),
+      torch::autograd::deleteNode);
+  torch::autograd::set_history(self, new_grad_fn);
 }
 
 const c10::VariableVersion& version_counter(const Variable& self) {
