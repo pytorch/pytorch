@@ -48,7 +48,12 @@ from torch._prims_common import (
     StrideType,
 )
 from torch._subclasses.fake_tensor import get_schema_info
-from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymTypes
+from torch.fx.experimental.symbolic_shapes import (
+    compute_unbacked_bindings,
+    free_unbacked_symbols,
+    rebind_unbacked,
+    SymTypes,
+)
 from torch.utils._sympy.functions import CleanDiv, FloorDiv, ModularIndexing
 
 from . import config, dependencies
@@ -2987,46 +2992,7 @@ class Buffer(IRNode):
         return self.get_read_writes().reads
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        """
-        Returns the unbacked symbols which are defined by this IR node,
-        because this is a data-dependent IR node, or item()
-        """
-        # So this is a little unusual.  In principle, you could imagine
-        # defining a MultiOutputLayout buffer so that it DOES define
-        # unbacked symints.  However, we can't easily tell what symints
-        # such a buffer defines, because MultiOutputLayout doesn't actually
-        # define any useful information about what it returns.
-        #
-        # An easier and better approach is to delay the symint allocation
-        # to the MultiOutput IR nodes, which are when we actually extract
-        # out the buffers and know what their sizes are.
-        #
-        # There are two subleties here:
-        #
-        # 1. Suppose you have a kernel that produces out1: (i0,), out2: (i0,)
-        #    Both of these actually count as defs!  The scheduler will just
-        #    arbitrarily pick one of these as the canonical definer and
-        #    ensure it stays live.  It's not a big deal if we pick the
-        #    wrong one because tuple accesses are cheap, and all this means
-        #    is we accidentally keep a MultiOutput node live when it wasn't
-        #    strictly necessary.
-        #
-        # 2. Suppose you have a MultiOutput buffer whose size is (i0,), but
-        #    the MultiOutputLayout buffer it is projecting from isn't actually
-        #    dynamic; it has i0 as one of the arguments.  We cannot tell this
-        #    directly from MultiOutput, we have to look at the input buffer's
-        #    uses to work this out.  No big deal.
-        if isinstance(self.layout, (NoneLayout, MultiOutputLayout)):
-            return set()
-
-        # This kernel defines all unbacked symbols... that it didn't get in as
-        # arguments!
-        defs = (
-            free_unbacked_symbols(self.get_size())
-            | free_unbacked_symbols(self.get_stride())
-            | free_unbacked_symbols(self.get_offset())
-        )
-        return defs - self.get_unbacked_symbol_uses()
+        return set()
 
     def get_unbacked_symbol_uses(self) -> Set[sympy.Symbol]:
         """
@@ -3925,7 +3891,15 @@ class ExternKernel(InputsKernel):
         return pw
 
     @classmethod
-    def process_kernel(cls, kernel, *args, **kwargs):
+    def process_kernel(
+        cls, kernel, *args, **kwargs
+    ) -> Tuple[
+        Any,
+        List[IRNode],
+        List[Any],
+        Callable[..., Any],
+        Dict[sympy.Symbol, pytree.KeyPath],
+    ]:
         binded_args = {"args": args, "kwargs": kwargs}
 
         args_flat, args_spec = pytree.tree_flatten(binded_args)
@@ -3962,9 +3936,9 @@ class ExternKernel(InputsKernel):
             if is_storage_and_layout(x):
                 as_storage_and_layout(x, freeze=True)
 
-        # We don't have generic shape formulas, so just burn in the
-        # shapes and run an example input.
-        # TODO(jansel): replace this with dynamic shape formulas
+        # Rerun fake tensor propagation, because Inductor may have changed the
+        # strides of inputs and we need to determine accurately what the
+        # output stride will be.
         example_args = []
 
         # We need to retain the constant values of fake tensors that we originally
@@ -3979,6 +3953,10 @@ class ExternKernel(InputsKernel):
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
+        if shape_env := V.fake_mode.shape_env:
+            rebind_unbacked(shape_env, V.graph.current_node, example_output)
+            unbacked_bindings = compute_unbacked_bindings(shape_env, example_output)
+
         example_out_li = (
             [example_output]
             if not isinstance(example_output, (list, tuple))
@@ -3991,12 +3969,13 @@ class ExternKernel(InputsKernel):
                     msg = f"{msg} Found from : \n {stack_trace}"
                 V.graph.disable_cudagraphs_reason = msg
 
-        # TODO: Unconditionally do this, not just when example_output has
-        # unbacked symbols
-        if maybe_free_unbacked_symbols(example_output):
-            example_output = V.graph.current_node.meta["val"]
-
-        return example_output, tensor_args, non_tensor_args, unflatten_args
+        return (
+            example_output,
+            tensor_args,
+            non_tensor_args,
+            unflatten_args,
+            unbacked_bindings,
+        )
 
     @classmethod
     def convert_to_reinterpret_view(cls, x):
@@ -4876,25 +4855,11 @@ class DynamicScalar(ExternKernel):
     def should_allocate(self):
         return False
 
-    # TODO: handle bools carefully
-    def __init__(self, sym, data):
+    def __init__(self, sym, keypath, data):
         data.realize()
         super().__init__(None, NoneLayout(torch.device("cpu")), self.unwrap_storage([data]))  # type: ignore[arg-type]
-        if isinstance(sym, sympy.Symbol):
-            self.sym = sym
-            self.is_bool = False
-        else:
-            # Special case for boolean.  For Reasons(TM), we don't represent
-            # boolean variables directly in sympy; instead, we generate an
-            # indicator integer variable which we then convert to a boolean by
-            # testing i0 == 1.  We have to identify the underlying indicator
-            # variable, and then bind i0 to the appropriate integer value
-            # based on the runtime boolean.
-            assert isinstance(sym, sympy.Eq), sym
-            assert isinstance(sym.args[0], sympy.Symbol), sym
-            assert sym.args[1] == 1, sym
-            self.sym = sym.args[0]
-            self.is_bool = True
+        self.sym = sym
+        self.keypath = keypath
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return {self.sym}
@@ -4994,6 +4959,8 @@ class FallbackKernel(ExternKernelAlloc):
         nontensor_args,
         unflatten_args,
         kwargs=None,
+        *,
+        unbacked_bindings=None,
     ):
         super().__init__(
             layout,
@@ -5006,6 +4973,7 @@ class FallbackKernel(ExternKernelAlloc):
         # output through the abi-compatible interface.
         self.outputs: Sequence[Any] = []
         self.use_runtime_dispatch = False
+        self.unbacked_bindings = unbacked_bindings
 
         assert isinstance(
             kernel,
@@ -5116,6 +5084,9 @@ class FallbackKernel(ExternKernelAlloc):
 
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.init_args_default_value(kernel._schema)
+
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return self.unbacked_bindings.keys() if self.unbacked_bindings else set()
 
     def init_args_default_value(self, schema):
         self.args_default_value = [
@@ -5400,6 +5371,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                unbacked_bindings,
             ) = cls.process_kernel(kernel, *args, **kwargs)
 
         if example_output is None:
@@ -5409,6 +5381,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                unbacked_bindings=unbacked_bindings,
             )
 
         else:
@@ -5421,6 +5394,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                unbacked_bindings=unbacked_bindings,
             )
 
         def generate_output(output, indices):
@@ -8272,7 +8246,9 @@ class _CollectiveKernel(FallbackKernel):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                unbacked_bindings,
             ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
+        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
         for tensor_arg in tensor_args:
             tensor_arg.realize()
 
@@ -8327,7 +8303,9 @@ class _CollectiveKernel(FallbackKernel):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                unbacked_bindings,
             ) = cls.process_kernel(kernel, inputs, *args, **kwargs)
+        assert not unbacked_bindings, f"{kernel}, {unbacked_bindings}"
         for tensor_arg in tensor_args:
             tensor_arg.realize()
 
@@ -8395,7 +8373,9 @@ class _WaitKernel(_CollectiveKernel):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                unbacked_bindings,
             ) = cls.process_kernel(kernel, inp)
+        assert not unbacked_bindings, f"{kernel} {unbacked_bindings}"
         packed = cls(
             NoneLayout(inp.get_device()),
             kernel,

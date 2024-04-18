@@ -1216,10 +1216,20 @@ class GraphLowering(torch.fx.Interpreter):
         for i in range(buffer_watermark, len(self.buffers)):
             new_unbacked_defs |= self.buffers[i].get_unbacked_symbol_defs()
 
+        def format_buffers():
+            r = []
+            for b in self.buffers[buffer_watermark:]:
+                r.append(
+                    f"unbacked_symbol_defs={b.get_unbacked_symbol_defs()} in:\n{b}\n"
+                )
+            return "***\n".join(r)
+
         unbacked_bindings = n.meta.get("unbacked_bindings", {})
-        assert (
-            new_unbacked_defs == unbacked_bindings.keys()
-        ), f"{new_unbacked_defs} != {unbacked_bindings}"
+        assert new_unbacked_defs == unbacked_bindings.keys(), (
+            f"{unbacked_bindings} != {new_unbacked_defs} (fx != inductor)\n"
+            f"fx node is: {n.format_node()}\n"
+            f"new buffers are:\n\n{format_buffers()}"
+        )
 
         return result
 

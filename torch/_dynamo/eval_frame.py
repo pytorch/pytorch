@@ -775,6 +775,8 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "example_value" in self.current_node.meta:
             # NB: intentionally do not use set_example_value
             arg.node.meta["example_value"] = self.current_node.meta["example_value"]
+        if "unbacked_bindings" in self.current_node.meta:
+            arg.node.meta["unbacked_bindings"] = self.current_node.meta["unbacked_bindings"]
         return arg
 
     def output(self, target, args, kwargs):
@@ -802,6 +804,8 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             result_proxy.node.meta["example_value"] = self.current_node.meta[
                 "example_value"
             ]
+        if "unbacked_bindings" in self.current_node.meta:
+            result_proxy.node.meta["unbacked_bindings"] = self.current_node.meta["unbacked_bindings"]
         if self.current_node.op != "output":
             result_proxy.node._rename(
                 getattr(self.current_node, "name", result_proxy.node.name)

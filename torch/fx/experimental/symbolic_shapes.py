@@ -286,7 +286,10 @@ def rebind_unbacked(shape_env, n: torch.fx.Node, result):
                 raw_u1 = sympy.sympify(u1)
             else:
                 raw_u1 = u1.node.expr
-            shape_env._rename_unbacked_to(raw_u0, raw_u1)
+            # If you manage to hit the memo, this could potentially be the
+            # same
+            if raw_u0 != raw_u1:
+                shape_env._rename_unbacked_to(raw_u0, raw_u1)
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
     r""" Canonicalize a boolean expression by transforming it into a lt / le
