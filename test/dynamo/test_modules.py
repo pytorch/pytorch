@@ -1753,7 +1753,9 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             ]:
                 x = torch.randn(size)
                 mod(x)
-        self.assertEqual(cnts.frame_count, 2 * num_submodules)
+        # The extra recompilations happen because _wrapped_call_impl is now
+        # falling back to eager, and Dynamo is triggering on forward method.
+        self.assertEqual(cnts.frame_count, 3 * num_submodules)
 
     def test_recursion(self):
         mod = MockModule()
@@ -2126,15 +2128,16 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         loss_bwd = loss.backward()
 
         self.assertEqual(eager_loss_bwd, loss_bwd)
-        self.assertEqual(cnt.frame_count, 2)
+        # Both forward and the hook are compiled in one graph
+        self.assertEqual(cnt.frame_count, 1)
 
         # Ndim change, recompile
         pred = model(torch.randn([10, 10, 10]))
-        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.frame_count, 2)
 
         # Stable
         pred = model(torch.randn([10, 10, 10]))
-        self.assertEqual(cnt.frame_count, 4)
+        self.assertEqual(cnt.frame_count, 2)
 
     def test_dunder_call_explicitly(self):
         # hooks should be triggered if explicit calling `__call__`
