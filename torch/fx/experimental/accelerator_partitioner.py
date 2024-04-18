@@ -339,7 +339,7 @@ class Partitioner:
             self.find_single_partition(
                 total_size_of_graph, logical_device_id=device_with_max_mem.logical_id
             )
-        elif total_size_of_graph > sum([d.available_mem_bytes for d in self.devices]):
+        elif total_size_of_graph > sum(d.available_mem_bytes for d in self.devices):
             raise RuntimeError("Devices have no enough memory for the module")
         else:
             # Sparse nn based partition

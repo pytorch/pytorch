@@ -8,6 +8,9 @@ import inspect
 import re
 import contextlib
 import sys
+import warnings
+from torch._library.custom_ops import custom_op
+
 
 __all__ = [
     'Library',
@@ -15,7 +18,9 @@ __all__ = [
     'define',
     'fallthrough_kernel',
     'impl_abstract',
+    'register_fake',
     'get_ctx',
+    'custom_op',
 ]
 
 # Set containing the combination of (namespace, operator, DispatchKey) for which a new kernel has been registered
@@ -93,8 +98,7 @@ class Library:
             name of the operator as inferred from the schema.
 
         Example::
-            >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LIBRARY)
-            >>> my_lib = Library("foo", "DEF")
+            >>> my_lib = Library("mylib", "DEF")
             >>> my_lib.define("sum(Tensor self) -> Tensor")
         '''
         # This is added because we also want to disallow PURE_FUNCTION alias analysis which is a valid
@@ -105,7 +109,18 @@ class Library:
         if isinstance(tags, torch.Tag):
             tags = (tags,)
         result = self.m.define(schema, alias_analysis, tuple(tags))
-        qualname = self.ns + "::" + schema.split("(")[0]
+        name = schema.split("(")[0]
+        qualname = self.ns + "::" + name
+
+        # If the OpOverloadPacket exists already, then this means we're adding a
+        # new OpOverload for it. Refresh the packet to include the new OpOverload.
+        packet_name = name.split(".")[0] if "." in name else name
+        if hasattr(torch.ops, self.ns):
+            ns = getattr(torch.ops, self.ns)
+            if hasattr(ns, packet_name):
+                packet = getattr(ns, packet_name)
+                torch._ops._refresh_packet(packet)
+
         self._op_defs.add(qualname)
         _defs.add(qualname)
         return result
@@ -178,6 +193,8 @@ class Library:
         for handle in self._registration_handles:
             handle.destroy()
         self._registration_handles.clear()
+        global _impls
+        _impls -= self._op_impls
         for name in self._op_defs:
             # Delete the cached torch.ops.ns.foo if it was registered.
             # Otherwise, accessing it leads to a segfault.
@@ -229,7 +246,7 @@ def define(qualname, schema, *, lib=None, tags=()):
     This entrypoint defines the custom operator (the first step)
     you must then perform the second step by calling various
     ``impl_*`` APIs, like :func:`torch.library.impl` or
-    :func:`torch.library.impl_abstract`.
+    :func:`torch.library.register_fake`.
 
     Args:
         qualname (str): The qualified name for the operator. Should be
@@ -249,7 +266,6 @@ def define(qualname, schema, *, lib=None, tags=()):
             torch.Tag carefully before applying it.
 
     Example::
-        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_LIBRARY)
         >>> import torch
         >>> import numpy as np
         >>>
@@ -257,14 +273,14 @@ def define(qualname, schema, *, lib=None, tags=()):
         >>> torch.library.define("mylib::sin", "(Tensor x) -> Tensor")
         >>>
         >>> # Add implementations for the operator
-        >>> @torch.library.impl("mylibrary::sin", "cpu")
+        >>> @torch.library.impl("mylib::sin", "cpu")
         >>> def f(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
         >>> # Call the new operator from torch.ops.
         >>> x = torch.randn(3)
         >>> y = torch.ops.mylib.sin(x)
-        >>> assert torch.allclose(y, x)
+        >>> assert torch.allclose(y, x.sin())
 
     """
     if not isinstance(qualname, str):
@@ -317,15 +333,15 @@ def impl(qualname, types, func=None, *, lib=None):
         >>> import numpy as np
         >>>
         >>> # Define the operator
-        >>> torch.library.define("mylibrary::sin", "(Tensor x) -> Tensor")
+        >>> torch.library.define("mylib::mysin", "(Tensor x) -> Tensor")
         >>>
         >>> # Add implementations for the cpu device
-        >>> @torch.library.impl("mylibrary::sin", "cpu")
+        >>> @torch.library.impl("mylib::mysin", "cpu")
         >>> def f(x):
         >>>     return torch.from_numpy(np.sin(x.numpy()))
         >>>
         >>> x = torch.randn(3)
-        >>> y = torch.ops.mylibrary.sin(x)
+        >>> y = torch.ops.mylib.mysin(x)
         >>> assert torch.allclose(y, x.sin())
     """
     if isinstance(types, str):
@@ -379,21 +395,35 @@ def _(lib: Library, name, dispatch_key=""):
     return wrap
 
 
-
 def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
-    r"""Register an abstract implementation for this operator.
+    r"""This API was renamed to :func:`torch.library.register_fake` in PyTorch 2.4.
+    Please use that instead.
+    """
+    warnings.warn("torch.library.impl_abstract was renamed to "
+                  "torch.library.register_fake. Please use that instead; "
+                  "we will remove torch.library.impl_abstract in a future "
+                  "version of PyTorch.",
+                  DeprecationWarning, stacklevel=2)
+    return register_fake(qualname, func, lib=lib, _stacklevel=_stacklevel + 1)
 
-    An "abstract implementation" specifies the behavior of this operator on
-    Tensors that carry no data. Given some input Tensors with certain properties
-    (sizes/strides/storage_offset/device), it specifies what the properties of
-    the output Tensors are.
 
-    The abstract implementation has the same signature as the operator.
-    It is run for both FakeTensors and meta tensors. To write an abstract
+
+def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
+    r"""Register a FakeTensor implementation ("fake impl") for this operator.
+
+    Also sometimes known as a "meta kernel", "abstract impl".
+
+    An "FakeTensor implementation" specifies the behavior of this operator on
+    Tensors that carry no data ("FakeTensor"). Given some input Tensors with
+    certain properties (sizes/strides/storage_offset/device), it specifies
+    what the properties of the output Tensors are.
+
+    The FakeTensor implementation has the same signature as the operator.
+    It is run for both FakeTensors and meta tensors. To write a FakeTensor
     implementation, assume that all Tensor inputs to the operator are
     regular CPU/CUDA/Meta tensors, but they do not have storage, and
     you are trying to return regular CPU/CUDA/Meta tensor(s) as output.
-    The abstract implementation must consist of only PyTorch operations
+    The FakeTensor implementation must consist of only PyTorch operations
     (and may not directly access the storage or data of any input or
     intermediate Tensors).
 
@@ -412,8 +442,8 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
         >>>     "mylib::custom_linear",
         >>>     "(Tensor x, Tensor weight, Tensor bias) -> Tensor")
         >>>
-        >>> @torch.library.impl_abstract("mylib::custom_linear")
-        >>> def custom_linear_abstract(x, weight):
+        >>> @torch.library.register_fake("mylib::custom_linear")
+        >>> def _(x, weight, bias):
         >>>     assert x.dim() == 2
         >>>     assert weight.dim() == 2
         >>>     assert bias.dim() == 1
@@ -423,13 +453,21 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
         >>>
         >>>     return (x @ weight.t()) + bias
         >>>
+        >>> with torch._subclasses.fake_tensor.FakeTensorMode():
+        >>>     x = torch.randn(2, 3)
+        >>>     w = torch.randn(3, 3)
+        >>>     b = torch.randn(3)
+        >>>     y = torch.ops.mylib.custom_linear(x, w, b)
+        >>>
+        >>> assert y.shape == (2, 3)
+        >>>
         >>> # Example 2: an operator with data-dependent output shape
         >>> torch.library.define("mylib::custom_nonzero", "(Tensor x) -> Tensor")
         >>>
-        >>> @torch.library.impl_abstract("mylib::custom_nonzero")
-        >>> def custom_nonzero_abstract(x):
+        >>> @torch.library.register_fake("mylib::custom_nonzero")
+        >>> def _(x):
         >>>     # Number of nonzero-elements is data-dependent.
-        >>>     # Since we cannot peek at the data in an abstract impl,
+        >>>     # Since we cannot peek at the data in an fake impl,
         >>>     # we use the ctx object to construct a new symint that
         >>>     # represents the data-dependent size.
         >>>     ctx = torch.library.get_ctx()
@@ -443,12 +481,20 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
         >>>     x_np = x.numpy()
         >>>     res = np.stack(np.nonzero(x_np), axis=1)
         >>>     return torch.tensor(res, device=x.device)
+        >>>
+        >>> from torch.fx.experimental.proxy_tensor import make_fx
+        >>>
+        >>> x = torch.tensor([0, 1, 2, 3, 4, 0])
+        >>> trace = make_fx(torch.ops.mylib.custom_nonzero, tracing_mode="symbolic")(x)
+        >>> trace.print_readable()
+        >>>
+        >>> assert torch.allclose(trace(x), torch.ops.mylib.custom_nonzero(x))
 
     """
     source = torch._library.utils.get_source(_stacklevel + 1)
     frame = sys._getframe(_stacklevel)
     caller_module = inspect.getmodule(frame)
-    # Can be none if you call impl_abstract from somewhere there isn't a module
+    # Can be none if you call register_fake from somewhere there isn't a module
     # (e.g. __main__)
     caller_module_name = None if caller_module is None else caller_module.__name__
 
@@ -475,8 +521,8 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
 
 
 # If the op was defined in C++, then we want to make sure there was an
-# m.impl_abstract_pystub(module, ...) call and that the module is the
-# same as the module that called torch.library.impl_abstract.
+# m.set_python_module(module, ...) call and that the module is the
+# same as the module that called torch.library.register_fake.
 def _check_pystubs_once(func, qualname, actual_module_name):
     checked = False
 
@@ -498,8 +544,8 @@ def _check_pystubs_once(func, qualname, actual_module_name):
             cpp_filename = op._handle().debug()
             raise RuntimeError(
                 f"Operator '{qualname}' was defined in C++ and has a Python "
-                f"abstract impl. In this situation, we require there to also be a "
-                f"companion C++ `m.impl_abstract_pystub(\"{actual_module_name}\")` "
+                f"fake impl. In this situation, we require there to also be a "
+                f"companion C++ `m.set_python_module(\"{actual_module_name}\")` "
                 f"call, but we could not find one. Please add that to "
                 f"to the top of the C++ TORCH_LIBRARY({namespace}, ...) block the "
                 f"operator was registered in ({cpp_filename})")
@@ -507,10 +553,10 @@ def _check_pystubs_once(func, qualname, actual_module_name):
         if actual_module_name != pystub_module:
             cpp_filename = op._handle().debug()
             raise RuntimeError(
-                f"Operator '{qualname}' specified that its python abstract impl "
+                f"Operator '{qualname}' specified that its python fake impl "
                 f"is in the Python module '{pystub_module}' but it was actually found "
-                f"in '{actual_module_name}'. Please either move the abstract impl "
-                f"or correct the m.impl_abstract_pystub call ({cpp_filename})")
+                f"in '{actual_module_name}'. Please either move the fake impl "
+                f"or correct the m.set_python_module call ({cpp_filename})")
         checked = True
         return func(*args, **kwargs)
     return inner
@@ -526,7 +572,7 @@ def _check_pystubs_once(func, qualname, actual_module_name):
 def get_ctx() -> "torch._library.abstract_impl.AbstractImplCtx":
     """get_ctx() returns the current AbstractImplCtx object.
 
-    Calling ``get_ctx()`` is only valid inside of an abstract impl
-    (see :func:`torch.library.impl_abstract` for more usage details.
+    Calling ``get_ctx()`` is only valid inside of an fake impl
+    (see :func:`torch.library.register_fake` for more usage details.
     """
     return torch._library.abstract_impl.global_ctx_getter()

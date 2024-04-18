@@ -10,7 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from io import StringIO
 
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 from unittest.mock import patch
 
 import sympy
@@ -94,10 +94,11 @@ class TritonTemplateKernel(TritonKernel):
         grid_fn,
         meta,
         call_sizes,
-        use_jit=False,
+        use_jit=True,
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
+        subgraphs=None,
         *,
         index_dtype,
     ):
@@ -124,6 +125,8 @@ class TritonTemplateKernel(TritonKernel):
         self.epilogue_fn = epilogue_fn
         self.render_hooks = dict()
         self.triton_meta: Optional[Dict[str, object]] = None
+        # For Templated Attention
+        self.subgraphs = subgraphs
 
     def need_numel_args(self):
         return False
@@ -150,8 +153,8 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
-            "device": self.output_node.get_device().index,
-            "device_type": self.output_node.get_device().type,
+            "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -264,7 +267,53 @@ class TritonTemplateKernel(TritonKernel):
             val = self.named_input_nodes[name].get_stride()[index]
         return texpr(self.rename_indexing(val))
 
-    def store_output(self, indices, val, mask):
+    def modification(self, **fixed_inputs) -> str:
+        """This function generates the code body to populate
+        a 'modification' placeholder within a template
+
+        TODO come up with standardized way to modify templates, with
+        potential multiple modifications
+        """
+
+        class PlaceholderSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
+            self.name = "PlaceholderSubstitution"
+
+            def load(self, name: str, index: sympy.Expr):
+                if name not in fixed_inputs:
+                    raise AssertionError(
+                        f"All loads should be coming from fixed inputs - {name}"
+                    )
+                return f"({fixed_inputs[name]})"
+
+            # TODO Doesn't work yet
+            def indirect_indexing(self, index_var, size, check):
+                return self._inner.indirect_indexing(index_var, size, False)
+                # return sympy_symbol(str(index_var))
+
+        # if self.modification_cache is None:
+        with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
+            assert isinstance(
+                self.subgraphs, ir.ComputedBuffer
+            ), "Expected the subgraph to be a ComputedBuffer"
+            if isinstance(self.subgraphs.data, ir.InputBuffer):
+                out = self.subgraphs.data.make_loader()((1,))
+            else:
+                out = self.subgraphs.data.inner_fn((1,))
+
+        self.codegen_body()
+        self.body.writeline(f"{fixed_inputs['out']} = {out.value}")
+
+        body_val = self.body.getvalue()
+        self.body.clear()
+        self.cse.invalidate(set())
+        return body_val
+
+    def store_output(
+        self,
+        indices: Union[List[Any], Tuple[Any]],
+        val: str,
+        mask: Optional[str] = None,
+    ):
         """
         Hook called from template code to store the final output
         (if the buffer hasn't been optimized away), then append any
@@ -272,7 +321,7 @@ class TritonTemplateKernel(TritonKernel):
         """
         assert isinstance(indices, (list, tuple))
         assert isinstance(val, str)
-        assert isinstance(mask, str)
+        assert isinstance(mask, (str, type(None)))
         assert self.template_mask is None
         indices = list(map(TritonPrinter.paren, indices))
         index_symbols = [sympy.Symbol(x) for x in indices]
@@ -357,6 +406,7 @@ class TritonTemplateKernel(TritonKernel):
                 self.stride,
                 self.store_output,
                 self.make_load,
+                self.modification,
             ]
         }
 
@@ -466,6 +516,7 @@ class TritonTemplate(KernelTemplate):
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
+        subgraphs=None,
         **kwargs,
     ):
         assert self.template, "requires jinja2"
@@ -496,13 +547,14 @@ class TritonTemplate(KernelTemplate):
             suffix_args=suffix_args,
             epilogue_fn=epilogue_fn,
             index_dtype="tl.int32",
+            subgraphs=subgraphs,
         )
         with patch.object(
             V.graph, "get_dtype", self._fake_get_dtype(fake_out)
         ), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
-            use_jit=False,
+            use_jit=True,
             **kernel_options,
         ) as kernel:
             try:
@@ -688,10 +740,6 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         assert self.bmreq is not None
         return self.bmreq.benchmark(*args, output_tensor=out)
 
-    def precompile(self):
-        assert self.bmreq is not None
-        self.bmreq.precompile()
-
     def __str__(self):
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
 
@@ -712,6 +760,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 layout=self.layout,
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
+                debug_extra=self.debug_extra,
             )
         )
 
@@ -742,6 +791,9 @@ class ExternKernelCaller(ChoiceCaller):
         return f"ExternKernelCaller({self.choice.call_name()})"
 
     def benchmark(self, *args, out):
+        if out.numel() == 0:
+            # no need to run the kerrnel of do benchmarking
+            return 0.0
         if self.has_out_variant:
             return super().benchmark(*args, out=out)
         else:
@@ -829,7 +881,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
-
         if len(choices) == 0:
             raise RuntimeError(
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
@@ -1044,6 +1095,8 @@ class AlgorithmSelectorCache(PersistentCache):
             return result
 
         def benchmark_in_current_process(choices):
+            from triton.runtime.autotuner import OutOfResources
+
             timings = {}
             for choice in choices:
                 try:
@@ -1063,6 +1116,9 @@ class AlgorithmSelectorCache(PersistentCache):
                         if "illegal memory access" in msg:
                             msg += "\n\nEither error in template or triton bug.\n"
                         raise ErrorFromChoice(msg, choice, debug_str())  # noqa: TRY200
+                except OutOfResources as e:
+                    log.warning(e)
+                    timing = float("inf")
                 except AssertionError as e:
                     raise AssertionError(  # noqa: TRY200
                         f"Incorrect result from choice {choice}\n\n{e}"

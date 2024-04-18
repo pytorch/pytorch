@@ -127,7 +127,7 @@ class BaseListVariable(VariableTracker):
         elif name == "__contains__":
             assert len(args) == 1
             assert not kwargs
-            return iter_contains(self.items, args[0], tx)
+            return iter_contains(self.unpack_var_sequence(tx), args[0], tx)
         elif name == "index":
             from .builder import SourcelessBuilder
 
@@ -160,7 +160,7 @@ class RangeVariable(BaseListVariable):
         elif len(items_to_map) == 3:
             start, stop, step = items_to_map
         else:
-            raise AssertionError()
+            raise AssertionError
 
         assert stop is not None
         super().__init__([start, stop, step], **kwargs)
@@ -263,6 +263,9 @@ class CommonListMethodsVariable(BaseListVariable):
 class ListVariable(CommonListMethodsVariable):
     def python_type(self):
         return list
+
+    def __repr__(self):
+        return f"{self.__class__.__name__}(length={len(self.items)}"
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
@@ -589,7 +592,7 @@ class SliceVariable(BaseListVariable):
         elif len(items_to_map) == 3:
             start, stop, step = items_to_map
         else:
-            raise AssertionError()
+            raise AssertionError
 
         if isinstance(start, variables.TensorVariable) or isinstance(
             stop, variables.TensorVariable
@@ -637,14 +640,14 @@ class ListIteratorVariable(VariableTracker):
     def __repr__(self):
         return f"{self.__class__.__name__}(length={len(self.items)}, index={repr(self.index)})"
 
-    def next_variables(self, tx):
+    def next_variable(self, tx):
         assert self.mutable_local
         old_index = self.index
         if old_index >= len(self.items):
-            raise StopIteration()
+            raise StopIteration
         tx.output.side_effects.mutation(self)
         self.index += 1
-        return self.items[old_index], self
+        return self.items[old_index]
 
     def call_method(
         self,
@@ -662,7 +665,7 @@ class ListIteratorVariable(VariableTracker):
 
     def as_python_constant(self):
         if self.index > 0:
-            raise NotImplementedError()
+            raise NotImplementedError
         return iter([x.as_python_constant() for x in self.items])
 
     def unpack_var_sequence(self, tx):
@@ -745,7 +748,7 @@ class RestrictedListSubclassVariable(ListVariable):
         return [x.as_proxy() for x in self.items]
 
     def as_python_constant(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def is_python_constant(self):
         return False
