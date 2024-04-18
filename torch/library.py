@@ -109,21 +109,34 @@ class Library:
         if isinstance(tags, torch.Tag):
             tags = (tags,)
         result = self.m.define(schema, alias_analysis, tuple(tags))
-        name = schema.split("(")[0]
-        qualname = self.ns + "::" + name
-
-        # If the OpOverloadPacket exists already, then this means we're adding a
-        # new OpOverload for it. Refresh the packet to include the new OpOverload.
-        packet_name = name.split(".")[0] if "." in name else name
-        if hasattr(torch.ops, self.ns):
-            ns = getattr(torch.ops, self.ns)
-            if hasattr(ns, packet_name):
-                packet = getattr(ns, packet_name)
-                torch._ops._refresh_packet(packet)
-
+        qualname = self.ns + "::" + schema.split("(")[0]
         self._op_defs.add(qualname)
         _defs.add(qualname)
         return result
+
+    def _register_fake(self, op_name, fn, _stacklevel=1):
+        r'''Registers the fake impl for an operator defined in the library.'''
+        source = torch._library.utils.get_source(_stacklevel + 1)
+        frame = sys._getframe(_stacklevel)
+        caller_module = inspect.getmodule(frame)
+        # Can be none if you call register_fake from somewhere there isn't a module
+        # (e.g. __main__)
+        caller_module_name = None if caller_module is None else caller_module.__name__
+
+        # TODO(rzou): We're gonna need to stage this change with torchvision,
+        # since torchvision is github first.
+        if caller_module_name is not None and caller_module_name.startswith("torchvision."):
+            caller_module_name = None
+
+        qualname = f"{self.ns}::{op_name}"
+        entry = torch._library.simple_registry.singleton.find(qualname)
+        if caller_module_name is not None:
+            func_to_register = _check_pystubs_once(fn, qualname, caller_module_name)
+        else:
+            func_to_register = fn
+
+        handle = entry.abstract_impl.register(func_to_register, source)
+        self._registration_handles.append(handle)
 
     def impl(self, op_name, fn, dispatch_key=''):
         r'''Registers the function implementation for an operator defined in the library.
@@ -491,34 +504,23 @@ def register_fake(qualname, func=None, /, *, lib=None, _stacklevel=1):
         >>> assert torch.allclose(trace(x), torch.ops.mylib.custom_nonzero(x))
 
     """
-    source = torch._library.utils.get_source(_stacklevel + 1)
-    frame = sys._getframe(_stacklevel)
-    caller_module = inspect.getmodule(frame)
-    # Can be none if you call register_fake from somewhere there isn't a module
-    # (e.g. __main__)
-    caller_module_name = None if caller_module is None else caller_module.__name__
+    stacklevel = _stacklevel
 
-    # TODO(rzou): We're gonna need to stage this change with torchvision,
-    # since torchvision is github first.
-    if caller_module_name is not None and caller_module_name.startswith("torchvision."):
-        caller_module_name = None
-
-    def inner(func):
-        entry = torch._library.simple_registry.singleton.find(qualname)
-        if caller_module_name is not None:
-            func_to_register = _check_pystubs_once(func, qualname, caller_module_name)
+    def register(func):
+        namespace, op_name = torch._library.utils.parse_namespace(qualname)
+        if lib is None:
+            use_lib = Library(namespace, "FRAGMENT")
+            _keep_alive.append(use_lib)
         else:
-            func_to_register = func
-
-        handle = entry.abstract_impl.register(func_to_register, source)
-        if lib is not None:
-            lib._registration_handles.append(handle)
+            use_lib = lib
+        use_lib._register_fake(op_name, func, _stacklevel=stacklevel)
         return func
 
     if func is None:
-        return inner
-    return inner(func)
-
+        return register
+    else:
+        stacklevel += 1
+        register(func)
 
 # If the op was defined in C++, then we want to make sure there was an
 # m.set_python_module(module, ...) call and that the module is the
@@ -539,24 +541,26 @@ def _check_pystubs_once(func, qualname, actual_module_name):
         maybe_pystub = torch._C._dispatch_pystub(
             op._schema.name,
             op._schema.overload_name)
-        if not maybe_pystub:
-            namespace = op.namespace
-            cpp_filename = op._handle().debug()
-            raise RuntimeError(
-                f"Operator '{qualname}' was defined in C++ and has a Python "
-                f"fake impl. In this situation, we require there to also be a "
-                f"companion C++ `m.set_python_module(\"{actual_module_name}\")` "
-                f"call, but we could not find one. Please add that to "
-                f"to the top of the C++ TORCH_LIBRARY({namespace}, ...) block the "
-                f"operator was registered in ({cpp_filename})")
-        pystub_module = maybe_pystub[0]
-        if actual_module_name != pystub_module:
-            cpp_filename = op._handle().debug()
-            raise RuntimeError(
-                f"Operator '{qualname}' specified that its python fake impl "
-                f"is in the Python module '{pystub_module}' but it was actually found "
-                f"in '{actual_module_name}'. Please either move the fake impl "
-                f"or correct the m.set_python_module call ({cpp_filename})")
+        if maybe_pystub is None:
+            if torch._library.utils.requires_set_python_module():
+                namespace = op.namespace
+                cpp_filename = op._handle().debug()
+                raise RuntimeError(
+                    f"Operator '{qualname}' was defined in C++ and has a Python "
+                    f"fake impl. In this situation, we require there to also be a "
+                    f"companion C++ `m.set_python_module(\"{actual_module_name}\")` "
+                    f"call, but we could not find one. Please add that to "
+                    f"to the top of the C++ TORCH_LIBRARY({namespace}, ...) block the "
+                    f"operator was registered in ({cpp_filename})")
+        else:
+            pystub_module = maybe_pystub[0]
+            if actual_module_name != pystub_module:
+                cpp_filename = op._handle().debug()
+                raise RuntimeError(
+                    f"Operator '{qualname}' specified that its python fake impl "
+                    f"is in the Python module '{pystub_module}' but it was actually found "
+                    f"in '{actual_module_name}'. Please either move the fake impl "
+                    f"or correct the m.set_python_module call ({cpp_filename})")
         checked = True
         return func(*args, **kwargs)
     return inner
