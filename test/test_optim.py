@@ -155,7 +155,12 @@ class TestOptimRenewed(TestCase):
 
             initial_value = closure().item()
             for _ in range(20):
-                loss = optimizer.step(closure)
+                if optim_info.step_requires_closure:
+                    loss = optimizer.step(closure)
+                else:
+                    loss = closure()
+                    optimizer.step()
+
                 for scheduler in schedulers:
                     if isinstance(scheduler, ReduceLROnPlateau):
                         scheduler.step(loss)
@@ -1104,7 +1109,11 @@ class TestOptimRenewed(TestCase):
 
             # Prime the optimizer
             for _ in range(10):
-                optimizer.step(closure)
+                if optim_info.step_requires_closure:
+                    optimizer.step(closure)
+                else:
+                    closure()
+                    optimizer.step()
 
             # Clone the weights and construct a new optimizer for them
             with torch.no_grad():
@@ -1119,8 +1128,15 @@ class TestOptimRenewed(TestCase):
 
             # Run both optimizers in parallel
             for _ in range(10):
-                optimizer.step(closure)
-                optimizer_c.step(closure_c)
+                if optim_info.step_requires_closure:
+                    optimizer.step(closure)
+                    optimizer_c.step(closure_c)
+                else:
+                    closure()
+                    closure_c()
+                    optimizer.step()
+                    optimizer_c.step()
+
                 self.assertEqual(weight, weight_c)
                 self.assertEqual(bias, bias_c)
 
