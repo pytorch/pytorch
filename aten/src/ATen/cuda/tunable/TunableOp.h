@@ -87,17 +87,10 @@ class TunableOp {
       this->ops_.emplace(name, std::move(op));
     }
 
-    static int GetICacheFlushIterations() {
-      static const char *env = getenv("PYTORCH_TUNABLEOP_ICACHE_FLUSH_ITERATIONS");
-      if (env != nullptr) {
-        return atoi(env);
-      }
-      return 0;
-    }
-
   private:
     static void WarmUp(Callable<ParamsT> *op, std::vector<ParamsT*> param, size_t num_iter) {
-      bool do_flush = GetICacheFlushIterations() > 0;
+      TuningContext* ctx = getTuningContext();
+      bool do_flush = ctx->GetICacheFlushIterations() > 0;
       for (size_t i = 0; i < num_iter; i++) {
         if (do_flush) {
           at::cuda::flush_icache();
@@ -107,7 +100,8 @@ class TunableOp {
     }
 
     static double Profile(Callable<ParamsT> *op, std::vector<ParamsT*> param, size_t num_iter) {
-      bool do_flush = GetICacheFlushIterations() > 0;
+      TuningContext* ctx = getTuningContext();
+      bool do_flush = ctx->GetICacheFlushIterations() > 0;
       TimerT timer{};
       timer.Start();
       for (size_t i = 0; i < num_iter; i++) {
@@ -121,22 +115,6 @@ class TunableOp {
     }
 
   protected:
-    static bool IsNumericsCheckEnabled() {
-      static const char *env = getenv("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
-      if (env != nullptr && strcmp(env, "0") == 0) {
-        return false;
-      }
-      return true;
-    }
-
-    static size_t GetRotatingBufferSize() {
-      static const char *env = getenv("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
-      if (env != nullptr) {
-        return atoi(env) * 1024 * 1024;  // in MiB
-      }
-      return 0;
-    }
-
     virtual ResultEntry FindFastest(const ParamsT* params) {
       TuningContext* ctx = getTuningContext();
       auto op_sig = Signature();
@@ -145,7 +123,7 @@ class TunableOp {
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
 
-      int flush_iters = GetICacheFlushIterations();
+      int flush_iters = ctx->GetICacheFlushIterations();
       if (flush_iters > 0) {
         TUNABLE_LOG("instruction cache flush is enabled");
       }
@@ -159,7 +137,7 @@ class TunableOp {
 
       // need copies of params to reuse
       // make as many copies as will fill the requested rotating buffer size, if requested
-      size_t rotating_size = GetRotatingBufferSize();
+      size_t rotating_size = ctx->GetRotatingBufferSize();
       bool use_buffer_rotation = (rotating_size > 0);
       size_t param_size = params->GetSize(use_buffer_rotation);
       size_t param_count = (rotating_size / param_size) + 1;
@@ -180,7 +158,7 @@ class TunableOp {
       for (size_t i = 0; i < op_names_.size(); i++) {
         auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
 
-        if (IsNumericsCheckEnabled()) {
+        if (ctx->IsNumericsCheckEnabled()) {
           ParamsT* numerical_params = params->DeepCopy(false);
           auto status = candidate->Call(numerical_params);
           if (status != OK) {

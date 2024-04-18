@@ -145,6 +145,10 @@ class TORCH_CUDA_CPP_API TuningContext {
     void DisableTuning();
     bool IsTuningEnabled() const;
 
+    void EnableNumericsCheck();
+    void DisableNumericsCheck();
+    bool IsNumericsCheckEnabled() const;
+
     void SetMaxTuningDurationMs(int max_duration_ms);
     int GetMaxTuningDurationMs() const;
 
@@ -156,6 +160,12 @@ class TORCH_CUDA_CPP_API TuningContext {
 
     void SetMaxWarmupIterations(int max_iter);
     int GetMaxWarmupIterations() const;
+
+    void SetICacheFlushIterations(int iterations);
+    int GetICacheFlushIterations() const;
+
+    void SetRotatingBufferSize(int size);
+    int GetRotatingBufferSize() const;
 
     void EnableTunableOpAndTuning();
     void DisableTunableOpAndTuning();
@@ -179,10 +189,13 @@ class TORCH_CUDA_CPP_API TuningContext {
     bool enable_;
     bool tuning_enable_;
     bool manager_initialized_;
+    bool numerics_check_enabled_;
     int max_tuning_duration_ms_;
     int max_tuning_iterations_;
     int max_warmup_duration_ms_;
     int max_warmup_iterations_;
+    int icache_flush_iterations_;
+    int rotating_buffer_size_;
     mutable TuningResultsManager manager_;
     mutable c10::once_flag manager_init_once_;
     TuningResultsValidator validator_;

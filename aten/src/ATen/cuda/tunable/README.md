@@ -66,7 +66,10 @@ Default is 1.
 The following options may help diminish any variance between tuning and non-tuning scenarios due to cache effects.  During tuning of a workload the various hardware caches will more likely produce hits than when not tuning.  The following options attempt to flush these caches to produce a more faithful profile of the tuned operator.
 
 #### PYTORCH_TUNABLEOP_ICACHE_FLUSH_ITERATIONS
-Default is 0, meaning it is not used.
+Default is 0, meaning it is not used. Set to 1 or greater to flush the instrution cache.
+
+#### PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE
+Default is 0, meaning it is not used. Set to the number of MiB to use for the pool of operator parameters. For example, setting this to the size of your device's memory cache will guarantee that every tuning iteration will use a cold cache.
 
 ## File Output
 

@@ -294,10 +294,13 @@ TuningContext::TuningContext() :
     enable_{false},
     tuning_enable_{true},
     manager_initialized_{false},
+    numerics_check_enabled_{true},
     max_tuning_duration_ms_{30},
     max_tuning_iterations_{100},
     max_warmup_duration_ms_{0},
     max_warmup_iterations_{0},
+    icache_flush_iterations_{0},
+    rotating_buffer_size_{0},
     filename_{},
     results_count_from_input_file_{0}
 {
@@ -364,6 +367,22 @@ bool TuningContext::IsTuningEnabled() const {
   return tuning_enable_;
 }
 
+void TuningContext::EnableNumericsCheck() {
+  numerics_check_enabled_ = true;
+}
+
+void TuningContext::DisableNumericsCheck() {
+  numerics_check_enabled_ = false;
+}
+
+bool TuningContext::IsNumericsCheckEnabled() const {
+  static const char *env = getenv("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
+  if (env != nullptr && strcmp(env, "0") == 0) {
+    return false;
+  }
+  return numerics_check_enabled_;
+}
+
 void TuningContext::SetMaxTuningDurationMs(int max_duration_ms) {
   max_tuning_duration_ms_ = max_duration_ms;
 }
@@ -410,6 +429,30 @@ int TuningContext::GetMaxWarmupIterations() const {
     return atoi(env);
   }
   return max_warmup_iterations_;
+}
+
+void TuningContext::SetICacheFlushIterations(int iterations) {
+  icache_flush_iterations_ = iterations;
+}
+
+int TuningContext::GetICacheFlushIterations() const {
+  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ICACHE_FLUSH_ITERATIONS");
+  if (env != nullptr) {
+    return atoi(env);
+  }
+  return icache_flush_iterations_;
+}
+
+void TuningContext::SetRotatingBufferSize(int size) {
+  rotating_buffer_size_ = size;
+}
+
+int TuningContext::GetRotatingBufferSize() const {
+  static const char *env = std::getenv("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
+  if (env != nullptr) {
+    return atoi(env) * 1024 * 1024;  // in MiB
+  }
+  return rotating_buffer_size_;
 }
 
 void TuningContext::EnableTunableOpAndTuning() {
