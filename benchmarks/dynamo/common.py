@@ -2704,6 +2704,8 @@ class BenchmarkRunner:
             compiled_model = self.deepcopy_and_maybe_parallelize(orig_model)
             self.init_optimizer(name, current_device, compiled_model.parameters())
             self.seperate_optimizer = self.optimizer
+        else:
+            compiled_model = model
 
         self.init_optimizer(name, current_device, model.parameters())
 
@@ -3554,6 +3556,11 @@ def run(runner, args, original_dir=None):
     if args.ddp:
         assert args.training, "DDP benchmark requires --training mode"
         torch._dynamo.config.optimize_ddp = args.optimize_ddp_mode
+        if args.compiled_autograd and args.optimize_ddp_mode != "python_reducer":
+            log.error(
+                "CompiledAutograd + DDP is only compatible with python_reducer."
+            )
+            return sys.exit(-1)
         if args.only == "dlrm":
             log.error(
                 "DLRM+DDP is unsupported as it requires sharding the embedding layer separately from DDP"
