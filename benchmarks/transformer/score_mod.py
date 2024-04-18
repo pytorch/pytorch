@@ -24,11 +24,6 @@ def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) ->
     for _ in range(5):
         func(*args, **kwargs)
     return do_bench(lambda: func(*args, **kwargs)) * 1e3
-    # t0 = benchmark.Timer(
-    #     stmt="func(*args, **kwargs)",
-    #     globals={"args": args, "kwargs": kwargs, "func": func},
-    # )
-    # return t0.adaptive_autorange(min_run_time=0.1).median * 1e6
 
 
 @dataclass(frozen=True)
