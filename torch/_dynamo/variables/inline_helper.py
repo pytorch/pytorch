@@ -3,6 +3,13 @@ import contextlib
 import torch.fx
 from .constant import ConstantVariable
 
+"""
+This file contains helper functions to decompose and inline a user function/module
+with make_fx. The primary use case of these functions are to enable the inlining of
+nn modules and torch ops during the dynamo tracing. This functionality is currently
+guarded with `torch._dynamo.config.use_single_step_graph`
+"""
+
 
 def dummy_user_function_to_inline_gm(gm, args):
     return gm(*args)
@@ -49,9 +56,6 @@ def vt_to_fake_helper(vt, tx):
     return proxy_to_fake_helper(proxy_)
 
 
-tracer_to_used_names = {}
-
-
 def reconstruct_node_meta_data(module_vt, tx, num_nodes_need_update_metadata):
     for node in tx.output.graph.nodes.__reversed__():
         num_nodes_need_update_metadata -= 1
@@ -62,20 +66,21 @@ def reconstruct_node_meta_data(module_vt, tx, num_nodes_need_update_metadata):
             # below logic to get a unique name for source_fn_stack is mimic from
             # the _Namespace.create_name() which is used to get a unique name for
             # the fx node.
-            if tx.output.current_tracer not in tracer_to_used_names.keys():
+            breakpoint()
+            if tx.output.current_tracer not in tx.tracer_to_used_names.keys():
                 # TODO(JackCaoG): use weakref here?
-                tracer_to_used_names[tx.output.current_tracer] = {}
+                tx.tracer_to_used_names[tx.output.current_tracer] = {}
 
             base_module_key = module_vt.module_key.lower()
 
             if (
                 base_module_key
-                not in tracer_to_used_names[tx.output.current_tracer].keys()
+                not in tx.tracer_to_used_names[tx.output.current_tracer].keys()
             ):
-                tracer_to_used_names[tx.output.current_tracer][base_module_key] = 0
+                tx.tracer_to_used_names[tx.output.current_tracer][base_module_key] = 0
 
-            count = tracer_to_used_names[tx.output.current_tracer][base_module_key]
-            tracer_to_used_names[tx.output.current_tracer][base_module_key] += 1
+            count = tx.tracer_to_used_names[tx.output.current_tracer][base_module_key]
+            tx.tracer_to_used_names[tx.output.current_tracer][base_module_key] += 1
             unique_module_key = (
                 base_module_key if count == 0 else f"{base_module_key}_{count}"
             )
@@ -97,14 +102,13 @@ def reconstruct_node_meta_data(module_vt, tx, num_nodes_need_update_metadata):
                 node.meta["stack_trace"] = "\n".join(splited[:-3]) + "\n"
 
 
-code_to_Fx = {}
+code_to_fx = {}  # type: ignore[var-annotated]
 
 
 def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs):
     from functorch import make_fx
 
     from torch._dispatch.python import enable_python_dispatcher
-    from torch._guards import detect_fake_mode
     from .base import MutableLocal
     from .builder import SourcelessBuilder
     from .dicts import ConstDictVariable
@@ -127,15 +131,14 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs):
         return inner
 
     wrapped_fn = wrapper_fn(fn)
-    fake_mode = detect_fake_mode(fake_value_args)
 
-    with fake_mode and enable_python_dispatcher() and decomp_for_pre_dispatch():
+    with tx.fake_mode and enable_python_dispatcher() and decomp_for_pre_dispatch():
         fx_g = make_fx(wrapped_fn, pre_dispatch=True)(
             fake_value_args, fake_value_kwargs
         )
 
     # this is a hack, we want to access `.code` here to trigger the `real_recompile`
-    # in case this is `_lazy_graph_module`. This will aovid us trying to inline the
+    # in case this is `_lazy_graph_module`. This will avoid us trying to inline the
     # `_LazyGraphModule._lazy_forward`(in the skip list) below.
     code = fx_g.code
 
@@ -143,10 +146,10 @@ def decompose_and_inline_function_with_makefx(tx, fn, args, kwargs):
     # SpeculationLog will replay the dynamo tracing upon graph break and it expects
     # to see the same functon name. It is safer to rerun the `make_Fx` and use the
     # cached fx only if code is the same.
-    if code in code_to_Fx:
-        fx_g = code_to_Fx[code]
+    if code in code_to_fx:
+        fx_g = code_to_fx[code]
     else:
-        code_to_Fx[code] = fx_g
+        code_to_fx[code] = fx_g
 
     # now inline this fx graph and return the output
     user_fn_variable_with_kwargs = SourcelessBuilder.create(
