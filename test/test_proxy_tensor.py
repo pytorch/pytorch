@@ -1981,6 +1981,12 @@ out_symbolic_tensor_failures = {
     xfail('ones', ''),
     xfail('randn', ''),
     xfail('zeros', ''),
+
+    # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('index_reduce', 'prod'),
+    xfail('index_reduce', 'mean'),
+    xfail('index_reduce', 'amax'),
+    xfail('index_reduce', 'amin'),
 }
 
 out_symbolic_tensor_segfaults = {
