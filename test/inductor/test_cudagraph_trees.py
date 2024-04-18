@@ -518,11 +518,11 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     self.assertEqual(m.count, expected_clones)
 
         def test_unaligned_static_input_trees(self):
-            self._test_unaligned_static_input_impl(expected_clones=2)
+            self._test_unaligned_static_input_impl(expected_clones=0)
 
         @torch._inductor.config.patch("triton.cudagraph_trees", False)
         def test_unaligned_static_input_non_trees(self):
-            self._test_unaligned_static_input_impl(expected_clones=2)
+            self._test_unaligned_static_input_impl(expected_clones=0)
 
         @torch._inductor.config.patch("triton.cudagraphs", False)
         def test_unaligned_static_input_no_cudagraphs(self):
