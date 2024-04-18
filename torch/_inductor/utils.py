@@ -949,11 +949,11 @@ class DeferredLineBase:
 
     def __call__(self) -> Optional[str]:
         """Returns either self.line or None to indicate the line has been 'unwritten'"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def _new_line(self, line: str) -> DeferredLineBase:
         """Returns a new deferred line with the same condition"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def with_prefix(self, prefix):
         return self._new_line(f"{prefix}{self.line}")
@@ -1528,3 +1528,33 @@ def is_gpu(device: str):
 def device_need_guard(device: str):
     assert isinstance(device, str)
     return is_gpu(device)
+
+
+def needs_fallback_due_to_atomic_add_limitations(dtype):
+    # tl.atomic_add does NOT support the following types
+    return dtype in {torch.int64, torch.bool, torch.bfloat16}
+
+
+def use_scatter_fallback(
+    fn, reduction_type, self_dtype, src_dtype, src_device_type, src_is_tensor
+):
+    reduce_ty = "add" if fn == "aten.scatter_" else "sum"
+
+    return (
+        reduction_type not in {None, reduce_ty}
+        or (
+            src_is_tensor
+            and is_gpu(src_device_type)
+            and needs_fallback_due_to_atomic_add_limitations(src_dtype)
+        )
+        or (
+            fn == "aten.scatter_reduce_"
+            and reduction_type == "sum"
+            and src_is_tensor
+            and src_device_type == "cpu"
+            and config.cpp.fallback_scatter_reduce_sum
+            and (config.cpp.dynamic_threads or parallel_num_threads() != 1)
+        )
+        or (reduction_type == reduce_ty and self_dtype in {torch.bool, torch.int64})
+        or torch.are_deterministic_algorithms_enabled()
+    )

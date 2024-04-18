@@ -577,7 +577,7 @@ class TestFullyShardBackwardPrefetch(FSDPTest):
         return post_backward_with_record
 
 
-class TestFullyShardUnshard(FSDPTest):
+class TestFullyShardUnshardMultiProcess(FSDPTest):
     @property
     def world_size(self) -> int:
         return min(torch.cuda.device_count(), 2)
@@ -658,6 +658,23 @@ class TestFullyShardUnshard(FSDPTest):
                     _optim.step()
                 _optim.zero_grad()
             self.assertEqual(losses[0], losses[1])
+
+
+class TestFullyShardUnshardMultiThread(FSDPTestMultiThread):
+    @property
+    def world_size(self) -> int:
+        return 2
+
+    @unittest.skipIf(not TEST_CUDA, "no cuda")
+    def test_unshard_no_param_group(self):
+        # Check that we can call `unshard()` on a module with no parameter
+        # group / no managed parameters without erroring
+        model = nn.Sequential(nn.Linear(4, 4), nn.Linear(4, 4))
+        for lin in model:
+            fully_shard(lin)
+        fully_shard(model)
+        handle = model.unshard(async_op=True)
+        handle.wait()
 
 
 if __name__ == "__main__":
