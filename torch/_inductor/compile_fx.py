@@ -838,8 +838,12 @@ def get_input_idxs_to_check(
         if (
             isinstance(input, torch.Tensor)  # non-tensors don't need alignment
             and input.device.type == "cuda"  # right now we only care for cuda tensors
-            and not (i in static_input_idxs and tensor_is_aligned(input))  # tensor is NOT (aligned and constant)
-            and should_assume_input_aligned(input)  # See Note: [Input Alignment handling in Inductor]
+            and not (
+                i in static_input_idxs and tensor_is_aligned(input)
+            )  # tensor is NOT (aligned and constant)
+            and should_assume_input_aligned(
+                input
+            )  # See Note: [Input Alignment handling in Inductor]
         ):
             # if we get here, then
             # (a) our triton code assumes that the input is aligned

@@ -1468,7 +1468,7 @@ class TritonKernel(Kernel):
         def add_range(i, expr):
             expr = sv.simplify(expr)
             if not sv.statically_known_multiple_of(remaining[i], expr):
-                raise CantSplit()
+                raise CantSplit
             # guard on the last item out
             remaining[i] = FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
@@ -1501,7 +1501,7 @@ class TritonKernel(Kernel):
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group]
                     ):
-                        raise CantSplit()
+                        raise CantSplit
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
                     return_getters.append(
