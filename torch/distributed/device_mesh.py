@@ -12,6 +12,27 @@ from ..utils._typing_utils import not_none
 __all__ = ["init_device_mesh", "DeviceMesh"]
 
 
+import functools
+import weakref
+
+
+def weak_lru(maxsize=128, typed=False):
+    'LRU Cache decorator that keeps a weak reference to "self"'
+
+    def wrapper(func):
+        @functools.lru_cache(maxsize, typed)
+        def _func(_self, *args, **kwargs):
+            return func(_self(), *args, **kwargs)
+
+        @functools.wraps(func)
+        def inner(self, *args, **kwargs):
+            return _func(weakref.ref(self), *args, **kwargs)
+
+        return inner
+
+    return wrapper
+
+
 if not is_available():
     import sys
 
@@ -55,27 +76,6 @@ else:
             logger.warning(
                 "DeviceMesh requires numpy >= 1.21 to be installed for type checking"
             )
-
-
-import functools
-import weakref
-
-def weak_lru(maxsize=128, typed=False):
-    'LRU Cache decorator that keeps a weak reference to "self"'
-    def wrapper(func):
-
-        @functools.lru_cache(maxsize, typed)
-        def _func(_self, *args, **kwargs):
-            return func(_self(), *args, **kwargs)
-
-        @functools.wraps(func)
-        def inner(self, *args, **kwargs):
-            return _func(weakref.ref(self), *args, **kwargs)
-
-        return inner
-
-    return wrapper
-
 
     class _MeshEnv:
         def __init__(self) -> None:
