@@ -106,7 +106,7 @@ class ModelsWithScriptObjectAttr:
         def __init__(self):
             super().__init__()
             self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
-            self.attr2 = [
+            self.pytree_attr2 = [
                 torch.classes._TorchScriptTesting._Foo(1, 2),
                 {
                     torch.classes._TorchScriptTesting._Foo(3, 4),
@@ -118,7 +118,7 @@ class ModelsWithScriptObjectAttr:
         def __init__(self):
             super().__init__()
             self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
-            self.attr2 = [
+            self.pytree_attr2 = [
                 torch.classes._TorchScriptTesting._Foo(1, 2),
                 {
                     torch.classes._TorchScriptTesting._Foo(3, 4),
@@ -132,7 +132,7 @@ class ModelsWithScriptObjectAttr:
         def __init__(self):
             super().__init__()
             self.attr = torch.classes._TorchScriptTesting._Foo(10, 20)
-            self.attr2 = [
+            self.pytree_attr2 = [
                 torch.classes._TorchScriptTesting._Foo(1, 2),
                 {
                     torch.classes._TorchScriptTesting._Foo(3, 4),
@@ -509,6 +509,7 @@ class TestPasses(TestCase):
                 self.assertEqual(len(fake_constant_attrs), len(constant_attrs))
                 for fake_obj, fqn in fake_constant_attrs.items():
                     self.assertEqual(constant_attrs[fake_to_real[fake_obj]], fqn)
+                _gather_constant_attrs(patched_mod)
 
     def test_runtime_assert_inline_constraints_for_item(self) -> None:
         class M(torch.nn.Module):

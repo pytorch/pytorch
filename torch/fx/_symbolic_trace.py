@@ -366,7 +366,7 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, (torch.Tensor, FakeScriptObject)):
+        if isinstance(a, (torch.Tensor, torch.ScriptObject, FakeScriptObject)):
             qualname: Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
@@ -732,6 +732,7 @@ class Tracer(TracerBase):
             self.tensor_attrs: Dict[
                 Union[
                     torch.Tensor,
+                    torch.ScriptObject,
                     FakeScriptObject
                 ], str
             ] = {}
@@ -968,7 +969,7 @@ class _PatchedFn(NamedTuple):
     orig_fn: Any
 
     def revert(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class _PatchedFnSetItem(_PatchedFn):
