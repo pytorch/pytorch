@@ -95,23 +95,10 @@ Tensor& _fft_r2c_mps_out(const Tensor& self, IntArrayRef dim, int64_t normalizat
       auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, self);
       auto descriptor = [MPSGraphFFTDescriptor descriptor];
       descriptor.scalingMode = normalization_to_ScalingMode(normalization);
-      MPSGraphTensor* outputTensor;
-      if (onesided) {
-        // Return only unique results:
-        outputTensor = [mpsGraph realToHermiteanFFTWithTensor:inputTensor
-                                                         axes:IntArrayToNSArray(dim)
-                                                   descriptor:descriptor
-                                                         name:nil];
-      } else {
-        // Return with Hermitean conjugate results:
-        auto useDataType =
-            (inputTensor.dataType == MPSDataTypeFloat16) ? MPSDataTypeComplexFloat16 : MPSDataTypeComplexFloat32;
-        auto cTensor = [mpsGraph castTensor:inputTensor toType:useDataType name:nil];
-        outputTensor = [mpsGraph fastFourierTransformWithTensor:cTensor
-                                                           axes:IntArrayToNSArray(dim)
-                                                     descriptor:descriptor
-                                                           name:nil];
-      }
+      auto outputTensor = [mpsGraph realToHermiteanFFTWithTensor:inputTensor
+                                                            axes:IntArrayToNSArray(dim)
+                                                      descriptor:descriptor
+                                                            name:nil];
       newCachedGraph->inputTensor_ = inputTensor;
       newCachedGraph->outputTensor_ = outputTensor;
     });

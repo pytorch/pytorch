@@ -56,8 +56,8 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
 
   ReduceOp(
       RedOpType op,
-      const c10::intrusive_ptr<_SupplementBase>& optional_supplement) {
-    if (optional_supplement) {
+      c10::intrusive_ptr<_SupplementBase> optional_supplement) {
+    if (optional_supplement.get()) {
       op_ = op;
     } else {
       supplement_ = optional_supplement;
@@ -66,9 +66,14 @@ struct TORCH_API ReduceOp : torch::CustomClassHolder {
 
   // The heap resource supplement_, if it exists, is managed by a
   // c10::intrusive_ptr, so constructors and operator= can be simple
-  ReduceOp(const ReduceOp& other) = default;
+  ReduceOp(const ReduceOp& other)
+      : op_(other.op_), supplement_(other.supplement_) {}
 
-  ReduceOp& operator=(const ReduceOp& other) = default;
+  const ReduceOp& operator=(const ReduceOp& other) {
+    op_ = other.op_;
+    supplement_ = other.supplement_;
+    return *this;
+  }
 
   operator RedOpType() const {
     return op_;

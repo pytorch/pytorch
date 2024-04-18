@@ -257,7 +257,7 @@ class SendBuffer {
   }
 
   void flush() {
-    if (!buffer.empty()) {
+    if (buffer.size() > 0) {
       client.sendRaw(buffer.data(), buffer.size());
       buffer.clear();
     }
@@ -390,7 +390,7 @@ void TCPStore::waitForWorkers() {
   }
 }
 
-void TCPStore::validate() {
+void TCPStore::validate(void) {
   const std::lock_guard<std::mutex> lock(activeOpLock_);
   detail::SendBuffer buffer(*client_, detail::QueryType::VALIDATE);
   buffer.appendValue<std::uint32_t>(c10d::detail::validationMagicNumber);
@@ -625,7 +625,7 @@ bool TCPStore::hasExtendedApi() const {
 std::unordered_map<std::string, std::unordered_map<std::string, double>>
 TCPStore::collectClientCounters() const noexcept {
   std::unordered_map<std::string, std::unordered_map<std::string, double>> res;
-  for (const auto& kv : clientCounters_) {
+  for (auto kv : clientCounters_) {
     res[kv.first] = kv.second.observe();
   }
   return res;

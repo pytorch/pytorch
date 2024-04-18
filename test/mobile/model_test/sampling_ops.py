@@ -3,7 +3,6 @@ import torch
 
 # https://pytorch.org/docs/stable/torch.html#random-sampling
 
-
 class SamplingOpsModule(torch.nn.Module):
     def forward(self):
         a = torch.empty(3, 3).uniform_(0.0, 1.0)

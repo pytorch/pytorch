@@ -3,9 +3,8 @@
 import torch
 import torch._C
 import torch.nn.functional as F
-from torch.testing._internal.common_utils import skipIfNoXNNPACK
 from torch.testing._internal.jit_utils import JitTestCase
-
+from torch.testing._internal.common_utils import skipIfNoXNNPACK
 
 class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
     def check_replacement(
@@ -134,8 +133,10 @@ class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
                 "prepacked::linear_clamp_run": "aten::linear",
                 "prepacked::conv2d_clamp_prepack": "aten::conv2d",
                 "prepacked::conv2d_clamp_run": "aten::conv2d",
-                "prepacked::conv2d_transpose_clamp_prepack": "aten::conv_transpose2d",
-                "prepacked::conv2d_transpose_clamp_run": "aten::conv_transpose2d",
+                "prepacked::conv2d_transpose_clamp_prepack":
+                    "aten::conv_transpose2d",
+                "prepacked::conv2d_transpose_clamp_run":
+                    "aten::conv_transpose2d",
             },
             jit_pass=torch._C._jit_pass_insert_prepacked_ops,
         )
@@ -146,7 +147,7 @@ class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
             model=torch.jit.trace(torch.nn.Linear(5, 4), torch.rand(3, 2, 5)),
             replacements={
                 "prepacked::linear_clamp_prepack": "aten::linear",
-                "prepacked::linear_clamp_run": "aten::linear",
+                "prepacked::linear_clamp_run": "aten::linear"
             },
             jit_pass=torch._C._jit_pass_insert_prepacked_ops,
         )
@@ -222,9 +223,11 @@ class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
         self.check_replacement(
             model=model,
             replacements={
-                "prepacked::linear_clamp_prepack": "prepacked::linear_clamp_prepack",
+                "prepacked::linear_clamp_prepack":
+                    "prepacked::linear_clamp_prepack",
                 "prepacked::linear_clamp_run": linear_activation_kind,
-                "prepacked::conv2d_clamp_prepack": "prepacked::conv2d_clamp_prepack",
+                "prepacked::conv2d_clamp_prepack":
+                    "prepacked::conv2d_clamp_prepack",
                 "prepacked::conv2d_clamp_run": conv2d_activation_kind,
             },
             jit_pass=torch._C._jit_pass_fuse_clamp_w_prepacked_linear_conv,
@@ -236,7 +239,7 @@ class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
             linear_activation=F.hardtanh,
             linear_activation_kind="aten::hardtanh",
             conv2d_activation=F.hardtanh_,
-            conv2d_activation_kind="aten::hardtanh_",
+            conv2d_activation_kind="aten::hardtanh_"
         )
 
     @skipIfNoXNNPACK
@@ -245,7 +248,7 @@ class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
             linear_activation=F.hardtanh_,
             linear_activation_kind="aten::hardtanh_",
             conv2d_activation=F.hardtanh,
-            conv2d_activation_kind="aten::hardtanh",
+            conv2d_activation_kind="aten::hardtanh"
         )
 
     @skipIfNoXNNPACK
@@ -254,7 +257,7 @@ class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
             linear_activation=F.relu,
             linear_activation_kind="aten::relu",
             conv2d_activation=F.relu_,
-            conv2d_activation_kind="aten::relu_",
+            conv2d_activation_kind="aten::relu_"
         )
 
     @skipIfNoXNNPACK
@@ -263,5 +266,5 @@ class TestOptimizeForMobilePreserveDebugInfo(JitTestCase):
             linear_activation=F.relu_,
             linear_activation_kind="aten::relu_",
             conv2d_activation=F.relu,
-            conv2d_activation_kind="aten::relu",
+            conv2d_activation_kind="aten::relu"
         )

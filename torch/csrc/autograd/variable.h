@@ -681,7 +681,7 @@ TORCH_API void handle_view_on_rebase(
 
 struct TORCH_API DifferentiableViewMeta : public AutogradMeta {
  private:
-  /// Information about the views
+  /// Informations about the views
   c10::optional<ViewInfo> backward_info_;
   c10::optional<ViewInfo> forward_info_;
 

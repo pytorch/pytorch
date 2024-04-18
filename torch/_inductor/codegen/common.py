@@ -449,10 +449,6 @@ class PythonPrinter(ExprPrinter):
         assert len(expr.args) == 1
         return f"math.floor({self._print(expr.args[0])})"
 
-    def _print_Trunc(self, expr):
-        assert len(expr.args) == 1
-        return f"math.trunc({self._print(expr.args[0])})"
-
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
         return f"math.ceil({self._print(expr.args[0])})"
@@ -582,21 +578,42 @@ class OpOverrides:
     def _initialize_pointwise_overrides(cls, target):
         assert target in {"triton", "cpp", "cppvec"}, target
 
+        def pointwise_factory_1(impl):
+            def func(x):
+                return impl.format(x=x)
+
+            return func
+
+        def pointwise_factory_2(impl):
+            def func(x, y):
+                return impl.format(x=x, y=y)
+
+            return func
+
         for funcname, data in pointwise_overrides_data.items():
             impl = getattr(data, target)
             if impl is None:
                 continue
+
+            if isinstance(impl, str):
+                nof_args = 2 if "{y}" in impl else 1
+                # extend the following dictionary with factory
+                # functions for a specific number of arguments as
+                # needed:
+                factory = {1: pointwise_factory_1, 2: pointwise_factory_2}[nof_args]
+                impl = factory(impl)
+
             setattr(cls, funcname, staticmethod(impl))
 
 
 @dataclasses.dataclass
 class OverridesData:
     name: str
-    cpp: Callable[..., str]
+    cpp: Union[str, Callable[..., str]]
     # None when not impl in libdevice/triton
-    triton: Optional[Callable[..., str]] = None
+    triton: Union[Optional[str], Callable[..., str]] = None
     # None when not impl in aten/.../vec
-    cppvec: Optional[Callable[..., str]] = None
+    cppvec: Union[Optional[str], Callable[..., str]] = None
     type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND = (
         ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT
     )
@@ -605,45 +622,45 @@ class OverridesData:
 pointwise_overrides_data: Dict[str, OverridesData] = dict(
     airy_ai=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"airy_ai_forward({x})",
+        cpp="airy_ai_forward({x})",
         name="special_airy_ai",
     ),
     bessel_j0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"bessel_j0_forward({x})",
-        triton=lambda x: f"libdevice.j0({x})",
+        cpp="bessel_j0_forward({x})",
+        triton="libdevice.j0({x})",
         name="special_bessel_j0",
     ),
     bessel_j1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"bessel_j1_forward({x})",
-        triton=lambda x: f"libdevice.j1({x})",
+        cpp="bessel_j1_forward({x})",
+        triton="libdevice.j1({x})",
         name="special_bessel_j1",
     ),
     bessel_y0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"bessel_y0_forward({x})",
-        triton=lambda x: f"libdevice.y0({x})",
+        cpp="bessel_y0_forward({x})",
+        triton="libdevice.y0({x})",
         name="special_bessel_y0",
     ),
     bessel_y1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"bessel_y1_forward({x})",
-        triton=lambda x: f"libdevice.y1({x})",
+        cpp="bessel_y1_forward({x})",
+        triton="libdevice.y1({x})",
         name="special_bessel_y1",
     ),
     digamma=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"calc_digamma({x})",
-        cppvec=lambda x: f"{x}.digamma()",
+        cpp="calc_digamma({x})",
+        cppvec="{x}.digamma()",
         name="digamma",
     ),
     # no cpp nor triton implementation for entr, it is defined as decomposition
     # erf, erfc
     erfcx=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"calc_erfcx({x})",
-        triton=lambda x: f"libdevice.erfcx({x})",
+        cpp="calc_erfcx({x})",
+        triton="libdevice.erfcx({x})",
         name="special_erfcx",
     ),
     fma=OverridesData(
@@ -656,173 +673,173 @@ pointwise_overrides_data: Dict[str, OverridesData] = dict(
     # erfinv, exp2, expit, gammaln
     igamma=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"calc_igamma({x}, {y})",
+        cpp="calc_igamma({x}, {y})",
         name="igamma",
     ),
     igammac=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"calc_igammac({x}, {y})",
+        cpp="calc_igammac({x}, {y})",
         name="igammac",
     ),
     gammainc=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"calc_igamma({x}, {y})",
+        cpp="calc_igamma({x}, {y})",
         name="special_gammainc",
     ),
     gammaincc=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"calc_igammac({x}, {y})",
+        cpp="calc_igammac({x}, {y})",
         name="special_gammaincc",
     ),
     i0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"calc_i0({x})",
-        triton=lambda x: f"libdevice.cyl_bessel_i0({x})",
-        cppvec=lambda x: f"{x}.i0()",
+        cpp="calc_i0({x})",
+        triton="libdevice.cyl_bessel_i0({x})",
+        cppvec="{x}.i0()",
         name="i0",
     ),
     i0e=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"calc_i0e({x})",
-        cppvec=lambda x: f"{x}.i0e()",
+        cpp="calc_i0e({x})",
+        cppvec="{x}.i0e()",
         name="special_i0e",
     ),
     i1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"calc_i1({x})",
-        triton=lambda x: f"libdevice.cyl_bessel_i1({x})",
+        cpp="calc_i1({x})",
+        triton="libdevice.cyl_bessel_i1({x})",
         name="special_i1",
     ),
     i1e=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"calc_i1e({x})",
+        cpp="calc_i1e({x})",
         name="special_i1e",
     ),
     log_ndtr=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"calc_log_ndtr({x})",
+        cpp="calc_log_ndtr({x})",
         name="special_log_ndtr",
     ),
     # logit
     modified_bessel_i0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"modified_bessel_i0_forward({x})",
-        triton=lambda x: f"libdevice.cyl_bessel_i0({x})",
+        cpp="modified_bessel_i0_forward({x})",
+        triton="libdevice.cyl_bessel_i0({x})",
         name="special_modified_bessel_i0",
     ),
     modified_bessel_i1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"modified_bessel_i1_forward({x})",
-        triton=lambda x: f"libdevice.cyl_bessel_i1({x})",
+        cpp="modified_bessel_i1_forward({x})",
+        triton="libdevice.cyl_bessel_i1({x})",
         name="special_modified_bessel_i1",
     ),
     modified_bessel_k0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"modified_bessel_k0_forward({x})",
+        cpp="modified_bessel_k0_forward({x})",
         name="special_modified_bessel_k0",
     ),
     modified_bessel_k1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"modified_bessel_k1_forward({x})",
+        cpp="modified_bessel_k1_forward({x})",
         name="special_modified_bessel_k1",
     ),
     # multigamma
     ndtr=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"calc_ndtr({x})",
+        cpp="calc_ndtr({x})",
         name="special_ndtr",
     ),
     ndtri=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"calc_ndtri({x})",
+        cpp="calc_ndtri({x})",
         name="special_ndtri",
     ),
     polygamma=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"calc_polygamma({y}, {x})",
+        cpp="calc_polygamma({y}, {x})",
         name="polygamma",
     ),
     # psi - alias to digamma
     # round
     scaled_modified_bessel_k0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"scaled_modified_bessel_k0_forward({x})",
+        cpp="scaled_modified_bessel_k0_forward({x})",
         name="special_scaled_modified_bessel_k0",
     ),
     scaled_modified_bessel_k1=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"scaled_modified_bessel_k1_forward({x})",
+        cpp="scaled_modified_bessel_k1_forward({x})",
         name="special_scaled_modified_bessel_k1",
     ),
     # sinc
     spherical_bessel_j0=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x: f"spherical_bessel_j0_forward({x})",
+        cpp="spherical_bessel_j0_forward({x})",
         name="special_spherical_bessel_j0",
     ),
     zeta=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"zeta({x}, {y})",
+        cpp="zeta({x}, {y})",
         name="special_zeta",
     ),
     chebyshev_polynomial_t=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"chebyshev_polynomial_t_forward({x}, {y})",
+        cpp="chebyshev_polynomial_t_forward({x}, {y})",
         name="special_chebyshev_polynomial_t",
     ),
     chebyshev_polynomial_u=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"chebyshev_polynomial_u_forward({x}, {y})",
+        cpp="chebyshev_polynomial_u_forward({x}, {y})",
         name="special_chebyshev_polynomial_u",
     ),
     chebyshev_polynomial_v=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"chebyshev_polynomial_v_forward({x}, {y})",
+        cpp="chebyshev_polynomial_v_forward({x}, {y})",
         name="special_chebyshev_polynomial_v",
     ),
     chebyshev_polynomial_w=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"chebyshev_polynomial_w_forward({x}, {y})",
+        cpp="chebyshev_polynomial_w_forward({x}, {y})",
         name="special_chebyshev_polynomial_w",
     ),
     legendre_polynomial_p=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"legendre_polynomial_p_forward({x}, {y})",
+        cpp="legendre_polynomial_p_forward({x}, {y})",
         name="special_legendre_polynomial_p",
     ),
     shifted_chebyshev_polynomial_t=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"shifted_chebyshev_polynomial_t_forward({x}, {y})",
+        cpp="shifted_chebyshev_polynomial_t_forward({x}, {y})",
         name="special_shifted_chebyshev_polynomial_t",
     ),
     shifted_chebyshev_polynomial_u=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"shifted_chebyshev_polynomial_u_forward({x}, {y})",
+        cpp="shifted_chebyshev_polynomial_u_forward({x}, {y})",
         name="special_shifted_chebyshev_polynomial_u",
     ),
     shifted_chebyshev_polynomial_v=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"shifted_chebyshev_polynomial_v_forward({x}, {y})",
+        cpp="shifted_chebyshev_polynomial_v_forward({x}, {y})",
         name="special_shifted_chebyshev_polynomial_v",
     ),
     shifted_chebyshev_polynomial_w=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"shifted_chebyshev_polynomial_w_forward({x}, {y})",
+        cpp="shifted_chebyshev_polynomial_w_forward({x}, {y})",
         name="special_shifted_chebyshev_polynomial_w",
     ),
     hermite_polynomial_h=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"hermite_polynomial_h_forward({x}, {y})",
+        cpp="hermite_polynomial_h_forward({x}, {y})",
         name="special_hermite_polynomial_h",
     ),
     hermite_polynomial_he=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"hermite_polynomial_he_forward({x}, {y})",
+        cpp="hermite_polynomial_he_forward({x}, {y})",
         name="special_hermite_polynomial_he",
     ),
     laguerre_polynomial_l=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        cpp=lambda x, y: f"laguerre_polynomial_l_forward({x}, {y})",
+        cpp="laguerre_polynomial_l_forward({x}, {y})",
         name="special_laguerre_polynomial_l",
     ),
 )

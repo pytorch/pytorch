@@ -434,15 +434,17 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
-            def forward(self, a, b, e, f):
+            def forward(self, a, b, c, d, e, f):
                 a.trunc_()
                 b.trunc_()
-                return (a + b + self.mean) * e * f
+                c.trunc_()
+                d.trunc_()
+                return (a + b + c + d + self.mean) * e * f
 
         a = torch.randn(3, 3, requires_grad=True)
         b = torch.randn(3, 3, requires_grad=True)
-        a1, a2 = a.clone(), a.clone()
-        b1, b2 = b.clone(), b.clone()
+        a1, a2, a3, a4 = a.clone(), a.clone(), a.clone(), a.clone()
+        b1, b2, b3, b4 = b.clone(), b.clone(), b.clone(), b.clone()
 
         failure_reason = None
 
@@ -455,8 +457,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        f(a1, a1, 2, 2)
-        f(a2, b2, 2, 2)
+        f(a1, a1, a1, a1, 2, 2)
+        f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
             """L['a'] is L['b']""",
@@ -473,10 +475,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         d3, d4 = d.clone(), d.clone()
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        f(c3, c3, 3, 3)
-        f(c4, d4, 3, 3)
+        f(a3, b3, c3, c3, 3, 3)
+        f(a4, b4, c4, d4, 3, 3)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""L['a'] is L['b']""", failure_reason)
+        self.assertIn("""L['c'] is L['d']""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_with_global(self):
@@ -487,16 +489,18 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
-            def forward(self, a, b, e, f):
+            def forward(self, a, b, c, d, e, f):
                 a.trunc_()
                 b.trunc_()
-                return (a + b + z + self.mean) * e * f
+                c.trunc_()
+                d.trunc_()
+                return (a + b + c + d + z + self.mean) * e * f
 
         a = torch.randn(3, 3, requires_grad=True)
         b = torch.randn(3, 3, requires_grad=True)
         z = a
-        a1, a2 = a.clone(), a.clone()
-        b1, b2 = b.clone(), b.clone()
+        a1, a2, a3, a4 = a.clone(), a.clone(), a.clone(), a.clone()
+        b1, b2, b3, b4 = b.clone(), b.clone(), b.clone(), b.clone()
 
         failure_reason = None
 
@@ -509,8 +513,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        f(a1, a1, 2, 2)
-        f(a2, b2, 2, 2)
+        f(a1, a1, a1, a1, 2, 2)
+        f(a2, b2, b2, b2, 2, 2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
             """L['a'] is L['b']""",
@@ -524,15 +528,17 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
-            def forward(self, e, f, a, b):
+            def forward(self, e, f, a, b, c, d):
                 a.trunc_()
                 b.trunc_()
-                return (a + b + self.mean) * e[0] * f[0]
+                c.trunc_()
+                d.trunc_()
+                return (a + b + c + d + self.mean) * e[0] * f[0]
 
         a = torch.randn(3, 3, requires_grad=True)
         b = torch.randn(3, 3, requires_grad=True)
-        a1, a2 = a.clone(), a.clone()
-        b1, b2 = b.clone(), b.clone()
+        a1, a2, a3, a4 = a.clone(), a.clone(), a.clone(), a.clone()
+        b1, b2, b3, b4 = b.clone(), b.clone(), b.clone(), b.clone()
 
         failure_reason = None
 
@@ -545,8 +551,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        f([3, 2, 1], [4, 5, 6], a1, a1)
-        f([3, 2, 1], [4, 5, 6], a2, b2)
+        f([3, 2, 1], [4, 5, 6], a1, a1, a1, a1)
+        f([3, 2, 1], [4, 5, 6], a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
             """L['a'] is L['b']""",
@@ -563,8 +569,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         d3, d4 = d.clone(), d.clone()
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        f([3, 2, 1], [4, 5, 6], c3, c3)
-        f([3, 2, 1], [4, 5, 6], c4, d4)
+        f([3, 2, 1], [4, 5, 6], a3, b3, c3, c3)
+        f([3, 2, 1], [4, 5, 6], a4, b4, c4, d4)
         self.assertEqual(cc.frame_count, 2)
 
     @patch("torch._functorch.config.debug_assert", True)
@@ -574,15 +580,17 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
                 super().__init__()
                 self.mean = torch.nn.Parameter(torch.randn(3, 3))
 
-            def forward(self, a, b):
+            def forward(self, a, b, c, d):
                 a.trunc_()
                 b.trunc_()
-                return a + b + self.mean
+                c.trunc_()
+                d.trunc_()
+                return a + b + c + d + self.mean
 
         a = torch.randn(3, 3, requires_grad=True)
         b = torch.randn(3, 3, requires_grad=True)
-        a1, a2 = a.clone(), a.clone()
-        b1, b2 = b.clone(), b.clone()
+        a1, a2, a3, a4 = a.clone(), a.clone(), a.clone(), a.clone()
+        b1, b2, b3, b4 = b.clone(), b.clone(), b.clone(), b.clone()
 
         failure_reason = None
 
@@ -595,8 +603,8 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         cc = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        f(a1, a1)
-        f(a2, b2)
+        f(a1, a1, a1, a1)
+        f(a2, b2, b2, b2)
         self.assertEqual(cc.frame_count, 2)
         self.assertIn(
             """L['a'] is L['b']""",
@@ -613,10 +621,10 @@ class AotAutogradFallbackTests(torch._dynamo.test_case.TestCase):
         d3, d4 = d.clone(), d.clone()
 
         f = torch._dynamo.optimize(cc, guard_fail_fn=guard_fail_fn)(F())
-        f(c3, c3)
-        f(c4, d4)
+        f(a3, b3, c3, c3)
+        f(a4, b4, c4, d4)
         self.assertEqual(cc.frame_count, 2)
-        self.assertIn("""L['a'] is L['b']""", failure_reason)
+        self.assertIn("""L['c'] is L['d']""", failure_reason)
 
     @patch("torch._functorch.config.debug_assert", True)
     def test_arg_dupe_via_dynamo_recompiles_many_args(self):

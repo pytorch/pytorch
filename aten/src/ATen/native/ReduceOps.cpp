@@ -4,7 +4,6 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
-#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
@@ -2256,7 +2255,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
     .promote_inputs_to_common_dtype(true)
     .build();
 
-  AT_DISPATCH_V2(iter.input_dtype(), "equal_cpu", AT_WRAP([&] {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(kBool, kBFloat16, kHalf, iter.input_dtype(), "equal_cpu", [&] {
     iter.for_each([&](char** data, const int64_t *strides, int64_t dim_size) {
       if (!result) {
           return;
@@ -2272,7 +2271,7 @@ bool cpu_equal(const Tensor& self, const Tensor& other) {
         other_data += strides[1];
       }
     });
-  }), kBool, kBFloat16, kHalf, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
+  });
   return result.load();
 }
 

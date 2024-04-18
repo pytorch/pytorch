@@ -565,9 +565,9 @@ class Vectorized<c10::Half> {
   }
 
   Vectorized<c10::Half> operator!=(const Vectorized<c10::Half>& other) const {
-    float16x8_t r0 = vreinterpretq_f16_u16(
+    float32x4_t r0 = vreinterpretq_f16_u16(
         vmvnq_u16(vceqq_f16(values.val[0], other.values.val[0])));
-    float16x8_t r1 = vreinterpretq_f16_u16(
+    float32x4_t r1 = vreinterpretq_f16_u16(
         vmvnq_u16(vceqq_f16(values.val[1], other.values.val[1])));
     return Vectorized<c10::Half>(r0, r1);
   }

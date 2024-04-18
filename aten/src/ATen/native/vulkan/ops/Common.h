@@ -90,10 +90,6 @@ inline c10::optional<Scalar> get_optional_scalar(
                                       : c10::optional<Scalar>();
 }
 
-inline float roundevenf(float v) {
-  return (float)nearbyint(v);
-}
-
 } // namespace ops
 } // namespace vulkan
 } // namespace native

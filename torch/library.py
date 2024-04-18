@@ -107,18 +107,7 @@ class Library:
         if isinstance(tags, torch.Tag):
             tags = (tags,)
         result = self.m.define(schema, alias_analysis, tuple(tags))
-        name = schema.split("(")[0]
-        qualname = self.ns + "::" + name
-
-        # If the OpOverloadPacket exists already, then this means we're adding a
-        # new OpOverload for it. Refresh the packet to include the new OpOverload.
-        packet_name = name.split(".")[0] if "." in name else name
-        if hasattr(torch.ops, self.ns):
-            ns = getattr(torch.ops, self.ns)
-            if hasattr(ns, packet_name):
-                packet = getattr(ns, packet_name)
-                torch._ops._refresh_packet(packet)
-
+        qualname = self.ns + "::" + schema.split("(")[0]
         self._op_defs.add(qualname)
         _defs.add(qualname)
         return result

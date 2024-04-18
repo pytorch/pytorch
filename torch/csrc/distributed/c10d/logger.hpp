@@ -2,7 +2,6 @@
 #include <torch/csrc/distributed/c10d/reducer.hpp>
 
 #include <mutex>
-#include <utility>
 
 namespace c10d {
 
@@ -125,8 +124,9 @@ class TORCH_API C10dLogger {
 
  protected:
   // singletion, hide constructor from the public
-  C10dLogger(std::string logDestination)
-      : logDestination_(std::move(logDestination)) {}
+  C10dLogger(const std::string& logDestination) {
+    logDestination_ = logDestination;
+  }
 
   // the name of the destination this logger should log to
   std::string logDestination_;

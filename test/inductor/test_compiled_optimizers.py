@@ -310,8 +310,7 @@ def make_recompile_test(optim_cls, closure=None, kernel_count=2, **kwargs):
 
             # perturb state to force recompile
             # Adagrad doesn't reinitialize state on each step
-            # SGD has an empty state
-            if optim_cls in (Adagrad, SGD):
+            if optim_cls is Adagrad:
                 opt_compiled.param_groups[0]["lr"] = 0.02
             elif optim_cls is Adam:  # ensure we are guarding on the data_ptr of states
                 state_tensor = opt_compiled.state[

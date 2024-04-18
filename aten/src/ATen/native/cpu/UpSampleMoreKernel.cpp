@@ -15,10 +15,9 @@ namespace {
 using scale_t = std::vector<c10::optional<double>>;
 
 template <typename acc_t, typename scalar_t,
-          typename scalar_nonconst_t = std::remove_const_t<scalar_t>,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_nonconst_t> || !std::is_same<acc_t, float>::value, int> = 0>
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t> || !std::is_same<acc_t, float>::value, int> = 0>
 void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) {
-  TORCH_CHECK((std::is_same<acc_t, scalar_nonconst_t>::value),
+  TORCH_CHECK((std::is_same<acc_t, scalar_t>::value),
               "acc data type of Upsample backward should be same as scalar_t for float or double on CPU.")
   using Vec = Vectorized<acc_t>;
   int64_t d = 0;
@@ -32,15 +31,14 @@ void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) 
 }
 
 template <typename acc_t, typename scalar_t,
-          typename scalar_nonconst_t = std::remove_const_t<scalar_t>,
-          typename std::enable_if_t<is_reduced_floating_point_v<scalar_nonconst_t> && std::is_same<acc_t, float>::value, int> = 0>
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t> && std::is_same<acc_t, float>::value, int> = 0>
 void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) {
-  using bVec = Vectorized<scalar_nonconst_t>;
+  using bVec = Vectorized<scalar_t>;
   using fVec = Vectorized<float>;
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec gout_bvec = bVec::loadu(gout + d);
-    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_nonconst_t>(gout_bvec);
+    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_t>(gout_bvec);
     fVec gin_fvec0 = fVec::loadu(gin + d) + gout_fvec0;
     fVec gin_fvec1 = fVec::loadu(gin + d + fVec::size()) + gout_fvec1;
     gin_fvec0.store(gin + d);
@@ -52,10 +50,9 @@ void inline nearest_channels_last_acc(acc_t* gin, scalar_t* gout, int64_t size) 
 }
 
 template <typename acc_t, typename scalar_t,
-          typename scalar_nonconst_t = std::remove_const_t<scalar_t>,
-          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_nonconst_t> || !std::is_same<acc_t, float>::value, int> = 0>
-void inline linear_channels_last_acc(acc_t* gin, const scalar_t* gout, acc_t w, int64_t size) {
-  TORCH_CHECK((std::is_same<acc_t, scalar_nonconst_t>::value),
+          typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t> || !std::is_same<acc_t, float>::value, int> = 0>
+void inline linear_channels_last_acc(acc_t* gin, scalar_t* gout, acc_t w, int64_t size) {
+  TORCH_CHECK((std::is_same<acc_t, scalar_t>::value),
               "acc data type of Upsample backward should be same as scalar_t for float or double on CPU.")
   using Vec = Vectorized<acc_t>;
   int64_t d = 0;
@@ -69,15 +66,14 @@ void inline linear_channels_last_acc(acc_t* gin, const scalar_t* gout, acc_t w, 
 }
 
 template <typename acc_t, typename scalar_t,
-          typename scalar_nonconst_t = std::remove_const_t<scalar_t>,
-          typename std::enable_if_t<is_reduced_floating_point_v<scalar_nonconst_t> && std::is_same<acc_t, float>::value, int> = 0>
-void inline linear_channels_last_acc(acc_t* gin, const scalar_t* gout, acc_t w, int64_t size) {
-  using bVec = Vectorized<scalar_nonconst_t>;
+          typename std::enable_if_t<is_reduced_floating_point_v<scalar_t> && std::is_same<acc_t, float>::value, int> = 0>
+void inline linear_channels_last_acc(acc_t* gin, scalar_t* gout, acc_t w, int64_t size) {
+  using bVec = Vectorized<scalar_t>;
   using fVec = Vectorized<float>;
   int64_t d = 0;
   for (; d < size - (size % bVec::size()); d += bVec::size()) {
     bVec gout_bvec = bVec::loadu(gout + d);
-    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_nonconst_t>(gout_bvec);
+    auto [gout_fvec0, gout_fvec1] = convert_to_float<scalar_t>(gout_bvec);
     fVec gin_fvec0 = fVec::loadu(gin + d) + fVec(w) * gout_fvec0;
     fVec gin_fvec1 = fVec::loadu(gin + d + fVec::size()) + fVec(w) * gout_fvec1;
     gin_fvec0.store(gin + d);
@@ -99,7 +95,7 @@ void cpu_upsample_nearest_backward(
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
-  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.data_ptr<scalar_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();
@@ -236,7 +232,7 @@ void cpu_upsample_nearest_backward_channels_last(
   auto grad_output = grad_output_.contiguous(channels_last_memory_format);
   auto grad_input = grad_input_.contiguous(channels_last_memory_format);
 
-  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.data_ptr<scalar_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   auto input_sizes = grad_input.sizes().vec();
@@ -270,7 +266,7 @@ void cpu_upsample_nearest_backward_channels_last(
         int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[0]);
         for (const auto ow : c10::irange(output_width)) {
           int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[1]);
-          const scalar_t* grad_output_ptr = grad_output_data +
+          scalar_t* grad_output_ptr = grad_output_data +
               (n * output_height * output_width + oh * output_width + ow) * channels;
           opmath_t* buffer_ptr = acc_data_ptr + input_offset + (ih * input_width + iw) * channels;
           nearest_channels_last_acc(buffer_ptr, grad_output_ptr, channels);
@@ -303,7 +299,7 @@ void cpu_upsample_nearest_backward_channels_last(
           int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[1]);
           for (int64_t ow = 0; ow < output_width; ow++) {
             int64_t iw = nearest_idx_fn(ow, input_width, output_width, scales[2]);
-            const scalar_t* grad_output_ptr = grad_output_data +
+            scalar_t* grad_output_ptr = grad_output_data +
                 (n * output_depth * output_height * output_width +
                 od * output_height * output_width + oh * output_width + ow) * channels;
 
@@ -430,7 +426,7 @@ void cpu_upsample_linear_backward(
   auto grad_output = grad_output_.contiguous();
   auto grad_input = grad_input_.contiguous();
 
-  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.data_ptr<scalar_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
   auto input_sizes = grad_input.sizes().vec();
   auto output_sizes = grad_output.sizes().vec();
@@ -607,7 +603,7 @@ void cpu_upsample_linear_backward_channels_last(
   auto grad_output = grad_output_.contiguous(channels_last_memory_format);
   auto grad_input = grad_input_.contiguous(channels_last_memory_format);
 
-  auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
+  auto grad_output_data = grad_output.data_ptr<scalar_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
   auto input_sizes = grad_input.sizes().vec();
@@ -655,7 +651,7 @@ void cpu_upsample_linear_backward_channels_last(
         for (const auto ow : c10::irange(output_width)) {
           compute_source_index_and_lambda(
               iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
-          const scalar_t* grad_output_ptr = grad_output_data +
+          scalar_t* grad_output_ptr = grad_output_data +
               (n * output_height * output_width + oh * output_width + ow) * channels;
           linear_channels_last_acc(input_indexr(n, ih0, iw0, input_offset), grad_output_ptr, h0lambda * w0lambda, channels); /* i00 */
           linear_channels_last_acc(input_indexr(n, ih0, iw1, input_offset), grad_output_ptr, h0lambda * w1lambda, channels); /* i01 */
@@ -707,7 +703,7 @@ void cpu_upsample_linear_backward_channels_last(
           for (const auto ow : c10::irange(output_width)) {
             compute_source_index_and_lambda(
                 iw0, iw1, w0lambda, w1lambda, width_scale, ow, input_width, output_width, align_corners);
-            const scalar_t* grad_output_ptr = grad_output_data + (n * output_depth * output_height * output_width +
+            scalar_t* grad_output_ptr = grad_output_data + (n * output_depth * output_height * output_width +
                 od *  output_height * output_width + oh * output_width + ow) * channels;
             linear_channels_last_acc(input_indexr(n, id0, ih0, iw0, input_offset), grad_output_ptr, d0lambda * h0lambda * w0lambda, channels); /* i000 */
             linear_channels_last_acc(input_indexr(n, id0, ih0, iw1, input_offset), grad_output_ptr, d0lambda * h0lambda * w1lambda, channels); /* i001 */

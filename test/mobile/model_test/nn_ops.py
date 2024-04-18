@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 # https://pytorch.org/docs/stable/nn.html
 class NNConvolutionModule(torch.nn.Module):
     def __init__(self):
@@ -32,13 +31,11 @@ class NNConvolutionModule(torch.nn.Module):
         )
 
     def forward(self):
-        return len(
-            (
-                [module(self.input1d) for i, module in enumerate(self.module1d)],
-                [module(self.input2d) for i, module in enumerate(self.module2d)],
-                [module(self.input3d) for i, module in enumerate(self.module3d)],
-            )
-        )
+        return len((
+            [module(self.input1d) for i, module in enumerate(self.module1d)],
+            [module(self.input2d) for i, module in enumerate(self.module2d)],
+            [module(self.input3d) for i, module in enumerate(self.module3d)],
+        ))
 
 
 class NNPoolingModule(torch.nn.Module):
@@ -80,13 +77,11 @@ class NNPoolingModule(torch.nn.Module):
         # TODO max_unpool
 
     def forward(self):
-        return len(
-            (
-                [module(self.input1d) for i, module in enumerate(self.module1d)],
-                [module(self.input2d) for i, module in enumerate(self.module2d)],
-                [module(self.input3d) for i, module in enumerate(self.module3d)],
-            )
-        )
+        return len((
+            [module(self.input1d) for i, module in enumerate(self.module1d)],
+            [module(self.input2d) for i, module in enumerate(self.module2d)],
+            [module(self.input3d) for i, module in enumerate(self.module3d)],
+        ))
 
 
 class NNPaddingModule(torch.nn.Module):
@@ -121,13 +116,11 @@ class NNPaddingModule(torch.nn.Module):
         )
 
     def forward(self):
-        return len(
-            (
-                [module(self.input1d) for i, module in enumerate(self.module1d)],
-                [module(self.input2d) for i, module in enumerate(self.module2d)],
-                [module(self.input3d) for i, module in enumerate(self.module3d)],
-            )
-        )
+        return len((
+            [module(self.input1d) for i, module in enumerate(self.module1d)],
+            [module(self.input2d) for i, module in enumerate(self.module2d)],
+            [module(self.input3d) for i, module in enumerate(self.module3d)],
+        ))
 
 
 class NNNormalizationModule(torch.nn.Module):
@@ -162,13 +155,11 @@ class NNNormalizationModule(torch.nn.Module):
         )
 
     def forward(self):
-        return len(
-            (
-                [module(self.input1d) for i, module in enumerate(self.module1d)],
-                [module(self.input2d) for i, module in enumerate(self.module2d)],
-                [module(self.input3d) for i, module in enumerate(self.module3d)],
-            )
-        )
+        return len((
+            [module(self.input1d) for i, module in enumerate(self.module1d)],
+            [module(self.input2d) for i, module in enumerate(self.module2d)],
+            [module(self.input3d) for i, module in enumerate(self.module3d)],
+        ))
 
 
 class NNActivationModule(torch.nn.Module):
@@ -211,7 +202,9 @@ class NNActivationModule(torch.nn.Module):
 
     def forward(self):
         input = torch.randn(2, 3, 4)
-        return len(([module(input) for i, module in enumerate(self.activations)],))
+        return len((
+            [module(input) for i, module in enumerate(self.activations)],
+        ))
 
 
 class NNRecurrentModule(torch.nn.Module):
@@ -403,15 +396,16 @@ class NNShuffleModule(torch.nn.Module):
         self.shuffle = nn.ChannelShuffle(2)
 
     def forward(self):
-        return len(
-            self.shuffle(torch.randn(1, 4, 2, 2)),
-        )
+        return len(self.shuffle(torch.randn(1, 4, 2, 2)),)
 
 
 class NNUtilsModule(torch.nn.Module):
     def __init__(self):
         super().__init__()
-        self.flatten = nn.Sequential(nn.Linear(50, 50), nn.Unflatten(1, (2, 5, 5)))
+        self.flatten = nn.Sequential(
+            nn.Linear(50, 50),
+            nn.Unflatten(1, (2, 5, 5))
+        )
 
     def forward(self):
         a = [torch.tensor([1, 2, 3]), torch.tensor([3, 4])]

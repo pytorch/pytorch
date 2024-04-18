@@ -8,7 +8,7 @@ from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._triton import has_triton
 
-from ..pattern_matcher import fwd_only, gen_register_replacement, joint_fwd_bwd, Match
+from ..pattern_matcher import fwd_only, joint_fwd_bwd, Match, register_replacement
 
 aten = torch.ops.aten
 
@@ -485,10 +485,7 @@ def _pad_mm_init():
         ),
     ]:
         assert isinstance(workaround, dict)  # mypy is unable to infer the type properly
-        name = pattern.__name__
-
-        gen_register_replacement(
-            f"{name}_training",
+        register_replacement(
             pattern,
             replacement,
             args,
@@ -497,9 +494,7 @@ def _pad_mm_init():
             extra_check=extra_check,
             scalar_workaround=workaround,
         )
-
-        gen_register_replacement(
-            f"{name}_inference",
+        register_replacement(
             pattern,
             replacement,
             args,

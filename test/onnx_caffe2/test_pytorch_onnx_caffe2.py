@@ -3071,6 +3071,7 @@ def setup_rnn_tests():
         variable_length_opts,
         dropout_opts,
     ):
+
         for base, name, extra_kwargs in (
             ("elman", "elman_relu", {"nonlinearity": "relu"}),
             ("elman", "elman_tanh", {"nonlinearity": "tanh"}),

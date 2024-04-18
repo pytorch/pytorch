@@ -8,7 +8,6 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
-#include <c10/util/env.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
@@ -67,9 +66,9 @@ namespace Native {
 //   smallest available free block or allocate a new block using cudaMalloc.
 // - To reduce fragmentation, requests between 1MB and 10MB will allocate and
 //   split a 20MB block, if no free block of sufficient size is available.
-// - To further reduce fragmentation, blocks >= max_split_size are not allowed
-//   to be split. These oversize cached blocks will still satisfy requests
-//   within 1MB of the oversize cached block size.
+// - To further reduce fragmentation, blocks >= 200MB are not allowed to be
+//   split. These oversize cached blocks will still satisfy requests within
+//   20MB of the oversize cached block size.
 //
 // With this allocator, allocations and frees should logically be considered
 // "usages" of the memory segment associated with streams, just like kernel
@@ -1150,7 +1149,7 @@ class DeviceCachingAllocator {
           "CUDA out of memory. Tried to allocate ",
           format_size(alloc_size),
           ". GPU ",
-          static_cast<int>(device),
+          device,
           " has a total capacity of ",
           format_size(device_total),
           " of which ",
@@ -2832,7 +2831,7 @@ class DeviceCachingAllocator {
 // errors, since the caching allocator foils cuda-memcheck.
 bool forceUncachedAllocator() {
   static bool force_uncached =
-      c10::utils::has_env("PYTORCH_NO_CUDA_MEMORY_CACHING");
+      getenv("PYTORCH_NO_CUDA_MEMORY_CACHING") != nullptr;
   return force_uncached;
 }
 
@@ -3364,9 +3363,9 @@ struct BackendStaticInitializer {
   // version checks, to CUDAAllocatorConfig's runtime doublecheck. If this
   // works, maybe we should move all of CUDAAllocatorConfig here?
   CUDAAllocator* parseEnvForBackend() {
-    const auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
-    if (val.has_value()) {
-      const std::string& config = val.value();
+    const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
+    if (val != nullptr) {
+      const std::string config(val);
 
       std::regex exp("[\\s,]+");
       std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);

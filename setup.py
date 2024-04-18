@@ -223,9 +223,6 @@
 #   USE_MIMALLOC
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
 #      By default, It is only enabled on Windows.
-#
-#   USE_PRIORITIZED_TEXT_FOR_LD
-#      Uses prioritized text form cmake/prioritized_text.txt for LD
 
 import sys
 
@@ -266,7 +263,6 @@ from tools.build_pytorch_libs import build_caffe2
 from tools.generate_torch_version import get_torch_version
 from tools.setup_helpers.cmake import CMake
 from tools.setup_helpers.env import build_type, IS_DARWIN, IS_LINUX, IS_WINDOWS
-from tools.setup_helpers.generate_linker_script import gen_linker_script
 
 ################################################################################
 # Parameters parsed from environment
@@ -1118,31 +1114,6 @@ def main():
         'mkl>=2021.1.1,<=2021.4.0; platform_system == "Windows"',
     ]
 
-    use_prioritized_text = str(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD", ""))
-    if (
-        use_prioritized_text == ""
-        and platform.system() == "Linux"
-        and platform.processor() == "aarch64"
-    ):
-        print_box(
-            """
-            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
-            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
-            """
-        )
-    if use_prioritized_text == "1" or use_prioritized_text == "True":
-        gen_linker_script(
-            filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
-        )
-        linker_script_path = os.path.abspath("cmake/linker_script.ld")
-        os.environ["LDFLAGS"] = os.getenv("LDFLAGS", "") + f" -T{linker_script_path}"
-        os.environ["CFLAGS"] = (
-            os.getenv("CFLAGS", "") + " -ffunction-sections -fdata-sections"
-        )
-        os.environ["CXXFLAGS"] = (
-            os.getenv("CXXFLAGS", "") + " -ffunction-sections -fdata-sections"
-        )
-
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
@@ -1169,7 +1140,7 @@ def main():
     install_requires += extra_install_requires
 
     extras_require = {
-        "optree": ["optree>=0.11.0"],
+        "optree": ["optree>=0.9.1"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
 
@@ -1384,12 +1355,6 @@ def main():
                 "include/tensorpipe/transport/ibv/*.h",
                 "include/tensorpipe/transport/shm/*.h",
                 "include/tensorpipe/transport/uv/*.h",
-            ]
-        )
-    if get_cmake_cache_vars()["USE_KINETO"]:
-        torch_package_data.extend(
-            [
-                "include/kineto/*.h",
             ]
         )
     torchgen_package_data = [

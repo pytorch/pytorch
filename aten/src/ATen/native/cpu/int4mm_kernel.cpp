@@ -1,4 +1,3 @@
-#include <type_traits>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 
@@ -139,7 +138,7 @@ inline void tinygemm_kernel(
         // when BLOCK_N = 64, handle each row at a time
         // to reduce de-quantize overhead.
         if constexpr (col == 0) {
-          __m256i b4 = _mm256_loadu_si256((__m256i*)(B + k * ldb));
+          __m256i b4 = _mm256_load_si256((__m256i*)(B + k * ldb));
           if (k + PREFETCH_SIZE_K < K) {
             _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb, _MM_HINT_T0);
           }
@@ -337,7 +336,7 @@ inline void tinygemm_kernel(
   c10::ForcedUnroll<ROWS * COLS>{}(storec);
 }
 
-#endif
+#else
 
 inline float convert_int4_to_float(uint8_t a, bool is_even) {
   static constexpr float lut[16] = {
@@ -352,13 +351,12 @@ inline float convert_int4_to_float(uint8_t a, bool is_even) {
 }
 
 // non-vectorized version
-template <int BLOCK_M, int BLOCK_N, typename T>
-inline
-std::enable_if_t<std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>, void> tinygemm_kernel(
-    const T* RESTRICT A,
+template <int BLOCK_M, int BLOCK_N>
+inline void tinygemm_kernel(
+    const BFloat16* RESTRICT A,
     const uint8_t* RESTRICT B,
-    const T* RESTRICT ScaleAndZeros,
-    T* RESTRICT C,
+    const BFloat16* RESTRICT ScaleAndZeros,
+    BFloat16* RESTRICT C,
     int lda,
     int ldb,
     int ldc,
@@ -385,6 +383,7 @@ std::enable_if_t<std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>, void> t
   }
 }
 
+#endif
 
 #define LAUNCH_TINYGEMM_KERNEL(MB_SIZE, NB_SIZE)                 \
   tinygemm_kernel<MB_SIZE, NB_SIZE>(                             \
@@ -526,8 +525,7 @@ void weight_to_int4pack_kernel(
   });
 }
 
-template<typename T>
-void int4pack_mm_kernel_(
+void int4pack_mm_kernel(
     const Tensor& C,
     const Tensor& A,
     const Tensor& B,
@@ -535,10 +533,10 @@ void int4pack_mm_kernel_(
     const Tensor& qScaleAndZeros,
     int N, int K) {
 
-  const auto* A_data = A.data_ptr<T>();
+  const auto* A_data = A.data_ptr<BFloat16>();
   const auto* B_data = reinterpret_cast<uint8_t*>(B.data_ptr());
-  auto* C_data = C.data_ptr<T>();
-  const auto* S_data = qScaleAndZeros.data_ptr<T>();
+  auto* C_data = C.data_ptr<BFloat16>();
+  const auto* S_data = qScaleAndZeros.data_ptr<BFloat16>();
 
   int M = A.size(0);
 
@@ -555,7 +553,9 @@ void int4pack_mm_kernel_(
     int mb{0}, nb{0};
     data_index_init(begin, mb, MB, nb, NB);
 
-    for (C10_UNUSED const auto i : c10::irange(begin, end)) {
+    for (const auto i : c10::irange(begin, end)) {
+      (void)i;
+
       int mb_start = mb * BLOCK_M;
       int mb_size = std::min(BLOCK_M, M - mb_start);
       int nb_start = nb * BLOCK_N;
@@ -587,20 +587,6 @@ void int4pack_mm_kernel_(
       data_index_step(mb, MB, nb, NB);
     }
   });
-}
-
-void int4pack_mm_kernel(
-    const Tensor& C,
-    const Tensor& A,
-    const Tensor& B,
-    int qGroupSize,
-    const Tensor& qScaleAndZeros,
-    int N, int K) {
- if (C.scalar_type() == kBFloat16) {
-   int4pack_mm_kernel_<BFloat16>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
- } else {
-   int4pack_mm_kernel_<Half>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
- }
 }
 
 } // anonymous namespace

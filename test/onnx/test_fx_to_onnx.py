@@ -1,8 +1,6 @@
 # Owner(s): ["module: onnx"]
 from __future__ import annotations
 
-import logging
-
 import tempfile
 
 from typing import Mapping, Tuple
@@ -708,30 +706,6 @@ class TestFxToOnnx(pytorch_test_common.ExportTestCase):
                 return input + torch.tensor(1.0, dtype=float8_type)
 
         _ = torch.onnx.dynamo_export(Float8Module(), torch.randn(1, 2, 3, 4))
-
-    def test_export_with_logging_logger(self):
-        logger = logging.getLogger(__name__)
-
-        class LoggingLoggerModule(torch.nn.Module):
-            def forward(self, x):
-                logger.log("abc")
-                return x + 1
-
-        input = torch.randn(2, 3)
-        model = LoggingLoggerModule()
-        _ = torch.onnx.dynamo_export(model, input)
-
-    def test_export_with_hf_logging_logger(self):
-        logger = transformers.utils.logging.get_logger(__name__)
-
-        class HFLoggingLoggerModule(torch.nn.Module):
-            def forward(self, x):
-                logger.warning_once("abc")
-                return x + 1
-
-        input = torch.randn(2, 3)
-        model = HFLoggingLoggerModule()
-        _ = torch.onnx.dynamo_export(model, input)
 
     def test_checkpoint_cast(self):
         model_id = "openai/whisper-large-v3"

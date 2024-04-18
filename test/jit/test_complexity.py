@@ -10,28 +10,17 @@ import torch
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    run_tests,
-    set_default_dtype,
-    suppress_warnings,
-)
-from torch.testing._internal.jit_metaprogramming_utils import (
-    get_all_nn_module_tests,
-    get_nn_functional_compiled_fn_and_inputs,
-    get_nn_mod_test_name,
-    nn_functional_tests,
-    try_get_nn_module_compiled_mod_and_inputs,
-)
-from torch.testing._internal.jit_utils import enable_profiling_mode, JitTestCase
+from torch.testing._internal.jit_utils import JitTestCase, enable_profiling_mode
+from torch.testing._internal.jit_metaprogramming_utils import try_get_nn_module_compiled_mod_and_inputs, \
+    get_nn_mod_test_name, get_all_nn_module_tests, nn_functional_tests, get_nn_functional_compiled_fn_and_inputs
+from torch.testing._internal.common_utils import run_tests, set_default_dtype, suppress_warnings, IS_FBCODE
 
 
 def num_ifs_loops(graph):
     graph_str = str(graph)
     # only look at body of graph
-    graph_body = graph_str[0 : graph_str.find("return")]
+    graph_body = graph_str[0:graph_str.find("return")]
     return graph_body.count("prim::Loop") + graph_body.count("prim::If")
-
 
 def num_non_tensor_nodes(block):
     num_non_tensor = 0
@@ -50,7 +39,6 @@ def num_non_tensor_nodes(block):
                 break
         num_non_tensor += int(not tensor_out)
     return num_non_tensor
-
 
 class TestComplexity(JitTestCase):
     def setUp(self):
@@ -102,6 +90,5 @@ class TestComplexity(JitTestCase):
             for line in stats:
                 print(line)
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     run_tests()

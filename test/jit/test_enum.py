@@ -2,24 +2,21 @@
 
 import os
 import sys
-from enum import Enum
-from typing import Any, List
 
 import torch
 from torch.testing import FileCheck
+from enum import Enum
+from typing import Any, List
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase, make_global
 
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
-
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
 
 class TestEnum(JitTestCase):
     def test_enum_value_types(self):
@@ -41,9 +38,11 @@ class TestEnum(JitTestCase):
         def supported_enum_types(a: IntEnum, b: FloatEnum, c: StringEnum):
             return (a.name, b.name, c.name)
 
-        FileCheck().check("IntEnum").check("FloatEnum").check("StringEnum").run(
-            str(supported_enum_types.graph)
-        )
+        FileCheck() \
+            .check("IntEnum") \
+            .check("FloatEnum") \
+            .check("StringEnum") \
+            .run(str(supported_enum_types.graph))
 
         class TensorEnum(Enum):
             FOO = torch.tensor(0)
@@ -55,9 +54,7 @@ class TestEnum(JitTestCase):
             return a.name
 
         # TODO: rewrite code so that the highlight is not empty.
-        with self.assertRaisesRegexWithHighlight(
-            RuntimeError, "Cannot create Enum with value type 'Tensor'", ""
-        ):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Cannot create Enum with value type 'Tensor'", ""):
             torch.jit.script(unsupported_enum_types)
 
     def test_enum_comp(self):
@@ -91,9 +88,11 @@ class TestEnum(JitTestCase):
         def enum_comp(x: Foo) -> bool:
             return x == Bar.ITEM1
 
-        FileCheck().check("prim::Constant").check_same("Bar.ITEM1").check(
-            "aten::eq"
-        ).run(str(enum_comp.graph))
+        FileCheck() \
+            .check("prim::Constant") \
+            .check_same("Bar.ITEM1") \
+            .check("aten::eq") \
+            .run(str(enum_comp.graph))
 
         self.assertEqual(enum_comp(Foo.ITEM1), False)
 
@@ -108,9 +107,7 @@ class TestEnum(JitTestCase):
             return x == y
 
         # TODO: rewrite code so that the highlight is not empty.
-        with self.assertRaisesRegexWithHighlight(
-            RuntimeError, "Could not unify type list", ""
-        ):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "Could not unify type list", ""):
             torch.jit.script(enum_comp)
 
     def test_enum_name(self):
@@ -124,9 +121,11 @@ class TestEnum(JitTestCase):
         def enum_name(x: Color) -> str:
             return x.name
 
-        FileCheck().check("Color").check_next("prim::EnumName").check_next(
-            "return"
-        ).run(str(enum_name.graph))
+        FileCheck() \
+            .check("Color") \
+            .check_next("prim::EnumName") \
+            .check_next("return") \
+            .run(str(enum_name.graph))
 
         self.assertEqual(enum_name(Color.RED), Color.RED.name)
         self.assertEqual(enum_name(Color.GREEN), Color.GREEN.name)
@@ -142,9 +141,11 @@ class TestEnum(JitTestCase):
         def enum_value(x: Color) -> int:
             return x.value
 
-        FileCheck().check("Color").check_next("prim::EnumValue").check_next(
-            "return"
-        ).run(str(enum_value.graph))
+        FileCheck() \
+            .check("Color") \
+            .check_next("prim::EnumValue") \
+            .check_next("return") \
+            .run(str(enum_value.graph))
 
         self.assertEqual(enum_value(Color.RED), Color.RED.value)
         self.assertEqual(enum_value(Color.GREEN), Color.GREEN.value)
@@ -160,9 +161,11 @@ class TestEnum(JitTestCase):
         def enum_const(x: Color) -> bool:
             return x == Color.RED
 
-        FileCheck().check(
-            "prim::Constant[value=__torch__.jit.test_enum.Color.RED]"
-        ).check_next("aten::eq").check_next("return").run(str(enum_const.graph))
+        FileCheck() \
+            .check("prim::Constant[value=__torch__.jit.test_enum.Color.RED]") \
+            .check_next("aten::eq") \
+            .check_next("return") \
+            .run(str(enum_const.graph))
 
         self.assertEqual(enum_const(Color.RED), True)
         self.assertEqual(enum_const(Color.GREEN), False)
@@ -180,9 +183,7 @@ class TestEnum(JitTestCase):
             else:
                 return False
 
-        with self.assertRaisesRegexWithHighlight(
-            RuntimeError, "has no attribute 'PURPLE'", "Color.PURPLE"
-        ):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "has no attribute 'PURPLE'", "Color.PURPLE"):
             torch.jit.script(enum_const)
 
     def test_enum_ivalue_type(self):
@@ -196,9 +197,10 @@ class TestEnum(JitTestCase):
         def is_color_enum(x: Any):
             return isinstance(x, Color)
 
-        FileCheck().check(
-            "prim::isinstance[types=[Enum<__torch__.jit.test_enum.Color>]]"
-        ).check_next("return").run(str(is_color_enum.graph))
+        FileCheck() \
+            .check("prim::isinstance[types=[Enum<__torch__.jit.test_enum.Color>]]") \
+            .check_next("return") \
+            .run(str(is_color_enum.graph))
 
         self.assertEqual(is_color_enum(Color.RED), True)
         self.assertEqual(is_color_enum(Color.GREEN), True)
@@ -215,9 +217,10 @@ class TestEnum(JitTestCase):
         def closed_over_aliased_type():
             return a.RED.value
 
-        FileCheck().check("prim::Constant[value={}]".format(a.RED.value)).check_next(
-            "return"
-        ).run(str(closed_over_aliased_type.graph))
+        FileCheck() \
+            .check("prim::Constant[value={}]".format(a.RED.value)) \
+            .check_next("return") \
+            .run(str(closed_over_aliased_type.graph))
 
         self.assertEqual(closed_over_aliased_type(), Color.RED.value)
 
@@ -227,9 +230,10 @@ class TestEnum(JitTestCase):
         def closed_over_aliased_value():
             return b.value
 
-        FileCheck().check("prim::Constant[value={}]".format(b.value)).check_next(
-            "return"
-        ).run(str(closed_over_aliased_value.graph))
+        FileCheck() \
+            .check("prim::Constant[value={}]".format(b.value)) \
+            .check_next("return") \
+            .run(str(closed_over_aliased_value.graph))
 
         self.assertEqual(closed_over_aliased_value(), Color.RED.value)
 
@@ -249,9 +253,13 @@ class TestEnum(JitTestCase):
         m = TestModule(Color.RED)
         scripted = torch.jit.script(m)
 
-        FileCheck().check("TestModule").check_next("Color").check_same(
-            'prim::GetAttr[name="e"]'
-        ).check_next("prim::EnumValue").check_next("return").run(str(scripted.graph))
+        FileCheck() \
+            .check("TestModule") \
+            .check_next("Color") \
+            .check_same("prim::GetAttr[name=\"e\"]") \
+            .check_next("prim::EnumValue") \
+            .check_next("return") \
+            .run(str(scripted.graph))
 
         self.assertEqual(scripted(), Color.RED.value)
 
@@ -308,11 +316,15 @@ class TestEnum(JitTestCase):
         m = TestModule(Color.RED)
         scripted = torch.jit.script(m)
 
-        FileCheck().check("TestModule").check_next("Color").check_same(
-            'prim::GetAttr[name="e"]'
-        ).check_next("return").run(str(scripted.graph))
+        FileCheck() \
+            .check("TestModule") \
+            .check_next("Color") \
+            .check_same("prim::GetAttr[name=\"e\"]") \
+            .check_next("return") \
+            .run(str(scripted.graph))
 
         self.assertEqual(scripted(), Color.RED)
+
 
     def test_enum_iterate(self):
         class Color(Enum):
@@ -330,9 +342,12 @@ class TestEnum(JitTestCase):
         make_global(Color)
         scripted = torch.jit.script(iterate_enum)
 
-        FileCheck().check("Enum<__torch__.jit.test_enum.Color>[]").check_same(
-            "Color.RED"
-        ).check_same("Color.GREEN").check_same("Color.BLUE").run(str(scripted.graph))
+        FileCheck() \
+            .check("Enum<__torch__.jit.test_enum.Color>[]") \
+            .check_same("Color.RED") \
+            .check_same("Color.GREEN") \
+            .check_same("Color.BLUE") \
+            .run(str(scripted.graph))
 
         # PURPLE always appears last because we follow Python's Enum definition order.
         self.assertEqual(scripted(Color.RED), [Color.GREEN.value, Color.BLUE.value])
@@ -340,6 +355,7 @@ class TestEnum(JitTestCase):
 
     # Tests that explicitly and/or repeatedly scripting an Enum class is permitted.
     def test_enum_explicit_script(self):
+
         @torch.jit.script
         class Color(Enum):
             RED = 1

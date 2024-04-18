@@ -28,7 +28,7 @@ class CollectTracepointsPass(PassBase):
                         "Symint input is not implemented yet for submodule call signature."
                     )
             else:
-                return ConstantArgument(name="", value=arg)
+                return ConstantArgument(value=arg)
 
         for module in gm.modules():
             if not isinstance(module, torch.fx.GraphModule):

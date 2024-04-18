@@ -130,11 +130,10 @@ class _DerivedDim(_Dim):
         from sympy import Integer
 
         _min_symint = self.fn(Integer(self.root.min))  # type: ignore[attr-defined]
-        root = self.root  # type: ignore[attr-defined]
         assert _min_symint >= 0, (
             f"Expected derived min value of {self.__name__} to be >= 0. "
-            f"Please specify an appropriate min value for {root.__name__} "
-            f"(currently {root.min})."
+            f"Please specify an appropriate min value for {self.root.__name__} "  # type: ignore[attr-defined]
+            f"(currently {self.root.min})."  # type: ignore[attr-defined]
         )
         return int(_min_symint)
 
@@ -145,11 +144,10 @@ class _DerivedDim(_Dim):
         from sympy import Integer
 
         _max_symint = self.fn(Integer(self.root.max))  # type: ignore[attr-defined]
-        root = self.root  # type: ignore[attr-defined]
         assert _max_symint <= sys.maxsize - 1, (
             f"Expected derived max value of {self.__name__} to be <= {sys.maxsize - 1}. "
-            f"Please specify an appropriate max value for {root.__name__} "
-            f"(currently {root.max})."
+            f"Please specify an appropriate max value for {self.root.__name__} "  # type: ignore[attr-defined]
+            f"(currently {self.root.max})."  # type: ignore[attr-defined]
         )
         return int(_max_symint)
 
