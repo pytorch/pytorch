@@ -16,7 +16,6 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_TORCHDYNAMO,
     TestCase,
-    xfailIfTorchDynamo,
     xpassIfTorchDynamo,
 )
 
@@ -167,7 +166,6 @@ class TestSetOps(TestCase):
                     None,
                     "to_begin",
                 ),
-                decorators=[xfailIfTorchDynamo],
             ),
             # should fail because attempting to cast
             # two special floating point values

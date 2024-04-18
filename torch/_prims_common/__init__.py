@@ -12,6 +12,7 @@ from typing import (
     Callable,
     cast,
     List,
+    NamedTuple,
     Optional,
     overload,
     Sequence,
@@ -20,6 +21,8 @@ from typing import (
     TYPE_CHECKING,
     Union,
 )
+
+from typing_extensions import TypeAlias
 
 
 if TYPE_CHECKING:
@@ -33,16 +36,16 @@ import torch
 from torch import sym_float, sym_int, sym_max
 
 
-ShapeType = Union[torch.Size, List[int], Tuple[int, ...]]
-StrideType = Union[List[int], Tuple[int, ...]]
-DimsType = Union[int, List[int], Tuple[int, ...]]
-DimsSequenceType = Union[List[int], Tuple[int, ...]]
+ShapeType: TypeAlias = Union[torch.Size, List[int], Tuple[int, ...]]
+StrideType: TypeAlias = Union[List[int], Tuple[int, ...]]
+DimsType: TypeAlias = Union[int, List[int], Tuple[int, ...]]
+DimsSequenceType: TypeAlias = Union[List[int], Tuple[int, ...]]
 # TODO: Type[torch.SymInt], Type[torch.SymFloat]
-NumberTypeType = Union[Type[bool], Type[int], Type[float], Type[complex]]
+NumberTypeType: TypeAlias = Union[Type[bool], Type[int], Type[float], Type[complex]]
 # TODO: This needs a lot more type annotations
 # NumberType = Union[bool, int, float, complex, torch.SymInt, torch.SymFloat]
-NumberType = Union[bool, int, float, complex]
-RealNumberType = Union[bool, int, float]
+NumberType: TypeAlias = Union[bool, int, float, complex]
+RealNumberType: TypeAlias = Union[bool, int, float]
 
 Number = (bool, int, float, complex, torch.SymInt, torch.SymFloat)
 # I don't call it Integral because numbers.Integral includes bool, but IntLike
@@ -52,7 +55,7 @@ IntLike = (int, torch.SymInt)
 FloatLike = (float, torch.SymFloat)
 IntWithoutSymInt = int
 FloatWithoutSymFloat = float
-DeviceLikeType = Union[str, torch.device, int]
+DeviceLikeType: TypeAlias = Union[str, torch.device, int]
 Tensor = torch.Tensor
 
 
@@ -63,7 +66,7 @@ torch_function_passthrough = {
     torch.sym_int,
     torch.sym_max,
     torch.sym_min,
-    torch.sym_sqrt,
+    torch._sym_sqrt,  # type: ignore[attr-defined]
     torch.sym_ite,
     torch.Tensor.dim,
     torch.Tensor.ndim.__get__,  # type: ignore[attr-defined]
@@ -87,13 +90,15 @@ torch_function_passthrough = {
 
 TensorLikeType = torch.Tensor
 TensorLike = torch.Tensor
-TensorSequenceType = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
-TensorOrNumberLikeType = Union[TensorLikeType, NumberType]
+TensorSequenceType: TypeAlias = Union[List[TensorLikeType], Tuple[TensorLikeType, ...]]
+TensorOrNumberLikeType: TypeAlias = Union[TensorLikeType, NumberType]
 
 CustomOutParamAnnotation = "__custom_out_param__"
 
 
 def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if len(a) != len(b):
         return False
 
@@ -103,7 +108,13 @@ def same_shape(a: ShapeType, b: ShapeType, *, allow_rhs_unbacked=False) -> bool:
             # with each other
             if isinstance(y, torch.SymInt):
                 continue
-        if x != y:
+        # NB: Naively, you would not expect to have to do an oblivious guard
+        # here because there is seemingly no broadcasting here, but in fact we
+        # use this in some situations to determine if we need to do an expand
+        # on the tensor because they don't line up, so you can definitely end
+        # up trying to prove u0 != 1 in this situation.  See
+        # python test/test_proxy_tensor.py -k test_cumsum_unbacked
+        if guard_size_oblivious(x != y):
             return False
 
     return True
@@ -128,6 +139,7 @@ def compare_tensor_meta(
     check_strides=False,
     *,
     allow_rhs_unbacked=False,
+    check_conj=True,
 ):
     """
     Checks that two tensor likes have the same shape,
@@ -169,10 +181,11 @@ def compare_tensor_meta(
             msg = f"Storage offset mismatch! Storage offsets are {a.storage_offset()} and {b.storage_offset()}!"
             raise RuntimeError(msg)
 
-    if a.is_conj() != b.is_conj():
-        raise RuntimeError(
-            f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
-        )
+    if check_conj:
+        if a.is_conj() != b.is_conj():
+            raise RuntimeError(
+                f"Conj mismatch! is_conj is set to {a.is_conj()} and {b.is_conj()}"
+            )
 
     if a.is_neg() != b.is_neg():
         raise RuntimeError(
@@ -218,16 +231,18 @@ def is_contiguous(a: TensorLikeType) -> bool:
     Tensors are contiguous when they have no elements,
     one element, or when they have "nested" strides.
     """
-    if a.numel() < 2:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
+    if guard_size_oblivious(a.numel() < 2):
         return True
 
     expected_stride = 1
     for x, y in reversed(tuple(zip(a.shape, a.stride()))):
         # Skips checking strides when a dimension has length 1
-        if x == 1:
+        if guard_size_oblivious(x == 1):
             continue
 
-        if y != expected_stride:
+        if guard_size_oblivious(y != expected_stride):
             return False
         expected_stride = expected_stride * x
 
@@ -333,6 +348,8 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
     its dimensions that is contiguous.
     """
 
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if a.is_sparse:
         return False
 
@@ -349,11 +366,34 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 
     # Checks that there exists a permutation of the strides s.t. the tensor would be contiguous
     # Sorts (length, stride) pairs by stride
-    lengths_and_strides = sorted(zip(a.shape, a.stride()), key=operator.itemgetter(1))
+    #
+    # This sort is done in a size-oblivious way, which helps if we do a
+    # comparison like 2048*u0 > u0; we just want this to return True
+    # (and not worry about what if u0 is zero).
+    class K(NamedTuple):
+        size: int
+        stride: int
+
+        def __lt__(self, other):
+            return guard_size_oblivious(self.stride < other.stride)
+
+        def __gt__(self, other):
+            return guard_size_oblivious(self.stride > other.stride)
+
+        def __le__(self, other):
+            return guard_size_oblivious(self.stride <= other.stride)
+
+        def __ge__(self, other):
+            return guard_size_oblivious(self.stride >= other.stride)
+
+        def __eq__(self, other):
+            return guard_size_oblivious(self.stride == other.stride)
+
+    lengths_and_strides = sorted(map(K, a.shape, a.stride()))
 
     expected_stride = 1
     for length, stride in lengths_and_strides:
-        if length == 1:
+        if guard_size_oblivious(length == 1):
             continue
 
         if stride != expected_stride:
@@ -375,6 +415,8 @@ def is_non_overlapping_and_dense(a: Tensor) -> bool:
 def compute_elementwise_output_logical_to_physical_perm(
     *tensors, _skip_checks=False
 ) -> List[int]:
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     if not _skip_checks and len(tensors) == 0:
         msg = "Can't compute elementwise output strides for zero tensors!"
         raise ValueError(msg)
@@ -421,17 +463,19 @@ def compute_elementwise_output_logical_to_physical_perm(
             stride_a = tensor.stride()[idx_a]
             stride_b = tensor.stride()[idx_b]
 
-            if stride_a == 0 or stride_b == 0:
+            if guard_size_oblivious(stride_a == 0) or guard_size_oblivious(
+                stride_b == 0
+            ):
                 continue
 
-            if stride_a < stride_b:
+            if guard_size_oblivious(stride_a < stride_b):
                 return -1
 
-            if stride_a > stride_b:
+            if guard_size_oblivious(stride_a > stride_b):
                 return 1
 
             # stride_a == stride_b
-            if shape[idx_a] > shape[idx_b]:
+            if guard_size_oblivious(shape[idx_a] > shape[idx_b]):
                 return 1
 
         # Note: this case is hit if all strides are zero,
@@ -826,7 +870,7 @@ def infer_size_shapes(a: ShapeType, b: ShapeType) -> Tuple[int, ...]:
             (sizeA == sizeB) or (sizeA == 1) or (sizeB == 1),
             lambda: (
                 f"The size of tensor a ({sizeA}) must match the size of "
-                f"tensor b ({sizeB}) at non-singleton dimension {i}"
+                f"tensor b ({sizeB}) at non-jagged dimension {i}"
             ),
         )
 
@@ -886,7 +930,16 @@ def infer_size(shape: ShapeType, numel: int) -> Tuple[int, ...]:
     return tuple(shape)
 
 
-_integer_dtypes = (torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
+_integer_dtypes = (
+    torch.uint8,
+    torch.uint16,
+    torch.uint32,
+    torch.uint64,
+    torch.int8,
+    torch.int16,
+    torch.int32,
+    torch.int64,
+)
 _low_precision_dtypes = (torch.float16, torch.bfloat16, torch.complex32)
 _complex_dtypes = (torch.complex32, torch.complex64, torch.complex128)
 
@@ -1291,6 +1344,7 @@ class RETURN_TYPE(Enum):
     NEW = (0,)
     VIEW = (1,)
     INPLACE = (2,)
+    NONE = (3,)
 
 
 # TODO: when NumberType contains the sym types, can simplify this
@@ -1537,13 +1591,13 @@ def make_contiguous_strides_for(
     if not shape:
         return ()
 
-    from torch.fx.experimental.symbolic_shapes import is_singleton
+    from torch.fx.experimental.symbolic_shapes import is_nested_int
 
     multiplier = 1
     strides = []
     for l in reversed(shape):
         strides.append(multiplier)
-        multiplier *= l if is_singleton(l) else sym_max(l, 1)
+        multiplier *= l if is_nested_int(l) else sym_max(l, 1)
 
     result = tuple(reversed(strides))
 
@@ -1699,8 +1753,10 @@ def compute_required_storage_length(
     40
 
     """
+    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+
     # Short-circuits if the shape has no elements
-    if reduce(operator.mul, shape, 1) == 0:
+    if guard_size_oblivious(reduce(operator.mul, shape, 1) == 0):
         return 0
 
     max_offset = sum((x - 1) * y for x, y in zip(shape, strides))

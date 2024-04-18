@@ -178,7 +178,7 @@ def gen_einsum_strategies(
         spec_list = []
         for specs in zip(*strategy_comb):
             spec_list.append(DTensorSpec(mesh, tuple(specs)))
-        strat = PlacementStrategy(output_spec=spec_list[0], input_specs=spec_list[1:])
+        strat = PlacementStrategy(output_specs=spec_list[0], input_specs=spec_list[1:])
         all_strategies.append(strat)
 
     return OpStrategy(all_strategies)

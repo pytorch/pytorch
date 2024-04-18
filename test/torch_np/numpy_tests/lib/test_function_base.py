@@ -1435,7 +1435,7 @@ class TestVectorize(TestCase):
         try:
             vectorize(random.randrange)  # Should succeed
         except Exception:
-            raise AssertionError()  # noqa: TRY200
+            raise AssertionError  # noqa: TRY200
 
     def test_keywords2_ticket_2100(self):
         # Test kwarg support: enhancement ticket 2100
@@ -2577,7 +2577,7 @@ class TestBincount(TestCase):
             lambda: np.bincount(x, minlength=-1),
         )
 
-    @skipIfTorchDynamo  # flaky test
+    @skipIfTorchDynamo()  # flaky test
     @skipif(not HAS_REFCOUNT, reason="Python lacks refcounts")
     def test_dtype_reference_leaks(self):
         # gh-6805

@@ -94,10 +94,7 @@ typedef enum {
 /*!
  * \brief A Device for Tensor and operator.
  */
-// NB: This is the only difference from
-// https://github.com/dmlc/dlpack/blob/v0.7/include/dlpack/dlpack.h Required to
-// allow forward declaration of DLDevice.
-typedef struct DLDevice_ {
+typedef struct {
   /*! \brief The device type used in the device. */
   DLDeviceType device_type;
   /*!
@@ -198,12 +195,12 @@ typedef struct {
   /*! \brief The data type of the pointer*/
   DLDataType dtype;
   /*! \brief The shape of the tensor */
-  int64_t* shape;
+  const int64_t* shape;
   /*!
    * \brief strides of the tensor (in number of elements, not bytes)
    *  can be NULL, indicating tensor is compact and row-majored.
    */
-  int64_t* strides;
+  const int64_t* strides;
   /*! \brief The offset in bytes to the beginning pointer to data */
   uint64_t byte_offset;
 } DLTensor;

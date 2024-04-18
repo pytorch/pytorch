@@ -49,6 +49,14 @@ TEST(IValueTest, Basic) {
   ASSERT_TRUE(dlist.isNone());
   dlist = IValue(c10::List<double>({3.4}));
   ASSERT_TRUE(dlist.toDoubleVector() == std::vector<double>({3.4}));
+  dlist = IValue(std::vector<double>({3.3, 3.2}));
+  ASSERT_TRUE(dlist.toDoubleVector() == std::vector<double>({3.3, 3.2}));
+  IValue blist(std::vector<bool>{true, false});
+  ASSERT_TRUE(blist.isList());
+  const auto blistRef = blist.toListRef();
+  ASSERT_EQ(blistRef.size(), 2);
+  ASSERT_TRUE(blistRef[0].toBool());
+  ASSERT_FALSE(blistRef[1].toBool());
   IValue the_list(
       at::ivalue::Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
   ASSERT_EQ(foo.use_count(), 3);

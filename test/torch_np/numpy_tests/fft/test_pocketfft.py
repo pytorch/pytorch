@@ -47,6 +47,7 @@ class TestFFTShift(TestCase):
 @instantiate_parametrized_tests
 class TestFFT1D(TestCase):
     def setUp(self):
+        super().setUp()
         np.random.seed(123456)
 
     def test_identity(self):
@@ -341,7 +342,7 @@ class TestFFT1D(TestCase):
                 Y_res = fft(Y, axes=ax)
                 assert_allclose(X_res, Y_res, atol=_tol, rtol=_tol)
         else:
-            raise ValueError()
+            raise ValueError
 
 
 @skipif(IS_WASM, reason="Cannot start thread")

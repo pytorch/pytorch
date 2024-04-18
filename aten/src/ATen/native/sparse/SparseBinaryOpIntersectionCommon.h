@@ -23,8 +23,7 @@
 #define NAME "sparse_binary_op_intersection_cpu"
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
@@ -87,7 +86,7 @@ TensorIterator make_value_selection_intersection_iter(
         lhs_values.sizes(),
         // remove nnz dim for smooth broadcasting
         rhs_values.sizes().slice(1));
-    // update nnz dim to be the lenght of an index
+    // update nnz dim to be the length of an index
     sizes[0] = lhs_select_idx.numel();
     return sizes;
   }();
@@ -478,4 +477,4 @@ void _sparse_binary_op_intersection_kernel_out(
 
 } // anonymous namespace
 
-}} // at::native
+} // at::native

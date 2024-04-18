@@ -134,15 +134,15 @@ class AllocationTreeNode:
 
     def get_live_ranges(self) -> LiveRanges:
         """Aggregate LiveRanges for all objects below this in tree"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_size_hint(self) -> int:
         """Number of bytes used for example inputs"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_symbolic_size(self) -> sympy.Expr:
         """Number of bytes needed at runtime"""
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def finalize(self, pool, offset) -> AllocationTreeNode:
         """Called after all allocations have been made"""
@@ -326,7 +326,7 @@ class TemporalSplit(ClearCacheOnAllocateMixin, AllocationTreeNode):
     @cache_on_self
     def get_symbolic_size(self) -> sympy.Expr:
         if not self.allocations:
-            return 0
+            return 0  # type: ignore[return-value]
         return sympy.Max(*[x.get_symbolic_size() for x in self.allocations])
 
     def is_empty(self):

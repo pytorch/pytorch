@@ -341,11 +341,13 @@ def get_ignored_functions() -> Set[Callable]:
         Tensor._fix_weakref,
         Tensor._view_func,
         Tensor._view_func_unsafe,
+        Tensor._rev_view_func_unsafe,
         Tensor._make_wrapper_subclass,
         Tensor._python_dispatch.__get__,
         Tensor._has_symbolic_sizes_strides.__get__,
         Tensor._conj,
         Tensor._conj_physical,
+        Tensor._lazy_clone,
         Tensor._neg_view,
         Tensor._is_zerotensor,
         Tensor._is_all_true,
@@ -908,6 +910,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.nn.functional.prelu: lambda input, weight: -1,
         torch.nn.functional.relu: lambda input, inplace=False: -1,
         torch.nn.functional.relu6: lambda input, inplace=False: -1,
+        torch.nn.functional.rms_norm: lambda input, normalized_shape, weight=None, eps=1e-6: -1,
         torch.nn.functional.rrelu: lambda input, lower=0.125, upper=0.3333333333333333, training=False, inplace=False: -1,
         torch.nn.functional.selu: lambda input, inplace=False: -1,
         torch.nn.functional.silu: lambda input, inplace=False: -1,
@@ -1006,6 +1009,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.renorm: lambda input, p, dim, maxnorm, out=None: -1,
         torch.repeat_interleave: lambda input, dim=None: -1,
         torch.reshape: lambda input, shape: -1,
+        torch.rms_norm: lambda input, normalized_shape, weight=None, eps=1e-6: -1,
         torch.rnn_relu: lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1,
         torch.rnn_relu_cell: lambda input, hx, w_ih, w_hh, b_ih=None, b_hh=None: -1,
         torch.rnn_tanh: lambda input, hx, params, has_biases, num_layers, dropout, train, bidirectional, batch_first: -1,
@@ -1026,6 +1030,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch._segment_reduce: lambda data, reduce="max", lengths=None, indices=None, offsets=None, axis=0, unsafe=False: -1,
         torch.select: lambda input, dim, index: -1,
         torch.select_scatter: lambda input, src, dim, index: -1,
+        torch.slice_inverse: lambda input, src, dim=0, start=None, end=None, step=1: -1,
         torch.slice_scatter: lambda input, src, dim=0, start=None, end=None, step=1: -1,
         torch.selu: lambda input, inplace=False: -1,
         torch.sigmoid: lambda input, out=None: -1,
@@ -1063,7 +1068,16 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         torch.sym_min: lambda a, b: -1,
         torch.sym_not: lambda input: -1,
         torch.sym_ite: lambda a, b, c: -1,
-        torch.sym_sqrt: lambda input: -1,
+        torch._sym_sqrt: lambda input: -1,
+        torch._sym_cos: lambda input: -1,
+        torch._sym_cosh: lambda input: -1,
+        torch._sym_sin: lambda input: -1,
+        torch._sym_sinh: lambda input: -1,
+        torch._sym_tan: lambda input: -1,
+        torch._sym_tanh: lambda input: -1,
+        torch._sym_asin: lambda input: -1,
+        torch._sym_acos: lambda input: -1,
+        torch._sym_atan: lambda input: -1,
         torch.nansum: lambda input, dim=None: -1,
         torch.svd: lambda input, some=True, compute_uv=True, out=None: -1,
         torch.svd_lowrank: lambda input, q=6, niter=2, M=None: -1,
@@ -1355,6 +1369,7 @@ def get_testing_overrides() -> Dict[Callable, Callable]:
         Tensor.map_: lambda self, tensor, callable: -1,
         Tensor.map2_: lambda self, x, y, callable: -1,
         Tensor.mm: lambda self, mat2: -1,
+        Tensor.module_load: lambda self, other, assign=False: -1,
         Tensor.narrow_copy: lambda self, dimension, start, length: -1,
         Tensor.ndimension: lambda self: -1,
         Tensor.nelement: lambda self: -1,
@@ -1895,7 +1910,7 @@ class TorchFunctionMode:
         pass
 
     def __torch_function__(self, func, types, args=(), kwargs=None):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def __enter__(self):
         _push_mode(self)

@@ -97,7 +97,7 @@ constexpr bool mkldnn_bf16_device_check_arm() {
 
 #if AT_MKLDNN_ENABLED()
 inline bool mkldnn_bf16_device_check() {
-#if defined(__x86_64__)
+#if defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))
   // Use ideep to check bf16 on X64 as cpuinfo has no avx_ne_convert check.
   return ideep::has_bf16_type_support();
 #else
@@ -106,7 +106,7 @@ inline bool mkldnn_bf16_device_check() {
 }
 
 inline bool mkldnn_fp16_device_check() {
-#if defined(__x86_64__)
+#if defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))
   return ideep::has_fp16_type_support();
 #else
   return false;

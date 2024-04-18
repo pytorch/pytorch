@@ -231,7 +231,7 @@ class MultiheadAttention(torch.ao.nn.quantizable.MultiheadAttention):
 
         if converted.bias_v is not None:
             bias_v = converted._parameters.pop('bias_v')
-            sc, zp = torch._choose_qparams_per_tensor(bias_k,
+            sc, zp = torch._choose_qparams_per_tensor(bias_k,  # type: ignore[possibly-undefined]
                                                       reduce_range=False)
             bias_v = torch.quantize_per_tensor(bias_v, sc, zp, torch.quint8)
             setattr(converted, 'bias_v', bias_v)  # noqa: B010

@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/ScalarOps.h>
 
@@ -15,10 +16,10 @@ inline void fill_inplace(Tensor& self, const Scalar& value_scalar) {
 
 namespace detail {
 Tensor& scalar_fill(Tensor& self, const Scalar& value) {
-  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(
-      kComplexHalf, kHalf, kBool, kBFloat16, self.scalar_type(), "fill_out", [&]() {
+  AT_DISPATCH_V2(
+      self.scalar_type(), "fill_out", AT_WRAP([&]() {
         fill_inplace<scalar_t>(self, value);
-      });
+      }), kComplexHalf, kHalf, kBool, kBFloat16, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES));
   return self;
 }
 

@@ -4,7 +4,7 @@ import importlib
 import inspect
 import sys
 import types
-from typing import Any, Callable, Dict, Type, Union
+from typing import Any, Callable, Dict, Set, Type, Union
 
 import torch._C
 import torch.utils._pytree as pytree
@@ -85,7 +85,7 @@ class OperatorBase:
         self.functorch_table = {}
 
     def __call__(self, *args, **kwargs):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def has_kernel_for_dispatch_key(self, k):
         return k in self.py_kernels
@@ -149,7 +149,7 @@ class OperatorBase:
             return fn(_CppFunctionalizeAPI(), *args, **kwargs)
 
         def functionalize_dispatch_mode_fn(mode, *args, **kwargs):
-            return fn(_PythonFunctionalizeAPI(), *args, **kwargs)
+            return fn(_PythonFunctionalizeAPI(mode), *args, **kwargs)
 
         def functionalize_functorch_fn(interpreter, *args, **kwargs):
             return fn(_FunctorchFunctionalizeAPI(interpreter), *args, **kwargs)
@@ -165,7 +165,7 @@ class OperatorBase:
         return fn
 
     def name(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 is_included_in_alias = torch._C._dispatch_is_included_in_alias
@@ -227,7 +227,7 @@ def resolve_key(op: OperatorBase, k: DispatchKey):  # type: ignore[valid-type]
     raise NotImplementedError(f"could not find kernel for {op} at dispatch key {k}")
 
 
-_higher_order_ops = {}
+_higher_order_ops: Dict[str, "HigherOrderOperator"] = {}
 
 _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS = [
     DispatchKey.PythonDispatcher,  # type: ignore[attr-defined]
@@ -265,6 +265,14 @@ class HigherOrderOperator(OperatorBase):
 
         for dispatch_key in _HIGHER_ORDER_OP_DEFAULT_FALLTHROUGH_DISPATCH_KEYS:
             self.fallthrough(dispatch_key)
+
+        # [NOTE] We have to register pre-dispatch key implementation
+        # because sometimes HOP use aot-dispatch tracing to detect certaion
+        # mutations. This is problematic when we are functionalizing HOP
+        # during pre-dispatch because when the inner tracer starts, it will see
+        # that PreDispatch key is still active. In that case, we just redispatch
+        # it to next key. This is only safe to do when PreDispatch key stack has no
+        # active modes.
 
     def py_impl(self, k):
         if isinstance(k, torch._C.DispatchKey) and not self.non_fallthrough_keys.has(k):
@@ -335,7 +343,13 @@ class HigherOrderOperator(OperatorBase):
                 f"could not find kernel for HigherOrderOperator {self._name} "
                 f"at dispatch key {final_key} (resolved from {dispatch_key})"
             )
-        self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
+
+        # [NOTE] We shouldn't cache PreDispatch kernel here because depending
+        # on what modes are active, predispatch behaviour is different.
+        # Also we do same thing for normal ops:
+        # See Note [Not Caching Per-Dispatch-Key Mode Handlers]
+        if dispatch_key != torch._C.DispatchKey.PreDispatch:
+            self._dispatch_cache[dispatch_key] = self.py_kernels[final_key]
         kernel = self.py_kernels[final_key]
         # It's illegal to register DispatchKey to py_kernels, since there's no
         # C++ kernel to call into
@@ -427,14 +441,30 @@ def unset_mode_pre_dispatch(mode_key):
         torch._C._TorchDispatchModeKey.PROXY,
         torch._C._TorchDispatchModeKey.FUNCTIONAL,
     )
-    if mode_key == torch._C._TorchDispatchModeKey.PROXY:
-        current_mode = current_mode_stack_pre_dispatch.get(0)
-        mode_stack_state_for_pre_dispatch().set(0, None)
-        return current_mode
-    else:
-        current_mode = current_mode_stack_pre_dispatch.get(1)
-        mode_stack_state_for_pre_dispatch().set(1, None)
-        return current_mode
+
+    def _unset_mode():
+        if mode_key == torch._C._TorchDispatchModeKey.PROXY:
+            current_mode = current_mode_stack_pre_dispatch.get(0)
+            mode_stack_state_for_pre_dispatch().set(0, None)
+            return current_mode
+        else:
+            current_mode = current_mode_stack_pre_dispatch.get(1)
+            mode_stack_state_for_pre_dispatch().set(1, None)
+            return current_mode
+
+    current_mode = _unset_mode()
+
+    new_pre_dispatch_len = _len_torch_dispatch_stack_pre_dispatch()
+    # When we are unsetting a mode, we need to check if there is
+    # active mode left on the PreDispatch key. If there is nothing
+    # active, we need to remove PreDispatch key from local dispatch include
+    # set.
+    if new_pre_dispatch_len == 0:
+        torch._C._dispatch_tls_set_dispatch_key_included(
+            torch._C.DispatchKey.PreDispatch, False
+        )
+
+    return current_mode
 
 
 def _set_mode_pre_dispatch(mode):
@@ -442,30 +472,39 @@ def _set_mode_pre_dispatch(mode):
     from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode
 
     assert isinstance(mode, (FunctionalTensorMode, ProxyTorchDispatchMode))
+
+    previous_mode_stack_len = _len_torch_dispatch_stack_pre_dispatch()
     if isinstance(mode, FunctionalTensorMode):
         current_mode = mode_stack_state_for_pre_dispatch().get(1)
         assert current_mode is None
         mode_stack_state_for_pre_dispatch().set(1, mode)
-        return
+    else:
+        current_mode = mode_stack_state_for_pre_dispatch().get(0)
+        assert current_mode is None
+        mode_stack_state_for_pre_dispatch().set(0, mode)
 
-    current_mode = mode_stack_state_for_pre_dispatch().get(0)
-    assert current_mode is None
-    mode_stack_state_for_pre_dispatch().set(0, mode)
+    # When we are setting a mode, we need to check if there is
+    # active mode left on the PreDispatch key. If there was nothing
+    # active before setting this mode, it means that PreDispatch key
+    # was turned off. So we need to turn it on again.
+    if previous_mode_stack_len == 0:
+        torch._C._dispatch_tls_set_dispatch_key_included(
+            torch._C.DispatchKey.PreDispatch, True
+        )
 
 
 def _pop_mode_from_pre_dispatch():
     mode_stack = mode_stack_state_for_pre_dispatch()
+    pre_dispatch_len = _len_torch_dispatch_stack_pre_dispatch()
+
+    if pre_dispatch_len == 0:
+        raise AssertionError("Trying to pop empty mode stack")
+
     if mode_stack.get(1) is not None:
-        res = mode_stack.get(1)
-        mode_stack.set(1, None)
-        return res
+        return unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.FUNCTIONAL)
 
     if mode_stack.get(0) is not None:
-        res = mode_stack.get(0)
-        mode_stack.set(0, None)
-        return res
-
-    raise AssertionError("Trying to pop empty mode stack")
+        return unset_mode_pre_dispatch(torch._C._TorchDispatchModeKey.PROXY)
 
 
 def _len_torch_dispatch_stack_pre_dispatch():
@@ -500,7 +539,7 @@ def mode_stack_state_for_pre_dispatch():
     return _mode_stack_state_for_pre_dispatch
 
 
-cached_ops = set()
+cached_ops: Set["OpOverload"] = set()
 
 
 def add_cached_op(op_overload):
@@ -539,6 +578,9 @@ class OpOverload(OperatorBase):
         op.__module__ = overloadpacket.__module__
         self.__qualname__ = self._name
         self.__annotations__ = {}
+        # Only compute the OperatorHandle when we need it. Not all OpOverloads have
+        # OperatorHandles (the TorchScript ones don't...)
+        self._lazy_handle = None
 
         # If the OpOverload was constructed from a Library.def in Python.
         self._defined_in_python = self.__qualname__ in torch.library._defs
@@ -556,6 +598,22 @@ class OpOverload(OperatorBase):
                 is_write = a.alias_info.is_write or is_write
         self.is_view = is_write is not None and not is_write
 
+    @property
+    def _namespace(self):
+        return self._schema.name.split("::")[0]
+
+    @property
+    def _opname(self):
+        return self._schema.name.split("::")[1]
+
+    @property
+    def _handle(self):
+        if self._lazy_handle is None:
+            self._lazy_handle = torch._C._dispatch_find_schema_or_throw(
+                self._schema.name, self._schema.overload_name
+            )
+        return self._lazy_handle
+
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
@@ -567,8 +625,13 @@ class OpOverload(OperatorBase):
 
     def __call__(self_, *args, **kwargs):  # noqa: B902
         # use `self_` to avoid naming collide with aten ops arguments that
-        # named "self". This way, all the aten ops can be called by kwargs.
-        return self_._op(*args, **(kwargs or {}))
+        # are named "self". This way, all the aten ops can be called by kwargs.
+        return self_._op(*args, **kwargs)
+
+    def redispatch(self_, keyset, *args, **kwargs):  # noqa: B902
+        # use `self_` to avoid naming collide with aten ops arguments that
+        # are named "self". This way, all the aten ops can be called by kwargs.
+        return self_._handle.redispatch_boxed(keyset, *args, **kwargs)
 
     def __hash__(self):
         return hash(self._op)
@@ -683,6 +746,7 @@ class OpOverload(OperatorBase):
                             ).has(torch._C.DispatchKey.Python):
                                 overload_types.append(type(a))
                         # TODO: check that I got these args correct (in C++, we pass in "0000"??)
+
                         return curr_mode.__torch_dispatch__(
                             self, overload_types, args, kwargs
                         )

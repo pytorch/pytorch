@@ -60,6 +60,7 @@ else:
         def __init__(self) -> None:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
+            self.parent_to_child_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
@@ -69,6 +70,13 @@ else:
         def create_child_mesh(
             self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
         ) -> "DeviceMesh":
+            # Directly return the child mesh if it is already created.
+            child_mesh_mappings = self.parent_to_child_mapping.get(device_mesh)
+            if child_mesh_mappings:
+                sub_mesh = child_mesh_mappings.get(mesh_dim_name)
+                if sub_mesh:
+                    return sub_mesh
+
             # swap the current dim to the last dim then reshape to flatten out other
             # dims, so we can just extract the list of ranks which contains cur_rank.
             cur_rank = device_mesh.get_rank()
@@ -81,14 +89,16 @@ else:
                     device_mesh.device_type,
                     mesh_1d,
                     mesh_dim_names=(mesh_dim_name,),
-                    _init_process_groups=False,
                 )
                 if cur_rank in mesh_1d:
                     res_sub_mesh = sub_mesh
 
-            res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]
+            res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
             # Assign the current DeviceMesh as the parent of the child DeviceMesh.
             self.child_to_parent_mapping[res_sub_mesh] = device_mesh
+            self.parent_to_child_mapping.setdefault(device_mesh, {})[
+                mesh_dim_name
+            ] = res_sub_mesh
             return res_sub_mesh
 
         def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
@@ -134,7 +144,7 @@ else:
                     f"Mesh dimension '{mesh_dim_name}' does not exist.",
                     f"Available mesh dimensions are: mesh_dim_names={device_mesh.mesh_dim_names}",
                 )
-            return device_mesh.mesh_dim_names.index(mesh_dim_name)  # type: ignore[union-attr]
+            return not_none(device_mesh.mesh_dim_names.index(mesh_dim_name))
 
     _mesh_resources: _MeshEnv = _MeshEnv()
 
@@ -197,11 +207,12 @@ else:
             mesh: Union[torch.Tensor, "ArrayLike"],
             *,
             mesh_dim_names: Optional[Tuple[str, ...]] = None,
-            _init_process_groups: bool = True,
         ) -> None:
             self.device_type = device_type
+            if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
+                raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
             self.mesh = (
-                mesh.detach()
+                mesh.detach().to(device="cpu", dtype=torch.int)
                 if isinstance(mesh, torch.Tensor)
                 else torch.tensor(mesh, dtype=torch.int)
             )
@@ -218,8 +229,7 @@ else:
                 # already. The world pg is used for device mesh identity (rank) on each
                 # process (we need to know if the current global rank is in the mesh or not).
                 self._get_or_create_default_group()
-                if _init_process_groups:
-                    self._init_process_groups()
+                self._init_process_groups()
 
         def _get_or_create_default_group(self):
             default_initialized = is_initialized()
@@ -257,9 +267,13 @@ else:
             return _get_default_group()
 
         def _init_process_groups(self):
-            # group tag/ranks associated with each mesh dimension, each mesh dimension should
-            # have one sub-group per rank
-            dim_group_infos: List[Tuple[str, List[int]]] = []
+            # tag/ranks/group_name associated with each mesh dimension, each
+            # mesh dimension should have one sub-group per rank
+            #
+            # TODO(yifu): remove tag and ranks once we fully migrate to native
+            # functional collectives. See details in:
+            # https://github.com/pytorch/pytorch/issues/93173#issuecomment-1907095208
+            dim_group_infos: List[Tuple[str, List[int], str]] = []
 
             if self.mesh.ndim == 1 and self.mesh.numel() == get_world_size():
                 # if the mesh is the same as world_pg, we just append the default
@@ -269,6 +283,7 @@ else:
                     (
                         _get_group_tag(_get_default_group()),
                         list(range(get_world_size())),
+                        _get_default_group().group_name,
                     )
                 )
             else:
@@ -283,10 +298,12 @@ else:
                     # for each dim and append the groups
                     for dim_mesh in pg_ranks_by_dim:
                         subgroup_ranks = dim_mesh.tolist()
-                        # call new_group regardless of the current rank in the
-                        # pg or not, it's required that all ranks participate
-                        # in subgroup construction
+
+                        # We temporarily revert the re-use subgroup, since it breaks two internal tests.
+                        # Temporarily reverting to resolve test timeout while root-causing.
+                        # TODO: Add two tests to cover internal tests scenarios and re-enable reuse subgroup if exists.
                         dim_group = new_group(ranks=subgroup_ranks)
+
                         # only add to dim_groups if the current rank in the subgroup
                         if self.get_rank() in subgroup_ranks:
                             if len(dim_group_infos) > dim:
@@ -295,7 +312,11 @@ else:
                                     f"in {subgroup_ranks}!"
                                 )
                             dim_group_infos.append(
-                                (_get_group_tag(dim_group), subgroup_ranks)
+                                (
+                                    _get_group_tag(not_none(dim_group)),
+                                    subgroup_ranks,
+                                    dim_group.group_name,
+                                )
                             )
             self._dim_group_infos = dim_group_infos
 
@@ -358,13 +379,16 @@ else:
                 >>> # of cross-host(dim 0), and within-host (dim 1).
                 >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
             """
-            if self.mesh.ndim <= 1:
-                raise RuntimeError(
-                    f"Cannot slice a DeviceMesh with {self.mesh.ndim} dimension."
-                )
+            if self.mesh.ndim == 1:
+                if self.mesh_dim_names and mesh_dim_name == self.mesh_dim_names[0]:
+                    return self
+                else:
+                    raise RuntimeError(
+                        f"Invalid mesh_dim_name {mesh_dim_name} specified."
+                    )
+
             mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim_name)
             submesh = _mesh_resources.create_child_mesh(self, mesh_dim, mesh_dim_name)
-
             return submesh
 
         def get_group(
@@ -388,20 +412,24 @@ else:
                 raise RuntimeError("DeviceMesh process groups not initialized!")
 
             if self.mesh.ndim == 1:
-                return not_none(_find_pg_by_ranks_and_tag(*self._dim_group_infos[0]))
+                return not_none(
+                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[0][:2])
+                )
 
             if mesh_dim is not None:
                 if isinstance(mesh_dim, str):
                     mesh_dim = _mesh_resources.get_mesh_dim_by_name(self, mesh_dim)
                 return not_none(
-                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim])
+                    _find_pg_by_ranks_and_tag(*self._dim_group_infos[mesh_dim][:2])
                 )
             else:
                 dim_groups = []
                 for ith_dim in range(self.mesh.ndim):
                     dim_groups.append(
                         not_none(
-                            _find_pg_by_ranks_and_tag(*self._dim_group_infos[ith_dim])
+                            _find_pg_by_ranks_and_tag(
+                                *self._dim_group_infos[ith_dim][:2]
+                            )
                         )
                     )
                 return dim_groups
@@ -459,11 +487,11 @@ else:
             elif mesh_dim is None:
                 mesh_dim = 0
 
-            mesh_dim_group = self.get_group(mesh_dim)  # type: ignore[arg-type]
+            mesh_dim_group = not_none(self.get_group(mesh_dim))
             assert isinstance(
                 mesh_dim_group, ProcessGroup
             ), "We expect ProcessGroup before calling `get_rank`!"
-            return get_rank(mesh_dim_group)  # type: ignore[arg-type]
+            return not_none(get_rank(mesh_dim_group))
 
         def get_coordinate(self) -> Optional[List[int]]:
             """
@@ -525,7 +553,7 @@ else:
                     f"Found len(mesh_dim_names): {len(mesh_dim_names)} and len(mesh_shape):{len(mesh_shape)}.",
                 )
 
-        mesh = torch.arange(math.prod(mesh_shape)).view(mesh_shape)
+        mesh = torch.arange(math.prod(mesh_shape), dtype=torch.int).view(mesh_shape)
         device_mesh = DeviceMesh(
             device_type=device_type,
             mesh=mesh,

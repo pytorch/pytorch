@@ -87,6 +87,12 @@ class GenCompositeViewCopyKernel:
     def __call__(self, g: NativeFunctionsViewGroup) -> Optional[str]:
         if g.view_copy is None:
             return None
+        elif g.view_copy.func.name.name.base != f"{g.view.func.name.name}_copy":
+            # If the view_copy doesn't match the standard naming scheme of <op>_copy,
+            # assume it already exists and doesn't need to be generated.
+            # Example: slice_inverse() with the copy variant named slice_scatter()
+            # instead of slice_inverse_copy()
+            return None
 
         metadata = self.backend_index.get_kernel(g.view_copy)
         assert metadata is not None
@@ -425,7 +431,8 @@ def emit_view_functionalization_body(
         {reverse_lambda.decl()} {{
           return {reverse_lambda.inner_call()}
         }},
-        /*is_multi_output=*/{str(is_multi_output_view).lower()}
+        /*is_multi_output=*/{str(is_multi_output_view).lower()},
+        /*is_as_strided=*/{str(str(f.func.name) == 'as_strided').lower()}
       );
       auto out = at::functionalization::impl::create_functional_tensor_with_view_meta(tmp_output, {view_tensor_name}, view_meta);
       // See  Note [Propagating strides in the functionalization pass]
@@ -658,7 +665,7 @@ def emit_inplace_functionalization_body(
          // case 2: arguments are not functional tensors, so we no-op and redispatch.
          at::AutoDispatchSkipFunctionalize guard;
          {maybe_create_output(f, 'tmp_output')}at::_ops::{f.func.name.unambiguous_name()}::call({', '.join(inplace_exprs)});
-         {return_from_mutable_noop_redispatch(f, 'tmp_output')};
+         {return_from_mutable_noop_redispatch(f, 'tmp_output')}
         }}
       }} else {{
         {return_type} tmp_output;
@@ -686,8 +693,8 @@ def gen_functionalization_view_inverse_declaration(
     def emit_decl_helper(g: NativeFunctionsViewGroup) -> Optional[str]:
         if g.view.has_composite_implicit_autograd_kernel:
             return None
-        view_copy_inverse_sig = ViewInverseSignature(g)
-        return view_copy_inverse_sig.decl()
+        view_inverse_sig = ViewInverseSignature(g)
+        return view_inverse_sig.decl()
 
     return emit_decl_helper(g)
 
@@ -744,7 +751,8 @@ def gen_functionalization_registration(
         if str(f.func.name) == "resize_":
             # See Note [resize_ in Functionalization]
             return []
-        assert not f.is_view_op
+        if str(f.func.name.name) != "set_":
+            assert not f.is_view_op
         # functionalization needs to generate and register kernels for inplace ops.
         # We *also* need to directly register CompositeImplicitAUtograd kernels
         # so that they decompose properly before functioanlization.
@@ -784,7 +792,10 @@ def gen_functionalization_definition(
         # I think we should either:
         # (1) fix their schemas (BC-breaking)
         # (2) hand-write their functionalization kernels
-        if str(g.func.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION:
+        if (
+            str(g.func.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION
+            and str(g.func.name.name) not in MUTABLE_OPS_NOT_USING_FUNCTIONALIZATION
+        ):
             assert g.has_composite_implicit_autograd_kernel or not modifies_arguments(g)
         return []
     else:

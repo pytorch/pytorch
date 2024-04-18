@@ -16,9 +16,8 @@ TORCH_API inline void noopDelete(void*) {}
 ///
 ///     at::Tensor tensor = at::for_blob(data, sizes)
 ///             .strides(strides)
-///             .context(context, [](void *ctx) { delete static_cast<Ctx*>(ctx); })
-///             .options(...)
-///             .make_tensor();
+///             .context(context, [](void *ctx) { delete static_cast<Ctx*>(ctx);
+///             }) .options(...) .make_tensor();
 ///
 class TORCH_API TensorMaker {
   friend TensorMaker for_blob(void* data, IntArrayRef sizes) noexcept;
@@ -83,7 +82,7 @@ class TORCH_API TensorMaker {
 
   std::size_t computeStorageSize() const noexcept;
 
-  DataPtr makeDataPtrFromDeleter() const;
+  DataPtr makeDataPtrFromDeleter() noexcept;
 
   DataPtr makeDataPtrFromContext() noexcept;
 
@@ -140,11 +139,11 @@ inline Tensor from_blob(
 inline Tensor from_blob(
     void* data,
     IntArrayRef sizes,
-    const std::function<void(void*)>& deleter,
+    std::function<void(void*)> deleter,
     const TensorOptions& options = {},
     const c10::optional<Device> target_device = c10::nullopt) {
   return for_blob(data, sizes)
-      .deleter(deleter)
+      .deleter(std::move(deleter))
       .options(options)
       .target_device(target_device)
       .make_tensor();
@@ -155,10 +154,7 @@ inline Tensor from_blob(
     IntArrayRef sizes,
     IntArrayRef strides,
     const TensorOptions& options = {}) {
-  return for_blob(data, sizes)
-      .strides(strides)
-      .options(options)
-      .make_tensor();
+  return for_blob(data, sizes).strides(strides).options(options).make_tensor();
 }
 
 inline Tensor from_blob(
@@ -168,4 +164,4 @@ inline Tensor from_blob(
   return for_blob(data, sizes).options(options).make_tensor();
 }
 
-}  // namespace at
+} // namespace at

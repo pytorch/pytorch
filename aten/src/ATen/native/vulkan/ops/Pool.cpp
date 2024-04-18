@@ -30,7 +30,7 @@ Tensor adaptive_avg_pool2d(
           output_size[Layout::Activation4D::batch],
           output_size[Layout::Activation4D::channels],
       },
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
 
   const uvec3 v_output_size = v_output.extents();
@@ -159,7 +159,7 @@ Tensor pool2d(
           output_height,
           output_width,
       },
-      self_arg.scalar_type(),
+      v_self.dtype(),
   };
   if (v_self.is_quantized()) {
     v_output.set_is_quantized();

@@ -53,7 +53,7 @@ static inline void cpu_cum_base_kernel(const Tensor& result,
     // NOLINTNEXTLINE(bugprone-argument-comment)
     .declare_static_shape(self.sizes(), /*squash_dim=*/dim)
     .add_output(result)
-    .add_input(self)
+    .add_const_input(self)
     .build();
 
   auto result_dim_stride = ensure_nonempty_stride(result, dim);
@@ -183,8 +183,7 @@ inline void norm_two_reduce_step(Vectorized<acc_t>& acc_vec, Vectorized<scalar_t
 
 template <>
 inline void norm_two_reduce_step(Vectorized<float>& acc_fvec, Vectorized<BFloat16>& data_bvec) {
-  Vectorized<float> data_fvec0, data_fvec1;
-  std::tie(data_fvec0, data_fvec1) = convert_bfloat16_float(data_bvec);
+  auto [data_fvec0, data_fvec1] = convert_bfloat16_float(data_bvec);
   acc_fvec += data_fvec0 * data_fvec0;
   acc_fvec += data_fvec1 * data_fvec1;
 }
@@ -196,7 +195,7 @@ template <typename scalar_t, typename acc_t=typename scalar_value_type<scalar_t>
 void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   if (val == 0.0) {
     binary_kernel_reduce(iter, NormZeroOps<scalar_t, acc_t, out_t>(), acc_t(0));
-  } else if (val == 0.0) {
+  } else if (val == 1.0) {
     binary_kernel_reduce(iter, NormOneOps<scalar_t, acc_t, out_t>(), acc_t(0));
   } else if (val == 2.0) {
     binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t>(), acc_t(0));
@@ -291,7 +290,9 @@ static void and_kernel_impl(TensorIterator& iter) {
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a && b) ? 1 : 0; },
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
-          return a & b;
+          // NB: != returns 0xFF rather than 0x01, so we must negate to get
+          // the desired result
+          return (a != Vectorized<uint8_t>(0)).neg() & (b != Vectorized<uint8_t>(0)).neg();
         },
         /*ident=*/true);
   } else {
@@ -327,7 +328,7 @@ static void or_kernel_impl(TensorIterator& iter) {
         iter,
         [=](uint8_t a, uint8_t b) -> uint8_t { return (a || b) ? 1 : 0; },
         [=](Vectorized<uint8_t> a, Vectorized<uint8_t> b) {
-          return a | b;
+          return (a != Vectorized<uint8_t>(0)).neg() | (b != Vectorized<uint8_t>(0)).neg();
         },
         /*ident=*/false);
   } else {

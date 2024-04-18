@@ -1,4 +1,5 @@
 from contextlib import contextmanager
+from typing import Optional
 import torch
 import torch.distributed as dist
 import torch.nn as nn
@@ -65,7 +66,7 @@ def _shard_tensor(
                 f'sharding_spec={sharding_spec} on rank: {current_rank} does not '  # type: ignore[index]
                 f'match with sharding_spec={entry[1]} on rank: {idx}')
 
-    st = sharding_spec.shard(tensor, src_rank=src_rank, process_group=process_group)
+    st = sharding_spec.shard(tensor, src_rank=src_rank, process_group=pg)
 
     return st
 
@@ -120,7 +121,7 @@ def shard_parameter(
     module.register_parameter(param_name, nn.Parameter(st))
 
 # Tracks the current process group in the load context manager.
-_CURRENT_PROCESS_GROUP = None
+_CURRENT_PROCESS_GROUP: Optional[dist.ProcessGroup] = None
 
 @contextmanager
 def load_with_process_group(process_group):

@@ -9,7 +9,6 @@
 
 #include <c10/macros/Macros.h>
 #include <c10/util/Logging.h>
-#include <c10/util/math_compat.h>
 #include <c10/util/string_utils.h>
 #include <torch/csrc/jit/tensorexpr/codegen.h>
 #include <torch/csrc/jit/tensorexpr/exceptions.h>

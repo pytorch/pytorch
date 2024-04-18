@@ -1,7 +1,6 @@
 #include <c10/core/WrapDimMinimal.h>
 
-namespace c10 {
-namespace detail {
+namespace c10::detail {
 
 template <typename T>
 T maybe_wrap_dim_slow(T dim, T dim_post_expr, bool wrap_scalar) {
@@ -40,5 +39,4 @@ maybe_wrap_dim_slow(int64_t dim, int64_t dim_post_expr, bool wrap_scalar);
 template C10_API SymInt
 maybe_wrap_dim_slow(SymInt dim, SymInt dim_post_expr, bool wrap_scalar);
 
-} // namespace detail
-} // namespace c10
+} // namespace c10::detail

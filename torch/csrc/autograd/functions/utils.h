@@ -65,7 +65,7 @@ inline bool compute_requires_grad(Args&&... args) {
 }
 
 inline void set_history(
-    at::Tensor& variable,
+    const at::Tensor& variable,
     const std::shared_ptr<Node>& grad_fn) {
   TORCH_CHECK(grad_fn != nullptr);
   if (variable.defined()) {
@@ -81,15 +81,7 @@ inline void set_history(
 }
 
 inline void set_history(
-    std::vector<Variable>&& variables,
-    const std::shared_ptr<Node>& grad_fn) {
-  for (auto& variable : variables) {
-    set_history(variable, grad_fn);
-  }
-}
-
-inline void set_history(
-    std::vector<Variable>& variables,
+    const std::vector<Variable>& variables,
     const std::shared_ptr<Node>& grad_fn) {
   for (auto& variable : variables) {
     set_history(variable, grad_fn);

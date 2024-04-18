@@ -222,7 +222,7 @@ def print_results(results: List[Experiment]):
         {
             "Type": "Average",
             "Speedup": np.mean(speedups),
-            **{key: None for key in max_config_dict},
+            **dict.fromkeys(max_config_dict),
         },
         {"Type": "Max", "Speedup": speedups[max_speedup_index], **max_config_dict},
         {"Type": "Min", "Speedup": speedups[min_speedup_index], **min_config_dict},

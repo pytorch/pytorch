@@ -13,6 +13,8 @@ from torch.testing._internal.common_cuda import tf32_off
 from torch.testing._internal.common_utils import unMarkDynamoStrictTest
 from torch.testing._internal.common_utils import (
     is_iterable_of_tensors,
+    IS_WINDOWS,
+    IS_MACOS,
     TestCase,
     skipIfCrossRef,
     suppress_warnings,
@@ -26,6 +28,7 @@ from torch.testing._internal.common_device_type import (
     onlyNativeDeviceTypes,
     ops,
     instantiate_device_type_tests,
+    onlyCPU,
     onlyCUDA,
 )
 from torch.testing._internal.common_methods_invocations import op_db, skip, skipOps, xfail
@@ -35,6 +38,7 @@ from torch._ops import DispatchKey
 import itertools
 import functools
 from functools import partial
+import re
 import unittest
 
 aten = torch.ops.aten
@@ -65,6 +69,9 @@ _decomp_test_ops_core_autograd = [
     for op in op_db
     if op.aten_name in core_decomposition_names
     and op.supports_autograd
+]
+_sdpa_op_info = [
+    op for op in op_db if "scaled_dot_product_attention" in op.aten_name
 ]
 
 
@@ -137,7 +144,8 @@ def ref_vjp_no_create(f, *primals):
 
     def wrapped(cotangents):
         return _autograd_grad(
-            _as_tuple(result), primals, _as_tuple(cotangents), create_graph=False
+            _as_tuple(result), primals, _as_tuple(cotangents), create_graph=False,
+            retain_graph=True,
         )
 
     return result, wrapped
@@ -540,6 +548,20 @@ class TestDecomp(TestCase):
         res = torch._decomp.decompositions.uniform(x, low=low, high=high)
         self.assertEqual(ref, res)
 
+    def test_broadcasting_index_copy(self, device):
+        x = torch.zeros([1, 10], device=device)
+        xs = torch.ones([2, 10], device=device)
+
+        def index_copy(xs, x):
+            torch._decomp.decompositions.index_copy_(xs, 0, torch.tensor(0).to(device), x)
+
+        index_copy(xs, x)
+
+        xs_two = torch.ones([2, 10], device=device)
+        xs_two[0] = x
+
+        self.assertEqual(xs, xs_two)
+
     def test_rrelu_with_noise(self, device):
         # rrelu_with_noise behavior depends on a) whether elements in the input
         # are <= 0, and b) whether we're in training mode. Cover all cases:
@@ -614,6 +636,45 @@ class TestDecomp(TestCase):
         var = torch.randn(3, device=device)
         res = torch._decomp.decompositions.native_batch_norm(input, weight, bias, mean, var, False, 1, 1e-05)
         self.assertEqual(shape, res[0].shape)
+
+    def test_arange_graph(self, device):
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def func(x, start):
+            le = x.shape[-1]
+            if start is None:
+                a = torch.arange(le, dtype=torch.float32, device=x.device)
+            else:
+                a = torch.arange(start, le, dtype=torch.float32, device=x.device)
+            return a
+
+        pattern = r", device = device\(.+\), requires_grad = False"
+
+        cfunc = make_fx(func, decomposition_table=decomposition_table)
+        fx_g = cfunc(torch.rand(10, device=device), None)
+        fx_g_code = fx_g.code.strip()
+        # Remove device and requires_grad
+        fx_g_code = re.sub(pattern, "", fx_g_code)
+        self.assertExpectedInline(fx_g_code, """\
+def forward(self, x_1, start_1):
+    iota = torch.ops.prims.iota.default(10, start = 0, step = 1, dtype = torch.int64)
+    mul = torch.ops.prims.mul.default(iota, 1);  iota = None
+    add = torch.ops.prims.add.default(mul, 0);  mul = None
+    convert_element_type = torch.ops.prims.convert_element_type.default(add, torch.float32);  add = None
+    return convert_element_type""")
+
+        fx_g = cfunc(torch.rand(10, device=device), 1)
+        fx_g_code = fx_g.code.strip()
+        # Remove device and requires_grad
+        fx_g_code = re.sub(pattern, "", fx_g_code)
+        self.assertExpectedInline(fx_g_code, """\
+def forward(self, x_1, start_1):
+    iota = torch.ops.prims.iota.default(9, start = 0, step = 1, dtype = torch.int64)
+    mul = torch.ops.prims.mul.default(iota, 1);  iota = None
+    add = torch.ops.prims.add.default(mul, 1);  mul = None
+    convert_element_type = torch.ops.prims.convert_element_type.default(add, torch.float32);  add = None
+    return convert_element_type""")
+
 
     class DecompCrossRefMode(TorchDispatchMode):
         def __init__(self, test_case, saved_precision, saved_rel_tol, dtype, run_all):
@@ -932,44 +993,54 @@ class DecompOneOffTests(TestCase):
         self.assertTrue(torch.allclose(ref[0], res[0]))
         self.assertTrue(torch.allclose(ref[1], res[1]))
 
+        inp = torch.rand([30, 10], device=device)
+        inp2 = torch.rand([30, 1], device=device)
+
+        self.assertEqual(
+            torch.ops.aten._weight_norm_interface(inp, inp2),
+            torch._decomp.decompositions._weight_norm_interface(inp, inp2)
+        )
+
     @unittest.skipIf(TEST_WITH_ASAN, "Skipped under ASAN")
-    @onlyNativeDeviceTypes
+    @onlyCPU
     @skipIfCrossRef
-    def test_sdpa(self, device):
-        from torch.fx.experimental.proxy_tensor import make_fx
-        from torch._decomp import get_decompositions
-        from torch.nn import functional as F
+    @skipOps('DecompOneOffTests', 'test_sdpa', [
+        xfail("nn.functional.scaled_dot_product_attention", dtypes=[torch.half] + ([torch.bfloat16] if IS_MACOS else [])),
+    ])
+    @ops(_sdpa_op_info)
+    def test_sdpa(self, device, dtype, op):
+        # SDPA doesn't support float16, this is aligned with aten/src/ATen/native/transformers/attention.cpp. If we
+        # add support for float16 over there we should update this test as well.
 
         class ScaledDotProductAttention(torch.nn.Module):
             def __init__(self):
                 super().__init__()
 
-            def forward(self, query_layer, key_layer, value_layer):
-                attn_output = F.scaled_dot_product_attention(
-                    query_layer, key_layer, value_layer, None, dropout_p=0.0, is_causal=True
+            def forward(self, query_layer, key_layer, value_layer, mask=None, is_causal=True):
+                attn_output = op(
+                    query_layer, key_layer, value_layer, attn_mask=mask, dropout_p=0.0, is_causal=is_causal
                 )
                 return attn_output
 
 
-        query_layer = torch.randn(1, 128, 100, 64, device=device)
-        key_layer = torch.randn(1, 128, 100, 64, device=device)
-        value_layer = torch.randn(1, 128, 100, 64, device=device)
+        query_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
+        key_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
+        value_layer = torch.randn(1, 128, 100, 64, device=device, dtype=dtype)
+        masks = [None, torch.ones((1, 1, 100, 100), device=device, dtype=torch.bool)]
 
-        attention = ScaledDotProductAttention()
-        fx_g = make_fx(
-            attention,
-            decomposition_table=get_decompositions(
-                [
-                    torch.ops.aten._scaled_dot_product_flash_attention.default,
-                ]
-            ),
-        )(query_layer, key_layer, value_layer)
+        atol, rtol = dtype_precisions[dtype]
 
-        compiled_res = fx_g(query_layer, key_layer, value_layer)
-        eager_res = F.scaled_dot_product_attention(
-            query_layer, key_layer, value_layer, None, dropout_p=0.0, is_causal=True
-        )
-        self.assertTrue(torch.allclose(compiled_res, eager_res, atol=1e-6, rtol=1e-5))
+        for mask in masks:
+            is_causal = mask is None
+            attention = ScaledDotProductAttention()
+            decomposed_res = torch._decomp.decompositions.scaled_dot_product_flash_attention_for_cpu(
+                query_layer, key_layer, value_layer, 0.0, is_causal, attn_mask=mask
+            )
+            eager_res = op(
+                query_layer, key_layer, value_layer, attn_mask=mask, dropout_p=0.0, is_causal=is_causal
+            )
+
+            self.assertTrue(torch.allclose(decomposed_res[0], eager_res, atol=atol, rtol=rtol))
 
 
 instantiate_device_type_tests(DecompOneOffTests, globals())
@@ -1047,6 +1118,14 @@ class HasDecompTest(TestCase):
         core_decomps = torch._decomp.core_aten_decompositions().keys()
         core_aten_ops = useful_decomps - core_decomps
         self.assertExpected("".join(sorted(op.name() + "\n" for op in core_aten_ops)))
+
+    @unittest.skipIf(IS_WINDOWS, "torch.compile not supported on windows")
+    def test_compile_rrelu(self):
+        def f(x):
+            return torch.rrelu(x)
+
+        inp = torch.rand(1, 2, 3)
+        self.assertEqual(f(inp), torch.compile(f)(inp))
 
 
 if __name__ == "__main__":

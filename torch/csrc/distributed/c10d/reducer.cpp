@@ -20,6 +20,7 @@
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/comm.hpp>
 #include <torch/csrc/distributed/c10d/logger.hpp>
+#include <utility>
 
 namespace c10d {
 namespace {
@@ -89,7 +90,7 @@ std::vector<at::Tensor> extractTensors(const c10::IValue& result) {
 Reducer::Reducer(
     std::vector<at::Tensor> params,
     std::vector<std::vector<size_t>> bucket_indices,
-    std::vector<size_t> per_bucket_size_limits,
+    const std::vector<size_t>& per_bucket_size_limits,
     c10::intrusive_ptr<c10d::ProcessGroup> process_group,
     std::vector<bool> expect_sparse_gradients,
     int64_t bucket_bytes_cap,
@@ -193,6 +194,9 @@ Reducer::Reducer(
 #endif
                     this->autograd_hook(variable_index);
                     return outputs;
+                  },
+                  [=](torch::autograd::CompiledNodeArgs& args) {
+                    // Make post_hook an noop if compiled_autograds is enabled.
                   })),
           grad_accumulator);
 
@@ -446,7 +450,7 @@ void Reducer::mark_variable_ready_sparse(size_t variable_index) {
     if (sparse_metadata_) {
       grad = grad.coalesce();
       REDUCER_CHECK(
-          param_names_.size() != 0, logger_, "No parameter names were found");
+          !param_names_.empty(), logger_, "No parameter names were found");
       std::string& param_name = param_names_[variable_index];
       auto iter = sparse_metadata_->find(param_name);
       REDUCER_CHECK(
@@ -629,7 +633,7 @@ void Reducer::delay_all_reduce() {
 }
 
 void Reducer::set_logger(std::weak_ptr<c10d::Logger> logger) {
-  logger_ = logger;
+  logger_ = std::move(logger);
 }
 
 // The function `autograd_hook` is called after the gradient for a
@@ -724,7 +728,7 @@ void Reducer::autograd_hook(size_t index) {
 void Reducer::all_reduce_local_used_map() {
   // See Note [Skip allreducing local_used_map_dev]
   // H2D from local_used_map_ to local_used_map_dev_
-  if (local_used_map_dev_.is_cuda()) {
+  if (local_used_map_dev_.is_cuda() || local_used_map_dev_.is_privateuseone()) {
     // Note [local_used_map_ -> local_used_map_dev copying]
     // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     // We do async H2D to avoid the blocking overhead. The async copy and
@@ -734,8 +738,8 @@ void Reducer::all_reduce_local_used_map() {
     // Correct sequencing with respect to host operations is also
     // essential. The H2D copy_ is stream ordered, while the host's
     // changes to local_used_map_ are host ordered. If a large backlog of
-    // cuda-stream work pushes the copy_ far into the future, and if no
-    // blocking calls occur between now and finalize_backward()** such
+    // cuda/privateuseone-stream work pushes the copy_ far into the future, and
+    // if no blocking calls occur between now and finalize_backward()** such
     // that finalize_backward() re-zeroes local_used_map_ on the host
     // before the stream executes the copy_, copy_ will read those zeros
     // instead of the values we thought we told it to read here. Copying
@@ -766,8 +770,8 @@ void Reducer::all_reduce_local_used_map() {
   } else if (local_used_map_dev_.is_mtia()) {
     // MTIA probably will have special logic in the future, following code might
     // be changed drastically. Therefore, a new if case is created for MTIA, for
-    // now, the implementation is similar to the CUDA one, except for
-    // the pin memory step.
+    // now, the implementation is similar to the CUDA/privateuseone one, except
+    // for the pin memory step.
     auto local_used_map_tmp = at::native::empty_like(
         local_used_map_,
         c10::optTypeMetaToScalarType(local_used_map_.options().dtype_opt()),
@@ -1802,11 +1806,9 @@ bool Reducer::rebuild_buckets() {
           params_.size(),
           " versus rebuilt params size of: ",
           rebuilt_param_indices_.size()));
-  std::vector<std::vector<size_t>> rebuilt_bucket_indices;
   std::vector<size_t> bucket_size_limits;
   bucket_size_limits.push_back(first_bucket_bytes_cap_);
   bucket_size_limits.push_back(bucket_bytes_cap_);
-  std::vector<size_t> per_bucket_size_limits;
   auto ddp_set_last_bucket_as_small =
       (getCvarString({"DDP_SET_LAST_BUCKET_CAP"}, "N/A") == "1");
 
@@ -1819,7 +1821,7 @@ bool Reducer::rebuild_buckets() {
     std::reverse(rebuilt_params_.begin(), rebuilt_params_.end());
     std::reverse(rebuilt_param_indices_.begin(), rebuilt_param_indices_.end());
   }
-  std::tie(rebuilt_bucket_indices, per_bucket_size_limits) =
+  auto [rebuilt_bucket_indices, per_bucket_size_limits] =
       compute_bucket_assignment_by_size(
           rebuilt_params_,
           bucket_size_limits,

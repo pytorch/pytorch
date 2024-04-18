@@ -305,7 +305,8 @@ Tensor cat(const at::ITensorListRef& tensors, const int64_t in_dim) {
   TORCH_INTERNAL_ASSERT(!result_size.empty(), "Accessing empty array");
   result_size[dim] = cat_dim_size;
 
-  vTensor v_output{api::context(), result_size, tensor.scalar_type()};
+  vTensor v_output{
+      api::context(), result_size, convert_dtype(tensor.scalar_type())};
 
   if (dim == ndim - 1) {
     return cat_width(materialized, v_output);

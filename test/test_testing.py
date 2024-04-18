@@ -1485,15 +1485,7 @@ class TestMakeTensor(TestCase):
         low_inclusive, high_exclusive = {
             torch.bool: (0, 2),
             torch.uint8: (0, 10),
-            **{
-                signed_integral_dtype: (-9, 10)
-                for signed_integral_dtype in [
-                    torch.int8,
-                    torch.int16,
-                    torch.int32,
-                    torch.int64,
-                ]
-            },
+            **dict.fromkeys([torch.int8, torch.int16, torch.int32, torch.int64], (-9, 10)),
         }.get(dtype, (-9, 9))
 
         t = torch.testing.make_tensor(10_000, dtype=dtype, device=device, low=low_inclusive, high=high_exclusive)
@@ -2063,7 +2055,7 @@ class TestTestParametrizationDeviceType(TestCase):
         for test_func, name in _get_test_funcs_for_test_class(device_cls):
             should_apply = (name == 'test_op_param_test_op_x_2_cpu_float64' or
                             ('test_other' in name and 'y_5' in name) or
-                            ('test_three' in name and name.endswith('int16')))
+                            ('test_three' in name and name.endswith('_int16')))
             self.assertEqual(hasattr(test_func, '_decorator_applied'), should_apply)
 
     def test_modules_decorator_applies_module_and_param_specific_decorators(self, device):

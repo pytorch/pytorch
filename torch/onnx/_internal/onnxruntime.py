@@ -1,9 +1,11 @@
 import dataclasses
 import importlib
 import logging
+import os
 
 from typing import (
     Any,
+    Callable,
     Dict,
     Final,
     List,
@@ -49,6 +51,7 @@ try:
     from torch.onnx._internal.fx.type_utils import (
         _TORCH_DTYPE_TO_NUMPY_DTYPE,
         _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE,
+        from_python_type_to_onnx_tensor_element_type,
     )
 
     _SUPPORT_ONNXRT = True
@@ -82,6 +85,34 @@ def is_onnxrt_backend_supported() -> bool:
         ...
     """
     return _SUPPORT_ONNXRT
+
+
+_dumped_onnx_model: Dict[str, int] = {}
+
+
+def _dump_onnx_model(
+    model_string: bytes, graph_module: Optional[torch.fx.GraphModule] = None
+) -> str:
+    """Stores the onnx model into a file.
+    The name is "{ONNXRT_DUMP_PATH}{N}.onnx"
+    where *N* is the number of files already stored with
+    this prefix.
+    If graph_module is not None, the graph is stored as a string with
+    the same filename except the extension (.txt).
+    """
+    prefix = os.environ.get("ONNXRT_DUMP_PATH", None)
+    if not prefix:
+        return ""
+    n = _dumped_onnx_model.get(prefix, -1) + 1
+    filename = f"{prefix}{n}.onnx"
+    with open(filename, "wb") as f:
+        f.write(model_string)
+    _dumped_onnx_model[prefix] = n
+    if graph_module is not None:
+        filename_txt = f"{prefix}{n}.txt"
+        with open(filename_txt, "w", encoding="utf-8") as f:
+            f.write(str(graph_module.graph))
+    return filename
 
 
 def _infer_default_eps() -> Sequence[str]:
@@ -151,29 +182,24 @@ class OrtOperatorSupport(OperatorSupport):
             return False
         # This is the and the only place to decide if aten op is supported.
         if node.op == "call_function" and node.target in self._onnx_support_dict:
-            logger.warning(
+            logger.info(
                 "support_dict supports node.target: %s (type: %s)",
                 node.target,
                 type(node.target),
             )
             return True
-        logger.warning(
-            "support_dict doesn't support node.target: %s (type: %s)",
-            node.target,
-            type(node.target),
-        )
         # If node.target is not in support_dict, we still want to check if torch.jit.script
         # can convert it to ONNX equivalence. Let's use base mechanism to do this.
         # See extra_support_dict  for supported ops.
         if super().is_node_supported(submodules, node):
-            logger.warning(
+            logger.info(
                 "extra_support_dict supports node.target: %s (type: %s)",
                 node.target,
                 type(node.target),
             )
             return True
         logger.warning(
-            "extra_support_dict doesn't supports node.target: %s (type: %s)",
+            "support_dict and extra_support_dict don't support node.target: %s (type: %s)",
             node.target,
             type(node.target),
         )
@@ -199,51 +225,6 @@ def _move_placeholder_to_front(graph_module: torch.fx.GraphModule) -> None:
         return
     for placeholder in placeholders:
         first_not_placeholder.prepend(placeholder)
-
-
-def _replace_to_copy_with_to(fx_module: torch.fx.GraphModule) -> None:
-    # aten._to_copy doesn't have exporter so we replace it with aten.to.
-    for node in fx_module.graph.nodes:
-        if (
-            isinstance(node.target, torch._ops.OpOverload)
-            and node.target.overloadpacket == torch.ops.aten._to_copy
-        ):
-            is_default_layout = True
-            is_on_same_device = True
-            is_cast = True
-            are_kwargs_supported = True
-            if "layout" in node.kwargs and node.kwargs["layout"] != torch.strided:
-                is_default_layout = False
-            if (
-                "device" in node.kwargs
-                and node.kwargs["device"] != node.args[0].meta["val"].device
-            ):
-                is_on_same_device = False
-            if "dtype" not in node.kwargs:
-                is_cast = False
-            for kwarg in node.kwargs:
-                if kwarg not in ["layout", "device", "dtype"]:
-                    are_kwargs_supported = False
-
-            if (
-                len(node.args) == 1
-                and is_default_layout
-                and is_on_same_device
-                and is_cast
-                and are_kwargs_supported
-            ):
-                # This aten::_to_copy looks like ONNX Cast, so other kwargs are ignored.
-                # This change could lead to invalid FX graph but it doesn't matter, as long as the downstream backend,
-                # ONNXRuntime, can execute the exported ONNX graph.
-                node.kwargs = {"dtype": node.kwargs["dtype"]}
-
-                node.target = torch.ops.aten.to.dtype
-            else:
-                raise RuntimeError(
-                    f"aten._to_copy must be replaced with other ONNX-supported aten ops. \
-                         args={[arg.meta for arg in node.args]}, kwargs={node.kwargs}"
-                )
-    fx_module.recompile()
 
 
 def _infer_ep_from_device(*args) -> Tuple[str, ...]:
@@ -313,23 +294,42 @@ def _sort_eps(eps: Tuple[str, ...]) -> Tuple[str, ...]:
     return tuple(sorted(unique_eps, key=get_execution_provider_priority, reverse=True))
 
 
-def _get_onnx_devices(values: Tuple[torch.Tensor, ...]) -> Tuple["ORTC.OrtDevice", ...]:
-    assert all(
-        value.device == values[0].device for value in values
-    ), "All values must be on the same device."
-
+def _get_onnx_devices(
+    values: Tuple[
+        Union[
+            torch.Tensor, torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool
+        ],
+        ...,
+    ]
+) -> Tuple["ORTC.OrtDevice", ...]:
     def _device_id_or_zero(device_id: int) -> int:
         return device_id or 0
 
-    devices: Tuple["ORTC.OrtDevice", ...] = tuple(
-        ORTC.OrtDevice(
-            _get_ort_device_type(value.device.type),
-            ORTC.OrtDevice.default_memory(),
-            _device_id_or_zero(value.device.index),
-        )
-        for value in values
-    )
-    return devices
+    def _map_tensor_or_sym_to_device(
+        value: Union[
+            torch.Tensor, torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool
+        ],
+    ) -> int:
+        if isinstance(value, torch.Tensor):
+            return ORTC.OrtDevice(
+                _get_ort_device_type(value.device.type),
+                ORTC.OrtDevice.default_memory(),
+                _device_id_or_zero(value.device.index),
+            )
+        elif isinstance(
+            value, (torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool)
+        ):
+            return ORTC.OrtDevice(
+                _get_ort_device_type("cpu"), ORTC.OrtDevice.default_memory(), 0
+            )
+        else:
+            raise ValueError("Unsupported value type: " + str(type(value)))
+
+    if len(values) > 0:
+        ort_devices = tuple(_map_tensor_or_sym_to_device(value) for value in values)
+        return ort_devices
+    else:
+        return (_map_tensor_or_sym_to_device(1),)
 
 
 def _get_ortvalues_from_torch_tensors(
@@ -356,6 +356,61 @@ def _to_real_tensor(tensor: FakeTensor) -> torch.Tensor:
     return out
 
 
+def _adjust_scalar_from_fx_to_onnx(
+    dynamo_value: Union[
+        torch.Tensor,
+        int,
+        float,
+        bool,
+    ],
+    value_info: "onnx.ValueInfoProto",  # type: ignore[name-defined]
+) -> torch.Tensor:
+    """Helper function to wrap PyTorch variables as torch.Tensor"""
+    if (
+        isinstance(dynamo_value, torch.Tensor)
+        and len(value_info.type.tensor_type.shape.dim) == 0
+        and dynamo_value.shape == (1,)
+    ):
+        # ONNX expect a scalar with empty shape.
+        # In contrast, PyTorch usually allows implicit
+        # conversion between shape=() and shape=(1,).
+        #
+        # Below, PyTorch's shape (1,) is reshaped to ().
+        return torch.squeeze(dynamo_value)
+    elif isinstance(dynamo_value, int):
+        return torch.tensor(dynamo_value, dtype=torch.int64)
+    elif isinstance(dynamo_value, float):
+        return torch.tensor(dynamo_value, dtype=torch.float32)
+    elif isinstance(dynamo_value, bool):
+        return torch.tensor(dynamo_value, dtype=torch.bool)
+    else:
+        assert isinstance(dynamo_value, torch.Tensor)
+        return dynamo_value.contiguous()
+
+
+def _adjust_scalar_from_onnx_to_fx(
+    tensor: torch.Tensor,
+    prim_value: Union[
+        torch.Tensor,
+        torch.SymInt,
+        int,
+        torch.SymFloat,
+        float,
+        torch.SymBool,
+        bool,
+    ],
+) -> Union[torch.Tensor, int, float, bool,]:
+    """Helper function to wrap ORT-produced torch.Tensor as PyTorch variables"""
+    assert isinstance(tensor, torch.Tensor), "ORT's output must be tensor."
+    if isinstance(
+        prim_value,
+        (torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool),
+    ):
+        # Convert tensor back to scalar to match Dynamo's expectation.
+        return tensor.item()
+    return tensor
+
+
 def _run_onnx_session_with_ortvaluevector(
     sess: "onnxruntime.InferenceSession",
     input_names: Tuple[str, ...],
@@ -365,13 +420,22 @@ def _run_onnx_session_with_ortvaluevector(
     outputs: Tuple[torch.Tensor, ...],
     output_devices: Tuple["ORTC.OrtDevice", ...],
     preallocate_output: bool,
-) -> Tuple[torch.Tensor, ...]:
+    input_value_infos: Tuple["onnx.ValueInfoProto", ...],  # type: ignore[name-defined]
+    normalized_prim_outputs: Tuple[
+        Union[
+            torch.Tensor, torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool
+        ],
+        ...,
+    ],
+) -> Tuple[Union[torch.Tensor, int, float, bool], ...]:
     _nvtx_range_push("contiguous")
-    inputs = tuple(a.contiguous() for a in inputs)
+    inputs = tuple(
+        _adjust_scalar_from_fx_to_onnx(arg, value_info)
+        for arg, value_info in zip(inputs, input_value_infos)
+    )
     _nvtx_range_pop()
 
     _nvtx_range_push("push_back_batch")
-
     ort_inputs = _get_ortvalues_from_torch_tensors(inputs, input_devices)
 
     # preallocate output pytorch Tensors and use the buffers affined to the torch device for the output ortvalue.
@@ -394,12 +458,32 @@ def _run_onnx_session_with_ortvaluevector(
     )
     _nvtx_range_pop()
 
+    # Post-processing step:
+    #  wrap ORT's outputs to the schema represented by
+    #  `prim_output` (obtained by running the original
+    #  torch.fx.GraphModule).
     if preallocate_output:
+        # Profile the ORT-to-PyTorch type cast below
+        _nvtx_range_push("after run_with_ortvaluevector")
+        # Outputs are stored on pre-allocated torch.Tensors' memory,
+        # so this case doesn't need to convert ORTValue to torch.Tensor.
+        pth_outputs = tuple(
+            _adjust_scalar_from_onnx_to_fx(onnx_output, prim_output)  # type: ignore[misc]
+            for onnx_output, prim_output in zip(pth_outputs, normalized_prim_outputs)
+        )
+        _nvtx_range_pop()
         return pth_outputs
     else:
+        # Profile the two ORT-to-PyTorch type casts below
         _nvtx_range_push("after run_with_ortvaluevector")
+        # Map ORTValue to torch.Tensor.
         pth_outputs = onnxruntime.training.ortmodule._utils._ortvalues_to_torch_tensor(
             ort_outputs
+        )
+        # Change some torch.Tensor to int, float, bool.
+        pth_outputs = tuple(
+            _adjust_scalar_from_onnx_to_fx(onnx_output, prim_output)  # type: ignore[misc]
+            for onnx_output, prim_output in zip(pth_outputs, normalized_prim_outputs)
         )
         _nvtx_range_pop()
         return pth_outputs
@@ -414,15 +498,29 @@ def _run_onnx_session_with_fetch(
     outputs: Tuple[torch.Tensor, ...],
     output_devices: Tuple["ORTC.OrtDevice", ...],
     preallocate_output: bool,
-) -> Tuple[torch.Tensor, ...]:
+    input_value_infos: Tuple["onnx.ValueInfoProto", ...],  # type: ignore[name-defined]
+    normalized_prim_outputs: Tuple[
+        Union[
+            torch.Tensor, torch.SymInt, int, torch.SymFloat, float, torch.SymBool, bool
+        ],
+        ...,
+    ],
+) -> Tuple[Union[torch.Tensor, int, float, bool], ...]:
+    inputs = tuple(
+        _adjust_scalar_from_fx_to_onnx(arg, value_info)
+        for arg, value_info in zip(inputs, input_value_infos)
+    )
     feed = {
         name: onnxruntime.OrtValue.ortvalue_from_numpy(tensor.cpu().numpy())
         for name, tensor in zip(input_names, inputs)
     }
     ort_outputs = sess.run(output_names, feed)
     pth_outputs = tuple(
-        torch.from_numpy(value).to(tensor.device)
-        for value, tensor in zip(ort_outputs, outputs)
+        _adjust_scalar_from_onnx_to_fx(
+            torch.from_numpy(value),
+            prim_output,
+        )
+        for value, prim_output in zip(ort_outputs, normalized_prim_outputs)
     )
     return pth_outputs
 
@@ -469,8 +567,20 @@ class OrtExecutionInfoPerSession:
         if len(args) != len(self.input_value_infos):
             return False
         for arg, value_info in zip(args, self.input_value_infos):
-            if not isinstance(arg, torch.Tensor):
+            if not isinstance(arg, (torch.Tensor, float, int)):
                 return False
+
+            # Check Python scalars such as int, float, and bool.
+            if isinstance(arg, (int, float, bool)):
+                # Map, e.g., float to onnx.TensorProto.FLOAT.
+                onnx_dtype = from_python_type_to_onnx_tensor_element_type(type(arg))
+                if onnx_dtype != value_info.type.tensor_type.elem_type:
+                    return False
+                if len(value_info.type.tensor_type.shape.dim) != 0:
+                    return False
+                continue
+
+            # Check tensor.
             onnx_dtype = _TORCH_DTYPE_TO_ONNX_TENSOR_ELEMENT_TYPE[arg.dtype]
             if onnx_dtype != value_info.type.tensor_type.elem_type:
                 return False
@@ -591,6 +701,12 @@ class OrtBackendOptions:
     ort_session_options: Optional["onnxruntime.SessionOptions"] = None
     """Options for the ``onnxruntime.InferenceSession`` used by the ``OrtBackend``."""
 
+    pre_ort_model_transforms: Optional[  # type: ignore[name-defined]
+        Sequence[Callable[["onnx.ModelProto"], None]]
+    ] = None
+    """A list of graph transforms to be applied to the ONNX model before it
+    is fed to ONNXRuntime's InferenceSession."""
+
 
 @compatibility(is_backward_compatible=False)
 class OrtBackend:
@@ -644,7 +760,14 @@ class OrtBackend:
 
         extra_support_dict: Dict[str, Any] = {
             "getattr": None,
+            # To send operator.getitem to ORT, add the corresponding string
+            # recognized by PyTorch's OperatorSupport class.
             "_operator.getitem": None,
+            # To send operator.mul to ORT, add the corresponding string
+            # recognized by PyTorch's OperatorSupport class.
+            "_operator.mul": None,
+            "_operator.add": None,
+            "_operator.sub": None,
         }
 
         self._supported_ops = OrtOperatorSupport(support_dict, extra_support_dict)
@@ -727,6 +850,8 @@ class OrtBackend:
             onnx_session = cached_execution_info_per_session.session
             input_names = cached_execution_info_per_session.input_names
             output_names = cached_execution_info_per_session.output_names
+            input_value_infos = cached_execution_info_per_session.input_value_infos
+            output_value_infos = cached_execution_info_per_session.output_value_infos
             input_devices = cached_execution_info_per_session.input_devices
             output_devices = cached_execution_info_per_session.output_devices
             prim_outputs = cached_execution_info_per_session.example_outputs
@@ -762,9 +887,9 @@ class OrtBackend:
                 )
             else:
                 try:
-                    prim_outputs = FakeTensorProp(graph_module).propagate(
-                        *args, **kwargs
-                    )
+                    prim_outputs = FakeTensorProp(
+                        graph_module, check_consistency=False
+                    ).propagate(*args, **kwargs)
                 except Exception:
                     logger.warning("FakeTensorProb failed for %s", graph_module)
                     # When FakeTensorProp fails, it is not possible to preallocate output buffers
@@ -797,6 +922,39 @@ class OrtBackend:
                 opset_version=self._resolved_onnx_exporter_options.onnx_registry.opset_version,
             )
 
+            try:
+                from onnxscript import optimizer  # type: ignore[import]
+                from onnxscript.rewriter import (  # type: ignore[import]
+                    onnxruntime as ort_rewriter,  # type: ignore[import]
+                )
+
+                onnx_model = optimizer.optimize(onnx_model)
+                onnx_model = ort_rewriter.rewrite(onnx_model)
+            except ImportError:
+                logger.warning(
+                    "ONNXScript optimizer is not available. Skipping optimization. "
+                    "Please `pip install onnxscript -U` to enable post-export optimization."
+                )
+
+            # Modify ONNX model using pre-registered graph transforms.
+            # They are in-place modifications for avoiding unnecessary
+            # copy of ONNX initializers.
+            if self._options.pre_ort_model_transforms:
+                for transform in self._options.pre_ort_model_transforms:
+                    transform(onnx_model)
+
+            onnx_model_bytes = onnx_model.SerializeToString()
+            if os.environ.get("ONNXRT_DUMP_PATH", None):
+                # If not empty, environment variable ONNXRT_DUMP_PATH defined the path
+                # where generated onnx files should be stored.
+                # This module keeps a global variables keeping track of the
+                # stored models.
+                # If ONNXRT_DUMP_PATH="dumped/dumped_model_"
+                # The first file name will be 'dumped/dumped_model_0.onnx'.
+                # For every dumped model, a text file 'dumped/dumped_model_0.txt'
+                # is created as well to contain the string representing the graph_module.
+                _dump_onnx_model(onnx_model_bytes, graph_module=graph_module)
+
             # Initialize a ORT session to execute this ONNX model.
             # Note that TorchDynamo assumes all inputs/outputs are on the
             # same device, but it's subject to change (very likely with
@@ -807,7 +965,7 @@ class OrtBackend:
             # TODO(wschin): enable external allocators.
             # See https://github.com/pytorch/pytorch/issues/106867
             onnx_session = onnxruntime.InferenceSession(
-                path_or_bytes=onnx_model.SerializeToString(),
+                path_or_bytes=onnx_model_bytes,
                 sess_options=self._options.ort_session_options,
                 providers=self._select_eps(graph_module, *args),
             )
@@ -825,12 +983,15 @@ class OrtBackend:
             else:
                 output_devices = _get_onnx_devices((prim_outputs,))
 
+            input_value_infos = tuple(input for input in onnx_model.graph.input)
+            output_value_infos = tuple(output for output in onnx_model.graph.output)
+
             execution_info_per_session = OrtExecutionInfoPerSession(
                 session=onnx_session,
                 input_names=input_names,
-                input_value_infos=tuple(input for input in onnx_model.graph.input),
+                input_value_infos=input_value_infos,
                 output_names=output_names,
-                output_value_infos=tuple(output for output in onnx_model.graph.output),
+                output_value_infos=output_value_infos,
                 input_devices=input_devices,
                 output_devices=output_devices,
                 example_outputs=prim_outputs,
@@ -850,7 +1011,10 @@ class OrtBackend:
             (prim_outputs,) if is_single_tensor_output else prim_outputs
         )
         assert isinstance(normalized_prim_outputs, tuple)
-        assert all(isinstance(elem, torch.Tensor) for elem in normalized_prim_outputs)
+        assert all(
+            isinstance(elem, (torch.Tensor, torch.SymInt, int))
+            for elem in normalized_prim_outputs
+        )
 
         _nvtx_range_push("run_onnx_session_with_ortvaluevector")
         onnx_outputs = self.run(
@@ -862,8 +1026,11 @@ class OrtBackend:
             normalized_prim_outputs,
             output_devices,
             self._options.preallocate_output,
+            input_value_infos,
+            normalized_prim_outputs,
         )
         _nvtx_range_pop()
+
         if self._assert_allclose_to_baseline:
             # Compute baseline.
             baseline_outputs = torch._prims.executor.execute(
@@ -910,9 +1077,6 @@ class OrtBackend:
             partitioned_prim_graph_module = self._partitioner_cache[graph_module]
         else:
             prim_graph_module = graph_module
-            # TODO(wschin): this is required for removing aten::_to_copy in _replace_to_copy_with_to.
-            # See https://github.com/pytorch/pytorch/issues/106871.
-            _replace_to_copy_with_to(prim_graph_module)
             partitioner = CapabilityBasedPartitioner(
                 prim_graph_module,
                 self._supported_ops,
@@ -978,6 +1142,7 @@ class OrtBackend:
                 or a.default_execution_providers != b.default_execution_providers
                 or a.preallocate_output != b.preallocate_output
                 or a.use_aot_autograd != b.use_aot_autograd
+                or a.pre_ort_model_transforms != b.pre_ort_model_transforms
             ):
                 return False
 

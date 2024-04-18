@@ -263,7 +263,7 @@ def split_const_subgraphs(
     setattr(
         split,
         fx_const_folded_attrs_name,
-        torch.nn.ParameterList() if multiple_outputs else torch.nn.Parameter(),
+        torch.nn.ParameterList() if multiple_outputs else torch.nn.Parameter(),  # type: ignore[possibly-undefined]
     )
     for node in split.graph.nodes:
         if node.op == "call_module" and node.target == const_mod_name:

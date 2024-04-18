@@ -103,7 +103,6 @@ class TestIdentifyGradients(TestCase):
         grad_tensor: torch.Tensor,
         parameter: Optional[torch.Tensor] = None,
     ) -> None:
-
         # This is not an exhaustive check, but for the purpose of unit testing
         # it is sufficient.
         def key_matches_tensor(key, tensor) -> bool:
@@ -219,7 +218,6 @@ class TestIdentifyGradients(TestCase):
         check(cold_start=False)
 
     def _test_extract_gradients_from_optimizer(self, set_to_none: bool) -> None:
-
         x = torch.ones((1,))
         w0 = torch.ones((1,), requires_grad=True)
         w1 = torch.ones((1,), requires_grad=True)
@@ -844,14 +842,19 @@ class TestMemoryProfilerE2E(TestCase):
             if key.storage.allocation_id == max(ids | {-1})
         }
 
-    def _run_and_check_parameters_and_gradients(self, inner_fn, model, grads_none: bool = False):
-
+    def _run_and_check_parameters_and_gradients(
+        self, inner_fn, model, grads_none: bool = False
+    ):
         with profile() as prof:
             inner_fn()
 
         memory_profile = prof._memory_profile()
 
-        def assert_category(t: torch.Tensor, category: _memory_profiler.Category, should_be_none: bool = False):
+        def assert_category(
+            t: torch.Tensor,
+            category: _memory_profiler.Category,
+            should_be_none: bool = False,
+        ):
             if should_be_none:
                 assert t is None, "tensor should be None but is not."
                 return
@@ -940,7 +943,9 @@ class TestMemoryProfilerE2E(TestCase):
         # If we profile the first step then gradients will not have been
         # created when we call `model.forward`, so if we don't call `.backward`
         # then gradients are never created.
-        self._run_and_check_parameters_and_gradients(inner_fn=fwd_only, model=model, grads_none=True)
+        self._run_and_check_parameters_and_gradients(
+            inner_fn=fwd_only, model=model, grads_none=True
+        )
 
         # On the first step we must rely on `AccumulateGrad`, since gradients
         # did not exist when `model.forward` was called.
@@ -1147,26 +1152,26 @@ class TestMemoryProfilerE2E(TestCase):
             aten::mul.Tensor                         1 (INPUT), 3 (INPUT)                          -> 4 (INPUT)
             aten::mul.Tensor                         1 (INPUT), 5 (INPUT)                          -> 6 (INPUT)
             aten::cat                                4 (INPUT), 6 (INPUT)                          -> 7 (INPUT)
-            aten::binary_cross_entropy_with_logits   7 (INPUT), 2 (INPUT)                          -> 13 (INPUT)
+            aten::binary_cross_entropy_with_logits   7 (INPUT), 2 (INPUT)                          -> 11 (INPUT)
 
             -- Backward ---------------------------------------------------------------------------------------------
-            aten::ones_like                          13 (INPUT)                                    -> 16 (INPUT)
-            aten::sigmoid                            7 (INPUT)                                     -> 17 (TEMPORARY)
-            aten::sub.Tensor                         17 (TEMPORARY), 2 (INPUT)                     -> 18 (TEMPORARY)
-            aten::mul.Tensor                         18 (TEMPORARY), 16 (INPUT)                    -> 19 (AUTOGRAD_DETAIL)
-            aten::div_.Scalar                        19 (AUTOGRAD_DETAIL)                          -> 19 (AUTOGRAD_DETAIL)
-            aten::slice.Tensor                       19 (AUTOGRAD_DETAIL)                          -> 19 (AUTOGRAD_DETAIL)
-            aten::slice.Tensor                       19 (AUTOGRAD_DETAIL)                          -> 19 (AUTOGRAD_DETAIL)
-            aten::mul.Tensor                         19 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 22 (AUTOGRAD_DETAIL)
+            aten::ones_like                          11 (INPUT)                                    -> 14 (INPUT)
+            aten::sigmoid                            7 (INPUT)                                     -> 15 (TEMPORARY)
+            aten::sub.Tensor                         15 (TEMPORARY), 2 (INPUT)                     -> 16 (TEMPORARY)
+            aten::mul.Tensor                         16 (TEMPORARY), 14 (INPUT)                    -> 17 (AUTOGRAD_DETAIL)
+            aten::div_.Scalar                        17 (AUTOGRAD_DETAIL)                          -> 17 (AUTOGRAD_DETAIL)
+            aten::slice.Tensor                       17 (AUTOGRAD_DETAIL)                          -> 17 (AUTOGRAD_DETAIL)
+            aten::slice.Tensor                       17 (AUTOGRAD_DETAIL)                          -> 17 (AUTOGRAD_DETAIL)
+            aten::mul.Tensor                         17 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 20 (AUTOGRAD_DETAIL)
+            aten::sum.dim_IntList                    20 (AUTOGRAD_DETAIL)                          -> 21 (GRADIENT)
+            aten::view                               21 (GRADIENT)                                 -> 21 (GRADIENT)
+            aten::detach                             21 (GRADIENT)                                 -> 21 (GRADIENT)
+            aten::detach                             21 (GRADIENT)                                 -> ???
+            aten::mul.Tensor                         17 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 22 (AUTOGRAD_DETAIL)
             aten::sum.dim_IntList                    22 (AUTOGRAD_DETAIL)                          -> 23 (GRADIENT)
             aten::view                               23 (GRADIENT)                                 -> 23 (GRADIENT)
             aten::detach                             23 (GRADIENT)                                 -> 23 (GRADIENT)
-            aten::detach                             23 (GRADIENT)                                 -> ???
-            aten::mul.Tensor                         19 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 24 (AUTOGRAD_DETAIL)
-            aten::sum.dim_IntList                    24 (AUTOGRAD_DETAIL)                          -> 25 (GRADIENT)
-            aten::view                               25 (GRADIENT)                                 -> 25 (GRADIENT)
-            aten::detach                             25 (GRADIENT)                                 -> 25 (GRADIENT)
-            aten::detach                             25 (GRADIENT)                                 -> ???""",
+            aten::detach                             23 (GRADIENT)                                 -> ???""",
         )
 
     def test_categories_e2e_simple_fwd_bwd_step(self) -> None:
@@ -1199,30 +1204,30 @@ class TestMemoryProfilerE2E(TestCase):
             aten::mul.Tensor                         1 (INPUT), 3 (PARAMETER)                      -> 4 (ACTIVATION)
             aten::mul.Tensor                         1 (INPUT), 5 (PARAMETER)                      -> 6 (ACTIVATION)
             aten::cat                                4 (ACTIVATION), 6 (ACTIVATION)                -> 7 (ACTIVATION)
-            aten::binary_cross_entropy_with_logits   7 (ACTIVATION), 2 (INPUT)                     -> 13 (ACTIVATION)
+            aten::binary_cross_entropy_with_logits   7 (ACTIVATION), 2 (INPUT)                     -> 11 (ACTIVATION)
 
             -- Backward ---------------------------------------------------------------------------------------------
-            aten::ones_like                          13 (ACTIVATION)                               -> 16 (ACTIVATION)
-            aten::sigmoid                            7 (ACTIVATION)                                -> 17 (TEMPORARY)
-            aten::sub.Tensor                         17 (TEMPORARY), 2 (INPUT)                     -> 18 (TEMPORARY)
-            aten::mul.Tensor                         18 (TEMPORARY), 16 (ACTIVATION)               -> 19 (AUTOGRAD_DETAIL)
-            aten::div_.Scalar                        19 (AUTOGRAD_DETAIL)                          -> 19 (AUTOGRAD_DETAIL)
-            aten::slice.Tensor                       19 (AUTOGRAD_DETAIL)                          -> 19 (AUTOGRAD_DETAIL)
-            aten::slice.Tensor                       19 (AUTOGRAD_DETAIL)                          -> 19 (AUTOGRAD_DETAIL)
-            aten::mul.Tensor                         19 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 22 (AUTOGRAD_DETAIL)
+            aten::ones_like                          11 (ACTIVATION)                               -> 14 (ACTIVATION)
+            aten::sigmoid                            7 (ACTIVATION)                                -> 15 (TEMPORARY)
+            aten::sub.Tensor                         15 (TEMPORARY), 2 (INPUT)                     -> 16 (TEMPORARY)
+            aten::mul.Tensor                         16 (TEMPORARY), 14 (ACTIVATION)               -> 17 (AUTOGRAD_DETAIL)
+            aten::div_.Scalar                        17 (AUTOGRAD_DETAIL)                          -> 17 (AUTOGRAD_DETAIL)
+            aten::slice.Tensor                       17 (AUTOGRAD_DETAIL)                          -> 17 (AUTOGRAD_DETAIL)
+            aten::slice.Tensor                       17 (AUTOGRAD_DETAIL)                          -> 17 (AUTOGRAD_DETAIL)
+            aten::mul.Tensor                         17 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 20 (AUTOGRAD_DETAIL)
+            aten::sum.dim_IntList                    20 (AUTOGRAD_DETAIL)                          -> 21 (GRADIENT)
+            aten::view                               21 (GRADIENT)                                 -> 21 (GRADIENT)
+            aten::detach                             21 (GRADIENT)                                 -> 21 (GRADIENT)
+            aten::detach                             21 (GRADIENT)                                 -> 21 (GRADIENT)
+            aten::mul.Tensor                         17 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 22 (AUTOGRAD_DETAIL)
             aten::sum.dim_IntList                    22 (AUTOGRAD_DETAIL)                          -> 23 (GRADIENT)
             aten::view                               23 (GRADIENT)                                 -> 23 (GRADIENT)
             aten::detach                             23 (GRADIENT)                                 -> 23 (GRADIENT)
             aten::detach                             23 (GRADIENT)                                 -> 23 (GRADIENT)
-            aten::mul.Tensor                         19 (AUTOGRAD_DETAIL), 1 (INPUT)               -> 24 (AUTOGRAD_DETAIL)
-            aten::sum.dim_IntList                    24 (AUTOGRAD_DETAIL)                          -> 25 (GRADIENT)
-            aten::view                               25 (GRADIENT)                                 -> 25 (GRADIENT)
-            aten::detach                             25 (GRADIENT)                                 -> 25 (GRADIENT)
-            aten::detach                             25 (GRADIENT)                                 -> 25 (GRADIENT)
 
             -- Optimizer --------------------------------------------------------------------------------------------
-            aten::add_.Tensor                        3 (PARAMETER), 25 (GRADIENT)                  -> 3 (PARAMETER)
-            aten::add_.Tensor                        5 (PARAMETER), 23 (GRADIENT)                  -> 5 (PARAMETER)""",
+            aten::add_.Tensor                        3 (PARAMETER), 23 (GRADIENT)                  -> 3 (PARAMETER)
+            aten::add_.Tensor                        5 (PARAMETER), 21 (GRADIENT)                  -> 5 (PARAMETER)""",
         )
 
     def test_categories_e2e_simple_module_fwd(self) -> None:
@@ -1461,7 +1466,6 @@ class TestMemoryProfilerE2E(TestCase):
                 return f"{size / 1024:3.1f} kB"
             return f"{size // 1024} kB"
 
-
         # We generate sequential IDs for Tensors; however platforms vary
         # slightly in the exact computation executed. If this results in
         # tensor creation the IDs will be shifted and the unit test will fail.
@@ -1477,7 +1481,6 @@ class TestMemoryProfilerE2E(TestCase):
             f"{action.name.lower():<25}  {format_action(action, key, version):<25}  "
             f"{id_for_testing(key):>3}(v{version}) {format_size(size):>15}"
             for _, action, (key, version), size in prof._memory_profile().timeline
-
             # We generally don't care about tiny allocations during memory
             # profiling and they add a lot of noise to the unit test.
             if size > 1024
@@ -1547,7 +1550,8 @@ class TestMemoryProfilerE2E(TestCase):
             destroy                    ???                         29(v1)         1024 kB
             destroy                    GRADIENT                    16(v0)          128 kB
             destroy                    GRADIENT                    17(v0)            2 kB
-            destroy                    GRADIENT                    13(v0)         1024 kB""")
+            destroy                    GRADIENT                    13(v0)         1024 kB""",
+        )
 
     def test_memory_timeline_no_id(self) -> None:
         # On CPU the default behavior is to simply forward to malloc. That
@@ -1594,7 +1598,9 @@ class TestMemoryProfilerE2E(TestCase):
         if not torch.cuda.is_available():
             expected = expected[2:]
             for event in expected:
-                self.assertTrue(event in actual, f"event: {event} was not found in actual.")
+                self.assertTrue(
+                    event in actual, f"event: {event} was not found in actual."
+                )
         else:
             self.assertEqual(
                 actual,

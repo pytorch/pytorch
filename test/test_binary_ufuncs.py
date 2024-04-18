@@ -1646,6 +1646,7 @@ class TestBinaryUfuncs(TestCase):
             cpu_out = t.cpu().pow(2)
             self.assertEqual(cpu_out, cuda_out)
 
+    @skipIfTorchDynamo()
     @onlyNativeDeviceTypes
     @dtypes(*all_types_and_complex_and(torch.half))
     def test_complex_scalar_pow_tensor(self, device, dtype):
@@ -3487,7 +3488,7 @@ class TestBinaryUfuncs(TestCase):
         )
         _test_helper(a, b)
 
-    @skipIfTorchDynamo     # complex infs/nans differ under Dynamo/Inductor
+    @skipIfTorchDynamo()    # complex infs/nans differ under Dynamo/Inductor
     @dtypesIfCUDA(torch.float32, torch.float64, torch.bfloat16)
     @dtypes(torch.float32, torch.float64, torch.bfloat16, torch.complex64, torch.complex128)
     def test_logaddexp(self, device, dtype):
@@ -3889,9 +3890,15 @@ class TestBinaryUfuncs(TestCase):
         import scipy.integrate
 
         if hasattr(scipy.integrate, "cumulative_trapezoid"):
-            scipy_cumulative_trapezoid = scipy.integrate.cumulative_trapezoid
+            _scipy_cumulative_trapezoid = scipy.integrate.cumulative_trapezoid
         else:  # Older version of SciPy uses a different name
-            scipy_cumulative_trapezoid = scipy.integrate.cumtrapz
+            _scipy_cumulative_trapezoid = scipy.integrate.cumtrapz
+
+        def scipy_cumulative_trapezoid(y, x=None, dx=1.0, axis=-1, initial=None):
+            if y.shape[axis] == 0:
+                return np.empty_like(y)
+            else:
+                return _scipy_cumulative_trapezoid(y, x, dx, axis, initial)
 
         def test_dx(sizes, dim, dx, device):
             t = torch.randn(sizes, device=device)

@@ -55,7 +55,7 @@ DECOMPOSITION_UTIL_FILE_NAME = "decomposition_registry_util.cpp"
 
 def gen_serialized_decompisitions() -> str:
     return "\n".join(
-        [scripted_func.code for scripted_func in decomposition_table.values()]
+        [scripted_func.code for scripted_func in decomposition_table.values()]  # type: ignore[misc]
     )
 
 
@@ -63,7 +63,7 @@ def gen_decomposition_mappings() -> str:
     decomposition_mappings = []
     for schema, scripted_func in decomposition_table.items():
         decomposition_mappings.append(
-            '    {"' + schema + '", "' + scripted_func.name + '"},'
+            '    {"' + schema + '", "' + scripted_func.name + '"},'  # type: ignore[operator]
         )
     return "\n".join(decomposition_mappings)
 

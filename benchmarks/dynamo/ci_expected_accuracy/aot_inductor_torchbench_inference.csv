@@ -50,7 +50,7 @@ dcgan,pass,0
 
 
 
-demucs,eager_fail_to_run,0
+demucs,pass,0
 
 
 
@@ -130,6 +130,14 @@ hf_Bart,pass,0
 
 
 
+hf_Bert,pass,0
+
+
+
+hf_Bert_large,pass,0
+
+
+
 hf_BigBird,fail_accuracy,0
 
 
@@ -162,7 +170,7 @@ hf_Whisper,pass,0
 
 
 
-hf_clip,eager_fail_to_run,0
+hf_distil_whisper,pass,0
 
 
 
@@ -175,6 +183,14 @@ llama,fail_to_run,0
 
 
 llama_v2_7b_16h,model_fail_to_load,0
+
+
+
+llava,model_fail_to_load,0
+
+
+
+maml,pass_due_to_skip,0
 
 
 
@@ -202,15 +218,15 @@ moco,fail_to_run,0
 
 
 
+moondream,model_fail_to_load,0
+
+
+
 nanogpt,pass,0
 
 
 
 nvidia_deeprecommender,pass,0
-
-
-
-phi_1_5,model_fail_to_load,0
 
 
 
@@ -238,7 +254,7 @@ pytorch_CycleGAN_and_pix2pix,pass,0
 
 
 
-pytorch_stargan,fail_to_run,0
+pytorch_stargan,pass,0
 
 
 
@@ -267,6 +283,10 @@ resnext50_32x4d,pass,0
 
 
 sam,fail_to_run,0
+
+
+
+sam_fast,fail_to_run,0
 
 
 

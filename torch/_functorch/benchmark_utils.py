@@ -1,7 +1,9 @@
+# mypy: ignore-errors
+
 import contextlib
-import time
-import os
 import json
+import os
+import time
 
 import torch
 from torch.profiler import profile, ProfilerActivity
@@ -11,8 +13,17 @@ def synchronize():
     pass
 
 
-def dump_chrome_trace(f, input, trace_filename, optimize_ctx, activities, num_runs=1,
-                      devices=None, kwargs_for_f=None, kwargs_for_profiler=None):
+def dump_chrome_trace(
+    f,
+    input,
+    trace_filename,
+    optimize_ctx,
+    activities,
+    num_runs=1,
+    devices=None,
+    kwargs_for_f=None,
+    kwargs_for_profiler=None,
+):
     """
     Output the chrome trace of running f(input, **kwargs_for_f) with [optimize_ctx]
     [num_runs] times to [trace_filename].
@@ -69,7 +80,12 @@ def get_chrome_trace_events(filename):
 
 def is_gpu_compute_event(event):
     global gpu_pids
-    return "pid" in event and event["pid"] in gpu_pids and "ph" in event and event["ph"] == "X"
+    return (
+        "pid" in event
+        and event["pid"] in gpu_pids
+        and "ph" in event
+        and event["ph"] == "X"
+    )
 
 
 def get_sorted_gpu_events(events):
@@ -97,8 +113,13 @@ def get_duration(sorted_gpu_events):
 
 def get_sorted_gpu_mm_conv_events(events):
     def is_mm_conv_event(event):
-        return "name" in event and ("gemm" in event["name"] or "conv" in event["name"]
-                                    or "cutlass" in event["name"] or "wgrad" in event["name"])
+        return "name" in event and (
+            "gemm" in event["name"]
+            or "conv" in event["name"]
+            or "cutlass" in event["name"]
+            or "wgrad" in event["name"]
+        )
+
     gpu_events = get_sorted_gpu_events(events)
     sorted_events = []
     for event in gpu_events:
@@ -132,7 +153,7 @@ def compute_utilization(filename: str, total_length: float):
     for event in events:
         if "name" not in event:
             continue
-        if event["name"] == 'process_labels' and "GPU" in event["args"]["labels"]:
+        if event["name"] == "process_labels" and "GPU" in event["args"]["labels"]:
             gpu_pids.append(event["pid"])
 
     total_length = total_length * 1e6
@@ -145,7 +166,14 @@ def compute_utilization(filename: str, total_length: float):
     return utilization, mm_conv_utilization
 
 
-def benchmark_utilization(f, input, trace_folder, optimize_ctx=None, trace_file_name="tmp_chrome_trace", num_runs=1):
+def benchmark_utilization(
+    f,
+    input,
+    trace_folder,
+    optimize_ctx=None,
+    trace_file_name="tmp_chrome_trace",
+    num_runs=1,
+):
     """
     Benchmark the GPU Utilization and percent of time spent on matmul and convolution operations of
     running f(input, **kwargs_for_f) with [optimize_ctx] [num_runs] times.
@@ -186,8 +214,17 @@ def benchmark_utilization(f, input, trace_folder, optimize_ctx=None, trace_file_
         optimize_ctx = contextlib.nullcontext()
 
     chrome_trace_file_name = os.path.join(trace_folder, trace_file_name + ".json")
-    total_length = dump_chrome_trace(f, input, chrome_trace_file_name, optimize_ctx,
-                                     [ProfilerActivity.CUDA], num_runs=num_runs, devices="cuda")
-    utilization, mm_conv_utilization = compute_utilization(chrome_trace_file_name, total_length)
+    total_length = dump_chrome_trace(
+        f,
+        input,
+        chrome_trace_file_name,
+        optimize_ctx,
+        [ProfilerActivity.CUDA],
+        num_runs=num_runs,
+        devices="cuda",
+    )
+    utilization, mm_conv_utilization = compute_utilization(
+        chrome_trace_file_name, total_length
+    )
 
     return utilization, mm_conv_utilization

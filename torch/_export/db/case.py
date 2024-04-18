@@ -4,6 +4,7 @@ import string
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from types import ModuleType
 
 import torch
 
@@ -96,8 +97,8 @@ class ExportCase:
 
 
 _EXAMPLE_CASES: Dict[str, ExportCase] = {}
-_MODULES = set()
-_EXAMPLE_CONFLICT_CASES = {}
+_MODULES: Set[ModuleType] = set()
+_EXAMPLE_CONFLICT_CASES: Dict[str, List[ExportCase]] = {}
 _EXAMPLE_REWRITE_CASES: Dict[str, List[ExportCase]] = {}
 
 
@@ -120,10 +121,9 @@ def to_snake_case(name):
 
 
 def _make_export_case(m, name, configs):
-    if inspect.isclass(m):
-        if not issubclass(m, torch.nn.Module):
-            raise TypeError("Export case class should be a torch.nn.Module.")
-        m = m()
+    if not issubclass(m, torch.nn.Module):
+        raise TypeError("Export case class should be a torch.nn.Module.")
+    m = m()
 
     if "description" not in configs:
         # Fallback to docstring if description is missing.
@@ -145,9 +145,9 @@ def export_case(**kwargs):
         if module in _MODULES:
             raise RuntimeError("export_case should only be used once per example file.")
 
+        assert module is not None
         _MODULES.add(module)
         normalized_name = to_snake_case(m.__name__)
-        assert module is not None
         module_name = module.__name__.split(".")[-1]
         if module_name != normalized_name:
             raise RuntimeError(

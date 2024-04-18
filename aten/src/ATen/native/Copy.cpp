@@ -3,6 +3,7 @@
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorIterator.h>
@@ -52,10 +53,9 @@ bool copy_transpose_valid(const Tensor& self, const Tensor& src) {
 
 #if !defined(C10_MOBILE)
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)                              \
-        AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND8(                             \
-            kComplexHalf, kHalf, kBool, kBFloat16, kFloat8_e5m2,            \
-            kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, TYPE, NAME, \
-            __VA_ARGS__)
+        AT_DISPATCH_V2(                             \
+            TYPE, NAME, AT_WRAP(__VA_ARGS__), kComplexHalf, kHalf, kBool, kBFloat16, kFloat8_e5m2,            \
+            kFloat8_e4m3fn, kFloat8_e5m2fnuz, kFloat8_e4m3fnuz, AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES))
 #else
 #define _AT_DISPATCH_CP_TYPES(TYPE, NAME, ...)     \
         AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND4(    \
@@ -81,7 +81,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(self.sizes().equals(src.sizes()));
 
   _AT_DISPATCH_CP_TYPES(self.scalar_type(), "copy_", [&] {
-    scalar_t* sp = src.data_ptr<scalar_t>();
+    const scalar_t* sp = src.const_data_ptr<scalar_t>();
     scalar_t* rp = self.data_ptr<scalar_t>();
     scalar_t* bp = buf.data_ptr<scalar_t>();
 
@@ -89,7 +89,7 @@ void copy_same_type_transpose_(Tensor& self, const Tensor& src) {
     int64_t NC = src.size(1);
     for (int64_t R = 0; R < NR; R += BLOCK_SZ) {
       for (int64_t C = 0; C < NC; C += BLOCK_SZ) {
-        scalar_t* spo = sp + R + C * NR;
+        const scalar_t* spo = sp + R + C * NR;
         scalar_t* rpo = rp + C + R * NC;
 
         int nr = std::min(NR - R, BLOCK_SZ);
@@ -156,7 +156,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
         auto* output_ptr =
             reinterpret_cast<fbgemm::float16*>(self.data_ptr<at::Half>());
         if (self.numel() < at::internal::GRAIN_SIZE) {
-          fbgemm::FloatToFloat16_simd(src.data_ptr<float>(), output_ptr, self.numel());
+          fbgemm::FloatToFloat16_simd(src.const_data_ptr<float>(), output_ptr, self.numel());
         } else {
           at::parallel_for(
               0,
@@ -164,14 +164,14 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
               at::internal::GRAIN_SIZE,
               [&](int64_t begin, int64_t end) {
                 fbgemm::FloatToFloat16_simd(
-                    src.data_ptr<float>() + begin,
+                    src.const_data_ptr<float>() + begin,
                     output_ptr + begin,
                   end - begin);
               });
         }
       } else {
-        auto in_data = reinterpret_cast<fbgemm::float16*>(
-            src.data_ptr<at::Half>());
+        auto in_data = reinterpret_cast<const fbgemm::float16*>(
+            src.const_data_ptr<at::Half>());
         auto* output_ptr = self.data_ptr<float>();
         if (self.numel() < at::internal::GRAIN_SIZE) {
           fbgemm::Float16ToFloat_simd(in_data, output_ptr, self.numel());
@@ -265,7 +265,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
 
   auto iter = TensorIteratorConfig()
     .add_output(self)
-    .add_input(src)
+    .add_const_input(src)
     .resize_outputs(false)
     .check_all_same_dtype(false)
     .check_all_same_device(false)
@@ -296,7 +296,7 @@ static Tensor & copy_impl(Tensor & self, const Tensor & src, bool non_blocking) 
   }
 #endif
 
-  if(!self.is_complex() && src.is_complex()) {
+  if(!(self.is_complex() || self.dtype() == at::kBool) && src.is_complex()) {
     TORCH_WARN_ONCE("Casting complex values to real discards the imaginary part");
   }
   copy_stub(device_type, iter, non_blocking);
@@ -335,7 +335,7 @@ void copy_ignoring_overlaps(const TensorBase &dst, const TensorBase &src) {
   // FIXME: really, overlapping writes should be illegal/an error in Torch
   auto iter = TensorIteratorConfig()
       .add_output(dst)
-      .add_input(src)
+      .add_const_input(src)
       .resize_outputs(false)
       .set_check_mem_overlap(false)
       .check_all_same_dtype(true)

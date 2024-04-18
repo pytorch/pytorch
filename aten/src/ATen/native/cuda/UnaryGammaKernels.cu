@@ -18,17 +18,23 @@ CONSTEXPR_EXCEPT_WIN_CUDA char digamma_name[] = "digamma";
 // See note [Jiterator]
 void digamma_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "digamma_cuda", [&]() {
-      jitted_gpu_kernel</*name=*/digamma_name,
-                        /*return_dtype=*/ scalar_t,
-                        /*common_dtype=*/ scalar_t,
-                        /*arity=*/ 1>(iter, digamma_string);
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      iter.common_dtype(), "digamma_cuda", [&]() {
+        jitted_gpu_kernel</*name=*/digamma_name,
+                          /*return_dtype=*/ scalar_t,
+                          /*common_dtype=*/ scalar_t,
+                          /*arity=*/ 1>(iter, digamma_string);
     });
   #else
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "digamma_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return calc_digamma(a);
-      });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      iter.common_dtype(), "digamma_cuda", [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return calc_digamma(a);
+        });
     });
   #endif // AT_USE_JITERATOR()
 }
@@ -37,17 +43,23 @@ void digamma_kernel_cuda(TensorIteratorBase& iter) {
 CONSTEXPR_EXCEPT_WIN_CUDA char trigamma_name[] = "trigamma";
 void trigamma_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "trigamma_cuda", [&]() {
-      jitted_gpu_kernel</*name=*/trigamma_name,
-                        /*return_dtype=*/ scalar_t,
-                        /*common_dtype=*/ scalar_t,
-                        /*arity=*/ 1>(iter, trigamma_string);
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      iter.common_dtype(), "trigamma_cuda", [&]() {
+        jitted_gpu_kernel</*name=*/trigamma_name,
+                          /*return_dtype=*/ scalar_t,
+                          /*common_dtype=*/ scalar_t,
+                          /*arity=*/ 1>(iter, trigamma_string);
     });
   #else
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "trigamma_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return calc_trigamma(a);
-      });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      iter.common_dtype(), "trigamma_cuda", [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return calc_trigamma(a);
+        });
     });
   #endif // AT_USE_JITERATOR()
 }
@@ -61,7 +73,9 @@ void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
   } else {
 #if AT_USE_JITERATOR()
     // TODO : `unary_jitted_gpu_kernel` for cleaner UX.
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
         iter.common_dtype(), "polygamma_cuda", [&]() {
           jitted_gpu_kernel<
               /*name=*/polygamma_name,
@@ -75,7 +89,9 @@ void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
               /*extra_args=*/std::make_tuple(n));
         });
 #else
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
         iter.common_dtype(), "polygamma_cuda", [&]() {
           gpu_kernel(iter, [=] GPU_LAMBDA(scalar_t a) -> scalar_t {
             return calc_polygamma<scalar_t, /*is_cuda=*/true>(a, static_cast<int>(n));
@@ -88,17 +104,23 @@ void polygamma_kernel_cuda(TensorIteratorBase& iter, int64_t n) {
 CONSTEXPR_EXCEPT_WIN_CUDA char lgamma_name[] = "lgamma_kernel";
 void lgamma_kernel_cuda(TensorIteratorBase& iter) {
   #if AT_USE_JITERATOR()
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "lgamma_cuda", [&]() {
-      jitted_gpu_kernel</*name=*/lgamma_name,
-                        /*return_dtype=*/ scalar_t,
-                        /*common_dtype=*/ scalar_t,
-                        /*arity=*/ 1>(iter, lgamma_string);
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      iter.common_dtype(), "lgamma_cuda", [&]() {
+        jitted_gpu_kernel</*name=*/lgamma_name,
+                          /*return_dtype=*/ scalar_t,
+                          /*common_dtype=*/ scalar_t,
+                          /*arity=*/ 1>(iter, lgamma_string);
     });
   #else
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.common_dtype(), "lgamma_cuda", [&]() {
-      gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
-        return ::lgamma(a);
-      });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+      at::ScalarType::Half,
+      at::ScalarType::BFloat16,
+      iter.common_dtype(), "lgamma_cuda", [&]() {
+        gpu_kernel(iter, []GPU_LAMBDA(scalar_t a) -> scalar_t {
+          return ::lgamma(a);
+        });
     });
   #endif
 }

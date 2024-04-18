@@ -1,8 +1,10 @@
 from operator import itemgetter
+from typing import List
 
 from functorch.compile import make_boxed_func
 
 import torch
+import torch.fx
 import torch.nn as nn
 from torch._functorch.compilers import aot_module
 from torch._inductor.decomposition import select_decomp_table
@@ -11,7 +13,7 @@ from torch.distributed._tensor import DTensor
 
 inductor_decomps = select_decomp_table()
 
-graphs = []
+graphs: List[torch.fx.GraphModule] = []
 
 
 def fwd_bwd_compiler(fx_g, _):

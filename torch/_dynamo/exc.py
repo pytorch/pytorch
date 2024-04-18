@@ -2,25 +2,21 @@ import os
 import textwrap
 from enum import auto, Enum
 from traceback import extract_stack, format_exc, format_list, StackSummary
-from typing import cast, NoReturn, Optional
+from typing import Any, cast, NoReturn, Optional
 
 import torch._guards
 
 from . import config
-from .config import is_fbcode
 
 from .utils import counters
 
-if is_fbcode():
-    from torch.fb.exportdb.logging import exportdb_error_message
-else:
 
-    def exportdb_error_message(case_name):
-        return (
-            "For more information about this error, see: "
-            + "https://pytorch.org/docs/main/generated/exportdb/index.html#"
-            + case_name.replace("_", "-")
-        )
+def exportdb_error_message(case_name):
+    return (
+        "For more information about this error, see: "
+        + "https://pytorch.org/docs/main/generated/exportdb/index.html#"
+        + case_name.replace("_", "-")
+    )
 
 
 import logging
@@ -38,7 +34,11 @@ class InternalTorchDynamoError(TorchDynamoException):
 
 
 class RestartAnalysis(TorchDynamoException):
-    pass
+    restart_reason: str
+
+    def __init__(self, *args, restart_reason=None):
+        self.restart_reason = restart_reason
+        super().__init__(*args)
 
 
 class SpeculationRestartAnalysis(RestartAnalysis):
@@ -133,6 +133,7 @@ class UserErrorType(Enum):
     CONSTRAINT_VIOLATION = auto()
     DYNAMIC_DIM = auto()
     INVALID_INPUT = auto()
+    INVALID_OUTPUT = auto()
 
 
 class UserError(Unsupported):
@@ -155,6 +156,19 @@ class UserError(Unsupported):
         super().__init__(msg)
         self.error_type = error_type
         self.message = msg
+
+
+class UserStopIteration(TorchDynamoException):
+    value: Optional[Any]
+
+    # Reference `StopIteration_init` in CPython
+    # https://github.com/python/cpython/blob/3.11/Objects/exceptions.c#L568-L584
+    def __init__(self, *args, **kwargs):
+        super().__init__("unhandled `raise StopIteration`")
+        if len(args) > 0:
+            self.value = args[0]
+        else:
+            self.value = None
 
 
 class UncapturedHigherOrderOpError(TorchDynamoException):
@@ -185,11 +199,16 @@ def unimplemented_with_warning(e: Exception, code, msg: str) -> NoReturn:
     graph_break_msg = format_error_msg_verbose(e, code)
     graph_breaks_log.debug("%s", graph_break_msg)
     log.warning(msg)
-    raise unimplemented(msg) from e
+    unimplemented(msg, from_exc=e)
 
 
-def unimplemented(msg: str) -> NoReturn:
+_NOTHING = object()
+
+
+def unimplemented(msg: str, *, from_exc: Any = _NOTHING) -> NoReturn:
     assert msg != os.environ.get("BREAK", False)
+    if from_exc is not _NOTHING:
+        raise Unsupported(msg) from from_exc
     raise Unsupported(msg)
 
 

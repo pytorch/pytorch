@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 import operator
 from typing import Dict, List
 
@@ -7,7 +9,7 @@ from torch._dynamo.source import GetItemSource
 from .. import variables
 from ..exc import unimplemented, UserError, UserErrorType
 from ..guards import GuardBuilder, install_guard
-from ..utils import istype, np
+from ..utils import common_constant_types, istype, np
 from .base import typestr, VariableTracker
 
 _type_to_assert_reason = {
@@ -71,14 +73,16 @@ class ConstantVariable(VariableTracker):
         return self.value
 
     def __str__(self):
-        # return f"ConstantVariable({self.value})"
-        return f"ConstantVariable({type(self.value).__name__})"
+        return f"ConstantVariable({type(self.value).__name__}: {repr(self.value)})"
 
     def python_type(self):
         return type(self.value)
 
     def as_python_constant(self):
         return self.value
+
+    def is_python_constant(self):
+        return True
 
     @property
     def items(self):
@@ -95,16 +99,7 @@ class ConstantVariable(VariableTracker):
 
     @staticmethod
     def is_literal(obj):
-        if type(obj) in (
-            int,
-            float,
-            bool,
-            type(None),
-            str,
-            Ellipsis.__class__,
-            torch.dtype,
-            torch.device,
-        ):
+        if type(obj) in common_constant_types:
             return True
         # The structure within is_literal get routed to variables.BaseListVariable
         if type(obj) in (list, tuple, set, frozenset, torch.Size):
@@ -127,7 +122,7 @@ class ConstantVariable(VariableTracker):
             )
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member
 
     def call_method(
@@ -217,5 +212,5 @@ class EnumVariable(VariableTracker):
     def const_getattr(self, tx, name):
         member = getattr(self.value, name)
         if callable(member):
-            raise NotImplementedError()
+            raise NotImplementedError
         return member

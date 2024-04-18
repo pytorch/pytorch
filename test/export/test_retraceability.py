@@ -1,4 +1,4 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
 
 try:
     from . import test_export, testing
@@ -12,7 +12,11 @@ test_classes = {}
 
 def mocked_retraceability_export(*args, **kwargs):
     ep = export(*args, **kwargs)
-    ep = export(ep, *(args[1:]), **kwargs)
+    if "dynamic_shapes" in kwargs:
+        if isinstance(kwargs["dynamic_shapes"], dict):
+            kwargs["dynamic_shapes"] = tuple(kwargs["dynamic_shapes"].values())
+
+    ep = export(ep.module(), *(args[1:]), **kwargs)
     return ep
 
 

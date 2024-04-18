@@ -1,3 +1,5 @@
+# mypy: ignore-errors
+
 r"""Importing this file must **not** initialize CUDA context. test_distributed
 relies on this assumption to properly run. This means that when this is imported
 no CUDA calls shall be made, including torch.cuda.device_count(), etc.
@@ -77,7 +79,6 @@ from torch.nn import (
     ParameterList,
     Sequential,
 )
-from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips, FIXME_default_non_strict
 from torch.onnx import (
     register_custom_op_symbolic,
     unregister_custom_op_symbolic,
@@ -92,9 +93,15 @@ from torch.testing._comparison import (
 )
 from torch.testing._comparison import not_close_error_metas
 from torch.testing._internal.common_dtype import get_all_dtypes
+from torch.utils._import_utils import _check_module_exists
 import torch.utils._pytree as pytree
 
 from .composite_compliance import no_dispatch
+try:
+    import pytest
+    has_pytest = True
+except ImportError:
+    has_pytest = False
 
 
 # Class to keep track of test flags configurable by environment variables.
@@ -736,9 +743,8 @@ def prof_func_call(*args, **kwargs):
 def prof_meth_call(*args, **kwargs):
     return prof_callable(meth_call, *args, **kwargs)
 
-# TODO fix when https://github.com/python/mypy/issues/2427 is address
-torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[assignment]
-torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[assignment]
+torch._C.ScriptFunction.__call__ = prof_func_call  # type: ignore[method-assign]
+torch._C.ScriptMethod.__call__ = prof_meth_call  # type: ignore[method-assign]
 
 def _get_test_report_path():
     # allow users to override the test file location. We need this
@@ -803,7 +809,7 @@ TEST_IN_SUBPROCESS = args.subprocess
 TEST_SAVE_XML = args.save_xml
 REPEAT_COUNT = args.repeat
 SEED = args.seed
-if not expecttest.ACCEPT:
+if not getattr(expecttest, "ACCEPT", False):
     expecttest.ACCEPT = args.accept
 UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
@@ -979,7 +985,9 @@ def sanitize_pytest_xml(xml_file: str):
     import xml.etree.ElementTree as ET
     tree = ET.parse(xml_file)
     for testcase in tree.iter('testcase'):
-        full_classname = testcase.attrib['classname']
+        full_classname = testcase.attrib.get("classname")
+        if full_classname is None:
+            continue
         # The test prefix is optional
         regex_result = re.search(r"^(test\.)?(?P<file>.*)\.(?P<classname>[^\.]*)$", full_classname)
         if regex_result is None:
@@ -1220,30 +1228,17 @@ else:
 
 IS_FILESYSTEM_UTF8_ENCODING = sys.getfilesystemencoding() == 'utf-8'
 
-def _check_module_exists(name: str) -> bool:
-    r"""Returns if a top-level module with :attr:`name` exists *without**
-    importing it. This is generally safer than try-catch block around a
-    `import X`. It avoids third party libraries breaking assumptions of some of
-    our tests, e.g., setting multiprocessing start method when imported
-    (see librosa/#747, torchvision/#544).
-    """
-    try:
-        import importlib.util
-        spec = importlib.util.find_spec(name)
-        return spec is not None
-    except ImportError:
-        return False
-
 TEST_NUMPY = _check_module_exists('numpy')
 TEST_FAIRSEQ = _check_module_exists('fairseq')
 TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 TEST_MPS = torch.backends.mps.is_available()
+TEST_XPU = torch.xpu.is_available()
 TEST_CUDA = torch.cuda.is_available()
 custom_device_mod = getattr(torch, torch._C._get_privateuse1_backend_name(), None)
 TEST_PRIVATEUSE1 = True if (hasattr(custom_device_mod, "is_available") and custom_device_mod.is_available()) else False
 TEST_NUMBA = _check_module_exists('numba')
-
+TEST_TRANSFORMERS = _check_module_exists('transformers')
 TEST_DILL = _check_module_exists('dill')
 
 TEST_LIBROSA = _check_module_exists('librosa') and not IS_ARM64
@@ -1258,6 +1253,9 @@ def split_if_not_empty(x: str):
     return x.split(",") if len(x) != 0 else []
 
 NOTEST_CPU = "cpu" in split_if_not_empty(os.getenv('PYTORCH_TESTING_DEVICE_EXCEPT_FOR', ''))
+
+skipIfNoDill = unittest.skipIf(not TEST_DILL, "no dill")
+
 
 # Python 2.7 doesn't have spawn
 TestEnvironment.def_flag("NO_MULTIPROCESSING_SPAWN", env_var="NO_MULTIPROCESSING_SPAWN")
@@ -1299,6 +1297,7 @@ if TEST_CUDA and 'NUM_PARALLEL_PROCS' in os.environ:
     # other libraries take up about 11% of space per process
     torch.cuda.set_per_process_memory_fraction(round(1 / num_procs - .11, 2))
 
+requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "Requires CUDA")
 
 def skipIfCrossRef(fn):
     @wraps(fn)
@@ -1342,6 +1341,14 @@ def xfailIfTorchDynamo(func):
 
 
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
+    """
+    Usage:
+    @skipIfTorchDynamo(msg)
+    def test_blah(self):
+        ...
+    """
+    assert isinstance(msg, str), "Are you using skipIfTorchDynamo correctly?"
+
     def decorator(fn):
         if not isinstance(fn, type):
             @wraps(fn)
@@ -1358,7 +1365,6 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
             fn.__unittest_skip_why__ = msg
 
         return fn
-
 
     return decorator
 
@@ -1383,10 +1389,18 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
 
     return decorator
 
+def serialTest(condition=True):
+    """
+    Decorator for running tests serially.  Requires pytest
+    """
+    def decorator(fn):
+        if has_pytest and condition:
+            return pytest.mark.serial(fn)
+        return fn
+    return decorator
 
 def unMarkDynamoStrictTest(cls=None):
     def decorator(cls):
-        assert inspect.isclass(cls)
         cls.dynamo_strict = False
         return cls
 
@@ -1485,6 +1499,9 @@ IS_TBB = "tbb" in os.getenv("BUILD_ENVIRONMENT", "")
 numpy_to_torch_dtype_dict = {
     np.bool_      : torch.bool,
     np.uint8      : torch.uint8,
+    np.uint16     : torch.uint16,
+    np.uint32     : torch.uint32,
+    np.uint64     : torch.uint64,
     np.int8       : torch.int8,
     np.int16      : torch.int16,
     np.int32      : torch.int32,
@@ -1552,6 +1569,21 @@ def runOnRocm(fn):
         else:
             raise unittest.SkipTest("test currently only works on the ROCm stack")
     return wrapper
+
+def skipIfXpu(func=None, *, msg="test doesn't currently work on the XPU stack"):
+    def dec_fn(fn):
+        reason = f"skipIfXpu: {msg}"
+
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            if TEST_XPU:
+                raise unittest.SkipTest(reason)
+            else:
+                return fn(*args, **kwargs)
+        return wrapper
+    if func:
+        return dec_fn(func)
+    return dec_fn
 
 def skipIfMps(fn):
     @wraps(fn)
@@ -1651,6 +1683,20 @@ class CudaSyncGuard:
     def __exit__(self, exception_type, exception_value, traceback):
         torch.cuda.set_sync_debug_mode(self.debug_mode_restore)
 
+# Context manager for setting torch.__future__.set_swap_module_params_on_conversion
+# and automatically resetting it to its original value
+class SwapTensorsGuard:
+    def __init__(self, use_swap_tensors):
+        self.use_swap_tensors = use_swap_tensors
+
+    def __enter__(self):
+        self.swap_tensors_restore = torch.__future__.get_swap_module_params_on_conversion()
+        if self.use_swap_tensors is not None:
+            torch.__future__.set_swap_module_params_on_conversion(self.use_swap_tensors)
+
+    def __exit__(self, exception_type, exception_value, traceback):
+        torch.__future__.set_swap_module_params_on_conversion(self.swap_tensors_restore)
+
 # This decorator can be used for API tests that call
 # torch.use_deterministic_algorithms().  When the test is finished, it will
 # restore the previous deterministic flag setting.
@@ -1708,6 +1754,30 @@ def wrapDeterministicFlagAPITest(fn):
             with CuBLASConfigGuard():
                 fn(*args, **kwargs)
     return wrapper
+
+# This decorator can be used for API tests that want to safely call
+# torch.__future__.set_swap_module_params_on_conversion.  `swap` can be set to
+# True, False or None where None indicates that the context manager does not
+# set the flag. When the test is finished, it will restore the previous swap
+# flag setting.
+def wrapSwapTensorsTest(swap=None):
+    def dec_fn(fn):
+        @wraps(fn)
+        def wrapper(*args, **kwargs):
+            with SwapTensorsGuard(swap):
+                fn(*args, **kwargs)
+        return wrapper
+    return dec_fn
+
+# test parametrizer for swapping
+class swap(_TestParametrizer):
+    def __init__(self, swap_values):
+        super().__init__()
+        self.swap_values = swap_values
+
+    def _parametrize_test(self, test, generic_cls, device_cls):
+        for swap in self.swap_values:
+            yield wrapSwapTensorsTest(swap)(test), f'swap_{swap}', {}, lambda _: []
 
 def skipIfCompiledWithoutNumpy(fn):
     # Even if the numpy module is present, if `USE_NUMPY=0` is used during the
@@ -1806,6 +1876,16 @@ def skipIfTBB(message="This test makes TBB sad"):
                 fn(*args, **kwargs)
         return wrapper
     return dec_fn
+
+
+def skip_if_pytest(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        if "PYTEST_CURRENT_TEST" in os.environ:
+            raise unittest.SkipTest("does not work under pytest")
+        return fn(*args, **kwargs)
+
+    return wrapped
 
 
 def slowTest(fn):
@@ -2234,6 +2314,7 @@ def check_if_enable(test: unittest.TestCase):
                     "windows": IS_WINDOWS,
                     "linux": IS_LINUX,
                     "rocm": TEST_WITH_ROCM,  # noqa: F821
+                    "xpu": TEST_XPU,  # noqa: F821
                     "asan": TEST_WITH_ASAN,  # noqa: F821
                     "dynamo": TEST_WITH_TORCHDYNAMO,  # noqa: F821
                     "inductor": TEST_WITH_TORCHINDUCTOR,  # noqa: F821
@@ -2589,7 +2670,7 @@ class TestCase(expecttest.TestCase):
                         parts = Path(abs_test_path).parts
                         for i, part in enumerate(parts):
                             if part == "test":
-                                base_dir = os.path.join(*parts[:i])
+                                base_dir = os.path.join(*parts[:i]) if i > 0 else ''
                                 return os.path.relpath(abs_test_path, start=base_dir)
 
                         # Can't determine containing dir; just return the test filename.
@@ -2694,7 +2775,11 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 match = re.match(r".*/test/(.*).py", full_path)
                 if match is not None:
                     filename = match.group(1)
-                    strict_default = filename not in FIXME_default_non_strict
+                    if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
+                        from .dynamo_test_failures import FIXME_inductor_non_strict
+                        strict_default = filename not in FIXME_inductor_non_strict
+                    else:
+                        strict_default = True
             # inspect.getfile can fail with these
             except (OSError, TypeError):
                 pass
@@ -2702,7 +2787,15 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 if os.environ["STRICT_DEFAULT"] == "1":
                     strict_default = True
 
-        strict_mode = getattr(test_cls, "dynamo_strict", strict_default) and compiled
+        strict_mode = False
+        if compiled:
+            test_method = getattr(self, self._testMethodName)
+            if hasattr(test_method, "dynamo_strict"):
+                strict_mode = test_method.dynamo_strict
+            elif hasattr(test_cls, "dynamo_strict"):
+                strict_mode = test_cls.dynamo_strict
+            else:
+                strict_mode = strict_default
         nopython = getattr(test_cls, "dynamo_strict_nopython", False) and compiled
 
         if strict_mode:
@@ -2710,12 +2803,12 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
 
         # TODO: Remove this; this is grandfathered in because we suppressed errors
         # on test suite previously
-        # When strict mode is False, supress_errors is True
+        # When strict mode is False, suppress_errors is True
         if compiled:
-            supress_errors = not strict_mode
+            suppress_errors = not strict_mode
         else:
-            supress_errors = torch._dynamo.config.suppress_errors
-        with unittest.mock.patch("torch._dynamo.config.suppress_errors", supress_errors):
+            suppress_errors = torch._dynamo.config.suppress_errors
+        with unittest.mock.patch("torch._dynamo.config.suppress_errors", suppress_errors):
             if TEST_WITH_TORCHINDUCTOR:  # noqa: F821
                 super_run = torch._dynamo.optimize("inductor")(super_run)
             elif TEST_WITH_AOT_EAGER:  # noqa: F821
@@ -2724,12 +2817,39 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
                 # TorchDynamo optimize annotation
                 super_run = torch._dynamo.optimize("eager", nopython=nopython)(super_run)
                 key = f"{self.__class__.__name__}.{self._testMethodName}"
+                from .dynamo_test_failures import dynamo_expected_failures, dynamo_skips
+
+                def expect_failure(f, test_name):
+                    @wraps(f)
+                    def wrapper(*args, **kwargs):
+                        try:
+                            f(*args, **kwargs)
+                        except BaseException as e:
+                            self.skipTest(e)
+                        raise RuntimeError(f"Unexpected success, please remove `test/dynamo_expected_failures/{test_name}`")
+                    return wrapper
+
                 if key in dynamo_expected_failures:
                     method = getattr(self, self._testMethodName)
-                    unittest.expectedFailure(self)
+                    setattr(self, self._testMethodName, expect_failure(method, key))
+
+                def ignore_failure(f, test_name):
+                    @wraps(f)
+                    def wrapper(*args, **kwargs):
+                        try:
+                            f(*args, **kwargs)
+                        except BaseException as e:
+                            self.skipTest(e)
+                        method = getattr(self, self._testMethodName)
+                        if getattr(method, "__unittest_expecting_failure__", False):
+                            self.skipTest("unexpected success")
+                        else:
+                            self.skipTest(f"This test passed, maybe we can remove `test/dynamo_skips/{test_name}`")
+                    return wrapper
+
                 if key in dynamo_skips:
                     method = getattr(self, self._testMethodName)
-                    setattr(self, self._testMethodName, unittest.skip("marked skip in dynamo_test_failures.py")(method))
+                    setattr(self, self._testMethodName, ignore_failure(method, key))
 
             super_run(result=result)
 
@@ -3853,6 +3973,14 @@ This message can be suppressed by setting PYTORCH_PRINT_REPRO_ON_FAILURE=0"""
         return stderr.decode('ascii')
 
 
+class TestCaseBase(TestCase):
+    # Calls to super() in dynamically created classes are a bit odd.
+    # See https://github.com/pytorch/pytorch/pull/118586 for more info
+    # Subclassing this class and then calling super(TestCaseBase) will run
+    # TestCase's setUp, tearDown etc functions
+    pass
+
+
 def download_file(url, binary=True):
     from urllib.parse import urlsplit
     from urllib import request, error
@@ -4506,6 +4634,9 @@ def bytes_to_scalar(byte_list: List[int], dtype: torch.dtype, device: torch.devi
     dtype_to_ctype: Dict[torch.dtype, Any] = {
         torch.int8: ctypes.c_int8,
         torch.uint8: ctypes.c_uint8,
+        torch.uint16: ctypes.c_uint16,
+        torch.uint32: ctypes.c_uint32,
+        torch.uint64: ctypes.c_uint64,
         torch.int16: ctypes.c_int16,
         torch.int32: ctypes.c_int32,
         torch.int64: ctypes.c_int64,
@@ -4903,6 +5034,7 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
 
     s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n    .+\n( +[~^]+ *\n)?', repl_frame, s)
     s = re.sub(r"line \d+", "line N", s)
+    s = re.sub(r".py:\d+", ".py:N", s)
     s = re.sub(file, os.path.basename(file), s)
     s = re.sub(os.path.join(os.path.dirname(torch.__file__), ""), "", s)
     s = re.sub(r"\\", "/", s)  # for Windows

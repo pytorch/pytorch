@@ -30,6 +30,7 @@
 #include <ATen/ops/kl_div_native.h>
 #include <ATen/ops/l1_loss_native.h>
 #include <ATen/ops/log.h>
+#include <ATen/ops/log_sigmoid.h>
 #include <ATen/ops/margin_ranking_loss_native.h>
 #include <ATen/ops/mean.h>
 #include <ATen/ops/min.h>
@@ -268,31 +269,34 @@ Tensor& binary_cross_entropy_out_cpu(const Tensor& input, const Tensor& target, 
 
     auto iter = TensorIteratorConfig()
       .add_output(loss_squeezed)
-      .add_owned_input(at::squeeze(input))
-      .add_owned_input(at::squeeze(target))
+      .add_owned_const_input(at::squeeze(input))
+      .add_owned_const_input(at::squeeze(target))
       .build();
 
-    AT_DISPATCH_FLOATING_TYPES(loss.scalar_type(), "binary_cross_entropy", [&] {
-        at::native::cpu_kernel(
-            iter,
-            [] (scalar_t input_val, scalar_t target_val) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        ScalarType::Half,
+        ScalarType::BFloat16,
+        loss.scalar_type(),
+        "binary_cross_entropy",
+        [&] {
+          at::native::cpu_kernel(
+              iter, [](scalar_t input_val, scalar_t target_val) {
                 TORCH_CHECK(
                     (input_val >= 0) && (input_val <= 1),
-                    "all elements of input should be between 0 and 1"
-                );
+                    "all elements of input should be between 0 and 1");
                 TORCH_CHECK(
                     (target_val >= 0) && (target_val <= 1),
-                    "all elements of target should be between 0 and 1"
-                );
+                    "all elements of target should be between 0 and 1");
 
                 // Binary cross entropy tensor is defined by the equation:
                 // L = -w (y ln(x) + (1-y) ln(1-x))
-                return (target_val - scalar_t(1))
-                    * std::max(scalar_t(std::log1p(-input_val)), scalar_t(-100))
-                    - target_val * std::max(scalar_t(std::log(input_val)), scalar_t(-100));
-            }
-        );
-    });
+                return (target_val - scalar_t(1)) *
+                    std::max(scalar_t(std::log1p(-input_val)), scalar_t(-100)) -
+                    target_val *
+                    std::max(scalar_t(std::log(input_val)), scalar_t(-100));
+              });
+        });
+
     if (weight.defined()) {
         loss.mul_(weight);
     }
@@ -322,26 +326,30 @@ Tensor& binary_cross_entropy_backward_out_cpu(const Tensor& grad, const Tensor& 
 
     auto iter = TensorIteratorConfig()
       .add_output(grad_input_squeezed)
-      .add_owned_input(at::squeeze(grad))
-      .add_owned_input(at::squeeze(input))
-      .add_owned_input(at::squeeze(target))
+      .add_owned_const_input(at::squeeze(grad))
+      .add_owned_const_input(at::squeeze(input))
+      .add_owned_const_input(at::squeeze(target))
       .build();
 
-    AT_DISPATCH_FLOATING_TYPES(grad_input.scalar_type(), "binary_cross_entropy_backward", [&] {
-        at::native::cpu_kernel(
-            iter,
-            [] (scalar_t grad_val, scalar_t input_val, scalar_t target_val) {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        ScalarType::Half,
+        ScalarType::BFloat16,
+        grad_input.scalar_type(),
+        "binary_cross_entropy_backward",
+        [&] {
+          at::native::cpu_kernel(
+              iter,
+              [](scalar_t grad_val, scalar_t input_val, scalar_t target_val) {
                 // The gradient is the partial derivative of BCELoss
                 // with respect to x
                 // d(L)/d(x) = -w (y - x) / (x - x^2)
-                return grad_val * (input_val - target_val)
-                    / (scalar_t(std::max(
+                return grad_val * (input_val - target_val) /
+                    (scalar_t(std::max(
                         (scalar_t(1) - input_val) * input_val,
-                        scalar_t(EPSILON)
-                    )));
-            }
-        );
-    });
+                        scalar_t(EPSILON))));
+              });
+        });
+
     if (weight.defined()) {
         grad_input.mul_(weight);
     }
@@ -358,21 +366,20 @@ Tensor binary_cross_entropy_with_logits(const Tensor& input, const Tensor& targe
   c10::MaybeOwned<Tensor> pos_weight_maybe_owned = at::borrow_from_optional_tensor(pos_weight_opt);
   const Tensor& pos_weight = *pos_weight_maybe_owned;
 
-    Tensor loss;
-    auto max_val = (-input).clamp_min_(0);
-    if (pos_weight.defined()) {
-        // pos_weight need to be broadcasted, thus mul(target) is not inplace.
-        auto log_weight = (pos_weight - 1).mul(target).add_(1);
-        loss = (1 - target).mul_(input).add_(log_weight.mul_(((-max_val).exp_().add_((-input - max_val).exp_())).log_().add_(max_val)));
-    } else {
-        loss = (1 - target).mul_(input).add_(max_val).add_((-max_val).exp_().add_((-input -max_val).exp_()).log_());
-    }
+  auto log_sigmoid_input = at::log_sigmoid(input);
+  if (pos_weight.defined()) {
+      // pos_weight need to be broadcasted, thus mul(target) is not inplace.
+      auto log_weight = (pos_weight - 1).mul(target).add_(1);
+      log_sigmoid_input.mul_(log_weight);
+  }
 
-    if (weight.defined()) {
-        loss.mul_(weight);
-    }
+  Tensor loss = (1 - target).mul_(input).sub_(log_sigmoid_input);
 
-    return apply_loss_reduction(loss, reduction);
+  if (weight.defined()) {
+      loss.mul_(weight);
+  }
+
+  return apply_loss_reduction(loss, reduction);
 }
 
 Tensor poisson_nll_loss(const Tensor& input, const Tensor& target, const bool log_input, const bool full, const double eps, const int64_t reduction)
@@ -435,9 +442,9 @@ Tensor& smooth_l1_loss_backward_out(const Tensor& grad_output, const Tensor& inp
   auto norm = reduction == Reduction::Mean ? 1. / input.numel() : 1.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
-    .add_input(input)
-    .add_input(target)
-    .add_input(grad_output)
+    .add_const_input(input)
+    .add_const_input(target)
+    .add_const_input(grad_output)
     .promote_inputs_to_common_dtype(true)
     .cast_common_dtype_to_outputs(true)
     .enforce_safe_casting_to_output(true)
@@ -480,9 +487,9 @@ Tensor& huber_loss_backward_out(const Tensor& grad_output, const Tensor& input, 
   auto norm = (reduction == Reduction::Mean) ? (1. / input.numel()) : 1.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
-    .add_input(input)
-    .add_input(target)
-    .add_input(grad_output)
+    .add_const_input(input)
+    .add_const_input(target)
+    .add_const_input(grad_output)
     .build();
   huber_backward_stub(iter.device_type(), iter, norm, delta);
   return grad_input;
@@ -498,9 +505,9 @@ Tensor& mse_loss_backward_out(const Tensor& grad_output,
   auto norm = reduction == Reduction::Mean ? 2. / input.numel() : 2.;
   auto iter = at::TensorIteratorConfig()
     .add_output(grad_input)
-    .add_input(input)
-    .add_input(target)
-    .add_input(grad_output)
+    .add_const_input(input)
+    .add_const_input(target)
+    .add_const_input(grad_output)
     .build();
   mse_backward_stub(iter.device_type(), iter, norm);
   return grad_input;

@@ -1,4 +1,6 @@
 from collections import defaultdict
+from dataclasses import dataclass
+from time import perf_counter_ns
 from typing import Any, Dict, List, Optional
 from warnings import warn
 
@@ -85,6 +87,18 @@ def _run_on_profiler_start():
 
 def _run_on_profiler_stop():
     _set_is_profiler_enabled(False)
+
+
+@dataclass
+class _ProfilerStats:
+    "Profiler timing and stats used by developers to catch issues/regressions"
+    profiling_window_duration_sec: float = 0
+    number_of_events: int = 0
+    profiler_prepare_call_duration_us: int = 0
+    profiler_enable_call_duration_us: int = 0
+    profiler_disable_call_duration_us: int = 0
+    parse_kineto_call_duration_us: int = 0
+    function_events_build_tree_call_duration_us: int = 0
 
 
 class profile:
@@ -210,6 +224,9 @@ class profile:
             experimental_config = _ExperimentalConfig()
         self.experimental_config = experimental_config
         self.kineto_results: Optional[_ProfilerResult] = None
+        self.profiling_start_time_ns = 0
+        self.profiling_end_time_ns = 0
+        self._stats = _ProfilerStats()
 
         if not self.use_cpu:
             assert (
@@ -281,21 +298,38 @@ class profile:
 
     def _prepare_trace(self):
         self.entered = True
+        t0 = perf_counter_ns()
         _prepare_profiler(self.config(), self.kineto_activities)
+        t1 = perf_counter_ns()
+        self._stats.profiler_prepare_call_duration_us = int((t1 - t0) / 1000)
 
     def _start_trace(self):
         self.entered = True
         _run_on_profiler_start()
+        t0 = perf_counter_ns()
         _enable_profiler(self.config(), self.kineto_activities)
+        t1 = perf_counter_ns()
+        self._stats.profiler_enable_call_duration_us = int((t1 - t0) / 1000)
+        self.profiling_start_time_ns = t1
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if not self.enabled:
             return
         if self.use_cuda:
             torch.cuda.synchronize()
+
+        t0 = perf_counter_ns()
         self.kineto_results = _disable_profiler()
+        t1 = perf_counter_ns()
+        self._stats.profiler_disable_call_duration_us = int((t1 - t0) / 1000)
+        self.profiling_end_time_ns = t0
+
         _run_on_profiler_stop()
+        t0 = perf_counter_ns()
         parsed_results = self._parse_kineto_results(self.kineto_results)
+        t1 = perf_counter_ns()
+        self._stats.parse_kineto_call_duration_us = int((t1 - t0) / 1000)
+
         self.function_events = EventList(
             parsed_results,
             use_cuda=self.use_cuda,
@@ -303,7 +337,15 @@ class profile:
             profile_memory=self.profile_memory,
             with_flops=self.with_flops,
         )
+        t0 = perf_counter_ns()
         self.function_events._build_tree()
+        t1 = perf_counter_ns()
+        self._stats.function_events_build_tree_call_duration_us = int((t1 - t0) / 1000)
+
+        self._stats.number_of_events = len(self.function_events)
+        self._stats.profiling_window_duration_sec = (
+            (self.profiling_end_time_ns - self.profiling_start_time_ns) * 1.0 / 1e9
+        )
         return False
 
     def __repr__(self):
@@ -386,7 +428,7 @@ class profile:
     def _parse_kineto_results(self, result: _ProfilerResult):
         # result.events() has most of the events - PyTorch op-level and device-level events
 
-        trace_start_us = result.trace_start_us()
+        trace_start_ns = result.trace_start_ns()
         mem_records = [
             [evt, False] for evt in result.events() if evt.name() == MEMORY_EVENT_NAME
         ]
@@ -424,9 +466,9 @@ class profile:
         for kineto_event in result.events():
             if _filter_name(kineto_event.name()):
                 continue
-            rel_start_us = kineto_event.start_us() - trace_start_us
-            rel_end_us = rel_start_us + kineto_event.duration_us()
-            abs_end_us = kineto_event.start_us() + kineto_event.duration_us()
+            rel_start_ns = kineto_event.start_ns() - trace_start_ns
+            rel_end_ns = rel_start_ns + kineto_event.duration_ns()
+            abs_end_ns = kineto_event.start_ns() + kineto_event.duration_ns()
 
             cpu_memory_usage = 0
             cuda_memory_usage = 0
@@ -434,7 +476,7 @@ class profile:
             if kineto_event.device_type() == DeviceType.CPU:
                 # find the corresponding memory allocation events
                 for mem_record in mem_records_acc.in_interval(
-                    kineto_event.start_us(), abs_end_us
+                    kineto_event.start_ns() / 1000, abs_end_ns / 1000
                 ):
                     cpu_memory_usage += _cpu_memory_usage(mem_record[0])
                     cuda_memory_usage += _cuda_memory_usage(mem_record[0])
@@ -450,8 +492,8 @@ class profile:
                 name=_rewrite_name(name=kineto_event.name(), with_wildcard=True),
                 trace_name=_rewrite_name(name=kineto_event.name(), with_wildcard=False),
                 thread=kineto_event.start_thread_id(),
-                start_us=rel_start_us,
-                end_us=rel_end_us,
+                start_us=rel_start_ns / 1000,
+                end_us=rel_end_ns / 1000,
                 fwd_thread=kineto_event.fwd_thread_id(),
                 input_shapes=kineto_event.shapes(),
                 concrete_inputs=kineto_event.concrete_inputs(),
@@ -469,6 +511,7 @@ class profile:
                 sequence_nr=kineto_event.sequence_nr(),
                 device_type=kineto_event.device_type(),
                 device_index=kineto_event.device_index(),
+                device_resource_id=kineto_event.device_resource_id(),
                 flops=kineto_event.flops(),
             )
             max_evt_id = max(max_evt_id, fe.id)
@@ -512,14 +555,14 @@ class profile:
                         f_evt.thread = fe.thread
 
         def createFunctionEventForMemoryEvents(evt):
-            rel_start_us = evt.start_us() - trace_start_us
+            rel_start_ns = evt.start_ns() - trace_start_ns
             fe = FunctionEvent(
                 id=max_evt_id,
                 name=evt.name(),
                 trace_name=None,  # not outputting in the trace
                 thread=evt.start_thread_id(),
-                start_us=rel_start_us,
-                end_us=rel_start_us,  # no duration
+                start_us=rel_start_ns / 1000,
+                end_us=rel_start_ns / 1000,  # no duration
                 fwd_thread=evt.start_thread_id(),
                 input_shapes=[],
                 stack=[],
@@ -876,6 +919,9 @@ class EnforceUnique:
         self.seen = set()
 
     def see(self, *key):
+        r"""
+        Observe a key and raise an error if it is seen multiple times.
+        """
         if key in self.seen:
             raise RuntimeError("duplicate key: " + str(key))
         self.seen.add(key)
@@ -962,23 +1008,27 @@ class KinetoStepTracker:
 
     We fix this by adding a layer of abstraction before calling step()
     to the kineto library. The idea is to maintain steps per requester in a dict:
-    ```
-    {
-       "ProfilerStep": 100,  # triggered by profiler step() call
-       "Optimizer1Step": 100,   # Optimizer 1 or 2 are just examples, could be SGD, Adam etc
-       "Optimizer2Step": 100,
-    }
-    ```
+
+    .. code-block::
+
+        {
+           "ProfilerStep": 100,  # triggered by profiler step() call
+           "Optimizer1Step": 100,   # Optimizer 1 or 2 are just examples, could be SGD, Adam etc
+           "Optimizer2Step": 100,
+        }
+
     To figure out the global step count just take the max of dict values (100).
 
     If one of the count increments the max will go up.
-    ```
-    {
-       "ProfilerStep": 100,
-       "Optimizer1Step": 101,   # Optimizer1 got incremented first say
-       "Optimizer2Step": 100,
-    }
-    ```
+
+    .. code-block::
+
+        {
+           "ProfilerStep": 100,
+           "Optimizer1Step": 101,   # Optimizer1 got incremented first say
+           "Optimizer2Step": 100,
+        }
+
     Then global step count is 101
     We only call the kineto step() function when global count increments.
 
@@ -986,15 +1036,21 @@ class KinetoStepTracker:
     for now. The result could be incorrect increments of the step count.
     """
 
-    _current_step = -1
+    _current_step = 0
     _step_dict: Dict[str, int] = defaultdict(int)
 
     @classmethod
     def init_step_count(cls, requester: str):
+        r"""
+        Initialize for a given requester.
+        """
         cls._step_dict[requester] = cls._current_step
 
     @classmethod
     def erase_step_count(cls, requester: str) -> bool:
+        r"""
+        Remove a given requester.
+        """
         return cls._step_dict.pop(requester, None) is not None
 
     @classmethod
@@ -1023,4 +1079,7 @@ class KinetoStepTracker:
 
     @classmethod
     def current_step(cls) -> int:
+        r"""
+        Get the latest step for any requester
+        """
         return cls._current_step

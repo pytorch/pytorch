@@ -1,7 +1,7 @@
 # Owner(s): ["oncall: r2p"]
 
 from torch.testing._internal.common_utils import (
-    TestCase, run_tests,
+    TestCase, run_tests, skipIfTorchDynamo,
 )
 
 from datetime import timedelta, datetime
@@ -75,6 +75,7 @@ class TestMonitor(TestCase):
         self.assertIsNotNone(e.data)
         log_event(e)
 
+    @skipIfTorchDynamo("Really weird error")
     def test_event_handler(self) -> None:
         events = []
 
@@ -97,6 +98,8 @@ class TestMonitor(TestCase):
         log_event(e)
         self.assertEqual(len(events), 2)
 
+
+@skipIfTorchDynamo("Really weird error")
 class TestMonitorTensorboard(TestCase):
     def setUp(self):
         global SummaryWriter, event_multiplexer

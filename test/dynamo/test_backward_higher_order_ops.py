@@ -59,19 +59,15 @@ class BackwardHigherOrderOpTests(torch._dynamo.test_case.TestCase):
         out = make_fx(_multiply_invoke)(x)
         self.assertEqual(out(x), torch.tensor([0.25, 0.25]))
         actual = normalize_gm(out.print_readable(False))
-
-        expected = """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class _multiply_invoke(torch.nn.Module):
     def forward(self, grad_1: "f32[2]"):
         trace_wrapped: "f32[2]" = torch__dynamo__trace_wrapped_higher_order_op_self_invoke(grad_1);  grad_1 = None
-        assert_1: "f32[2]" = torch__dynamo__trace_wrapped_higher_order_op__assert_meta(trace_wrapped, (2,), (1,), torch.float32);  trace_wrapped = None
-        detach: "f32[2]" = torch.ops.aten.detach.default(assert_1);  assert_1 = None
-        detach_1: "f32[2]" = torch.ops.aten.detach.default(detach);  detach = None
-        detach_2: "f32[2]" = torch.ops.aten.detach.default(detach_1);  detach_1 = None
-        detach_3: "f32[2]" = torch.ops.aten.detach.default(detach_2);  detach_2 = None
-        return detach_3
-"""
-        self.assertExpectedInline(actual, expected)
+        return trace_wrapped
+""",
+        )
 
     def test_invoke_make_bw(self):
         x = torch.tensor([0.5, 0.5], requires_grad=True)
@@ -86,14 +82,15 @@ class _multiply_invoke(torch.nn.Module):
         self.assertEqual(out(x.grad), torch.tensor([4.0, 4.0]))
         actual = normalize_gm(out.print_readable(False))
 
-        expected = """\
+        self.assertExpectedInline(
+            actual,
+            """\
 class _multiply_invoke(torch.nn.Module):
     def forward(self, grad_1: "f32[2]"):
         trace_wrapped: "f32[2]" = torch__dynamo__trace_wrapped_higher_order_op_self_invoke(grad_1);  grad_1 = None
-        assert_1: "f32[2]" = torch__dynamo__trace_wrapped_higher_order_op__assert_meta(trace_wrapped, (2,), (1,), torch.float32);  trace_wrapped = None
-        return assert_1
-"""
-        self.assertExpectedInline(actual, expected)
+        return trace_wrapped
+""",
+        )
 
     def test_invoke_in_pt2_compiled_autograd(self):
         graph = None
@@ -125,21 +122,23 @@ class _multiply_invoke(torch.nn.Module):
                 out.backward(grad_out)
             actual = normalize_gm(graph.print_readable(False))
             self.assertEqual(x.grad, grad_out * grad_out)
-            expected = """\
+            self.assertExpectedInline(
+                actual,
+                """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0 : torch.SymInt, L_inputs_0_ : torch.Tensor, L_inputs_1_ : torch.Tensor, L_inputs_2_ : torch.Tensor):
-        getitem = L_inputs_0_
-        getitem_1 = L_inputs_1_
-        getitem_2 = L_inputs_2_
+    def forward(self, L_inputs_ : list):
+        l_inputs_ = L_inputs_
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem);  getitem_1 = None
+        getitem = l_inputs_[0];  l_inputs_ = None
 
-        call_hook = getitem * getitem;  getitem = None
+        new_grad = torch.clone(getitem)
 
-        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_2, call_hook);  getitem_2 = call_hook = None
-        return ()
-"""
-            self.assertExpectedInline(actual, expected)
+        result = getitem * getitem;  getitem = None
+
+        new_grad_1 = torch.clone(result);  result = None
+        return (new_grad, new_grad_1)
+""",
+            )
 
             graph = None
 
@@ -193,17 +192,17 @@ class GraphModule(torch.nn.Module):
                 actual,
                 """\
 class GraphModule(torch.nn.Module):
-    def forward(self, s0 : torch.SymInt, L_inputs_0_ : torch.Tensor, L_inputs_1_ : torch.Tensor, L_inputs_2_ : torch.Tensor):
-        getitem = L_inputs_0_
-        getitem_1 = L_inputs_1_
-        getitem_2 = L_inputs_2_
+    def forward(self, L_inputs_ : list):
+        l_inputs_ = L_inputs_
 
-        accumulate_grad__default = torch.ops.inductor.accumulate_grad_.default(getitem_1, getitem);  getitem_1 = None
+        getitem = l_inputs_[0];  l_inputs_ = None
 
-        call_hook = getitem * getitem;  getitem = None
+        new_grad = torch.clone(getitem)
 
-        accumulate_grad__default_1 = torch.ops.inductor.accumulate_grad_.default(getitem_2, call_hook);  getitem_2 = call_hook = None
-        return ()
+        result = getitem * getitem;  getitem = None
+
+        new_grad_1 = torch.clone(result);  result = None
+        return (new_grad, new_grad_1)
 """,
             )
 

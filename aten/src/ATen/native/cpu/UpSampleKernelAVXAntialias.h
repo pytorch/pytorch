@@ -296,7 +296,7 @@ void ImagingResampleVertical(
 // [ Weights computation for uint8_t and multiplication trick ]
 // For details on how the AVX kernels are implemented, see
 // https://gist.github.com/NicolasHug/47c97d731f05eaad5694c173849b86f5
-// See also [ Support for antialias=False as a subcase of antilias=True ] to
+// See also [ Support for antialias=False as a subcase of antialias=True ] to
 // learn more about how the antialias=False case is computed. The same holds
 // here: all these kernels are general enough to handle an arbitrary number of
 // weights, but when aa=False they could be optimized further.
@@ -344,7 +344,7 @@ void upsample_avx_bilinear_bicubic_uint8(
     int interp_dim = 3;
     auto stride = (skip_unpacking) ? num_channels : 4;
     std::tie(horiz_indices_weights, ksize_horiz, horiz_weights_precision) =
-        F::compute_indices_int16_weights_aa(
+        F::compute_index_ranges_int16_weights(
             /*input_size=*/xin,
             /*output_size=*/xout,
             /*stride=*/stride,
@@ -360,7 +360,7 @@ void upsample_avx_bilinear_bicubic_uint8(
     int interp_dim = 2;
     auto stride = (skip_unpacking) ? num_channels * xout : 4 * xout;
     std::tie(vert_indices_weights, ksize_vert, vert_weights_precision) =
-        F::compute_indices_int16_weights_aa(
+        F::compute_index_ranges_int16_weights(
             /*input_size=*/yin,
             /*output_size=*/yout,
             /*stride=*/stride,
@@ -699,7 +699,7 @@ void ImagingResampleHorizontalConvolution8u4x(
       // Memcpy 4-bytes is faster than 3-bytes and this is a boundary case when we want to write
       // 4 bytes (R G B | X) to the output buffer (X1 X2 X3 | R1).
       // The 4th byte in the register (X) has a garbage value and 4th byte in the output buffer (R1) has a correct
-      // value which was preveiously computed by another line. In other words, it means that we can not overwrite
+      // value which was previously computed by another line. In other words, it means that we can not overwrite
       // it by simply writing 4 bytes from the register to the output. We'll do the following:
       //               v----------|
       // Output = [... X1 X2 X3 | R1 G1 B1 R2 ...]
@@ -1040,7 +1040,7 @@ void ImagingResampleHorizontalConvolution8u(
         // Memcpy 4-bytes is faster than 3-bytes and this is a boundary case when we want to write
         // 4 bytes (R G B | X) to the output buffer (X1 X2 X3 | R1).
         // The 4th byte in the register (X) has a garbage value and 4th byte in the output buffer (R1) has a correct
-        // value which was preveiously computed by another line. In other words, it means that we can not overwrite
+        // value which was previously computed by another line. In other words, it means that we can not overwrite
         // it by simply writing 4 bytes from the register to the output. We'll do the following:
         //               v----------|
         // Output = [... X1 X2 X3 | R1 G1 B1 R2 ...]

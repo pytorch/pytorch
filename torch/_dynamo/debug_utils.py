@@ -3,19 +3,22 @@
 import copy
 import functools
 import getpass
+import inspect
 import itertools
 import logging
 import os
+import re
 import subprocess
 import tempfile
 import textwrap
 from collections import Counter
 from importlib import import_module
-from typing import Callable, Optional, TypeVar
+from typing import Any, Callable, Dict, List, Optional, TypeVar
 
 import torch
 import torch._prims_common as utils
 import torch._subclasses.meta_utils
+from torch import Tensor
 
 from torch._dynamo.testing import rand_strided
 from torch._prims_common import is_float_dtype
@@ -46,7 +49,7 @@ if use_buck:
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops_cpu",
         "//deeplearning/fbgemm/fbgemm_gpu:sparse_ops",
     ]
-    cur_target = libfb.py.build_info.BuildInfo.get_build_rule().replace("fbcode:", "//")
+    cur_target = libfb.py.build_info.BuildInfo.get_build_rule().replace("fbcode:", "//")  # type: ignore[possibly-undefined]
     extra_imports = "\n".join([f'torch.ops.load_library("{x}")' for x in extra_deps])
 
 
@@ -88,6 +91,7 @@ python_binary(
 {extra_cpp_deps}
     ],
     main_module = "{self.path}",
+    par_style = "xar",
 )
 """
         )
@@ -229,7 +233,7 @@ def _cuda_system_info_comment():
         cuda_version_lines = cuda_version_out.decode().split("\n")
         comment = "".join([f"# {s} \n" for s in cuda_version_lines if s not in [""]])
         model_str += f"{comment}\n"
-    except FileNotFoundError:
+    except (FileNotFoundError, subprocess.CalledProcessError):
         model_str += "# nvcc not found\n"
 
     gpu_names = Counter(
@@ -250,6 +254,7 @@ def generate_config_string(*, stable_output=False):
     if stable_output:
         return "# config omitted due to stable_output=True"
 
+    experimental_config = torch.fx.experimental._config.codegen_config()  # type: ignore[attr-defined]
     return f"""\
 import torch._dynamo.config
 import torch._inductor.config
@@ -258,7 +263,7 @@ import torch.fx.experimental._config
 {torch._dynamo.config.codegen_config()}
 {torch._inductor.config.codegen_config()}
 {torch._functorch.config.codegen_config()}
-{torch.fx.experimental._config.codegen_config()}
+{experimental_config}
 """
 
 
@@ -305,8 +310,6 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False, disable_clone=False):
     When disable_clone is True, we will use args as-is without cloning.
     This is higher fidelity but we may destroy the args in the process.
     """
-    from torch._functorch.aot_autograd import make_boxed_func
-
     from .testing import collect_results, reduce_to_scalar_loss, requires_bwd_pass
 
     gm = copy.deepcopy(gm)
@@ -316,19 +319,9 @@ def run_fwd_maybe_bwd(gm, args, only_fwd=False, disable_clone=False):
     if hasattr(gm, "zero_grad"):
         gm.zero_grad(True)
 
-    # TorchInductor returned callable expects lists. So, boxing the call.
-    orig_named_parameters = getattr(gm, "named_parameters", None)
-    orig_named_buffers = getattr(gm, "named_buffers", None)
-    if not hasattr(gm, "_boxed_call") and (
-        orig_named_parameters is not None or orig_named_buffers is not None
-    ):
-        gm = make_boxed_func(gm)
-        if orig_named_parameters is not None:
-            gm.named_parameters = orig_named_parameters
-        if orig_named_buffers is not None:
-            gm.named_buffers = orig_named_buffers
+    # TorchInductor returned callable expects lists. So, may need a boxed calling convention.
+    out = gm(args) if hasattr(gm, "_boxed_call") else gm(*args)
 
-    out = gm(args)
     if only_fwd:
         return out
     if requires_bwd_pass(out):
@@ -354,20 +347,7 @@ def same_two_models(
         is mostly useful for the minifier (which wants to avoid quantizing floating point
         error into integer/boolean error)
     """
-    from .eval_frame import OptimizedModule
-    from .testing import (
-        named_buffers_for_optimized_module,
-        named_parameters_for_optimized_module,
-    )
     from .utils import same
-
-    if isinstance(gm, OptimizedModule):
-        gm.named_parameters = named_parameters_for_optimized_module(gm)
-        gm.named_buffers = named_buffers_for_optimized_module(gm)
-
-    if isinstance(opt_gm, OptimizedModule):
-        opt_gm.named_parameters = named_parameters_for_optimized_module(opt_gm)
-        opt_gm.named_buffers = named_buffers_for_optimized_module(opt_gm)
 
     ref = run_fwd_maybe_bwd(gm, example_inputs, only_fwd)
 
@@ -696,3 +676,102 @@ class InputWriter:
         if isinstance(val, torch.SymInt):
             val = val.node.hint
         self._lines.append(f"reader.symint({val!r})  # {name}")
+
+
+def aot_graph_input_parser(
+    func: Callable[[List[Tensor]], List[Tensor]],
+    device: str = "cuda",
+    sym_shapes: Optional[Dict[str, int]] = None,
+    default_sym_shape: Optional[int] = None,
+) -> Dict[str, Any]:
+    """
+    Takes in a function which has been printed with print_readable() and constructs kwargs to run it.
+
+    Handles Tensor inputs, Symints, and a graph module which might have tensor constants.
+
+    Consider a function `forward` defined as follows:
+
+    def forward(self, primals_1: "f32[1001, 6]", primals_2: "f32[s0]", primals_3: "Sym(s0)",):
+        _tensor_constant0: "i64[4190]" = self._tensor_constant0
+        # Further implementation
+
+    kwargs = aot_graph_input_parser(forward)
+    forward(**kwargs)
+    """
+
+    from torch.fx.graph import dtype_abbrs
+
+    dtype_map = {value: key for key, value in dtype_abbrs.items()}
+    dtype_pattern = "|".join(dtype_abbrs.values())
+
+    # Extracting the source code from the function
+    source = inspect.getsource(func)
+
+    # Regular expressions
+    tensor_assignment_regex = rf"(_tensor_constant\d+): \"({dtype_pattern})\[\s*(.*?)\s*\]\" = self\.(_tensor_constant\d+)"
+    tensor_regex = rf"({dtype_pattern})\[\s*(.*?)\s*\]"
+    sym_shape_regex = r"Sym\((s\d+)\)"
+
+    class TensorContainer:
+        "Container for tensors as attributes"
+        pass
+
+    # Dictionary for tensors from annotations
+    kwargs: Dict[str, Any] = {}
+
+    sym_shapes = sym_shapes or {}
+
+    def get_sym_int(symint):
+        torch._check(
+            symint in sym_shapes or default_sym_shape is not None,
+            lambda: f"{symint} not in symbolic_shapes and default sym shape not passed in",
+        )
+        return sym_shapes.get(symint, default_sym_shape)
+
+    def gen_tensor(shape, dtype) -> Tensor:
+        # Resolve symbolic shapes to concrete values
+        resolved_shape = []
+        dynamic_dims = []
+        for i, dim in enumerate(shape):
+            dim = dim.strip()
+            if "s" in dim:
+                s = get_sym_int(dim)
+                resolved_shape.append(s)
+                dynamic_dims.append(i)
+            else:
+                resolved_shape.append(int(dim))
+
+        constructor = torch.randn if dtype.is_floating_point else torch.zeros
+        out = constructor(resolved_shape, dtype=dtype, device=device)  # type: ignore[call-arg]
+        for d in dynamic_dims:
+            torch._dynamo.mark_dynamic(out, d)
+        return out
+
+    # Parse function annotations for tensor generation
+    annotations = func.__annotations__
+    for param, annotation in annotations.items():
+        # Skip 'return' annotation
+        if param == "return":
+            continue
+
+        match = re.search(tensor_regex, annotation)
+        if match:
+            data_type, shape_str = match.groups()
+            shape = tuple(shape_str.split(","))
+            dtype = dtype_map[data_type]
+            kwargs[param] = gen_tensor(shape, dtype)
+
+        match = re.search(sym_shape_regex, annotation)
+        if match:
+            kwargs[param] = get_sym_int(match.group(1))
+
+    if "self" in inspect.signature(func).parameters:
+        container = TensorContainer()
+        kwargs["self"] = container
+        for match in re.finditer(tensor_assignment_regex, source):
+            attr_name, data_type, shape_str, _ = match.groups()
+            shape = tuple(shape_str.split(","))
+            dtype = dtype_map[data_type]
+            setattr(container, attr_name, gen_tensor(shape, dtype))
+
+    return kwargs

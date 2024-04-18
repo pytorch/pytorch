@@ -77,7 +77,7 @@ def ismethod(func):
         return signature.parameters.get('self', None) is not None
     else:
         if sys.version_info.major < 3:
-            spec = inspect.getargspec(func)
+            spec = inspect.getargspec(func)  # type: ignore[attr-defined]
         else:
             spec = inspect.getfullargspec(func)  # type: ignore[union-attr, assignment]
         return spec and spec.args and spec.args[0] == 'self'

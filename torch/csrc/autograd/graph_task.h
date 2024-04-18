@@ -6,18 +6,13 @@
 #include <torch/csrc/autograd/utils/warnings.h>
 #include <vector>
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 using edge_list = std::vector<Edge>;
 struct ReadyQueue;
 
 static constexpr int NO_DEVICE = -2;
 static constexpr int CPU_DEVICE = -1;
-
-namespace {
-std::atomic<uint64_t> graph_task_id{0};
-}
 
 // GraphTask holds metadata needed for a single execution of backward()
 struct GraphTask : std::enable_shared_from_this<GraphTask> {
@@ -132,7 +127,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
   // These will be synced with leaf_streams in exec_post_processing.
   std::vector<c10::optional<c10::Stream>> caller_current_streams_;
 
-  // Collects caller_current_streams_
+  // Collects caller_current_streams_ for the accelerator device.
   void stash_current_streams();
 
   void init_to_execute(
@@ -200,18 +195,7 @@ struct GraphTask : std::enable_shared_from_this<GraphTask> {
       int reentrant_depth,
       std::shared_ptr<ReadyQueue> cpu_ready_queue,
       c10::SmallVector<Node*, 4> graph_roots,
-      bool exit_on_error = false)
-      : keep_graph_(keep_graph),
-        graph_roots_(std::move(graph_roots)),
-        owner_(NO_DEVICE),
-        reentrant_depth_(reentrant_depth),
-        exit_on_error_(exit_on_error),
-        cpu_ready_queue_(std::move(cpu_ready_queue)),
-        future_result_(c10::make_intrusive<at::ivalue::Future>(
-            c10::ListType::create(c10::TensorType::get()))),
-        id_(graph_task_id.fetch_add(1, std::memory_order_relaxed)) {
-    thread_locals_.set_grad_mode(grad_mode);
-  }
+      bool exit_on_error = false);
 
  private:
   // run GraphTask post processing
@@ -239,5 +223,4 @@ TORCH_API std::vector<Node*> get_current_graph_task_execution_order();
 TORCH_API int get_current_graph_task_id();
 void add_node_to_current_graph_task_exec_info(Node* fn);
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd

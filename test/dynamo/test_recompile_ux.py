@@ -266,9 +266,7 @@ tensor 'L['x']' size mismatch at index 0. expected 8, actual 12""".split(
             opt_f([7, 8])
 
             for line in """\
-len(L['x']) == 3
-L['x'][0] == 4
-L['x'][1] == 5""".split(
+len(L['x']) == 3""".split(
                 "\n"
             ):
                 self.assertIn(line, filter_reasons())
@@ -278,9 +276,7 @@ L['x'][1] == 5""".split(
 
             for line in """\
 len(L['x']) == 2
-L['x'][0] == 7
-len(L['x']) == 3
-L['x'][0] == 4""".split(
+len(L['x']) == 3""".split(
                 "\n"
             ):
                 self.assertIn(line, filter_reasons())

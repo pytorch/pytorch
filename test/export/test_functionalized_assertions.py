@@ -1,4 +1,4 @@
-# Owner(s): ["module: dynamo"]
+# Owner(s): ["oncall: export"]
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
 
