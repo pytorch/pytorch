@@ -27,6 +27,7 @@ torch.fx.experimental.symbolic_shapes
     DimConstraints
     ShapeEnvSettings
     ConvertIntKey
+    CallMethodKey
 
     hint_int
     is_concrete_int
