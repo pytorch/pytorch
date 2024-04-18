@@ -3122,7 +3122,7 @@ utils_device.CURRENT_DEVICE == None""".split(
             x: torch.Tensor
 
             def __post_init__(self):
-                object.__setattr__(self, 'y', self.x + 2)
+                object.__setattr__(self, "y", self.x + 2)
 
         def fn4(x) -> None:
             d = D(x)
