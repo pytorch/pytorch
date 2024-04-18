@@ -1610,7 +1610,7 @@ class TestQuantizedTensor(TestCase):
         # register the ops
         import torch.ao.quantization.fx._decomposed
         x = torch.randn(2, 3).requires_grad_()
-        (s, zp) = torch.ops.quantized_decomposed.choose_qparams_per_token_asymmetric(x, torch.int8)
+        (s, zp) = torch.ops.quantized_decomposed._choose_qparams_per_token_asymmetric_impl(x, torch.int8)
         out = x.div(s).add(zp).round()
         out.sum().backward()
 

@@ -184,12 +184,12 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # Test serialization
         b = io.BytesIO()
         torch.save(qlinear, b)
-        for weights_only in [True, False]:
-            b.seek(0)
-            loaded = torch.load(b, weights_only=weights_only)
-            self.assertEqual(qlinear.weight(), loaded.weight())
-            self.assertEqual(qlinear.scale, loaded.scale)
-            self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        b.seek(0)
+        # Don't test weights_only here as this is legacy code that saves the model
+        loaded = torch.load(b)
+        self.assertEqual(qlinear.weight(), loaded.weight())
+        self.assertEqual(qlinear.scale, loaded.scale)
+        self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test torch.package
         buffer = io.BytesIO()
@@ -367,14 +367,14 @@ class TestStaticQuantizedModule(QuantizationTestCase):
         # Test serialization
         b = io.BytesIO()
         torch.save(qconv_module, b)
-        for weights_only in [True, False]:
-            b.seek(0)
-            loaded_conv = torch.load(b, weights_only=weights_only)
+        b.seek(0)
+        # Don't test weights_only here as this is legacy code that saves the model
+        loaded_conv = torch.load(b)
 
-            self.assertEqual(loaded_conv.bias(), qconv_module.bias())
-            self.assertEqual(loaded_conv.scale, qconv_module.scale)
-            self.assertEqual(loaded_conv.zero_point,
-                             qconv_module.zero_point)
+        self.assertEqual(loaded_conv.bias(), qconv_module.bias())
+        self.assertEqual(loaded_conv.scale, qconv_module.scale)
+        self.assertEqual(loaded_conv.zero_point,
+                         qconv_module.zero_point)
 
         # Test copy and deepcopy
         copied_conv = copy.copy(qconv_module)
@@ -1481,24 +1481,24 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
         # Test serialization
         b = io.BytesIO()
         torch.save(dynamic_module, b)
-        for weights_only in [True, False]:
-            b.seek(0)
-            loaded_conv = torch.load(b, weights_only=weights_only)
+        b.seek(0)
+        # Don't test weights_only here as this is legacy code that saves the model
+        loaded_conv = torch.load(b)
 
-            self.assertEqual(loaded_conv.bias(), dynamic_module.bias())
-            self.assertEqual(loaded_conv.scale, dynamic_module.scale)
-            self.assertEqual(loaded_conv.zero_point,
-                             dynamic_module.zero_point)
+        self.assertEqual(loaded_conv.bias(), dynamic_module.bias())
+        self.assertEqual(loaded_conv.scale, dynamic_module.scale)
+        self.assertEqual(loaded_conv.zero_point,
+                         dynamic_module.zero_point)
 
-            # Test copy and deepcopy
-            copied_conv = copy.copy(dynamic_module)
-            self.assertEqual(copied_conv.bias(), dynamic_module.bias())
-            self.assertEqual(copied_conv.scale, dynamic_module.scale)
-            self.assertEqual(copied_conv.zero_point,
-                             dynamic_module.zero_point)
-            Y_copied = copied_conv(X_fp32, reduce_range)
-            np.testing.assert_array_almost_equal(
-                Y.numpy(), Y_copied.numpy(), decimal=0)
+        # Test copy and deepcopy
+        copied_conv = copy.copy(dynamic_module)
+        self.assertEqual(copied_conv.bias(), dynamic_module.bias())
+        self.assertEqual(copied_conv.scale, dynamic_module.scale)
+        self.assertEqual(copied_conv.zero_point,
+                         dynamic_module.zero_point)
+        Y_copied = copied_conv(X_fp32, reduce_range)
+        np.testing.assert_array_almost_equal(
+            Y.numpy(), Y_copied.numpy(), decimal=0)
 
         deepcopied_conv = copy.deepcopy(dynamic_module)
         self.assertEqual(deepcopied_conv.bias(), dynamic_module.bias())
@@ -1661,11 +1661,11 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
 
         b = io.BytesIO()
         torch.save(qlinear, b)
-        for weights_only in [True, False]:
-            b.seek(0)
-            loaded = torch.load(b, weights_only=weights_only)
-            self.assertEqual(qlinear.weight(), loaded.weight())
-            self.assertEqual(qlinear.zero_point, loaded.zero_point)
+        b.seek(0)
+        # Don't test weights_only here as this is legacy code that saves the model
+        loaded = torch.load(b)
+        self.assertEqual(qlinear.weight(), loaded.weight())
+        self.assertEqual(qlinear.zero_point, loaded.zero_point)
 
         # Test JIT
         self.checkScriptable(qlinear, [[X]], check_save_load=True)
