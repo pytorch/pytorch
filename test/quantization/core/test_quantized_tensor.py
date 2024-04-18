@@ -1350,6 +1350,7 @@ class TestQuantizedTensor(TestCase):
         buf.seek(0)
         # Don't test weights_only here as this is loading a Module (legacy)
         f2 = torch.load(buf)
+
         self.assertEqual(f2.qscheme, torch.per_tensor_symmetric)
 
     @given(X=hu.tensor(shapes=hu.array_shapes(min_dims=2, max_dims=4,
