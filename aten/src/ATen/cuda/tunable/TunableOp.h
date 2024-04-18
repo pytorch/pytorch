@@ -90,7 +90,7 @@ class TunableOp {
   private:
     static void WarmUp(Callable<ParamsT> *op, std::vector<ParamsT*> param, size_t num_iter) {
       TuningContext* ctx = getTuningContext();
-      bool do_flush = ctx->GetICacheFlushIterations() > 0;
+      bool do_flush = ctx->IsICacheFlushEnabled();
       for (size_t i = 0; i < num_iter; i++) {
         if (do_flush) {
           at::cuda::flush_icache();
@@ -101,7 +101,7 @@ class TunableOp {
 
     static double Profile(Callable<ParamsT> *op, std::vector<ParamsT*> param, size_t num_iter) {
       TuningContext* ctx = getTuningContext();
-      bool do_flush = ctx->GetICacheFlushIterations() > 0;
+      bool do_flush = ctx->IsICacheFlushEnabled();
       TimerT timer{};
       timer.Start();
       for (size_t i = 0; i < num_iter; i++) {
@@ -123,7 +123,7 @@ class TunableOp {
       auto min_duration_ms = std::numeric_limits<double>::infinity();
       std::string id_name = "Default";
 
-      int flush_iters = ctx->GetICacheFlushIterations();
+      int flush_iters = ctx->IsICacheFlushEnabled();
       if (flush_iters > 0) {
         TUNABLE_LOG("instruction cache flush is enabled");
       }

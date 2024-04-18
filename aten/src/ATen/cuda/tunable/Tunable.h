@@ -137,16 +137,13 @@ class TORCH_CUDA_CPP_API TuningContext {
     TuningContext &operator=(TuningContext &) = delete;
     TuningContext &operator=(TuningContext &&) = delete;
 
-    void EnableTunableOp();
-    void DisableTunableOp();
+    void EnableTunableOp(bool value);
     bool IsTunableOpEnabled() const;
 
-    void EnableTuning();
-    void DisableTuning();
+    void EnableTuning(bool value);
     bool IsTuningEnabled() const;
 
-    void EnableNumericsCheck();
-    void DisableNumericsCheck();
+    void EnableNumericsCheck(bool value);
     bool IsNumericsCheckEnabled() const;
 
     void SetMaxTuningDurationMs(int max_duration_ms);
@@ -161,14 +158,11 @@ class TORCH_CUDA_CPP_API TuningContext {
     void SetMaxWarmupIterations(int max_iter);
     int GetMaxWarmupIterations() const;
 
-    void SetICacheFlushIterations(int iterations);
-    int GetICacheFlushIterations() const;
+    void EnableICacheFlush(bool value);
+    bool IsICacheFlushEnabled() const;
 
     void SetRotatingBufferSize(int size);
     int GetRotatingBufferSize() const;
-
-    void EnableTunableOpAndTuning();
-    void DisableTunableOpAndTuning();
 
     TuningResultsManager& GetTuningResultsManager();
 
@@ -178,23 +172,25 @@ class TORCH_CUDA_CPP_API TuningContext {
 
     TuningStatus LoadTuningResults(const TuningResults& tr);
 
-    void SetFilename(const std::string& filename);
+    void SetFilename(const std::string& filename, bool insert_device_ordinal=false);
     std::string GetFilename() const;
 
-  protected:
-    bool ReadFile(const std::string& filename);
-    bool WriteFile(const std::string& filename);
+    void WriteFileOnExit(bool value);
+
+    bool ReadFile(const std::string& filename={});
+    bool WriteFile(const std::string& filename={});
 
   private:
     bool enable_;
     bool tuning_enable_;
     bool manager_initialized_;
-    bool numerics_check_enabled_;
+    bool write_file_on_exit_;
+    bool numerics_check_enable_;
     int max_tuning_duration_ms_;
     int max_tuning_iterations_;
     int max_warmup_duration_ms_;
     int max_warmup_iterations_;
-    int icache_flush_iterations_;
+    bool icache_flush_;
     int rotating_buffer_size_;
     mutable TuningResultsManager manager_;
     mutable c10::once_flag manager_init_once_;

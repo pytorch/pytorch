@@ -4485,6 +4485,11 @@ class TestLinalg(TestCase):
         assert torch.cuda.tunable.tuning_is_enabled() is False
         torch.cuda.tunable.tuning_enable(True)
         assert torch.cuda.tunable.tuning_is_enabled()
+        assert torch.cuda.tunable.numerics_check_is_enabled(), "TunableOp numeric check should be enabled by default"
+        torch.cuda.tunable.numerics_check_enable(False)
+        assert torch.cuda.tunable.numerics_check_is_enabled() is False
+        torch.cuda.tunable.numerics_check_enable(True)
+        assert torch.cuda.tunable.numerics_check_is_enabled()
         assert torch.cuda.tunable.get_max_tuning_duration() == 30
         assert torch.cuda.tunable.get_max_tuning_iterations() == 100
         assert torch.cuda.tunable.get_max_warmup_duration() == 0
@@ -4504,14 +4509,32 @@ class TestLinalg(TestCase):
             y = make_arg(size_y, noncontiguous=nctg_y)
             self.check_single_matmul(x, y)
 
-        filename = torch.cuda.tunable.get_filename()
+        filename1 = torch.cuda.tunable.get_filename()
+        filename2 = "tunableop_results_tmp1.csv"
+        filename3 = "tunableop_results_tmp2.csv"
         ordinal = torch.cuda.current_device()
-        assert filename == f"tunableop_results{ordinal}.csv"
+        assert filename1 == f"tunableop_results{ordinal}.csv"
         assert len(torch.cuda.tunable.get_validators()) > 0
         assert len(torch.cuda.tunable.get_results()) > 0
 
+        assert torch.cuda.tunable.write_file()  # use default filename
+        assert torch.cuda.tunable.write_file(filename2)  # use custom, one-time filename
+        torch.cuda.tunable.set_filename(filename3)
+        assert torch.cuda.tunable.write_file()  # use previously set filename
+        assert torch.cuda.tunable.read_file()  # use previously set filename, will ignore duplicates and return True
+
+        with open(filename1) as file1:
+            file1_contents = file1.read()
+        with open(filename2) as file2:
+            file2_contents = file2.read()
+        with open(filename3) as file3:
+            file3_contents = file3.read()
+        assert file1_contents == file2_contents
+        assert file1_contents == file3_contents
+
         # disables TunableOp, no file will be written, restore to default values
         torch.cuda.tunable.enable(False)
+        torch.cuda.tunable.set_filename(filename1)  # reset back to default filename for next unit test
         torch.cuda.tunable.set_max_tuning_duration(30)
         torch.cuda.tunable.set_max_tuning_iterations(100)
         torch.cuda.tunable.set_max_warmup_duration(0)
