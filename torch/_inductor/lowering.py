@@ -5574,14 +5574,18 @@ make_fallback(auto_functionalized)
 
 
 @register_lowering(triton_kernel_wrapper_mutation)
-def triton_kernel_wrap_(*, kernel_idx, constant_args_idx, grid, kwargs):
+def triton_kernel_wrap_(*, kernel_idx, constant_args_idx, grid, kwargs, tensors_to_clone=None):
     from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+    if tensors_to_clone is None:
+        tensors_to_clone = []
 
     constant_args = kernel_side_table.get_constant_args(constant_args_idx)
     ir.UserDefinedTritonKernel(
         kernel_idx=kernel_idx,
         grid=grid,
         kernel_args={**kwargs, **constant_args},
+        tensors_to_clone=tensors_to_clone
     )
     return {key: val for key, val in kwargs.items() if isinstance(val, TensorBox)}
 
@@ -5616,6 +5620,7 @@ def triton_kernel_wrap(
         constant_args_idx=constant_args_idx,
         grid=grid,
         kwargs=new_kwargs,
+        tensors_to_clone=tensors_to_clone
     )
 
 

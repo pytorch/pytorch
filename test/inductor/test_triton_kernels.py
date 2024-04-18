@@ -788,6 +788,40 @@ def forward(self, x_1, output_1):
         out.sum().backward()
 
     @requires_cuda
+    @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
+    def test_triton_kernel_inputs_buffer_reuse(self):
+        def _mul2(x):
+            y = torch.empty_like(x)
+            mul2_kernel[(10,)](
+                in_ptr0=x,
+                out_ptr=y,
+                n_elements=x.numel(),
+                BLOCK_SIZE=1,
+            )
+            return y
+
+        @torch.compile
+        def f(x):
+            for _ in range(4):
+                # The output of one mul2 kernel is the input to the next mul2 kernel,
+                # but at some point we should start re-using buffers not allocate new buffers.
+                x = _mul2(x)
+            return x + 1
+
+        x = torch.randn(10, device="cuda", dtype=torch.float32)
+        eager_out = f(x)
+        compiled_out, (code,) = run_and_get_code(
+            torch.compile(f), x
+        )
+        self.assertEqual(compiled_out, eager_out)
+
+        # Check that we're re-using any unused memory buffers.
+        num_bufs_allocated = code.count("empty_strided_cuda((10, ), (1, ), torch.float32)")
+        self.assertEqual(num_bufs_allocated, 2)
+
+
+
+    @requires_cuda
     def test_triton_kernel_matmul_tracking(self):
         @triton.jit
         def ones_kernel(x_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
