@@ -56,29 +56,41 @@ else:
                 "DeviceMesh requires numpy >= 1.21 to be installed for type checking"
             )
 
+
+import functools
+import weakref
+
+def weak_lru(maxsize=128, typed=False):
+    'LRU Cache decorator that keeps a weak reference to "self"'
+    def wrapper(func):
+
+        @functools.lru_cache(maxsize, typed)
+        def _func(_self, *args, **kwargs):
+            return func(_self(), *args, **kwargs)
+
+        @functools.wraps(func)
+        def inner(self, *args, **kwargs):
+            return _func(weakref.ref(self), *args, **kwargs)
+
+        return inner
+
+    return wrapper
+
+
     class _MeshEnv:
         def __init__(self) -> None:
             self.mesh_stack: List[DeviceMesh] = []
             self.child_to_parent_mapping: Dict[DeviceMesh, DeviceMesh] = {}
-            self.parent_to_child_mapping: Dict[DeviceMesh, Dict[str, DeviceMesh]] = {}
 
         def get_current_mesh(self) -> "DeviceMesh":
             if len(self.mesh_stack) == 0:
                 raise RuntimeError("No device mesh is currently active!")
             return self.mesh_stack[-1]
 
+        @weak_lru()
         def create_child_mesh(
             self, device_mesh: "DeviceMesh", mesh_dim: int, mesh_dim_name: str
         ) -> "DeviceMesh":
-            # Directly return the child mesh if it is already created.
-            child_mesh_mappings = self.parent_to_child_mapping.get(device_mesh)
-            if child_mesh_mappings:
-                sub_mesh = child_mesh_mappings.get(mesh_dim_name)
-                if sub_mesh:
-                    return sub_mesh
-
-            # swap the current dim to the last dim then reshape to flatten out other
-            # dims, so we can just extract the list of ranks which contains cur_rank.
             cur_rank = device_mesh.get_rank()
             pg_ranks_by_dim = device_mesh.mesh.swapdims(-1, mesh_dim).reshape(
                 -1, device_mesh.mesh.size(mesh_dim)
@@ -96,9 +108,6 @@ else:
             res_sub_mesh._dim_group_infos = [device_mesh._dim_group_infos[mesh_dim]]  # type: ignore[possibly-undefined]
             # Assign the current DeviceMesh as the parent of the child DeviceMesh.
             self.child_to_parent_mapping[res_sub_mesh] = device_mesh
-            self.parent_to_child_mapping.setdefault(device_mesh, {})[
-                mesh_dim_name
-            ] = res_sub_mesh
             return res_sub_mesh
 
         def get_parent_mesh(self, device_mesh: "DeviceMesh") -> Optional["DeviceMesh"]:
