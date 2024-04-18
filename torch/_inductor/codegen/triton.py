@@ -3413,8 +3413,9 @@ class TritonScheduling(BaseScheduling):
             )
         )
         for node in pointwise_nodes:
+            # An index can be an integer when loading a random seed.
             if not all(
-                dep.is_contiguous()
+                not isinstance(dep, MemoryDep) or dep.is_contiguous() or isinstance(dep.index, (sympy.Integer, int)) or dep.stride1_for_last_dim()
                 for dep in itertools.chain(
                     node.read_writes.reads, node.read_writes.writes
                 )

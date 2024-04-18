@@ -69,12 +69,25 @@ class MemoryDep(typing.NamedTuple):
         return len(free_unbacked_symbols(self.get_numel())) > 0
 
     def is_contiguous(self) -> bool:
+        return isinstance(self.index, sympy.Symbol) and self.index in self.var_names
+
+    def stride1_for_last_dim(self, result_for_complex_expression=True) -> bool:
         """
-        2 cases
-        1. self.index is a symbol appearing in self.var_names
-        2. self.index is a interger. This happens for random seed.
+        Whether the stride for the last dimension is 1.
         """
-        return (isinstance(self.index, sympy.Symbol) and self.index in self.var_names) or isinstance(self.index, (sympy.Integer, int))
+        terms = self.index.args if isinstance(self.index, sympy.Add) else [self.index]
+
+        last_sym = self.var_names[-1] 
+        for term in terms:
+            if term is last_sym:
+                return True
+
+            # Having a >1 stride for the last dimension is bad for perf
+            # return False.
+            if isinstance(term, sympy.Mul) and len(term.args) == 2 and term.args[1] is last_sym and isinstance(term.args[0], (int, sympy.Integer)) and term.args[0] > 1:
+                return False
+        
+        return result_for_complex_expression
 
     def is_scalar(self) -> bool:
         if isinstance(self.index, sympy.Symbol):
