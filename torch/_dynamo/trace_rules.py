@@ -32,7 +32,6 @@ import typing
 import unittest
 import weakref
 from collections import defaultdict
-from contextlib import contextmanager
 from typing import Any, Callable, cast, Dict, List, Optional, Set, Union
 
 np: Optional[types.ModuleType] = None
@@ -128,20 +127,6 @@ If you are removing an existing torch level API:
 
 
 """
-
-_TLS = threading.local()
-
-
-@contextmanager
-def dont_trace_nn_module_call_impl():
-    old = getattr(_TLS, "trace_top_level_nn_module_call_impl", True)
-    _TLS.trace_top_level_nn_module_call_impl = False
-    try:
-        yield False
-    finally:
-        _TLS.trace_top_level_nn_module_call_impl = old
-
-
 manual_torch_name_rule_map = {
     "torch.onnx.is_in_onnx_export": TorchInGraphFunctionVariable,
     "torch.onnx.operators.shape_as_tensor": TorchInGraphFunctionVariable,
@@ -3050,10 +3035,6 @@ def add_module_init_func(name: str, init_func: Callable[[], None]) -> None:
     """Register a module without eagerly importing it"""
     # If the module is already imported, eagerly run init
     assert "." not in name, f"Expected a root module name, but got {name}"
-    if name in sys.modules:
-        init_func()
-
-    # Module is not yet imported, delay processing until needed
     assert name not in _lazy_module_init
     _lazy_module_init[name].append(init_func)
 
@@ -3535,18 +3516,6 @@ def lookup_inner(
         elif name == "__torch_function__":
             if reasons is not None:
                 reasons.add("func name is __torch_function__")
-            return UserFunctionVariable
-
-    if not is_direct_call and getattr(
-        _TLS, "trace_top_level_nn_module_call_impl", True
-    ):
-        if (
-            filename
-            and "torch/nn/modules/module.py" in filename
-            and name == "_call_impl"
-        ):
-            if reasons is not None:
-                reasons.add("func name is _call_impl")
             return UserFunctionVariable
 
     # Step 3: lookup obj's tracing rule by filename.
