@@ -40,6 +40,10 @@ at::Tensor mkldnn_tensor_from_data_ptr(
 
 #else
 
+void* data_ptr_from_mkldnn(at::Tensor* mkldnn_tensor) {
+  TORCH_CHECK(false, "MKL-DNN build is disabled");
+}
+
 at::Tensor mkldnn_tensor_from_data_ptr(
     void* data_ptr,
     at::IntArrayRef dims,
