@@ -170,7 +170,11 @@ def _resize_output_check(out: TensorLikeType, shape: ShapeType):
 
 
 # TODO: handle tuples of tensors
-def _maybe_resize_out(out: TensorLikeType, shape: ShapeType, memory_format: Optional[torch.memory_format]):
+def _maybe_resize_out(
+    out: TensorLikeType,
+    shape: ShapeType,
+    memory_format: Optional[torch.memory_format] = None,
+):
     if _resize_output_check(out, shape):
         return out.resize_(shape, memory_format=memory_format)
     else:
@@ -205,7 +209,12 @@ def _safe_copy_out(
     return copy_to.copy_(copy_from)
 
 
-def out_wrapper(*out_names: str, exact_dtype: bool = False, pass_is_out: bool = False, preserve_memory_format=False):
+def out_wrapper(
+    *out_names: str,
+    exact_dtype: bool = False,
+    pass_is_out: bool = False,
+    preserve_memory_format=False,
+):
     # The wrapped function needs to convert the output parameters to ensure
     # compatibility between the Python API (which always uses "out" as the
     # parameter name and may be a tuple) and the Aten API (which may have
@@ -220,7 +229,10 @@ def out_wrapper(*out_names: str, exact_dtype: bool = False, pass_is_out: bool = 
     is_tensor = len(out_names) == 1
 
     def compute_memory_format(t):
-        if preserve_memory_format and utils.suggest_memory_format(t) == torch.channels_last:
+        if (
+            preserve_memory_format
+            and utils.suggest_memory_format(t) == torch.channels_last
+        ):
             return torch.channels_last
         else:
             return None
