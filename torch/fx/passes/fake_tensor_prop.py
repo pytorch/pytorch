@@ -50,7 +50,7 @@ class FakeTensorProp(torch.fx.Interpreter):
         meta = map_aggregate(result, extract_val)
         if meta is not None:
             n.meta['val'] = meta
-            if symbol_to_path := compute_unbacked_bindings(self._mode.shape_env, result):
+            if (shape_env := self._mode.shape_env) and (symbol_to_path := compute_unbacked_bindings(shape_env, result)):
                 n.meta["unbacked_bindings"] = symbol_to_path
 
         return result
