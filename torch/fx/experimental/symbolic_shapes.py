@@ -429,11 +429,11 @@ def find_symbol_binding_fx_nodes(graph):
 @dataclass(frozen=True)
 class ConvertIntKey:
     def __str__(self) -> str:
-        return ".__int__()"
+        return ".cast_symbool_to_symint_guardless()"
 
     def get(self, b: bool) -> int:
         """Get the int value from bool"""
-        return int(b)
+        return cast_symbool_to_symint_guardless(b)
 
 
 @dataclass(frozen=True)
@@ -1293,7 +1293,7 @@ def _eval_is_non_overlapping_and_dense(sizes, strides):
 
 def cast_symbool_to_symint_guardless(symbool: torch.SymBool) -> torch.SymInt:
     int_sym = sympy.Piecewise((1, symbool.node.expr), (0, True))
-    return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()))
+    return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()) if has_hint(symbool) else None)
 
 SYMPY_INTERP = {
     'Abs': operator.abs,
