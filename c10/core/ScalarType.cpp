@@ -84,6 +84,13 @@ ScalarType promoteTypes(ScalarType a, ScalarType b) {
     // - We must not promote uint64 to int64 because this will overflow.
     //
     // It'll be a bit of work to fix it, so we're punting on it for now.
+    // However, float promotion is fine, so we handle that.
+    if (isFloatingType(a)) {
+      return a;
+    }
+    if (isFloatingType(b)) {
+      return b;
+    }
     TORCH_CHECK(
         false,
         "Promotion for uint16, uint32, uint64 types is not supported, attempted to promote ",
