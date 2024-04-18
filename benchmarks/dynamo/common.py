@@ -2569,7 +2569,7 @@ class BenchmarkRunner:
                 # E.g., the output order might not match, None might be part of output, etc.
 
             try:
-                if self.args.training:
+                if self.args.training and self.args.amp:
                     if process_fn := self.get_output_amp_train_process_func.get(
                         name, None
                     ):
@@ -2589,8 +2589,6 @@ class BenchmarkRunner:
             except Exception as e:
                 # Sometimes torch.allclose may throw RuntimeError
                 is_same = False
-
-            breakpoint()
 
             if not is_same:
                 if self.args.skip_accuracy_check:
