@@ -2623,10 +2623,6 @@ def send_object_list(object_list, dst, group=None, device=None):
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
 
-    .. note:: Note that this API differs slightly from the :func:`all_gather`
-        collective since it does not provide an ``async_op`` handle and thus
-        will be a blocking call.
-
     .. warning::
         :func:`send_object_list` uses ``pickle`` module implicitly, which
         is known to be insecure. It is possible to construct malicious pickle
@@ -2717,10 +2713,6 @@ def recv_object_list(object_list, src=None, group=None, device=None):
         ``torch.cuda.current_device()`` and it is the user's responsibility to
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
-
-    .. note:: Note that this API differs slightly from the :func:`all_gather`
-        collective since it does not provide an ``async_op`` handle and thus
-        will be a blocking call.
 
     .. warning::
         :func:`recv_object_list` uses ``pickle`` module implicitly, which
@@ -2815,7 +2807,7 @@ def broadcast_object_list(object_list, src=0, group=None, device=None):
         ensure that this is set so that each rank has an individual GPU, via
         ``torch.cuda.set_device()``.
 
-    .. note:: Note that this API differs slightly from the :func:`all_gather`
+    .. note:: Note that this API differs slightly from the :func:`broadcast`
         collective since it does not provide an ``async_op`` handle and thus
         will be a blocking call.
 
