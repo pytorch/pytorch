@@ -1156,7 +1156,7 @@ if torch._C._has_mkldnn:
                     if (
                         is_lp_weight
                         or mkldnn._is_mkldnn_acl_supported()
-                        or V.aot_compilation
+                        or V.aot_compilation is True
                     )
                     else torch.ops.mkl._mkl_reorder_linear_weight
                 )
@@ -1168,7 +1168,7 @@ if torch._C._has_mkldnn:
                 if (
                     is_lp_weight
                     or mkldnn._is_mkldnn_acl_supported()
-                    or V.aot_compilation
+                    or V.aot_compilation is True
                 ):
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
