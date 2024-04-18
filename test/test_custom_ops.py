@@ -2140,7 +2140,7 @@ class TestCustomOpAPI(TestCase):
         @torch.library.custom_op(
             "_torch_testing::add",
             mutates_args=(),
-            manual_schema="(Tensor x, float y) -> Tensor",
+            schema="(Tensor x, float y) -> Tensor",
         )
         def add(x, y):
             x_np = x.numpy(force=True)
@@ -2155,7 +2155,7 @@ class TestCustomOpAPI(TestCase):
         @torch.library.custom_op(
             "_torch_testing::sin_",
             mutates_args=["x"],
-            manual_schema="(Tensor(a!) x) -> ()",
+            schema="(Tensor(a!) x) -> ()",
         )
         def sin_(x):
             x_np = x.numpy()
@@ -2173,7 +2173,7 @@ class TestCustomOpAPI(TestCase):
             @torch.library.custom_op(
                 "_torch_testing::sin_",
                 mutates_args=(),
-                manual_schema="(Tensor(a!) x) -> ()",
+                schema="(Tensor(a!) x) -> ()",
             )
             def sin_(x):
                 x_np = x.numpy()
