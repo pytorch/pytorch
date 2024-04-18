@@ -5,7 +5,7 @@ import weakref
 from bisect import bisect_right
 from collections import Counter
 from functools import partial, wraps
-from typing import Sequence, Optional
+from typing import Optional, Sequence
 
 from torch import inf
 
@@ -783,10 +783,12 @@ class SequentialLR(LRScheduler):
         self, optimizer, schedulers, milestones, last_epoch=-1, verbose="deprecated"
     ):
         if len(schedulers) < 1:
-            raise ValueError(f"{self.__class__.__name__} expects at least one scheduler, but got no scheduler.")
+            raise ValueError(
+                f"{self.__class__.__name__} expects at least one scheduler, but got no scheduler."
+            )
 
         for scheduler_idx, scheduler in enumerate(schedulers):
-            if not hasattr(scheduler, 'optimizer'):
+            if not hasattr(scheduler, "optimizer"):
                 raise TypeError(
                     f"{self.__class__.__name__} at index {scheduler_idx} should have `optimizer` as its attribute."
                 )
@@ -1059,7 +1061,9 @@ class ChainedScheduler(LRScheduler):
         >>>     scheduler.step()
     """
 
-    def __init__(self, schedulers: Sequence[LRScheduler], optimizer: Optional[Optimizer] = None):
+    def __init__(
+        self, schedulers: Sequence[LRScheduler], optimizer: Optional[Optimizer] = None
+    ):
         if len(schedulers) < 1:
             raise ValueError(
                 f"{self.__class__.__name__} expects at least one scheduler to be chained, but got no scheduler."
@@ -1067,7 +1071,7 @@ class ChainedScheduler(LRScheduler):
 
         optimizer = optimizer or schedulers[0].optimizer
         for scheduler_idx, scheduler in enumerate(schedulers):
-            if not hasattr(scheduler, 'optimizer'):
+            if not hasattr(scheduler, "optimizer"):
                 raise TypeError(
                     f"{self.__class__.__name__} at index {scheduler_idx} should have `optimizer` as its attribute."
                 )
@@ -1086,7 +1090,7 @@ class ChainedScheduler(LRScheduler):
         self._schedulers = schedulers
         self.optimizer = optimizer
         self._last_lr = [
-            group['lr'] for group in self._schedulers[-1].optimizer.param_groups
+            group["lr"] for group in self._schedulers[-1].optimizer.param_groups
         ]
 
     def step(self):
