@@ -54,7 +54,7 @@ densenet121,pass,0
 
 
 
-detectron2_fasterrcnn_r_101_c4,pass,43
+detectron2_fasterrcnn_r_101_c4,pass,42
 
 
 
@@ -62,7 +62,7 @@ detectron2_fasterrcnn_r_101_dc5,pass,43
 
 
 
-detectron2_fasterrcnn_r_101_fpn,pass,47
+detectron2_fasterrcnn_r_101_fpn,pass,46
 
 
 
@@ -70,7 +70,7 @@ detectron2_fasterrcnn_r_50_c4,pass,43
 
 
 
-detectron2_fasterrcnn_r_50_dc5,pass,43
+detectron2_fasterrcnn_r_50_dc5,pass,42
 
 
 
@@ -78,11 +78,11 @@ detectron2_fasterrcnn_r_50_fpn,pass,47
 
 
 
-detectron2_fcos_r_50_fpn,pass,24
+detectron2_fcos_r_50_fpn,pass,23
 
 
 
-detectron2_maskrcnn_r_101_c4,fail_accuracy,58
+detectron2_maskrcnn_r_101_c4,fail_accuracy,57
 
 
 
