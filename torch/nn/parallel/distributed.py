@@ -897,6 +897,7 @@ class DistributedDataParallel(Module, Joinable):
             torch._dynamo.trace_rules.LEGACY_MOD_INLINELIST.add(
                 "torch.nn.parallel.distributed"
             )
+            torch._dynamo.trace_rules.get_legacy_mod_inlinelist.cache_clear()
         self._force_to_disable_cpp_reducer = (
             optimize_ddp == "python_reducer_without_compiled_forward"
         )
@@ -929,6 +930,8 @@ class DistributedDataParallel(Module, Joinable):
                 param.grad.copy_(gradient)
 
         for index, param in enumerate(self._module_parameters):
+            if not param.requires_grad:
+                continue
             self._accum_grad_hooks.append(
                 param.register_post_accumulate_grad_hook(
                     functools.partial(
@@ -1463,9 +1466,9 @@ class DistributedDataParallel(Module, Joinable):
         self._lazy_init_ran = True
 
     def _should_disable_cpp_reducer(self) -> bool:
-        return self._use_python_reducer and (
-            torch._utils.is_compiling() or self._force_to_disable_cpp_reducer
-        )
+        if torch._utils.is_compiling() and self._use_python_reducer:
+            self._force_to_disable_cpp_reducer = True
+        return self._use_python_reducer and self._force_to_disable_cpp_reducer
 
     def _pre_forward(self, *inputs, **kwargs):
         if self._should_disable_cpp_reducer():
