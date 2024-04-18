@@ -95,7 +95,7 @@ class TestCutlassBackend(TestCase):
             return a @ b
 
         a = torch.randn(2240, 4096).cuda().half()
-        b = torch.randn(4096, 4096).cuda().half()
+        b = torch.randn(4096, 2048).cuda().half()
 
         with config.patch(
             {
