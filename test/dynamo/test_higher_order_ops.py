@@ -1300,10 +1300,22 @@ def forward(self, getitem, const):
         def inner(x):
             return x.sin(), x.cos().T, x.sin().view(-1)
 
+        rand_44 = torch.randn(4, 4)
         inps = [
             torch.randn(3),
             torch.randn(3, 4),
             torch.randn(3, 4, 5, requires_grad=True),
+            torch.randn(3, 4, 5, requires_grad=True).permute((2, 0, 1)),
+            torch.randn(3, 4, 5, requires_grad=True).detach(),
+            torch.randn(3, 4, 5, requires_grad=True).narrow(1, 1, 2),
+            rand_44.T,
+            rand_44[::2],
+            rand_44[::2, ::2],
+            rand_44[1::3, 1::3],
+            rand_44[1::3, 1::2].T,
+            rand_44.unsqueeze(1),
+            rand_44.squeeze(0),
+            rand_44.reshape(2, 8),
         ]
         for x in inps:
             compiled_ret = torch.compile(
