@@ -2638,6 +2638,8 @@ def send_object_list(object_list, dst, group=None, device=None):
         >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
+        >>> # Assumes backend is not NCCL
+        >>> device = torch.device("cpu")
         >>> if dist.get_rank() == 0:
         >>>     # Assumes world_size of 2.
         >>>     objects = ["foo", 12, {1: 2}] # any picklable object
@@ -2645,8 +2647,6 @@ def send_object_list(object_list, dst, group=None, device=None):
         >>> else:
         >>>     objects = [None, None, None]
         >>>     dist.recv_object_list(objects, src=1, device=device)
-        >>> # Assumes backend is not NCCL
-        >>> device = torch.device("cpu")
         >>> objects
         ['foo', 12, {1: 2}]
     """
@@ -2729,6 +2729,8 @@ def recv_object_list(object_list, src=None, group=None, device=None):
         >>> # xdoctest: +SKIP("need process group init")
         >>> # Note: Process group initialization omitted on each rank.
         >>> import torch.distributed as dist
+        >>> # Assumes backend is not NCCL
+        >>> device = torch.device("cpu")
         >>> if dist.get_rank() == 0:
         >>>     # Assumes world_size of 2.
         >>>     objects = ["foo", 12, {1: 2}] # any picklable object
@@ -2736,8 +2738,6 @@ def recv_object_list(object_list, src=None, group=None, device=None):
         >>> else:
         >>>     objects = [None, None, None]
         >>>     dist.recv_object_list(objects, src=1, device=device)
-        >>> # Assumes backend is not NCCL
-        >>> device = torch.device("cpu")
         >>> objects
         ['foo', 12, {1: 2}]
     """

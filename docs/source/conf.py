@@ -495,8 +495,6 @@ coverage_ignore_functions = [
     "barrier",
     "batch_isend_irecv",
     "broadcast",
-    "send_object_list",
-    "recv_object_list",
     "broadcast_object_list",
     "destroy_process_group",
     "gather",
