@@ -257,19 +257,8 @@ class _ReversibleFunction(torch.autograd.Function):
             grad_hidden_states, 2, dim=-1
         )
 
-        # retrieve params from ctx for backward
-        attn_output, hidden_states = ctx.saved_tensors
-
-        # create tuple
-        output = ReformerBackwardOutput(
-            attn_output=attn_output,
-            hidden_states=hidden_states,
-            grad_attn_output=grad_attn_output,
-            grad_hidden_states=grad_hidden_states,
-        )
-
         # free memory
-        del grad_attn_output, grad_hidden_states, attn_output, hidden_states
+        del grad_attn_output
 
         # num of return vars has to match num of forward() args
         # return gradient for hidden_states arg and None for other args
@@ -1135,11 +1124,11 @@ class ReproTests(torch._dynamo.test_case.TestCase):
             cnt = self._reformer(nopython=False)
         # cant inline torch.autograd.Function means graph break
         if torch._dynamo.config.assume_static_by_default:
-            self.assertExpectedInline(cnt.frame_count, """3""")
-            self.assertExpectedInline(cnt.op_count, """10""")
+            self.assertExpectedInline(cnt.frame_count, """1""")
+            self.assertExpectedInline(cnt.op_count, """5""")
         else:
-            self.assertExpectedInline(cnt.frame_count, """3""")
-            self.assertExpectedInline(cnt.op_count, """10""")
+            self.assertExpectedInline(cnt.frame_count, """1""")
+            self.assertExpectedInline(cnt.op_count, """5""")
 
     @disable_translation_validation_if_dynamic_shapes
     def test_longformer_chunk(self):
