@@ -630,6 +630,24 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
       REDISPATCH_SIGNATURE,                         \
       POLICY)
 
+// KERNEL_XPU/KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_XPU
+// registration (OP, POLICY) or (OP, OVERLOAD, POLICY) for AutocastXPU
+#define KERNEL_XPU(...) KERNEL(c10::DeviceType::XPU, __VA_ARGS__)
+
+#define KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_XPU( \
+    REDISPATCH_FUNC,                               \
+    REGISTER_NAME,                                 \
+    REGISTER_SIGNATURE,                            \
+    REDISPATCH_SIGNATURE,                          \
+    POLICY)                                        \
+  KERNEL_DIFFERENT_REDISPATCH_SIGNATURE(           \
+      c10::DeviceType::XPU,                        \
+      REDISPATCH_FUNC,                             \
+      REGISTER_NAME,                               \
+      REGISTER_SIGNATURE,                          \
+      REDISPATCH_SIGNATURE,                        \
+      POLICY)
+
 // KERNEL_PRIVATEUSEONE/KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_PRIVATEUSEONE
 // registration (OP, POLICY) or (OP, OVERLOAD, POLICY) for AutocastPrivateUse1
 #define KERNEL_PRIVATEUSEONE(OP, ...) \

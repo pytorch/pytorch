@@ -569,5 +569,42 @@ TORCH_LIBRARY_IMPL(aten, AutocastCPU, m) {
 
 }
 
+TORCH_LIBRARY_IMPL(_, AutocastXPU, m) {
+  m.fallback(torch::CppFunction::makeFallthrough());
+}
+
+TORCH_LIBRARY_IMPL(aten, AutocastXPU, m) {
+  // lower_precision_fp
+#define _KERNEL_XPU_LOW_PRECISION_FP(...) \
+  KERNEL_XPU(__VA_ARGS__, lower_precision_fp)
+
+  AT_FORALL_LOWER_PRECISION_FP(_KERNEL_XPU_LOW_PRECISION_FP)
+
+  // fp32
+#define _KERNEL_XPU_FP32(...) KERNEL_XPU(__VA_ARGS__, fp32)
+
+  AT_FORALL_FP32(_KERNEL_XPU_FP32)
+
+  // fp32_set_opt_dtype
+#define _KERNEL_XPU_FP32_SET_OPT_DTYPE(...) \
+  KERNEL_XPU(__VA_ARGS__, fp32_set_opt_dtype)
+
+  AT_FORALL_FP32_SET_OPT_DTYPE(_KERNEL_XPU_FP32_SET_OPT_DTYPE)
+
+  // fp32_append_dtype
+  // The fp32_append_dtype wrapper overrides implicit promotion behavior.
+  // norm does not implicitly promote, but be aware when adding new ops to this policy.
+  AT_FORALL_DIFFERENT_REDISPATCH_SIGNATURE(
+      KERNEL_DIFFERENT_REDISPATCH_SIGNATURE_XPU)
+
+  // promote
+#define _KERNEL_XPU_PROMOTE(...) KERNEL_XPU(__VA_ARGS__, promote)
+
+  AT_FORALL_PROMOTE(_KERNEL_XPU_PROMOTE)
+
+  m.impl(TORCH_SELECTIVE_NAME("aten::binary_cross_entropy"),
+         TORCH_FN((&at::autocast::binary_cross_entropy_banned)));
+}
+
 } // namespace
 } // namespace at::autocast
