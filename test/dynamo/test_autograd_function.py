@@ -473,25 +473,26 @@ class AutogradFunctionTests(torch._dynamo.test_case.TestCase):
         @dataclass
         class Weird:
             x: int
-            y: torch.Tensor
+            b: torch.Tensor
+            c: torch.Tensor
 
         class Foo(torch.autograd.Function):
             @staticmethod
             def forward(ctx, x: torch.Tensor, weird: Weird, z: torch.Tensor):
-                ctx.save_for_backward(weird.y)
-                return x.clone() * weird.y
+                ctx.save_for_backward(weird.b, weird.c)
+                return x.clone() * weird.b * weird.c
 
             @staticmethod
             def backward(ctx, grad):
-                (y,) = ctx.saved_tensors
-                return grad * y, None, grad * 2
+                b, c = ctx.saved_tensors
+                return grad * b * c, None, grad * 2
 
         @torch.compile(backend="eager", fullgraph=True)
         def f(x, weird, z):
             return Foo.apply(x, weird, z)
 
         x = torch.tensor(2.0, requires_grad=True)
-        weird = Weird(1.2, torch.tensor(2.5))
+        weird = Weird(1.2, torch.tensor(2.5), torch.tensor(3.5))
         z = torch.tensor(3.0, requires_grad=True)
 
         result = f(x, weird, z)
