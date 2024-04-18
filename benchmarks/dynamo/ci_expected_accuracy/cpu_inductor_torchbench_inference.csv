@@ -30,7 +30,7 @@ basic_gnn_edgecnn,pass,0
 
 
 
-basic_gnn_gcn,pass,6
+basic_gnn_gcn,pass,10
 
 
 
@@ -46,7 +46,7 @@ dcgan,pass,0
 
 
 
-demucs,pass,3
+demucs,pass,6
 
 
 
@@ -54,47 +54,47 @@ densenet121,pass,0
 
 
 
-detectron2_fasterrcnn_r_101_c4,pass,42
+detectron2_fasterrcnn_r_101_c4,pass,46
 
 
 
-detectron2_fasterrcnn_r_101_dc5,pass,42
+detectron2_fasterrcnn_r_101_dc5,pass,46
 
 
 
-detectron2_fasterrcnn_r_101_fpn,pass,46
+detectron2_fasterrcnn_r_101_fpn,pass,50
 
 
 
-detectron2_fasterrcnn_r_50_c4,pass,42
+detectron2_fasterrcnn_r_50_c4,pass,46
 
 
 
-detectron2_fasterrcnn_r_50_dc5,pass,42
+detectron2_fasterrcnn_r_50_dc5,pass,46
 
 
 
-detectron2_fasterrcnn_r_50_fpn,pass,46
+detectron2_fasterrcnn_r_50_fpn,pass,50
 
 
 
-detectron2_fcos_r_50_fpn,pass,23
+detectron2_fcos_r_50_fpn,pass,29
 
 
 
-detectron2_maskrcnn_r_101_c4,fail_accuracy,57
+detectron2_maskrcnn_r_101_c4,fail_accuracy,61
 
 
 
-detectron2_maskrcnn_r_101_fpn,pass,64
+detectron2_maskrcnn_r_101_fpn,pass,69
 
 
 
-detectron2_maskrcnn_r_50_c4,pass,57
+detectron2_maskrcnn_r_50_c4,pass,61
 
 
 
-detectron2_maskrcnn_r_50_fpn,pass,64
+detectron2_maskrcnn_r_50_fpn,pass,69
 
 
 
@@ -102,11 +102,11 @@ dlrm,pass,0
 
 
 
-doctr_det_predictor,pass,5
+doctr_det_predictor,pass,6
 
 
 
-doctr_reco_predictor,pass,4
+doctr_reco_predictor,pass,5
 
 
 
@@ -114,7 +114,7 @@ drq,pass,0
 
 
 
-fastNLP_Bert,pass,4
+fastNLP_Bert,pass,7
 
 
 
@@ -154,7 +154,7 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,pass,5
+hf_Reformer,pass,9
 
 
 
@@ -194,7 +194,7 @@ mobilenet_v2,pass,0
 
 
 
-mobilenet_v2_quantized_qat,pass,2
+mobilenet_v2_quantized_qat,pass,92
 
 
 
@@ -262,7 +262,7 @@ resnet50,pass,0
 
 
 
-resnet50_quantized_qat,pass,2
+resnet50_quantized_qat,pass,59
 
 
 
@@ -278,7 +278,7 @@ soft_actor_critic,pass,0
 
 
 
-speech_transformer,pass,10
+speech_transformer,pass,13
 
 
 
@@ -326,7 +326,7 @@ torch_multimodal_clip,pass,0
 
 
 
-tts_angular,pass,2
+tts_angular,pass,5
 
 
 
@@ -334,8 +334,8 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,28
+vision_maskrcnn,pass,33
 
 
 
-yolov3,pass,2
+yolov3,pass,3
