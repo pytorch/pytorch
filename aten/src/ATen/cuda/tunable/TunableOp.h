@@ -96,13 +96,17 @@ class TunableOp {
     }
 
   private:
-    static void WarmUp(Callable<ParamsT> *op, ParamsT* param, size_t num_iter) {
+    static void WarmUp(Callable<ParamsT> *op, std::vector<ParamsT*> param, size_t num_iter) {
+      bool do_flush = GetICacheFlushIterations() > 0;
       for (size_t i = 0; i < num_iter; i++) {
-        TORCH_CHECK(op->Call(param) == OK);
+        if (do_flush) {
+          at::cuda::flush_icache();
+        }
+        TORCH_CHECK(op->Call(param[i%param.size()]) == OK);
       }
     }
 
-    static double Profile(Callable<ParamsT> *op, ParamsT* param, size_t num_iter) {
+    static double Profile(Callable<ParamsT> *op, std::vector<ParamsT*> param, size_t num_iter) {
       bool do_flush = GetICacheFlushIterations() > 0;
       TimerT timer{};
       timer.Start();
@@ -110,19 +114,27 @@ class TunableOp {
         if (do_flush) {
           at::cuda::flush_icache();
         }
-        TORCH_CHECK(op->Call(param) == OK);
+        TORCH_CHECK(op->Call(param[i%param.size()]) == OK);
       }
       timer.End();
       return timer.Duration() / num_iter;
     }
 
   protected:
-    bool IsNumericsCheckEnabled() {
+    static bool IsNumericsCheckEnabled() {
       static const char *env = getenv("PYTORCH_TUNABLEOP_NUMERICAL_CHECK");
       if (env != nullptr && strcmp(env, "0") == 0) {
         return false;
       }
       return true;
+    }
+
+    static size_t GetRotatingBufferSize() {
+      static const char *env = getenv("PYTORCH_TUNABLEOP_ROTATING_BUFFER_SIZE");
+      if (env != nullptr) {
+        return atoi(env) * 1024 * 1024;  // in MiB
+      }
+      return 0;
     }
 
     virtual ResultEntry FindFastest(const ParamsT* params) {
@@ -142,25 +154,43 @@ class TunableOp {
       }
 
       // calcaulte a reference answer for numerical check
-      ParamsT* reference_params = params->DeepCopy();
+      ParamsT* reference_params = params->DeepCopy(false);
       TORCH_CHECK(ops_[ResultEntry::Default()]->Call(reference_params) == OK);
 
-      // need a copy of params to reuse
-      ParamsT* reusable_params = params->DeepCopy();
+      // need copies of params to reuse
+      // make as many copies as will fill the requested rotating buffer size, if requested
+      size_t rotating_size = GetRotatingBufferSize();
+      bool use_buffer_rotation = (rotating_size > 0);
+      size_t param_size = params->GetSize(use_buffer_rotation);
+      size_t param_count = (rotating_size / param_size) + 1;
+      if (use_buffer_rotation) {
+        TUNABLE_LOG("Rotating buffer ", rotating_size/(1024*1024), " MiB. ",
+            "Needed Size: ", param_size/(1024*1024), " MiB. ",
+            "Needed number of param copies: ", param_count);
+      }
+      else {
+        TUNABLE_LOG("Rotating buffer not requested");
+      }
+
+      std::vector<ParamsT*> reusable_params(param_count);
+      for (size_t i = 0; i < param_count; i++) {
+        reusable_params[i] = params->DeepCopy(use_buffer_rotation);
+      }
 
       for (size_t i = 0; i < op_names_.size(); i++) {
         auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
-        auto status = candidate->Call(reusable_params);
+        auto status = candidate->Call(reusable_params[0]);
         if (status != OK) {
           TUNABLE_LOG("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
           continue;
         }
 
         if (IsNumericsCheckEnabled()) {
-          ParamsT* numerical_params = params->DeepCopy();
+          std::vector<ParamsT*> numerical_params(1);
+          numerical_params[0] = params->DeepCopy(false);
           WarmUp(candidate, numerical_params, 1);
-          status = reference_params->NumericalCheck(numerical_params);
-          numerical_params->Delete();
+          status = reference_params->NumericalCheck(numerical_params[0]);
+          numerical_params[0]->Delete();
           if (status != OK) {
             TUNABLE_LOG("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
             continue;
@@ -212,6 +242,8 @@ class TunableOp {
         }
         // tuning must run at least 1 iteration
         tuning_iter = std::max(1, tuning_iter);
+        // tuning must run at least as many times as we have rotating buffers, if requested
+        tuning_iter = std::max(static_cast<int>(reusable_params.size()), tuning_iter);
 
         // do the full warmup followed by tuning
         double warmup_ms = warmup_iter * approx_duration;
@@ -229,7 +261,9 @@ class TunableOp {
         }
       }
 
-      reusable_params->Delete();
+      for (size_t i = 0; i < reusable_params.size(); i++) {
+        reusable_params[i]->Delete();
+      }
       reference_params->Delete();
 
       TUNABLE_LOG("└──found fastest for ", op_sig, '(', params_sig, ") ", id_name);
