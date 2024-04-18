@@ -475,7 +475,7 @@ class FreeUnbackedSymbolsOpsHandler:
     def frexp(self, x):
         return (None,) * 2
 
-    def scan(self, dtypes, combine_fn, values, inits):
+    def scan(self, dtypes, combine_fn, values):
         return (None,) * len(values)
 
     def reduction(
