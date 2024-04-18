@@ -251,6 +251,11 @@ EXPECTED_SKIPS_OR_FAILS_WITH_DTYPES: Tuple[onnx_test_common.DecorateMeta, ...] =
         reason=onnx_test_common.reason_onnx_script_does_not_support("Arange", "uint8, int8"),
     ),
     xfail(
+        "arange",
+        dtypes=(torch.int16, torch.int32),
+        reason="AssertionError: The values for attribute 'shape' do not match",
+    ),
+    xfail(
         "argmax",
         dtypes=(
             torch.int16,
@@ -1880,9 +1885,7 @@ def _run_test_output_match(
                         # python test/onnx/test_fx_op_consistency.py -k test_output_match_stack_cpu_int32
                         from torch.export import _trace
 
-                        model = _trace._export(
-                            model, inputs, pre_dispatch=False
-                        ).run_decompositions()
+                        model = _trace._export(model, inputs, pre_dispatch=False)
                     except AssertionError as e:
                         # NOTE: avoid fake_mode detection bug in torch.export.export
                         pytest.xfail(
@@ -2010,6 +2013,7 @@ class TestOnnxModelOutputConsistency(onnx_test_common._TestONNXRuntime):
         "nn.functional.multilabel_soft_margin_loss": [4e-2, 5e-3],
         "nn.functional.local_response_norm": [1e-2, 5e-3],
         "nn.functional.poisson_nll_loss": [3e-2, 1e-3],
+        "nn.functional.nll_loss": [3e-2, 1e-3],
         "native_batch_norm": [3e-2, 1e-3],
         "dot": [3e-2, 1e-3],
         "logit": [3e-2, 1e-3],

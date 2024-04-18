@@ -178,10 +178,10 @@ class FSDP:
             pending unshard op in the pre-forward automatically.
         """
         state = self._get_fsdp_state()
-        if (fsdp_param_group := state._fsdp_param_group) is None:
-            return None
-        fsdp_param_group.lazy_init()
-        fsdp_param_group.unshard(async_op=async_op)
+        fsdp_param_group = state._fsdp_param_group
+        if fsdp_param_group is not None:
+            fsdp_param_group.lazy_init()
+            fsdp_param_group.unshard(async_op=async_op)
         handle = UnshardHandle(fsdp_param_group)
         if async_op:
             return handle
@@ -211,7 +211,9 @@ class FSDP:
             recurse (bool): Whether to set for all submodules or just the
                 passed-in module.
         """
-        for module in cast(nn.Module, self).modules():
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
             if isinstance(module, FSDP):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
@@ -227,7 +229,9 @@ class FSDP:
         # TODO: post_reduce_output += fsdp_param.sharded_param.grad
         # after reduce-scatter and before all-reduce
         raise NotImplementedError("requires_all_reduce is not yet supported in HSDP")
-        for module in cast(nn.Module, self).modules():
+        self_module = cast(nn.Module, self)
+        modules = list(self_module.modules()) if recurse else [self_module]
+        for module in modules:
             if isinstance(module, FSDP):
                 state = module._get_fsdp_state()
                 if fsdp_param_group := state._fsdp_param_group:
@@ -281,10 +285,12 @@ class UnshardHandle:
     A handle to wait on the unshard op.
 
     Args:
-        fsdp_param_group (FSDPParamGroup): FSDP parameter group to unshard.
+        fsdp_param_group (FSDPParamGroup, optional): FSDP parameter group to
+            unshard. This should be ``None`` iff the FSDP module does not
+            manage any parameters, meaning the unshard is a no-op.
     """
 
-    def __init__(self, fsdp_param_group: FSDPParamGroup):
+    def __init__(self, fsdp_param_group: Optional[FSDPParamGroup]):
         self._fsdp_param_group = fsdp_param_group
 
     def wait(self):
@@ -294,7 +300,7 @@ class UnshardHandle:
         This ensures that the current stream can use the unsharded parameters,
         which are now registered to the module.
         """
-        if hasattr(self, "_fsdp_param_group"):
+        if self._fsdp_param_group is not None:
             self._fsdp_param_group.wait_for_unshard()
             # Avoid keeping a reference
-            delattr(self, "_fsdp_param_group")
+            self._fsdp_param_group = None

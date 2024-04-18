@@ -403,7 +403,7 @@ class TestMin(TestCase):
         # test with too many elements
         try:
             A[1, ..., 1, 1]
-            raise NotImplementedError()
+            raise NotImplementedError
         except IndexError:
             pass
         c, d = dims()
@@ -415,7 +415,7 @@ class TestMin(TestCase):
         )
         try:
             A[..., 3, ...]
-            raise NotImplementedError()
+            raise NotImplementedError
         except DimensionBindError:
             pass
 
