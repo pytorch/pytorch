@@ -315,7 +315,7 @@ def deserialize_torch_artifact(serialized: Union[Dict[str, Any], Tuple[Any, ...]
     return artifact
 
 
-def _sympy_int_to_int(val: sympy.Expr):
+def _sympy_int_to_int(val: sympy.Expr, adjust: str):
     # Convert simple sympy Integers into concrete int
     if val == sympy.oo:
         return math.inf
@@ -323,7 +323,20 @@ def _sympy_int_to_int(val: sympy.Expr):
         return -math.inf
     if isinstance(val, sympy.Integer):
         return int(val)
-    raise RuntimeError("Export constraints cannot be non-integer expressions")
+
+    # TODO: Remove this adjustment when Ed gets rid of fractional ranges
+    log.warning(
+        "Export constraints cannot be non-integer expressions. Found "
+        "type %s, and value %s. We will attempt to %s "
+        "this value.", type(val), val, adjust
+    )
+
+    if adjust == "floor":
+        return math.floor(val)
+    elif adjust == "ceil":
+        return math.ceil(val)
+    else:
+        raise RuntimeError(f"Got invalid adjustment {adjust}")
 
 
 def _int_to_sympy_int(val) -> sympy.Expr:
@@ -340,8 +353,8 @@ def serialize_range_constraints(
 ) -> Dict[str, RangeConstraint]:
     return {
         str(k): RangeConstraint(
-            _sympy_int_to_int(v.lower),  # type: ignore[arg-type]
-            _sympy_int_to_int(v.upper),  # type: ignore[arg-type]
+            _sympy_int_to_int(v.lower, "ceil"),  # type: ignore[arg-type]
+            _sympy_int_to_int(v.upper, "floor"),  # type: ignore[arg-type]
         )
         for k, v in range_constraints.items()
     }
