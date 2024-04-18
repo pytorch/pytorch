@@ -134,7 +134,7 @@ WHEEL_CONTAINER_IMAGES = {
     },
     "cpu": f"pytorch/manylinux-builder:cpu-{DEFAULT_TAG}",
     "cpu-cxx11-abi": f"pytorch/manylinuxcxx11-abi-builder:cpu-cxx11-abi-{DEFAULT_TAG}",
-    "cpu-aarch64": f"pytorch/manylinuxaarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
+    "cpu-aarch64": f"pytorch/manylinux2_28_aarch64-builder:cpu-aarch64-{DEFAULT_TAG}",
 }
 
 CONDA_CONTAINER_IMAGES = {

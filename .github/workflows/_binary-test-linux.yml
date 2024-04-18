@@ -168,9 +168,9 @@ jobs:
       - name: Checkout pytorch/builder to builder dir
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: aarch64_cd_update
           submodules: recursive
-          repository: pytorch/builder
+          repository: snadampal/builder
           path: builder
 
       - name: Clean pytorch/builder checkout
