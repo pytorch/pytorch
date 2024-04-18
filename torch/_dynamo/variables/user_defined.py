@@ -7,6 +7,7 @@ import importlib
 import inspect
 import itertools
 import random
+import re
 import sys
 import threading
 import types
@@ -247,6 +248,10 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return BuiltinVariable.call_custom_dict_fromkeys(
                 tx, self.value, *args, **kwargs
             )
+        elif name == "__eq__" and len(args) == 1 and hasattr(args[0], "value"):
+            return variables.ConstantVariable(self.value == args[0].value)
+        elif name == "__ne__" and len(args) == 1 and hasattr(args[0], "value"):
+            return variables.ConstantVariable(self.value != args[0].value)
 
         return super().call_method(tx, name, args, kwargs)
 
@@ -603,6 +608,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 assert self.source  # OrderedDict, dict subtypes must always have source
                 return self.odict_getitem(tx, args[0])
 
+            if (
+                method in (object.__ne__, object.__eq__)
+                and len(args) == 1
+                and not kwargs
+                and hasattr(args[0], "value")
+            ):
+                return ConstantVariable(
+                    (self.value is args[0].value) is (method is object.__eq__)
+                )
+
             # check for methods implemented in C++
             if isinstance(method, types.FunctionType):
                 source = (
@@ -773,7 +788,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             or "__slots__" in self.value.__class__.__dict__
             or type(self.value) == threading.local
         ):
-            # getattr_static doesn't work on these
+            try:
+                cls_var = inspect.getattr_static(
+                    self.value.__class__, name, NO_SUCH_SUBOBJ
+                )
+                if cls_var is not NO_SUCH_SUBOBJ and name not in self.value.__dict__:
+                    # maybe user-defined @property that we need to inline
+                    return cls_var
+            except AttributeError:
+                pass  # __slots__
+            # this might call torch.nn.Module.__getattr__
             subobj = getattr(self.value, name)
         else:
             subobj = inspect.getattr_static(self.value, name)
@@ -787,7 +811,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         value = self.value
         source = AttrSource(self.source, name) if self.source else None
         self._check_for_getattribute()
-        getattr_fn = self._check_for_getattr()
 
         if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
             return tx.output.side_effects.load_attr(self, name)
@@ -796,6 +819,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             subobj = self._getattr_static(name)
         except AttributeError:
             subobj = NO_SUCH_SUBOBJ
+            getattr_fn = self._check_for_getattr()
             if isinstance(getattr_fn, types.FunctionType):
                 return variables.UserMethodVariable(
                     getattr_fn, self, source=source
@@ -868,6 +892,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 (
                     torch.Tensor,
                     torch.nn.Module,
+                    re.Pattern,
                 ),
             )
         ):
@@ -879,7 +904,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if (
             name not in getattr(value, "__dict__", {})
-            and type(value).__module__.startswith("torch.")
+            and (
+                type(value).__module__.startswith("torch.")
+                or isinstance(subobj, re.Pattern)
+            )
             and "torch.optim" not in type(value).__module__
             and not callable(value)
             and not isinstance(subobj, types.MethodDescriptorType)

@@ -58,9 +58,10 @@ from .utils import (
     is_dynamic,
     is_gpu,
     is_pointwise_use,
+    needs_fallback_due_to_atomic_add_limitations,
     pad_listlike,
-    parallel_num_threads,
     sympy_product,
+    use_scatter_fallback,
 )
 from .virtualized import ops, V
 
@@ -1629,7 +1630,7 @@ def bernoulli_p(x, *args):
 # This shouldn't be called in general
 @register_lowering(aten._foobar)
 def _foobar(_):
-    raise AssertionError()
+    raise AssertionError
 
 
 @functools.lru_cache(1)
@@ -1904,7 +1905,6 @@ def sdpa_constraint(fx_node, *args, **kwargs):
 
 
 # WIP
-make_fallback(aten.index_reduce)  # @pearu
 make_fallback(aten._adaptive_avg_pool3d)  # @isuruf
 make_fallback(aten.adaptive_max_pool3d)  # @isuruf
 make_fallback(aten.fractional_max_pool3d)  # @isuruf
@@ -2087,6 +2087,9 @@ make_fallback(aten._flash_attention_backward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_forward.default, sdpa_constraint)
 make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 make_fallback(aten._scaled_mm.default, constrain_to_fx_strides)
+
+# index_reduce requires fallback when use_scatter_fallback(...) returns True
+make_fallback(aten.index_reduce)
 
 
 # Register with type_promotion_kind None.
@@ -2819,11 +2822,6 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
     return index_put_impl_(self, indices, values, accumulate, check=False)
 
 
-def needs_fallback_due_to_atomic_add_limitations(dtype):
-    # tl.atomic_add does NOT support the following types
-    return dtype in {torch.int64, torch.bool, torch.bfloat16}
-
-
 def index_put_impl_(self, indices, values, accumulate, check):
     # Dispatch to masked fill for single boolean index with single value
     if (
@@ -2973,24 +2971,14 @@ def scatter_fallback(
     reduce: Optional[str] = None,
     include_self: bool = True,
 ):
-    reduce_ty = "add" if fn == "aten.scatter_" else "sum"
-    if (
-        reduce not in {None, reduce_ty}
-        or (
-            isinstance(src, TensorBox)
-            and is_gpu(src.get_device().type)
-            and needs_fallback_due_to_atomic_add_limitations(src.get_dtype())
-        )
-        or (
-            fn == "aten.scatter_reduce_"
-            and reduce == "sum"
-            and isinstance(src, TensorBox)
-            and src.get_device() == torch.device("cpu")
-            and config.cpp.fallback_scatter_reduce_sum
-            and (config.cpp.dynamic_threads or parallel_num_threads() != 1)
-        )
-        or (reduce == reduce_ty and self.get_dtype() in {torch.bool, torch.int64})
-        or torch.are_deterministic_algorithms_enabled()
+    src_is_tensor = isinstance(src, TensorBox)
+    if use_scatter_fallback(
+        fn,
+        reduce,
+        self.get_dtype(),
+        src.get_dtype() if src_is_tensor else type(src),
+        src.get_device().type if src_is_tensor else "not impl",
+        src_is_tensor,
     ):
         ir.ScatterFallback(
             V.graph.current_node.target,
@@ -3642,16 +3630,12 @@ def max_pool2d_with_indices_backward(
     new_size = list(x.get_size())
 
     h_window_size = max(
-        [
-            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
-            for h in range(kernel_size[0] * 2)
-        ]
+        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        [
-            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
-            for w in range(kernel_size[1] * 2)
-        ]
+        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        for w in range(kernel_size[1] * 2)
     )
 
     window_size = h_window_size * w_window_size
@@ -4353,16 +4337,12 @@ def avg_pool2d_backward(
     dtype = x.get_dtype()
 
     h_window_size = max(
-        [
-            max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
-            for h in range(kernel_size[0] * 2)
-        ]
+        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        [
-            max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
-            for w in range(kernel_size[1] * 2)
-        ]
+        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        for w in range(kernel_size[1] * 2)
     )
 
     window_size = h_window_size * w_window_size
@@ -5737,17 +5717,23 @@ def templated_attention(*args, **kwargs):
             choices: List[Any] = []
             from .select_algorithm import autotune_select_algorithm
 
-            sdpa_template.maybe_append_choice(
-                choices=choices,
-                input_nodes=(query, key, value),
-                layout=layout,
-                subgraphs=subgraph_buffer,
-                num_stages=2,
-                num_warps=4,
-                BLOCK_M=64,
-                BLOCK_N=128,
-                BLOCK_DMODEL=query.get_size()[-1],
-            )
+            for BLOCK_M, BLOCK_N, num_warps, num_stages in [
+                (128, 64, 4, 3),
+                (128, 128, 4, 3),
+                (128, 128, 8, 2),
+                (64, 128, 4, 3),
+            ]:
+                sdpa_template.maybe_append_choice(
+                    choices=choices,
+                    input_nodes=(query, key, value),
+                    layout=layout,
+                    subgraphs=subgraph_buffer,
+                    num_stages=num_stages,
+                    num_warps=num_warps,
+                    BLOCK_M=BLOCK_M,
+                    BLOCK_N=BLOCK_N,
+                    BLOCK_DMODEL=query.get_size()[-1],
+                )
             return autotune_select_algorithm(
                 "sdpa", choices, [query, key, value], layout
             )
