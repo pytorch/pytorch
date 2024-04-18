@@ -15,6 +15,8 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.exc import UserError, UserErrorType
 from torch._export.non_strict_utils import (
+    _fakify_script_objects,
+    _gather_constant_attrs,
     make_constraints,
     make_fake_inputs,
     make_fake_params_buffers,
@@ -452,47 +454,6 @@ def _export_to_torch_ir(
     return gm_torch_level
 
 
-def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
-    """Search the module hierarchy, gathering up all tensor and ScriptObject constants.
-
-    Returns a dictionary mapping hash(value) to the name of the constant. We
-    have to abuse `hash` here unfortunately, see: [ScriptObject hash].
-    """
-    constants = ConstantAttrMap()
-    buffers_parameters = set(m.buffers())
-    buffers_parameters.update(m.parameters())
-
-    def inner(m: torch.nn.Module, prefix_atoms: List[str], constants):
-        for k, v in m.__dict__.items():
-            assert not isinstance(v, FakeScriptObject), (
-                "_gather_constant_attrs received a module with FakeScriptObject attributes. "
-                "FakeScriptObject should only exist during tracing."
-            )
-            if isinstance(
-                v,
-                (
-                    torch.Tensor,
-                    torch.ScriptObject,
-                ),
-            ):
-                if v in buffers_parameters:
-                    # filter out buffers and parameters, leaving only constants
-                    continue
-
-                fqn = ".".join(prefix_atoms + [k])
-                if v in constants:
-                    raise ValueError(
-                        f"Duplicate reference to constant attribute found: '{constants[v]}' and '{fqn}'."
-                    )
-
-                constants[v] = fqn
-        for k, v in m.named_children():
-            inner(v, prefix_atoms + [k], constants)
-
-    inner(m, [], constants)
-    return constants
-
-
 def _export_non_strict(
     mod: torch.nn.Module,
     fake_args,
@@ -927,8 +888,6 @@ def _export(
     kwargs = kwargs or {}
     _process_dynamic_shapes(mod, args, kwargs, dynamic_shapes)  # TODO(avik): remove
 
-    constant_attrs = _gather_constant_attrs(mod)
-
     flat_args, orig_in_spec = pytree.tree_flatten((args, kwargs))
 
     if not strict:
@@ -1014,55 +973,8 @@ def _export(
             fake_mode, _get_params_buffers(mod)
         )
 
-        @contextmanager
-        def _fakify_constant_script_objects(
-            mod, args, kwargs, constant_attrs, fake_mode
-        ):
-            patched_attr = {}
-            fake_constant_attrs = ConstantAttrMap()
-            fake_to_real = {}
-
-            def _fakify_obj(obj):
-                fake_obj = torch._library.fake_class_registry.to_fake_obj(
-                    fake_mode, obj
-                )
-                fake_to_real[fake_obj] = obj
-                return fake_obj
-
-            def _leaf_mod_and_attr(
-                mod: torch.nn.Module, attr_fqn: str
-            ) -> Tuple[torch.nn.Module, str]:
-                *prefix_attr, last_attr = attr_fqn.split(".")
-                cur_mod = mod
-                for attr in prefix_attr:
-                    cur_mod = getattr(cur_mod, attr)
-                return cur_mod, last_attr
-
-            try:
-                for obj, fqn in constant_attrs.items():
-                    if isinstance(obj, torch.ScriptObject):
-                        cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
-                        assert obj is getattr(cur_mod, attr)
-                        fake_script_obj = _fakify_obj(obj)
-                        setattr(cur_mod, attr, fake_script_obj)
-                        fake_constant_attrs[fake_script_obj] = fqn
-                        patched_attr[fqn] = obj
-                    else:
-                        fake_constant_attrs[obj] = fqn
-
-                fake_args, fake_kwargs = pytree.tree_map_only(
-                    torch.ScriptObject, _fakify_obj, (args, kwargs)
-                )
-                yield (mod, fake_args, fake_kwargs, fake_constant_attrs, fake_to_real)
-            finally:
-                for fqn, orig_obj in patched_attr.items():
-                    cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
-                    setattr(cur_mod, attr, orig_obj)
-
         with fake_mode:
-            with _fakify_constant_script_objects(
-                mod, fake_args, fake_kwargs, constant_attrs, fake_mode
-            ) as (
+            with _fakify_script_objects(mod, fake_args, fake_kwargs, fake_mode) as (
                 patched_mod,
                 new_fake_args,
                 new_fake_kwargs,
@@ -1244,6 +1156,7 @@ def _export(
     _normalize_nn_module_stack(gm_torch_level, type(mod))
 
     # NOTE: graph module expects only positional args
+    constant_attrs = _gather_constant_attrs(mod)
     ep_non_strict = _export_non_strict(
         gm_torch_level,
         _convert_to_positional_args(orig_arg_names, fake_args, fake_kwargs),
