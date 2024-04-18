@@ -23,7 +23,7 @@ def _parse_and_validate_remote_device(pg, remote_device):
     device = remote_device.device()
 
     # Validate rank, skip validation if rank is not part of process group.
-    if not c10d._rank_not_in_group(pg):
+    if rank is not None and not c10d._rank_not_in_group(pg):
         pg_global_ranks = c10d.get_process_group_ranks(pg)
         if rank not in pg_global_ranks:
             raise ValueError(

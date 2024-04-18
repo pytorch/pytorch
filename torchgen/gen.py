@@ -1151,7 +1151,7 @@ def compute_cpp_argument_yaml(
             arg["default"] = cpp_a.default
         return arg
     elif isinstance(cpp_a.argument, SelfArgument):
-        raise AssertionError()
+        raise AssertionError
     elif isinstance(cpp_a.argument, Argument):
         return compute_argument_yaml(
             cpp_a.argument,
