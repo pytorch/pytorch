@@ -2,12 +2,12 @@
 
 import os
 import sys
+from collections import namedtuple
+from typing import Dict, List, NamedTuple, Tuple
 
 import torch
-from torch.testing._internal.jit_utils import JitTestCase, make_global
 from torch.testing._internal.common_utils import IS_WINDOWS
-from collections import namedtuple
-from typing import List, Tuple, Dict, NamedTuple
+from torch.testing._internal.jit_utils import JitTestCase, make_global
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -20,14 +20,15 @@ if __name__ == "__main__":
         "instead."
     )
 
+
 class TestTyping(JitTestCase):
     def test_dict_in_not_in(self):
         def test_in_dict(x):
             # type: (Dict[str, int]) -> bool
-            return 'hi' in x
+            return "hi" in x
 
-        self.checkScript(test_in_dict, ({'hi': 2, 'bye': 3},))
-        self.checkScript(test_in_dict, ({'bye': 3},))
+        self.checkScript(test_in_dict, ({"hi": 2, "bye": 3},))
+        self.checkScript(test_in_dict, ({"bye": 3},))
 
         # Check evaluation order
         @torch.jit.script
@@ -57,8 +58,8 @@ class TestTyping(JitTestCase):
             else:
                 return True
 
-        self.checkScript(test_not_in_dict, ({"hello": 1, "world": 2}, ))
-        self.checkScript(test_not_in_dict, ({"world": 2}, ))
+        self.checkScript(test_not_in_dict, ({"hello": 1, "world": 2},))
+        self.checkScript(test_not_in_dict, ({"world": 2},))
 
         def test_dict_tensor_key(a, t):
             # type: (Dict[Tensor, int], Tensor) -> bool
@@ -80,9 +81,12 @@ class TestTyping(JitTestCase):
             l: List[int] = [1, 2, "foo", 3]
             return l
 
-        with self.assertRaisesRegex(RuntimeError, "List type annotation"
-                                    r" `List\[int\]` did not match the "
-                                    "types of the given list elements"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "List type annotation"
+            r" `List\[int\]` did not match the "
+            "types of the given list elements",
+        ):
             torch.jit.script(fn)
 
     def test_dict_type_refinement_annotation_key_mismatch(self):
@@ -92,10 +96,13 @@ class TestTyping(JitTestCase):
             d: Dict[int, str] = dict(zip(l1, l2))
             return d
 
-        with self.assertRaisesRegex(RuntimeError, "Dicts may only "
-                                    "contain homogeneous keys, but the "
-                                    "type of the first generated key "
-                                    r"was Union\[int, str\]"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Dicts may only "
+            "contain homogeneous keys, but the "
+            "type of the first generated key "
+            r"was Union\[int, str\]",
+        ):
             torch.jit.script(fn)
 
     def test_dict_type_refinement_annotation_value_mismatch(self):
@@ -105,28 +112,36 @@ class TestTyping(JitTestCase):
             d: Dict[str, int] = dict(zip(l1, l2))
             return d
 
-        with self.assertRaisesRegex(RuntimeError, "Dict type annotation"
-                                    r" `Dict\[str, int\]` did not match"
-                                    " the type of an actual value type"
-                                    r" `Union\[int, str\]`"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Dict type annotation"
+            r" `Dict\[str, int\]` did not match"
+            " the type of an actual value type"
+            r" `Union\[int, str\]`",
+        ):
             torch.jit.script(fn)
 
     def test_dict_invalid_annotations(self):
         # Check for invalid value type annotation
         def wrong_value_type(dictionary: Dict[str, torch.jit.ScriptModule]):
             return
+
         with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
             torch.jit.script(wrong_value_type)
 
         # Check for invalid key type annotation
         def wrong_key_type(dictionary: Dict[torch.jit.ScriptModule, str]):
             return
+
         with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
             torch.jit.script(wrong_key_type)
 
         # Check for invalid key and value type annotation
-        def wrong_key_value_type(dictionary: Dict[torch.jit.ScriptModule, torch.jit.ScriptModule]):
+        def wrong_key_value_type(
+            dictionary: Dict[torch.jit.ScriptModule, torch.jit.ScriptModule]
+        ):
             return
+
         with self.assertRaisesRegex(ValueError, "Unknown type annotation"):
             torch.jit.script(wrong_key_value_type)
 
@@ -138,13 +153,16 @@ class TestTyping(JitTestCase):
             _, y = t2
             return x + y
 
-        t = torch.randn(2, 2), (1, torch.randn(2, 2)),
+        t = (
+            torch.randn(2, 2),
+            (1, torch.randn(2, 2)),
+        )
         f(t, "hi")
         graph = f.graph_for(t, "hi")
         input_types = list(next(graph.inputs()).type().elements())
         w = input_types[0]
-        self.assertEqual(input_types[0].kind(), 'TensorType')
-        self.assertEqual(input_types[1].elements()[1].kind(), 'TensorType')
+        self.assertEqual(input_types[0].kind(), "TensorType")
+        self.assertEqual(input_types[1].elements()[1].kind(), "TensorType")
 
     def test_tuple_io(self):
         def stuff(x):
@@ -165,8 +183,7 @@ class TestTyping(JitTestCase):
         def foo():
             return tuple(1, 2)
 
-        self.checkScriptRaisesRegex(foo, (), Exception,
-                                    "1 argument")
+        self.checkScriptRaisesRegex(foo, (), Exception, "1 argument")
 
         def cant_infer_size():
             return tuple([1, 2, 3])  # noqa: C409
@@ -179,12 +196,14 @@ class TestTyping(JitTestCase):
             # type: (int) -> Tuple[Tensor, Tensor]
             a = (torch.ones(x), torch.zeros(x))
             return a
+
         self.checkScript(stuff2, (3,))
 
     def test_list_io(self):
         def stuff3(x):
             # type: (List[int]) -> Tuple[Tensor, List[int]]
             return torch.ones(x), x
+
         self.checkScript(stuff3, ([3, 2],))
 
     def test_bool_list_io(self):
@@ -203,6 +222,7 @@ class TestTyping(JitTestCase):
             # type: (Tuple[int, List[List[int]]]) -> int
             x, y = z
             return y[0][1]
+
         self.checkScript(foo, ((1, [[1, 2], [3, 4]]),))
 
     def test_list_sum(self):
@@ -215,12 +235,12 @@ class TestTyping(JitTestCase):
         def fn2(x: List[bool]):
             return sum(x)
 
-        self.checkScript(fn, ([1, 2, 3], ))
-        self.checkScript(fn1, ([1.0, 2.0, 3.0], ))
-        self.checkScript(fn1, ([1, 2.8, 3], ))
-        self.checkScript(fn2, ([True, False, False], ))
-        self.checkScript(fn2, ([False, False, False], ))
-        self.checkScript(fn2, ([0, 1, 1, 0], ))
+        self.checkScript(fn, ([1, 2, 3],))
+        self.checkScript(fn1, ([1.0, 2.0, 3.0],))
+        self.checkScript(fn1, ([1, 2.8, 3],))
+        self.checkScript(fn2, ([True, False, False],))
+        self.checkScript(fn2, ([False, False, False],))
+        self.checkScript(fn2, ([0, 1, 1, 0],))
 
     def test_list_unification(self):
         def fn():
@@ -254,7 +274,6 @@ class TestTyping(JitTestCase):
         self.checkScript(self.get_sum_list_fn(), ([1],))
 
     def test_sum_list_literal(self):
-
         def sum_list():
             # type: () -> int
             sum = 0
@@ -266,8 +285,8 @@ class TestTyping(JitTestCase):
         self.checkScript(sum_list, ())
 
     def test_sum_list_wrong_type(self):
-
         with self.assertRaisesRegex(RuntimeError, "'int' object is not iterable"):
+
             @torch.jit.script
             def sum_list(a):
                 # type: (int) -> int
@@ -280,14 +299,18 @@ class TestTyping(JitTestCase):
             sum_list(1)
 
     def test_list_iterables(self):
-        with self.assertRaisesRegex(RuntimeError, 'List of iterables is not supported currently'):
-            cu = torch.jit.CompilationUnit('''
+        with self.assertRaisesRegex(
+            RuntimeError, "List of iterables is not supported currently"
+        ):
+            cu = torch.jit.CompilationUnit(
+                """
             def list_iterables(x):
                 for i, j in [2, 3, 4], [5, 6, 7]:
                     x += i
                     x += j
                 return x
-            ''')
+            """
+            )
 
     def test_for_in_string(self):
         def test_strings(x):
@@ -352,36 +375,43 @@ class TestTyping(JitTestCase):
 
     def test_dict_comprehension(self):
         def fn():
-            return {i : chr(i + 65) for i in range(4)}
+            return {i: chr(i + 65) for i in range(4)}
+
         self.checkScript(fn, ())
 
     def test_dict_comprehension_with_type_annotation(self):
         def fn():
-            d: Dict[int, str] = {i : chr(i + 65) for i in range(4)}
+            d: Dict[int, str] = {i: chr(i + 65) for i in range(4)}
             return d
+
         self.checkScript(fn, ())
 
         with self.assertRaisesRegex(RuntimeError, ""):
-            with self.assertRaisesRegex(AssertionError, "Expected Dict "
-                                        "type annotation for dict "
-                                        "comprehension, found "
-                                        "Tuple[int, str]"):
+            with self.assertRaisesRegex(
+                AssertionError,
+                "Expected Dict "
+                "type annotation for dict "
+                "comprehension, found "
+                "Tuple[int, str]",
+            ):
+
                 @torch.jit.script
                 def fn():
-                    d: Tuple[int, str] = {i : chr(i + 65) for i in range(4)}
+                    d: Tuple[int, str] = {i: chr(i + 65) for i in range(4)}
                     return d
 
     def test_dict_comprehension_scope(self):
         def comprehension_can_access_outer_scope_variables():
             lst = ["foo", "bar", "baz"]
-            return {l : len(l) for l in lst}
+            return {l: len(l) for l in lst}
 
         self.checkScript(comprehension_can_access_outer_scope_variables, ())
 
         with self.assertRaisesRegex(RuntimeError, "undefined value i"):
+
             @torch.jit.script
             def outer_scope_cannot_access_comprehension_variables():
-                d = {i : chr(i + 65) for i in range(4)}
+                d = {i: chr(i + 65) for i in range(4)}
                 i = i + 1  # noqa: F821
 
     def test_for_tuple_assign(self):
@@ -402,22 +432,28 @@ class TestTyping(JitTestCase):
                 sum += a[1]
             return sum
 
-        self.checkScript(test_tuple_assign, (((1, 2), (4, 7)), ))
+        self.checkScript(test_tuple_assign, (((1, 2), (4, 7)),))
 
         def test_single_starred_lhs(self):
-            with self.assertRaisesRegex(RuntimeError, 'A Starred expression may only appear on the lhs within the presence'
-                                                      ' of another non-starred expression'):
-                cu = torch.jit.CompilationUnit('''
+            with self.assertRaisesRegex(
+                RuntimeError,
+                "A Starred expression may only appear on the lhs within the presence"
+                " of another non-starred expression",
+            ):
+                cu = torch.jit.CompilationUnit(
+                    """
                 def single_starred_lhs(x):
                     a = (x, x, x)
                     *b, = a
                     return b
-                ''')
+                """
+                )
 
     def test_singleton_tuple_unpack(self):
         def foo(a):
-            b, = (a,)
+            (b,) = (a,)
             return b + 1
+
         self.checkScript(foo, (torch.rand(3),))
 
     def test_tuple_assignments(self):
@@ -441,7 +477,9 @@ class TestTyping(JitTestCase):
             a[i], (x[i], b) = 1, (2, 3)
             return a[i] + 1, x + 5, b
 
-        self.checkScript(subscript_tuple_assign, ([12, 7, 9, 11], torch.tensor((3, 13, 17)), 0))
+        self.checkScript(
+            subscript_tuple_assign, ([12, 7, 9, 11], torch.tensor((3, 13, 17)), 0)
+        )
 
         def star_tuple_assign():
             # type: () -> Tuple[int, int, Tuple[int, int], Tuple[int, int]]
@@ -455,7 +493,7 @@ class TestTyping(JitTestCase):
             a[0] += 1
             return a
 
-        with self.assertRaisesRegex(RuntimeError, 'does not support augmented assign'):
+        with self.assertRaisesRegex(RuntimeError, "does not support augmented assign"):
             scripted_aug_assign = torch.jit.script(subscript_tuple_augmented_assign)
 
     def test_multiple_assign(self):
@@ -505,7 +543,6 @@ class TestTyping(JitTestCase):
             # type: (Optional[int]) -> int
             return torch.jit._unwrap_optional(x)
 
-
         @torch.jit.script
         def fn(x):
             # type: (int) -> int
@@ -540,7 +577,7 @@ class TestTyping(JitTestCase):
             # type: (Tuple[float, float]) -> int
             return opt_list(x) + broadcast_opt_list(x)
 
-        self.assertEqual(opt_list_tuple_caller((2., 3.)), 4)
+        self.assertEqual(opt_list_tuple_caller((2.0, 3.0)), 4)
 
     def test_optional_tuple(self):
         def fn(x=None):
@@ -556,10 +593,11 @@ class TestTyping(JitTestCase):
 
     def test_namedtuple_redefine(self):
         global _1, _2
-        _1 = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
-        _2 = namedtuple('GoogLeNetOutputs', ['different'])
+        _1 = namedtuple("GoogLeNetOutputs", ["logits", "aux_logits2", "aux_logits1"])
+        _2 = namedtuple("GoogLeNetOutputs", ["different"])
 
-        with self.assertRaisesRegex(RuntimeError, r'redefine'):
+        with self.assertRaisesRegex(RuntimeError, r"redefine"):
+
             @torch.jit.script
             def foo(x, y):
                 # type: (_1, _2) -> _1
@@ -567,7 +605,9 @@ class TestTyping(JitTestCase):
 
     def test_namedtuple_py2(self):
         global _GoogLeNetOutputs  # see [local resolution in python]
-        _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
+        _GoogLeNetOutputs = namedtuple(
+            "GoogLeNetOutputs", ["logits", "aux_logits2", "aux_logits1"]
+        )
 
         @torch.jit.script
         def foo(x):
@@ -575,22 +615,27 @@ class TestTyping(JitTestCase):
             return x
 
         vals = torch.rand(3), torch.rand(4), torch.rand(5)
-        out = foo(_GoogLeNetOutputs(logits=vals[0], aux_logits2=vals[1], aux_logits1=vals[2]))
+        out = foo(
+            _GoogLeNetOutputs(logits=vals[0], aux_logits2=vals[1], aux_logits1=vals[2])
+        )
         self.assertEqual(out.logits, vals[0])
         self.assertEqual(out.aux_logits2, vals[1])
         self.assertEqual(out.aux_logits1, vals[2])
 
     def test_namedtuple_good_error(self):
         global _GoogLeNetOutputs  # see [local resolution in python]
-        _GoogLeNetOutputs = namedtuple('GoogLeNetOutputs', ['logits', 'aux_logits2', 'aux_logits1'])
+        _GoogLeNetOutputs = namedtuple(
+            "GoogLeNetOutputs", ["logits", "aux_logits2", "aux_logits1"]
+        )
 
         @torch.jit.script
         def foo(x):
             # type: (_GoogLeNetOutputs) -> _GoogLeNetOutputs
             return x
 
-        with self.assertRaisesRegex(RuntimeError,
-                                    r'aka NamedTuple\(logits, aux_logits2, aux_logits1\)'):
+        with self.assertRaisesRegex(
+            RuntimeError, r"aka NamedTuple\(logits, aux_logits2, aux_logits1\)"
+        ):
             out = foo(_GoogLeNetOutputs(logits="3", aux_logits2="4", aux_logits1="5"))
 
     def test_namedtuple_error_source_attribution(self):

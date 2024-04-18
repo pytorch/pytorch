@@ -1858,7 +1858,7 @@ class TimeOutException(Exception):
 
 
 def alarm_handler(signum, frame):
-    raise TimeOutException()
+    raise TimeOutException
 
 
 def exit_after(s):
@@ -2136,7 +2136,7 @@ class BenchmarkRunner:
         return set()
 
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @property
     def equal_nan(self):

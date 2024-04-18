@@ -1898,7 +1898,6 @@ symbolic_tensor_failures = {
     xfail('nn.functional.binary_cross_entropy', ''),  # aten.new_empty.default - couldn't find symbolic meta function/decom...
     xfail('nn.functional.cross_entropy', ''),  # aten.size.default - couldn't find symbolic meta function/decomposition
     xfail('nn.functional.ctc_loss'),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/decomposition
-    xfail('nn.functional.fractional_max_pool2d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('nn.functional.fractional_max_pool3d', ''),  # argument 'size' must be tuple of ints, but found element of t...
     xfail('quantile', ''),  # Could not run 'aten::equal' with arguments from the 'Meta' backend.
     xfail('resize_as_', ''),  # aten.clone.default - couldn't find symbolic meta function/decomposition
@@ -1982,6 +1981,12 @@ out_symbolic_tensor_failures = {
     xfail('ones', ''),
     xfail('randn', ''),
     xfail('zeros', ''),
+
+    # RuntimeError: Cannot call numel() on tensor with symbolic sizes/strides
+    xfail('index_reduce', 'prod'),
+    xfail('index_reduce', 'mean'),
+    xfail('index_reduce', 'amax'),
+    xfail('index_reduce', 'amin'),
 }
 
 out_symbolic_tensor_segfaults = {

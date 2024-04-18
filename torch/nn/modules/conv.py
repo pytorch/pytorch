@@ -1152,7 +1152,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
             super().reset_parameters()  # type: ignore[misc]
 
     # Signature of "initialize_parameters" is incompatible with the definition in supertype LazyModuleMixin
-    def initialize_parameters(self, input) -> None:  # type: ignore[override]
+    def initialize_parameters(self, input: Tensor, *args, **kwargs) -> None:  # type: ignore[override]
         # defined by parent class but using a protocol
         if self.has_uninitialized_params():  # type: ignore[misc]
             self.in_channels = self._get_in_channels(input)
@@ -1184,7 +1184,7 @@ class _LazyConvXdMixin(LazyModuleMixin):
     # Function to return the number of spatial dims expected for inputs to the module.
     # This is expected to be implemented by subclasses.
     def _get_num_spatial_dims(self) -> int:
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 # LazyConv1d defines weight as a Tensor but derived class defines it as UnitializeParameter

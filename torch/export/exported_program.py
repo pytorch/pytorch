@@ -141,6 +141,48 @@ def _rename_without_collisions(
     return name_map[orig_name]
 
 
+def _name_hoo_subgraph_placeholders(gm: torch.fx.GraphModule) -> None:
+    """
+    Propagate placeholder names from the top-level graph into HigherOrderOp subgraphs,
+    and handle collisions with non-placeholders by count suffixing.
+    Different HOO subgraph types have different input schemas, so we first enumerate them
+    and gather the top-level named placeholder nodes.
+    """
+    # gather all HOO subgraphs and their top-level named placeholder nodes
+    subgraph_ph_tuples: List[Tuple[torch.fx.GraphModule, List[torch.fx.Node]]] = []
+    for node in gm.graph.nodes:
+        if node.op == "call_function" and isinstance(
+            node.target, torch._ops.HigherOrderOperator
+        ):
+            # HOO subgraphs have varying input schemas, so we enumerate them there
+            if node.target._name == "cond":
+                _, true_graph, false_graph, cond_args = node._args
+                subgraph_ph_tuples.append((getattr(gm, true_graph.target), cond_args))
+                subgraph_ph_tuples.append((getattr(gm, false_graph.target), cond_args))
+            elif node.target._name == "wrap_with_set_grad_enabled":
+                subgraph, phs = node._args[1], node._args[2:]
+                subgraph_ph_tuples.append((getattr(gm, subgraph.target), phs))
+            elif node.target._name == "map_impl":
+                body_graph, array, args = node._args
+                subgraph_ph_tuples.append(
+                    (getattr(gm, body_graph.target), array + args)
+                )
+
+    # propagate names
+    for subgraph, hoo_phs in subgraph_ph_tuples:
+        name_map: Dict[str, str] = {}
+        for i, node in enumerate(subgraph.graph.nodes):
+            if i < len(hoo_phs):  # placeholder, retain name
+                name_map[node.name] = hoo_phs[i].name
+                node.name = node.target = hoo_phs[i].name
+            else:  # non-placeholder, check for collisions
+                node.name = _rename_without_collisions(name_map, node.name, node.name)
+
+        # recurse and recompile
+        _name_hoo_subgraph_placeholders(subgraph)
+        subgraph.recompile()
+
+
 class ExportedProgram:
     """
     Package of a program from :func:`export`. It contains
@@ -465,6 +507,16 @@ class ExportedProgram:
         module.eval = types.MethodType(_eval, module)  # type: ignore[method-assign]
         return module
 
+    def _num_lifted_params_buffers(self):
+        return next(
+            (
+                i
+                for i, s in enumerate(self._graph_signature.input_specs)
+                if s.kind == InputKind.USER_INPUT
+            ),
+            len(self._graph_signature.input_specs),
+        )
+
     @_disable_prexisiting_fake_mode
     def run_decompositions(
         self, decomp_table: Optional[Dict[torch._ops.OperatorBase, Callable]] = None
@@ -543,6 +595,9 @@ class ExportedProgram:
                 continue
             node.name = _rename_without_collisions(name_map, node.name, node.name)
 
+        # propagate names to higher order op subgraphs
+        _name_hoo_subgraph_placeholders(gm)
+
         # To match the output target with correct input for input mutations
         # need to find the old to new placeholder map
         old_new_placeholder_map = {
@@ -594,7 +649,12 @@ class ExportedProgram:
         # (The node-level meta is addressed above.)
         gm.meta.update(self.graph_module.meta)
 
-        new_range_constraints = _get_updated_range_constraints(gm)
+        new_range_constraints = _get_updated_range_constraints(
+            gm,
+            self._num_lifted_params_buffers(),
+            pytree.tree_leaves(self.example_inputs),
+            _is_executorch=False,
+        )
 
         constants = lift_constants_pass(gm, new_graph_signature, ConstantAttrMap())
         for k, v in constants.items():
@@ -613,7 +673,6 @@ class ExportedProgram:
             verifier=self.verifier,
             constants=self.constants,
         )
-
         if len(new_range_constraints) > 0:
             exported_program = exported_program._transform_do_not_use(
                 _AddRuntimeAssertionsForInlineConstraintsPass(new_range_constraints)
@@ -700,7 +759,12 @@ class ExportedProgram:
                 self.graph_signature, transformed_gm
             ),
             state_dict=self.state_dict,
-            range_constraints=_get_updated_range_constraints(transformed_gm),
+            range_constraints=_get_updated_range_constraints(
+                transformed_gm,
+                self._num_lifted_params_buffers(),
+                pytree.tree_leaves(self.example_inputs),
+                _is_executorch=False,
+            ),
             module_call_graph=copy.deepcopy(self._module_call_graph),
             example_inputs=self.example_inputs,
             verifier=self.verifier,
@@ -745,6 +809,9 @@ class ExportedProgram:
 
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
+    num_lifted: Optional[int] = None,
+    example_inputs: Optional[List[Any]] = None,
+    _is_executorch: bool = True,
 ) -> "Dict[sympy.Symbol, Any]":
     def get_shape_env(gm):
         vals = [
@@ -756,18 +823,44 @@ def _get_updated_range_constraints(
 
         fake_mode = detect_fake_mode(vals)
         if fake_mode is not None:
-            return fake_mode.shape_env
+            return fake_mode.shape_env, fake_mode
         for v in vals:
             if isinstance(v, torch.SymInt):
-                return v.node.shape_env
+                return v.node.shape_env, fake_mode
 
-    shape_env = get_shape_env(gm)
+    # FIXME(tmanlaibaatar) Remove this whole branch once https://github.com/pytorch/pytorch/pull/123764
+    if _is_executorch:
+        assert num_lifted is None
+        assert example_inputs is None
+        shape_env, _ = get_shape_env(gm)
+        if shape_env is None:
+            return {}
+        range_constraints = {
+            k: v
+            for k, v in shape_env.var_to_range.items()
+            if k not in shape_env.replacements
+        }
+        # Only when we have an unbacked symint, and it's used as constructor inputs,
+        # runtime_var_to_range will make a difference compated to var_to_range.
+        # e.g. [2, oo) -> [0, oo)
+        for k, v in shape_env.var_to_range.items():
+            if k not in shape_env.replacements:
+                range_constraints[k] = v
+        return range_constraints
+
+    assert num_lifted is not None
+    assert example_inputs is not None
+
+    shape_env, fake_mode = get_shape_env(gm)
     if shape_env is None:
         return {}
+
+    from torch.export.dynamic_shapes import _process_constraints
+
+    range_constraints = _process_constraints(fake_mode, gm, num_lifted, example_inputs)
+
     range_constraints = {
-        k: v
-        for k, v in shape_env.var_to_range.items()
-        if k not in shape_env.replacements
+        k: v for k, v in range_constraints.items() if k not in shape_env.replacements
     }
     # Only when we have an unbacked symint, and it's used as constructor inputs,
     # runtime_var_to_range will make a difference compated to var_to_range.

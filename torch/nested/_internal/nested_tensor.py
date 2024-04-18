@@ -45,7 +45,7 @@ class NestedTensor(torch.Tensor):
     # For example, a jagged tensor with shape [B, x, D] can be strided in two
     # ways: [xD, D, 1] and [x, 1, sum(x)], where xD represents x multiplied by D
     _size: Tuple[int, ...]
-    _stride: Tuple[int, ...]
+    _strides: Tuple[int, ...]
     # Indicates that the nth dimension is ragged
     _ragged_idx: int
     _metadata_cache: Dict[str, Any]
@@ -337,8 +337,8 @@ def jagged_from_list(
     ret_nt = nested_view_from_values_offsets(values, offsets)
     ret_nt._metadata_cache = {
         # compute this now since it's easy
-        "max_seqlen": max([t.shape[0] for t in tensors]),
-        "min_seqlen": min([t.shape[0] for t in tensors]),
+        "max_seqlen": max(t.shape[0] for t in tensors),
+        "min_seqlen": min(t.shape[0] for t in tensors),
     }
     return (ret_nt, offsets)  # type: ignore[return-value]
 
