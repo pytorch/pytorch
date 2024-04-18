@@ -1466,9 +1466,9 @@ class DistributedDataParallel(Module, Joinable):
         self._lazy_init_ran = True
 
     def _should_disable_cpp_reducer(self) -> bool:
-        if torch._utils.is_compiling() and self._use_python_reducer:
-            self._force_to_disable_cpp_reducer = True
-        return self._use_python_reducer and self._force_to_disable_cpp_reducer
+        return self._use_python_reducer and (
+            torch._utils.is_compiling() or self._force_to_disable_cpp_reducer
+        )
 
     def _pre_forward(self, *inputs, **kwargs):
         if self._should_disable_cpp_reducer():
