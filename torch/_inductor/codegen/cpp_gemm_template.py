@@ -6,6 +6,7 @@ from .. import ir
 
 from ..ir import Buffer, CppTemplateBuffer, IRNode, Layout
 from ..lowering import permute, view
+from ..virtualized import V
 from .cpp_template import CppTemplate
 
 from .cpp_template_kernel import CppTemplateKernel
@@ -131,10 +132,34 @@ class CppPackedGemmTemplate(CppTemplate):
         def preprocessor(inputs, layout):
             return pack_weight(*transpose_weight(*reorder_and_filter(inputs, layout)))
 
+        def postprocessor(output):
+            if isinstance(output, ir.IRNode):
+                # prepack the weight as input to the template buffer
+                # TODO: prune the unused constants in V.graph
+                # TODO: should we implement it with constant folding in the scheduler instead?
+                assert isinstance(output, ir.TensorBox)
+                template_buffer = ir.InputsKernel.unwrap_storage_for_input(output)
+                assert isinstance(template_buffer, ir.CppTemplateBuffer)
+                new_input_nodes, _ = reorder_and_filter(input_nodes, layout)
+                W_node = ir.InputsKernel.unwrap_storage_for_input(new_input_nodes[1])
+                assert isinstance(W_node, ir.ConstantBuffer)
+                assert W_node.get_name() in V.graph.constants
+                W = V.graph.constants[W_node.get_name()]
+                new_input_nodes[1] = W
+                new_input_nodes, _ = pack_weight(
+                    *transpose_weight(new_input_nodes, layout)
+                )
+                W_packed = new_input_nodes[1]
+                W_packed_constant = V.graph.add_tensor_constant(W_packed)
+                template_buffer.inputs[1] = ir.InputsKernel.unwrap_storage_for_input(
+                    W_packed_constant
+                )
+            return output
+
         template = DataProcessorTemplateWrapper(
             CppPackedGemmTemplate,
             preprocessor,
-            None,
+            postprocessor,
             input_nodes=input_nodes,
             layout=layout,
             n_block_size=n_block_size,
@@ -152,15 +177,17 @@ class CppPackedGemmTemplate(CppTemplate):
         assert not epilogue_nodes, "Epilogue nodes are not supported for GEMM template."
         assert len(self.input_nodes) >= 2
 
-        if template_buffer_node is not None:
-            self.output_node = template_buffer_node
-        if epilogue_nodes is not None and len(epilogue_nodes) > 0:
-            self.output_node = cast(Buffer, epilogue_nodes[-1])
-        assert self.output_node is not None
-
         X, W = self.input_nodes[0], self.input_nodes[1]
         inp = self.input_nodes[2] if len(self.input_nodes) > 2 else None
         Y = self.output_node
+
+        if template_buffer_node is not None:
+            # Use the updated prepacked weight buffer
+            W = template_buffer_node.inputs[1]
+            Y = template_buffer_node
+        if epilogue_nodes is not None and len(epilogue_nodes) > 0:
+            Y = cast(Buffer, epilogue_nodes[-1])
+        assert self.output_node is not None
 
         options = dict(
             X=X,
