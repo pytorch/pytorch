@@ -339,15 +339,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout snadampal/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: openmp_update
           submodules: recursive
-          repository: pytorch/builder
+          repository: snadampal/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean snadampal/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -442,15 +442,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout snadampal/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: openmp_update
           submodules: recursive
-          repository: pytorch/builder
+          repository: snadampal/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean snadampal/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -792,15 +792,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout snadampal/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: openmp_update
           submodules: recursive
-          repository: pytorch/builder
+          repository: snadampal/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean snadampal/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -895,15 +895,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout snadampal/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: openmp_update
           submodules: recursive
-          repository: pytorch/builder
+          repository: snadampal/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean snadampal/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1245,15 +1245,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout snadampal/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: openmp_update
           submodules: recursive
-          repository: pytorch/builder
+          repository: snadampal/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean snadampal/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1348,15 +1348,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout snadampal/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: openmp_update
           submodules: recursive
-          repository: pytorch/builder
+          repository: snadampal/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean snadampal/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1698,15 +1698,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout snadampal/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: openmp_update
           submodules: recursive
-          repository: pytorch/builder
+          repository: snadampal/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean snadampal/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -1801,15 +1801,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout snadampal/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: openmp_update
           submodules: recursive
-          repository: pytorch/builder
+          repository: snadampal/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean snadampal/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2151,15 +2151,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout snadampal/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: openmp_update
           submodules: recursive
-          repository: pytorch/builder
+          repository: snadampal/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean snadampal/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
@@ -2254,15 +2254,15 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: pytorch
-      - name: Checkout pytorch/builder
+      - name: Checkout snadampal/builder
         uses: malfet/checkout@silent-checkout
         with:
-          ref: main
+          ref: openmp_update
           submodules: recursive
-          repository: pytorch/builder
+          repository: snadampal/builder
           path: builder
           quiet-checkout: true
-      - name: Clean pytorch/builder checkout
+      - name: Clean snadampal/builder checkout
         run: |
           # Remove any artifacts from the previous checkouts
           git clean -fxd
