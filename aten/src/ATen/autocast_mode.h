@@ -10,8 +10,8 @@
 
 namespace at::autocast {
 
-TORCH_API bool is_enabled(DispatchKey dispatch_key);
-TORCH_API void set_enabled(DispatchKey dispatch_key, bool new_enabled);
+TORCH_API bool is_enabled(at::DeviceType device_type);
+TORCH_API void set_enabled(at::DeviceType device_type, bool new_enabled);
 TORCH_API at::ScalarType get_autocast_dtype(at::DeviceType device_type);
 TORCH_API void set_autocast_dtype(
     at::DeviceType device_type,
@@ -81,7 +81,7 @@ inline at::ScalarType get_lower_precision_fp_from_device_type(
     return get_autocast_dtype(device_type);
   } else {
     throw std::runtime_error(
-          "unknown device type for autocast in get_lower_precision_fp_from_device_type");
+        "unknown device type for autocast in get_lower_precision_fp_from_device_type");
   }
 }
 
@@ -634,4 +634,3 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
       REGISTER_SIGNATURE,                                    \
       REDISPATCH_SIGNATURE,                                  \
       POLICY)
- 

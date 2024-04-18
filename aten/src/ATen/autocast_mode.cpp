@@ -6,11 +6,13 @@
 
 namespace at::autocast {
 
-bool is_enabled(DispatchKey dispatch_key) {
+bool is_enabled(at::DeviceType device_type) {
+  at::DispatchKey dispatch_key = get_autocast_dispatch_key_from_device_type(device_type);
   return !c10::impl::tls_is_dispatch_key_excluded(dispatch_key);
 }
 
-bool set_enabled(DispatchKey dispatch_key, bool new_enabled) {
+void set_enabled(at::DeviceType device_type, bool new_enabled) {
+  at::DispatchKey dispatch_key = get_autocast_dispatch_key_from_device_type(device_type);
   c10::impl::tls_set_dispatch_key_excluded(dispatch_key, !new_enabled);
 }
 
