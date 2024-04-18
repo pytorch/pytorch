@@ -1676,13 +1676,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "See https://github.com/pytorch/pytorch/issues/115679"
-                ),
-                "TestOptimRenewed",
-                "test_state_dict_with_cuda_params",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "This test uses mocks, which dynamo does not support"
                 ),
                 "TestOptimRenewed",
