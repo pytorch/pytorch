@@ -509,7 +509,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def baz(x: Tensor) -> Tensor:
-                raise NotImplementedError()
+                raise NotImplementedError
 
     def test_unsupported_schemas(self):
         with self.assertRaisesRegex(ValueError, "only supports functional"):
@@ -670,35 +670,35 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(ValueError, "varargs"):
 
             def foo(*args):
-                raise NotImplementedError()
+                raise NotImplementedError
 
             infer_schema(foo)
 
         with self.assertRaisesRegex(ValueError, "varkwargs"):
 
             def foo(**kwargs):
-                raise NotImplementedError()
+                raise NotImplementedError
 
             infer_schema(foo)
 
         with self.assertRaisesRegex(ValueError, "must have a type annotation"):
 
             def foo(x):
-                raise NotImplementedError()
+                raise NotImplementedError
 
             infer_schema(foo)
 
         with self.assertRaisesRegex(ValueError, "unsupported"):
 
             def foo(x: Tensor) -> Tuple[Tensor, ...]:
-                raise NotImplementedError()
+                raise NotImplementedError
 
             infer_schema(foo)
 
         with self.assertRaisesRegex(ValueError, "can be mutated"):
 
             def foo(x: Tensor, y: int) -> Tensor:
-                raise NotImplementedError()
+                raise NotImplementedError
 
             infer_schema(foo, mutates_args={"y"})
 
@@ -752,7 +752,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
                     @custom_ops.custom_op(f"{self.test_ns}::foo")
                     def foo(x: Tensor) -> typ:
-                        raise NotImplementedError()
+                        raise NotImplementedError
 
                     @custom_ops.impl(f"{self.test_ns}::foo")
                     def foo_impl(x: Tensor) -> typ:
@@ -771,7 +771,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
                     @custom_ops.custom_op(f"{self.test_ns}::foo")
                     def foo(x: Tensor) -> Tuple[typ, typ]:
-                        raise NotImplementedError()
+                        raise NotImplementedError
 
                     @custom_ops.impl(f"{self.test_ns}::foo")
                     def foo_impl(x: Tensor) -> Tuple[typ, typ]:
@@ -789,7 +789,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor, y: typ) -> Tensor:
-                raise NotImplementedError()
+                raise NotImplementedError
 
             yeet = None
 
@@ -823,7 +823,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         @custom_ops.custom_op(f"{self.test_ns}::foo")
         def foo(x: torch.Tensor, sizes: Sequence[int]) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         called = 0
 
@@ -847,7 +847,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor, y: List[Optional[int]]) -> Tensor:
-                raise NotImplementedError()
+                raise NotImplementedError
 
             del foo
 
@@ -855,7 +855,7 @@ class TestCustomOp(CustomOpTestCaseBase):
             # int[N] in Dispatcher is a bit wild, so we don't try to support it.
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor, y: Tuple[int, int]) -> Tensor:
-                raise NotImplementedError()
+                raise NotImplementedError
 
             del foo
 
@@ -863,7 +863,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor, y: Callable) -> Tensor:
-                raise NotImplementedError()
+                raise NotImplementedError
 
             del foo
 
@@ -910,7 +910,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
                 @custom_ops.custom_op(f"{ns}::foo2")
                 def foo2(x: torch.Tensor) -> torch.Tensor:
-                    raise NotImplementedError()
+                    raise NotImplementedError
 
     def test_private_ctor(self):
         with self.assertRaisesRegex(RuntimeError, "CustomOp constructor is private"):
@@ -919,7 +919,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_lifetime(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         custom_op = torch._custom_op.impl.get_op(f"{TestCustomOp.test_ns}::foo")
 
@@ -928,7 +928,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
-                raise NotImplementedError()
+                raise NotImplementedError
 
         # Unless we delete the original op.
         custom_ops._destroy(f"{TestCustomOp.test_ns}::foo")
@@ -936,14 +936,14 @@ class TestCustomOp(CustomOpTestCaseBase):
         # Smoke test
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
-            raise NotImplementedError()
+            raise NotImplementedError
 
         custom_ops._destroy(f"{TestCustomOp.test_ns}::foo")
 
     def test_autograd_notimplemented(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
-            raise NotImplementedError()
+            raise NotImplementedError
 
         x = torch.randn(3, requires_grad=True)
         op = self.get_op(f"{self.test_ns}::foo")
@@ -954,7 +954,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: Sequence[torch.Tensor]) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         x = torch.randn(3, requires_grad=True)
         y = torch.randn(3)
@@ -966,7 +966,7 @@ class TestCustomOp(CustomOpTestCaseBase):
 
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         x = torch.randn(3, requires_grad=True)
         y = torch.randn(3)
@@ -978,7 +978,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_autograd_notimplemented_gradmode(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
         def foo_impl(x, y):
@@ -994,7 +994,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_impl_cpu(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types="cpu")
         def foo_cpu(x):
@@ -1008,7 +1008,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_impl_invalid_devices(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         def foo_impl(x):
             return x.sin()
@@ -1033,7 +1033,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_partially_registered(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
         def foo_impl(x):
@@ -1054,7 +1054,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_save_for_backward_inputs_are_namedtuple(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
         def foo_impl(x):
@@ -1084,7 +1084,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_returns_dict(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
         def foo_impl(x):
@@ -1107,7 +1107,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_dict_invalid_keys(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
         def foo_impl(x):
@@ -1130,7 +1130,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_dict_grad_for_nontensor(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
         def foo_impl(x, dim):
@@ -1153,7 +1153,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_dict_requires_keys_for_input_tensors(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
         def foo_impl(x, y):
@@ -1176,7 +1176,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_dict_requires_keys_for_input_optional_tensors(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor, y: Optional[torch.Tensor]) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
         def foo_impl(x, y):
@@ -1199,7 +1199,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_grads_are_tensor_or_none(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
         def foo_impl(x):
@@ -1222,7 +1222,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_tensorlist_input_requires_list_grads_with_same_numel(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(xs: Sequence[torch.Tensor]) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
         def foo_impl(xs):
@@ -1245,7 +1245,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_tensorlist_input_requires_list_grads_none_or_Tensor(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(xs: Sequence[torch.Tensor]) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
         def foo_impl(xs):
@@ -1268,7 +1268,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_tensorlist_input_requires_list_grads(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(xs: Sequence[torch.Tensor]) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
         def foo_impl(xs):
@@ -1291,7 +1291,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_output_differentiability_type(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(xs: Sequence[torch.Tensor]) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         with self.assertRaisesRegex(RuntimeError, "output_differentiability"):
 
@@ -1304,7 +1304,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_output_differentiability_numel(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(xs: Sequence[torch.Tensor]) -> Tuple[torch.Tensor, torch.Tensor]:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         with self.assertRaisesRegex(RuntimeError, "output_differentiability"):
 
@@ -1317,7 +1317,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_output_differentiability_tensorlist(self):
         @custom_ops.custom_op(f"{self.test_ns}::foo")
         def foo(x: Tensor) -> Tuple[List[Tensor], Tensor]:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{self.test_ns}::foo")
         def foo_impl(x):
@@ -1343,7 +1343,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_backward_output_differentiability_non_tensor(self):
         @custom_ops.custom_op(f"{self.test_ns}::foo")
         def foo(x: Tensor) -> Tuple[Tensor, int]:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{self.test_ns}::foo")
         def foo_impl(x):
@@ -1368,7 +1368,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_impl_separate(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo", device_types="cpu")
         def foo_cpu(x):
@@ -1392,7 +1392,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_impl_multiple(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @custom_ops.impl(f"{TestCustomOp.test_ns}::foo")
         def foo_impl(x):
@@ -1422,7 +1422,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_impl_meta(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x, dim):
@@ -1438,7 +1438,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_duplicate_impl(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor, dim: int) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x, dim):
@@ -1457,7 +1457,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_new_data_dependent_symint(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x):
@@ -1483,7 +1483,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         # this one is just a sanity check.
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x):
@@ -1497,7 +1497,7 @@ class TestCustomOp(CustomOpTestCaseBase):
     def test_not_implemented_error(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
         def foo(x: torch.Tensor) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         x = torch.randn(3)
         op = self.get_op(f"{self.test_ns}::foo")
@@ -1505,14 +1505,12 @@ class TestCustomOp(CustomOpTestCaseBase):
             op(x)
 
         x = torch.randn(3, device="meta")
-        with self.assertRaisesRegex(
-            NotImplementedError, "no abstract impl or Meta kernel"
-        ):
+        with self.assertRaisesRegex(NotImplementedError, "no fake impl or Meta kernel"):
             op(x)
 
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::bar")
         def bar(sizes: Sequence[int]) -> torch.Tensor:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         op = self.get_op(f"{self.test_ns}::bar")
         with self.assertRaisesRegex(NotImplementedError, "no Tensor inputs"):
@@ -2023,7 +2021,7 @@ class MiniOpTest(CustomOpTestCaseBase):
 
             @staticmethod
             def backward(ctx, grad):
-                raise NotImplementedError()
+                raise NotImplementedError
 
         def autograd_impl(x):
             return Op.apply(x)
@@ -2286,6 +2284,121 @@ class TestCustomOpAPI(TestCase):
             self.assertGreater(after, prev)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_fake(self):
+        for mode in ["function", "qualname", "opoverload"]:
+
+            @torch.library.custom_op("_torch_testing::add", mutates_args=())
+            def add(x: Tensor, y: float) -> Tensor:
+                x_np = x.cpu().numpy()
+                out_np = x_np + y
+                return torch.from_numpy(out_np).to(x.device)
+
+            called = False
+
+            if mode == "function":
+                dec = torch.library.register_fake(add)
+            elif mode == "qualname":
+                dec = torch.library.register_fake("_torch_testing::add")
+            elif mode == "opoverload":
+                dec = torch.library.register_fake(torch.ops._torch_testing.add.default)
+
+            @dec
+            def _(x, y):
+                nonlocal called
+                called = True
+                return torch.empty_like(x)
+
+            with torch._subclasses.fake_tensor.FakeTensorMode():
+                x = torch.randn(3)
+                y = 3.14
+                z = add(x, y)
+                self.assertEqual(z.shape, x.shape)
+                self.assertTrue(called)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_autograd(self):
+        for mode in ["function", "qualname", "opoverload"]:
+
+            @torch.library.custom_op("mylib::numpy_sin", mutates_args=())
+            def numpy_sin(x: Tensor) -> Tensor:
+                x_np = x.cpu().numpy()
+                y_np = np.sin(x_np)
+                return torch.from_numpy(y_np).to(device=x.device)
+
+            def setup_context(ctx, inputs, output) -> Tensor:
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            called = False
+
+            def backward(ctx, grad):
+                nonlocal called
+                called = True
+                (x,) = ctx.saved_tensors
+                return grad * x.cos()
+
+            if mode == "function":
+                torch.library.register_autograd(numpy_sin, setup_context, backward)
+            elif mode == "qualname":
+                torch.library.register_autograd(
+                    "mylib::numpy_sin", setup_context, backward
+                )
+            elif mode == "opoverload":
+                torch.library.register_autograd(
+                    torch.ops.mylib.numpy_sin.default, setup_context, backward
+                )
+
+            x = torch.randn(3, requires_grad=True)
+            y = numpy_sin(x)
+            (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
+            self.assertTrue(called)
+            self.assertEqual(grad_x, x.cos())
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_autograd_low_level(self):
+        for mode in ["qualname", "opoverload"]:
+            with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+                lib.define("sin5(Tensor x) -> Tensor")
+
+                def numpy_sin(x: Tensor) -> Tensor:
+                    x_np = x.cpu().detach().numpy()
+                    y_np = np.sin(x_np)
+                    return torch.from_numpy(y_np).to(device=x.device)
+
+                def setup_context(ctx, inputs, output) -> Tensor:
+                    (x,) = inputs
+                    ctx.save_for_backward(x)
+
+                called = False
+
+                def backward(ctx, grad):
+                    nonlocal called
+                    called = True
+                    (x,) = ctx.saved_tensors
+                    return grad * x.cos()
+
+                lib.impl("sin5", numpy_sin, "CPU")
+
+                called = False
+
+                if mode == "qualname":
+                    torch.library.register_autograd(
+                        "_torch_testing::sin5", setup_context, backward, lib=lib
+                    )
+                elif mode == "opoverload":
+                    torch.library.register_autograd(
+                        torch.ops._torch_testing.sin5.default,
+                        setup_context,
+                        backward,
+                        lib=lib,
+                    )
+                x = torch.randn(3, requires_grad=True)
+                y = torch.ops._torch_testing.sin5(x)
+                (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
+                self.assertTrue(called)
+                self.assertEqual(grad_x, x.cos())
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_fake(self):
         @torch.library.custom_op("_torch_testing::add", mutates_args=())
         def add(x: Tensor, y: float) -> Tensor:
@@ -2459,30 +2572,6 @@ Please use `add.register_fake` to add an fake impl.""",
         x = x.cuda()
         y = f(x)
         self.assertEqual(y, x.sin())
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_overloading(self):
-        called_f = 0
-        called_f1 = 0
-
-        @torch.library.custom_op("_torch_testing::f", mutates_args=())
-        def f(x: Tensor) -> Tensor:
-            nonlocal called_f
-            called_f += 1
-            return x.clone()
-
-        x = torch.randn(2, 3)
-        torch.ops._torch_testing.f(x)
-        self.assertEqual(called_f, 1)
-
-        @torch.library.custom_op("_torch_testing::f.overload", mutates_args=())
-        def f1(x: Tensor, y: Tensor) -> Tensor:
-            nonlocal called_f1
-            called_f1 += 1
-            return x.clone()
-
-        torch.ops._torch_testing.f(x, x)
-        self.assertEqual(called_f1, 1)
 
     def test_disallows_output_aliasing(self):
         @torch.library.custom_op("_torch_testing::f", mutates_args=())
