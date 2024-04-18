@@ -6,7 +6,18 @@ import traceback
 import weakref
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple, Type, TYPE_CHECKING, TypeVar
+from typing import (
+    Any,
+    cast,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from weakref import ReferenceType
 
 import torch
@@ -39,6 +50,18 @@ from torch.utils._traceback import CapturedTraceback
 
 if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
+
+
+class _Unassigned:
+    pass
+
+
+class _Unhashable:
+    pass
+
+
+_UNASSIGNED = _Unassigned()
+_UNHASHABLE = _Unhashable()
 
 DimList = List
 
@@ -667,7 +690,7 @@ def extract_tensor_metadata(t: torch.Tensor) -> "TensorMetadata":
     """
     Extract the TensorMetadata of a tensor.
     """
-    memory_format = suggest_memory_format(t)
+    memory_format: Optional[torch.memory_format] = suggest_memory_format(t)
     if is_sparse_any(t) or not t.is_contiguous(memory_format=memory_format):
         memory_format = None
 
@@ -750,15 +773,12 @@ class DispatchCacheInfo:
 # new allocations of Tensors which have non-meta storage so
 # memory should not significantly increase.
 
-_UNHASHABLE = object()
-_UNASSIGNED = object()
-
 
 class FakeTensorMode(TorchDispatchMode):
     cache: Dict[_DispatchCacheKey, _DispatchCacheEntry | _BypassDispatchCache] = {}
     cache_hits: int = 0
     cache_misses: int = 0
-    cache_bypasses = defaultdict(int)
+    cache_bypasses: Dict[str, int] = defaultdict(int)
 
     def __init__(
         self,
@@ -906,7 +926,7 @@ class FakeTensorMode(TorchDispatchMode):
         Lookup a cache entry for the given arguments. If none exists, dispatch
         and cache the result (if the result is eligible for caching).
         """
-        output = _UNASSIGNED
+        output: Union[FakeTensor, _Unassigned] = _UNASSIGNED
         key = self._cache_key(func, args, kwargs)
         entry = FakeTensorMode.cache.get(key, None)
         if isinstance(entry, _DispatchCacheEntry):
@@ -1172,7 +1192,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         # Synthesize a new FakeTensor with the cached metadata.
         metadata = entry.metadata
-        assert not metadata.is_sparse
+        assert metadata and not metadata.is_sparse
 
         empty = torch.empty_strided(
             metadata.shape,
@@ -1190,7 +1210,7 @@ class FakeTensorMode(TorchDispatchMode):
 
         if func.is_view:
             # For view ops, the storage should be the same as the tensor input.
-            storage = args[entry.view_idx].untyped_storage()
+            storage = args[cast(int, entry.view_idx)].untyped_storage()
             with in_kernel_invocation_manager(self):
                 empty.set_(
                     storage, metadata.storage_offset, metadata.shape, metadata.stride
@@ -1264,7 +1284,7 @@ class FakeTensorMode(TorchDispatchMode):
         else:
             return t
 
-    def _dispatch_impl(self, func, types, args, kwargs):
+    def _dispatch_impl(self, func, types, args, kwargs) -> FakeTensor:
         flat_args, args_spec = pytree.tree_flatten((args, kwargs))
 
         flat_arg_fake_tensors = [t for t in flat_args if self.is_our_fake(t)]
@@ -1644,7 +1664,7 @@ class FakeTensorMode(TorchDispatchMode):
         source: Optional[Source] = None,
         symbolic_context=None,
     ):
-        shape_env = self.shape_env
+        shape_env: Optional[ShapeEnv] = self.shape_env
         if static_shapes is None:
             static_shapes = self.static_shapes
         if static_shapes:
