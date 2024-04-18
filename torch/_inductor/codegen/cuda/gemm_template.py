@@ -941,7 +941,12 @@ class CKGemmTemplate(CKTemplate):
             operation_name=op.name(),
             template_params=(",\n" + 12 * " ").join(template_params)), self._template_from_string(template_type).render(operation_name=op.name())
 
-    def render(self, kernel: CUDATemplateKernel, op: CKGemmOperation):
+    def render(self, kernel: CUDATemplateKernel, op: CKGemmOperation, **kwargs):
+        epilogue_nodes = kwargs.get('epilogue_nodes', None)
+        assert epilogue_nodes is None or 0 == len(epilogue_nodes)
+        template_buffer_node = kwargs.get('template_buffer_node', None)
+        if template_buffer_node is not None:
+            self.output_node = template_buffer_node
         instance_definition, instance_type = self.emit_ck_instance(op)
         X, W = self.input_nodes[0], self.input_nodes[1]
         Y = self.output_node
