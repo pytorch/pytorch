@@ -296,28 +296,11 @@ class CKTemplate(CUDATemplate):
                 using F16 = ck::half_t;
                 using F32 = float;
 
-                // DeviceMem methods are defined in composable_kernel/library/src/utility/device_memory.cpp
-                // We can redefine them here unless we link to the library
-                DeviceMem::DeviceMem(std::size_t mem_size) : mMemSize(mem_size) {
-                    hip_check_error(hipMalloc(static_cast<void**>(&mpDeviceBuf), mMemSize));
-                }
-
-                void* DeviceMem::GetDeviceBuffer() const { return mpDeviceBuf; }
-
-                DeviceMem::~DeviceMem() {
-                    if(mpDeviceBuf) {
-                        hip_check_error(hipFree(mpDeviceBuf));
-                    }
-                }
-
-                void DeviceMem::ToDevice(const void* p) const {
-                    if(mpDeviceBuf) {
-                        hip_check_error(
-                            hipMemcpy(mpDeviceBuf, const_cast<void*>(p), mMemSize, hipMemcpyHostToDevice));
-                    } else {
-                        throw std::runtime_error("ToDevice with an empty pointer");
-                    }
-                }
+                #if DEBUG_LOG
+                static constexpr auto kDEBUG_LOG = 1;
+                #else
+                static constexpr auto kDEBUG_LOG = 0;
+                #endif
             """
         )
         return res

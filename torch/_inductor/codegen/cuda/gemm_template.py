@@ -837,31 +837,25 @@ class CKGemmTemplate(CKTemplate):
         auto M = {{M}};
         auto N = {{N}};
         auto K = {{K}};
-        auto StrideA = -1; // default
-        auto StrideB = -1; // default
-        auto StrideC = -1; // default
+        auto StrideA = {{K}}; // TBD fix for row/col major
+        auto StrideB = {{K}}; 
+        auto StrideC = {{K}}; 
         auto KBatch = 1; // split k into batches
 
+        // TBD unhardcode
         auto a_element_op = PassThrough {}; // TBD adjust for alpha and beta
         auto b_element_op = PassThrough {};
         auto c_element_op = PassThrough {};
 
+        // TBD unhardcode
         using ADataType = ck::half_t;
         using BDataType = ck::half_t;
         using CDataType = ck::half_t;
 
-        DeviceMem a_m_k_device_buf(sizeof(ADataType) * M * K);
-        DeviceMem b_k_n_device_buf(sizeof(BDataType) * K * N);
-        DeviceMem c_m_n_device_buf(sizeof(CDataType) * M * N);
-
-        a_m_k_device_buf.ToDevice(X);
-        b_k_n_device_buf.ToDevice(W);
-        c_m_n_device_buf.ToDevice(Y);
-
         auto argument = gemm.MakeArgument(
-            static_cast<ADataType*>(a_m_k_device_buf.GetDeviceBuffer()),
-            static_cast<BDataType*>(b_k_n_device_buf.GetDeviceBuffer()),
-            static_cast<CDataType*>(c_m_n_device_buf.GetDeviceBuffer()),
+            reinterpret_cast<const ADataType*>(X),
+            reinterpret_cast<const BDataType*>(W),
+            reinterpret_cast<CDataType*>(Y),
             M,
             N,
             K,
@@ -878,9 +872,8 @@ class CKGemmTemplate(CKTemplate):
             argument.Print();
             return -1;
         }
-
         // run the kernel
-        float elapsed_time = invoker.Run(argument, StreamConfig{stream});
+        float elapsed_time = invoker.Run(argument, StreamConfig{stream, /* time kernel */ false, /* log level */ kDEBUG_LOG});
         return 0;
     } // kernel definition
     } // extern C
@@ -973,6 +966,7 @@ class CKGemmTemplate(CKTemplate):
 
     def gen_ops(self):
         res = []
+        # all string attributes must be either type aliases or global constants in C++
         res.append(CKGemmOperation(a_layout="Row", 
                                    b_layout="Row", 
                                    c_layout="Row", 
