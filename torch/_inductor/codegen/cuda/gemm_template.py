@@ -873,10 +873,15 @@ class CKGemmTemplate(CKTemplate):
             b_element_op,
             c_element_op
         );
-        // TBD: check gemm.IsSupportedArgument(argument)
+        if (!gemm.IsSupportedArgument(argument)) {
+            printf("Unsupported gemm argument! \n");
+            argument.Print();
+            return -1;
+        }
 
         // run the kernel
         float elapsed_time = invoker.Run(argument, StreamConfig{stream});
+        return 0;
     } // kernel definition
     } // extern C
     """
