@@ -4013,16 +4013,8 @@ module_db: List[ModuleInfo] = [
                decorators=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format'),
-                   # Expect failures for tests that rely on torch.half implementation on CPU
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_forward", dtypes=[torch.float16], device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_if_train_and_eval_modes_differ",
-                                dtypes=[torch.float16], device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_save_load", dtypes=[torch.float16],
-                                device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_non_contiguous_tensors", dtypes=[torch.float16],
-                                device_type='cpu'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_multiple_device_transfer", dtypes=[torch.float16],
-                                device_type='cuda'),
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-2, rtol=1e-3)}), "TestModule",
+                                "test_forward", dtypes=[torch.float16], device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
                                 device_type='cuda'),),
                ),
