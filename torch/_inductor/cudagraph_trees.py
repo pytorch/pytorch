@@ -1710,6 +1710,9 @@ class CUDAGraphTreeManager:
         self.warned_functions: Set[FunctionID] = set()
         torch._C._set_cached_tensors_enabled(True)
 
+        # warn only once if a function mutates inputs
+        self.warned_mutation: Set[FunctionID] = set()
+
         # NB: cuda caching allocator will remember the stream a segment is allocated to
         # and only allocate that segment to the same stream. we need to use a single stream
         # for all allocations to the memory pool, otherwise the allocations to separate streams
@@ -1819,11 +1822,10 @@ class CUDAGraphTreeManager:
             self._get_cuda_graph_recorded_tensor_checker(),
         ):
             self.non_cudagraph_managed_mutation_hint[node_id][function_id] = True
-            # skip warning for warmup nodes
-            if node_id and node_id.id < 0:
+            # warn once per function_id
+            if function_id in self.warned_mutation:
                 return
-            if self.current_node and self.current_node.stack_traces:
-                has_mutation_str = f"{has_mutation_str}\nParent node from : \n {self.current_node.stack_traces[-1]}"
+            self.warned_mutation.add(function_id)
             perf_hint_log.warning(has_mutation_str)
         else:
             self.non_cudagraph_managed_mutation_hint[node_id][function_id] = False
@@ -1854,9 +1856,8 @@ class CUDAGraphTreeManager:
         # Early exit if the function mutates inputs which are neither parameters/buffers nor
         # cudagraph recorded tensors. This check should happen after `try_end_curr_recording`
         # and `try_end_curr_warmup` which may change self.current_node.
-        wrapped_function = self.ids_to_funcs[function_id]
         if self.non_cudagraph_managed_mutation_hint[node_id][function_id]:
-            return wrapped_function.model(new_inputs)
+            return self.ids_to_funcs[function_id].model(new_inputs)
 
         # warming up a function and subsequentally recording may use different memory addresses
         # because both depend on the state of the caching allocator. if we warm up graph A,
@@ -1903,12 +1904,12 @@ class CUDAGraphTreeManager:
                 if self.current_node is None:
                     return self.run(new_inputs, function_id)
 
-            if len(wrapped_function.mutated_input_idxs) > 0:
+            if len(self.ids_to_funcs[function_id].mutated_input_idxs) > 0:
                 self._update_non_cudagraph_managed_mutation(function_id, new_inputs)
                 if self.non_cudagraph_managed_mutation_hint[self._get_node_id()][
                     function_id
                 ]:
-                    return wrapped_function.model(new_inputs)
+                    return self.ids_to_funcs[function_id].model(new_inputs)
 
             # at this point, we necessarily will do a new recording
             self.debug_fail_counter += 1

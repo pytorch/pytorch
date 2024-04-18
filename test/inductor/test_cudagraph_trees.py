@@ -375,12 +375,12 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 mut(mut_inp)
             FileCheck().check("skipping cudagraphs due to mutation on input.").check(
                 "x.add_(2)"
-            ).check("Parent node from : ").check("return x + 1").run(captured_output[0])
+            ).run(captured_output[0])
             self.assertEqual(mut_inp, non_mut(foo(inp)))
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
-        def test_mutation_cudagraph_managed_tensor_warn_once(self, backend):
+        def test_mutation_cudagraph_managed_tensor_warn(self, backend):
             def foo(x):
                 return x.add_(1)
 
@@ -403,7 +403,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
-        def test_mutation_cudagraph_managed_tensor_warn_twice(self, backend):
+        def test_mutation_cudagraph_managed_tensor_warn_only_once(self, backend):
             def foo(x):
                 return x + 1
 
@@ -427,10 +427,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     mut(tmp)  # should not warn
 
                 mut_inp = tmp.clone()
-                mut(mut_inp)  # should warn since current_node is not None
+                mut(mut_inp)  # should not warn since mut has warned
 
             FileCheck().check_count(
-                "skipping cudagraphs due to mutation on input.", 2, exactly=True
+                "skipping cudagraphs due to mutation on input.", 1, exactly=True
             ).run(captured_output[0])
 
         def test_function_compiled_multiple_times(self):
