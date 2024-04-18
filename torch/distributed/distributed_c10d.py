@@ -2646,7 +2646,7 @@ def send_object_list(object_list, dst, group=None, device=None):
         >>>     dist.send_object_list(objects, dst=1, device=device)
         >>> else:
         >>>     objects = [None, None, None]
-        >>>     dist.recv_object_list(objects, src=1, device=device)
+        >>>     dist.recv_object_list(objects, src=0, device=device)
         >>> objects
         ['foo', 12, {1: 2}]
     """
@@ -2737,7 +2737,7 @@ def recv_object_list(object_list, src=None, group=None, device=None):
         >>>     dist.send_object_list(objects, dst=1, device=device)
         >>> else:
         >>>     objects = [None, None, None]
-        >>>     dist.recv_object_list(objects, src=1, device=device)
+        >>>     dist.recv_object_list(objects, src=0, device=device)
         >>> objects
         ['foo', 12, {1: 2}]
     """
