@@ -30,7 +30,7 @@ from torch._utils import render_call
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
-from torch.utils._cxx_pytree import PyTree, tree_map
+from torch.utils._pytree import PyTree, tree_map
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
@@ -56,7 +56,8 @@ except ValueError as e:
     else:
         raise e
 
-pytree = torch.utils._cxx_pytree
+pytree = torch.utils._pytree
+
 T = TypeVar("T")
 TensorWeakRef = Any
 
@@ -527,7 +528,7 @@ class FakeTensor(torch.Tensor):
             return NotImplemented
 
         fake_mode = None
-        for arg in pytree.tree_leaves((args, kwargs)):
+        for arg in pytree.arg_tree_leaves(*args, **kwargs):
             if isinstance(arg, FakeTensor):
                 fake_mode = arg.fake_mode
                 break
