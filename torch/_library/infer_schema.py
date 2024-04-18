@@ -1,6 +1,7 @@
-import typing
 import inspect
-from .. import Tensor, types, dtype, device
+import typing
+
+from .. import device, dtype, Tensor, types
 
 
 def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
@@ -38,13 +39,17 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
         schema_type = SUPPORTED_PARAM_TYPES[param.annotation]
         if name in mutates_args:
             if not schema_type.startswith("Tensor"):
-                error_fn(f"Parameter {name} is in mutable_args but only Tensors or collections of Tensors can be mutated")
+                error_fn(
+                    f"Parameter {name} is in mutable_args but only Tensors or collections of Tensors can be mutated"
+                )
             schema_type = f"Tensor(a{idx}!){schema_type[len('Tensor'):]}"
         seen_args.add(name)
         if param.default is inspect.Parameter.empty:
             params.append(f"{schema_type} {name}")
         else:
-            if param.default is not None and not isinstance(param.default, (int, float, bool)):
+            if param.default is not None and not isinstance(
+                param.default, (int, float, bool)
+            ):
                 error_fn(
                     f"Parameter {name} has an unsupported default value (we only support "
                     f"int, float, bool, None). Please file an issue on GitHub so we can "
@@ -53,10 +58,12 @@ def infer_schema(prototype_function: typing.Callable, mutates_args=()) -> str:
             params.append(f"{schema_type} {name}={param.default}")
     mutates_args_not_seen = set(mutates_args) - seen_args
     if len(mutates_args_not_seen) > 0:
-        error_fn(f"{mutates_args_not_seen} in mutates_args were not found in "
-                 f"the custom op's signature. "
-                 f"mutates_args should contain the names of all args that the "
-                 f"custom op mutates.")
+        error_fn(
+            f"{mutates_args_not_seen} in mutates_args were not found in "
+            f"the custom op's signature. "
+            f"mutates_args should contain the names of all args that the "
+            f"custom op mutates."
+        )
     ret = parse_return(sig.return_annotation, error_fn)
     return f"({', '.join(params)}) -> {ret}"
 
