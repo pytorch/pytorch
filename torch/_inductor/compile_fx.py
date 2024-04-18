@@ -835,23 +835,19 @@ def get_input_idxs_to_check(
     """
     ids_to_check = []
     for i, input in enumerate(inputs):
-        if not isinstance(input, torch.Tensor):
-            continue  # non-tensors don't need alignment
-        if not input.device.type == "cuda":
-            continue  # right now we only care for cuda tensors
-        if i in static_input_idxs and tensor_is_aligned(input):
-            continue  # static input -> the tensor won't change; and we already know this is aligned
-        if not should_assume_input_aligned(input):
-            # See Note: [Input Alignment handling in Inductor]
-            # we will generate triton code that doesn't assume alignment for this input.
-            continue
+        if (
+            isinstance(input, torch.Tensor)  # non-tensors don't need alignment
+            and input.device.type == "cuda"  # right now we only care for cuda tensors
+            and not (i in static_input_idxs and tensor_is_aligned(input))  # tensor is NOT (aligned and constant)
+            and should_assume_input_aligned(input)  # See Note: [Input Alignment handling in Inductor]
+        ):
+            # if we get here, then
+            # (a) our triton code assumes that the input is aligned
+            # (b) we can't be sure ahead of time that the input will actually be aligned.
+            # therefore, at runtime, we'll need to check that the input is aligned
+            # (and if not, clone it to make it aligned.)
+            ids_to_check.append(i)
 
-        # if we get here, then
-        # (a) our triton code assumes that the input is aligned
-        # (b) we can't be sure ahead of time that the input will actually be aligned.
-        # therefore, at runtime, we'll need to check that the input is aligned
-        # (and if not, clone it to make it aligned.)
-        ids_to_check.append(i)
     return ids_to_check
 
 
