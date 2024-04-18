@@ -896,6 +896,8 @@ class CKGemmTemplate(CKTemplate):
         res = super().header()
         res.splice(
             """
+                // CK GEMM header(s)
+
                 #include "ck/tensor_operation/gpu/device/impl/device_gemm_xdl_cshuffle_v3.hpp"
             """
         )
@@ -905,6 +907,8 @@ class CKGemmTemplate(CKTemplate):
         res = super().globals()
         res.splice(
             """
+                // CK GEMM globals
+
                 using Row = ck::tensor_layout::gemm::RowMajor;
                 using Col = ck::tensor_layout::gemm::ColumnMajor;
 
@@ -921,7 +925,7 @@ class CKGemmTemplate(CKTemplate):
         return res
 
     def filter_op(self, op: CKGemmOperation) -> Optional[CKGemmOperation]:
-        # TBD return None if alignment or layout is invalid
+        # TBD return None if alignment or layout or dtype is invalid
         return op
 
     def emit_ck_instance(self, op: CKGemmOperation):

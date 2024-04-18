@@ -267,10 +267,8 @@ class CKTemplate(CUDATemplate):
         res = super().header()
         res.splice(
             """
-                // 'ere be headers
-                // #include <initializer_list>
-                // #include <numeric>
-                
+                // CK headers
+
                 #include "ck/ck.hpp"
                 #include "ck/utility/data_type.hpp"
                 #include "ck/library/utility/check_err.hpp"
@@ -287,7 +285,8 @@ class CKTemplate(CUDATemplate):
         res = super().globals()
         res.splice(
             """
-                // 'ere be globals
+                // CK globals
+
                 template <ck::index_t... Is>
                 using S = ck::Sequence<Is...>;
 
