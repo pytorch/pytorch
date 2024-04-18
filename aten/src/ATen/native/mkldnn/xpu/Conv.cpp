@@ -335,10 +335,12 @@ Attr get_onednn_conv_sum_attr(
       stride_,
       dilation_);
   MemoryFormat mem_fmt = at::MemoryFormat::Contiguous;
-  bool propagate_channels_last =
-      is_smf_channels_last(input_r) || is_smf_channels_last(weight_r);
-  if (propagate_channels_last)
-    mem_fmt = get_cl_tag_by_ndim(ndim);
+  auto input_fmt = input_r.suggest_memory_format();
+  auto input_is_cl = (input_fmt == at::MemoryFormat::ChannelsLast || input_fmt == at::MemoryFormat::ChannelsLast3d);
+  auto weight_fmt = weight_r.suggest_memory_format();
+  auto weight_is_cl = (weight_fmt == at::MemoryFormat::ChannelsLast || weight_fmt == at::MemoryFormat::ChannelsLast3d);
+
+  bool propagate_channels_last = input_is_cl || weight_is_cl;
 
   Tensor out = at::empty(output_size, input_r.options().memory_format(mem_fmt));
   if (!onednn::binary_valid(out, accumu)) {
