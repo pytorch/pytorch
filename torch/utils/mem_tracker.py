@@ -2,7 +2,7 @@ import math
 from collections import defaultdict
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Dict, List, NamedTuple, Optional
+from typing import Any, Dict, List, NamedTuple, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -18,8 +18,10 @@ __all__ = ["MemoryTrackingMode"]
 
 class _RefType(str, Enum):
     parameter = "parameter"
+    unsharded_parameter = "unsharded_parameter"
     buffer = "buffer"
     gradient = "gradient"
+    unsharded_gradient = "unsharded_gradient"
     activation = "activation"
     optstate = "optstate"
 
@@ -30,12 +32,16 @@ class _WeakRefInfo:
         self.size = size
         self.element_size = element_size
         self.reftype = reftype
-        self.mem_consumed = (
-            math.ceil((self.size * self.element_size) / _PYTORCH_MIN_ALLOCATE)
-            * _PYTORCH_MIN_ALLOCATE
-        )
+        self.mem_consumed = self._calculate_mem_consumed()
 
-    def get_mem_consumed(self) -> int:
+    def _calculate_mem_consumed(self)->int:
+        return (math.ceil((self.size * self.element_size) / _PYTORCH_MIN_ALLOCATE)
+            * _PYTORCH_MIN_ALLOCATE)
+
+    def get_mem_consumed(self, st: torch.UntypedStorage) -> int:
+        if st.size() != self.size:
+            self.size = st.size()
+            self.mem_consumed = self._calculate_mem_consumed()
         return self.mem_consumed
 
 
@@ -68,13 +74,13 @@ class MemoryTrackingMode(TorchDispatchMode):
         self.FIRST_OPT_ITER: bool = True
         self._module_to_hook_handles: Dict[nn.Module, _ModuleHookHandles] = {}
         self._param_to_grad_hook_handles: Dict[nn.Parameter, RemovableHandle] = {}
-        self._optimizer_hook_handle: RemovableHandle
+        self._optimizer_hook_handle: Union[RemovableHandle, None] = None
         self.WINFO = WeakIdKeyDictionary()
 
     def _update_stats(self):
         curr_use: int = 0
-        for winfo in self.WINFO.values():
-            curr_use += winfo.get_mem_consumed()
+        for st, winfo in self.WINFO.items():
+            curr_use += winfo.get_mem_consumed(st)
 
         if self._MEMORY_MAX < curr_use:
             self._MEMORY_MAX = curr_use
@@ -90,13 +96,17 @@ class MemoryTrackingMode(TorchDispatchMode):
     def _get_current_memory_allocated(self) -> Dict[str, int]:
         mem_stats = defaultdict(int)
         mem_stats[_RefType.parameter.name] = 0
+        mem_stats[_RefType.unsharded_parameter.name] = 0
         mem_stats[_RefType.gradient.name] = 0
+        mem_stats[_RefType.unsharded_gradient.name] = 0
         mem_stats[_RefType.optstate.name] = 0
         mem_stats[_RefType.activation.name] = 0
         mem_stats[_RefType.buffer.name] = 0
-        for winfo in self.WINFO.values():
-            mem_stats[winfo.reftype.name] += winfo.get_mem_consumed()
-        mem_stats["total"] = sum([m for m in mem_stats.values()])
+        for st, winfo in self.WINFO.items():
+            mem_stats[winfo.reftype.name] += winfo.get_mem_consumed(st)
+        mem_stats["TRACKER_total"] = sum([m for m in mem_stats.values()])
+        if torch.cuda.is_available():
+            mem_stats["CUDA_total"] = torch.cuda.memory_allocated()
         return mem_stats
 
     def print_mem_stats(self, stats: Optional[Dict[str, int]] = None):
@@ -173,10 +183,11 @@ class MemoryTrackingMode(TorchDispatchMode):
             self._register_module_hooks(name, module)
 
         def _grad_hook(param: nn.Parameter):
-            st = param.grad.untyped_storage()
-            winfo = self.WINFO.get(st, None)
-            assert winfo is not None, "grad tensor not found in WINFO"
-            winfo.reftype = _RefType.gradient
+            if param.grad is not None:
+                st = param.grad.untyped_storage()
+                winfo = self.WINFO.get(st, None)
+                assert winfo is not None, "grad tensor not found in WINFO"
+                winfo.reftype = _RefType.gradient
 
         for param in mod.parameters():
             st = param.untyped_storage()
