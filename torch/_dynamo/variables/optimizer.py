@@ -156,7 +156,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             ):
                 return self.value.param_groups[arg.source.index]
 
-            raise ArgMappingException()
+            raise ArgMappingException
 
         new_args = [map_arg(arg) for arg in args]
         new_kwargs = {k: map_arg(v) for k, v in kwargs.items()}

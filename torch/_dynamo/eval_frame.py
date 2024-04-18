@@ -58,7 +58,7 @@ from .code_context import code_context
 from .exc import CondOpArgsMismatchError, UserError, UserErrorType
 from .mutation_guard import install_generation_tagging_init
 from .types import CacheEntry, DynamoCallback
-from .utils import common_constant_types, compile_times
+from .utils import common_constant_types, compile_times, set_example_value
 
 log = logging.getLogger(__name__)
 
@@ -335,6 +335,22 @@ class _TorchDynamoContext:
             new_mod.get_compiler_config = get_compiler_config
 
             return new_mod
+
+        if inspect.isclass(fn):
+            # User has wrapped the class with compile/disable decorator. Apply
+            # disable to init/call method.
+            cls_obj = fn
+            if isinstance(self, DisableContext):
+                # Disable on init is useful for reconstruction of bytecodes where we
+                # want to prevent Dynamo from tracing into the init function. Check
+                # test_reconstruction in test_model_output.py.
+                cls_obj.__init__ = self(cls_obj.__init__)
+            cls_obj.__call__ = self(cls_obj.__call__)
+            if issubclass(cls_obj, torch.nn.Module):
+                # NN module variable tracker directly inlines the _call_impl. Disable it.
+                cls_obj._call_impl = self(cls_obj._call_impl)
+            return cls_obj
+
         assert callable(fn)
 
         try:
@@ -750,7 +766,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "tensor_dict" in self.current_node.meta:
             arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
         if "example_value" in self.current_node.meta:
-            arg.node.meta["example_value"] = self.current_node.meta["example_value"]
+            set_example_value(arg.node, self.current_node.meta["example_value"])
         return arg
 
     def output(self, target, args, kwargs):
@@ -774,9 +790,9 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "val" in self.current_node.meta:
             result_proxy.node.meta["val"] = self.current_node.meta["val"]
         if "example_value" in self.current_node.meta:
-            result_proxy.node.meta["example_value"] = self.current_node.meta[
-                "example_value"
-            ]
+            set_example_value(
+                result_proxy.node, self.current_node.meta["example_value"]
+            )
         if self.current_node.op != "output":
             result_proxy.node._rename(
                 getattr(self.current_node, "name", result_proxy.node.name)
