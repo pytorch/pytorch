@@ -1365,9 +1365,7 @@ class TestNestedTensor(torch._dynamo.test_case.TestCase):
         nt, _ = self._get_jagged_tensor(((2, 3, 4), 5), None)
 
         def fn(x):
-            return torch.nested.nested_tensor_from_jagged(
-                x.values() * 2, x.offsets()
-            )
+            return torch.nested.nested_tensor_from_jagged(x.values() * 2, x.offsets())
 
         torch.compile(fn, fullgraph=True, backend="aot_eager")(nt)
 
