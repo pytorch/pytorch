@@ -895,7 +895,7 @@ def _gen_source(source, name):
     return source
 
 
-def _assert_all_args_kwargs_const():
+def _assert_all_args_kwargs_const(name, args, kwargs):
     if not all(
         x.is_python_constant() for x in itertools.chain(args, kwargs.values())
     ):
@@ -903,8 +903,8 @@ def _assert_all_args_kwargs_const():
 
 def _get_kwargs(*names, mod, name, args, kwargs, assert_const=True):
     if assert_const:
-        _assert_all_args_kwargs_const()
-    fn = getattr(module, name)
+        _assert_all_args_kwargs_const(name, args, kwargs)
+    fn = getattr(mod, name)
     bound_args = inspect.signature(fn).bind(
         *([x.as_python_constant() for x in args]),
         **{k: v.as_python_constant() for k, v in kwargs.items()},
@@ -921,10 +921,10 @@ def _wrap_values(items, *, tx, key, source_cls, source):
                 submod,
                 key,
                 name,
-                source=NNModuleSource(gen_source(self.source, name)),
+                source=NNModuleSource(_gen_source(source, name)),
             )
         )
-    return ListIteratorVariable(result, mutable_local=MutableLocal())
+    return variables.ListIteratorVariable(result, mutable_local=MutableLocal())
 
 def _named_embed(name, obj, *, tx, key, source_cls, source):
     return TupleVariable(
@@ -934,7 +934,7 @@ def _named_embed(name, obj, *, tx, key, source_cls, source):
                 obj,
                 key,
                 name,
-                source=NNModuleSource(gen_source(self.source, name)),
+                source=NNModuleSource(_gen_source(source, name)),
             ),
         ]
     )
