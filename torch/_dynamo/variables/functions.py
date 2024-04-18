@@ -438,7 +438,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
 
     def get_function(self):
         if self.closure:
-            raise NotImplementedError()
+            raise NotImplementedError
         func = types.FunctionType(
             self.code.as_python_constant(),
             self.f_globals,

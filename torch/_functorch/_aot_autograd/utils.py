@@ -7,7 +7,7 @@ import operator
 import warnings
 from contextlib import nullcontext
 from functools import wraps
-from typing import Any, Callable, List, Optional, Tuple
+from typing import Any, Callable, List, Optional, Tuple, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -103,7 +103,9 @@ def make_boxed_compiler(compiler):
     return f
 
 
-def call_func_at_runtime_with_args(f, args, steal_args=False, disable_amp=False):
+def call_func_at_runtime_with_args(
+    f, args: Union[Tuple[Any], List[Any]], steal_args=False, disable_amp=False
+):
     if not steal_args:
         args = list(args)
     assert isinstance(args, list)
@@ -280,3 +282,13 @@ def unlift_tokens(fw_module, fw_metadata):
     fw_metadata.num_forward_returns -= num_tokens
     fw_metadata.num_forward -= num_tokens
     fw_metadata.tokens = {}
+
+
+def root_module_when_exporting_non_strict(flat_fn):
+    # When exporting in non-strict mode, we wrap the root module in a specific pattern.
+    # See `_aot_export_non_strict` in torch.export._trace.py.
+    # We look for that wrapping pattern here.
+    if hasattr(flat_fn, "_orig_mod") and hasattr(flat_fn._orig_mod, "_export_root"):
+        return flat_fn._orig_mod._export_root
+    else:
+        return None

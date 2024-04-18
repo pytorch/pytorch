@@ -203,7 +203,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
     # rules, keyed by aten op name, value is propagation func
     _op_dispatcher: op_dispatch.OpDispatcher = op_dispatch.OpDispatcher()
 
-    @torch._dynamo.disable
     @staticmethod
     def __new__(
         cls,
@@ -295,7 +294,6 @@ class DTensor(torch.Tensor):  # pyre-ignore[13]: pyre is bad at __new__
         )
 
     @classmethod
-    @torch._dynamo.disable
     # pyre-fixme[3]: Return type must be annotated.
     # pyre-fixme[2]: Parameter must be annotated.
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
