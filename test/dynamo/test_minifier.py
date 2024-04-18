@@ -143,7 +143,9 @@ inner(torch.randn(20, 20).cuda(), torch.randn(20, 20))
         res = self._run_full_test(run_code, "dynamo", "ReluCompileError", isolate=False)
 
         if torch._dynamo.config.use_single_step_graph:
-            expected_repro = """\
+            self.assertExpectedInline(
+                res.minifier_module(),
+                """\
 class Repro(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -181,9 +183,12 @@ class Repro(torch.nn.Module):
         cpu = x3.cpu();  x3 = None
         add_6 = cpu + y3;  cpu = y3 = None
         relu = torch.relu(add_6);  add_6 = None
-        return (relu,)"""
+        return (relu,)""",
+            )
         else:
-            expected_repro = """\
+            self.assertExpectedInline(
+                res.minifier_module(),
+                """\
 class Repro(torch.nn.Module):
     def __init__(self):
         super().__init__()
@@ -215,12 +220,8 @@ class Repro(torch.nn.Module):
         cpu = x3.cpu();  x3 = None
         add_6 = cpu + y3;  cpu = y3 = None
         relu = torch.relu(add_6);  add_6 = None
-        return (relu,)"""
-
-        self.assertExpectedInline(
-            res.minifier_module(),
-            expected_repro,
-        )
+        return (relu,)""",
+            )
 
     # Test if we can actually get a minified graph
     def test_if_graph_minified(self):

@@ -291,7 +291,8 @@ class StructuredTraceTest(TestCase):
         dist.destroy_process_group()
 
         if torch._dynamo.config.use_single_step_graph:
-            expected_output = (
+            self.assertExpectedInline(
+                self.buffer.getvalue(),
                 """\
 {"dynamo_start": {"stack": "STACK"}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"dynamo_guards": {}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
@@ -313,10 +314,11 @@ class StructuredTraceTest(TestCase):
 {"inductor_output_code": {"filename": "FILENAME"}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_guards": {}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
-""",
-            )  # noqa: B950
+""",  # noqa: B950
+            )
         else:
-            expected_output = (
+            self.assertExpectedInline(
+                self.buffer.getvalue(),
                 """\
 {"dynamo_start": {"stack": "STACK"}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 0}
 {"dynamo_guards": {}, "rank": 0, "frame_id": 0, "frame_compile_id": 0, "attempt": 1, "has_payload": "HASH"}
@@ -338,13 +340,8 @@ class StructuredTraceTest(TestCase):
 {"inductor_output_code": {"filename": "FILENAME"}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"dynamo_guards": {}, "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0, "has_payload": "HASH"}
 {"compilation_metrics": "METRICS", "rank": 0, "frame_id": 1, "frame_compile_id": 0, "attempt": 0}
-""",
-            )  # noqa: B950
-
-        self.assertExpectedInline(
-            self.buffer.getvalue(),
-            expected_output[0],
-        )
+""",  # noqa: B950
+            )
 
         self.assertParses()
 
