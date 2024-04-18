@@ -257,9 +257,9 @@ def templated_attention(*args, **kwargs):
                 make_contiguous_strides_for(query.get_size()),
             )
             choices: List[Any] = []
-            configs = []
+            configs: List[Any] = []
             if query.get_dtype() == torch.float32:
-                configs.append(64, 64, 4, 3)
+                configs.append((64, 64, 4, 3))
             configs += [
                 (128, 64, 4, 3),
                 (128, 128, 4, 3),
