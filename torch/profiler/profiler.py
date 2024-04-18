@@ -1,6 +1,7 @@
 import gzip
 import json
 import os
+import shutil
 import tempfile
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -784,8 +785,33 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         Removes ET observer from record function callbacks.
         """
+
+        def _save_triton_kernels():
+            # Save the kernel paths for the generated kernels
+            from torch._inductor.codecache import PyCodeCache as PyCodeCache
+
+            kernel_files = [
+                v.__file__
+                for v in PyCodeCache.cache.values()
+                if getattr(v, "__file__", None) is not None
+            ]
+            work_dir, file_name = os.path.split(self._output_file_path)
+            resource_dir = os.path.join(
+                work_dir, os.path.splitext(file_name)[0] + "_resources"
+            )
+            if not os.path.exists(resource_dir):
+                os.mkdir(resource_dir)
+
+            for kernel_file in kernel_files:
+                if kernel_file is None:
+                    continue
+                path, name = os.path.split(kernel_file)
+                dst = os.path.join(resource_dir, name)
+                shutil.copyfile(kernel_file, dst)
+
         if self._registered:
             self.stop()
+            _save_triton_kernels()
             _remove_execution_trace_observer()
             self._registered = False
 
