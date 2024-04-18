@@ -108,11 +108,17 @@ struct EnableHermeticPyObject {
 class PythonKernelHolder : public c10::OperatorKernel {
   c10::SafePyObject func_;
   c10::DispatchKey dispatch_key_;
+  // If "with_keyset", then we expect a keyset as the first arg.
+  bool with_keyset_;
 
  public:
-  PythonKernelHolder(py::object func, c10::DispatchKey dispatch_key)
+  PythonKernelHolder(
+      py::object func,
+      c10::DispatchKey dispatch_key,
+      bool with_keyset = false)
       : func_(func.release().ptr(), getPyInterpreter()),
-        dispatch_key_(dispatch_key) {}
+        dispatch_key_(dispatch_key),
+        with_keyset_(with_keyset) {}
 
   void operator()(
       const c10::OperatorHandle& op,
@@ -127,7 +133,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
       const auto& cur_torch_dispatch_mode_state =
           c10::impl::TorchDispatchModeTLS::get_stack_at(mode_stack_len - 1);
       cur_torch_dispatch_mode_state->pyinterpreter()
-          ->python_op_registration_trampoline(op, dispatch_key_, stack);
+          ->python_op_registration_trampoline(
+              op, dispatch_key_, keyset, stack, with_keyset_);
       return;
     }
 
@@ -144,7 +151,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
             ivalue.unsafeToTensorImpl()->key_set().has(
                 at::DispatchKey::Python)) {
           (*interpreter)
-              ->python_op_registration_trampoline(op, dispatch_key_, stack);
+              ->python_op_registration_trampoline(
+                  op, dispatch_key_, keyset, stack, with_keyset_);
           return;
         }
       } else if (ivalue.isTensorList() || ivalue.isOptionalTensorList()) {
@@ -159,7 +167,8 @@ class PythonKernelHolder : public c10::OperatorKernel {
           if (interpreter &&
               nv.unsafeToTensorImpl()->key_set().has(at::DispatchKey::Python)) {
             (*interpreter)
-                ->python_op_registration_trampoline(op, dispatch_key_, stack);
+                ->python_op_registration_trampoline(
+                    op, dispatch_key_, keyset, stack, with_keyset_);
             return;
           }
         }
@@ -180,10 +189,11 @@ class PythonKernelHolder : public c10::OperatorKernel {
     EnableHermeticPyObject g2;
 #endif
     auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
-    auto obj = py::reinterpret_steal<py::object>(PyObject_Call(
-        func_.ptr(getPyInterpreter()),
-        args_kwargs.first.ptr(),
-        args_kwargs.second.ptr()));
+    auto func =
+        py::reinterpret_borrow<py::object>(func_.ptr(getPyInterpreter()));
+    auto obj = with_keyset_
+        ? func(keyset, *args_kwargs.first, **args_kwargs.second)
+        : func(*args_kwargs.first, **args_kwargs.second);
     if (!obj) {
       throw python_error();
     }
@@ -242,7 +252,25 @@ void initDispatchBindings(PyObject* module) {
 
   py::class_<c10::OperatorHandle>(m, "_DispatchOperatorHandle")
       .def("schema", &c10::OperatorHandle::schema)
-      .def("debug", &c10::OperatorHandle::debug);
+      .def("debug", &c10::OperatorHandle::debug)
+      .def(
+          "redispatch_boxed",
+          [](py::object self,
+             c10::DispatchKeySet keyset,
+             py::args args,
+             const py::kwargs& kwargs) {
+            auto& handle = self.cast<c10::OperatorHandle&>();
+            auto stack = torch::jit::createStackForSchema(
+                handle.schema(),
+                std::move(args),
+                kwargs,
+                /*self=*/c10::nullopt);
+            {
+              pybind11::gil_scoped_release no_gil_guard;
+              handle.redispatchBoxed(keyset, &stack);
+            }
+            return torch::jit::createPyObjectForStack(std::move(stack));
+          });
 
   m.def("_dispatch_call_boxed", &ophandle_call_boxed);
 
@@ -351,7 +379,8 @@ void initDispatchBindings(PyObject* module) {
              const char* name,
              // TODO: empty string no longer works
              c10::DispatchKey dispatch,
-             py::object func) {
+             py::object func,
+             bool with_keyset) {
             HANDLE_TH_ERRORS
             auto& lib = self.cast<torch::Library&>();
             if (func.is(py::module::import("torch.library")
@@ -367,7 +396,7 @@ void initDispatchBindings(PyObject* module) {
                       dispatch,
                       CppFunction::makeFromBoxedFunctor(
                           std::make_unique<PythonKernelHolder>(
-                              func, dispatch))),
+                              func, dispatch, with_keyset))),
                   register_or_verify());
               python_registrations_[lib._resolve(name)].insert_or_assign(
                   dispatch,
@@ -379,7 +408,8 @@ void initDispatchBindings(PyObject* module) {
           "",
           py::arg("name"),
           py::arg("dispatch"),
-          py::arg("func"))
+          py::arg("func"),
+          py::arg("with_keyset") = false)
       .def(
           "define",
           [](const py::object& self,
@@ -670,6 +700,10 @@ void initDispatchBindings(PyObject* module) {
   m.attr("_additional_keys_to_prop_for_wrapper_tensors") =
       py::cast(at::functorch::kKeysToPropagateToWrapper);
 
+  m.attr("_after_autograd_keyset") = py::cast(c10::after_autograd_keyset);
+  m.attr("_after_ADInplaceOrView_keyset") =
+      py::cast(c10::after_ADInplaceOrView_keyset);
+
   m.def("_dispatch_has_backend_fallback", [](c10::DispatchKey t) {
     return c10::Dispatcher::singleton().hasBackendFallbackForDispatchKey(t);
   });
@@ -880,7 +914,9 @@ void initDispatchBindings(PyObject* module) {
 void python_op_registration_trampoline_impl(
     const c10::OperatorHandle& op,
     c10::DispatchKey key,
-    torch::jit::Stack* stack) {
+    c10::DispatchKeySet keyset,
+    torch::jit::Stack* stack,
+    bool with_keyset) {
   auto arguments = torch::jit::pop(*stack, op.schema().arguments().size());
   py::gil_scoped_acquire g;
   auto args_kwargs = parseIValuesToPyArgsKwargs(op, arguments);
@@ -888,8 +924,10 @@ void python_op_registration_trampoline_impl(
   TORCH_INTERNAL_ASSERT(func != nullptr);
   auto* pyobj = func->ptr(getPyInterpreter());
   TORCH_INTERNAL_ASSERT(pyobj != nullptr);
-  auto obj = py::reinterpret_steal<py::object>(
-      PyObject_Call(pyobj, args_kwargs.first.ptr(), args_kwargs.second.ptr()));
+  auto callable = py::reinterpret_borrow<py::object>(pyobj);
+  auto obj = with_keyset
+      ? callable(keyset, *args_kwargs.first, **args_kwargs.second)
+      : callable(*args_kwargs.first, **args_kwargs.second);
   if (!obj) {
     throw python_error();
   }
