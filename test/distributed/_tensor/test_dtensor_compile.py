@@ -289,6 +289,40 @@ class TestDTensorCompile(torch._dynamo.test_case.TestCase):
             tmp_dt._local_tensor.stride(), tmp_dt_fake._local_tensor.stride()
         )
 
+    def test_dtensor_contiguous_dtensor_noncontiguous_local_as_tangent(self):
+        # Partial -> Shard on an unbalanced tensor results in:
+        # - A contiguous DTensor
+        # - where the inner _local_tensor is noncontiguous
+        # When this tensor is a fwd graph output,
+        # AOTAutograd needs to make sure we trace the backward
+        # with a contiguous tangent
+        placement = Shard(1)
+
+        def fn(x):
+            out = x.redistribute(mesh, [placement])
+            return out
+
+        # Temporarily ignore setUp(), and use rank3 graphs during tracing
+        dist.destroy_process_group()
+        fake_store = FakeStore()
+        dist.init_process_group("fake", store=fake_store, rank=3, world_size=2)
+        mesh = DeviceMesh(self.device_type, [1, 3])
+
+        x = torch.randn(10, 257, 160, requires_grad=True)
+        x_dt = DTensor.from_local(
+            x,
+            mesh,
+            [_Partial()],
+            run_check=False,
+            shape=(10, 257, 160),
+            stride=(41120, 160, 1),
+        )
+
+        out_dt = torch.compile(fn)(x_dt)
+        # If we don't properly contiguify our traced tangents,
+        # this fails with an inductor stride assert
+        out_dt.to_local().sum().backward()
+
     def test_dynamo_to_local_kwargs(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 

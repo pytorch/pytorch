@@ -83,7 +83,16 @@ def coerce_tangent(x):
     if is_traceable_wrapper_subclass(out) and hasattr(
         out, "__coerce_tangent_metadata__"
     ):
-        return out.__coerce_tangent_metadata__()
+        out = out.__coerce_tangent_metadata__()
+    # It's possible to have a subclass that advertises as contiguous,
+    # but has noncontiguous inner tensors.
+    # Force these to be conntiguous too
+    if is_traceable_wrapper_subclass(out):
+        for attr in out.__tensor_flatten__()[0]:
+            elem = getattr(out, attr)
+            if not elem.is_contiguous():
+                elem_contig = elem.contiguous()
+                setattr(out, attr, elem_contig)
     return out
 
 

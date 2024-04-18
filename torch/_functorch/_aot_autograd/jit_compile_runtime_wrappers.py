@@ -68,6 +68,19 @@ aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
 aten = torch.ops.aten
 
 
+def _force_contiguous(x):
+    if not isinstance(x, torch.Tensor):
+        return x
+    x = x.contiguous()
+    if not is_traceable_wrapper_subclass(x):
+        return x
+    for attr in x.__tensor_flatten__()[0]:
+        elem = getattr(x, attr)
+        if not elem.is_contiguous():
+            setattr(x, attr, elem.contiguous())
+    return x
+
+
 def _compute_output_meta_with_inductor_strides(fw_module, fwd_output_strides):
     out = [n.meta["val"] for n in (list(fw_module.graph.nodes)[-1].args[0])]
     # will only be set for inductor
@@ -887,11 +900,8 @@ Got grad_output types: {str(grad_output_types)}"""
             # Make the tangents contiguous. Note that we must do this after subclass desugaring
             # because inputs to inductor have to be contiguous
             all_args = [
-                t.contiguous()
-                if (
-                    (tangents_start_idx <= i < tangents_end_idx)
-                    and (not t.is_contiguous())
-                )
+                _force_contiguous(t)
+                if (tangents_start_idx <= i < tangents_end_idx)
                 else t
                 for i, t in enumerate(all_args)
             ]
