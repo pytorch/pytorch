@@ -60,6 +60,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    serialTest,
     skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
@@ -771,6 +772,7 @@ class TestProfiler(TestCase):
         }.items(),
         name_fn=lambda name, thread_spec: name,
     )
+    @serialTest()
     @parametrize("work_in_main_thread", [True, False])
     def test_source_multithreaded(self, name, thread_spec, work_in_main_thread):
         """Test various threading configurations.
