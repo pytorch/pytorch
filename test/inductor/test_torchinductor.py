@@ -9,6 +9,7 @@ import itertools
 import math
 import operator
 import os
+from pathlib import Path
 import random
 import re
 import shutil
@@ -768,7 +769,55 @@ class CommonTemplate:
         )
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
-    def test_aoti_compile_with_persistent_cache(self):
+    def test_eager_aoti_cache_hit(self):
+        ns = "aten"
+        op_name = "cos"
+        op_overload_name = "default"
+        dispatch_key = "CPU"
+        device = "cpu"
+        if self.device.lower() == "cuda":
+            dispatch_key = "CUDA"
+            device = "cuda"
+
+        input_tensor = torch.randn(128, dtype=torch.float, device=device)
+
+        # Produce kernel for the first time
+        kernel_lib_path = aoti_compile_with_persistent_cache(
+            ns,
+            op_name,
+            op_overload_name,
+            device,
+            False,
+            torch.ops.aten.cos,
+            (input_tensor, ),
+            {},
+        )
+        self.assertTrue(Path(kernel_lib_path).exists())
+
+        from unittest import mock
+
+        # patch the aoti_compile_with_persistent_cache as None to ensure no new kernel is generated
+        with mock.patch("torch._inductor.utils.aoti_compile_with_persistent_cache", None):
+            qualified_op_name = f"{ns}::{op_name}"
+            _, overload_names = torch._C._jit_get_operation(qualified_op_name)
+            with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+                # Get ref result from eager
+                ref_value = getattr(torch, op_name)(input_tensor)
+
+                for overload_name in overload_names:
+                    try:
+                        schema = torch._C._get_schema(qualified_op_name, overload_name)
+                        torch_compile_op_lib_impl._impl_with_aoti_compile(  # noqa: F821
+                            schema.name, schema.overload_name, dispatch_key
+                        )
+                    except Exception as e:
+                        continue
+                # Invoke the pre-compiled kernel and get result.
+                res_value = getattr(torch, op_name)(input_tensor)
+                self.assertEqual(ref_value, res_value)
+
+    @skipCUDAIf(not SM80OrLater, "Requires sm80")
+    def test_eager_aoti_with_persistent_cache(self):
         def fn(a):
             return torch.abs(a)
 
