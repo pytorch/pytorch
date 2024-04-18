@@ -1208,9 +1208,6 @@ class InvalidVecISA(VecISA):
 
 
 def x86_isa_checker() -> List[str]:
-    from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppOptions
-    from torch._inductor.jit_builder.isa_help_code_store import get_x86_isa_detect_code
-
     supported_isa: List[str] = []
 
     def _check_and_append_supported_isa(
@@ -1226,40 +1223,16 @@ def x86_isa_checker() -> List[str]:
     if Arch != "x86_64" and Arch != "AMD64":
         return supported_isa
 
-    cpp_code = get_x86_isa_detect_code()
+    avx2 = torch.cpu._is_cpu_support_avx2()
+    avx512 = torch.cpu._is_cpu_support_avx512()
 
-    key, input_path = write(cpp_code, "cpp")
+    _check_and_append_supported_isa(supported_isa, avx2, "avx2")
+    _check_and_append_supported_isa(supported_isa, avx512, "avx512")
 
-    from filelock import FileLock
+    # Remove after all feature completed.
+    print(f"!!! x86 isa --> avx2: {avx2}, avx512: {avx512}")
 
-    lock_dir = get_lock_dir()
-    lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
-    with lock:
-        output_dir = os.path.dirname(input_path)
-        x86_isa_help_builder = CppBuilder(key, [input_path], CppOptions(), output_dir)
-        status, target_file = x86_isa_help_builder.build()
-
-        # 1. open the shared library
-        isa_help_lib = ctypes.CDLL(target_file)
-
-        # 2. tell Python the argument and result types of function
-        isa_help_lib.check_avx2_feature.restype = ctypes.c_bool
-        isa_help_lib.check_avx2_feature.argtypes = []
-
-        isa_help_lib.check_avx512_feature.restype = ctypes.c_bool
-        isa_help_lib.check_avx512_feature.argtypes = []
-
-        # 3. call cpp backend and get result
-        avx2 = isa_help_lib.check_avx2_feature()
-        avx512 = isa_help_lib.check_avx512_feature()
-
-        _check_and_append_supported_isa(supported_isa, avx2, "avx2")
-        _check_and_append_supported_isa(supported_isa, avx512, "avx512")
-
-        # Remove after all feature completed.
-        # print(f"!!! x86 isa --> avx2: {avx2}, avx512: {avx512}")
-
-        return supported_isa
+    return supported_isa
 
 
 invalid_vec_isa = InvalidVecISA()
@@ -1895,7 +1868,6 @@ class AotCodeCompiler:
             def _to_bytes(t: torch.Tensor) -> bytes:
                 # This serializes the tensor's untyped_storage to bytes by accessing
                 # the raw data of the underlying structure.
-                import ctypes
 
                 if t.numel() == 0:
                     return b""
