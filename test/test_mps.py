@@ -172,8 +172,6 @@ def mps_ops_grad_modifier(ops):
         'nn.functional.conv_transpose1d': [torch.float16],
         'nn.functional.conv_transpose2d': [torch.float16],
         'nn.functional.conv_transpose3d': [torch.float16],
-        'nn.functional.nll_loss': [torch.float16],
-        'nn.functional.cross_entropy': [torch.float16],
     }
 
     MACOS_13_3_XFAILLIST_GRAD = {
@@ -11414,7 +11412,9 @@ class TestConsistency(TestCaseMPS):
         'nn.functional.batch_norm',
         'nn.functional.instance_norm',
         'round', 'xlogy', 'addcmul',
+        'nn.functional.cross_entropy',
         'nn.functional.binary_cross_entropy',
+        'nn.functional.nll_loss',
         'nn.functional.max_pool2d',
         'nn.functional.gelu',
         'nn.functional.glu',
