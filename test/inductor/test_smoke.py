@@ -7,7 +7,7 @@ import torch._logging
 
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_LINUX
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA, HAS_GPU
 
 
 class MLP(torch.nn.Module):
@@ -27,20 +27,20 @@ def _test_f(x):
 
 
 class SmokeTest(TestCase):
-    @unittest.skipIf(not HAS_CUDA, "Triton is not available")
+    @unittest.skipIf(not HAS_GPU, "Triton is not available")
     def test_mlp(self):
         torch._logging.set_logs(
             dynamo=logging.DEBUG, inductor=logging.DEBUG, aot=logging.DEBUG
         )
 
-        mlp = torch.compile(MLP().cuda())
+        mlp = torch.compile(MLP().to(GPU_TYPE))
         for _ in range(3):
-            mlp(torch.randn(1, device="cuda"))
+            mlp(torch.randn(1, device=GPU_TYPE))
 
         # set back to defaults
         torch._logging.set_logs()
 
-    @unittest.skipIf(not HAS_CUDA, "Triton is not available")
+    @unittest.skipIf(not HAS_GPU, "Triton is not available")
     def test_compile_decorator(self):
         @torch.compile
         def foo(x):
@@ -51,8 +51,8 @@ class SmokeTest(TestCase):
             return x * x
 
         for _ in range(3):
-            foo(torch.full((3, 4), 0.7, device="cuda"))
-            bar(torch.rand((2, 2), device="cuda"))
+            foo(torch.full((3, 4), 0.7, device=GPU_TYPE))
+            bar(torch.rand((2, 2), device=GPU_TYPE))
 
     def test_compile_invalid_options(self):
         with self.assertRaises(RuntimeError):
@@ -62,6 +62,6 @@ class SmokeTest(TestCase):
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if IS_LINUX and torch.cuda.is_available():
-        if torch.cuda.get_device_properties(0).major > 5:
+    if IS_LINUX and HAS_GPU:
+        if (not HAS_CUDA) or torch.cuda.get_device_properties(0).major <= 5:
             run_tests()

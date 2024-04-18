@@ -305,7 +305,9 @@ def compute_grads(args, kwrags, results, grads):
         return leaf_tensors
 
     flat_results = pytree.tree_leaves(results)
-    flat_diff_results = [r for r in flat_results if r.requires_grad]
+    flat_diff_results = [
+        r for r in flat_results if isinstance(r, torch.Tensor) and r.requires_grad
+    ]
     assert len(flat_diff_results) > 0
 
     leaf_tensors = gather_leaf_tensors(args, kwrags)
@@ -518,7 +520,7 @@ def check_model(
         grads = [
             torch.rand(r.shape, device=r.device, dtype=r.dtype)
             for r in correct_flat
-            if r.requires_grad
+            if isinstance(r, torch.Tensor) and r.requires_grad
         ]
         for g in grads:
             g /= g.norm()

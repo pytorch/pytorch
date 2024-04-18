@@ -216,7 +216,6 @@ CI_SERIAL_LIST = [
     "test_reductions",
     "test_cuda",
     "test_cuda_expandable_segments",
-    "test_indexing",
     "test_fx_backends",
     "test_linalg",
     "test_cpp_extensions_jit",
@@ -229,13 +228,10 @@ CI_SERIAL_LIST = [
     "nn/test_pooling",
     "nn/test_convolution",  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
     "distributions/test_distributions",
-    "test_autograd",  # slow gradcheck runs a test that checks the cuda memory allocator
-    "test_prims",  # slow gradcheck runs a test that checks the cuda memory allocator
     "test_modules",  # failed test due to mismatched elements
     "functorch/test_vmap",  # OOM
     "test_fx",  # gets SIGKILL
     "test_dataloader",  # frequently hangs for ROCm
-    "test_serialization",  # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
     "test_schema_check",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
     "functorch/test_memory_efficient_fusion",  # Cause CUDA OOM on ROCm
     "test_utils",  # OOM
@@ -246,7 +242,6 @@ CI_SERIAL_LIST = [
     "test_module_hooks",  # OOM
     "inductor/test_max_autotune",
     "inductor/test_cutlass_backend",  # slow due to many nvcc compilation steps
-    "test_profiler",  # test_source_multithreaded is probably not compatible with parallelism
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [

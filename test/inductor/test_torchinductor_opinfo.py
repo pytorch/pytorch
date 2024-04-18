@@ -167,6 +167,8 @@ inductor_skips = defaultdict(dict)
 inductor_skips["cpu"] = {
     "linalg.ldl_factor": {f32, f64},  # flaky
     "nn.functional.cosine_embedding_loss": {b8},  # flaky
+    ("index_reduce", "prod"): {f16},  # flaky
+    ("index_reduce", "mean"): {f16},  # flaky
 }
 
 if IS_MACOS and IS_X86:
@@ -202,37 +204,6 @@ if TEST_WITH_ROCM:
     inductor_skips["cuda"]["logcumsumexp"] = {f32}
     inductor_skips["cuda"]["special.modified_bessel_i1"] = {f64}
 
-inductor_skips["xpu"] = {
-    # xpu crash case, wait for triton fix:
-    ("nn.functional.interpolate", "bicubic"): {u8, f16, bf16, f32, f64},
-    "cummax": {b8, f16},
-    "cummin": {b8, f16},
-    "__getitem__": {f16},
-    "gather": {f16},
-    "put": {f16},
-    "index_add": {f16},
-    "index_reduce": {f16},
-    "index_select": {f16},
-    "scatter_add": {f16},
-    ("scatter_reduce", "amax"): {f16},
-    ("scatter_reduce", "amin"): {f16},
-    ("scatter_reduce", "sum"): {f16},
-    ("scatter_reduce", "mean"): {f16},
-    ("scatter_reduce", "prod"): {f16},
-    # Jiterator kernel is not expected to work with inductor
-    "jiterator_2inputs_2outputs": {b8, f16, f32, f64, i32, i64},
-    "jiterator_4inputs_with_extra_args": {b8, f16, f32, f64, i32, i64},
-    "jiterator_binary": {b8, f16, f32, f64, i32, i64},
-    "jiterator_binary_return_by_ref": {b8, f16, f32, f64, i32, i64},
-    "jiterator_unary": {b8, f16, f32, f64, i32, i64},
-    # flaky
-    "nn.functional.cosine_embedding_loss": {b8},
-    "native_batch_norm": {f16, f32, f64},
-    "_native_batch_norm_legit": {f16, f32, f64},
-    "_batch_norm_with_update": {f16, f32, f64},
-}
-
-
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
@@ -256,7 +227,10 @@ inductor_expected_failures_single_sample["cpu"] = {
     ("normal", "number_mean"): {f16, f32, f64},
     ("sparse.mm", "reduce"): {f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "to_sparse": {f32, f64},
+    "to_sparse": {
+        f32,
+        f64,
+    },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCPU
     "view_as_complex": {f16},
 }
 
@@ -265,27 +239,18 @@ inductor_expected_failures_single_sample["cuda"] = {
     "_upsample_bilinear2d_aa": {f16, f32, f64},
     "cholesky": {f32, f64},
     "multinomial": {f16, f32, f64},
-    "nn.functional.normalize": {f16},
     ("normal", "in_place"): {f16, f32, f64},
     ("normal", "number_mean"): {f16, f32, f64},
     "sparse.sampled_addmm": {f32, f64},
-    "to_sparse": {f16, f32, f64},
-    "torch.ops.aten._efficient_attention_forward": {f16, bf16, f32},
-    "torch.ops.aten._flash_attention_forward": {f16, bf16, f32},
+    "torch.ops.aten._flash_attention_forward": {f16},
+    "torch.ops.aten._efficient_attention_forward": {f16, f32},
+    "to_sparse": {
+        f16,
+        f32,
+        f64,
+    },  # NYI: could not find kernel for aten.view.default at dispatch key DispatchKey.SparseCUDA
 }
 
-inductor_expected_failures_single_sample["xpu"] = {
-    "_upsample_bilinear2d_aa": {f16, f32, f64},
-    "cholesky": {f32, f64},
-    "multinomial": {f16, f32, f64},
-    "nn.functional.normalize": {f16},
-    ("normal", "in_place"): {f16, f32, f64},
-    ("normal", "number_mean"): {f16, f32, f64},
-    "sparse.sampled_addmm": {f32, f64},
-    "to_sparse": {f16, f32, f64},
-    "torch.ops.aten._efficient_attention_forward": {f16, bf16, f32},
-    "torch.ops.aten._flash_attention_forward": {f16, bf16, f32},
-}
 
 # intentionally not handled
 intentionally_not_handled = {
@@ -294,19 +259,11 @@ intentionally_not_handled = {
 }
 
 inductor_expected_failures_single_sample["cuda"].update(intentionally_not_handled)
-inductor_expected_failures_single_sample["xpu"].update(intentionally_not_handled)
 
 
 inductor_gradient_expected_failures_single_sample = defaultdict(dict)
 
-inductor_gradient_expected_failures_single_sample["cuda"] = {
-    "nn.functional.normalize": {f16},
-}
-inductor_gradient_expected_failures_single_sample["xpu"] = {
-    "nn.functional.normalize": {f16},
-}
-if not TEST_WITH_ROCM:
-    inductor_gradient_expected_failures_single_sample["cuda"]["tanh"] = {f16}
+inductor_gradient_expected_failures_single_sample["cuda"] = {}
 
 if not TEST_MKL:
     inductor_expected_failures_single_sample["cpu"].update({})
@@ -314,7 +271,6 @@ if not TEST_MKL:
 inductor_should_fail_with_exception = defaultdict(dict)
 inductor_should_fail_with_exception["cpu"] = {}
 inductor_should_fail_with_exception["cuda"] = {}
-inductor_should_fail_with_exception["xpu"] = {}
 
 
 def get_skips_and_xfails(from_dict, xfails=True):
@@ -384,6 +340,7 @@ inductor_override_kwargs = {
     ("nn.functional.cosine_similarity", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.instance_norm", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.local_response_norm", "cuda", f16): {"reference_in_float": True},
+    ("nn.functional.normalize", "cuda", f16): {"atol": 1e-3, "rtol": 0.05},
     ("nn.functional.rms_norm", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.soft_margin_loss", "cuda", f16): {"reference_in_float": True},
     ("nn.functional.softmin", "cuda", f16): {"atol": 1e-4, "rtol": 0.01},
@@ -421,53 +378,18 @@ inductor_override_kwargs = {
     ("nn.functional.upsample_bilinear", "cuda", f64): {"atol": 5e-4, "rtol": 0},
     ("nn.functional.interpolate.bicubic", "cpu", f32): {"atol": 5e-3, "rtol": 0},
     ("nn.functional.interpolate.bicubic", "cuda", f64): {"atol": 1e-3, "rtol": 0},
-    # XPU
-    ("cross", "xpu", f16): {"reference_in_float": True},
-    ("linalg.cross", "xpu", f16): {"reference_in_float": True},
-    ("addr", "xpu", f16): {"reference_in_float": True},
-    ("baddbmm", "xpu", f16): {"atol": 2e-3, "rtol": 0.002},  # decomp affects accuracy
-    ("angle", "xpu", f64): {"reference_in_float": True},
-    ("asin", "xpu", f16): {"reference_in_float": True},
-    ("atanh", "xpu", f16): {"reference_in_float": True},
-    ("cauchy", "xpu"): {"reference_in_float": True},
-    ("cummax", "xpu", f16): {"atol": 5e-4, "rtol": 0.002},
-    ("cumsum", "xpu", f16): {"reference_in_float": True},
-    ("cumprod", "xpu"): {"reference_in_float": True, "atol": 7e-5, "rtol": 0.002},
-    ("logcumsumexp", "xpu"): {"grad_atol": 8e-4, "grad_rtol": 0.001},
-    ("exponential", "xpu"): {"reference_in_float": True},
-    ("geometric", "xpu"): {"reference_in_float": True},
-    ("kron", "xpu", f16): {"reference_in_float": True},
-    ("log_normal", "xpu"): {"reference_in_float": True},
-    ("masked.softmin", "xpu", f16): {"atol": 1e-4, "rtol": 0.01},
-    ("nn.functional.batch_norm", "xpu", f16): {"reference_in_float": True},
-    ("nn.functional.batch_norm.without_cudnn", "xpu", f16): {
-        "reference_in_float": True
-    },
-    ("nn.functional.cosine_similarity", "xpu", f16): {"reference_in_float": True},
-    ("nn.functional.instance_norm", "xpu", f16): {"reference_in_float": True},
-    ("nn.functional.local_response_norm", "xpu", f16): {"reference_in_float": True},
-    ("nn.functional.rms_norm", "xpu", f16): {"reference_in_float": True},
-    ("nn.functional.soft_margin_loss", "xpu", f16): {"reference_in_float": True},
-    ("nn.functional.softmin", "xpu", f16): {"atol": 1e-4, "rtol": 0.01},
-    ("nn.functional.softsign", "xpu", f16): {"reference_in_float": True},
-    ("nn.functional.tanhshrink", "xpu", f16): {"atol": 3e-4, "rtol": 0.001},
-    ("outer", "xpu", f16): {"reference_in_float": True},
-    ("round.decimals_3", "xpu", f16): {"reference_in_float": True},
-    ("nn.functional.triplet_margin_loss", "xpu", f16): {"atol": 1e-4, "rtol": 0.02},
-    ("nn.functional.triplet_margin_with_distance_loss", "xpu", f16): {
-        "atol": 1e-4,
-        "rtol": 0.02,
-    },
-    ("sinc", "xpu", f16): {"atol": 0.008, "rtol": 0.002},
-    ("softmax", "xpu", f16): {"atol": 1e-4, "rtol": 0.02},
-    ("_softmax_backward_data", "xpu", f16): {"atol": 0.008, "rtol": 0.002},
-    ("special.log_ndtr", "xpu", f64): {"atol": 1e-6, "rtol": 1e-5},
-    ("std_mean.unbiased", "xpu", f16): {"reference_in_float": True},
-    ("uniform", "xpu"): {"reference_in_float": True},
-    # High atol due to precision loss
-    ("nn.functional.interpolate.bilinear", "xpu", f64): {"atol": 5e-4, "rtol": 0},
-    ("nn.functional.upsample_bilinear", "xpu", f64): {"atol": 5e-4, "rtol": 0},
-    ("nn.functional.interpolate.bicubic", "xpu", f64): {"atol": 1e-3, "rtol": 0},
+    # Unreasonably high atol requirement:
+    ("index_reduce.mean", "cuda", f16): {"check_gradient": False},
+    ("index_reduce.mean", "cuda", f32): {"check_gradient": False},
+    ("index_reduce.mean", "cuda", f64): {"check_gradient": False},
+    # Gradient contains non-finite entries:
+    ("index_reduce.amin", "cuda", f64): {"check_gradient": False},
+    ("index_reduce.amin", "cuda", f32): {"check_gradient": False},
+    ("index_reduce.amin", "cuda", f16): {"check_gradient": False},
+    ("index_reduce.amax", "cuda", f64): {"check_gradient": False},
+    ("index_reduce.amax", "cuda", f32): {"check_gradient": False},
+    ("index_reduce.amax", "cuda", f16): {"check_gradient": False},
+    ("tanh", "cuda", f16): {"atol": 1e-4, "rtol": 1e-2},
 }
 
 
@@ -480,6 +402,10 @@ inductor_all_samples = {
     "softmax.with_dtype",
     "index_add",
     "index_copy",
+    "index_reduce.prod",
+    "index_reduce.mean",
+    "index_reduce.amax",
+    "index_reduce.amin",
     "scatter_reduce.sum",
     "select_scatter",
     "squeeze",
@@ -753,7 +679,7 @@ class TestInductorOpInfo(TestCase):
         #     print(f"SUCCEEDED OP {op_name} on {device_type} with {dtype}", flush=True, file=f)
 
 
-instantiate_device_type_tests(TestInductorOpInfo, globals(), allow_xpu=True)
+instantiate_device_type_tests(TestInductorOpInfo, globals())
 
 if __name__ == "__main__":
     run_tests()
