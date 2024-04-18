@@ -294,7 +294,7 @@ class TestTraceableCollectives(MultiThreadedTestCase):
             for dim in dims_to_gather:
                 output_size = [3, 3, 3]
                 output_size[dim] *= mesh.size(0)
-                # each rank have its own tensor, all_gather gives a list
+                # each rank have its own tensor, all_gather gives a bigger tensor
                 local_tensor = torch.ones([3, 3, 3], device=device)
                 gathered_tensor = ft_c.all_gather_tensor(
                     local_tensor, gather_dim=dim, group=(mesh, 0)
@@ -684,6 +684,72 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             )
 
         self.assertIsNotNone(t.grad)
+
+    @parametrize("compile", [True, False])
+    def test_all_gather_tensor(self, compile: bool) -> None:
+        group = dist.group.WORLD.group_name
+
+        def my_func(t: torch.Tensor, dim: int) -> torch.Tensor:
+            assert t.requires_grad
+            out = ft_c.all_gather_tensor_autograd(
+                t * 1.0,
+                gather_dim=dim,
+                group=group,
+            )
+            out = out * 1.0
+            return out
+
+        if compile:
+            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
+        else:
+            compiled = my_func
+
+        dims_to_gather = [0, 1, 2]
+        for dim in dims_to_gather:
+            output_size = [3, 3, 3]
+            output_size[dim] *= self.world_size
+            # each rank have its own tensor, all_gather gives a bigger tensor
+            local_tensor = torch.ones([3, 3, 3], requires_grad=True)
+            gathered_tensor = compiled(local_tensor, dim)
+            self.assertEqual(gathered_tensor, torch.ones(output_size))
+
+            gathered_tensor.sum().backward()
+            self.assertEqual(
+                local_tensor.grad,
+                torch.full((3, 3, 3), fill_value=float(self.world_size)),
+            )
+
+    @parametrize("compile", [True, False])
+    def test_reduce_scatter_tensor(self, compile: bool) -> None:
+        group = dist.group.WORLD.group_name
+
+        def my_func(t: torch.Tensor, dim: int) -> torch.Tensor:
+            assert t.requires_grad
+            rs_tensor = (
+                ft_c.reduce_scatter_tensor_autograd(
+                    input_tensor * 1.0, "sum", scatter_dim=dim, group=group
+                )
+                * 1.0
+            )
+            return rs_tensor
+
+        if compile:
+            compiled = torch.compile(my_func, fullgraph=True, backend="aot_eager")
+        else:
+            compiled = my_func
+
+        dims_to_scatter = [0, 1]
+        for dim in dims_to_scatter:
+            group_size = self.world_size
+            input_size = [3, 3]
+            output_size = [3, 3]
+            output_size[dim] *= group_size
+            input_tensor = torch.ones(output_size, requires_grad=True)
+            rs_tensor = compiled(input_tensor, dim)
+            res_num = 1 * group_size
+            self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
+            rs_tensor.sum().backward()
+            self.assertEqual(input_tensor.grad, torch.full(output_size, fill_value=1.0))
 
 
 if __name__ == "__main__":
