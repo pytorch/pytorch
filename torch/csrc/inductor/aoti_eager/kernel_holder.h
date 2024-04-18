@@ -8,6 +8,7 @@
 #include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
 #include <torch/csrc/utils/pybind.h>
 
+#include <ATen/core/function_schema.h>
 #include <torch/csrc/utils/python_dispatch.h>
 
 #include <string>
@@ -95,7 +96,9 @@ class AOTIPythonKernelHolder : public c10::OperatorKernel {
   void init_aoti_kernel_cache();
   // Abstract the meta information of each tensor for the given operation. The
   // meta infomation will be used for cache lookup as the key.
-  AOTIKernelMetaInfo get_inputs_meta_info(const std::vector<at::Tensor>&);
+  AOTIKernelMetaInfo get_inputs_meta_info(
+      const std::vector<at::Tensor>& inputs,
+      const std::vector<c10::Argument>& inputs_argument);
   // Load the AOTIModelContainerRunner object from the given file path.
   std::shared_ptr<AOTIModelContainerRunner> load_aoti_model_runner(
       const std::string&);

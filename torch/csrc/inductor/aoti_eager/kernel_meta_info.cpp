@@ -1,5 +1,6 @@
 #if !defined(C10_MOBILE) && !defined(ANDROID)
 #include <torch/csrc/inductor/aoti_eager/kernel_meta_info.h>
+#include <iostream>
 
 namespace torch::inductor {
 
@@ -70,6 +71,27 @@ bool TensorMetaInfo::operator==(const TensorMetaInfo& other) const {
       this->scalar_value_ == other.scalar_value_ &&
       this->device_.type() == other.device_.type() &&
       this->sizes_ == other.sizes_ && this->strides_ == other.strides_;
+}
+
+std::ostream& operator<<(
+    std::ostream& stream,
+    const TensorMetaInfo& tensor_meta_info) {
+  stream << "is_symbolic_: " << tensor_meta_info.is_symbolic_ << std::endl;
+  stream << "dtype_: " << tensor_meta_info.dtype_ << std::endl;
+  stream << "scalar_value_: " << tensor_meta_info.scalar_value_.type()->str()
+         << "(" << tensor_meta_info.scalar_value_ << ")" << std::endl;
+  stream << "device_: " << tensor_meta_info.device_ << std::endl;
+  stream << "sizes_: ";
+  for (const auto& size : tensor_meta_info.sizes_) {
+    stream << size << " ";
+  }
+  stream << std::endl;
+  stream << "strides_: ";
+  for (const auto& stride : tensor_meta_info.strides_) {
+    stream << stride << " ";
+  }
+  stream << std::endl;
+  return stream;
 }
 
 size_t TensorMetaInfoHash::operator()(

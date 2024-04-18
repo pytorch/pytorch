@@ -229,7 +229,7 @@ bool AOTIPythonKernelHolder::cache_lookup(
   auto arg = return_arguments[0];
   // Only support return single tensor.
   // TODO: Extend scope to support tensor vector
-  if (!arg.type()->isSubtypeOf(c10::TensorType::get())) {
+  if (!arg.type()->isSubtypeOf(*c10::TensorType::get())) {
     return false;
   }
 
@@ -239,7 +239,8 @@ bool AOTIPythonKernelHolder::cache_lookup(
     return false;
   }
 
-  auto inputs_meta_info = get_inputs_meta_info(inputs);
+  TORCH_INTERNAL_ASSERT(op.schema().arguments().size() == inputs.size());
+  auto inputs_meta_info = get_inputs_meta_info(inputs, op.schema().arguments());
   auto aoti_kernel_state = aoti_kernel_cache_.find(inputs_meta_info);
   if (aoti_kernel_state == aoti_kernel_cache_.end()) {
     return false;
@@ -280,19 +281,24 @@ void AOTIPythonKernelHolder::cache_hit(
 }
 
 AOTIKernelMetaInfo AOTIPythonKernelHolder::get_inputs_meta_info(
-    const std::vector<at::Tensor>& inputs) {
+    const std::vector<at::Tensor>& inputs,
+    const std::vector<c10::Argument>& inputs_argument) {
   AOTIKernelMetaInfo inputs_meta_info;
-  for (const auto& input : inputs) {
+  for (size_t idx = 0; idx < inputs.size(); ++idx) {
+    auto input = inputs[idx];
+    auto input_info = inputs_argument[idx];
+
     auto device = input.device();
     if (device.is_cpu()) {
       // If the device is CPU, set the device index to -1.
       device = c10::Device(device.type(), -1);
     }
 
-    bool is_scalar_tensor = input.ndimension() == 0;
     c10::Scalar scalar_value((double)1.0);
     auto tensor_type = input.scalar_type();
-    if (is_scalar_tensor) {
+
+    bool is_scalar = input_info.type()->isSubtypeOf(*c10::NumberType::get());
+    if (is_scalar) {
       if (c10::isFloatingType(input.scalar_type())) {
         auto scalar_numeric_value = input.item().toDouble();
         tensor_type = c10::ScalarType::Double;
@@ -374,7 +380,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       auto dtype = meta_info_dict["dtype"].cast<std::string>();
       auto sizes = meta_info_dict["sizes"].cast<std::vector<int64_t>>();
       auto strides = meta_info_dict["strides"].cast<std::vector<int64_t>>();
-      bool is_scalar_tensor = meta_info_dict.contains("scalar_value");
+      bool is_scalar = meta_info_dict.contains("scalar_value");
 
       std::vector<c10::SymInt> sym_sizes;
       std::vector<c10::SymInt> sym_strides;
@@ -393,7 +399,7 @@ void AOTIPythonKernelHolder::init_aoti_kernel_cache() {
       // If an input parameter is a scalar, its detailed value is cached.
       // This is done to ensure correctness during subsequent checks.
       c10::Scalar scalar_value((double)1.0);
-      if (is_scalar_tensor) {
+      if (is_scalar) {
         if (c10::isFloatingType(tensor_dtype)) {
           auto scalar_numeric_value =
               meta_info_dict["scalar_value"].cast<double>();

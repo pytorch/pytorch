@@ -9,7 +9,6 @@ import itertools
 import math
 import operator
 import os
-from pathlib import Path
 import random
 import re
 import shutil
@@ -20,6 +19,8 @@ import time
 import typing
 import unittest
 import weakref
+from itertools import product
+from pathlib import Path
 from typing import Tuple
 from unittest.mock import patch
 
@@ -699,9 +700,10 @@ def assertGeneratedKernelCountEqual(self: TestCase, expected: int):
     self.assertEqual(torch._inductor.metrics.generated_kernel_count, expected)
 
 
-def clear_aoti_eager_cache():
-    if aoti_eager_cache_dir().exists():
-        shutil.rmtree(aoti_eager_cache_dir())
+def clear_aoti_eager_cache(ns: str, device_type: str):
+    device_cache = aoti_eager_cache_dir() / ns / device_type
+    if device_cache.exists():
+        shutil.rmtree(device_cache)
 
 
 class SweepInputs2:
@@ -771,38 +773,68 @@ class CommonTemplate:
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_eager_aoti_cache_hit(self):
         ns = "aten"
-        op_name = "cos"
-        op_overload_name = "default"
+        op_name = "add"
+        op_overload_name = "Tensor"
         dispatch_key = "CPU"
         device = "cpu"
         if self.device.lower() == "cuda":
             dispatch_key = "CUDA"
             device = "cuda"
 
-        input_tensor = torch.randn(128, dtype=torch.float, device=device)
+        args_inputs = [
+            (
+                torch.randn(128, dtype=torch.float, device=device),
+                torch.randn(128, dtype=torch.float, device=device),
+            ),
+            (
+                torch.scalar_tensor(2.0, dtype=torch.float, device=device),
+                torch.scalar_tensor(3.0, dtype=torch.float, device=device),
+            ),
+        ]
+        kwargs_inputs = [{"alpha": 5.0}, {"alpha": 6.0}]
 
         # Produce kernel for the first time
-        kernel_lib_path = aoti_compile_with_persistent_cache(
-            ns,
-            op_name,
-            op_overload_name,
-            device,
-            False,
-            torch.ops.aten.cos,
-            (input_tensor, ),
-            {},
-        )
-        self.assertTrue(Path(kernel_lib_path).exists())
+        clear_aoti_eager_cache(ns, device)
+
+        for args, kwargs in product(args_inputs, kwargs_inputs):
+            kernel_lib_path = aoti_compile_with_persistent_cache(
+                ns,
+                op_name,
+                op_overload_name,
+                device,
+                False,
+                torch.ops.aten.add,
+                args,
+                kwargs,
+            )
+            self.assertTrue(Path(kernel_lib_path).exists())
+
+        def fn(args_inputs, kwargs_inputs):
+            ref_values = []
+            for args, kwargs in product(args_inputs, kwargs_inputs):
+                a, b = args
+                if kwargs.get("alpha", None) is not None:
+                    val = getattr(torch, op_name)(a, b, alpha=kwargs["alpha"])
+                else:
+                    val = getattr(torch, op_name)(a, b)
+                ref_values.append(val)
+            return ref_values
 
         from unittest import mock
 
         # patch the aoti_compile_with_persistent_cache as None to ensure no new kernel is generated
-        with mock.patch("torch._inductor.utils.aoti_compile_with_persistent_cache", None):
+        with mock.patch(
+            "torch._inductor.utils.aoti_compile_with_persistent_cache", None
+        ):
             qualified_op_name = f"{ns}::{op_name}"
             _, overload_names = torch._C._jit_get_operation(qualified_op_name)
+
+            ref_values = []
+            res_values = []
+
             with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
                 # Get ref result from eager
-                ref_value = getattr(torch, op_name)(input_tensor)
+                ref_values = fn(args_inputs=args_inputs, kwargs_inputs=kwargs_inputs)
 
                 for overload_name in overload_names:
                     try:
@@ -812,9 +844,12 @@ class CommonTemplate:
                         )
                     except Exception as e:
                         continue
+
                 # Invoke the pre-compiled kernel and get result.
-                res_value = getattr(torch, op_name)(input_tensor)
-                self.assertEqual(ref_value, res_value)
+                res_values = fn(args_inputs=args_inputs, kwargs_inputs=kwargs_inputs)
+
+            for ref_val, res_val in zip(ref_values, res_values):
+                self.assertEqual(ref_val, res_val)
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_eager_aoti_with_persistent_cache(self):
@@ -831,7 +866,7 @@ class CommonTemplate:
 
         input_tensor = torch.randn(128, dtype=torch.float, device=device)
 
-        clear_aoti_eager_cache()
+        clear_aoti_eager_cache(ns, device)
         kernel_lib_path = aoti_compile_with_persistent_cache(
             ns,
             op_name,
@@ -868,23 +903,64 @@ class CommonTemplate:
             kernel_libs_abs_path.append(kernel_path.as_posix())
 
         self.assertTrue(kernel_lib_path in kernel_libs_abs_path)
-        clear_aoti_eager_cache()
 
     @skipCUDAIf(not SM80OrLater, "Requires sm80")
     def test_eager_aoti_with_scalar(self):
         namespace_name = "aten"
         dispatch_key = "CPU"
+        op_name = "add"
+        op_overload_name = "Tensor"
         device = torch.device("cpu")
         if self.device.lower() == "cuda":
             dispatch_key = "CUDA"
             device = torch.device("cuda")
 
-        a = torch.randn(3, 4, device=device)
-        b = torch.randn(3, 4, device=device)
+        # Test the difference between scalar tensor and scalar
+        a = torch.scalar_tensor(1.0, device=device)
+        b = torch.scalar_tensor(2.0, device=device)
+
+        clear_aoti_eager_cache(namespace_name, device.type)
+
+        kernel_lib_path = aoti_compile_with_persistent_cache(
+            namespace_name,
+            op_name,
+            op_overload_name,
+            a.device.type,
+            False,
+            torch.ops.aten.add,
+            args=(a, b),
+            kwargs={"alpha": 3.0},
+        )
+        self.assertTrue(Path(kernel_lib_path).exists())
+        device_kernel_cache = aoti_eager_cache_dir() / namespace_name / device.type
+        kernel_conf = device_kernel_cache / f"{op_name}.{op_overload_name}.json"
+        self.assertTrue(kernel_conf.exists())
+        json_data = load_aoti_eager_cache(
+            namespace_name, op_name, op_overload_name, a.device.type
+        )
+        op_info = json_data[0]
+        self.assertTrue(isinstance(op_info, dict))
+        self.assertTrue("meta_info" in op_info)
+        self.assertTrue(len(op_info["meta_info"]) == 3)
+        self.assertTrue(op_info["meta_info"][0]["sizes"] == [])
+        self.assertTrue(op_info["meta_info"][0]["strides"] == [])
+        # Scalar Tensor
+        self.assertTrue("scalar_value" not in op_info["meta_info"][0])
+        self.assertTrue(op_info["meta_info"][1]["sizes"] == [])
+        self.assertTrue(op_info["meta_info"][1]["strides"] == [])
+        # Scalar Tensor
+        self.assertTrue("scalar_value" not in op_info["meta_info"][1])
+        self.assertTrue(op_info["meta_info"][2]["sizes"] == [])
+        self.assertTrue(op_info["meta_info"][2]["strides"] == [])
+        # Scalar
+        self.assertTrue("scalar_value" in op_info["meta_info"][2])
 
         qualified_op_name = f"{namespace_name}::add"
         _, overload_names = torch._C._jit_get_operation(qualified_op_name)
         with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
+            a = torch.randn(128, device=device)
+            b = torch.randn(128, device=device)
+
             scalar_values = [1.0, 2.0, 3.0]
             ref_values = []
             for scalar_value in scalar_values:
@@ -900,7 +976,6 @@ class CommonTemplate:
                     continue
 
             res_values = []
-            clear_aoti_eager_cache()
             for scalar_value in scalar_values:
                 res_values.append(torch.add(a, b, alpha=scalar_value))
 
