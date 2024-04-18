@@ -87,6 +87,8 @@ def check_model(
     options=None,
     dynamic_shapes=None,
     disable_constraint_solver=False,
+    atol=None,
+    rtol=None,
 ):
     with torch.no_grad(), config.patch(
         {
@@ -112,7 +114,7 @@ def check_model(
             disable_constraint_solver,
         )
 
-    self.assertEqual(actual, expected)
+    self.assertEqual(actual, expected, atol=atol, rtol=rtol)
 
 
 def check_model_with_multiple_inputs(
@@ -1384,7 +1386,9 @@ class AOTInductorTestsTemplate:
             torch.randn(87, 87, device=self.device),
             torch.randn(87, 87, device=self.device),
         )
-        self.check_model(Model(), example_inputs)
+        self.check_model(
+            Model(), example_inputs, atol=1e-4, rtol=1e-4
+        )  # 1e-4 is the tol value used in pytorch/torch/_dynamo/utils.py
 
         if self.device == "cuda":
             so_path = torch._export.aot_compile(Model(), example_inputs)
