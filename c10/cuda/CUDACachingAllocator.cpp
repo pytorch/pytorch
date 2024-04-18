@@ -8,6 +8,7 @@
 #include <c10/util/CallOnce.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/UniqueVoidPtr.h>
+#include <c10/util/env.h>
 #include <c10/util/flat_hash_map.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
@@ -2831,7 +2832,7 @@ class DeviceCachingAllocator {
 // errors, since the caching allocator foils cuda-memcheck.
 bool forceUncachedAllocator() {
   static bool force_uncached =
-      getenv("PYTORCH_NO_CUDA_MEMORY_CACHING") != nullptr;
+      c10::utils::has_env("PYTORCH_NO_CUDA_MEMORY_CACHING");
   return force_uncached;
 }
 
@@ -3363,9 +3364,9 @@ struct BackendStaticInitializer {
   // version checks, to CUDAAllocatorConfig's runtime doublecheck. If this
   // works, maybe we should move all of CUDAAllocatorConfig here?
   CUDAAllocator* parseEnvForBackend() {
-    const char* val = getenv("PYTORCH_CUDA_ALLOC_CONF");
-    if (val != nullptr) {
-      const std::string config(val);
+    const auto val = c10::utils::get_env("PYTORCH_CUDA_ALLOC_CONF");
+    if (val.has_value()) {
+      const std::string& config = val.value();
 
       std::regex exp("[\\s,]+");
       std::sregex_token_iterator it(config.begin(), config.end(), exp, -1);
