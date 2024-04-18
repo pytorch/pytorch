@@ -1538,4 +1538,4 @@ def tensor_is_aligned(tensor: torch.Tensor):
 
 def should_assume_input_aligned(example_input: torch.Tensor):
     # See Note: [Input Alignment handling in Inductor]
-    return tensor_is_aligned(example_input) or config.assume_aligned_inputs
+    return config.assume_aligned_inputs or tensor_is_aligned(example_input)
