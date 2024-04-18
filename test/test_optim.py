@@ -591,7 +591,7 @@ class TestOptimRenewed(TestCase):
         # after rho_t becomes greater than 5 in step 6.
         kIterations = 7
 
-        optim_inputs = optim_info.optim_inputs_func(device=device)
+        optim_inputs = optim_info.optim_inputs_func(device=device, dtype=dtype)
         optim_cls = optim_info.optim_cls
         for optim_input in optim_inputs:
             models, optimizers = [], []
@@ -856,8 +856,7 @@ class TestOptimRenewed(TestCase):
     def test_fused_matches_forloop(self, device, dtype, optim_info):
         if device not in optim_info.supports_fused_on:
             self.skipTest(f"{device} is not supported for fused on {optim_info.optim_cls.__name__}")
-        reduced_precision = dtype in (torch.bfloat16, torch.float16, )
-        self._test_derived_optimizers(device, dtype, optim_info, "fused", reduced_precision=reduced_precision)
+        self._test_derived_optimizers(device, dtype, optim_info, "fused")
 
 
     @onlyNativeDeviceTypes
