@@ -260,13 +260,12 @@ AOTI_TORCH_EXPORT AOTITorchError aoti_torch_create_tensor_from_blob(
     const int64_t* strides_ptr,
     int64_t storage_offset,
     int32_t dtype,
-    int8_t layout,
-    const uint8_t* serialized_md,
-    int64_t serialized_md_size,
     int32_t device_type,
     int32_t device_index,
-    AtenTensorHandle* ret // returns new reference
-);
+    AtenTensorHandle* ret, // returns new reference
+    int8_t layout = 0,
+    const uint8_t* serialized_md = nullptr,
+    int64_t serialized_md_size = 0);
 
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch__embedding_bag(
     AtenTensorHandle weight,

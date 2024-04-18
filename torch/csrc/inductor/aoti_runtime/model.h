@@ -236,12 +236,12 @@ class AOTInductorModelBase {
           stride,
           offset,
           dtype,
-          layout,
-          serialized_md_ptr,
-          serialized_md_size,
           device_type_,
           device_idx_,
-          &tensor_handle));
+          &tensor_handle,
+          layout,
+          serialized_md_ptr,
+          serialized_md_size));
       constants_map_->emplace(std::move(name), tensor_handle);
     }
     if (constants_map_) {
