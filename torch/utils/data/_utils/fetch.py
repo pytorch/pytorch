@@ -12,7 +12,7 @@ class _BaseDatasetFetcher:
         self.drop_last = drop_last
 
     def fetch(self, possibly_batched_index):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class _IterableDatasetFetcher(_BaseDatasetFetcher):

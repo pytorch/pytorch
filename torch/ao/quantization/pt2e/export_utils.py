@@ -3,6 +3,8 @@ import types
 import torch
 import torch.nn.functional as F
 
+from torch.ao.quantization.utils import _assert_and_get_unique_device
+
 
 __all__ = [
     "model_is_exported",
@@ -137,11 +139,7 @@ def _replace_batchnorm(m: torch.fx.GraphModule, train_to_eval: bool):
         torch.randn(1),  # bn_running_var
     )
 
-    # TODO: We shouldn't assume that the model is on cuda just because cuda is
-    # available, but right now there's no other way to differentiate between
-    # the different bn ops. Once batch norm consolidation lands, we won't have
-    # to do this anymore: https://github.com/pytorch/pytorch/pull/119496.
-    is_cuda = torch.cuda.is_available()
+    is_cuda = _assert_and_get_unique_device(m).type == "cuda"
     bn_train_aten = _get_aten_graph_module_for_pattern(
         _WrapperModule(bn_train),
         example_inputs,
