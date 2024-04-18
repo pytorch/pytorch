@@ -127,7 +127,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
     # options to tune from
     choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
 
-    if m * n != 0 and use_triton_template(layout):
+    if use_triton_template(layout):
         for config in mm_configs(m, n, k):
             mm_template.maybe_append_choice(
                 choices,
@@ -136,7 +136,7 @@ def tuned_mm(mat1, mat2, *, layout=None):
                 **mm_options(config, m, n, k, layout),
             )
 
-    if m * n != 0 and use_cutlass_template(layout):
+    if use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
@@ -169,11 +169,12 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
     # TODO: Re-enable eager mode implementation once cuBLAS is fixed
     if m * n != 0 and (
-        use_cutlass_template(layout) or use_triton_template(layout, enable_int32=True)
+        use_cutlass_template(layout, m, n, k)
+        or use_triton_template(layout, enable_int32=True)
     ):
         choices = []
 
-    if m * n != 0 and use_cutlass_template(layout):
+    if m * n != 0 and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
@@ -192,6 +193,14 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     m, n, k, layout, mat1, mat2, inp_expanded = mm_args(mat1, mat2, inp, layout=layout)
     if m * n == 0 or not use_max_autotune():
+        # Use a FlexibleLayout if we are not autotuning.
+        # This allows padding strides for the output.
+        from torch._inductor.ir import FixedLayout, FlexibleLayout
+
+        if isinstance(layout, FixedLayout):
+            layout = FlexibleLayout(
+                device=layout.device, dtype=layout.dtype, size=layout.size
+            )
         choices = (
             [
                 aten_addmm.bind(
@@ -244,7 +253,7 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
                 epilogue_fn=addmm_epilogue(layout.dtype, alpha, beta),
             )
 
-    if use_cutlass_template(layout):
+    if use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices,
             layout,
@@ -298,7 +307,7 @@ def tuned_mixed_mm(mat1, mat2, mat2_dtype):
                 **mm_options(config, m, n, k, layout, b_prologue_cast_type),
             )
 
-    if m * n != 0 and use_cutlass_template(layout):
+    if m * n != 0 and use_cutlass_template(layout, m, n, k):
         CUTLASSGemmTemplate.add_cutlass_gemm_choices(
             choices, layout, [mat1, mat2], fuseable=True, non_fuseable=True
         )
