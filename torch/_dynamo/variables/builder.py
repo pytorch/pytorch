@@ -2067,7 +2067,10 @@ class SourcelessBuilder:
             return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
-        unimplemented(f"Unexpected type in sourceless builder {type(value)}")
+        typ = type(value)
+        unimplemented(
+            f"Unexpected type in sourceless builder {typ.__module__}.{typ.__qualname__}"
+        )
 
     @staticmethod
     def wrap_constant_literal(value):
