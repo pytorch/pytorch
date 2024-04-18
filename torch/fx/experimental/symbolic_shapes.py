@@ -3614,12 +3614,7 @@ class ShapeEnv:
 
 
         subst = {}
-        for s in symbols:
-            # Unbacked symints only
-            if s in self.var_to_val:
-                continue
-
-            subst = {}
+        for s in symbols_unbacked:
 
             def add_expr(expr):
                 # Expr and negation
