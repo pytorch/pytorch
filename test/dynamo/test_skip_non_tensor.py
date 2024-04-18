@@ -147,10 +147,10 @@ class SkipNonTensorTests(torch._dynamo.test_case.TestCase):
 
         class Foo(list):
             def __iter__(self):
-                raise Exception()
+                raise Exception
 
             def __len__(self):
-                raise Exception()
+                raise Exception
 
         x = Foo()
         x.append(torch.randn(4))
