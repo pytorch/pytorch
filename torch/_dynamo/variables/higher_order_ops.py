@@ -1626,7 +1626,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # at torch._functorch.autograd_function.AutogradFunctionApply.
         args_tensor_mask = [False] * len(args)
         for i, arg in enumerate(args):
-            if isinstance(arg, variables.TensorVariable):
+            if isinstance(arg, (variables.TensorVariable, variables.SymNodeVariable)):
                 filtered_args.append(arg)
                 args_tensor_mask[i] = True
         p_args = (
