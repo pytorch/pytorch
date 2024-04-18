@@ -1462,12 +1462,13 @@ class TestCustomOp(CustomOpTestCaseBase):
         @torch.library.impl_abstract(f"{TestCustomOp.test_ns}::foo", lib=self.lib())
         def foo_meta(x):
             ctx = torch.library.get_ctx()
-            ctx.new_dynamic_size(min=1)
+            r = ctx.new_dynamic_size(min=1)
             with self.assertRaisesRegex(ValueError, "greater than or equal to 0"):
                 ctx.new_dynamic_size(min=-1)
             with self.assertRaisesRegex(ValueError, "SymInt"):
                 ctx.new_dynamic_size(max=x.numel())
-            return torch.clone(x)
+            # NB: You must return dynamic sizes!
+            return x.new_empty(r)
 
         x = torch.randn(2, 3, device="cpu")
         op = self.get_op(f"{self.test_ns}::foo")
