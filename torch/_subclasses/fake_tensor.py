@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import contextlib
 import functools
 import logging
@@ -30,12 +28,12 @@ from torch._utils import render_call
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.overrides import TorchFunctionMode
-from torch.utils._pytree import PyTree, tree_map
 from torch.utils._mode_utils import no_dispatch
 from torch.utils._python_dispatch import (
     is_traceable_wrapper_subclass,
     TorchDispatchMode,
 )
+from torch.utils._pytree import PyTree, tree_map
 from torch.utils._stats import count
 from torch.utils._traceback import CapturedTraceback
 
@@ -752,11 +750,12 @@ class DispatchCacheInfo:
 # new allocations of Tensors which have non-meta storage so
 # memory should not significantly increase.
 
-UNHASHABLE = object()
+_UNHASHABLE = object()
+_UNASSIGNED = object()
 
 
 class FakeTensorMode(TorchDispatchMode):
-    cache: Dict[_DispatchCacheKey, _DispatchCacheEntry] = {}
+    cache: Dict[_DispatchCacheKey, _DispatchCacheEntry | _BypassDispatchCache] = {}
     cache_hits: int = 0
     cache_misses: int = 0
     cache_bypasses = defaultdict(int)
@@ -907,27 +906,42 @@ class FakeTensorMode(TorchDispatchMode):
         Lookup a cache entry for the given arguments. If none exists, dispatch
         and cache the result (if the result is eligible for caching).
         """
-        output = unassigned = object()
-        try:
-            key = self._cache_key(func, args, kwargs)
-            entry = FakeTensorMode.cache.get(key, None)
-            if entry is not None:
-                output = self._output_from_cache_entry(entry, func, args)
-                FakeTensorMode.cache_hits += 1
-                if self.cache_crosscheck_enabled:
-                    # For debugging / testing: Validate that the output synthesized
-                    # from the cache matches the output created by normal dispatch.
-                    self._crosscheck_cache_output(output, func, types, args, kwargs)
-            else:
+        output = _UNASSIGNED
+        key = self._cache_key(func, args, kwargs)
+        entry = FakeTensorMode.cache.get(key, None)
+        if isinstance(entry, _DispatchCacheEntry):
+            output = self._output_from_cache_entry(entry, func, args)
+            FakeTensorMode.cache_hits += 1
+            if self.cache_crosscheck_enabled:
+                # For debugging / testing: Validate that the output
+                # synthesized from the cache matches the output created
+                # by normal dispatch.
+                self._crosscheck_cache_output(output, func, types, args, kwargs)
+        elif isinstance(entry, _BypassDispatchCache):
+            FakeTensorMode.cache_bypasses[entry.reason] += 1
+        else:
+            # `entry` Must be 'None' - we don't have an entry in the cache
+            try:
+                # Attempt to validate the
+                # args. This will raise _BypassDispatchCache if there's an
+                # invalid value in the args.
                 self._validate_cache_key(func, args, kwargs)
                 output = self._dispatch_impl(func, types, args, kwargs)
                 entry = self._make_cache_entry(key, func, args, kwargs, output)
+            except _BypassDispatchCache as e:
+                # We have a bad value in the args. Add they key to the cache so
+                # we can early-out next time. Note that _make_cache_entry can
+                # raise _BypassDispatchCache - so we can actually be here with a
+                # valid 'output'. That's okay - we'll just use the output this
+                # time and mark the cache as invalid and next time drop below to
+                # recompute it.
+                FakeTensorMode.cache_bypasses[e.reason] += 1
+                FakeTensorMode.cache[key] = e
+            else:
                 FakeTensorMode.cache[key] = entry
                 FakeTensorMode.cache_misses += 1
-        except _BypassDispatchCache as e:
-            FakeTensorMode.cache_bypasses[e.reason] += 1
 
-        if output is unassigned:
+        if output is _UNASSIGNED:
             output = self._dispatch_impl(func, types, args, kwargs)
 
         return output
@@ -1026,12 +1040,15 @@ class FakeTensorMode(TorchDispatchMode):
                     # can't just ignore it because it's an unhashable value. Use
                     # a sentinel to indicate the unhashable value (so we don't
                     # collide with a "good" hash).
-                    output.append(UNHASHABLE)
+                    output.append(_UNHASHABLE)
+                    continue
+                if arg.fake_mode is not self:
+                    output.append(_UNHASHABLE)
                     continue
                 output.append(extract_tensor_metadata(arg))
             elif isinstance(arg, (torch.SymBool, torch.SymInt, torch.SymFloat)):
                 # Caught by _verify_args_for_hash later.
-                output.append(UNHASHABLE)
+                output.append(_UNHASHABLE)
             elif isinstance(arg, (list, tuple, dict)):
                 self._prep_args_for_hash(output, arg)
             else:
