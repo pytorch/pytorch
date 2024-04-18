@@ -1169,7 +1169,7 @@ def main():
     install_requires += extra_install_requires
 
     extras_require = {
-        "optree": ["optree>=0.9.1"],
+        "optree": ["optree>=0.11.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
 
@@ -1384,12 +1384,6 @@ def main():
                 "include/tensorpipe/transport/ibv/*.h",
                 "include/tensorpipe/transport/shm/*.h",
                 "include/tensorpipe/transport/uv/*.h",
-            ]
-        )
-    if get_cmake_cache_vars()["USE_KINETO"]:
-        torch_package_data.extend(
-            [
-                "include/kineto/*.h",
             ]
         )
     torchgen_package_data = [
