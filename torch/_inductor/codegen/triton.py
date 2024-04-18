@@ -3932,7 +3932,17 @@ class TritonScheduling(BaseScheduling):
         wrapped_jit_function = mod.triton_
 
         # call once to trigger the compilation
-        call(wrapped_jit_function.clone_args(*args)[0])
+        try:
+            call(wrapped_jit_function.clone_args(*args)[0])
+        except Exception as e:
+            log.debug(
+                "Exception (%s) in compiling fused nodes %s",
+                e,
+                {n.get_name() for n in nodes},
+            )
+            ms = float("inf")
+            store_cache()
+            return ms, mod.__file__
 
         launchers = wrapped_jit_function.launchers
         assert len(launchers) == 1
