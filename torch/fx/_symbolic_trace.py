@@ -366,7 +366,7 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, (torch.Tensor, ScriptObject)):
+        if isinstance(a, (torch.Tensor, ScriptObject, torch._library.fake_class_registry.FakeScriptObject)):
             qualname: Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
@@ -729,7 +729,13 @@ class Tracer(TracerBase):
             # is some other attribute on the model. Construct a dict mapping Tensor
             # values to the qualified name here for efficiency. This is used downstream
             # in create_arg
-            self.tensor_attrs: Dict[Union[torch.Tensor, ScriptObject], str] = {}
+            self.tensor_attrs: Dict[
+                Union[
+                    torch.Tensor,
+                    ScriptObject,
+                    torch._library.fake_class_registry.FakeScriptObject
+                ], str
+            ] = {}
 
             def collect_tensor_attrs(m: torch.nn.Module, prefix_atoms: List[str]):
                 for k, v in m.__dict__.items():

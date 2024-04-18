@@ -463,7 +463,14 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
 
     def inner(m: torch.nn.Module, prefix_atoms: List[str], constants):
         for k, v in m.__dict__.items():
-            if isinstance(v, (torch.Tensor, torch.ScriptObject)):
+            if isinstance(
+                v,
+                (
+                    torch.Tensor,
+                    torch.ScriptObject,
+                    torch._library.fake_class_registry.FakeScriptObject,
+                ),
+            ):
                 if v in buffers_parameters:
                     # filter out buffers and parameters, leaving only constants
                     continue
@@ -636,7 +643,14 @@ def _export_non_strict(
     class _ExportedProgramNonStrict:
         gm: torch.fx.GraphModule
         sig: ExportGraphSignature
-        constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]
+        constants: Dict[
+            str,
+            Union[
+                torch.Tensor,
+                torch._C.ScriptObject,
+                torch._library.fake_class_registry.FakeScriptObject,
+            ],
+        ]
 
     return _ExportedProgramNonStrict(
         gm,
@@ -990,16 +1004,81 @@ def _export(
         fake_params_buffers = make_fake_params_buffers(
             fake_mode, _get_params_buffers(mod)
         )
+
+        @contextmanager
+        def _fakify_constant_script_objects(
+            mod, args, kwargs, constant_attrs, fake_mode
+        ):
+            patched_attr = {}
+            fake_constant_attrs = ConstantAttrMap()
+            fake_to_real = {}
+
+            def _fakify_obj(obj):
+                fake_obj = torch._library.fake_class_registry.to_fake_obj(
+                    fake_mode, obj
+                )
+                fake_to_real[fake_obj] = obj
+                return fake_obj
+
+            def _leaf_mod_and_attr(
+                mod: torch.nn.Module, attr_fqn: str
+            ) -> Tuple[torch.nn.Module, str]:
+                *prefix_attr, attr = attr_fqn.split(".")
+                cur_mod = mod
+                for attr in prefix_attr:
+                    cur_mod = getattr(cur_mod, attr)
+                return cur_mod, attr
+
+            try:
+                for obj, fqn in constant_attrs.items():
+                    if isinstance(obj, torch.ScriptObject):
+                        cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
+                        assert obj is getattr(cur_mod, attr)
+                        fake_script_obj = _fakify_obj(obj)
+                        setattr(cur_mod, attr, fake_script_obj)
+                        fake_constant_attrs[fake_script_obj] = fqn
+                        patched_attr[fqn] = obj
+                    else:
+                        fake_constant_attrs[obj] = fqn
+
+                fake_args, fake_kwargs = pytree.tree_map_only(
+                    torch.ScriptObject, _fakify_obj, (args, kwargs)
+                )
+                yield (mod, fake_args, fake_kwargs, fake_constant_attrs, fake_to_real)
+            finally:
+                for fqn, orig_obj in patched_attr.items():
+                    cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
+                    setattr(cur_mod, attr, orig_obj)
+
         with fake_mode:
-            ep_non_strict = _export_non_strict(
-                mod,
-                fake_args,
-                fake_kwargs,
-                fake_params_buffers,
-                constant_attrs,
-                pre_dispatch=pre_dispatch,
-                transform=_tuplify_outputs,
-            )
+            with _fakify_constant_script_objects(
+                mod, fake_args, fake_kwargs, constant_attrs, fake_mode
+            ) as (
+                patched_mod,
+                new_fake_args,
+                new_fake_kwargs,
+                new_fake_constant_attrs,
+                map_fake_to_real,
+            ):
+                ep_non_strict = _export_non_strict(
+                    patched_mod,
+                    new_fake_args,
+                    new_fake_kwargs,
+                    fake_params_buffers,
+                    new_fake_constant_attrs,
+                    pre_dispatch=pre_dispatch,
+                    transform=_tuplify_outputs,
+                )
+                # ep_non_strict.constants contains fake script objects, we need to map them back
+                ep_non_strict.constants = {
+                    fqn: map_fake_to_real[obj]
+                    if isinstance(
+                        obj, torch._library.fake_class_registry.FakeScriptObject
+                    )
+                    else obj
+                    for fqn, obj in ep_non_strict.constants.items()
+                }
+
         ep_non_strict.gm.meta["inline_constraints"] = {
             k: v
             for k, v in fake_mode.shape_env.var_to_range.items()

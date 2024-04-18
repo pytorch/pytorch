@@ -70,7 +70,7 @@ def fakify(
         return t
 
     if isinstance(t, torch.ScriptObject):
-        return torch._library.fake_class_registry.to_fake_obj(mode, t)
+        return t
 
     if not isinstance(t, torch.Tensor):
         raise ValueError(f"Unsupported input type {type(t)}")

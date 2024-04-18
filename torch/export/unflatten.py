@@ -54,7 +54,14 @@ def _assign_attr(
         assert isinstance(from_obj, torch.Tensor)
         to_module.register_buffer(field, from_obj, persistent=persistent)
     elif attr_kind == _AttrKind.CONSTANT:
-        assert isinstance(from_obj, (torch.Tensor, torch.ScriptObject))
+        assert isinstance(
+            from_obj,
+            (
+                torch.Tensor,
+                torch.ScriptObject,
+                torch._library.fake_class_registry.FakeScriptObject,
+            ),
+        )
         setattr(to_module, field, from_obj)
 
 

@@ -226,9 +226,14 @@ def forward(self, obj_attr, x):
             def forward(self, x):
                 return x + torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
 
-        ep = self._test_export_same_as_eager(
-            MyModule(), (torch.ones(2, 3),), strict=False, pre_dispatch=pre_dispatch
-        )
+        with self._register_py_impl_temporially(
+            torch.ops._TorchScriptTesting.takes_foo.default,
+            torch._C.DispatchKey.Meta,
+            lambda cc, x: cc.add_tensor(x),
+        ):
+            ep = self._test_export_same_as_eager(
+                MyModule(), (torch.ones(2, 3),), strict=False, pre_dispatch=pre_dispatch
+            )
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
@@ -359,9 +364,14 @@ def forward(self, token, x, cc):
                 return x + b
 
         input = torch.ones(2, 3)
-        ep = self._test_export_same_as_eager(
-            MyModule(), (input,), strict=False, pre_dispatch=pre_dispatch
-        )
+        with self._register_py_impl_temporially(
+            torch.ops._TorchScriptTesting.takes_foo.default,
+            torch._C.DispatchKey.Meta,
+            lambda cc, x: cc.add_tensor(x),
+        ):
+            ep = self._test_export_same_as_eager(
+                MyModule(), (input,), strict=False, pre_dispatch=pre_dispatch
+            )
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
@@ -401,9 +411,14 @@ def forward(self, token, obj_attr, x):
                 return x + b
 
         input = torch.ones(2, 3)
-        ep = self._test_export_same_as_eager(
-            MyModule(), (input,), strict=False, pre_dispatch=pre_dispatch
-        )
+        with self._register_py_impl_temporially(
+            torch.ops._TorchScriptTesting.takes_foo.default,
+            torch._C.DispatchKey.Meta,
+            lambda cc, x: cc.add_tensor(x),
+        ):
+            ep = self._test_export_same_as_eager(
+                MyModule(), (input,), strict=False, pre_dispatch=pre_dispatch
+            )
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\
@@ -453,9 +468,14 @@ def forward(self, token, obj_attr, x):
                 return x + b
 
         input = torch.ones(2, 3)
-        ep = self._test_export_same_as_eager(
-            MyModule(), (input,), strict=False, pre_dispatch=pre_dispatch
-        )
+        with self._register_py_impl_temporially(
+            torch.ops._TorchScriptTesting.takes_foo.default,
+            torch._C.DispatchKey.Meta,
+            lambda cc, x: cc.add_tensor(x),
+        ):
+            ep = self._test_export_same_as_eager(
+                MyModule(), (input,), strict=False, pre_dispatch=pre_dispatch
+            )
         self.assertExpectedInline(
             ep.module().code.strip(),
             """\

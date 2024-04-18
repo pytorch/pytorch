@@ -30,3 +30,30 @@ def register_fake_operators():
     @register_if_not("_TorchScriptTesting::queue_size")
     def fake_queue_size(tq):
         return tq.size()
+
+    def meta_takes_foo_list_return(foo, x):
+        a = foo.add_tensor(x)
+        b = foo.add_tensor(a)
+        c = foo.add_tensor(b)
+        return [a, b, c]
+
+    def meta_takes_foo_tuple_return(foo, x):
+        a = foo.add_tensor(x)
+        b = foo.add_tensor(a)
+        return (a, b)
+
+    if (
+        torch._C.DispatchKey.Meta
+        not in torch.ops._TorchScriptTesting.takes_foo_list_return.default.py_kernels
+    ):
+        torch.ops._TorchScriptTesting.takes_foo_list_return.default.py_impl(
+            torch._C.DispatchKey.Meta
+        )(meta_takes_foo_list_return)
+
+    if (
+        torch._C.DispatchKey.Meta
+        not in torch.ops._TorchScriptTesting.takes_foo_tuple_return.default.py_kernels
+    ):
+        torch.ops._TorchScriptTesting.takes_foo_tuple_return.default.py_impl(
+            torch._C.DispatchKey.Meta
+        )(meta_takes_foo_tuple_return)
