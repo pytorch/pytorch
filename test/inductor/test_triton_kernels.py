@@ -810,16 +810,14 @@ def forward(self, x_1, output_1):
 
         x = torch.randn(10, device="cuda", dtype=torch.float32)
         eager_out = f(x)
-        compiled_out, (code,) = run_and_get_code(
-            torch.compile(f), x
-        )
+        compiled_out, (code,) = run_and_get_code(torch.compile(f), x)
         self.assertEqual(compiled_out, eager_out)
 
         # Check that we're re-using any unused memory buffers.
-        num_bufs_allocated = code.count("empty_strided_cuda((10, ), (1, ), torch.float32)")
+        num_bufs_allocated = code.count(
+            "empty_strided_cuda((10, ), (1, ), torch.float32)"
+        )
         self.assertEqual(num_bufs_allocated, 2)
-
-
 
     @requires_cuda
     def test_triton_kernel_matmul_tracking(self):
