@@ -6,60 +6,12 @@
 
 namespace at::autocast {
 
-bool is_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCUDA);
+bool is_enabled(DispatchKey dispatch_key) {
+  return !c10::impl::tls_is_dispatch_key_excluded(dispatch_key);
 }
 
-void set_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCUDA, !new_enabled);
-}
-
-bool is_cpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastCPU);
-}
-
-void set_cpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastCPU, !new_enabled);
-}
-
-bool is_xpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastXPU);
-}
-
-void set_xpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXPU, !new_enabled);
-}
-
-bool is_ipu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastIPU);
-}
-
-void set_ipu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastIPU, !new_enabled);
-}
-
-bool is_hpu_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastHPU);
-}
-
-void set_hpu_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastHPU, !new_enabled);
-}
-
-bool is_xla_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastXLA);
-}
-
-void set_xla_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastXLA, !new_enabled);
-}
-
-bool is_privateuseone_enabled() {
-  return !c10::impl::tls_is_dispatch_key_excluded(DispatchKey::AutocastPrivateUse1);
-}
-
-void set_privateuseone_enabled(bool new_enabled) {
-  c10::impl::tls_set_dispatch_key_excluded(DispatchKey::AutocastPrivateUse1, !new_enabled);
+bool set_enabled(DispatchKey dispatch_key, bool new_enabled) {
+  c10::impl::tls_set_dispatch_key_excluded(dispatch_key, !new_enabled);
 }
 
 namespace {
@@ -90,6 +42,8 @@ std::mutex cached_casts_mutex;
 // any instance of autocast (which should occur at the end of each forward pass)
 // it calls clear_cache() to ensure cached Tensors don't leak outside the autocasting region.
 thread_local int nesting = 0;
+
+thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES> autocast_dtype;
 
 // autocast_cpu_dtype is the lower_precision_fp used by AutocastCPU.
 thread_local at::ScalarType autocast_cpu_dtype = at::kBFloat16;

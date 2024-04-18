@@ -10,35 +10,23 @@
 
 namespace at::autocast {
 
-TORCH_API bool is_enabled();
-TORCH_API void set_enabled(bool enabled);
+TORCH_API bool is_enabled(DispatchKey dispatch_key);
+TORCH_API void set_enabled(DispatchKey dispatch_key, bool new_enabled);
 TORCH_API void clear_cache();
 TORCH_API int increment_nesting();
 TORCH_API int decrement_nesting();
-TORCH_API bool is_cpu_enabled();
-TORCH_API void set_cpu_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_gpu_dtype();
 TORCH_API at::ScalarType get_autocast_cpu_dtype();
 TORCH_API void set_autocast_gpu_dtype(at::ScalarType dtype);
 TORCH_API void set_autocast_cpu_dtype(at::ScalarType dtype);
-TORCH_API bool is_xpu_enabled();
-TORCH_API void set_xpu_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_xpu_dtype();
 TORCH_API void set_autocast_xpu_dtype(at::ScalarType dtype);
-TORCH_API bool is_ipu_enabled();
-TORCH_API void set_ipu_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_ipu_dtype();
 TORCH_API void set_autocast_ipu_dtype(at::ScalarType dtype);
-TORCH_API bool is_hpu_enabled();
-TORCH_API void set_hpu_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_hpu_dtype();
 TORCH_API void set_autocast_hpu_dtype(at::ScalarType dtype);
-TORCH_API bool is_xla_enabled();
-TORCH_API void set_xla_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_xla_dtype();
 TORCH_API void set_autocast_xla_dtype(at::ScalarType dtype);
-TORCH_API bool is_privateuseone_enabled();
-TORCH_API void set_privateuseone_enabled(bool enabled);
 TORCH_API at::ScalarType get_autocast_privateuseone_dtype();
 TORCH_API void set_autocast_privateuseone_dtype(at::ScalarType dtype);
 TORCH_API bool is_autocast_cache_enabled();
