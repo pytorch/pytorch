@@ -4279,14 +4279,14 @@ class TestQuantizeFx(QuantizationTestCase):
         checkModel(m, data, ref_weight, ref_bias, ref_res)
 
         # Test save to disk and load back
-        for weights_only in [True, False]:
-            m = M2().eval()
-            m = prepare_fx(m, qconfig_dict, example_inputs=(data,))
-            m = convert_fx(m)
-            m.load_state_dict(state_dict)
-            with TemporaryFileName() as fname:
-                torch.save(m.state_dict(), fname)
-                m.load_state_dict(torch.load(fname, weights_only=weights_only))
+        m = M2().eval()
+        m = prepare_fx(m, qconfig_dict, example_inputs=(data,))
+        m = convert_fx(m)
+        m.load_state_dict(state_dict)
+        with TemporaryFileName() as fname:
+            torch.save(m.state_dict(), fname)
+            # Don't test weights_only here as this is loading a ScriptModule
+            m.load_state_dict(torch.load(fname))
 
             checkModel(m, data, ref_weight, ref_bias, ref_res)
 
