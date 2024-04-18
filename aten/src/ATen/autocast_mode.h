@@ -12,23 +12,13 @@ namespace at::autocast {
 
 TORCH_API bool is_enabled(DispatchKey dispatch_key);
 TORCH_API void set_enabled(DispatchKey dispatch_key, bool new_enabled);
+TORCH_API at::ScalarType get_autocast_dtype(at::DeviceType device_type);
+TORCH_API void set_autocast_dtype(
+    at::DeviceType device_type,
+    at::ScalarType dtype);
 TORCH_API void clear_cache();
 TORCH_API int increment_nesting();
 TORCH_API int decrement_nesting();
-TORCH_API at::ScalarType get_autocast_gpu_dtype();
-TORCH_API at::ScalarType get_autocast_cpu_dtype();
-TORCH_API void set_autocast_gpu_dtype(at::ScalarType dtype);
-TORCH_API void set_autocast_cpu_dtype(at::ScalarType dtype);
-TORCH_API at::ScalarType get_autocast_xpu_dtype();
-TORCH_API void set_autocast_xpu_dtype(at::ScalarType dtype);
-TORCH_API at::ScalarType get_autocast_ipu_dtype();
-TORCH_API void set_autocast_ipu_dtype(at::ScalarType dtype);
-TORCH_API at::ScalarType get_autocast_hpu_dtype();
-TORCH_API void set_autocast_hpu_dtype(at::ScalarType dtype);
-TORCH_API at::ScalarType get_autocast_xla_dtype();
-TORCH_API void set_autocast_xla_dtype(at::ScalarType dtype);
-TORCH_API at::ScalarType get_autocast_privateuseone_dtype();
-TORCH_API void set_autocast_privateuseone_dtype(at::ScalarType dtype);
 TORCH_API bool is_autocast_cache_enabled();
 TORCH_API void set_autocast_cache_enabled(bool enabled);
 
@@ -84,23 +74,13 @@ inline DispatchKey get_autocast_dispatch_key_from_device_type(
 
 inline at::ScalarType get_lower_precision_fp_from_device_type(
     c10::DeviceType device_type) {
-  switch (device_type) {
-    case c10::DeviceType::CUDA:
-      return get_autocast_gpu_dtype();
-    case c10::DeviceType::CPU:
-      return get_autocast_cpu_dtype();
-    case c10::DeviceType::XPU:
-      return get_autocast_xpu_dtype();
-    case c10::DeviceType::IPU:
-      return get_autocast_ipu_dtype();
-    case c10::DeviceType::HPU:
-      return get_autocast_hpu_dtype();
-    case c10::DeviceType::XLA:
-      return get_autocast_xla_dtype();
-    case c10::DeviceType::PrivateUse1:
-      return get_autocast_privateuseone_dtype();
-    default:
-      throw std::runtime_error(
+  if (device_type == at::kCPU || device_type == at::kCUDA ||
+      device_type == at::kXPU || device_type == at::kIPU ||
+      device_type == at::kHPU || device_type == at::kXLA ||
+      device_type == at::kPrivateUse1) {
+    return get_autocast_dtype(device_type);
+  } else {
+    throw std::runtime_error(
           "unknown device type for autocast in get_lower_precision_fp_from_device_type");
   }
 }
@@ -654,3 +634,4 @@ copy pasted in from VariableTypeEverything.cpp with appropriate substitutions.
       REGISTER_SIGNATURE,                                    \
       REDISPATCH_SIGNATURE,                                  \
       POLICY)
+ 

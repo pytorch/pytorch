@@ -499,11 +499,36 @@ static PyObject* is_autocast_enabled(PyObject* _unused, PyObject* arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* set_autocast_dtype(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  TORCH_CHECK_TYPE(
+      THPDtype_Check(arg),
+      "dtype must be a torch.dtype (got ",
+      Py_TYPE(arg)->tp_name,
+      ")");
+  at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
+  at::autocast::set_autocast_xla_dtype(targetType);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* get_autocast_dtype(PyObject* _unused, PyObject* arg) {
+  HANDLE_TH_ERRORS
+  at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
+  auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
+  Py_INCREF(dtype);
+  return dtype;
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_enabled(DispatchKey::AutocastCPU) || at::autocast::is_enabled(DispatchKey::AutocastCUDA) ||
-      at::autocast::is_enabled(DispatchKey::AutocastXPU) || at::autocast::is_enabled(DispatchKey::AutocastIPU) ||
-      at::autocast::is_enabled(DispatchKey::AutocastXLA) || at::autocast::is_enabled(DispatchKey::AutocastHPU) ||
+  if (at::autocast::is_enabled(DispatchKey::AutocastCPU) ||
+      at::autocast::is_enabled(DispatchKey::AutocastCUDA) ||
+      at::autocast::is_enabled(DispatchKey::AutocastXPU) ||
+      at::autocast::is_enabled(DispatchKey::AutocastIPU) ||
+      at::autocast::is_enabled(DispatchKey::AutocastXLA) ||
+      at::autocast::is_enabled(DispatchKey::AutocastHPU) ||
       at::autocast::is_enabled(DispatchKey::AutocastPrivateUse1)) {
     Py_RETURN_TRUE;
   } else {
