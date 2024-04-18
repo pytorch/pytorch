@@ -1959,10 +1959,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // example: Using the batch_isend_irecv to send a tensor to a target process.
   // On the sender side, the corresponding underlying NCCL calls will look like
   //   ncclGroupStart() // This is in batch_isend_irecv
-  //   ncclGroupStart() // This is [Note 1]
   //   ncclCommInitRank() // Inside NCCLComm::create
   //   ncclSend()
-  //   ncclGroupEnd() // This is [Note 2]
   //   ncclGroupEnd() // This is in batch_isend_irecv
   // With this pattern, the nccl communicator will be created in the last
   // ncclGroupEnd which means when ncclSend is processed, the passed
@@ -1975,9 +1973,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     // comms have not been initiated yet, so can only check in blocking-way
     C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   }
-
-  // [Note 1] Create the NCCL communicators for each GPU
-  C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
 
   // GPU world size and GPU rank
   int numRanks, rank;
@@ -2038,19 +2033,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     std::lock_guard<std::mutex> lock(mutex_);
     inInitializationCommMap_.emplace(deviceKey, ncclComm);
   }
-
-  // [Note 2 ]
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
-#else
-  if (nccl_use_nonblocking()) {
-    // If we use nonblocking mode, allow communicators to be
-    // uninitialized/ncclInProgress until the first communication
-    C10D_NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), c10::nullopt);
-  } else {
-    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
-  }
-#endif
 
   NCCLTraceBuffer::get()->record_pg_ranks(
       std::make_tuple(pg_name_, pg_desc_), groupRanks());
