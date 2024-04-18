@@ -1287,6 +1287,61 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent, m) {
             out = compiled_fn(activations)
             self.assertTrue(len(activations) == 0)
 
+    @unittest.skipIf(not HAS_CUDA, "requires cuda")
+    def test_free_activation_memory_subclass(self):
+        # cover the case when aot inputs have subclasses, resulting in a different runtime wrapper
+        self.assertTrue(torch.cuda.memory_allocated() == 0)
+
+        # Use an op to check that the memory is freed by the time the op is executed
+        def assertion_impl(to_clone):
+            mem_allocated = torch.cuda.memory_allocated()
+            self.assertTrue(
+                mem_allocated < 1200000, "some activations should have been freed"
+            )
+            self.assertTrue(
+                mem_allocated > 800000,
+                "currently subclasses don't seem to be freed in inductor",
+            )
+            return to_clone.clone()
+
+        with torch.library._scoped_library("test_compiled_autograd", "FRAGMENT") as lib:
+            lib.define(
+                "assertion_op(Tensor x) -> Tensor", tags=(torch.Tag.pt2_compliant_tag,)
+            )
+            lib.impl("assertion_op", assertion_impl, "CPU")
+            lib.impl("assertion_op", lambda x: x.clone(), "Meta")
+            lib.impl("assertion_op", lambda x: x.clone(), "NestedTensor")
+
+            def fn(inputs):
+                _, y = inputs
+                out = y.cpu()
+                cloned_out = torch.ops.test_compiled_autograd.assertion_op(out)
+                return cloned_out
+
+            gm = torch.fx.symbolic_trace(fn)
+            torch._dynamo.utils.set_locals_to_steal(gm, ["inputs"])
+            compiled_fn = torch.compile(gm)
+
+            from torch.nested._internal.nested_tensor import jagged_from_list
+
+            activations = [
+                jagged_from_list(
+                    [
+                        torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
+                        torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
+                    ],
+                    None,
+                )[
+                    0
+                ],  # NestedTensor
+                torch.ones((1, 100000), device="cuda"),  # 400,000 bytes
+            ]
+            # 1,200,000 bytes (3 * 4 * 100,000 bytes)
+            self.assertTrue(torch.cuda.memory_allocated() > 1200000)
+
+            out = compiled_fn(activations)
+            self.assertTrue(len(activations) == 0)
+
 
 def load_test_module(name):
     testdir = Path(__file__).absolute().parent.parent

@@ -1,3 +1,4 @@
+#include <ATen/xpu/PinnedMemoryAllocator.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUDevice.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
@@ -52,6 +53,19 @@ void XPUHooks::deviceSynchronize(DeviceIndex device_index) const {
   // Only the SYCL queues we have reserved will be synchronized, see Note
   // [Synchronize Streams on Device].
   c10::xpu::syncStreamsOnDevice(device_index);
+}
+
+Allocator* XPUHooks::getPinnedMemoryAllocator() const {
+  return at::xpu::getPinnedMemoryAllocator();
+}
+
+bool XPUHooks::isPinnedPtr(const void* data) const {
+  if (!at::xpu::is_available()) {
+    return false;
+  }
+
+  return sycl::usm::alloc::host ==
+      sycl::get_pointer_type(data, c10::xpu::get_device_context());
 }
 
 REGISTER_XPU_HOOKS(XPUHooks);
