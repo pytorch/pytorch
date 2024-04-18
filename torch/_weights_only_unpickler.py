@@ -92,6 +92,12 @@ def _get_allowed_globals():
         torch.int16,
         torch.int32,
         torch.int64,
+        # quantized dtypes
+        torch.qint8,
+        torch.qint32,
+        torch.quint8,
+        torch.quint4x2,
+        torch.quint2x4,
     ]:
         rc[str(t)] = t
     # Tensor classes
