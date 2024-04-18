@@ -113,7 +113,7 @@ DEVICE_TO_ATEN = {
 
 LAYOUT_TO_ATEN = {
     torch.strided: "at::kStrided",
-    torch._mkldnn: "at::kMkldnn",
+    torch._mkldnn: "at::kMkldnn",  # type: ignore[attr-defined]
 }
 
 INDEX_TYPE = "long"
