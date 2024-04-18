@@ -57,10 +57,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         use_bias=True,
         dtype=torch.double,
     ):
-        if use_xpu:
-            device = torch.device("xpu")
-        else:
-            device = torch.device("cpu")
+        device = torch.device("xpu" if use_xpu else "cpu")
 
         x = torch.randn(
             batch_size,
