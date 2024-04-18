@@ -29,7 +29,6 @@ from torch._prims_common.wrappers import (
     _safe_copy_out,
     out_wrapper,
 )
-from torch.fx.experimental.symbolic_shapes import statically_known_true
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_map
 
@@ -3850,6 +3849,9 @@ def constant_pad_nd(
     pad: Tuple[int, ...],
     value: NumberType = 0,
 ) -> Tensor:
+    # Avoid importing sympy at a module level
+    from torch.fx.experimental.symbolic_shapes import statically_known_true
+
     if builtins.all(statically_known_true(p <= 0) for p in pad):
         import torch._refs as refs
 
