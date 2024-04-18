@@ -416,7 +416,7 @@ class FormattedTimesMixin:
 
     @property
     def cuda_time(self):  # To be deprecated
-        return device_time(self)
+        return self.device_time
 
 
 class Interval:
@@ -816,9 +816,7 @@ def _build_table(
     # ProfilerActivity.PrivateUse1 can also catch privateuse1 memory usage.
     # Here only need to check has_privateuse1_time if not use_device.
     if not use_device and has_device_time:
-        raise RuntimeError(
-            "use_device is None, but there is device performance data."
-        )
+        raise RuntimeError("use_device is None, but there is device performance data.")
 
     has_input_shapes = any(
         (event.input_shapes is not None and len(event.input_shapes) > 0)

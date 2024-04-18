@@ -1077,7 +1077,7 @@ class TestProfiler(TestCase):
             stats = run_profiler(create_cuda_tensor)
             check_metrics(
                 stats,
-                "cuda_memory_usage",
+                "device_memory_usage",
                 allocs=[
                     "test_user_scope_alloc",
                     "aten::to",
