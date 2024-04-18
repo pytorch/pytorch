@@ -613,7 +613,7 @@ def register_fake(
         return register(func)
 
 
-def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], backward_fn: Callable, /, *, lib=None) -> None:
+def register_autograd(op: _op_identifier, backward: Callable, /, *, setup_context: Optional[Callable] = None, lib=None) -> None:
     r"""Register a backward formula for this custom op.
 
     In order for an operator to work with autograd, you need to register
@@ -659,7 +659,7 @@ def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], 
         >>>     x, = ctx.saved_tensors
         >>>     return grad * x.cos()
         >>>
-        >>> torch.library.register_autograd("mylib::numpy_sin", setup_context, backward)
+        >>> torch.library.register_autograd("mylib::numpy_sin", backward, setup_context=setup_context)
         >>>
         >>> x = torch.randn(3, requires_grad=True)
         >>> y = numpy_sin(x)
@@ -673,7 +673,7 @@ def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], 
         op = op._name
     opdef = _maybe_get_opdef(op)
     if opdef is not None:
-        opdef.register_autograd(setup_context_fn, backward_fn)
+        opdef.register_autograd(backward, setup_context=setup_context)
         return
 
     assert isinstance(op, str)
@@ -687,7 +687,7 @@ def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], 
             f"a functional operator and register an autograd formula for that."
         )
 
-    info = _library.autograd.Info(setup_context_fn, backward_fn)
+    info = _library.autograd.Info(backward, setup_context)
     autograd_kernel = _library.autograd.make_autograd_impl(op, info)
     namespace, opname = torch._library.utils.parse_namespace(qualname)
     if lib is None:

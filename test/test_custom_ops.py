@@ -2486,14 +2486,18 @@ class TestCustomOpAPI(TestCase):
                 return grad * x.cos()
 
             if mode == "function":
-                torch.library.register_autograd(numpy_sin, setup_context, backward)
+                torch.library.register_autograd(
+                    numpy_sin, backward, setup_context=setup_context
+                )
             elif mode == "qualname":
                 torch.library.register_autograd(
-                    "mylib::numpy_sin", setup_context, backward
+                    "mylib::numpy_sin", backward, setup_context=setup_context
                 )
             elif mode == "opoverload":
                 torch.library.register_autograd(
-                    torch.ops.mylib.numpy_sin.default, setup_context, backward
+                    torch.ops.mylib.numpy_sin.default,
+                    backward,
+                    setup_context=setup_context,
                 )
 
             x = torch.randn(3, requires_grad=True)
@@ -2531,13 +2535,16 @@ class TestCustomOpAPI(TestCase):
 
                 if mode == "qualname":
                     torch.library.register_autograd(
-                        "_torch_testing::sin5", setup_context, backward, lib=lib
+                        "_torch_testing::sin5",
+                        backward,
+                        setup_context=setup_context,
+                        lib=lib,
                     )
                 elif mode == "opoverload":
                     torch.library.register_autograd(
                         torch.ops._torch_testing.sin5.default,
-                        setup_context,
                         backward,
+                        setup_context=setup_context,
                         lib=lib,
                     )
                 x = torch.randn(3, requires_grad=True)
