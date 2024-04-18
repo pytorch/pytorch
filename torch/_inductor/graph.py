@@ -1039,6 +1039,8 @@ class GraphLowering(torch.fx.Interpreter):
         def debug(msg):
             log.debug("lowering %s %s", LazyString(n.format_node), msg)
 
+        buffer_watermark = len(self.buffers)
+
         origins = {n}
         if n.op == "call_function":
             args, kwargs = self.fetch_args_kwargs_from_env(n)
@@ -1209,6 +1211,15 @@ class GraphLowering(torch.fx.Interpreter):
                         result.data.data.inputs[0].origin_node = n
 
         self.register_users_of(result)
+
+        new_unbacked_defs = set()
+        for i in range(buffer_watermark, len(self.buffers)):
+            new_unbacked_defs |= self.buffers[i].get_unbacked_symbol_defs()
+
+        unbacked_bindings = n.meta.get("unbacked_bindings", {})
+        assert (
+            new_unbacked_defs == unbacked_bindings.keys()
+        ), f"{new_unbacked_defs} != {unbacked_bindings}"
 
         return result
 
