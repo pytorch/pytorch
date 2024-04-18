@@ -30,11 +30,11 @@ alexnet,pass,6
 
 
 
-basic_gnn_edgecnn,pass,22
+basic_gnn_edgecnn,pass,29
 
 
 
-basic_gnn_gcn,pass,13
+basic_gnn_gcn,pass,17
 
 
 
@@ -50,7 +50,7 @@ dcgan,pass,6
 
 
 
-demucs,pass,9
+demucs,pass,12
 
 
 
@@ -70,7 +70,7 @@ drq,pass,6
 
 
 
-fastNLP_Bert,pass,10
+fastNLP_Bert,pass,13
 
 
 
@@ -114,7 +114,7 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,pass,26
+hf_Reformer,pass,31
 
 
 
@@ -162,7 +162,7 @@ mobilenet_v3_large,pass,7
 
 
 
-moco,pass,11
+moco,pass,14
 
 
 
@@ -230,7 +230,7 @@ soft_actor_critic,pass,6
 
 
 
-speech_transformer,pass,16
+speech_transformer,pass,19
 
 
 
@@ -274,7 +274,7 @@ torch_multimodal_clip,pass,7
 
 
 
-tts_angular,pass,9
+tts_angular,pass,12
 
 
 
@@ -282,8 +282,8 @@ vgg16,pass,6
 
 
 
-vision_maskrcnn,pass,33
+vision_maskrcnn,pass,38
 
 
 
-yolov3,pass,9
+yolov3,pass,10
