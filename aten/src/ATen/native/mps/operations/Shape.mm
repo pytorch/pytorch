@@ -320,14 +320,14 @@ TORCH_IMPL_FUNC(cat_out_mps)
   };
 
   @autoreleasepool {
-    string key = "cat_out_mps:" + to_string(dimension) + ":" +
-        (memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
+    string key =
+        "cat_out_mps:" + to_string(dimension) + ":" + (memory_format == MemoryFormat::ChannelsLast ? "NHWC" : "NCHW");
     if (!all_same_dtype) {
       key += getTensorsStringKey(input_tensors, true, all_same_sizes_and_stride);
     } else {
       key += ":" + getMPSTypeString(input_tensors[0].scalar_type(), true) + ":" + to_string(inputs.size());
     }
-    for(auto idx : skipped_tensor_indices) {
+    for (auto idx : skipped_tensor_indices) {
       key += "," + std::to_string(idx);
     }
 
@@ -371,9 +371,7 @@ TORCH_IMPL_FUNC(cat_out_mps)
         if (tensor.scalar_type() == kBool) {
           scalar_type = MPSDataTypeInt8;
         }
-        inputPlaceholders.emplace_back(cachedGraph->inputTensors_[t_idx],
-                                       tensor,
-                                       nullptr, true, scalar_type);
+        inputPlaceholders.emplace_back(cachedGraph->inputTensors_[t_idx], tensor, nullptr, true, scalar_type);
         t_idx++;
       }
       i++;
