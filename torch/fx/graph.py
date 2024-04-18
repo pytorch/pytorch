@@ -4,9 +4,8 @@ import torch.utils._pytree as pytree
 from . import _pytree as fx_pytree
 from ._compatibility import compatibility
 
-import os
 import contextlib
-from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type, Iterable
+from typing import TYPE_CHECKING, Callable, Any, List, Dict, NamedTuple, Optional, Tuple, Set, FrozenSet, Type
 from dataclasses import dataclass
 from contextlib import contextmanager
 import copy
@@ -379,8 +378,7 @@ class CodeGen:
         return []
 
     def _gen_python_code(
-        self, nodes, root_module: str, namespace: _Namespace, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
+        self, nodes, root_module: str, namespace: _Namespace, *, verbose: bool = False,
     ) -> PythonCode:
         free_vars: List[str] = []
         body: List[str] = []
@@ -389,8 +387,6 @@ class CodeGen:
 
         # Wrap string in list to pass by reference
         maybe_return_annotation : List[str] = ['']
-        include_stride = include_stride or (os.environ.get("FX_GRAPH_SHOW_STRIDE", "0") == "1")
-        include_device = include_device or (os.environ.get("FX_GRAPH_SHOW_DEVICE", "0") == "1")
 
         def add_global(name_hint: str, obj: Any):
             """Add an obj to be tracked as a global.
@@ -534,7 +530,7 @@ class CodeGen:
                     prev_stacktrace = ""
                     body.append('\n# No stacktrace found for following nodes\n')
 
-        def stringify_shape(shape : Iterable) -> str:
+        def stringify_shape(shape : torch.Size) -> str:
             return f"[{', '.join(str(x) for x in shape)}]"
 
         def emit_node(node : Node):
@@ -547,13 +543,10 @@ class CodeGen:
                 from torch.fx.passes.shape_prop import TensorMetadata
 
                 meta_val = node.meta.get('val', node.meta.get('tensor_meta', None))
+
                 # use string as annotation, to make it valid python code
                 if isinstance(meta_val, FakeTensor):
-                    stride_annotation = f"{stringify_shape(meta_val.stride())}" if include_stride else ""
-                    device_annotation = f"{meta_val.device}" if include_device else ""
-                    maybe_type_annotation = \
-                        f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}' \
-                        f'{stride_annotation}{device_annotation}"'
+                    maybe_type_annotation = f': "{dtype_abbrs[meta_val.dtype]}{stringify_shape(meta_val.shape)}"'
                 elif isinstance(meta_val, py_sym_types):
                     maybe_type_annotation = f': "Sym({meta_val})"'
                 elif isinstance(meta_val, TensorMetadata):
@@ -1353,10 +1346,7 @@ class Graph:
         return op
 
     @compatibility(is_backward_compatible=True)
-    def python_code(
-        self, root_module: str, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
-    ) -> PythonCode:
+    def python_code(self, root_module: str, *, verbose: bool = False) -> PythonCode:
         """
         Turn this ``Graph`` into valid Python code.
 
@@ -1415,19 +1405,10 @@ class Graph:
                     node._repr_fn = orig_repr_fns[node]
 
         with override_node_repr(self):
-            return self._python_code(
-                root_module, namespace,
-                verbose=verbose, include_stride=include_stride, include_device=include_device
-            )
+            return self._python_code(root_module, namespace, verbose=verbose)
 
-    def _python_code(
-        self, root_module: str, namespace: _Namespace, *,
-        verbose: bool = False, include_stride: bool = False, include_device: bool = False
-    ) -> PythonCode:
-        return self._codegen._gen_python_code(
-            self.nodes, root_module, namespace,
-            verbose=verbose, include_stride=include_stride, include_device=include_device
-        )
+    def _python_code(self, root_module: str, namespace: _Namespace, *, verbose: bool = False) -> PythonCode:
+        return self._codegen._gen_python_code(self.nodes, root_module, namespace, verbose=verbose)
 
 
     def __str__(self) -> str:

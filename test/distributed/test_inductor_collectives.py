@@ -17,6 +17,9 @@ from torch.testing._internal.common_distributed import (
     DynamoDistributedMultiProcTestCase,
     _dynamo_dist_per_rank_init,
     requires_nccl,
+    run_with_legacy_funcol,
+    run_with_both_funcol_impls,
+    run_with_both_funcol_impls_with_arg,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (
@@ -57,6 +60,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @run_with_legacy_funcol
     def test_broadcast_inductor(self):
         """
         Testing if broadcast works correctly when using inductor
@@ -93,6 +97,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @run_with_legacy_funcol
     def test_allreduce_inductor(self):
         """
         This is matmul/cat/allreduce is a pattern we aim to optimize.
@@ -135,6 +140,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @run_with_legacy_funcol
     def test_eager_allreduce_inductor_wait(self):
 
         def eager_func(a, b, c, d, *, tag, ranks, group_size):
@@ -174,6 +180,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @run_with_legacy_funcol
     def test_inductor_allreduce_eager_wait(self):
 
         def inductor_func(a, b, c, d, *, tag, ranks, group_size):
@@ -212,6 +219,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @run_with_legacy_funcol
     def test_allreduce_input_buffer_reuse(self):
         def func(a, *, tag, ranks, group_size):
             ar = _functional_collectives.all_reduce(a, "sum", ranks, tag)
@@ -231,6 +239,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @run_with_legacy_funcol
     def test_permute_tensor(self):
         def func(tensor, src_dst_pairs, *, tag, ranks, group_size):
             return _functional_collectives.permute_tensor(tensor, src_dst_pairs, ranks, tag)
@@ -260,6 +269,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._inductor.config, "allow_buffer_reuse", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @run_with_legacy_funcol
     def test_allgather_output_buffer_reuse(self):
         class Model(torch.nn.Module):
             def __init__(self, *args, **kwargs) -> None:
@@ -285,6 +295,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @run_with_legacy_funcol
     def test_allgather_contiguous_input(self):
         class Model(torch.nn.Module):
             def __init__(self, *args, **kwargs) -> None:
@@ -311,6 +322,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @run_with_legacy_funcol
     def test_allgather_into_tensor_inductor(self):
         """
         This is matmul/cat/allreduce is a pattern we aim to optimize.
@@ -343,6 +355,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @run_with_legacy_funcol
     def test_reduce_scatter_tensor_inductor(self):
         def example(a, b, *, tag, ranks, group_size):
             c = torch.matmul(a, b)
@@ -373,6 +386,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @run_with_legacy_funcol
     def test_all_to_all_single_inductor(self):
         def example(inp, input_split_sizes_tensor, output_split_sizes_tensor, *, tag, ranks, group_size):
             input_split_sizes = _tolist_with_constrain_as_size(input_split_sizes_tensor)
@@ -458,6 +472,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @patch.object(torch._dynamo.config, "capture_scalar_outputs", True)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @run_with_legacy_funcol
     def test_all_to_all_single_inductor_input_split_sizes_none(self):
         def example(inp, output_split_sizes_tensor, *, tag, ranks, group_size):
             output_split_sizes = _tolist_with_constrain_as_size(output_split_sizes_tensor)
@@ -499,6 +514,7 @@ class TestCollectivesMultiProc(DynamoDistributedMultiProcTestCase):
     @skip_if_lt_x_gpu(2)
     # TODO: somehow inductor bg compile threads are causing hangs at exit with distributed work dtor
     @patch.object(torch._inductor.config, "compile_threads", 1)
+    @run_with_legacy_funcol
     def test_all_to_all_single_inductor_split_sizes_none(self):
         def example(inp, *, tag, ranks, group_size):
             a2a = torch.ops.c10d_functional.all_to_all_single(
@@ -544,6 +560,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(debug=True)
+    @run_with_legacy_funcol  # impl specific
     def test_inductor_single_op(self):
 
         def func(inp, *, tag, ranks, group_size):
@@ -572,6 +589,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch(debug=True)
+    @run_with_legacy_funcol  # impl specific
     def test_inductor_steal_buffer(self):
         """
         it's ok and optimal if inductor allreduce mutates the buffer of an intermediate
@@ -609,6 +627,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
+    @run_with_legacy_funcol  # impl specific
     def test_inductor_doesnt_mutate_shared(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
@@ -646,10 +665,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         correct = func(inputs, **self.get_world_trs())
         self.assertTrue(same(out, correct))
 
-    def test_dynamo_trace_allreduce(self):
+    @run_with_both_funcol_impls_with_arg
+    def test_dynamo_trace_allreduce(self, use_native_funcol):
 
         def func(inp):
-            ar = _functional_collectives.all_reduce(inp, "sum", "0")
+            if use_native_funcol:
+                ar = _functional_collectives.all_reduce(inp, "sum", "0")
+            else:
+                ar = _functional_collectives.all_reduce(inp, "sum", [0], "")
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
@@ -663,10 +686,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
-    def test_dynamo_trace_all_gather_tensor(self):
+    @run_with_both_funcol_impls_with_arg
+    def test_dynamo_trace_all_gather_tensor(self, use_native_funcol):
 
         def func(inp):
-            ar = _functional_collectives.all_gather_tensor(inp, 0, "0")
+            if use_native_funcol:
+                ar = _functional_collectives.all_gather_tensor(inp, 0, "0")
+            else:
+                ar = _functional_collectives.all_gather_tensor(inp, 0, [0], "")
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
@@ -680,6 +707,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
+    @run_with_both_funcol_impls
     def test_dynamo_trace_all_gather_tensor_pg(self):
 
         def func(inp, *, pg):
@@ -697,6 +725,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
+    @run_with_both_funcol_impls
     def test_dynamo_rewrite_dist_all_gather(self):
 
         def func(inp, out, *, pg):
@@ -722,6 +751,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
+    @run_with_both_funcol_impls
     def test_dynamo_rewrite_dist_all_gather_list(self):
 
         def func(inp, out, *, pg):
@@ -744,6 +774,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.frame_count == 1
         assert same(outputs, correct_outputs)
 
+    @run_with_both_funcol_impls
     def test_dynamo_rewrite_dist_all_gather_args_match(self):
         # Duplicated most of the structure from test_dynamo_rewrite_dist_all_gather
         # except uses kwargs to ensure rewrite has matching arg names
@@ -771,6 +802,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
+    @run_with_both_funcol_impls
     def test_dynamo_rewrite_dist_reduce_scatter(self):
 
         def func(inp, out, *, pg):
@@ -796,6 +828,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
+    @run_with_both_funcol_impls
     @parametrize(
         "pg_mode",
         [
@@ -845,6 +878,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(inputs_compiled, inputs_eager)
 
+    @run_with_both_funcol_impls
     def test_dynamo_rewrite_dist_all_to_all_single(self):
 
         def func(output, input, pg):
@@ -868,6 +902,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.frame_count == 1
         assert same(output_compiled, output_eager)
 
+    @run_with_both_funcol_impls
     @parametrize(
         "reduce_op",
         [
@@ -905,6 +940,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         )
         compiled(*inputs)
 
+    @run_with_both_funcol_impls
     @parametrize(
         "source", [
             "GroupMember.WORLD",
@@ -943,6 +979,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         compiled(input)
 
 
+    @run_with_both_funcol_impls
     def test_dynamo_support_collective_op_with_async_op_False(self):
 
         def func(inp, out, *, pg):
@@ -969,6 +1006,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 3
         assert same(outputs, correct_outputs)
 
+    @run_with_both_funcol_impls
     def test_dynamo_graphbreaks_unsupported_async_op(self):
 
         def func(inp, out, *, pg):
@@ -994,6 +1032,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 0
         assert same(outputs, correct_outputs)
 
+    @run_with_both_funcol_impls
     def test_dynamo_pg_var(self):
         def func(inp, *, pg):
             x = pg.rank() + 1 % pg.size()
@@ -1010,10 +1049,14 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert counter.op_count == 1
         assert same(outputs, correct_outputs)
 
-    def test_dynamo_trace_reduce_scatter_tensor(self):
+    @run_with_both_funcol_impls_with_arg
+    def test_dynamo_trace_reduce_scatter_tensor(self, use_native_funcol):
 
         def func(inp):
-            ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, "0")
+            if use_native_funcol:
+                ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, "0")
+            else:
+                ar = _functional_collectives.reduce_scatter_tensor(inp, "sum", 0, [0], "")
             return ar
 
         inputs = torch.ones(4, 4, device="cuda")
@@ -1027,6 +1070,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         self.assertEqual(counter.op_count, 2)
         self.assertTrue(same(out, correct))
 
+    @run_with_both_funcol_impls
     def test_dynamo_trace_allgather_coalesced(self):
         def func(inp, *, tag, ranks, group_size):
             ar = torch.ops.c10d_functional.all_gather_into_tensor_coalesced(inp, tag, ranks, group_size)
@@ -1042,14 +1086,18 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
         assert same(out, correct)
 
 
-    def test_backwards(self):
+    @run_with_both_funcol_impls_with_arg
+    def test_backwards(self, use_native_funcol):
         """
         It's probably not that common to need backwards support for collectives.
 
         However, I wanted to at least see if it was possible to support it as a design goal.
         """
         def func(inp):
-            ar = _functional_collectives.all_reduce(inp, "sum", "0")
+            if use_native_funcol:
+                ar = _functional_collectives.all_reduce(inp, "sum", "0")
+            else:
+                ar = _functional_collectives.all_reduce(inp, "sum", [0], "")
             return ar
 
         input = torch.ones(4, 4, device="cuda", requires_grad=True)
@@ -1072,6 +1120,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
+    @run_with_legacy_funcol  # impl specific
     def test_inductor_all_gather_coalesced(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied
@@ -1118,6 +1167,7 @@ class TestCollectivesInductor(DynamoDistributedSingleProcTestCase):
 
     @unittest.skipIf(not has_triton(), "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch({"debug": True, "triton.descriptive_names": False})
+    @run_with_legacy_funcol  # impl specific
     def test_inductor_reduce_scatter_coalesced(self):
         """
         make sure that an intermediate that's going to be reuse isn't mutated unless copied

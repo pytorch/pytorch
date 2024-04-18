@@ -498,38 +498,24 @@ std::vector<OperatorName> Dispatcher::getRegistrationsForDispatchKey(c10::option
   });
 }
 
-int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey, DispatchKeySet dispatchKeySet) {
+int64_t Dispatcher::sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey) {
   int64_t seq_num = -1;
   // Setting sequence number in the Autograd case to associate
   // the forward range with the corresponding Autograd's node
-
-  // Note: this records a sequence number for both Autograd keys, and for
-  // non-Autograd keys where the dispatchKeySet still contains an autograd key.
-  // This means that we might collect the same sequence nubmer two different
-  // events if they all occurred above Autograd and still had the Autograd
-  // dispatch key in the dispatch key set.
-  // However, this usually doesn't happen: normally the first call will
-  // go through the call() or callBoxed() path in the dispatcher, while
-  // subsequent redispatches go through redispatch() or redispatchBoxed().
-  // `call` has profiler instrumentation, whereas `redispatch` doesn't.
-  // So usually, we'll collect a sequence number on the first call() if the
-  // dispatch keys contain autograd, and not on subsequent redispatches.
-  bool dispatchHasAutograd = !(dispatchKeySet & autograd_dispatch_keyset).empty();
-
-  if (dispatchHasAutograd && at::GradMode::is_enabled()) {
+  if (isIncludedInAlias(dispatchKey, DispatchKey::Autograd) && at::GradMode::is_enabled()) {
     seq_num = at::sequence_number::peek();
   }
   return seq_num;
 }
 
-void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, DispatchKeySet dispatchKeySet, c10::ArrayRef<const c10::IValue> args) {
-  guard.before(schema_ref, args, sequenceNumberForRunningRecordFunction(dispatchKey, dispatchKeySet));
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, c10::ArrayRef<const c10::IValue> args) {
+  guard.before(schema_ref, args, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 
-void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, DispatchKeySet dispatchKeySet) {
+void Dispatcher::runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey) {
   // Setting sequence number in the Autograd case to associate
   // the forward range with the corresponding Autograd's node
-  guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey, dispatchKeySet));
+  guard.before(schema_ref, sequenceNumberForRunningRecordFunction(dispatchKey));
 }
 #ifdef FBCODE_CAFFE2
 bool Dispatcher::profilingOperatorEvents() {

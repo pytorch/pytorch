@@ -47,16 +47,15 @@ _c10d_logger = _get_or_create_logger()
 
 def _get_msg_dict(func_name, *args, **kwargs) -> Dict[str, Any]:
     if dist.is_initialized():
-        group = kwargs.get("group") or kwargs.get("process_group")
         msg_dict = {
             "func_name": f"{func_name}",
             "args": f"{args}, {kwargs}",
             "pg_name": f"{dist._get_process_group_name(kwargs.get('pg'))}",  # type: ignore[arg-type]
-            "backend": f"{dist.get_backend(group)}",
+            "backend": f"{dist.get_backend(kwargs.get('group') or kwargs.get('process_group'))}",
             "world_size": f"{dist.get_world_size()}",
-            "group_size": f"{dist.get_world_size(group)}",
+            "group_size": f"{dist.get_world_size(kwargs.get('group'))}",
             "global_rank": f"{dist.get_rank()}",
-            "local_rank": f"{dist.get_rank(group)}",
+            "local_rank": f"{dist.get_rank(kwargs.get('group'))}",
         }
         if msg_dict["backend"] == "nccl":
             nccl_version = torch.cuda.nccl.version()

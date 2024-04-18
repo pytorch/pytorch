@@ -90,7 +90,6 @@ class Lock {
     flock(operation);
   }
 
-  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~Lock() {
     unlock();
   }
@@ -291,7 +290,6 @@ FileStore::FileStore(std::string path, int numWorkers)
   addHelper(refCountKey_, 1);
 }
 
-// NOLINTNEXTLINE(bugprone-exception-escape)
 FileStore::~FileStore() {
   // If the file does not exist - exit.
   // This can happen when FileStore is invoked from python language which has

@@ -15,7 +15,8 @@
 #include <unistd.h>
 #endif
 
-namespace c10d::detail {
+namespace c10d {
+namespace detail {
 
 // Magic number for client validation.
 static const uint32_t validationMagicNumber = 0x3C85F7CE;
@@ -62,7 +63,7 @@ class BackgroundThread {
   }
 
  private:
-  std::atomic<bool> is_running_{false};
+  std::atomic<bool> is_running_;
   std::thread daemonThread_{};
 };
 
@@ -72,4 +73,5 @@ std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(
     const TCPStoreOptions& opts);
 bool is_libuv_tcpstore_backend_available();
 
-} // namespace c10d::detail
+} // namespace detail
+} // namespace c10d

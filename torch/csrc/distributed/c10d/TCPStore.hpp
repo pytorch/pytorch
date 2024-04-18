@@ -141,7 +141,7 @@ class TORCH_API TCPStore : public Store {
  private:
   int64_t incrementValueBy(const std::string& key, int64_t delta);
 
-  void validate();
+  void validate(void);
 
   std::vector<uint8_t> doGet(const std::string& key);
 

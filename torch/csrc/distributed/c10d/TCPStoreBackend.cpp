@@ -25,10 +25,11 @@
 
 #include <torch/csrc/distributed/c10d/socket.h>
 
-namespace c10d::detail {
+namespace c10d {
+namespace detail {
 
 // Background thread parent class methods
-BackgroundThread::BackgroundThread() = default;
+BackgroundThread::BackgroundThread() {}
 
 BackgroundThread::~BackgroundThread() = default;
 
@@ -323,7 +324,7 @@ void TCPStoreMasterDaemon::doSet(
 }
 
 void TCPStoreMasterDaemon::validateHandler(int socket) {
-  uint32_t validateNumber = 0;
+  uint32_t validateNumber;
   tcputil::recvBytes<uint32_t>(socket, &validateNumber, 1);
   if (validateNumber != detail::validationMagicNumber) {
     TORCH_CHECK(
@@ -611,4 +612,5 @@ std::unique_ptr<BackgroundThread> create_tcpstore_backend(
   return std::make_unique<TCPStoreMasterDaemon>(std::move(socket));
 }
 
-} // namespace c10d::detail
+} // namespace detail
+} // namespace c10d

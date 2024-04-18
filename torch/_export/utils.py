@@ -9,11 +9,8 @@ import torch
 from torch._subclasses.fake_tensor import FakeTensor
 
 from torch.export import ExportedProgram
-from torch.export.exported_program import (
-    _name_hoo_subgraph_placeholders,
-    _rename_without_collisions,
-)
-from torch.export.graph_signature import InputKind, OutputKind
+from torch.export.exported_program import _rename_without_collisions
+from torch.export.graph_signature import ConstantArgument, InputKind, OutputKind
 from torch.utils._pytree import (
     _register_pytree_node,
     Context,
@@ -454,13 +451,11 @@ def placeholder_naming_pass(
     def _strip_name(x):
         if x.startswith("L__self___"):
             x = x[len("L__self___") :]
-        x = re.sub(r"[^a-zA-Z0-9]", "_", x)
-        return x
+        return x.replace(".", "_")
 
     def _extract_pytree_key(x):
         if isinstance(x, MappingKey):
-            x = re.sub(r"[^a-zA-Z0-9]", "_", str(x.key))
-            return x
+            return str(x.key).replace(".", "_")
         elif isinstance(x, SequenceKey):
             return str(x.idx)
         elif isinstance(x, GetAttrKey):
@@ -476,7 +471,7 @@ def placeholder_naming_pass(
     )
     flat_args_with_path, _ = tree_flatten_with_path(combined_args)
     user_input_names = [
-        spec.arg.name
+        (None if isinstance(spec.arg, ConstantArgument) else spec.arg.name)
         for spec in export_graph_signature.input_specs
         if spec.kind == InputKind.USER_INPUT
     ]
@@ -497,12 +492,13 @@ def placeholder_naming_pass(
     for spec in export_graph_signature.input_specs:
         if spec.kind == InputKind.USER_INPUT:
             continue
+        # this should never be ConstantArgument, but avoid lint issue
+        if isinstance(spec.arg, ConstantArgument):
+            continue
         if spec.kind == InputKind.TOKEN:
             base_name = ""
         else:
             base_name = _strip_name(spec.target).lower()
-        base_name = re.sub(r"[^a-zA-Z0-9]", "_", base_name)
-
         _rename_without_collisions(
             name_map,
             spec.arg.name,
@@ -522,19 +518,22 @@ def placeholder_naming_pass(
     # assign new node names
     for node in gm.graph.nodes:
         if node.op == "placeholder":
-            assert node.name in name_map
-            node.name = node.target = name_map[node.name]
+            if node.name in name_map:  # skip constant inputs
+                node.name = node.target = name_map[node.name]
         elif node.name in name_map:
             node.name = name_map[node.name]
 
+    # TODO(pianpwk), in immediate follow-up PR
     # propagate names to higher order op subgraphs
-    _name_hoo_subgraph_placeholders(gm)
+    # name_hoo_subgraph_placeholders(gm)
 
     # re-generate graph module code
     gm.recompile()
 
     # modify graph signature (input specs, output specs, user input mutations)
     for spec in export_graph_signature.input_specs:
+        if isinstance(spec.arg, ConstantArgument):
+            continue
         assert spec.arg.name in name_map
         spec.arg.name = name_map[spec.arg.name]
         if (  # handle targets for custom objects
@@ -543,6 +542,8 @@ def placeholder_naming_pass(
             spec.target = name_map[spec.target][4:]  # strip obj_ prefix
 
     for spec in export_graph_signature.output_specs:
+        if isinstance(spec.arg, ConstantArgument):
+            continue
         if spec.arg.name in name_map:
             spec.arg.name = name_map[spec.arg.name]
         if spec.kind == OutputKind.USER_INPUT_MUTATION and spec.target in name_map:

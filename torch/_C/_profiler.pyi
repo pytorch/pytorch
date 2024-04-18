@@ -234,10 +234,7 @@ def symbolize_tracebacks(
 
 class _RecordFunctionFast:
     def __init__(
-        self,
-        name: str,
-        input_values: Optional[Union[list, tuple]] = None,
-        keyword_values: Optional[dict] = None,
+        self, name: str, args: Optional[Union[list, tuple]] = None
     ) -> None: ...
     def __enter__(self) -> None: ...
     def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None: ...

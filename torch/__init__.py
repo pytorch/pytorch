@@ -339,9 +339,6 @@ class SymFloat:
     def __ge__(self, other) -> builtins.bool:
         raise AssertionError("type stub not overridden")
 
-    def __trunc__(self):
-        raise AssertionError("type stub not overridden")
-
     def __sym_max__(self, other):
         raise AssertionError("type stub not overridden")
 
@@ -468,7 +465,7 @@ def sym_int(a):
     if isinstance(a, SymInt):
         return a
     elif isinstance(a, SymFloat):
-        return math.trunc(a)
+        return math.floor(a) if a >= 0 else math.ceil(a)  # type: ignore[arg-type, call-overload]
     return py_int(a)  # type: ignore[operator]
 
 def sym_max(a, b):
@@ -1794,8 +1791,6 @@ def compile(model: Optional[Callable] = None, *,
             disable: builtins.bool = False) -> Callable:
     """
     Optimizes given model/function using TorchDynamo and specified backend.
-    If you are compiling an :class:`torch.nn.Module`, you can also use :meth:`torch.nn.Module.compile`
-    to compile the module inplace without changing its structure.
 
     Concretely, for every frame executed within the compiled region, we will attempt
     to compile it and cache the compiled result on the code object for future

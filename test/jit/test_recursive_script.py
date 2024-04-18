@@ -5,31 +5,25 @@ import re
 import sys
 import types
 import typing
-from collections import OrderedDict
-from typing import Dict, List, Optional, Tuple
+import typing_extensions
+from typing import List, Dict, Optional, Tuple
 
 import torch
 import torch.jit.frontend
 import torch.nn as nn
-import typing_extensions
 from torch import Tensor
 from torch.testing import FileCheck
+from collections import OrderedDict
 
 # Make the helper files in test/ importable
 pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
-from torch.testing._internal.jit_utils import (
-    _tmp_donotuse_dont_inline_everything,
-    JitTestCase,
-)
+from torch.testing._internal.jit_utils import JitTestCase, _tmp_donotuse_dont_inline_everything
 
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
-
+if __name__ == '__main__':
+    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
+                       "\tpython test/test_jit.py TESTNAME\n\n"
+                       "instead.")
 
 class TestRecursiveScript(JitTestCase):
     def test_inferred_nonetype(self):
@@ -93,9 +87,7 @@ class TestRecursiveScript(JitTestCase):
                 return self.fn(x)
 
         m = M(fn)
-        with self.assertRaisesRegexWithHighlight(
-            RuntimeError, "failed to compile", "i_dont_exist"
-        ):
+        with self.assertRaisesRegexWithHighlight(RuntimeError, "failed to compile", "i_dont_exist"):
             torch.jit.script(m)
 
     def test_init_error(self):
@@ -127,12 +119,12 @@ class TestRecursiveScript(JitTestCase):
 
         # sm1 was created while m had training = True
         self.assertTrue(sm1.training)
-        self.assertEqual(sm1.training, sm1._c.getattr("training"))
+        self.assertEqual(sm1.training, sm1._c.getattr('training'))
         self.assertEqual(sm1(), 2)
 
         # sm2 was created after m was eval'ed
         self.assertFalse(sm2.training)
-        self.assertEqual(sm2.training, sm2._c.getattr("training"))
+        self.assertEqual(sm2.training, sm2._c.getattr('training'))
         self.assertEqual(sm2(), 0)
 
     def test_module_name(self):
@@ -173,7 +165,7 @@ class TestRecursiveScript(JitTestCase):
 
     def test_constants_with_final(self):
         class M1(torch.nn.Module):
-            x: torch.jit.Final[int]
+            x : torch.jit.Final[int]
 
             def __init__(self):
                 super().__init__()
@@ -185,7 +177,7 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(M1(), (torch.randn(2, 2),))
 
         class M2(torch.nn.Module):
-            x: typing_extensions.Final[int]
+            x : typing_extensions.Final[int]
 
             def __init__(self):
                 super().__init__()
@@ -197,7 +189,7 @@ class TestRecursiveScript(JitTestCase):
         self.checkModule(M2(), (torch.randn(2, 2),))
 
         class M3(torch.nn.Module):
-            x: typing.Final[int]
+            x : typing.Final[int]
 
             def __init__(self):
                 super().__init__()
@@ -214,15 +206,12 @@ class TestRecursiveScript(JitTestCase):
             def unscriptable(self):
                 return "a" + 200
 
+
         class TestModule(torch.nn.Module):
             def forward(self, x):
                 return MyScriptClass()
 
-        with self.assertRaisesRegexWithHighlight(
-            torch.jit.frontend.FrontendError,
-            "Cannot instantiate class",
-            "MyScriptClass",
-        ):
+        with self.assertRaisesRegexWithHighlight(torch.jit.frontend.FrontendError, "Cannot instantiate class", "MyScriptClass"):
             t = torch.jit.script(TestModule())
 
     def test_method_call(self):
@@ -257,13 +246,13 @@ class TestRecursiveScript(JitTestCase):
             print(m)
 
         f = FileCheck()
-        f.check("MyModule")
-        f.check("Conv2d")
-        f.check("Linear")
-        f.check("Submodule")
+        f.check('MyModule')
+        f.check('Conv2d')
+        f.check('Linear')
+        f.check('Submodule')
         f.run(out[0])
 
-        self.assertEqual(m.original_name, "MyModule")
+        self.assertEqual(m.original_name, 'MyModule')
 
     def test_dir(self):
         def test_module_dir(mod):
@@ -271,17 +260,8 @@ class TestRecursiveScript(JitTestCase):
             scripted_mod = torch.jit.script(mod)
             dir_scripted = set(dir(scripted_mod))
             # set not currently copied over
-            ignore_set = [
-                "training",
-                "__delitem__",
-                "__setitem__",
-                "clear",
-                "items",
-                "keys",
-                "pop",
-                "update",
-                "values",
-            ]
+            ignore_set = ["training", "__delitem__", "__setitem__", "clear", "items",
+                          "keys", "pop", "update", "values"]
             for attr in dir_set:
                 if attr in ignore_set:
                     continue
@@ -303,9 +283,7 @@ class TestRecursiveScript(JitTestCase):
         linear = nn.Linear(10, 10)
 
         test_module_dir(nn.Sequential(conv, linear))
-        test_module_dir(
-            nn.ModuleDict(OrderedDict([("conv", conv), ("linear", linear)]))
-        )
+        test_module_dir(nn.ModuleDict(OrderedDict([("conv", conv), ("linear", linear)])))
 
     def test_class_compile(self):
         def other_fn(a: int, b: Tensor) -> Tensor:
@@ -317,6 +295,7 @@ class TestRecursiveScript(JitTestCase):
 
             def helper(self, a):
                 return self.x + a + other_fn(self.x, a)
+
 
         class N(torch.nn.Module):
             def forward(self, x):
@@ -432,7 +411,7 @@ class TestRecursiveScript(JitTestCase):
 
     def test_module_basic(self):
         class Other(torch.nn.Module):
-            __constants__ = ["x"]
+            __constants__ = ['x']
 
             def __init__(self, x):
                 super().__init__()
@@ -447,6 +426,7 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, t):
                 return t + self.x + self.param
 
+
         class M(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -459,7 +439,7 @@ class TestRecursiveScript(JitTestCase):
 
     def test_module_function_export(self):
         class Other(torch.nn.Module):
-            __constants__ = ["x"]
+            __constants__ = ['x']
 
             def __init__(self, x):
                 super().__init__()
@@ -472,6 +452,7 @@ class TestRecursiveScript(JitTestCase):
 
             def forward(self, t):
                 return t + self.x + self.param
+
 
         class M(torch.nn.Module):
             def __init__(self):
@@ -492,7 +473,9 @@ class TestRecursiveScript(JitTestCase):
             def __init__(self):
                 super().__init__()
                 self.sequential = nn.Sequential(
-                    Inner(), Inner(), nn.Sequential(Inner(), Inner())
+                    Inner(),
+                    Inner(),
+                    nn.Sequential(Inner(), Inner())
                 )
                 self.module_list = nn.ModuleList([Inner(), Inner()])
 
@@ -528,14 +511,12 @@ class TestRecursiveScript(JitTestCase):
                 self.sequential = nn.Sequential(
                     SeluButReluWhenScripted(),
                     SeluButReluWhenScripted(),
-                    nn.Sequential(
-                        SeluButReluWhenScripted(), shared, SeluButReluWhenScripted()
-                    ),
+                    nn.Sequential(SeluButReluWhenScripted(), shared, SeluButReluWhenScripted()),
                     shared,
                 )
-                self.module_list = nn.ModuleList(
-                    [SeluButReluWhenScripted(), shared, SeluButReluWhenScripted()]
-                )
+                self.module_list = nn.ModuleList([SeluButReluWhenScripted(),
+                                                  shared,
+                                                  SeluButReluWhenScripted()])
 
             def forward(self, x):
                 for mod in self.module_list:
@@ -572,8 +553,7 @@ class TestRecursiveScript(JitTestCase):
         self.assertEqual(obj(1, 2), 3)
         self.assertEqual(obj(1, 2, 3, 4), 10)
         with self.assertRaisesRegex(
-            torch.jit.frontend.NotSupportedError,
-            expected_regex="can't take variable number of arguments",
+            torch.jit.frontend.NotSupportedError, expected_regex="can't take variable number of arguments"
         ):
             torch.jit.script(obj)
 
@@ -588,10 +568,7 @@ class TestRecursiveScript(JitTestCase):
 
         self.assertEqual(jit_obj(1, 2), 3)
         with self.assertRaisesRegex(
-            RuntimeError,
-            expected_regex=re.escape(
-                "expected at most 2 argument(s) but received 4 argument(s)"
-            ),
+            RuntimeError, expected_regex=re.escape("expected at most 2 argument(s) but received 4 argument(s)")
         ):
             jit_obj(1, 2, 3, 4)
 
@@ -621,26 +598,27 @@ class TestRecursiveScript(JitTestCase):
             def __getstate__(self):
                 return (self.a, self.inner)
 
+
         untyped_values = (
-            ("my_dict", {"I": "am", "a test": "test"}),
-            ("my_float", 2.3),
-            ("my_int", 99),
-            ("my_bool", False),
-            ("my_tuple", (1, 2, 3, 4)),
-            ("my_list", [(1, 2), (3, 4)]),
+            ('my_dict', {"I": "am", "a test": "test"}),
+            ('my_float', 2.3),
+            ('my_int', 99),
+            ('my_bool', False),
+            ('my_tuple', (1, 2, 3, 4)),
+            ('my_list', [(1, 2), (3, 4)]),
             # ('my_tensor', torch.randn(2, 2)),
-            ("my_int_list", [1, 2, 3, 4]),
+            ('my_int_list', [1, 2, 3, 4]),
             # ('my_tensor_list', [torch.ones(2, 2) + i for i in range(4)]),
-            ("my_bool_list", [True, True, False, True]),
-            ("my_float_list", [1.0, 2.0, 3.0, 4.0]),
-            ("my_str_list", ["hello", "bye"]),
+            ('my_bool_list', [True, True, False, True]),
+            ('my_float_list', [1., 2., 3., 4.]),
+            ('my_str_list', ['hello', 'bye']),
         )
         typed_values = (
-            ("my_empty_list", []),
-            ("my_empty_dict", {}),
-            ("my_none", None),
-            ("my_object", Foo()),
-            ("my_object2", SFoo()),
+            ('my_empty_list', []),
+            ('my_empty_dict', {}),
+            ('my_none', None),
+            ('my_object', Foo()),
+            ('my_object2', SFoo()),
         )
 
         class M(torch.nn.Module):
@@ -681,11 +659,11 @@ class TestRecursiveScript(JitTestCase):
         # since there's no string frontend for Python classes (so the `define`)
         # trick doesn't work.
         M.__annotations__ = {
-            "my_empty_list": List[int],
-            "my_empty_dict": Dict[str, int],
-            "my_none": Optional[int],
-            "my_object": Foo,
-            "my_object2": SFoo,
+            'my_empty_list': List[int],
+            'my_empty_dict': Dict[str, int],
+            'my_none': Optional[int],
+            'my_object': Foo,
+            'my_object2': SFoo,
         }
 
         m = M()
@@ -716,7 +694,7 @@ class TestRecursiveScript(JitTestCase):
                 return self.encoder(x)
 
         m = M()
-        self.checkModule(m, (torch.randn(5, 5),))
+        self.checkModule(m, (torch.randn(5, 5), ))
 
     def test_inner_traced_module(self):
         class Dummy(nn.Module):
@@ -737,13 +715,12 @@ class TestRecursiveScript(JitTestCase):
         dummy = torch.jit.trace(Dummy(), torch.randn(1, 2))
         dummies = nn.ModuleList([dummy])
         model = Model(dummies)
-        self.checkModule(model, (torch.rand(5, 5),))
+        self.checkModule(model, (torch.rand(5, 5), ))
 
     def test_script_loaded_module(self):
         """
         Test that we can hold a loaded ScriptModule as a submodule.
         """
-
         class Dummy(nn.Module):
             def forward(self, x):
                 return x
@@ -759,7 +736,7 @@ class TestRecursiveScript(JitTestCase):
             def forward(self, input):
                 return self.encoder(input)
 
-        self.checkModule(ContainsLoaded(), (torch.rand(2, 3),))
+        self.checkModule(ContainsLoaded(), (torch.rand(2, 3), ))
 
     def test_optional_module(self):
         class Dummy(nn.Module):

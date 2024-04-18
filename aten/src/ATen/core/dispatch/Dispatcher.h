@@ -304,9 +304,9 @@ public:
 private:
   Dispatcher();
 
-  static int64_t sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey, DispatchKeySet dispatchKeySet);
-  static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, DispatchKeySet dispatchKeySet);
-  static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, DispatchKeySet dispatchKeySet, c10::ArrayRef<const c10::IValue> args);
+  static int64_t sequenceNumberForRunningRecordFunction(DispatchKey dispatchKey);
+  static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey);
+  static void runRecordFunction(at::RecordFunction& guard, at::RecordFunction::schema_ref_t schema_ref, DispatchKey dispatchKey, c10::ArrayRef<const c10::IValue> args);
 
   #ifdef FBCODE_CAFFE2
   static bool profilingOperatorEvents();
@@ -630,15 +630,15 @@ inline Return Dispatcher::callWithDispatchKeySlowPath(const TypedOperatorHandle<
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(lastArgIdx == num_boxed_args);
       // I don't *think* we need std::launder here, because IValue has
       // no subclasses and no const or reference fields.
-      runRecordFunction(guard, schema_ref, dispatchKey, dispatchKeySet, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
+      runRecordFunction(guard, schema_ref, dispatchKey, c10::ArrayRef<const c10::IValue>(reinterpret_cast<IValue *>(boxedArgs), num_boxed_args));
       for (size_t ii = 0; ii < num_boxed_args; ++ii) {
         reinterpret_cast<IValue *>(&boxedArgs[ii])->~IValue();
       }
     } else {
-      runRecordFunction(guard, schema_ref, dispatchKey, dispatchKeySet);
+      runRecordFunction(guard, schema_ref, dispatchKey);
     }
   } else {
-    runRecordFunction(guard, schema_ref, dispatchKey, dispatchKeySet);
+    runRecordFunction(guard, schema_ref, dispatchKey);
   }
 
   if (C10_UNLIKELY(guard.needsOutputs())) {
@@ -732,8 +732,8 @@ inline void Dispatcher::callBoxed(const OperatorHandle& op, Stack* stack) const 
     auto dispatchKey = dispatchKeySet.highestPriorityTypeId();
     auto& schema = op.schema();
     auto schema_ref = std::reference_wrapper<const FunctionSchema>(schema);
-    guard.needsInputs() ? runRecordFunction(guard, schema_ref, dispatchKey, dispatchKeySet, c10::ArrayRef<const c10::IValue>(stack->data(), stack->size()))
-                        : runRecordFunction(guard, schema_ref, dispatchKey, dispatchKeySet);
+    guard.needsInputs() ? runRecordFunction(guard, schema_ref, dispatchKey, c10::ArrayRef<const c10::IValue>(stack->data(), stack->size()))
+                        : runRecordFunction(guard, schema_ref, dispatchKey);
 
     // keeping the guard alive while executing the kernel
     kernel.callBoxed(op, dispatchKeySet, stack);

@@ -1,9 +1,8 @@
 # Owner(s): ["oncall: jit"]
 
 import io
-import unittest
-
 import torch
+import unittest
 from torch.testing._internal.common_utils import IS_WINDOWS, TEST_MKL
 from torch.testing._internal.jit_utils import JitTestCase
 
@@ -71,7 +70,9 @@ class TestSparse(JitTestCase):
                 self.a = torch.rand(4, 4).to_sparse_csr()
                 self.b = torch.rand(4, 4).to_sparse_csr()
 
+
             def forward(self, x):
+
                 return x.matmul(self.a).matmul(self.b)
 
         x = torch.rand(4, 4).to_sparse_csr()

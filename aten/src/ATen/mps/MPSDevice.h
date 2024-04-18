@@ -22,6 +22,8 @@ typedef void* MTLComputePipelineState_t;
 typedef void* MTLLibrary_t;
 #endif
 
+using namespace std;
+
 namespace at::mps {
 
 // Helper enum to check if a MPSGraph op is supported in a given macOS version

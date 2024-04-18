@@ -105,7 +105,6 @@ class ExtensionBackendTests(TestCase):
 
     def test_open_device_registration(self):
         torch.utils.rename_privateuse1_backend("extension_device")
-        torch._register_device_module("extension_device", self.module)
 
         register_backend_for_device(
             "extension_device",

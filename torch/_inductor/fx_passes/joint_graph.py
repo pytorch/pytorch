@@ -1,4 +1,3 @@
-import itertools
 import logging
 import typing
 from collections import Counter
@@ -118,28 +117,6 @@ def remove_no_ops(
     for node in graph.find_nodes(op="call_function", target=aten.div.Tensor):
         if len(node.args) == 2 and node.args[1] in ones:
             replace_no_op(node, 0)
-
-    # meta tensors returned from the graph have no data and can be replaced with empty_strided
-    for output_node in graph.find_nodes(op="output"):
-        had_meta_return = False
-
-        def visit(n):
-            nonlocal had_meta_return
-            val = n.meta.get("val")
-            if isinstance(val, torch.Tensor) and val.device.type == "meta":
-                with graph.inserting_before(output_node):
-                    n.replace_all_uses_with(
-                        graph.call_function(
-                            torch.ops.aten.empty_strided.default,
-                            args=(val.size(), val.stride()),
-                            kwargs={"dtype": val.dtype, "device": val.device},
-                        )
-                    )
-                had_meta_return = True
-
-        torch.fx.map_arg(output_node.args, visit)
-        if had_meta_return:
-            graph.eliminate_dead_code()
 
 
 @torch.utils._python_dispatch._disable_current_modes()
@@ -279,7 +256,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
             ):
                 torch._check(runtime_size == compile_time_size)
 
-            # zeros and ones just get traced into full, so we insert those
+            # zeros, and ones just get traced into full, so we insert those
             new_node = graph.call_function(
                 aten.full.default,
                 args=(node_replacements_shapes[node], value),
@@ -440,6 +417,26 @@ def _other_is_broadcasted_in_dim(match):
     return all(statically_known_true(other_shape[d] == 1) for d in dim)
 
 
+@register_graph_pattern(
+    _partial_softmax_pattern(aten.mul.Tensor),
+    pass_dict=pass_patterns[1],
+    extra_check=_other_is_broadcasted_in_dim,
+)
+@register_graph_pattern(
+    _partial_softmax_pattern(aten.mul.Tensor, reverse=True),
+    pass_dict=pass_patterns[1],
+    extra_check=_other_is_broadcasted_in_dim,
+)
+@register_graph_pattern(
+    _partial_softmax_pattern(aten.mul.Tensor, to_dtype=True),
+    pass_dict=pass_patterns[1],
+    extra_check=_other_is_broadcasted_in_dim,
+)
+@register_graph_pattern(
+    _partial_softmax_pattern(aten.mul.Tensor, reverse=True, to_dtype=True),
+    pass_dict=pass_patterns[1],
+    extra_check=_other_is_broadcasted_in_dim,
+)
 def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
         if not isinstance(other, torch.Tensor):
@@ -454,14 +451,16 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         match.replace_by_example(repl, [inp, other])
 
 
-for reverse, to_dtype in itertools.product((False, True), repeat=2):
-    register_graph_pattern(
-        _partial_softmax_pattern(aten.mul.Tensor, reverse=reverse, to_dtype=to_dtype),
-        pass_dict=pass_patterns[1],
-        extra_check=_other_is_broadcasted_in_dim,
-    )(mul_softmax_pattern)
-
-
+@register_graph_pattern(
+    _partial_softmax_pattern(aten.div.Tensor),
+    pass_dict=pass_patterns[1],
+    extra_check=_other_is_broadcasted_in_dim,
+)
+@register_graph_pattern(
+    _partial_softmax_pattern(aten.div.Tensor, to_dtype=True),
+    pass_dict=pass_patterns[1],
+    extra_check=_other_is_broadcasted_in_dim,
+)
 def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
         if not isinstance(other, torch.Tensor):
@@ -474,11 +473,3 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
     with V.fake_mode:
         match.replace_by_example(repl, [inp, other])
-
-
-for to_dtype in (False, True):
-    register_graph_pattern(
-        _partial_softmax_pattern(aten.div.Tensor, to_dtype=to_dtype),
-        pass_dict=pass_patterns[1],
-        extra_check=_other_is_broadcasted_in_dim,
-    )(div_softmax_pattern)

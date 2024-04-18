@@ -40,7 +40,6 @@ class CustomObjArgument:
 
 @dataclasses.dataclass
 class ConstantArgument:
-    name: str
     value: Union[int, float, bool, None]
 
 

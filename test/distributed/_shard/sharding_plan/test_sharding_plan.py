@@ -141,15 +141,15 @@ class TestShardingPlan(ShardedTensorTestBase):
         colwise_sharding_spec = ChunkShardingSpec(
             dim=0,
             placements=[
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                "rank:0/cuda:2",
+                "rank:1/cuda:3",
             ],
         )
         rowwise_sharding_spec = ChunkShardingSpec(
             dim=1,
             placements=[
-                "rank:2/cuda:2",
-                "rank:3/cuda:3",
+                "rank:0/cuda:2",
+                "rank:1/cuda:3",
             ],
         )
         sharding_plan = ShardingPlan(
