@@ -87,6 +87,7 @@ jobs:
         with:
           role-to-assume: ${{ inputs.aws-role-to-assume }}
           role-session-name: gha-linux-test
+          role-duration-seconds: 10800
           aws-region: us-east-1
 
       - name: Calculate docker image
@@ -274,7 +275,7 @@ jobs:
             --detach \
             --name="${container_name}" \
             --user jenkins \
-            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace:rw" \
             -w /var/lib/jenkins/workspace \
             "${DOCKER_IMAGE}"
           )
@@ -308,6 +309,12 @@ jobs:
           MONITOR_SCRIPT_PID: ${{ steps.monitor-script.outputs.monitor-script-pid }}
         run: |
           kill "$MONITOR_SCRIPT_PID"
+
+      - name: Chown directory
+        if: ${{ steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
+        shell: bash
+        run: |
+          sudo chown -R runner ../pytorch
 
       - name: Upload test artifacts
         uses: ./.github/actions/upload-test-artifacts
