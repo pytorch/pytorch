@@ -2626,6 +2626,17 @@ def forward(self, arg_0):
             torch.allclose(ep.module()(torch.ones(6, 4)), Foo()(torch.ones(6, 4)))
         )
 
+    def test_aten_lift_fresh_copy(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aten.lift_fresh_copy(x)
+
+        ep = export(M(), (torch.ones(6, 4),))
+        found = False
+
+        op = "torch.ops.aten.clone.default"
+        FileCheck().check_count(op, 1, exactly=True).run(ep.graph_module.code)
+
     def test_cond_buffers(self):
         class M(torch.nn.Module):
             def __init__(self):
