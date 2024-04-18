@@ -578,6 +578,9 @@ class OpOverload(OperatorBase):
         op.__module__ = overloadpacket.__module__
         self.__qualname__ = self._name
         self.__annotations__ = {}
+        # Only compute the OperatorHandle when we need it. Not all OpOverloads have
+        # OperatorHandles (the TorchScript ones don't...)
+        self._lazy_handle = None
 
         # If the OpOverload was constructed from a Library.def in Python.
         self._defined_in_python = self.__qualname__ in torch.library._defs
@@ -595,6 +598,22 @@ class OpOverload(OperatorBase):
                 is_write = a.alias_info.is_write or is_write
         self.is_view = is_write is not None and not is_write
 
+    @property
+    def _namespace(self):
+        return self._schema.name.split("::")[0]
+
+    @property
+    def _opname(self):
+        return self._schema.name.split("::")[1]
+
+    @property
+    def _handle(self):
+        if self._lazy_handle is None:
+            self._lazy_handle = torch._C._dispatch_find_schema_or_throw(
+                self._schema.name, self._schema.overload_name
+            )
+        return self._lazy_handle
+
     # it's a no-op since OpOverload object is immutable and must be unique for a given op overload.
     def __deepcopy__(self, memo=None):
         return self
@@ -608,6 +627,11 @@ class OpOverload(OperatorBase):
         # use `self_` to avoid naming collide with aten ops arguments that
         # are named "self". This way, all the aten ops can be called by kwargs.
         return self_._op(*args, **kwargs)
+
+    def redispatch(self_, keyset, *args, **kwargs):  # noqa: B902
+        # use `self_` to avoid naming collide with aten ops arguments that
+        # are named "self". This way, all the aten ops can be called by kwargs.
+        return self_._handle.redispatch_boxed(keyset, *args, **kwargs)
 
     def __hash__(self):
         return hash(self._op)
@@ -629,11 +653,6 @@ class OpOverload(OperatorBase):
     @property
     def namespace(self):
         return self._schema.name.split("::")[0]
-
-    def _handle(self):
-        return torch._C._dispatch_find_schema_or_throw(
-            self._schema.name, self._schema.overload_name
-        )
 
     def decompose(self, *args, **kwargs):
         dk = torch._C.DispatchKey.CompositeImplicitAutograd
@@ -931,10 +950,8 @@ class _OpNamespace(types.ModuleType):
         # for overloads and raise an exception if there are more than one.
         namespace_name = self.name
         qualified_op_name = f"{namespace_name}::{op_name}"
-        op_module = self.__module__ + "." + namespace_name
-
         try:
-            op, overload_names = _get_packet(qualified_op_name, op_module)
+            op, overload_names = torch._C._jit_get_operation(qualified_op_name)
             if op is None:
                 raise AttributeError(
                     f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
@@ -946,6 +963,10 @@ class _OpNamespace(types.ModuleType):
                 f"'_OpNamespace' '{self.name}' object has no attribute '{op_name}'"
             ) from e
 
+        # let the script frontend know that op is identical to the builtin op
+        # with qualified_op_name
+        torch.jit._builtins._register_builtin(op, qualified_op_name)
+        op.__module__ = self.__module__ + "." + namespace_name
         opoverloadpacket = OpOverloadPacket(
             qualified_op_name, op_name, op, overload_names
         )
@@ -955,22 +976,6 @@ class _OpNamespace(types.ModuleType):
         setattr(self, op_name, opoverloadpacket)
         self._dir.append(op_name)
         return opoverloadpacket
-
-
-def _get_packet(qualname, op_module):
-    op, overload_names = torch._C._jit_get_operation(qualname)
-    if op is not None:
-        op.__module__ = op_module
-        # let the script frontend know that op is identical to the builtin op
-        # with qualified_op_name
-        torch.jit._builtins._register_builtin(op, qualname)
-    return op, overload_names
-
-
-def _refresh_packet(packet):
-    op, overload_names = _get_packet(packet._qualified_op_name, packet._op.__module__)
-    packet._op = op
-    packet._overload_names = overload_names
 
 
 class _PyOpNamespace(_OpNamespace):

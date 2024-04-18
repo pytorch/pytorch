@@ -3856,6 +3856,20 @@ class ConcatKernel(NopKernel):
                     # use CL stride for the output
                     output_stride = make_channels_last_strides_for(new_size)
                     break
+        any_input_is_storage_and_layout = any(is_storage_and_layout(x) for x in inputs)
+        fx_node_args = V.graph.current_node.args[0]
+        assert V.graph.current_node.target in [aten.cat, aten.cat.default]
+        assert isinstance(fx_node_args, list)
+        # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
+        if any_input_is_storage_and_layout is False and any(
+            "val" in arg.meta
+            and (
+                arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
+                or arg.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
+            )
+            for arg in fx_node_args
+        ):
+            output_stride = make_channels_last_strides_for(new_size)
 
         concat_kernel = ConcatKernel(
             name=None,
@@ -4138,7 +4152,30 @@ class ExternKernel(InputsKernel):
 
         # NOTE: Don't use extract_read_writes here as it fails when
         # make_loader() inlines the computation
-        x.unwrap_view().freeze_layout()
+        x_unwrap_view = x.unwrap_view()
+        x_unwrap_view_fx_node = V.graph.get_buffer(
+            x_unwrap_view.get_name()
+        ).get_origin_node()
+        # Prefer channels last format according to how the format is set from eager.
+        if (
+            x_unwrap_view_fx_node is not None
+            and "val" in x_unwrap_view_fx_node.meta
+            and isinstance(x_unwrap_view.layout, FlexibleLayout)
+            and (
+                x_unwrap_view_fx_node.meta["val"].is_contiguous(
+                    memory_format=torch.channels_last
+                )
+                or x_unwrap_view_fx_node.meta["val"].is_contiguous(
+                    memory_format=torch.channels_last_3d
+                )
+            )
+        ):
+            x_unwrap_view.freeze_layout_with_same_order(
+                make_channels_last_strides_for(x_unwrap_view.get_size())
+            )
+        else:
+            x_unwrap_view.freeze_layout()
+
         index_args, var_ranges = dependencies.index_vars_squeeze(
             x.get_size(), prefix="r"
         )

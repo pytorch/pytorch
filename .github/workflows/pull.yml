@@ -232,7 +232,7 @@ jobs:
 
   linux-focal-cuda11_8-py3_10-gcc9-build:
     name: linux-focal-cuda11.8-py3.10-gcc9
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build-rg.yml
     with:
       build-environment: linux-focal-cuda11.8-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda11.8-cudnn8-py3-gcc9
@@ -257,7 +257,7 @@ jobs:
 
   linux-focal-cuda12_1-py3_10-gcc9-build:
     name: linux-focal-cuda12.1-py3.10-gcc9
-    uses: ./.github/workflows/_linux-build-label.yml
+    uses: ./.github/workflows/_linux-build-rg.yml
     with:
       build-environment: linux-focal-cuda12.1-py3.10-gcc9
       docker-image-name: pytorch-linux-focal-cuda12.1-cudnn8-py3-gcc9

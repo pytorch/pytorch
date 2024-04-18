@@ -30,7 +30,7 @@ basic_gnn_edgecnn,pass,0
 
 
 
-basic_gnn_gcn,pass,10
+basic_gnn_gcn,pass,6
 
 
 
@@ -46,7 +46,7 @@ dcgan,pass,0
 
 
 
-demucs,pass,6
+demucs,pass,3
 
 
 
@@ -54,7 +54,7 @@ densenet121,pass,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,29
+detectron2_fcos_r_50_fpn,pass,23
 
 
 
@@ -62,11 +62,11 @@ dlrm,pass,0
 
 
 
-doctr_det_predictor,pass,6
+doctr_det_predictor,pass,5
 
 
 
-doctr_reco_predictor,pass,5
+doctr_reco_predictor,pass,4
 
 
 
@@ -74,7 +74,7 @@ drq,pass,0
 
 
 
-fastNLP_Bert,pass,7
+fastNLP_Bert,pass,4
 
 
 
@@ -114,7 +114,7 @@ hf_GPT2_large,pass_due_to_skip,0
 
 
 
-hf_Reformer,pass,9
+hf_Reformer,pass,5
 
 
 
@@ -154,7 +154,7 @@ mobilenet_v2,pass,0
 
 
 
-mobilenet_v2_quantized_qat,pass,92
+mobilenet_v2_quantized_qat,pass,2
 
 
 
@@ -222,7 +222,7 @@ resnet50,pass,0
 
 
 
-resnet50_quantized_qat,pass,59
+resnet50_quantized_qat,pass,2
 
 
 
@@ -238,7 +238,7 @@ soft_actor_critic,pass,0
 
 
 
-speech_transformer,pass,13
+speech_transformer,pass,10
 
 
 
@@ -282,11 +282,11 @@ timm_vovnet,pass,0
 
 
 
-torch_multimodal_clip,timeout,0
+torch_multimodal_clip,pass,3
 
 
 
-tts_angular,pass,5
+tts_angular,pass,2
 
 
 
@@ -294,8 +294,8 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,33
+vision_maskrcnn,pass,28
 
 
 
-yolov3,pass,3
+yolov3,pass,2
