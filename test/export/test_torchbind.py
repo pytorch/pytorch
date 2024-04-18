@@ -85,6 +85,19 @@ class TestExportTorchbind(TestCase):
                 test.tq_size_counter += 1
                 return len(self.queue)
 
+        self.torch_bind_ops = [
+            torch.ops._TorchScriptTesting.takes_foo,
+            torch.ops._TorchScriptTesting.takes_foo_python_meta,
+            torch.ops._TorchScriptTesting.takes_foo_list_return,
+            torch.ops._TorchScriptTesting.takes_foo_tuple_return,
+            torch.ops._TorchScriptTesting.take_an_instance,
+            torch.ops._TorchScriptTesting.take_an_instance_inferred,
+            torch.ops._TorchScriptTesting.takes_foo_cia,
+            torch.ops._TorchScriptTesting.queue_pop,
+            torch.ops._TorchScriptTesting.queue_push,
+            torch.ops._TorchScriptTesting.queue_size,
+        ]
+
     def tearDown(self):
         torch._library.fake_class_registry.deregister_fake_class(
             "_TorchScriptTesting::_Foo"
@@ -554,6 +567,181 @@ def forward(self, arg0_1, arg1_1):
         self._assertEqualSkipScriptObject(gm(tq, x), mod(tq1, x))
         self.assertEqual(tq.size(), 0)
         self.assertEqual(tq1.size(), 0)
+
+    def test_identifying_torchbind_ops(self):
+        for op in self.torch_bind_ops:
+            self.assertTrue(op._has_torchbind_op_overload)
+
+        for op in [
+            torch.ops.aten.add,
+            torch.ops.aten.cos,
+        ]:
+            self.assertFalse(op._has_torchbind_op_overload)
+
+    def test_torchbind_op_register_fallthrough(self):
+        TEST_DISPATCH_KEY = torch._C.DispatchKey.AutocastCPU
+        TEST_DISPATCH_KEY_STR = "AutocastCPU"
+
+        for op_packet in self.torch_bind_ops:
+            op = op_packet.default
+            ns, _ = torch._library.utils.parse_namespace(op_packet._qualified_op_name)
+            with torch.library._scoped_library(ns, "FRAGMENT") as lib:
+                lib.impl(
+                    op.name(), torch.library.fallthrough_kernel, TEST_DISPATCH_KEY_STR
+                )
+                self.assertTrue(
+                    torch._C._dispatch_kernel_for_dispatch_key_is_fallthrough(
+                        op.name(), TEST_DISPATCH_KEY
+                    )
+                )
+
+    def test_torchbind_op_fallthrough_keys_respects_lib_impl(self):
+        TEST_DISPATCH_KEY = torch._C.DispatchKey.AutogradCPU
+        TEST_DISPATCH_KEY_STR = "AutogradCPU"
+
+        tested = 0
+        for op_packet in self.torch_bind_ops:
+            op = op_packet.default
+            ns, _ = torch._library.utils.parse_namespace(op_packet._qualified_op_name)
+            if (
+                not torch._C._dispatch_has_kernel_for_dispatch_key(
+                    op.name(), TEST_DISPATCH_KEY
+                )
+                and TEST_DISPATCH_KEY not in op.py_kernels
+            ):
+                tested += 1
+                with torch.library._scoped_library(ns, "FRAGMENT") as lib:
+                    lib.impl(
+                        op.name(), lambda *args, **kwargs: args, TEST_DISPATCH_KEY_STR
+                    )
+                    self.assertTrue(TEST_DISPATCH_KEY not in op._fallthrough_keys())
+
+                with torch.library._scoped_library(ns, "FRAGMENT") as lib:
+                    lib.impl(
+                        op.name(),
+                        torch.library.fallthrough_kernel,
+                        TEST_DISPATCH_KEY_STR,
+                    )
+                    self.assertTrue(TEST_DISPATCH_KEY in op._fallthrough_keys())
+        self.assertTrue(tested > 0)
+
+    def test_make_fx_schema_checking_script_object(self):
+        class Model(torch.nn.Module):
+            def forward(self, tq, x, foo):
+                torch.ops._TorchScriptTesting.queue_push(foo, x.cos())
+                return tq
+
+        class ModelCallByKW(torch.nn.Module):
+            def forward(self, tq, x, foo):
+                torch.ops._TorchScriptTesting.queue_push(x=x.cos(), foo=foo)
+                return tq
+
+        mod = Model()
+        modkw = ModelCallByKW()
+
+        foo = torch.classes._TorchScriptTesting._Foo(10, 20)
+        x = torch.ones(3, 3)
+        tq = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        ns = "_TorchScriptTesting"
+        with torch.library._scoped_library(ns, "FRAGMENT") as lib:
+            op = torch.ops._TorchScriptTesting.queue_push
+            lib.impl(op.__name__, torch.library.fallthrough_kernel, "AutogradCPU")
+            lib.impl(op.__name__, torch.library.fallthrough_kernel, "ADInplaceOrView")
+            lib.impl(
+                op.__name__,
+                torch.library.fallthrough_kernel,
+                "PythonTLSSnapshot",
+            )
+
+            with self.assertRaisesRegex(
+                RuntimeError, "is expected to be a FakeScriptObject"
+            ):
+                _ = make_fx(mod, tracing_mode="fake")(tq, x, foo)
+
+            with self.assertRaisesRegex(
+                RuntimeError, "is expected to be a FakeScriptObject"
+            ):
+                _ = make_fx(modkw, tracing_mode="fake")(tq, x, foo)
+
+    @parametrize("fallthrough_via", ["lib_impl", "py_impl"])
+    def test_make_fx_tensor_queue_operators(self, fallthrough_via):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, tq, x):
+                with torch.autocast("cuda", dtype=torch.bfloat16):
+                    torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                    torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+                    x_sin = torch.ops._TorchScriptTesting.queue_pop(
+                        tq
+                    ) - torch.ops._TorchScriptTesting.queue_size(tq)
+                    x_cos = torch.ops._TorchScriptTesting.queue_pop(
+                        tq
+                    ) + torch.ops._TorchScriptTesting.queue_size(tq)
+                    return x_sin, x_cos, tq
+
+        mod = Model()
+
+        tq1 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        tq2 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        x = torch.ones(2, 3)
+
+        mod(tq1, x)
+
+        ops = [
+            torch.ops._TorchScriptTesting.queue_push,
+            torch.ops._TorchScriptTesting.queue_pop,
+            torch.ops._TorchScriptTesting.queue_size,
+        ]
+        if fallthrough_via == "lib_impl":
+            ns = "_TorchScriptTesting"
+            with torch.library._scoped_library(ns, "FRAGMENT") as lib:
+                for op in ops:
+                    lib.impl(
+                        op.__name__, torch.library.fallthrough_kernel, "AutocastCUDA"
+                    )
+
+                gm = make_fx(mod, tracing_mode="fake")(tq1, x)
+        else:
+            for op in ops:
+                op.default.py_impl(torch._C.DispatchKey.AutocastCUDA)(
+                    torch.library.fallthrough_kernel
+                )
+            gm = make_fx(mod, tracing_mode="fake")(tq1, x)
+            for op in ops:
+                op.default._dispatch_cache.clear()
+                del op.default.py_kernels[torch._C.DispatchKey.AutocastCUDA]
+
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg1_1)
+    queue_push = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, cos);  cos = None
+    sin = torch.ops.aten.sin.default(arg1_1);  arg1_1 = None
+    queue_push_1 = torch.ops._TorchScriptTesting.queue_push.default(arg0_1, sin);  sin = None
+    queue_pop = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
+    queue_size = torch.ops._TorchScriptTesting.queue_size.default(arg0_1)
+    sub = torch.ops.aten.sub.Tensor(queue_pop, 1);  queue_pop = None
+    queue_pop_1 = torch.ops._TorchScriptTesting.queue_pop.default(arg0_1)
+    queue_size_1 = torch.ops._TorchScriptTesting.queue_size.default(arg0_1)
+    add = torch.ops.aten.add.Tensor(queue_pop_1, 0);  queue_pop_1 = None
+    return (sub, add, arg0_1)""",
+        )
+        self._assertEqualSkipScriptObject(gm(tq1, x), mod(tq2, x))
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
