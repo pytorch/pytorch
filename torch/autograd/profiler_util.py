@@ -491,6 +491,7 @@ class FunctionEvent(FormattedTimesMixin):
         )
         self.is_legacy: bool = is_legacy
         self.flops: Optional[int] = flops
+        self.has_linked: bool = False
 
     def append_kernel(self, name, device, duration):
         assert self.device_type == DeviceType.CPU

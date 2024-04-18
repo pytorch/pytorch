@@ -533,6 +533,8 @@ class profile:
                 if corr_id not in device_corr_map:
                     device_corr_map[corr_id] = []
                 device_corr_map[corr_id].append(fe)
+                # Use has_linked to distinguish between CPU events and runtime events or kernels.
+                fe.has_linked = True
 
         # associate CUDA kernels and CUDA runtime (CPU) with CPU events
         for fe in function_events:
@@ -540,6 +542,7 @@ class profile:
                 fe.device_type == DeviceType.CPU
                 and not fe.is_async
                 and fe.id in device_corr_map
+                and not fe.has_linked
             ):
                 for f_evt in device_corr_map[fe.id]:
                     if f_evt.device_type == DeviceType.CUDA:
