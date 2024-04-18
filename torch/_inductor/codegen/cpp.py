@@ -111,6 +111,11 @@ DEVICE_TO_ATEN = {
     "cuda": "at::kCUDA",
 }
 
+LAYOUT_TO_ATEN = {
+    torch.strided: "at::kStrided",
+    torch._mkldnn: "at::kMkldnn",
+}
+
 INDEX_TYPE = "long"
 
 NATIVE_OMP_RTYPES = {"+", "*", "^", "||", "min", "max"}
@@ -2138,7 +2143,10 @@ class CppKernel(Kernel):
     @property
     def assert_function(self) -> str:
         if V.graph.aot_mode:
-            return "AOTI_TORCH_CHECK"
+            # return "AOTI_TORCH_CHECK"
+            # Using AOTI_TORCH_CHECK on some model is causing performance drop.
+            # TODO: add an option here to don't always make it noinline?
+            return "TORCH_CHECK"
         else:
             return "TORCH_CHECK"
 

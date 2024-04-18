@@ -719,9 +719,14 @@ class CppWrapperCpu(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].offset = {tensor.storage_offset()};"
                 )
-                self.prefix.writeline(
-                    f"constants_info_[{idx}].data_size = {tensor.untyped_storage().nbytes()};"
-                )
+                if tensor.is_mkldnn:
+                    self.prefix.writeline(
+                        f"constants_info_[{idx}].data_size = {torch.ops.mkldnn._data_size(tensor)};"
+                    )
+                else:
+                    self.prefix.writeline(
+                        f"constants_info_[{idx}].data_size = {tensor.untyped_storage().nbytes()};"
+                    )
                 from_folded = "true" if name in V.graph.folded_constants else "false"
                 self.prefix.writeline(
                     f"constants_info_[{idx}].from_folded = {from_folded};"
@@ -734,6 +739,21 @@ class CppWrapperCpu(WrapperCodeGen):
                 self.prefix.writeline(
                     f"constants_info_[{idx}].stride = {{{stride_str}}};"
                 )
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].layout = static_cast<int8_t>({self.codegen_layout(tensor.layout)});"
+                )
+
+                if tensor.is_mkldnn:
+                    serialized_tensor = torch.ops.mkldnn._mkldnn_serialize(tensor)
+                    assert (
+                        serialized_tensor.dim() == 1
+                    ), "Expect serialized_tensor to be 1-D"
+
+                    serialized_list = serialized_tensor.tolist()
+                    serialized_list_str = self.codegen_shape_tuple(serialized_list)
+                    self.prefix.writeline(
+                        f"constants_info_[{idx}].serialized_md = {serialized_list_str};"
+                    )
                 if name in V.graph.dynamo_flat_name_to_original_fqn:
                     original_fqn = V.graph.dynamo_flat_name_to_original_fqn.get(
                         name, name
@@ -1433,6 +1453,11 @@ class CppWrapperCpu(WrapperCodeGen):
             from .cpp import DTYPE_TO_ATEN
 
             return DTYPE_TO_ATEN[dtype]
+
+    def codegen_layout(self, layout):
+        from .cpp import LAYOUT_TO_ATEN
+
+        return LAYOUT_TO_ATEN[layout]
 
     @functools.lru_cache(None)
     def codegen_int_array_var(

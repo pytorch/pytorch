@@ -1,6 +1,7 @@
 #include <ATen/native/mkldnn/MKLDNNCommon.h>
 #include <ATen/OpaqueTensorImpl.h>
 #include <c10/core/Allocator.h>
+#include <torch/library.h>
 
 #if AT_MKLDNN_ENABLED()
 
@@ -61,6 +62,18 @@ ideep::tensor::data_type get_mkldnn_dtype(ScalarType type) {
   }
 }
 
+int64_t data_ptr_from_mkldnn(const Tensor& mkldnn_tensor) {
+  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
+  void* data_ptr = mklimpl->unsafe_opaque_handle()->get_target().get_data_handle();
+  return reinterpret_cast<int64_t>(data_ptr);
+}
+
+void* data_ptr_from_mkldnn_aot(at::Tensor* mkldnn_tensor) {
+  MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor->unsafeGetTensorImpl());
+  void* data_ptr = mklimpl->unsafe_opaque_handle()->get_target().get_data_handle();
+  return data_ptr;
+}
+
 Tensor new_with_itensor_mkldnn(ideep::tensor&& it, c10::optional<ScalarType> dtype, c10::optional<Device> device) {
   // NOTE: int32_t dims from ideep::tensor but sizes needs int64_t
   // TODO: support int64_t dims in ideep::tensor to avoid extra conversion
@@ -79,6 +92,11 @@ ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
              "itensor_from_mkldnn expects MKL-DNN tensor input");
   MKLDNNTensorImpl *mklimpl = static_cast<MKLDNNTensorImpl *>(mkldnn_tensor.unsafeGetTensorImpl());
   return mklimpl->unsafe_opaque_handle()->get_target();
+}
+
+int64_t data_size_from_mkldnn(const Tensor& mkldnn_tensor) {
+  ideep::tensor t = itensor_from_mkldnn(mkldnn_tensor);
+  return t.get_desc().get_size();
 }
 
 ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data_ptr) {
@@ -165,6 +183,15 @@ ideep::tensor itensor_from_tensor(const Tensor& tensor, bool from_const_data_ptr
 
 int set_verbose(int level) {
     return ideep::utils::set_verbose(level);
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::data_ptr"),
+      TORCH_FN(data_ptr_from_mkldnn));
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_data_size"),
+      TORCH_FN(data_size_from_mkldnn));
 }
 
 }}

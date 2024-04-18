@@ -18,7 +18,7 @@ from ..pattern_matcher import (
     KeywordArg,
     MULTIPLE,
 )
-from ..virtualized import ops
+from ..virtualized import ops, V
 from .freezing_patterns import register_freezing_graph_pattern
 from .post_grad import register_lowering_pattern
 from .quantization import (
@@ -1146,9 +1146,18 @@ if torch._C._has_mkldnn:
                     if has_free_symbols(batch_size)
                     else batch_size,
                 )
+                # MKL packed matrix can't be copied to a different address because the internal implementation
+                # depends on the alignment of internally-stored metadata.
+                # In aot mode, we need to firstly save the packed weight, when loading it,
+                # it will be in a different address which doesn't work.
+                # Disable MKL prepack linear in AOT mode
                 packed_weight_op = (
                     mkldnn._reorder_linear_weight
-                    if (is_lp_weight or mkldnn._is_mkldnn_acl_supported())
+                    if (
+                        is_lp_weight
+                        or mkldnn._is_mkldnn_acl_supported()
+                        or V.aot_compilation
+                    )
                     else torch.ops.mkl._mkl_reorder_linear_weight
                 )
                 packed_weight_node = graph.create_node(
@@ -1156,7 +1165,11 @@ if torch._C._has_mkldnn:
                 )
 
                 packed_linear_inputs: Tuple[Any, ...] = (input, packed_weight_node)
-                if is_lp_weight or mkldnn._is_mkldnn_acl_supported():
+                if (
+                    is_lp_weight
+                    or mkldnn._is_mkldnn_acl_supported()
+                    or V.aot_compilation
+                ):
                     packed_linear_inputs += (bias, "none", [], "")
                     packed_linear_op = mkldnn._linear_pointwise.default
                 else:

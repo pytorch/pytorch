@@ -12,7 +12,9 @@
 #else
 #include <ATen/ops/_to_dense_native.h>
 #include <ATen/ops/empty.h>
+#include <ATen/ops/empty_like.h>
 #include <ATen/ops/empty_native.h>
+#include <ATen/ops/from_blob.h>
 #include <ATen/ops/mkldnn_reorder_conv2d_weight_native.h>
 #include <ATen/ops/mkldnn_reorder_conv3d_weight_native.h>
 #include <ATen/ops/to_mkldnn_native.h>
@@ -477,6 +479,23 @@ static std::vector<Tensor> mkldnn_reorder_mkldnn_rnn_layer_weight(
   return {packed_w1, packed_w2};
 }
 
+static Tensor mkldnn_serialize(const Tensor& self) {
+  const ideep::tensor packed_w = itensor_from_tensor(self);
+  auto packed_w_desc = packed_w.get_desc();
+
+  // TODO: test ideep versioning
+#if IDEEP_PREREQ(3, 4, 1, 2)
+  std::vector<uint8_t> serialized_wei_desc = packed_w_desc.get_blob();
+#else
+      TORCH_CHECK(false, "Unexpected IDeep version to do weight serialization.");
+#endif
+  Tensor serialized_md = at::from_blob((void*)serialized_wei_desc.data(), {(int64_t)serialized_wei_desc.size()}, at::TensorOptions(at::kByte));
+  auto res = at::empty_like(serialized_md);
+  // TODO: a copy is needed here so that from_blob won't be released
+  res.copy_(serialized_md);
+  return res;
+}
+
 TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_convolution_transpose_weight"),
@@ -490,6 +509,12 @@ TORCH_LIBRARY_IMPL(mkldnn, CPU, m) {
   m.impl(
       TORCH_SELECTIVE_NAME("mkldnn::_reorder_mkldnn_rnn_layer_weight"),
       TORCH_FN(mkldnn_reorder_mkldnn_rnn_layer_weight));
+}
+
+TORCH_LIBRARY_IMPL(mkldnn, MkldnnCPU, m) {
+  m.impl(
+      TORCH_SELECTIVE_NAME("mkldnn::_mkldnn_serialize"),
+      TORCH_FN(mkldnn_serialize));
 }
 
 #else

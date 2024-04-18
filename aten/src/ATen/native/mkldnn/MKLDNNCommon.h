@@ -28,6 +28,11 @@ static inline ideep::tensor::data_type get_mkldnn_dtype(const Tensor& t) {
   return get_mkldnn_dtype(t.scalar_type());
 }
 
+TORCH_API int64_t data_ptr_from_mkldnn(const Tensor& mkldnn_tensor);
+
+// TODO: unify with data_ptr_from_mkldnn
+TORCH_API void* data_ptr_from_mkldnn_aot(at::Tensor* mkldnn_tensor);
+
 // Construct aten MKL-DNN tensor given an ideep tensor
 TORCH_API Tensor new_with_itensor_mkldnn(ideep::tensor&& it, c10::optional<ScalarType> dtype, c10::optional<Device> device);
 

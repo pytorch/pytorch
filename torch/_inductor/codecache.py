@@ -1807,7 +1807,9 @@ class AotCodeCompiler:
 
             output_o = os.path.splitext(input_path)[0] + ".o"
             consts_size = sum(
-                tensor.untyped_storage().nbytes()
+                torch.ops.mkldnn._data_size(tensor)
+                if tensor.is_mkldnn
+                else tensor.untyped_storage().nbytes()
                 for (name, tensor) in graph.constants.items()
                 if name not in graph.folded_constants
             )
@@ -1842,6 +1844,13 @@ class AotCodeCompiler:
                 if t.numel() == 0:
                     return b""
 
+                if t.is_mkldnn:
+                    raw_array = ctypes.cast(
+                        torch.ops.mkldnn.data_ptr(t),
+                        ctypes.POINTER(ctypes.c_ubyte * torch.ops.mkldnn._data_size(t)),
+                    )
+                    return bytes(raw_array.contents)
+
                 t_cpu = t.untyped_storage().cpu()
                 raw_array = ctypes.cast(
                     t_cpu.data_ptr(),
@@ -1851,6 +1860,7 @@ class AotCodeCompiler:
                 return bytes(raw_array.contents)
 
             serialized_weights = b"".join(
+                # TODO: use size from opaque tensor for prepacked weight?
                 _to_bytes(graph.get_original_value_of_constant(name))
                 for name in graph.constants.keys()
                 if name not in graph.folded_constants
