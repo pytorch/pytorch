@@ -457,6 +457,7 @@ class DivideByKey:
         return f".__floordiv__({self.divisor})"
 
     def get(self, o: int) -> int:
+        """Divide object by divisor"""
         return o // self.divisor
 
 
