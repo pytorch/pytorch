@@ -1023,11 +1023,11 @@ def _export(
             def _leaf_mod_and_attr(
                 mod: torch.nn.Module, attr_fqn: str
             ) -> Tuple[torch.nn.Module, str]:
-                *prefix_attr, attr = attr_fqn.split(".")
+                *prefix_attr, last_attr = attr_fqn.split(".")
                 cur_mod = mod
                 for attr in prefix_attr:
                     cur_mod = getattr(cur_mod, attr)
-                return cur_mod, attr
+                return cur_mod, last_attr
 
             try:
                 for obj, fqn in constant_attrs.items():
