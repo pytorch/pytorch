@@ -433,6 +433,25 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(ref, res)
 
 
+class TestModuleSurviveSkipFiles(torch._dynamo.test_case.TestCase):
+    @unittest.skipIf(
+        not torch.distributed.is_available(),
+        "need to import MLP module from distributed",
+    )
+    def test_module_survive_skip_files(self):
+        from torch.testing._internal.common_fsdp import MLP
+
+        model = MLP(3)
+        inp = torch.randn((2, 3))
+        frame_count_before = torch._dynamo.convert_frame.FRAME_COUNTER
+        model.compile(backend="eager")
+        model(inp)
+        frame_count_after = torch._dynamo.convert_frame.FRAME_COUNTER
+        self.assertTrue(
+            frame_count_after > frame_count_before, "MLP did not survive skip files"
+        )
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

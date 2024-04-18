@@ -1,33 +1,34 @@
 # Owner(s): ["oncall: quantization"]
 import copy
+import itertools
+from enum import Enum
+
 import torch
+import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
 import torch.nn as nn
-from torch.ao.quantization.quantizer.x86_inductor_quantizer import (
-    X86InductorQuantizer,
-)
+from torch._export import capture_pre_autograd_graph
+from torch.ao.quantization import ObserverBase
 from torch.ao.quantization.quantize_pt2e import (
     convert_pt2e,
     prepare_pt2e,
     prepare_qat_pt2e,
 )
+from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
 from torch.testing._internal.common_quantization import (
     NodeSpec as ns,
     QuantizationTestCase,
-    skipIfNoX86,
     skipIfNoInductorSupport,
+    skipIfNoX86,
 )
-from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.common_quantized import override_quantized_engine
-from enum import Enum
-import itertools
-import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
-from torch.ao.quantization import ObserverBase
-from torch._export import capture_pre_autograd_graph
+from torch.testing._internal.common_utils import skipIfTorchDynamo
+
 
 class Conv2DType(Enum):
     left = 1
     right = 2
     both = 3
+
 
 class TestHelperModules:
     class SingleConv2dModule(torch.nn.Module):
@@ -46,7 +47,9 @@ class TestHelperModules:
     class Conv2dUnaryModule(torch.nn.Module):
         def __init__(self, post_op, use_bias: bool = False, with_bn=False) -> None:
             super().__init__()
-            self.conv = nn.Conv2d(3, 6, (2, 2), stride=(1, 1), padding=(1, 1), bias=use_bias)
+            self.conv = nn.Conv2d(
+                3, 6, (2, 2), stride=(1, 1), padding=(1, 1), bias=use_bias
+            )
             self.post_op = post_op
             self.bn = torch.nn.BatchNorm2d(6)
             self.with_bn = with_bn
@@ -61,18 +64,29 @@ class TestHelperModules:
             return x
 
     class Conv2dAddModule(torch.nn.Module):
-        def __init__(self,
-                     inplace_add: bool = False,
-                     conv2d_type: Conv2DType = Conv2DType.left,
-                     use_bias: bool = False,
-                     with_bn: bool = False,
-                     ) -> None:
+        def __init__(
+            self,
+            inplace_add: bool = False,
+            conv2d_type: Conv2DType = Conv2DType.left,
+            use_bias: bool = False,
+            with_bn: bool = False,
+        ) -> None:
             super().__init__()
             self.conv = torch.nn.Conv2d(
-                in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=use_bias
+                in_channels=3,
+                out_channels=3,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=use_bias,
             )
             self.conv2 = torch.nn.Conv2d(
-                in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=use_bias
+                in_channels=3,
+                out_channels=3,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=use_bias,
             )
             self.relu = nn.ReLU()
             self.inplace_add = inplace_add
@@ -109,19 +123,30 @@ class TestHelperModules:
                     return self.conv(x) + self.conv2(x)
 
     class Conv2dAddReLUModule(torch.nn.Module):
-        def __init__(self,
-                     inplace_add: bool = False,
-                     conv2d_type: Conv2DType = Conv2DType.left,
-                     inplace_relu: bool = False,
-                     use_bias: bool = False,
-                     with_bn: bool = False,
-                     ) -> None:
+        def __init__(
+            self,
+            inplace_add: bool = False,
+            conv2d_type: Conv2DType = Conv2DType.left,
+            inplace_relu: bool = False,
+            use_bias: bool = False,
+            with_bn: bool = False,
+        ) -> None:
             super().__init__()
             self.conv = torch.nn.Conv2d(
-                in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=use_bias
+                in_channels=3,
+                out_channels=3,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=use_bias,
             )
             self.conv2 = torch.nn.Conv2d(
-                in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=use_bias
+                in_channels=3,
+                out_channels=3,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=use_bias,
             )
             self.relu = nn.ReLU()
             self.inplace_add = inplace_add
@@ -170,21 +195,43 @@ class TestHelperModules:
             return torch.pow(x, 2)
 
     class SerialsConv2dAddReLUModule(torch.nn.Module):
-        """ Serials of 2 Conv2d -> Add -> ReLU Pattern.
-        """
-        def __init__(self, ) -> None:
+        """Serials of 2 Conv2d -> Add -> ReLU Pattern."""
+
+        def __init__(
+            self,
+        ) -> None:
             super().__init__()
             self.conv = torch.nn.Conv2d(
-                in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=True
+                in_channels=3,
+                out_channels=3,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=True,
             )
             self.conv2 = torch.nn.Conv2d(
-                in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=True
+                in_channels=3,
+                out_channels=3,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=True,
             )
             self.conv3 = torch.nn.Conv2d(
-                in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=True
+                in_channels=3,
+                out_channels=3,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=True,
             )
             self.conv4 = torch.nn.Conv2d(
-                in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1, bias=True
+                in_channels=3,
+                out_channels=3,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=True,
             )
             self.relu = nn.ReLU()
             self.relu2 = nn.ReLU()
@@ -196,13 +243,21 @@ class TestHelperModules:
             return res2
 
     class Conv2dCatMaxpool2d(torch.nn.Module):
-        def __init__(self,):
+        def __init__(
+            self,
+        ):
             super().__init__()
-            self.conv = torch.nn.Conv2d(3, 16, 7, bias=True, stride=2, padding=3, dilation=1)
-            self.conv2 = torch.nn.Conv2d(3, 16, 7, bias=True, stride=2, padding=3, dilation=1)
+            self.conv = torch.nn.Conv2d(
+                3, 16, 7, bias=True, stride=2, padding=3, dilation=1
+            )
+            self.conv2 = torch.nn.Conv2d(
+                3, 16, 7, bias=True, stride=2, padding=3, dilation=1
+            )
             self.relu = torch.nn.ReLU()
             self.maxpool = torch.nn.MaxPool2d(3, stride=2, padding=1)
-            self.conv3 = torch.nn.Conv2d(32, 32, 7, bias=True, stride=2, padding=3, dilation=1)
+            self.conv3 = torch.nn.Conv2d(
+                32, 32, 7, bias=True, stride=2, padding=3, dilation=1
+            )
 
         def forward(self, x):
             temp1 = self.relu(self.conv(x))
@@ -213,9 +268,13 @@ class TestHelperModules:
             return temp5
 
     class Conv2dAvgPool2d(torch.nn.Module):
-        def __init__(self,):
+        def __init__(
+            self,
+        ):
             super().__init__()
-            self.conv = torch.nn.Conv2d(3, 16, 7, bias=True, stride=2, padding=3, dilation=1)
+            self.conv = torch.nn.Conv2d(
+                3, 16, 7, bias=True, stride=2, padding=3, dilation=1
+            )
             self.avgpool = torch.nn.AvgPool2d(3, stride=2, padding=1)
 
         def forward(self, x):
@@ -223,9 +282,13 @@ class TestHelperModules:
             return temp1
 
     class Conv2dCatSameInputs(torch.nn.Module):
-        def __init__(self,):
+        def __init__(
+            self,
+        ):
             super().__init__()
-            self.conv = torch.nn.Conv2d(3, 16, 7, bias=True, stride=2, padding=3, dilation=1)
+            self.conv = torch.nn.Conv2d(
+                3, 16, 7, bias=True, stride=2, padding=3, dilation=1
+            )
             self.relu = torch.nn.ReLU()
 
         def forward(self, x):
@@ -234,9 +297,13 @@ class TestHelperModules:
             return temp3
 
     class Conv2dCatSingleInput(torch.nn.Module):
-        def __init__(self,):
+        def __init__(
+            self,
+        ):
             super().__init__()
-            self.conv = torch.nn.Conv2d(3, 16, 7, bias=True, stride=2, padding=3, dilation=1)
+            self.conv = torch.nn.Conv2d(
+                3, 16, 7, bias=True, stride=2, padding=3, dilation=1
+            )
             self.relu = torch.nn.ReLU()
 
         def forward(self, x):
@@ -253,7 +320,9 @@ class TestHelperModules:
             return self.linear(x)
 
     class LinearUnaryModule(torch.nn.Module):
-        def __init__(self, use_bias, postop, inplace_postop=False, post_op_algo='none') -> None:
+        def __init__(
+            self, use_bias, postop, inplace_postop=False, post_op_algo="none"
+        ) -> None:
             super().__init__()
             self.linear = nn.Linear(4, 4, bias=use_bias)
             if postop == nn.GELU:
@@ -265,9 +334,10 @@ class TestHelperModules:
             return self.postop(self.linear(x))
 
     class Conv2dAddModule2(torch.nn.Module):
-        def __init__(self,
-                     inplace_add: bool = False,
-                     ) -> None:
+        def __init__(
+            self,
+            inplace_add: bool = False,
+        ) -> None:
             super().__init__()
             self.conv = torch.nn.Conv2d(
                 in_channels=3, out_channels=3, kernel_size=3, stride=1, padding=1
@@ -301,10 +371,11 @@ class TestHelperModules:
             q = self.q_proj(x)
             k = self.k_proj(x)
             v = self.v_proj(x)
-            scores = torch.bmm(q, k.transpose(1, 2)) / (self.input_dim ** 0.5)
+            scores = torch.bmm(q, k.transpose(1, 2)) / (self.input_dim**0.5)
             attention = self.softmax(scores)
             weighted = torch.bmm(attention, v)
             return weighted
+
 
 class X86InductorQuantTestCase(QuantizationTestCase):
     def _test_quantizer(
@@ -344,6 +415,7 @@ class X86InductorQuantTestCase(QuantizationTestCase):
             m, expected_node_occurrence=node_occurrence, expected_node_list=node_list
         )
         return export_model, prepare_model, convert_model
+
 
 @skipIfNoInductorSupport
 class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
@@ -387,19 +459,41 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         unary_map = {
             "relu": [torch.nn.ReLU(inplace=False), torch.ops.aten.relu.default],
             "relu_inplace": [torch.nn.ReLU(inplace=True), torch.ops.aten.relu_.default],
-            "hardtanh": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False), torch.ops.aten.hardtanh.default],
-            "hardtanh_inplace": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True), torch.ops.aten.hardtanh_.default],
+            "hardtanh": [
+                torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False),
+                torch.ops.aten.hardtanh.default,
+            ],
+            "hardtanh_inplace": [
+                torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True),
+                torch.ops.aten.hardtanh_.default,
+            ],
             "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
-            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
-            "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
-            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default],
+            "relu6_inplace": [
+                torch.nn.ReLU6(inplace=True),
+                torch.ops.aten.hardtanh_.default,
+            ],
+            "hardswish": [
+                torch.nn.Hardswish(inplace=False),
+                torch.ops.aten.hardswish.default,
+            ],
+            "hardswish_inplace": [
+                torch.nn.Hardswish(inplace=True),
+                torch.ops.aten.hardswish_.default,
+            ],
             "swish": [torch.nn.SiLU(inplace=False), torch.ops.aten.silu.default],
-            "swish_inplace": [torch.nn.SiLU(inplace=True), torch.ops.aten.silu_.default],
+            "swish_inplace": [
+                torch.nn.SiLU(inplace=True),
+                torch.ops.aten.silu_.default,
+            ],
         }
         use_bias_list = [True, False]
         with override_quantized_engine("x86"), torch.no_grad():
-            for unary_op, use_bias in itertools.product(unary_map.keys(), use_bias_list):
-                m = TestHelperModules.Conv2dUnaryModule(unary_map[unary_op][0], use_bias=use_bias).eval()
+            for unary_op, use_bias in itertools.product(
+                unary_map.keys(), use_bias_list
+            ):
+                m = TestHelperModules.Conv2dUnaryModule(
+                    unary_map[unary_op][0], use_bias=use_bias
+                ).eval()
                 example_inputs = (torch.randn(2, 3, 16, 16),)
                 quantizer = X86InductorQuantizer().set_global(
                     xiq.get_default_x86_inductor_quantization_config()
@@ -476,7 +570,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_list,
                 )
 
-
     @skipIfNoX86
     def test_conv2d_binary2(self):
         """
@@ -506,7 +599,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
+                    torch.ops.aten.add_.Tensor
+                    if inplace_add
+                    else torch.ops.aten.add.Tensor,
                 ]
                 self._test_quantizer(
                     m,
@@ -576,7 +671,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         with override_quantized_engine("x86"), torch.no_grad():
             m = TestHelperModules.SerialsConv2dAddReLUModule().eval()
             example_inputs = (torch.randn(2, 3, 16, 16),)
-            quantizer = X86InductorQuantizer().set_global(xiq.get_default_x86_inductor_quantization_config())
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config()
+            )
             node_occurrence = {
                 torch.ops.quantized_decomposed.quantize_per_tensor.default: 4,
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default: 6,
@@ -635,10 +732,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
         # Check Maxpool2d has share observer at input and output
         for node in prepare_model.graph.nodes:
-            if (
-                node.op == "call_function"
-                and node.target is single_op
-            ):
+            if node.op == "call_function" and node.target is single_op:
                 single_op_node = node
                 input_obs_of_single_op = getattr(
                     prepare_model, single_op_node.args[0].target
@@ -658,7 +752,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         self.assertTrue(input_obs_of_single_op is output_obs_of_single_op)
         self.assertTrue(input_obs_of_single_op is not input_obs_of_conv)
 
-
     @skipIfNoX86
     def test_maxpool2d_recipe(self):
         r"""
@@ -671,7 +764,6 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             torch.ops.aten.max_pool2d.default,
         )
 
-
     @skipIfNoX86
     def test_adaptive_avg_pool2d_recipe(self):
         r"""
@@ -679,11 +771,12 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Since adaptive_avg_pool2d is a int8_in_int8_out_op, there is obs between adaptive_avg_pool2d and pow.
         """
         self._single_op_share_observer_recipe_test_helper(
-            TestHelperModules.Conv2dSingleOpPowModule(nn.AdaptiveAvgPool2d((1, 1))).eval(),
+            TestHelperModules.Conv2dSingleOpPowModule(
+                nn.AdaptiveAvgPool2d((1, 1))
+            ).eval(),
             torch.rand(1, 2, 14, 14),
             torch.ops.aten.adaptive_avg_pool2d.default,
         )
-
 
     @skipIfNoX86
     def test_flatten_recipe(self):
@@ -692,11 +785,12 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         Since flatten is a int8_in_int8_out_op, there is obs between flatten and pow.
         """
         self._single_op_share_observer_recipe_test_helper(
-            TestHelperModules.Conv2dSingleOpPowModule(lambda x: torch.flatten(x, 1)).eval(),
+            TestHelperModules.Conv2dSingleOpPowModule(
+                lambda x: torch.flatten(x, 1)
+            ).eval(),
             torch.rand(1, 2, 14, 14),
             torch.ops.aten.flatten.using_ints,
         )
-
 
     @skipIfNoX86
     def test_cat_recipe(self):
@@ -739,19 +833,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
         # Check Cat/Maxpool2d has share observer at input and output
         for node in prepare_model.graph.nodes:
-            if (
-                node.op == "call_function"
-                and node.target == torch.ops.aten.cat.default
-            ):
-                cat_act_obs0 = getattr(
-                    prepare_model, node.all_input_nodes[0].target
-                )
-                cat_act_obs1 = getattr(
-                    prepare_model, node.all_input_nodes[1].target
-                )
-                cat_out_obs = getattr(
-                    prepare_model, next(iter(node.users)).target
-                )
+            if node.op == "call_function" and node.target == torch.ops.aten.cat.default:
+                cat_act_obs0 = getattr(prepare_model, node.all_input_nodes[0].target)
+                cat_act_obs1 = getattr(prepare_model, node.all_input_nodes[1].target)
+                cat_out_obs = getattr(prepare_model, next(iter(node.users)).target)
             elif (
                 node.op == "call_function"
                 and node.target is torch.ops.aten.max_pool2d.default
@@ -811,19 +896,10 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
         # Check Cat has share observer at input and output
         for node in prepare_model.graph.nodes:
-            if (
-                node.op == "call_function"
-                and node.target == torch.ops.aten.cat.default
-            ):
-                cat_act_obs0 = getattr(
-                    prepare_model, node.args[0][0].target
-                )
-                cat_act_obs1 = getattr(
-                    prepare_model, node.args[0][1].target
-                )
-                cat_out_obs = getattr(
-                    prepare_model, next(iter(node.users)).target
-                )
+            if node.op == "call_function" and node.target == torch.ops.aten.cat.default:
+                cat_act_obs0 = getattr(prepare_model, node.args[0][0].target)
+                cat_act_obs1 = getattr(prepare_model, node.args[0][1].target)
+                cat_out_obs = getattr(prepare_model, next(iter(node.users)).target)
         self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
         self.assertTrue(isinstance(cat_act_obs1, ObserverBase))
         self.assertTrue(isinstance(cat_out_obs, ObserverBase))
@@ -868,16 +944,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
         # Check Cat has share observer at input and output
         for node in prepare_model.graph.nodes:
-            if (
-                node.op == "call_function"
-                and node.target == torch.ops.aten.cat.default
-            ):
-                cat_act_obs0 = getattr(
-                    prepare_model, node.args[0][0].target
-                )
-                cat_out_obs = getattr(
-                    prepare_model, next(iter(node.users)).target
-                )
+            if node.op == "call_function" and node.target == torch.ops.aten.cat.default:
+                cat_act_obs0 = getattr(prepare_model, node.args[0][0].target)
+                cat_out_obs = getattr(prepare_model, next(iter(node.users)).target)
         self.assertTrue(isinstance(cat_act_obs0, ObserverBase))
         self.assertTrue(isinstance(cat_out_obs, ObserverBase))
         self.assertTrue(cat_act_obs0 is cat_out_obs)
@@ -935,7 +1004,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 and node.target is torch.ops.aten.conv2d.default
             ):
                 conv_node = node
-                output_obs_of_conv = getattr(prepare_model, next(iter(conv_node.users)).target)
+                output_obs_of_conv = getattr(
+                    prepare_model, next(iter(conv_node.users)).target
+                )
         self.assertTrue(isinstance(input_obs_of_avgpool, ObserverBase))
         self.assertTrue(isinstance(output_obs_of_avgpool, ObserverBase))
         self.assertTrue(isinstance(output_obs_of_conv, ObserverBase))
@@ -986,11 +1057,16 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         cases = itertools.product(use_bias_list, inplace_list, postop_list)
         post_op_map = {
             nn.ReLU: [torch.ops.aten.relu_.default, torch.ops.aten.relu.default],
-            nn.LeakyReLU: [torch.ops.aten.leaky_relu_.default, torch.ops.aten.leaky_relu.default],
+            nn.LeakyReLU: [
+                torch.ops.aten.leaky_relu_.default,
+                torch.ops.aten.leaky_relu.default,
+            ],
         }
         with override_quantized_engine("x86"), torch.no_grad():
             for use_bias, inplace, postop in cases:
-                m = TestHelperModules.LinearUnaryModule(use_bias=use_bias, postop=postop, inplace_postop=inplace).eval()
+                m = TestHelperModules.LinearUnaryModule(
+                    use_bias=use_bias, postop=postop, inplace_postop=inplace
+                ).eval()
                 example_inputs = (torch.randn(2, 4),)
                 quantizer = X86InductorQuantizer().set_global(
                     xiq.get_default_x86_inductor_quantization_config()
@@ -1024,11 +1100,13 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         """
         use_bias_list = [True, False]
         postop = nn.GELU
-        post_op_algorithm = ['none', 'tanh']
+        post_op_algorithm = ["none", "tanh"]
         cases = itertools.product(use_bias_list, post_op_algorithm)
         with override_quantized_engine("x86"), torch.no_grad():
             for use_bias, post_op_algo in cases:
-                m = TestHelperModules.LinearUnaryModule(use_bias=use_bias, postop=postop, post_op_algo=post_op_algo).eval()
+                m = TestHelperModules.LinearUnaryModule(
+                    use_bias=use_bias, postop=postop, post_op_algo=post_op_algo
+                ).eval()
                 example_inputs = (torch.randn(2, 4),)
                 quantizer = X86InductorQuantizer().set_global(
                     xiq.get_default_x86_inductor_quantization_config()
@@ -1103,19 +1181,39 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         unary_map = {
             "relu": [torch.nn.ReLU(inplace=False), torch.ops.aten.relu.default],
             "relu_inplace": [torch.nn.ReLU(inplace=True), torch.ops.aten.relu_.default],
-            "hardtanh": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False), torch.ops.aten.hardtanh.default],
-            "hardtanh_inplace": [torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True), torch.ops.aten.hardtanh_.default],
+            "hardtanh": [
+                torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=False),
+                torch.ops.aten.hardtanh.default,
+            ],
+            "hardtanh_inplace": [
+                torch.nn.Hardtanh(min_val=0.0, max_val=6.0, inplace=True),
+                torch.ops.aten.hardtanh_.default,
+            ],
             "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
-            "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
-            "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
-            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default],
+            "relu6_inplace": [
+                torch.nn.ReLU6(inplace=True),
+                torch.ops.aten.hardtanh_.default,
+            ],
+            "hardswish": [
+                torch.nn.Hardswish(inplace=False),
+                torch.ops.aten.hardswish.default,
+            ],
+            "hardswish_inplace": [
+                torch.nn.Hardswish(inplace=True),
+                torch.ops.aten.hardswish_.default,
+            ],
             "swish": [torch.nn.SiLU(inplace=False), torch.ops.aten.silu.default],
-            "swish_inplace": [torch.nn.SiLU(inplace=True), torch.ops.aten.silu_.default],
+            "swish_inplace": [
+                torch.nn.SiLU(inplace=True),
+                torch.ops.aten.silu_.default,
+            ],
         }
 
         with override_quantized_engine("x86"):
             for unary_op in unary_map.keys():
-                m = TestHelperModules.Conv2dUnaryModule(unary_map[unary_op][0], with_bn=True)
+                m = TestHelperModules.Conv2dUnaryModule(
+                    unary_map[unary_op][0], with_bn=True
+                )
                 example_inputs = (torch.randn(2, 3, 16, 16),)
                 quantizer = X86InductorQuantizer().set_global(
                     xiq.get_default_x86_inductor_quantization_config(is_qat=True)
@@ -1160,7 +1258,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
         )
         with override_quantized_engine("x86"):
             for inplace_add in [True, False]:
-                m = TestHelperModules.Conv2dAddModule(inplace_add=inplace_add, with_bn=True)
+                m = TestHelperModules.Conv2dAddModule(
+                    inplace_add=inplace_add, with_bn=True
+                )
                 node_occurrence = {
                     # one for input and weight of the conv
                     # one for output for the add
@@ -1177,7 +1277,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
-                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
+                    torch.ops.aten.add_.Tensor
+                    if inplace_add
+                    else torch.ops.aten.add.Tensor,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                 ]
@@ -1222,7 +1324,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     torch.ops.quantized_decomposed.dequantize_per_tensor.default,
                     torch.ops.aten.conv2d.default,
                     torch.ops.quantized_decomposed.quantize_per_tensor.default,
-                    torch.ops.aten.add_.Tensor if inplace_add else torch.ops.aten.add.Tensor,
+                    torch.ops.aten.add_.Tensor
+                    if inplace_add
+                    else torch.ops.aten.add.Tensor,
                 ]
                 self._test_quantizer(
                     m,
@@ -1319,8 +1423,7 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             example_inputs = (torch.randn(1, 4, 64),)
             quantizer = X86InductorQuantizer().set_global(
                 xiq.get_default_x86_inductor_quantization_config(
-                    is_qat=True,
-                    is_dynamic=True
+                    is_qat=True, is_dynamic=True
                 )
             )
             node_occurrence = {
@@ -1345,4 +1448,106 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_occurrence,
                 node_list,
                 is_qat=True,
+            )
+
+    @skipIfNoX86
+    def test_filter_conv2d_recipe(self):
+        """
+        Test removing conv2d from default recipe of X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.Conv2dUnaryModule(torch.nn.ReLU(inplace=False)).eval()
+            example_inputs = (torch.randn(2, 3, 16, 16),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config()
+            )
+            quantizer.set_module_type_qconfig(torch.nn.Conv2d, None)
+            node_occurrence = {
+                # one for input and weight of the conv
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
+                # note: quantize op for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
+            }
+            node_list = [
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.relu.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+            )
+
+    @skipIfNoX86
+    def test_filter_linear_recipe(self):
+        """
+        Test removing linear from default recipe of X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.LinearUnaryModule(
+                use_bias=True,
+                postop=nn.ReLU,
+            ).eval()
+            example_inputs = (torch.randn(2, 4),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config()
+            )
+            quantizer.set_function_type_qconfig(torch.nn.functional.linear, None)
+            node_occurrence = {
+                # one for input and weight of the conv
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
+                # note: quantize op for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
+            }
+            node_list = [
+                torch.ops.aten.linear.default,
+                torch.ops.aten.relu.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+            )
+
+    @skipIfNoX86
+    def test_filter_maxpool2d_recipe(self):
+        """
+        Test removing maxpool2d from default recipe of X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.Conv2dUnaryModule(torch.nn.ReLU(inplace=False)).eval()
+            example_inputs = (torch.randn(2, 3, 16, 16),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config()
+            )
+            quantizer.set_function_type_qconfig(torch.nn.functional.max_pool2d, None)
+            node_occurrence = {
+                # one for input and weight of the conv
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+                # note: quantize op for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.relu.default,
+                torch.ops.aten.max_pool2d.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
             )
