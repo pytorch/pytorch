@@ -290,7 +290,7 @@ def get_error_inputs_for_all_optims(device, dtype):
 # global-cliquey flags to individual tests and fully expect tests to edit OptimizerInput.kwargs.
 
 
-def optim_inputs_func_adadelta(device):
+def optim_inputs_func_adadelta(device, dtype=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
         OptimizerInput(
@@ -339,7 +339,7 @@ def optim_error_inputs_func_adadelta(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_adagrad(device):
+def optim_inputs_func_adagrad(device, dtype=None):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(
@@ -383,7 +383,7 @@ def optim_error_inputs_func_adagrad(device, dtype):
 
 # TODO: consider tensor LR! See multi_tensor_optimizer_configs in test_optim.py --> tensor LR should work
 # with all implementation code paths...
-def optim_inputs_func_adam(device):
+def optim_inputs_func_adam(device, dtype=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
         OptimizerInput(
@@ -413,17 +413,18 @@ def optim_inputs_func_adam(device):
             params=None, kwargs={"weight_decay": 0.1, "amsgrad": True}, desc="amsgrad"
         ),
     ] + (cuda_supported_configs if "cuda" in str(device) else [])
-    for input in total:
-        """
-        Too small eps will make denom to be zero for low precision dtype
-        denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
-        For example,
-        >>> a
-        tensor([0.], dtype=torch.float16)
-        >>> a + 1e-8
-        tensor([0.], dtype=torch.float16)
-        """
-        input.kwargs["eps"] = 0.1
+    if dtype in (torch.float16,):
+        for input in total:
+            """
+            Too small eps will make denom to be zero for low precision dtype
+            denom = (exp_avg_sq.sqrt() / bias_correction2_sqrt).add_(eps)
+            For example,
+            >>> a
+            tensor([0.], dtype=torch.float16)
+            >>> a + 1e-8
+            tensor([0.], dtype=torch.float16)
+            """
+            input.kwargs["eps"] = 0.1
     return total
 
 
@@ -484,7 +485,7 @@ def optim_error_inputs_func_adam(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_adamax(device):
+def optim_inputs_func_adamax(device, dtype=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
         OptimizerInput(
@@ -535,15 +536,15 @@ def optim_error_inputs_func_adamax(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_adamw(device):
-    return optim_inputs_func_adam(device)
+def optim_inputs_func_adamw(device, dtype=None):
+    return optim_inputs_func_adam(device, dtype)
 
 
 def optim_error_inputs_func_adamw(device, dtype):
     return optim_error_inputs_func_adam(device, dtype)
 
 
-def optim_inputs_func_asgd(device):
+def optim_inputs_func_asgd(device, dtype=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
         OptimizerInput(
@@ -595,7 +596,7 @@ def optim_error_inputs_func_asgd(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_lbfgs(device):
+def optim_inputs_func_lbfgs(device, dtype=None):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 0.01}, desc="non-default lr"),
@@ -616,7 +617,7 @@ def optim_error_inputs_func_lbfgs(device, dtype):
 
 
 # Weird story bro, NAdam and RAdam do not have maximize.
-def optim_inputs_func_nadam(device):
+def optim_inputs_func_nadam(device, dtype=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
         OptimizerInput(
@@ -687,7 +688,7 @@ def optim_error_inputs_func_nadam(device, dtype):
 
 
 # Weird story bro, NAdam and RAdam do not have maximize.
-def optim_inputs_func_radam(device=None):
+def optim_inputs_func_radam(device=None, dtype=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
         OptimizerInput(
@@ -749,7 +750,7 @@ def optim_error_inputs_func_radam(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_rmsprop(device):
+def optim_inputs_func_rmsprop(device, dtype=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
         OptimizerInput(
@@ -810,7 +811,7 @@ def optim_error_inputs_func_rmsprop(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_rprop(device):
+def optim_inputs_func_rprop(device, dtype=None):
     cuda_supported_configs = [
         OptimizerInput(params=None, kwargs={"capturable": True}, desc="capturable"),
         OptimizerInput(
@@ -852,7 +853,7 @@ def optim_error_inputs_func_rprop(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_sgd(device):
+def optim_inputs_func_sgd(device, dtype=None):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(params=None, kwargs={"lr": 1e-2}, desc="non-default lr"),
@@ -897,7 +898,7 @@ def optim_error_inputs_func_sgd(device, dtype):
     return error_inputs
 
 
-def optim_inputs_func_sparseadam(device):
+def optim_inputs_func_sparseadam(device, dtype=None):
     return [
         OptimizerInput(params=None, kwargs={}, desc="default"),
         OptimizerInput(
