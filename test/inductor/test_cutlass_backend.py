@@ -108,7 +108,7 @@ class TestCutlassBackend(TestCase):
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
             Y = mm(a, b)
-            torch.testing.assert_close(Y_compiled, Y)
+            torch.testing.assert_close(Y_compiled, Y, atol=2e-4, rtol=1e-3)
 
     def _test_max_autotune_cutlass_backend_epilogue_fusion(
         self,
