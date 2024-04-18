@@ -16,7 +16,17 @@ static inline dnnl::memory::dims deconv_compatible_dilation(IntArrayRef& dilatio
   return ret;
 }
 
-static inline dnnl::memory::dims deconv_dst_size(
+static inline std::vector<int64_t> compatible_groups_deconv_strides(
+    const at::Tensor& weight,
+    dnnl::memory::dims group_size) {
+  std::vector<int64_t> strides = weight.strides().vec();
+  strides[0] = weight.strides()[1];
+  strides[1] = weight.strides()[0];
+  strides.insert(strides.begin(), group_size[2] * weight.strides()[0]);
+  return strides;
+}
+
+dnnl::memory::dims deconv_dst_size(
     IntArrayRef src_size,
     IntArrayRef weight_size,
     IntArrayRef padding,

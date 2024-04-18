@@ -3,6 +3,7 @@
 import sys
 
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm
+from torch.testing._internal.inductor_utils import HAS_CUDA
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -73,7 +74,7 @@ class TestMemoryPlanning(TestCase):
         ).check_next(
             "auto buf0 = alloc_from_pool(pool1, 0, at::kFloat, {s0, s0}, {s0, 1L});"
         ).check(
-            "auto buf1 = alloc_from_pool(pool1, align((4*s0) + (4*s0*((-1) + s0))),"
+            "auto buf1 = alloc_from_pool(pool1, align((4L*s0) + (4L*s0*((-1L) + s0))),"
         ).run(
             code
         )
@@ -116,4 +117,5 @@ class TestMemoryPlanning(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if HAS_CUDA:
+        run_tests()

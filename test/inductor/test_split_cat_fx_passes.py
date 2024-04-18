@@ -739,7 +739,7 @@ class TestSplitCatFxPasses(TestCase):
 
             torch.testing.assert_close(actual, expected)
             self.assertEqual(
-                counters["inductor"]["split_squeeze_replaced"],
+                counters["inductor"]["split_cat_pass"],
                 split_squeeze_replaced,
             )
             counters.clear()

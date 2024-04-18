@@ -2,6 +2,7 @@
 
 import os
 import sys
+
 import torch
 from torch._C import parse_ir
 from torch.testing import FileCheck
@@ -11,10 +12,13 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.jit_utils import JitTestCase
 
-if __name__ == '__main__':
-    raise RuntimeError("This test file is not meant to be run directly, use:\n\n"
-                       "\tpython test/test_jit.py TESTNAME\n\n"
-                       "instead.")
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test file is not meant to be run directly, use:\n\n"
+        "\tpython test/test_jit.py TESTNAME\n\n"
+        "instead."
+    )
+
 
 # Tests that Python slice class is supported in TorchScript
 class TestIgnorableArgs(JitTestCase):
@@ -44,11 +48,14 @@ class TestIgnorableArgs(JitTestCase):
         # We ignore trailing arguments after start=2 for dim 0
         # and after end=1 for dim 1
         # because in %16, %15 and %0 are default values for the schema.
-        FileCheck().check("torch.slice(torch.slice(torch.tensor(_0), 0, 2), 1, None, 1)").run(src)
+        FileCheck().check(
+            "torch.slice(torch.slice(torch.tensor(_0), 0, 2), 1, None, 1)"
+        ).run(src)
         self.assertEqual(function(), function_copy())
 
     def test_add_out_ignorable_args(self):
         @torch.jit.script
         def fn(x: torch.Tensor, y: torch.Tensor):
             torch.add(x, y, out=y)
+
         FileCheck().check("torch.add(x, y, out=y)").run(fn.code)

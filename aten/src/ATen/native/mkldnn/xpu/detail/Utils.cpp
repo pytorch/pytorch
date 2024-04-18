@@ -349,11 +349,11 @@ bool binary_valid(
   return false;
 }
 
-bool is_channels_last(at::MemoryFormat fmt){
+static inline bool is_channels_last(at::MemoryFormat fmt){
   return (at::MemoryFormat::ChannelsLast == fmt) || (at::MemoryFormat::ChannelsLast3d == fmt);
 }
 
-bool is_smf_channels_last(const Tensor& t){
+static inline bool is_smf_channels_last(const Tensor& t){
   return is_channels_last(t.suggest_memory_format());
 }
 
@@ -375,16 +375,6 @@ bool use_channels_last_for_conv(
   }
 
   return false;
-}
-
-std::vector<int64_t> compatible_groups_deconv_strides(
-    const at::Tensor& weight,
-    dnnl::memory::dims group_size) {
-  std::vector<int64_t> strides = weight.strides().vec();
-  strides[0] = weight.strides()[1];
-  strides[1] = weight.strides()[0];
-  strides.insert(strides.begin(), group_size[2] * weight.strides()[0]);
-  return strides;
 }
 
 }
