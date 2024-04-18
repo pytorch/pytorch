@@ -257,13 +257,17 @@ def templated_attention(*args, **kwargs):
                 make_contiguous_strides_for(query.get_size()),
             )
             choices: List[Any] = []
-
-            for BLOCK_M, BLOCK_N, num_warps, num_stages in [
+            configs = []
+            if query.get_dtype() == torch.float32:
+                configs.append(64, 64, 4, 3)
+            configs += [
                 (128, 64, 4, 3),
                 (128, 128, 4, 3),
                 (128, 128, 8, 2),
                 (64, 128, 4, 3),
-            ]:
+            ]
+
+            for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
                 sdpa_template.maybe_append_choice(
                     choices=choices,
                     input_nodes=(query, key, value),
