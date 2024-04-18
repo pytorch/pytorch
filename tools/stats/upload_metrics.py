@@ -22,7 +22,10 @@ except ImportError as e:
 
 # Sometimes our runner machines are located in one AWS account while the metrics table may be in
 # another, so we need to specify the table's ARN explicitly.
-TORCHCI_METRICS_TABLE_ARN = "arn:aws:dynamodb:us-east-1:308535385114:table/torchci-metrics"
+TORCHCI_METRICS_TABLE_ARN = (
+    "arn:aws:dynamodb:us-east-1:308535385114:table/torchci-metrics"
+)
+
 
 class EnvVarMetric:
     name: str
