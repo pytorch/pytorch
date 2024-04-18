@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 import abc
-import builtins
 import collections
 import copy
 import dataclasses
