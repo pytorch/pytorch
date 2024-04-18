@@ -61,7 +61,7 @@ class TestTemplatedSDPA(InductorTestCase):
         # Note, it seems like we really are less accurate than the float32
         # computation, likely due to the online softmax
         if dtype == torch.float32:
-            fudge_factor = 5.0
+            fudge_factor = 4.0
         else:
             fudge_factor = 1.1
         if compiled_error > ref_error * fudge_factor:
