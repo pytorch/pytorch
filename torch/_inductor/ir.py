@@ -4456,7 +4456,7 @@ class UserDefinedTritonKernel(ExternKernel):
     def get_mutation_names(self):
         return []
 
-    def __init__(self, *, kernel_idx, grid, kernel_args):
+    def __init__(self, *, kernel_idx, grid, kernel_args, tensors_to_clone):
         inputs = []
         kwargs = dict()
         constant_args = []
@@ -4489,8 +4489,13 @@ class UserDefinedTritonKernel(ExternKernel):
             arg for arg in kernel.arg_names if arg in kernel_args
         ]
 
+        mutable_args = [
+            arg
+            for key, arg in kernel_args.items()
+            if isinstance(arg, TensorBox) and key in tensors_to_clone
+        ]
         mark_node_as_mutating(
-            self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
+            self, *mutable_args
         )
 
     def get_inputs_that_alias_output(self):
