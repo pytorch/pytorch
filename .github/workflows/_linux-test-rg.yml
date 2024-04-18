@@ -65,7 +65,6 @@ jobs:
       fail-fast: false
     runs-on:
       group: ${{ matrix.runner }}
-
     timeout-minutes: ${{ matrix.mem_leak_check == 'mem_leak_check' && 600 || inputs.timeout-minutes }}
     steps:
       - name: Checkout PyTorch
@@ -77,7 +76,7 @@ jobs:
         with:
           build-environment: ${{ inputs.build-environment }}
           test-matrix: ${{ inputs.test-matrix }}
-          docker-image-name: ${{ inputs.docker-image-name }}
+          docker-image: ${{ inputs.docker-image }}
           sync-tag: ${{ inputs.sync-tag }}
           timeout-minutes: ${{ inputs.timeout-minutes }}
           use-gha: ${{ inputs.use-gha }}
