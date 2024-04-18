@@ -279,11 +279,11 @@ def generate_libtorch_matrix(
                     "libtorch_variant": libtorch_variant,
                     "libtorch_config": abi_version if os == "windows" else "",
                     "devtoolset": abi_version if os != "windows" else "",
-                    "container_image": LIBTORCH_CONTAINER_IMAGES[
-                        (arch_version, abi_version)
-                    ]
-                    if os != "windows"
-                    else "",
+                    "container_image": (
+                        LIBTORCH_CONTAINER_IMAGES[(arch_version, abi_version)]
+                        if os != "windows"
+                        else ""
+                    ),
                     "package_type": "libtorch",
                     "build_name": f"libtorch-{gpu_arch_type}{gpu_arch_version}-{libtorch_variant}-{abi_version}".replace(
                         ".", "_"
@@ -332,7 +332,11 @@ def generate_wheels_matrix(
             )
 
             # 12.1 linux wheels require PYTORCH_EXTRA_INSTALL_REQUIREMENTS to install
-            if arch_version in ["12.1", "11.8"] and os == "linux" or arch_version == "cuda-aarch64":
+            if (
+                arch_version in ["12.1", "11.8"]
+                and os == "linux"
+                or arch_version == "cuda-aarch64"
+            ):
                 ret.append(
                     {
                         "python_version": python_version,
@@ -360,17 +364,19 @@ def generate_wheels_matrix(
                         "desired_cuda": translate_desired_cuda(
                             gpu_arch_type, gpu_arch_version
                         ),
-                        "devtoolset": "cxx11-abi"
-                        if arch_version == "cpu-cxx11-abi"
-                        else "",
+                        "devtoolset": (
+                            "cxx11-abi" if arch_version == "cpu-cxx11-abi" else ""
+                        ),
                         "container_image": WHEEL_CONTAINER_IMAGES[arch_version],
                         "package_type": package_type,
                         "build_name": f"{package_type}-py{python_version}-{gpu_arch_type}{gpu_arch_version}".replace(
                             ".", "_"
                         ),
-                        "pytorch_extra_install_requirements":
-                        PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
-                        if os != "linux" else "",
+                        "pytorch_extra_install_requirements": (
+                            PYTORCH_EXTRA_INSTALL_REQUIREMENTS["12.1"]  # fmt: skip
+                            if os != "linux"
+                            else ""
+                        ),
                     }
                 )
     return ret
