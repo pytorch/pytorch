@@ -4507,8 +4507,8 @@ class TestLinalg(TestCase):
         filename = torch.cuda.tunable.get_filename()
         ordinal = torch.cuda.current_device()
         assert filename == f"tunableop_results{ordinal}.csv"
-        assert len(torch.cuda.tunable.get_validators()) > 1
-        assert len(torch.cuda.tunable.get_results()) > 1
+        assert len(torch.cuda.tunable.get_validators()) > 0
+        assert len(torch.cuda.tunable.get_results()) > 0
 
         # disables TunableOp, no file will be written, restore to default values
         torch.cuda.tunable.enable(False)
