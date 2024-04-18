@@ -315,32 +315,8 @@ class _TorchDynamoContext:
         fn = innermost_fn(fn)
 
         # add context containing GraphModule to any GraphModule forward functions
-        from torch.fx._lazy_graph_module import _LazyGraphModule
-
-        if isinstance(fn, _LazyGraphModule) or (
-            isinstance(getattr(fn, "__self__", None), _LazyGraphModule)
-            and fn.__name__ == "_lazy_forward"
-        ):
-            # Since dynamo will run the forward method for the GraphModule shortly
-            # anyways, it does not hurt to do the real recompilation here if
-            # this is a _LazyGraphModule. This makes it easier for dynamo to
-            # optimize a _LazyGraphModule.
-
-            lazy_gm = fn if isinstance(fn, _LazyGraphModule) else fn.__self__
-
-            _LazyGraphModule.force_recompile(lazy_gm)
-
-            # Assume that the underlying node metadata of `fn`,
-            # a GraphModule instance, accurately represents
-            # all instances of type(fn).
-            code_context.get_context(lazy_gm.forward.__code__)[
-                "orig_graphmodule"
-            ] = weakref.ref(lazy_gm)
-
-            if not isinstance(fn, _LazyGraphModule):
-                # replace fn with the real forward method
-                fn = lazy_gm.forward
-        elif isinstance(fn, GraphModule):
+        if isinstance(fn, GraphModule):
+            # add context containing GraphModule to any GraphModule forward functions
             code_context.get_context(fn.forward.__code__)[
                 "orig_graphmodule"
             ] = weakref.ref(fn)
@@ -368,7 +344,8 @@ class _TorchDynamoContext:
         if (
             (filename is None or trace_rules.check(fn))
             and (
-                getattr(fn, "__name__", "") not in ["_call_impl", "_wrapped_call_impl"]
+                getattr(fn, "__name__", "")
+                not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
             )
             and filename not in DONT_WRAP_FILES
         ):
@@ -824,32 +801,31 @@ class ExportResult(NamedTuple):
 
 def check_signature_rewritable(graph):
     input_errors = []
-    for node in graph.graph.nodes:
-        if node.op == "placeholder":
-            assert hasattr(node, "_dynamo_source")
-            source = node._dynamo_source
-            user_stacks = graph._source_to_user_stacks.get(source)
-            if user_stacks is None:
+    for node in graph.graph.find_nodes(op="placeholder"):
+        assert hasattr(node, "_dynamo_source")
+        source = node._dynamo_source
+        user_stacks = graph._source_to_user_stacks.get(source)
+        if user_stacks is None:
+            continue
+        assert len(user_stacks) > 0
+        # In some cases we may not have a useful stack.  Look for a
+        # useful stack
+        stack = None
+        for s in user_stacks:
+            if len(s) == 0:
                 continue
-            assert len(user_stacks) > 0
-            # In some cases we may not have a useful stack.  Look for a
-            # useful stack
-            stack = None
-            for s in user_stacks:
-                if len(s) == 0:
-                    continue
-                stack = s
-                break
-            if stack is None:
-                msg = f"{source.name()}, a closed over free variable"
-            else:
-                tb = "".join(traceback.format_list(stack))
-                extra = ""
-                if len(user_stacks) > 1:
-                    extra = f"(elided {len(user_stacks)-1} more accesses)"
-                msg = f"{source.name()}, accessed at:\n{tb}{extra}"
-            # TODO: option to print ALL of the stack traces at once
-            input_errors.append(msg)
+            stack = s
+            break
+        if stack is None:
+            msg = f"{source.name()}, a closed over free variable"
+        else:
+            tb = "".join(traceback.format_list(stack))
+            extra = ""
+            if len(user_stacks) > 1:
+                extra = f"(elided {len(user_stacks)-1} more accesses)"
+            msg = f"{source.name()}, accessed at:\n{tb}{extra}"
+        # TODO: option to print ALL of the stack traces at once
+        input_errors.append(msg)
 
     if input_errors:
         raise UserError(
@@ -1326,10 +1302,8 @@ def export(
                     )
 
             assert graph is not None
-            for node in graph.graph.nodes:
-                if node.op == "get_attr" and isinstance(
-                    getattr(graph, node.target), torch.Tensor
-                ):
+            for node in graph.graph.find_nodes(op="get_attr"):
+                if isinstance(getattr(graph, node.target), torch.Tensor):
                     node.meta["val"] = fake_mode.from_tensor(
                         getattr(graph, node.target), static_shapes=True
                     )

@@ -426,7 +426,7 @@ class GradScaler:
                 found_inf = cast(
                     torch.Tensor,
                     sum(
-                        [
+                        [  # noqa: C419
                             t.to(scaler.device, non_blocking=True)
                             for t in optimizer_state["found_inf_per_device"].values()
                         ]

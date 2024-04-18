@@ -3479,8 +3479,8 @@ Tensor _weight_int4pack_mm_cpu(
   auto N = B.size(0) * kNTileSize;
   auto K = A.size(1);
 
-  TORCH_CHECK(A.dtype() == kBFloat16,
-      __func__, " : expect A to be bfloat16 tensor.");
+  TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf,
+      __func__, " : expect A to be float16 or bfloat16 tensor.");
   TORCH_CHECK(A.is_contiguous(),
       __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,
@@ -3516,8 +3516,8 @@ Tensor _weight_int8pack_mm_cpu(
   auto N = B.size(0);
   auto K = A.size(1);
 
-  TORCH_CHECK(A.dtype() == kBFloat16,
-      __func__, " : expect A to be bfloat16 tensor.");
+  TORCH_CHECK(A.dtype() == kBFloat16 || A.dtype() == kHalf,
+      __func__, " : expect A to be float16 or bfloat16 tensor.");
   TORCH_CHECK(A.is_contiguous(),
       __func__, " : expect A to be contiguous.");
   TORCH_CHECK(A.dim() == 2,

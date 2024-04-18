@@ -1088,8 +1088,13 @@ class _ModuleStackTracer(PythonKeyTracer):
         node = super().create_node(*args, **kwargs)
 
         # nn_module_stack
-        if "nn_module_stack" not in node.meta and node.op not in ["placeholder", "output"]:
-            node.meta["nn_module_stack"] = self.module_stack
+        if node.op not in ["placeholder", "output"]:
+            if "nn_module_stack" not in node.meta:
+                node.meta["nn_module_stack"] = self.module_stack
+            # convert nn_module_stack from Dict[key, (FQN, class)] -> Dict[str, Tuple[str, str]]
+            for key, (fqn, mod_cls) in node.meta["nn_module_stack"].items():
+                if isinstance(mod_cls, type):
+                    node.meta["nn_module_stack"][key] = (fqn, mod_cls.__module__ + "." + mod_cls.__qualname__)
 
         # torch_fn
         if node.op == "call_function" and self.torch_fn_metadata is not None and "torch_fn" not in node.meta:
