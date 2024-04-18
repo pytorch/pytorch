@@ -32,7 +32,7 @@ Example::
 .. warning::
 
     This function does not return the number of dimensions described by :class:`torch.Size`, but instead the number
-    of elements a `:class:`torch.Tensor` with that size would contain.
+    of elements a :class:`torch.Tensor` with that size would contain.
 
 """,
 )
