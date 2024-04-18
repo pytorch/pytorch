@@ -834,28 +834,18 @@ class CKGemmTemplate(CKTemplate):
         auto gemm = {{instance_type}} {};
         auto invoker = gemm.MakeInvoker();
 
-        auto M = {{M}};
-        auto N = {{N}};
-        auto K = {{K}};
-        auto StrideA = {{K}}; // TBD fix for row/col major
-        auto StrideB = {{K}}; 
-        auto StrideC = {{K}}; 
-        auto KBatch = 1; // split k into batches
-
-        // TBD unhardcode
-        auto a_element_op = PassThrough {}; // TBD adjust for alpha and beta
-        auto b_element_op = PassThrough {};
-        auto c_element_op = PassThrough {};
-
-        // TBD unhardcode
-        using ADataType = ck::half_t;
-        using BDataType = ck::half_t;
-        using CDataType = ck::half_t;
+        constexpr auto M = {{M}};
+        constexpr auto N = {{N}};
+        constexpr auto K = {{K}};
+        constexpr auto StrideA = std::is_same_v<{{a_layout}}, Row> ? K : M; 
+        constexpr auto StrideB = std::is_same_v<{{b_layout}}, Row> ? N : K; 
+        constexpr auto StrideC = std::is_same_v<{{c_layout}}, Row> ? N : M;  
+        constexpr auto KBatch = 1; // split k into batches
 
         auto argument = gemm.MakeArgument(
-            reinterpret_cast<const ADataType*>(X),
-            reinterpret_cast<const BDataType*>(W),
-            reinterpret_cast<CDataType*>(Y),
+            reinterpret_cast<const {{a_element_dtype}}*>(X),
+            reinterpret_cast<const {{b_element_dtype}}*>(W),
+            reinterpret_cast<{{c_element_dtype}}*>(Y),
             M,
             N,
             K,
@@ -863,9 +853,9 @@ class CKGemmTemplate(CKTemplate):
             StrideB,
             StrideC,
             KBatch,
-            a_element_op,
-            b_element_op,
-            c_element_op
+            {{a_elementwise_op}} {},
+            {{b_elementwise_op}} {},
+            {{c_elementwise_op}} {}  
         );
         if (!gemm.IsSupportedArgument(argument)) {
             printf("Unsupported gemm argument! \n");
@@ -966,6 +956,15 @@ class CKGemmTemplate(CKTemplate):
             M=kernel.size(X, -2),
             K=kernel.size(X, -1),
             N=kernel.size(W, -1),
+            a_elementwise_op=op.a_elementwise_op,
+            b_elementwise_op=op.b_elementwise_op,
+            c_elementwise_op=op.c_elementwise_op,
+            a_element_dtype=op.a_element_dtype,
+            b_element_dtype=op.b_element_dtype,
+            c_element_dtype=op.c_element_dtype,
+            a_layout=op.a_layout,
+            b_layout=op.b_layout,
+            c_layout=op.c_layout,
         )
 
     def gen_ops(self):
