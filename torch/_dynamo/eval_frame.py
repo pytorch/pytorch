@@ -773,6 +773,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "tensor_dict" in self.current_node.meta:
             arg.node.meta["tensor_dict"] = self.current_node.meta["tensor_dict"]
         if "example_value" in self.current_node.meta:
+            # NB: intentionally do not use set_example_value
             arg.node.meta["example_value"] = self.current_node.meta["example_value"]
         return arg
 
@@ -797,6 +798,7 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
         if "val" in self.current_node.meta:
             result_proxy.node.meta["val"] = self.current_node.meta["val"]
         if "example_value" in self.current_node.meta:
+            # NB: intentionally do not use set_example_value
             result_proxy.node.meta["example_value"] = self.current_node.meta[
                 "example_value"
             ]
@@ -1203,6 +1205,14 @@ def export(
                     graph_captured_result = torch.func.functional_call(
                         graph, fake_params_buffers, fake_graph_inputs
                     )
+
+                    # We reran fake tensor propagation, but we didn't do
+                    # anything with the resulting unbacked SymInts.  Drop them
+                    # from the pending list.
+                    # NB: this is wrong if graph_captured_result has
+                    # data-dependent output size!
+                    if shape_env := ambient_fake_mode.shape_env:
+                        shape_env.pending_fresh_unbacked_symbols.clear()
 
                 return graph_captured_result
 
