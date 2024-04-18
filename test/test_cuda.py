@@ -33,7 +33,16 @@ from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
     _create_scaling_case, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
 from torch.utils.viz._cycles import observe_tensor_cycles
-
+from torch.testing._internal.common_optimizers import (optim_db,optims)
+from torch.testing._internal.common_device_type import(
+        expectedFailureMeta,
+        expectedFailureXLA,
+        instantiate_device_type_tests,
+        onlyCUDA,onlyCPU,
+        dtypes, dtypesIfCUDA, dtypesIfCPU, deviceCountAtLeast,
+        skipMeta,
+        PYTORCH_CUDA_MEMCHECK, largeTensorTest, onlyNativeDeviceTypes,
+        get_all_device_types, skipXLA)
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests
@@ -2896,6 +2905,9 @@ exit(2)
                 self.assertEqual(p_control, p_graphed)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    #@optims([optim for optim in optim_db if optim.optim_cls in [torch.optim.NAdam,torch.optim.RAdam,
+     #torch.optim.Rprop,torch.optim.Adam,torch.optim.AdamW,torch.optim.Adamax,torch.optim.ASGD,
+     #torch.optim.Adadelta,torch.optim.RMSprop]],dtypes=[torch.float32])
     def test_graph_optims(self):
         # Needs generalization if we want to extend this test to non-Adam-like optimizers.
         cases = [
@@ -2922,6 +2934,7 @@ exit(2)
 
         for optimizer_ctor, kwargs in cases:
             with self.subTest(optimizer_ctor=optimizer_ctor, kwargs=kwargs):
+                #print(optimizer_ctor,kwargs)
                 self._test_graphed_optimizer(3, 2, optimizer_ctor, kwargs)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
@@ -4148,9 +4161,18 @@ class TestBlockStateAbsorption(TestCase):
             cwd=os.path.dirname(os.path.realpath(__file__))).strip().decode('ascii')
         self.assertEqual(rc, "False", "Triton was imported when importing torch!")
 
-
+@torch.testing._internal.common_utils.markDynamoStrictTest
+class TestCudaOptims(TestCase):
+    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >=5.3 required for graphs")
+    @optims([optim for optim in optim_db if optim.optim_cls in [torch.optim.NAdam,torch.optim.RAdam,
+    torch.optim.Rprop,torch.optim.Adam,torch.optim.AdamW,torch.optim.Adamax,torch.optim.ASGD,
+    torch.optim.Adadelta,torch.optim.RMSprop]],dtypes=[torch.float32])
+    def test_graph_optims_new(self,device,dtype,optim_info):
+        optim_cls=optim_info.optim_cls
+        print(optim_cls)
 instantiate_parametrized_tests(TestCuda)
 instantiate_parametrized_tests(TestCudaMallocAsync)
+instantiate_device_type_tests(TestCudaOptims,globals(),only_for='cuda')
 
 if __name__ == '__main__':
     run_tests()
