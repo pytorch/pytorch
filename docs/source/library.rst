@@ -21,12 +21,12 @@ Use :func:`torch.library.custom_op` to create new custom ops.
 Extending custom ops (created from Python or C++)
 -------------------------------------------------
 
-Use the impl methods, such as :func:`torch.library.impl` and
-func:`torch.library.impl_abstract`, to add implementations
+Use the register methods, such as :func:`torch.library.register_kernel` and
+func:`torch.library.register_fake`, to add implementations
 for any operators (they may have been created using :func:`torch.library.custom_op` or
 via PyTorch's C++ operator registration APIs).
 
-.. autofunction:: impl
+.. autofunction:: register_kernel
 .. autofunction:: register_autograd
 .. autofunction:: register_fake
 .. autofunction:: impl_abstract
@@ -53,3 +53,5 @@ A tutorial that walks you through some examples on how to use this API is availa
 .. autofunction:: fallthrough_kernel
 
 .. autofunction:: define
+
+.. autofunction:: impl
