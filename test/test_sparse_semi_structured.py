@@ -564,6 +564,8 @@ class TestSparseSemiStructuredTraining(TestCase):
     def setUp(self):
         if not _IS_SM8X:
             self.skipTest('Only runs on SM80')
+        if IS_WINDOWS:
+            self.skipTest('CUTLASS not supported on windows')
 
 
     @training_dtypes
