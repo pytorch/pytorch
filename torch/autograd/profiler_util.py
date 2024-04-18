@@ -539,7 +539,7 @@ class FunctionEvent(FormattedTimesMixin):
 
     @property
     def self_cuda_memory_usage(self):  # To be deprecated
-        self_device_memory_usage(self)
+        self.self_device_memory_usage
 
     @property
     def cpu_time_total(self):
@@ -575,8 +575,7 @@ class FunctionEvent(FormattedTimesMixin):
 
     @property
     def cuda_time_total(self):  # To be deprecated
-        device_time_total(self)
-
+        self.device_time_total
 
     @property
     def self_device_time_total(self):
@@ -592,7 +591,7 @@ class FunctionEvent(FormattedTimesMixin):
 
     @property
     def self_cuda_time_total(self):  # To be deprecated
-        self_device_time_total(self)
+        self.self_device_time_total
 
     @property
     def key(self):
@@ -875,7 +874,7 @@ def _build_table(
         "CPU total",
         "CPU time avg",
     ]
-    device_name = use_device.upper()
+    device_name = use_device.upper() if use_device is not None else "None"
     if has_device_time:
         headers.extend(
             [
@@ -1089,6 +1088,7 @@ def _build_table(
     append(f"Self CPU time total: {_format_time(sum_self_cpu_time_total)}")
     if has_device_time:
         append(
-            f"Self {use_device.upper()} time total: {_format_time(sum_self_device_time_total)}"
+            f"Self {use_device.upper() if use_device is not None else 'None'} "
+            f"time total: {_format_time(sum_self_device_time_total)}"
         )
     return "".join(result)

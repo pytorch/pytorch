@@ -131,7 +131,7 @@ class _KinetoProfile:
             self.use_device = "cuda"
         elif ProfilerActivity.XPU in self.activities:
             self.use_device = "xpu"
-        elif ProfilerActivity.PrivateUse1 in self.activities:
+        else:
             self.use_device = "privateuseone"
 
         # user-defined metadata to be amended to the trace
