@@ -16,6 +16,7 @@
 #include <torch/csrc/PyInterpreter.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
+#include <torch/csrc/utils/tensor_new.h>
 
 #include <c10/util/flat_hash_map.h>
 #include <pybind11/operators.h>
@@ -868,6 +869,9 @@ void initDispatchBindings(PyObject* module) {
         .unsafeGetStorageImpl()
         ->set_warn_deprecated_on_mutable_data_ptr();
   });
+
+  m.def("_only_lift_cpu_tensors", &torch::utils::only_lift_cpu_tensors);
+  m.def("_set_only_lift_cpu_tensors", &torch::utils::set_only_lift_cpu_tensors);
 
   using c10::impl::TorchDispatchModeKey;
   py::enum_<TorchDispatchModeKey>(m, "_TorchDispatchModeKey")
