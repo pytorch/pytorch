@@ -53,17 +53,9 @@ bool binary_valid(
     const at::Tensor& other,
     bool is_fusion = false);
 
-bool is_channels_last(at::MemoryFormat fmt);
-
-bool is_smf_channels_last(const Tensor& t);
-
 bool use_channels_last_for_conv(
     const at::Tensor& src,
     const at::Tensor& weight,
     bool is_transpose);
-
-std::vector<int64_t> compatible_groups_deconv_strides(
-    const at::Tensor& weight,
-    dnnl::memory::dims group_size);
 
 } // namespace at::native::onednn

@@ -18,7 +18,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 import torch
 
 import torch.autograd.profiler as autograd_profiler
-from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
 from torch._dynamo.utils import dynamo_timed, get_first_attr
 from torch.utils._triton import has_triton_package
 
@@ -147,6 +147,7 @@ class CachingAutotuner(KernelInterface):
         size_hints=None,
         inductor_meta=None,  # metadata not relevant to triton
         custom_kernel=False,  # whether the kernel is inductor-generated or custom
+        filename: Optional[str] = None,
     ):
         super().__init__()
 
@@ -165,7 +166,7 @@ class CachingAutotuner(KernelInterface):
         self.device_type = (
             triton_meta["device_type"] if "device_type" in triton_meta else "cuda"
         )
-        self.gpu_device = get_interface_for_device(self.device_type)
+        self.device_interface = get_interface_for_device(self.device_type)
 
         if log.isEnabledFor(logging.DEBUG):
             log.debug(
@@ -176,7 +177,7 @@ class CachingAutotuner(KernelInterface):
             for c in self.configs:
                 log.debug(c)
 
-        self.launchers = []
+        self.launchers = []  # type: ignore[var-annotated]
         self.lock = threading.Lock()
         if os.getenv("TRITON_CACHE_DIR") is None:
             os.environ["TRITON_CACHE_DIR"] = os.path.join(
@@ -189,11 +190,7 @@ class CachingAutotuner(KernelInterface):
         self.coordesc_tuner = CoordescTuner(
             is_mm=False, name=self.fn.__name__, size_hints=size_hints
         )
-
-        # pre-create the profiler context manager to reduce latency
-        self.record_function_ctx = torch._C._profiler._RecordFunctionFast(
-            self.inductor_meta.get("kernel_name", "triton kernel")
-        )
+        self.filename = filename
 
     def precompile(self, warm_cache_only_with_cc=None):
         with self.lock:
@@ -222,7 +219,7 @@ class CachingAutotuner(KernelInterface):
 
             seen_configs = set(self.configs)
 
-            device_prop = self.gpu_device.Worker.get_device_properties(
+            device_prop = self.device_interface.Worker.get_device_properties(
                 self.triton_meta["device"]
             )
             if (
@@ -231,6 +228,8 @@ class CachingAutotuner(KernelInterface):
                 and self.size_hints is not None
                 # Disable for AMDGPU as Triton is not ready to return n_regs for a compiled_binary.
                 and torch.version.hip is None
+                # Disable for Intel GPU as Triton is not ready to return n_regs for a compiled_binary.
+                and self.device_type != "xpu"
                 and device_prop.major >= 8
             ):
                 for triton_config, compiled_binary in zip(
@@ -301,6 +300,13 @@ class CachingAutotuner(KernelInterface):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
         for k, v in cfg.kwargs.items():
+            if torch.version.hip is not None:
+                if k == "matrix_instr_nonkdim":
+                    compile_meta["matrix_instr_nonkdim"] = v
+                    continue
+                if k == "waves_per_eu":
+                    compile_meta["waves_per_eu"] = v
+                    continue
             compile_meta["constants"][self.fn.arg_names.index(k)] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
@@ -321,7 +327,7 @@ class CachingAutotuner(KernelInterface):
             device_type = self.device_type if torch.version.hip is None else "cuda"
             device_id = compile_meta["device"]
             device = torch.device(device_type, device_id)
-            cc = self.gpu_device.get_compute_capability(device)
+            cc = self.device_interface.get_compute_capability(device)
 
         compile_meta["cc"] = cc
 
@@ -341,6 +347,13 @@ class CachingAutotuner(KernelInterface):
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
             }
+            if torch.version.hip is not None:
+                if "waves_per_eu" in compile_meta:
+                    options["waves_per_eu"] = compile_meta["waves_per_eu"]
+                if "matrix_instr_nonkdim" in compile_meta:
+                    options["matrix_instr_nonkdim"] = compile_meta[
+                        "matrix_instr_nonkdim"
+                    ]
             compile_kwargs = {
                 "target": target,
                 "options": options,
@@ -356,9 +369,9 @@ class CachingAutotuner(KernelInterface):
             )
 
         # load binary to the correct device
-        with self.gpu_device.device(compile_meta["device"]):  # type: ignore[attr-defined]
+        with DeviceGuard(self.device_interface, compile_meta["device"]):  # type: ignore[attr-defined]
             # need to initialize context
-            self.gpu_device.synchronize(self.gpu_device.current_device())
+            self.device_interface.synchronize(self.device_interface.current_device())
 
             try:
                 binary = triton.compile(*compile_args, **compile_kwargs)
@@ -379,19 +392,27 @@ class CachingAutotuner(KernelInterface):
         ]
         def_args = [name for name in self.fn.arg_names if name not in cfg.kwargs]
 
+        binary_shared = (
+            binary.shared if hasattr(binary, "shared") else binary.metadata.shared
+        )
+
         scope = {
             "grid_meta": cfg.kwargs,
             "bin": binary,
             "launch_enter_hook": binary.launch_enter_hook,
             "launch_exit_hook": binary.launch_exit_hook,
-            "metadata": binary.metadata,
-            "torch": torch,
-            "set_device": self.gpu_device.set_device,
-            "current_device": self.gpu_device.current_device,
+            "metadata": binary.packed_metadata
+            if hasattr(binary, "packed_metadata")
+            else binary.metadata,
+            "shared": binary_shared,
         }
 
-        scope["runner"] = get_first_attr(binary, "run", "c_wrapper")
-        scope["function"] = get_first_attr(binary, "function", "cu_function")
+        scope["num_warps"] = (
+            binary.num_warps
+            if hasattr(binary, "num_warps")
+            else binary.metadata.num_warps
+        )
+
         scope["cta_args"] = (
             (binary.num_ctas, *get_first_attr(binary, "cluster_dims", "clusterDims"))
             if hasattr(binary, "num_ctas")
@@ -401,15 +422,122 @@ class CachingAutotuner(KernelInterface):
                 else ()
             )
         )
-        scope["num_warps"] = (
-            binary.num_warps
-            if hasattr(binary, "num_warps")
-            else binary.metadata.num_warps
+
+        scope["function"] = get_first_attr(binary, "function", "cu_function")
+
+        def get_launch_args_without_kernel_launch_metadata(
+            grid,
+            grid_0,
+            grid_1,
+            grid_2,
+            stream,
+            function,
+            metadata,
+            bin,
+            launch_enter_hook,
+            launch_exit_hook,
+            num_warps,
+            shared,
+            cta_args,
+            args,
+        ):
+            """
+            Construct launch args before CompiledKernel.launch_metadata is added.
+            """
+            return (
+                grid_0,
+                grid_1,
+                grid_2,
+                num_warps,
+                *cta_args,
+                shared,
+                stream,
+                function,
+                launch_enter_hook,
+                launch_exit_hook,
+                metadata,
+            )
+
+        # Getting the kernel launch args is extremely perf-sensitive.  Evaluating
+        # `bin.launch_metadata` is relatively expensive, and returns None unless a
+        # `launch_enter_hook` is installed.  So if we don't have that hook installed,
+        # we want to burn None in to the launch args with zero overhead.
+        # See https://github.com/pytorch/pytorch/issues/123597
+        if binary.launch_enter_hook:
+
+            def get_launch_args_with_kernel_launch_metadata(
+                grid,
+                grid_0,
+                grid_1,
+                grid_2,
+                stream,
+                function,
+                metadata,
+                bin,
+                launch_enter_hook,
+                launch_exit_hook,
+                num_warps,
+                shared,
+                cta_args,
+                args,
+            ):
+                """
+                Construct launch args after CompiledKernel.launch_metadata is added
+                by https://github.com/openai/triton/pull/3492 .
+                """
+                return (
+                    grid_0,
+                    grid_1,
+                    grid_2,
+                    stream,
+                    function,
+                    metadata,
+                    bin.launch_metadata(grid, stream, *args),
+                    launch_enter_hook,
+                    launch_exit_hook,
+                )
+
+        else:
+
+            def get_launch_args_with_kernel_launch_metadata(
+                grid,
+                grid_0,
+                grid_1,
+                grid_2,
+                stream,
+                function,
+                metadata,
+                bin,
+                launch_enter_hook,
+                launch_exit_hook,
+                num_warps,
+                shared,
+                cta_args,
+                args,
+            ):
+                """
+                Construct launch args after CompiledKernel.launch_metadata is added
+                by https://github.com/openai/triton/pull/3492 .
+                """
+                return (
+                    grid_0,
+                    grid_1,
+                    grid_2,
+                    stream,
+                    function,
+                    metadata,
+                    None,
+                    launch_enter_hook,
+                    launch_exit_hook,
+                )
+
+        scope["get_launch_args"] = (
+            get_launch_args_with_kernel_launch_metadata
+            if hasattr(binary, "launch_metadata")
+            else get_launch_args_without_kernel_launch_metadata
         )
-        binary_shared = (
-            binary.shared if hasattr(binary, "shared") else binary.metadata.shared
-        )
-        scope["shared"] = binary_shared
+
+        scope["runner"] = get_first_attr(binary, "run", "c_wrapper")
 
         exec(
             f"""
@@ -419,13 +547,13 @@ class CachingAutotuner(KernelInterface):
                 else:
                     grid_0, grid_1, grid_2 = grid
 
-                runner(grid_0, grid_1, grid_2, num_warps,
-                            *cta_args, shared,
-                            stream, function,
-                            launch_enter_hook,
-                            launch_exit_hook,
-                            metadata,
-                            {', '.join(call_args)})
+                args = {', '.join(call_args)},
+                launch_args = get_launch_args(
+                    grid, grid_0, grid_1, grid_2, stream, function,
+                    metadata, bin, launch_enter_hook, launch_exit_hook,
+                    num_warps, shared, cta_args, args
+                )
+                runner(*launch_args, *args)
                 return bin
             """.lstrip(),
             scope,
@@ -459,8 +587,8 @@ class CachingAutotuner(KernelInterface):
             )
             return float("inf")
 
-        stream = self.gpu_device.get_raw_stream(  # type: ignore[call-arg]
-            self.gpu_device.current_device()
+        stream = self.device_interface.get_raw_stream(  # type: ignore[call-arg]
+            self.device_interface.current_device()
         )
 
         def kernel_call():
@@ -658,13 +786,26 @@ class CachingAutotuner(KernelInterface):
                 {**dict(zip(self.arg_names, args)), **launcher.config.kwargs, **kwargs}
             )
 
-        # guard the record_function_ctx and only call it if profiling is currently
+        # guard the record function and only call it if profiling is currently
         # in progress, to reduce latency when profiler is not turned on. Note that
         # the "if" statement (instead of, say, a contextlib.nullcontext) is intentional;
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
         if autograd_profiler._is_profiler_enabled:
-            with self.record_function_ctx:
+            # grid can be a tuple of ints or a string.
+            grid_info = (
+                grid if isinstance(grid, tuple) else getattr(grid, "grid_fn_str", None)
+            )
+            with torch._C._profiler._RecordFunctionFast(
+                self.inductor_meta.get("kernel_name", "triton kernel"),
+                args,
+                {
+                    "kernel_file": self.filename,
+                    "kernel_type": "triton",
+                    "grid": grid_info,
+                    "stream": stream,
+                },
+            ):
                 return launcher(
                     *args,
                     **kwargs,
@@ -774,13 +915,13 @@ class DebugAutotuner(CachingAutotuner):
             if num_gb is None:
                 num_gb = get_num_bytes(*args, num_in_out_args=num_in_out_ptrs) / 1e9
             gb_per_s = num_gb / (ms / 1e3)
-            self.cached = (ms, num_gb, gb_per_s, kernel_name)
-        else:
-            ms, num_gb, gb_per_s, kernel_name = self.cached
-        collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
-        print(
-            create_bandwidth_info_str(ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}")
-        )
+            self.cached = ms, num_gb, gb_per_s, kernel_name
+            collected_calls.append((ms, num_gb, gb_per_s, kernel_name))
+            print(
+                create_bandwidth_info_str(
+                    ms, num_gb, gb_per_s, suffix=f" \t {kernel_name}"
+                )
+            )
 
 
 def hash_configs(configs: List[Config]):
@@ -829,7 +970,7 @@ def load_cached_autotuning(
 
 
 def should_use_remote_autotune_cache():
-    if config.use_autotune_remote_cache:
+    if config.autotune_remote_cache:
         return True
     if not config.is_fbcode():
         return False
@@ -838,10 +979,8 @@ def should_use_remote_autotune_cache():
 
     from triton.runtime.fb_memcache import MEMCACHE_VERSION
 
-    return torch._utils_internal.justknobs_check(
-        "pytorch/autotune_remote_cache:enable"
-    ) or MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
-        "pytorch/autotune_remote_cache:memcache_version"
+    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:autotune_memcache_version"
     )
 
 
@@ -870,7 +1009,7 @@ def cached_autotune(
         cache_filename = None
         remote_cache = None
         remote_cache_key = None
-        if config.use_autotune_local_cache:
+        if config.autotune_local_cache:
             cache_filename = os.path.splitext(filename)[0] + ".best_config"
         if should_use_remote_autotune_cache():
             backend_hash = inductor_meta.get("backend_hash", None)
@@ -900,8 +1039,7 @@ def cached_autotune(
             with open(cache_filename) as fd:
                 best_config = json.loads(fd.read())
         elif remote_cache is not None and remote_cache_key is not None:
-            cache_outs = remote_cache.get([remote_cache_key])
-            best_config = cache_outs.get(remote_cache_key, None)
+            best_config = remote_cache.get(remote_cache_key)
 
         best_config = load_cached_autotuning(best_config, configs_hash, configs)
         if best_config:
@@ -956,6 +1094,7 @@ def cached_autotune(
                 heuristic_type=heuristic_type,
                 size_hints=size_hints,
                 custom_kernel=custom_kernel,
+                filename=filename,
             )
         return CachingAutotuner(
             fn,
@@ -967,6 +1106,7 @@ def cached_autotune(
             heuristic_type=heuristic_type,
             size_hints=size_hints,
             custom_kernel=custom_kernel,
+            filename=filename,
         )
 
     return decorator
@@ -1532,6 +1672,8 @@ def grid(*numels):
             z_grid,
         )
 
+    setattr(grid_fn, "grid_fn_str", f"grid({numels})")  # noqa: B010
+
     return grid_fn
 
 
@@ -1539,5 +1681,8 @@ def split_scan_grid(xnumel, rnumel):
     def grid_fn(meta):
         assert meta.get("XBLOCK", 1) == 1
         return (ceildiv(rnumel, meta.get("RBLOCK", 1)), xnumel, 1)
+
+    grid_fn_str = f"split_scan_grid({xnumel}, {rnumel})"
+    setattr(grid_fn, "grid_fn_str", grid_fn_str)  # noqa: B010
 
     return grid_fn
