@@ -179,20 +179,25 @@ class TunableOp {
 
       for (size_t i = 0; i < op_names_.size(); i++) {
         auto* candidate = ops_[op_names_[i]].get(); // borrow pointer
-        auto status = candidate->Call(reusable_params[0]);
-        if (status != OK) {
-          TUNABLE_LOG("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
-          continue;
-        }
 
         if (IsNumericsCheckEnabled()) {
-          std::vector<ParamsT*> numerical_params(1);
-          numerical_params[0] = params->DeepCopy(false);
-          WarmUp(candidate, numerical_params, 1);
-          status = reference_params->NumericalCheck(numerical_params[0]);
-          numerical_params[0]->Delete();
+          ParamsT* numerical_params = params->DeepCopy(false);
+          auto status = candidate->Call(numerical_params);
+          if (status != OK) {
+            TUNABLE_LOG("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+            continue;
+          }
+          status = reference_params->NumericalCheck(numerical_params);
+          numerical_params->Delete();
           if (status != OK) {
             TUNABLE_LOG("├──numerics check failed for id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
+            continue;
+          }
+        }
+        else {
+          auto status = candidate->Call(reusable_params[0]);
+          if (status != OK) {
+            TUNABLE_LOG("├──unsupported id=", i, ", ", op_sig, '(', params_sig, ") ", op_names_[i]);
             continue;
           }
         }
