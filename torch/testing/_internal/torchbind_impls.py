@@ -1,3 +1,5 @@
+import contextlib
+
 import torch
 
 
@@ -108,3 +110,13 @@ def load_torchbind_test_lib():
         if IS_WINDOWS:
             lib_file_path = find_library_location("torchbind_test.dll")
         torch.ops.load_library(str(lib_file_path))
+
+
+@contextlib.contextmanager
+def _register_py_impl_temporially(op_overload, key, fn):
+    try:
+        op_overload.py_impl(key)(fn)
+        yield
+    finally:
+        del op_overload.py_kernels[key]
+        op_overload._dispatch_cache.clear()

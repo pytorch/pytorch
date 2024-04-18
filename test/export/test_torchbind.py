@@ -1,6 +1,5 @@
 # Owner(s): ["oncall: export"]
 
-import contextlib
 
 import torch
 import torch.utils._pytree as pytree
@@ -18,6 +17,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import (
+    _register_py_impl_temporially,
     load_torchbind_test_lib,
     register_fake_classes,
     register_fake_operators,
@@ -212,7 +212,7 @@ def forward(self, obj_attr, x):
             def forward(self, x):
                 return x + torch.ops._TorchScriptTesting.takes_foo(self.attr, x)
 
-        with self._register_py_impl_temporially(
+        with _register_py_impl_temporially(
             torch.ops._TorchScriptTesting.takes_foo.default,
             torch._C.DispatchKey.Meta,
             lambda cc, x: cc.add_tensor(x),
@@ -276,15 +276,6 @@ def forward(self, x, cc):
         # We also have a re-tracing test, which doubles the count.
         self.assertEqual(self.foo_add_tensor_counter, 4)
 
-    @contextlib.contextmanager
-    def _register_py_impl_temporially(self, op_overload, key, fn):
-        try:
-            op_overload.py_impl(key)(fn)
-            yield
-        finally:
-            del op_overload.py_kernels[key]
-            op_overload._dispatch_cache.clear()
-
     @parametrize("pre_dispatch", [True, False])
     def test_input_as_custom_op_argument(self, pre_dispatch):
         class MyModule(torch.nn.Module):
@@ -305,7 +296,7 @@ def forward(self, x, cc):
                 pre_dispatch=pre_dispatch,
             )
 
-        with self._register_py_impl_temporially(
+        with _register_py_impl_temporially(
             torch.ops._TorchScriptTesting.takes_foo.default,
             torch._C.DispatchKey.Meta,
             lambda cc, x: cc.add_tensor(x),
@@ -350,7 +341,7 @@ def forward(self, token, x, cc):
                 return x + b
 
         input = torch.ones(2, 3)
-        with self._register_py_impl_temporially(
+        with _register_py_impl_temporially(
             torch.ops._TorchScriptTesting.takes_foo.default,
             torch._C.DispatchKey.Meta,
             lambda cc, x: cc.add_tensor(x),
@@ -397,7 +388,7 @@ def forward(self, token, obj_attr, x):
                 return x + b
 
         input = torch.ones(2, 3)
-        with self._register_py_impl_temporially(
+        with _register_py_impl_temporially(
             torch.ops._TorchScriptTesting.takes_foo.default,
             torch._C.DispatchKey.Meta,
             lambda cc, x: cc.add_tensor(x),
@@ -454,7 +445,7 @@ def forward(self, token, obj_attr, x):
                 return x + b
 
         input = torch.ones(2, 3)
-        with self._register_py_impl_temporially(
+        with _register_py_impl_temporially(
             torch.ops._TorchScriptTesting.takes_foo.default,
             torch._C.DispatchKey.Meta,
             lambda cc, x: cc.add_tensor(x),

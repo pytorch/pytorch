@@ -4,7 +4,6 @@ with test_functionalization_with_native_python_assertion)
 """
 
 # Owner(s): ["oncall: export"]
-import contextlib
 import math
 import operator
 import unittest
@@ -51,6 +50,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import (
+    _register_py_impl_temporially,
     load_torchbind_test_lib,
     register_fake_classes,
     register_fake_operators,
@@ -400,15 +400,6 @@ class TestPasses(TestCase):
             if torch.Tag.core in op_overload.tags and is_view_op(op_overload._schema):
                 self.assertIsNotNone(get_view_copy_of_view_op(op_overload._schema))
 
-    @contextlib.contextmanager
-    def _register_py_impl_temporially(self, op_overload, key, fn):
-        try:
-            op_overload.py_impl(key)(fn)
-            yield
-        finally:
-            del op_overload.py_kernels[key]
-            op_overload._dispatch_cache.clear()
-
     def test_custom_obj_tuple_out(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -423,7 +414,7 @@ class TestPasses(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with self._register_py_impl_temporially(
+        with _register_py_impl_temporially(
             torch.ops._TorchScriptTesting.takes_foo.default,
             torch._C.DispatchKey.Meta,
             lambda cc, x: cc.add_tensor(x),

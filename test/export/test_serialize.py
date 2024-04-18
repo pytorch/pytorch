@@ -3,7 +3,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_sym_bool)
 """
 
-import contextlib
 
 # Owner(s): ["oncall: export"]
 import copy
@@ -41,6 +40,7 @@ from torch.testing._internal.common_utils import (
 )
 
 from torch.testing._internal.torchbind_impls import (
+    _register_py_impl_temporially,
     load_torchbind_test_lib,
     register_fake_classes,
     register_fake_operators,
@@ -785,15 +785,6 @@ class TestDeserialize(TestCase):
         model = MyModule().eval().cuda()
         self.check_graph(model, (inp,))
 
-    @contextlib.contextmanager
-    def _register_py_impl_temporially(self, op_overload, key, fn):
-        try:
-            op_overload.py_impl(key)(fn)
-            yield
-        finally:
-            del op_overload.py_kernels[key]
-            op_overload._dispatch_cache.clear()
-
     def test_custom_obj_tuple_out(self):
         class MyModule(torch.nn.Module):
             def __init__(self):
@@ -808,7 +799,7 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with self._register_py_impl_temporially(
+        with _register_py_impl_temporially(
             torch.ops._TorchScriptTesting.takes_foo.default,
             torch._C.DispatchKey.Meta,
             lambda cc, x: cc.add_tensor(x),
@@ -828,7 +819,7 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with self._register_py_impl_temporially(
+        with _register_py_impl_temporially(
             torch.ops._TorchScriptTesting.takes_foo.default,
             torch._C.DispatchKey.Meta,
             lambda cc, x: cc.add_tensor(x),
@@ -849,7 +840,7 @@ class TestDeserialize(TestCase):
 
         m = MyModule()
         inputs = (torch.ones(2, 3),)
-        with self._register_py_impl_temporially(
+        with _register_py_impl_temporially(
             torch.ops._TorchScriptTesting.takes_foo.default,
             torch._C.DispatchKey.Meta,
             lambda cc, x: cc.add_tensor(x),
