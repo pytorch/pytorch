@@ -300,6 +300,13 @@ class CachingAutotuner(KernelInterface):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
         for k, v in cfg.kwargs.items():
+            if torch.version.hip is not None:
+                if k == "matrix_instr_nonkdim":
+                    compile_meta["matrix_instr_nonkdim"] = v
+                    continue
+                if k == "waves_per_eu":
+                    compile_meta["waves_per_eu"] = v
+                    continue
             compile_meta["constants"][self.fn.arg_names.index(k)] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
@@ -340,6 +347,13 @@ class CachingAutotuner(KernelInterface):
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
             }
+            if torch.version.hip is not None:
+                if "waves_per_eu" in compile_meta:
+                    options["waves_per_eu"] = compile_meta["waves_per_eu"]
+                if "matrix_instr_nonkdim" in compile_meta:
+                    options["matrix_instr_nonkdim"] = compile_meta[
+                        "matrix_instr_nonkdim"
+                    ]
             compile_kwargs = {
                 "target": target,
                 "options": options,
@@ -965,10 +979,8 @@ def should_use_remote_autotune_cache():
 
     from triton.runtime.fb_memcache import MEMCACHE_VERSION
 
-    return torch._utils_internal.justknobs_check(
-        "pytorch/autotune_remote_cache:enable"
-    ) or MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
-        "pytorch/autotune_remote_cache:memcache_version"
+    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:autotune_memcache_version"
     )
 
 
