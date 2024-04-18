@@ -764,10 +764,24 @@ class MetaConverter:
                 return base.as_strided(sizes, strides, storage_offset)
 
             from torch._dynamo.source import EphemeralSource
-            from torch.fx.experimental.symbolic_shapes import sym_eq
+            from torch.fx.experimental.symbolic_shapes import (
+                StatelessSymbolicContext,
+                sym_eq,
+            )
 
             def symint_visitor_fn(s):
-                if shape_env is None:
+                nonlocal symbolic_context
+                from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+                all_static_sizes = (
+                    symbolic_context is not None
+                    and isinstance(symbolic_context, StatelessSymbolicContext)
+                    and all(
+                        x is DimDynamic.STATIC for x in symbolic_context.dynamic_sizes
+                    )
+                )
+                # Can't just rely on shape env being None - dynamo always initializes it
+                if all_static_sizes or shape_env is None:
                     return s
 
                 # NB: The symbol here is expected to be simplified out because we a priori
@@ -892,62 +906,33 @@ class MetaConverter:
                 elif is_sparse_compressed_layout(t.layout):
                     is_leaf = t.is_leaf
 
-                    def mk_meta():
+                    if t.layout in {torch.sparse_bsr, torch.sparse_bsc}:
                         assert t.sparse_dim is not None
                         assert t.dense_dim is not None
-                        nnz = 0
-                        batch_dim = t.ndim - t.sparse_dim - t.dense_dim
-                        batch_size = t.shape[:batch_dim]
-                        if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
-                            assert t.crow_indices is not None
-                            assert t.col_indices is not None
-                            index_dtype = t.crow_indices.dtype
-                            compressed_indices = torch.empty(
-                                t.crow_indices.shape, device="meta", dtype=index_dtype
-                            )
-                            plain_indices = torch.empty(
-                                (*t.col_indices.shape[:-1], nnz),
-                                device="meta",
-                                dtype=index_dtype,
-                            )
-                        else:
-                            assert t.ccol_indices is not None
-                            assert t.row_indices is not None
-                            index_dtype = t.ccol_indices.dtype
-                            compressed_indices = torch.empty(
-                                t.ccol_indices.shape, device="meta", dtype=index_dtype
-                            )
-                            plain_indices = torch.empty(
-                                (*t.row_indices.shape[:-1], nnz),
-                                device="meta",
-                                dtype=index_dtype,
-                            )
                         assert t.values is not None
-                        values_shape = t.values.shape
-                        values = torch.empty(
-                            (
-                                *values_shape[:batch_dim],
-                                nnz,
-                                *values_shape[batch_dim + 1 :],
-                            ),
-                            dtype=t.dtype,
-                            device="meta",
-                        )
-                        return torch.ops.aten.sparse_compressed_tensor(
-                            compressed_indices,
-                            plain_indices,
-                            values,
+                        batch_dim = t.ndim - t.sparse_dim - t.dense_dim
+                        blocksize = t.values.shape[batch_dim + 1 : batch_dim + 3]
+                    else:
+                        blocksize = ()
+                    if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                        assert t.crow_indices is not None
+                        index_dtype = t.crow_indices.dtype
+                    else:
+                        assert t.ccol_indices is not None
+                        index_dtype = t.ccol_indices.dtype
+
+                    r = callback(
+                        lambda: torch.ops.aten._sparse_compressed_tensor_with_dims(
+                            0,
+                            t.dense_dim,
                             t.shape,
+                            blocksize,
+                            index_dtype,
                             layout=t.layout,
                             dtype=t.dtype,
                             device="meta",
                         )
-
-                    # `mk_meta()` is similar to `t.to(device='meta'))`
-                    # except `to('meta')` preserves nnz value while
-                    # `mk_meta` result has nnz == 0.
-                    r = callback(mk_meta)
-
+                    )
                     assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = True

@@ -8,7 +8,7 @@ namespace at::native {
 TORCH_API at::Tensor clone_preserve_strides(const at::Tensor& self);
 
 inline bool cat_should_skip_tensor(const Tensor& t) {
-  return t.numel() == 0 && t.dim() == 1;
+  return t.sym_numel() == 0 && t.dim() == 1;
 }
 
  // Check to see if the shape of tensors is compatible
