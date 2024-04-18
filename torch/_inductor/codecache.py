@@ -1229,9 +1229,6 @@ def x86_isa_checker() -> List[str]:
     _check_and_append_supported_isa(supported_isa, avx2, "avx2")
     _check_and_append_supported_isa(supported_isa, avx512, "avx512")
 
-    # Remove after all feature completed.
-    print(f"!!! x86 isa --> avx2: {avx2}, avx512: {avx512}")
-
     return supported_isa
 
 
