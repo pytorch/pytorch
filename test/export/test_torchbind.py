@@ -4,6 +4,7 @@ import unittest
 
 import torch
 import torch.utils._pytree as pytree
+from torch._functorch.aot_autograd import aot_export_module
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._library.fake_class_registry import FakeScriptObject
 from torch.export import export
@@ -742,6 +743,63 @@ def forward(self, arg0_1, arg1_1):
     return (sub, add, arg0_1)""",
         )
         self._assertEqualSkipScriptObject(gm(tq1, x), mod(tq2, x))
+
+    def test_aot_export_tensor_queue_operators(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, tq, x):
+                torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+                x_sin = torch.ops._TorchScriptTesting.queue_pop(
+                    tq
+                ) - torch.ops._TorchScriptTesting.queue_size(tq)
+                x_cos = torch.ops._TorchScriptTesting.queue_pop(
+                    tq
+                ) + torch.ops._TorchScriptTesting.queue_size(tq)
+                return x_sin, x_cos, tq
+
+        mod = Model()
+
+        tq1 = torch.classes._TorchScriptTesting._TensorQueue(
+            torch.empty(
+                0,
+            ).fill_(-1)
+        )
+        x = torch.ones(2, 3)
+
+        fake_mode = torch._subclasses.fake_tensor.FakeTensorMode()
+        fake_tq1 = torch._library.fake_class_registry.to_fake_obj(fake_mode, tq1)
+        fake_x = fake_mode.from_tensor(x)
+        gm = aot_export_module(mod, (fake_tq1, fake_x), trace_joint=False)[0]
+
+        # inputs: token, tq, x
+        # return: token, x_sin, x_cos, tq
+        self.assertExpectedInline(
+            gm.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    cos = torch.ops.aten.cos.default(arg2_1)
+    with_effects = torch._higher_order_ops.effects.with_effects(arg0_1, torch.ops._TorchScriptTesting.queue_push.default, arg1_1, cos);  arg0_1 = cos = None
+    getitem = with_effects[0];  with_effects = None
+    sin = torch.ops.aten.sin.default(arg2_1);  arg2_1 = None
+    with_effects_1 = torch._higher_order_ops.effects.with_effects(getitem, torch.ops._TorchScriptTesting.queue_push.default, arg1_1, sin);  getitem = sin = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    with_effects_2 = torch._higher_order_ops.effects.with_effects(getitem_2, torch.ops._TorchScriptTesting.queue_pop.default, arg1_1);  getitem_2 = None
+    getitem_4 = with_effects_2[0]
+    getitem_5 = with_effects_2[1];  with_effects_2 = None
+    with_effects_3 = torch._higher_order_ops.effects.with_effects(getitem_4, torch.ops._TorchScriptTesting.queue_size.default, arg1_1);  getitem_4 = None
+    getitem_6 = with_effects_3[0];  with_effects_3 = None
+    sub = torch.ops.aten.sub.Tensor(getitem_5, 1);  getitem_5 = None
+    with_effects_4 = torch._higher_order_ops.effects.with_effects(getitem_6, torch.ops._TorchScriptTesting.queue_pop.default, arg1_1);  getitem_6 = None
+    getitem_8 = with_effects_4[0]
+    getitem_9 = with_effects_4[1];  with_effects_4 = None
+    with_effects_5 = torch._higher_order_ops.effects.with_effects(getitem_8, torch.ops._TorchScriptTesting.queue_size.default, arg1_1);  getitem_8 = None
+    getitem_10 = with_effects_5[0];  with_effects_5 = None
+    add = torch.ops.aten.add.Tensor(getitem_9, 0);  getitem_9 = None
+    return (getitem_10, sub, add, arg1_1)""",  # noqa: B950
+        )
 
 
 @skipIfTorchDynamo("torchbind not supported with dynamo yet")
