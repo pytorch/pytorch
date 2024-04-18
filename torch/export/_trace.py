@@ -33,6 +33,8 @@ from torch._export.verifier import SpecViolationError
 from torch._export.wrappers import _wrap_submodules
 from torch._functorch.aot_autograd import aot_export_module
 from torch._guards import detect_fake_mode
+
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch._utils_internal import log_export_usage
 from torch.export.exported_program import OutputKind
@@ -66,7 +68,6 @@ from .graph_signature import (
     TensorArgument,
     TokenArgument,
 )
-
 
 log = logging.getLogger(__name__)
 
@@ -463,12 +464,15 @@ def _gather_constant_attrs(m: torch.nn.Module) -> ConstantAttrMap:
 
     def inner(m: torch.nn.Module, prefix_atoms: List[str], constants):
         for k, v in m.__dict__.items():
+            assert not isinstance(v, FakeScriptObject), (
+                "_gather_constant_attrs received a module with FakeScriptObject attributes. "
+                "FakeScriptObject should only exist during tracing."
+            )
             if isinstance(
                 v,
                 (
                     torch.Tensor,
                     torch.ScriptObject,
-                    torch._library.fake_class_registry.FakeScriptObject,
                 ),
             ):
                 if v in buffers_parameters:
@@ -499,6 +503,9 @@ def _export_non_strict(
     transform=lambda x: x,  # TODO(zhxchen17) Revisit if this is needed later.
     pre_dispatch=False,
 ):
+    assert not any(
+        isinstance(obj, torch.ScriptObject) for obj in constant_attrs
+    ), "We expect all script objects have been replaced by FakeScriptObjects."
     # [NOTE] If the user is exporting under training mode, we want to detect if there is any
     # state change in the autograd global state and error. If the user is exporting under inference
     # mode, we don't care.
@@ -586,11 +593,7 @@ def _export_non_strict(
             return TensorArgument(name=node.name)
         elif isinstance(val, torch.SymInt):
             return SymIntArgument(name=node.name)
-        elif isinstance(val, torch.ScriptObject):
-            return CustomObjArgument(
-                name=node.name, class_fqn=val._type().qualified_name()  # type: ignore[attr-defined]
-            )
-        elif isinstance(val, torch._library.fake_class_registry.FakeScriptObject):
+        elif isinstance(val, FakeScriptObject):
             return CustomObjArgument(name=node.name, class_fqn=val._qualified_name)
         else:
             # TODO: this branch is likely wrong, all permissible ConstantArgument type
@@ -626,7 +629,14 @@ def _export_non_strict(
     )
 
     constants = rewrite_script_object_meta(gm)
-    constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
+    attr_constants = lift_constants_pass(gm, export_graph_signature, constant_attrs)
+    assert not any(
+        isinstance(obj, torch.ScriptObject) for obj in attr_constants.values()
+    ), "We expect all script objects have been replaced by FakeScriptObjects."
+    constants.update(attr_constants)  # type: ignore[arg-type]
+    assert not any(
+        isinstance(obj, torch.ScriptObject) for obj in constants.values()
+    ), "We expect all script objects have been replaced by FakeScriptObjects."
 
     # prettify names for placeholder nodes
     placeholder_naming_pass(
@@ -647,8 +657,7 @@ def _export_non_strict(
             str,
             Union[
                 torch.Tensor,
-                torch._C.ScriptObject,
-                torch._library.fake_class_registry.FakeScriptObject,
+                FakeScriptObject,
             ],
         ]
 
@@ -1069,12 +1078,10 @@ def _export(
                     pre_dispatch=pre_dispatch,
                     transform=_tuplify_outputs,
                 )
-                # ep_non_strict.constants contains fake script objects, we need to map them back
+                # ep_non_strict.constants contains only fake script objects, we need to map them back
                 ep_non_strict.constants = {
                     fqn: map_fake_to_real[obj]
-                    if isinstance(
-                        obj, torch._library.fake_class_registry.FakeScriptObject
-                    )
+                    if isinstance(obj, FakeScriptObject)
                     else obj
                     for fqn, obj in ep_non_strict.constants.items()
                 }

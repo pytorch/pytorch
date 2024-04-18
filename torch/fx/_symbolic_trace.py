@@ -23,7 +23,7 @@ from typing import (
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import ScriptObject  # type: ignore[attr-defined]
+from torch._library.fake_class_registry import FakeScriptObject
 
 from ._compatibility import compatibility
 from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph
@@ -366,7 +366,7 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, (torch.Tensor, ScriptObject, torch._library.fake_class_registry.FakeScriptObject)):
+        if isinstance(a, (torch.Tensor, FakeScriptObject)):
             qualname: Optional[str] = self.tensor_attrs.get(a)
 
             # Tensor was not found in the Module hierarchy, stow it away in a
@@ -732,14 +732,13 @@ class Tracer(TracerBase):
             self.tensor_attrs: Dict[
                 Union[
                     torch.Tensor,
-                    ScriptObject,
-                    torch._library.fake_class_registry.FakeScriptObject
+                    FakeScriptObject
                 ], str
             ] = {}
 
             def collect_tensor_attrs(m: torch.nn.Module, prefix_atoms: List[str]):
                 for k, v in m.__dict__.items():
-                    if isinstance(v, (torch.Tensor, ScriptObject)):
+                    if isinstance(v, (torch.Tensor, FakeScriptObject)):
                         self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
                 for k, v in m.named_children():
                     collect_tensor_attrs(v, prefix_atoms + [k])

@@ -17,10 +17,10 @@ from torch.export.exported_program import (
 
 
 class ConstantAttrMap(collections.abc.MutableMapping):
-    """A mapping class that understands how to use module constants (tensors and
-    ScriptObjects) as keys. We store tensors normally, but ScriptObjects are
-    stored by hash, because different torch.ScriptObjects can point to the same
-    underlying value (but we guarantee that they will `hash()` to the same value
+    """A mapping class that understands how to use module constants (tensors,
+    ScriptObjects, FakeScriptObjects) as keys. We store tensors and FakeScriptObjects normally,
+    but ScriptObjects are stored by hash, because different torch.ScriptObjects can point to
+    the same underlying value (but we guarantee that they will `hash()` to the same value
     if that's the case).
     """
 
@@ -87,7 +87,7 @@ def lift_constants_pass(
     gm: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
     constant_attrs: ConstantAttrMap,
-) -> Dict[str, Union[torch.Tensor, torch._C.ScriptObject]]:
+) -> Dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]]:
     """
     Takes a graph module, graph signature, and modifies them implace to lift any
     constants (tensors or custom classes) as inputs to the graph. Returns a
@@ -105,7 +105,9 @@ def lift_constants_pass(
     Returns:
         A dictionary of fqn => constant value.
     """
-    all_constants: Dict[str, Union[torch.Tensor, torch._C.ScriptObject]] = {}
+    all_constants: Dict[
+        str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
+    ] = {}
 
     inputs = graph_signature.input_specs
     num_custom_obj = sum(
@@ -139,7 +141,7 @@ def lift_constants_pass(
                 gm.graph.erase_node(node)
                 continue
 
-            # For ScriptObject and Tensor constants:
+            # For ScriptObject, Tensor and FakeScriptObject constants:
             # First check if the constant was an attribute on some module by
             # consulting `constant_attrs` map. If it is, use the fqn that keeps
             # its location consistent with the eager module.
@@ -241,14 +243,7 @@ def lift_constants_pass(
 
 def rewrite_script_object_meta(
     gm: torch.fx.GraphModule,
-) -> Dict[
-    str,
-    Union[
-        torch.Tensor,
-        torch.ScriptObject,
-        torch._library.fake_class_registry.FakeScriptObject,
-    ],
-]:
+) -> Dict[str, Union[torch.Tensor, FakeScriptObject,],]:
     """When tracing, we produce a graph with an actual ScriptObject in the
     meta["val"]. Eventually we want to change this behavior, when FakeMode infra
     for ScriptObjects lands.
@@ -259,24 +254,25 @@ def rewrite_script_object_meta(
         str,
         Union[
             torch.Tensor,
-            torch._C.ScriptObject,
-            torch._library.fake_class_registry.FakeScriptObject,
+            FakeScriptObject,
         ],
     ] = {}
     for node in gm.graph.nodes:
-        if "val" not in node.meta or not isinstance(
-            node.meta["val"],
-            (torch.ScriptObject, torch._library.fake_class_registry.FakeScriptObject),
-        ):
+        if "val" not in node.meta:
             continue
 
-        old_meta = node.meta["val"]
-        if isinstance(old_meta, torch._library.fake_class_registry.FakeScriptObject):
+        assert not isinstance(
+            node.meta["val"], torch.ScriptObject
+        ), "ScriptObject should already be fakified."
+
+        if isinstance(
+            node.meta["val"],
+            FakeScriptObject,
+        ):
+            old_meta = node.meta["val"]
             class_fqn = old_meta._qualified_name  # type: ignore[attr-defined]
-        else:
-            class_fqn = old_meta._type().qualified_name()  # type: ignore[attr-defined]
-        new_meta = CustomObjArgument(node.name, class_fqn)
-        constants[node.name] = old_meta
-        node.meta["val"] = new_meta
+            new_meta = CustomObjArgument(node.name, class_fqn)
+            constants[node.name] = old_meta
+            node.meta["val"] = new_meta
 
     return constants
