@@ -750,6 +750,9 @@ class rocm:
         ),
     )
 
+    # Number of op instance choices
+    n_max_profiling_configs: Optional[int] = None
+
 
 # create a directory containing lots of debug information
 class trace:

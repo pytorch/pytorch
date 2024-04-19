@@ -1154,8 +1154,7 @@ class CKGemmTemplate(CKTemplate):
                     )
 
         filtered_instances = list(filter(lambda op: self.filter_op(op), op_instances))
-        # chosen_instances = filtered_instances[:config.cuda.cutlass_max_profiling_configs]
-        chosen_instances = filtered_instances
+        chosen_instances = filtered_instances[:config.rocm.n_max_profiling_configs]
         log.debug(f"generated {len(chosen_instances)} ck instances: {chosen_instances}")
 
         return chosen_instances
