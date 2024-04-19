@@ -640,6 +640,176 @@ def wrap_check_inputs(check_inputs):
     return [{"forward": c} for c in check_inputs]
 
 
+
+def _trace_impl(
+    func,
+    example_inputs=None,
+    optimize=None,
+    check_trace=True,
+    check_inputs=None,
+    check_tolerance=1e-5,
+    strict=True,
+    _force_outplace=False,
+    _module_class=None,
+    _compilation_unit=_python_cu,
+    example_kwarg_inputs=None,
+    _store_inputs=True,
+):
+    if not _enabled:
+        return func
+    if optimize is not None:
+        warnings.warn(
+            "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
+        )
+
+    if isinstance(func, torch.jit.ScriptModule):
+        # it is hard to trace it because the forward method on ScriptModule is already defined, so it
+        # would result in an error.
+        warnings.warn(
+            "The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is."
+        )
+        return func
+
+    if isinstance(func, torch.nn.Module):
+        if example_inputs is None:
+            if isinstance(example_kwarg_inputs, dict):
+                example_inputs = example_kwarg_inputs
+            else:
+                raise RuntimeError("example_kwarg_inputs should be a dict")
+        return trace_module(
+            func,
+            {"forward": example_inputs},
+            None,
+            check_trace,
+            wrap_check_inputs(check_inputs),
+            check_tolerance,
+            strict,
+            _force_outplace,
+            _module_class,
+            example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            _store_inputs=_store_inputs,
+        )
+    if (
+        hasattr(func, "__self__")
+        and isinstance(func.__self__, torch.nn.Module)
+        and func.__name__ == "forward"
+    ):
+        if example_inputs is None:
+            if isinstance(example_kwarg_inputs, dict):
+                example_inputs = example_kwarg_inputs
+            else:
+                raise RuntimeError("example_kwarg_inputs should be a dict")
+        return trace_module(
+            func.__self__,
+            {"forward": example_inputs},
+            None,
+            check_trace,
+            wrap_check_inputs(check_inputs),
+            check_tolerance,
+            strict,
+            _force_outplace,
+            _module_class,
+            example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            _store_inputs=_store_inputs,
+        )
+
+    # Special case for common case of passing a single Tensor
+    if (
+        isinstance(example_inputs, (torch.Tensor, dict))
+        and example_kwarg_inputs is None
+    ):
+        example_inputs = (example_inputs,)
+    # done primarily so that weird iterables fail here and not pybind11 code
+    elif example_kwarg_inputs is None and not isinstance(example_inputs, tuple):
+        example_inputs = tuple(example_inputs)
+
+    var_lookup_fn = _create_interpreter_name_lookup_fn(0)
+
+    if hasattr(func, "__self__") and isinstance(func.__self__, torch.nn.Module):
+        raise AttributeError(
+            "trace doesn't support compiling individual module's functions.\n"
+            "Please use trace_module"
+        )
+
+    name = _qualified_name(func)
+    if isinstance(example_kwarg_inputs, dict):
+        example_inputs = example_kwarg_inputs
+        traced = torch._C._create_function_from_trace_with_dict(
+            name,
+            func,
+            example_kwarg_inputs,
+            var_lookup_fn,
+            strict,
+            _force_outplace,
+            get_callable_argument_names(func),
+        )
+    else:
+        traced = torch._C._create_function_from_trace(
+            name,
+            func,
+            example_inputs,
+            var_lookup_fn,
+            strict,
+            _force_outplace,
+            get_callable_argument_names(func),
+        )
+
+    # Check the trace against new traces created from user-specified inputs
+    if check_trace:
+        if check_inputs is not None:
+            _check_trace(
+                check_inputs,
+                func,
+                traced,
+                check_tolerance,
+                strict,
+                _force_outplace,
+                False,
+                _module_class,
+                example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            )
+        else:
+            _check_trace(
+                [example_inputs],
+                func,
+                traced,
+                check_tolerance,
+                strict,
+                _force_outplace,
+                False,
+                _module_class,
+                example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
+            )
+
+    # Allow torch.compile() to inline
+    traced._torchdynamo_inline = func  # type: ignore[attr-defined]
+    return traced
+
+
+def process_trace_inputs_for_export(example_inputs):
+    if not isinstance(example_inputs, tuple):
+        example_inputs = (example_inputs,)
+    return example_inputs
+
+
+# Custom module wrapper that wraps a free function
+class FunctionModuleWrapper(torch.nn.Module):
+    def __init__(self, func):
+        super(FunctionModuleWrapper, self).__init__()
+        self.func = func
+
+    def forward(self, *args, **kwargs):
+        return self.func(*args, **kwargs)
+
+def process_callable_into_module(func):
+    if isinstance(func, torch.nn.Module):
+        return func
+    if hasattr(func, "__self__") and isinstance(func.__self__, torch.nn.Module):
+        return func.__self__
+
+    return FunctionModuleWrapper(func)
+
+
 def trace(
     func,
     example_inputs=None,
@@ -653,6 +823,7 @@ def trace(
     _compilation_unit=_python_cu,
     example_kwarg_inputs=None,
     _store_inputs=True,
+    via_export=True,
 ):
     r"""
     Trace a function and return an executable  or :class:`ScriptFunction` that will be optimized using just-in-time compilation.
@@ -799,138 +970,26 @@ def trace(
         module = torch.jit.trace(n, example_forward_input)
 
     """
-    if not _enabled:
-        return func
-    if optimize is not None:
-        warnings.warn(
-            "`optimize` is deprecated and has no effect. Use `with torch.jit.optimized_execution() instead"
-        )
 
-    log_torchscript_usage("trace")
+    if not via_export:
+        return _trace_impl(func, example_inputs, optimize, check_trace, check_inputs, check_tolerance, strict, _force_outplace, _module_class, _compilation_unit, example_kwarg_inputs, _store_inputs)
 
-    if isinstance(func, torch.jit.ScriptModule):
-        # it is hard to trace it because the forward method on ScriptModule is already defined, so it
-        # would result in an error.
-        warnings.warn(
-            "The input to trace is already a ScriptModule, tracing it is a no-op. Returning the object as is."
-        )
-        return func
+    export_example_inputs = process_trace_inputs_for_export(example_inputs)
+    traced_func = _trace_impl(func, example_inputs, optimize, check_trace, check_inputs, check_tolerance, strict, _force_outplace, _module_class, _compilation_unit, example_kwarg_inputs, _store_inputs)
 
-    if isinstance(func, torch.nn.Module):
-        if example_inputs is None:
-            if isinstance(example_kwarg_inputs, dict):
-                example_inputs = example_kwarg_inputs
-            else:
-                raise RuntimeError("example_kwarg_inputs should be a dict")
-        return trace_module(
-            func,
-            {"forward": example_inputs},
-            None,
-            check_trace,
-            wrap_check_inputs(check_inputs),
-            check_tolerance,
-            strict,
-            _force_outplace,
-            _module_class,
-            example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
-            _store_inputs=_store_inputs,
-        )
-    if (
-        hasattr(func, "__self__")
-        and isinstance(func.__self__, torch.nn.Module)
-        and func.__name__ == "forward"
-    ):
-        if example_inputs is None:
-            if isinstance(example_kwarg_inputs, dict):
-                example_inputs = example_kwarg_inputs
-            else:
-                raise RuntimeError("example_kwarg_inputs should be a dict")
-        return trace_module(
-            func.__self__,
-            {"forward": example_inputs},
-            None,
-            check_trace,
-            wrap_check_inputs(check_inputs),
-            check_tolerance,
-            strict,
-            _force_outplace,
-            _module_class,
-            example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
-            _store_inputs=_store_inputs,
-        )
+    class WrapperMod(torch.nn.Module):
+        def __init__(self, fn):
+            super().__init__()
+            self.fn = fn
+        def forward(self, *args, **kwargs):
+            return self.fn(*args, **kwargs)
 
-    # Special case for common case of passing a single Tensor
-    if (
-        isinstance(example_inputs, (torch.Tensor, dict))
-        and example_kwarg_inputs is None
-    ):
-        example_inputs = (example_inputs,)
-    # done primarily so that weird iterables fail here and not pybind11 code
-    elif example_kwarg_inputs is None and not isinstance(example_inputs, tuple):
-        example_inputs = tuple(example_inputs)
-
-    var_lookup_fn = _create_interpreter_name_lookup_fn(0)
-
-    if hasattr(func, "__self__") and isinstance(func.__self__, torch.nn.Module):
-        raise AttributeError(
-            "trace doesn't support compiling individual module's functions.\n"
-            "Please use trace_module"
-        )
-
-    name = _qualified_name(func)
-    if isinstance(example_kwarg_inputs, dict):
-        example_inputs = example_kwarg_inputs
-        traced = torch._C._create_function_from_trace_with_dict(
-            name,
-            func,
-            example_kwarg_inputs,
-            var_lookup_fn,
-            strict,
-            _force_outplace,
-            get_callable_argument_names(func),
-        )
+    if isinstance(traced_func, torch._C.ScriptModule):
+        traced_mod = traced_func
     else:
-        traced = torch._C._create_function_from_trace(
-            name,
-            func,
-            example_inputs,
-            var_lookup_fn,
-            strict,
-            _force_outplace,
-            get_callable_argument_names(func),
-        )
+        traced_mod = WrapperMod(traced_func)
 
-    # Check the trace against new traces created from user-specified inputs
-    if check_trace:
-        if check_inputs is not None:
-            _check_trace(
-                check_inputs,
-                func,
-                traced,
-                check_tolerance,
-                strict,
-                _force_outplace,
-                False,
-                _module_class,
-                example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
-            )
-        else:
-            _check_trace(
-                [example_inputs],
-                func,
-                traced,
-                check_tolerance,
-                strict,
-                _force_outplace,
-                False,
-                _module_class,
-                example_inputs_is_kwarg=isinstance(example_kwarg_inputs, dict),
-            )
-
-    # Allow torch.compile() to inline
-    traced._torchdynamo_inline = func  # type: ignore[attr-defined]
-    return traced
-
+    return torch.export.export(traced_mod, export_example_inputs, example_kwarg_inputs, strict=False).module()
 
 _trace_module_map: Optional[Dict[Any, Any]] = None
 

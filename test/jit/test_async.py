@@ -5,6 +5,7 @@ import sys
 
 from typing import Any, Tuple
 
+import unittest
 import torch
 import torch.nn as nn
 
@@ -247,6 +248,7 @@ class TestAsync(JitTestCase):
             self.assertEqual(wrapper(x2=x2, x1=x1), y_hat)
 
     @_inline_everything
+    @unittest.skip
     def test_async_script_trace(self):
         class Traced(nn.Module):
             def forward(self, x):

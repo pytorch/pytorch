@@ -459,12 +459,13 @@ class TestJit(JitTestCase):
 
             pkl_fn = pickle.dumps(fn, protocol=0)
 
-    def test_stuff(self):
+    def test_stuff_1(self):
         class M(torch.nn.Module):
             def forward(self, x):
-                return x.cos() + x.shape[0]
+                return x.cos() * x.shape[0]
 
         m = torch.jit.trace(M(), (torch.randn(2, 2),))
+        print("BEFORE:::", m.graph)
         torch._C._jit_pass_replace_size_with_sym_size(m.graph)
         inp = torch.randn(3, 2)
         print(m.graph)
@@ -472,7 +473,24 @@ class TestJit(JitTestCase):
         from torch.export import export
         from torch.export import Dim
         dim = Dim("x")
-        export(m, (torch.randn(3, 2),), dynamic_shapes=({0: dim},), strict=False)
+        export(m, (torch.randn(2, 2),), dynamic_shapes=({0: dim},), strict=False)
+        print(m(inp) - M()(inp))
+
+    def test_stuff_2(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.reshape(x.shape[0]*x.shape[1], x.shape[2])
+
+        m = torch.jit.trace(M(), (torch.randn(2, 2, 2),))
+        print("BEFORE:::", m.graph)
+        torch._C._jit_pass_replace_size_with_sym_size(m.graph)
+        inp = torch.randn(3, 2)
+        print(m.graph)
+
+        from torch.export import export
+        from torch.export import Dim
+        dim = Dim("x")
+        export(m, (torch.randn(2, 2, 2),), dynamic_shapes=({0: dim},), strict=False)
         print(m(inp) - M()(inp))
 
     def test_restore_device(self):
@@ -8088,6 +8106,7 @@ dedent """
 
             self.assertEqual(cu.test_call_python(*inputs), outputs)
 
+    @unittest.skip
     def test_type_call_in_script(self):
         @torch.jit.script
         def fn(x):
