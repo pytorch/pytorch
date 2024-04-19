@@ -638,9 +638,9 @@ class InstructionTranslatorBase(
     current_speculation: Optional[SpeculationEntry]
     dispatch_table: List[Any]
     exec_recorder: Optional[ExecutionRecorder]
-    tracer_to_used_names: dict[
-        torch._dynamo.output_graph.SubgraphTracer, dict[str, int]
-    ] = {}
+    tracer_to_used_names: Dict[
+        torch._dynamo.output_graph.SubgraphTracer, Dict[str, int]
+    ]
 
     def mark_inconsistent_side_effects(self):
         """
