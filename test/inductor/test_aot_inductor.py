@@ -9,6 +9,7 @@ from typing import Dict, Tuple
 
 import torch
 import torch._inductor
+import torch.nn as nn
 from torch._dynamo.testing import rand_strided, same
 from torch._dynamo.utils import counters
 from torch._inductor import config
@@ -2608,6 +2609,29 @@ class AOTInductorTestsTemplate:
                 return torch.fft.fftn(x), torch.fft.fftn(x).real
 
         example_inputs = (torch.randn(16, 16, 16, device=self.device),)
+        self.check_model(Model(), example_inputs)
+
+    def test_misc_1(self):
+        class Model(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.mlp = nn.Sequential(
+                    nn.Linear(128, 64), nn.ReLU(), nn.Linear(64, 32), nn.Sigmoid()
+                )
+                self.emb = nn.EmbeddingBag(num_embeddings=128, embedding_dim=32)
+                self.over_arch = nn.Sequential(
+                    nn.Linear(64, 32), nn.ReLU(), nn.Linear(32, 32), nn.Sigmoid()
+                )
+
+            def forward(self, x, y):
+                mlp_output = self.mlp(x)
+                emb_output = self.emb(y)
+                return self.over_arch(torch.concat([mlp_output, emb_output], dim=1))
+
+        example_inputs = (
+            torch.randn(16, 128, device=self.device),
+            torch.randint(0, 128, (16, 10), device=self.device),
+        )
         self.check_model(Model(), example_inputs)
 
 
