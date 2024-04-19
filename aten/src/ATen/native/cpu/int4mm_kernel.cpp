@@ -280,7 +280,7 @@ inline void tinygemm_kernel(
         // when BLOCK_N = 32, handle each row at a time
         if constexpr (col == 0) {
           __m256i mask = _mm256_set1_epi32(0xF);
-          __m128i b4 = _mm_load_si128((__m128i*)(B + k * ldb));
+          __m128i b4 = _mm_loadu_si128((__m128i*)(B + k * ldb));
           if (k + PREFETCH_SIZE_K < K) {
             _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb, _MM_HINT_T0);
           }
