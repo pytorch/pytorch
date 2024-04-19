@@ -756,6 +756,29 @@ class TestCuda(TestCase):
         ):
             self.assertTrue(torch.backends.cudnn.allow_tf32)
 
+    def test_force_cudnn_conv(self):
+        # hack to workaround cuBLAS handles causing an edge case OOM if
+        # no handle was present before the first call
+        dummy = torch.randn(512, 512, dtype=torch.half, device='cuda')
+        torch.matmul(dummy, dummy)
+        # same for cuDNN
+        dummy = torch.randn(1, 1, 1, 1, dtype = torch.half, device='cuda')
+        torch.nn.functional.conv2d(dummy, dummy)
+
+        x = torch.randn(1, 3, 512, 512, 512, dtype=torch.half, device='cuda')
+        w = torch.randn(64, 3, 3, 3, 3, dtype=torch.half, device='cuda')
+        try:
+            with torch.backends.cudnn.flags(enabled=True, force=False):
+                o = torch.nn.functional.conv3d(x, w)
+        except RuntimeError as e:
+            self.assertTrue('CUDNN' not in str(e))
+        try:
+            with torch.backends.cudnn.flags(enabled=True, force=True):
+                o = torch.nn.functional.conv3d(x, w)
+        except RuntimeError as e:
+            self.assertTrue('CUDNN' in str(e))
+
+
     def test_type_conversions(self):
         x = torch.randn(5, 5)
         self.assertIsInstance(x.float(), torch.FloatTensor)
