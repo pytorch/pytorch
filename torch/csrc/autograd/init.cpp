@@ -483,7 +483,7 @@ static PyObject* set_autocast_enabled(
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
       {"set_autocast_enabled(c10::string_view device_type, bool enabled)",
-       "set_autocast_enabled(bool enabled)|deprecated"});
+       "set_autocast_enabled(bool enabled)"});
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent no BC-breaking changes.

@@ -77,23 +77,16 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
     set_autocast_dtype(device_type, dtype);                                                          \
   }
 
-// deprecated CPU-specific autocast APIs
-DECLARE_DEPRECATED_AUTOCAST_APIS(cpu, at::kCPU)
+#define AT_FORALL_DEPRECATED_AUTOCAST_BAKCNEDS(_) \
+  _(cpu, at::kCPU)                                \
+  _(xpu, at::kXPU)                                \
+  _(xla, at::kXLA)                                \
+  _(hpu, at::kHPU)                                \
+  _(ipu, at::kIPU)                                \
+  _(privateuseone, at::kPrivateUse1)
 
-// deprecated XPU-specific autocast APIs
-DECLARE_DEPRECATED_AUTOCAST_APIS(xpu, at::kXPU)
-
-// deprecated XLA-specific autocast APIs
-DECLARE_DEPRECATED_AUTOCAST_APIS(xla, at::kXLA)
-
-// deprecated HPU-specific autocast APIs
-DECLARE_DEPRECATED_AUTOCAST_APIS(hpu, at::kHPU)
-
-// deprecated IPU-specific autocast APIs
-DECLARE_DEPRECATED_AUTOCAST_APIS(ipu, at::kIPU)
-
-// deprecated PrivateUser1-specific autocast APIs
-DECLARE_DEPRECATED_AUTOCAST_APIS(privateuseone, at::kPrivateUse1)
+// deprecated other backend specific autocast APIs
+AT_FORALL_DEPRECATED_AUTOCAST_BAKCNEDS(DECLARE_DEPRECATED_AUTOCAST_APIS)
 
 namespace {
 inline bool is_autocast_eligible(
