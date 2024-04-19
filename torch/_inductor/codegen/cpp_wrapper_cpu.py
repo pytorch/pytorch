@@ -15,6 +15,7 @@ from .. import config, ir
 from ..codecache import CudaKernelParamCache
 from ..utils import cache_on_self, sympy_product
 from ..virtualized import V
+from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import IndentedBuffer
 from .wrapper import EnterSubgraphLine, ExitSubgraphLine, WrapperCodeGen
 
@@ -665,7 +666,9 @@ class CppWrapperCpu(WrapperCodeGen):
                 V.graph.const_module.wrapper_code.src_to_kernel.values()
             )
         for kernel in sorted(declare_kernel):
-            self.prefix.writeline(f"    CUfunction {kernel}{{nullptr}};")
+            self.prefix.writeline(
+                maybe_hipify_code_wrapper(f"    CUfunction {kernel}{{nullptr}};")
+            )
         self.prefix.writeline("};")
         self.prefix.writeline("}  // namespace")
 
