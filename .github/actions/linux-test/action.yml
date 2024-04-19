@@ -136,7 +136,7 @@ runs:
       uses: ./.github/actions/get-workflow-job-id
       if: always()
       with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+        github-token: ${{ inputs.GITHUB_TOKEN }}
 
     - name: Check for keep-going label and re-enabled test issues
       # This uses the filter-test-configs action because it conviniently
@@ -145,7 +145,7 @@ runs:
       id: keep-going
       uses: ./.github/actions/filter-test-configs
       with:
-        github-token: ${{ secrets.GITHUB_TOKEN }}
+        github-token: ${{ inputs.GITHUB_TOKEN }}
         test-matrix: ${{ inputs.test-matrix }}
         job-name: ${{ steps.get-job-id.outputs.job-name }}
 
