@@ -201,10 +201,10 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
       // together with fwd_thread_id, used to uniquely identify
       // the forward op
       .def("sequence_nr", [](const KinetoEvent& e) { return e.sequenceNr(); })
-      // absolute start time (since unix epoch) in us
-      .def("start_us", [](const KinetoEvent& e) { return e.startUs(); })
-      // duration in us
-      .def("duration_us", [](const KinetoEvent& e) { return e.durationUs(); })
+      // absolute start time (since unix epoch) in ns
+      .def("start_ns", [](const KinetoEvent& e) { return e.startNs(); })
+      // duration in ns
+      .def("duration_ns", [](const KinetoEvent& e) { return e.durationNs(); })
       // used for correlation between high-level PyTorch events
       // and low-level device events
       .def(
@@ -255,7 +255,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_get_sequence_nr", &at::sequence_number::peek);
 
   py::class_<ProfilerResult>(m, "_ProfilerResult")
-      .def("trace_start_us", &ProfilerResult::trace_start_us)
+      .def("trace_start_ns", &ProfilerResult::trace_start_ns)
       .def("events", &ProfilerResult::events)
       .def("experimental_event_tree", &ProfilerResult::event_tree)
 #ifdef USE_KINETO

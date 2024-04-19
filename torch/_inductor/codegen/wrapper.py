@@ -1,6 +1,7 @@
 import collections
 import contextlib
 import dataclasses
+import dis
 import functools
 import inspect
 import operator
@@ -41,6 +42,7 @@ from ..utils import (
     sympy_str,
 )
 from ..virtualized import V
+from .aoti_hipify_utils import maybe_hipify_code_wrapper
 from .common import CodeGen, DeferredLine, IndentedBuffer, PythonPrinter
 from .triton_utils import config_of, signature_to_meta
 
@@ -263,8 +265,10 @@ class EnterDeviceContextManagerLine(WrapperLine):
                         )
                     else:
                         code.writeline(
-                            "at::cuda::CUDAStreamGuard stream_guard("
-                            + "at::cuda::getStreamFromExternal(stream, this->device_idx_));"
+                            maybe_hipify_code_wrapper(
+                                "at::cuda::CUDAStreamGuard stream_guard("
+                                + "at::cuda::getStreamFromExternal(stream, this->device_idx_));"
+                            )
                         )
                 else:
                     assert (
@@ -275,7 +279,9 @@ class EnterDeviceContextManagerLine(WrapperLine):
                     code.writeline(
                         f"AOTICudaGuard device_guard({self.device_idx});"
                         if config.abi_compatible
-                        else f"at::cuda::CUDAGuard device_guard({self.device_idx});"
+                        else maybe_hipify_code_wrapper(
+                            f"at::cuda::CUDAGuard device_guard({self.device_idx});"
+                        )
                     )
                 else:
                     code.writeline(f"device_guard.set_index({self.device_idx});")
@@ -473,8 +479,13 @@ class WrapperCodeGen(CodeGen):
         self.header.writeline(f"{name} = None  # {hashed}")
 
     def write_header(self) -> None:
+        context = torch._guards.TracingContext.try_get()
+        aot_config_comment = ""
+        if context is not None and context.aot_graph_name is not None:
+            aot_config_comment = f"# AOT ID: {context.aot_graph_name}"
         self.header.splice(
             f"""
+                {aot_config_comment}
                 from ctypes import c_void_p, c_long
                 import torch
                 import math
@@ -1062,7 +1073,11 @@ class WrapperCodeGen(CodeGen):
                     )
                 else:
                     signature.append(SizeArg(key, arg))
-                    if arg is not None and V.graph.sizevars.statically_known_equals(arg, 1):  # type: ignore[arg-type]
+                    if isinstance(
+                        arg, (int, sympy.Integer)
+                    ) and V.graph.sizevars.statically_known_equals(
+                        arg, 1  # type: ignore[arg-type]
+                    ):
                         equal_to_1_arg_idx.append(idx)
         index_dtype = "tl.int32"
         triton_meta = {
@@ -1150,6 +1165,15 @@ class WrapperCodeGen(CodeGen):
         symbols_included = {original_name}
 
         def traverse(cur_kernel):
+            # here we extract the unqualified names (i.e., not attributes and
+            # without prepended module name) loaded in the kernel code, which
+            # are matched with the co_names and __globals__ below to codegen
+            # the respective imports necessary for the kernel compilation
+            unqualified_loads = {
+                inst.argval
+                for inst in dis.Bytecode(cur_kernel.fn)
+                if inst.opname == "LOAD_GLOBAL"
+            }
             for symbol_name in cur_kernel.fn.__code__.co_names:
                 if symbol_name in symbols_included:
                     continue
@@ -1164,6 +1188,22 @@ class WrapperCodeGen(CodeGen):
                     elif isinstance(symbol, (int, str, bool)):
                         compile_wrapper.newline()
                         compile_wrapper.writeline(f"{symbol_name} = {symbol!r}")
+                        symbols_included.add(symbol_name)
+                    elif (
+                        symbol_name in unqualified_loads
+                        and symbol_name != "tl"  # already imported
+                        and hasattr(symbol, "__module__")
+                        # only codegen imports from triton; JITFunctions
+                        # imported from other modules will be codegened
+                        # in the separate branch above
+                        and symbol.__module__.startswith("triton")
+                    ):
+                        # a global symbol imported from triton is referenced
+                        # without module qualification (i.e., `store` instead
+                        # of `tl.store`): need to codegen an import
+                        compile_wrapper.writeline(
+                            f"from {symbol.__module__} import {symbol.__name__} as {symbol_name}"
+                        )
                         symbols_included.add(symbol_name)
 
         traverse(kernel)
@@ -1311,7 +1351,7 @@ class WrapperCodeGen(CodeGen):
         self.lines.append(LineContext(ctx))
 
     def val_to_cpp_arg_str(self, type_, val) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def val_to_arg_str(self, s):
         from torch.utils._triton import dtype_to_string, has_triton_package
@@ -1550,22 +1590,24 @@ class WrapperCodeGen(CodeGen):
         outer_additional_inputs = [
             buf.codegen_reference() for buf in while_loop.additional_inputs
         ]
-        outer_inputs = outer_carried_inputs + outer_additional_inputs
 
-        self.writeline(f"{name} = [None] * {len(outer_inputs)}")
-        for i, inp in enumerate(outer_inputs):
+        self.writeline(f"{name} = [None] * {len(outer_carried_inputs)}")
+        for i, inp in enumerate(outer_carried_inputs):
             # set the initial state before the loop
             self.writeline(f"{name}[{i}] = {inp}")
 
-        cond_outer_inputs = [f"{name}[{i}]" for i in range(len(outer_inputs))]
+        cond_outer_inputs = [
+            *[f"{name}[{i}]" for i in range(len(outer_carried_inputs))],
+            *outer_additional_inputs,
+        ]
         cond_outer_outputs = [f"{name}_cond_result"]
         body_outer_inputs = list(
             cond_outer_inputs
         )  # same inputs for cond_fn and body_fn
-
-        # Carry over the state from body_fn.  Note: We only carry over the carried_inputs part of the inputs,
-        # the additional ones are passed in as they're before.
-        body_outer_outputs = [f"{name}[{i}]" for i in range(len(outer_carried_inputs))]
+        # Carry over the state from body_fn. Note: We only carry over
+        # the carried_inputs part of the inputs, the additional ones
+        # are passed in as they're before.
+        body_outer_outputs = body_outer_inputs[: len(outer_carried_inputs)]
 
         self.writeline("while True:")
         self.writeline(EnterSubgraphLine(self, while_loop.cond_subgraph.graph))

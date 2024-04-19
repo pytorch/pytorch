@@ -305,6 +305,12 @@ class TritonPrinter(PythonPrinter):
             f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
 
+    def _print_Trunc(self, expr):
+        assert len(expr.args) == 1
+        return (
+            f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        )
+
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
@@ -1462,7 +1468,7 @@ class TritonKernel(Kernel):
         def add_range(i, expr):
             expr = sv.simplify(expr)
             if not sv.statically_known_multiple_of(remaining[i], expr):
-                raise CantSplit()
+                raise CantSplit
             # guard on the last item out
             remaining[i] = FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
@@ -1495,7 +1501,7 @@ class TritonKernel(Kernel):
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group]
                     ):
-                        raise CantSplit()
+                        raise CantSplit
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
                     return_getters.append(
@@ -3926,7 +3932,17 @@ class TritonScheduling(BaseScheduling):
         wrapped_jit_function = mod.triton_
 
         # call once to trigger the compilation
-        call(wrapped_jit_function.clone_args(*args)[0])
+        try:
+            call(wrapped_jit_function.clone_args(*args)[0])
+        except Exception as e:
+            log.debug(
+                "Exception (%s) in compiling fused nodes %s",
+                e,
+                {n.get_name() for n in nodes},
+            )
+            ms = float("inf")
+            store_cache()
+            return ms, mod.__file__
 
         launchers = wrapped_jit_function.launchers
         assert len(launchers) == 1

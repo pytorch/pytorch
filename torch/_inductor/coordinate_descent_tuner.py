@@ -70,11 +70,10 @@ class CoordescTuner:
         return zmax
 
     def get_rmax(self):
+        rmax = inductor_config.triton.max_block["R"]
         if self.size_hints and len(self.size_hints) > 0:
-            return self.size_hints[-1]  # the last one is for reduction
-        else:
-            # large enough. We should not pick this large RBLOCK anyway
-            return 2**30
+            rmax = min(rmax, self.size_hints[-1])  # the last one is for reduction
+        return rmax
 
     def get_warpsmax(self):
         # Currently, CUDA has a maximum of 1024 threads, so 32 is the max
