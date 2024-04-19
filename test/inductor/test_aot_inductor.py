@@ -2376,7 +2376,7 @@ class AOTInductorTestsTemplate:
             def __init__(self):
                 super().__init__()
 
-            def forward(self, x0, x1, x2, x3, x4):
+            def forward(self, x0, x1, x2, x3):
                 t = (
                     x0.to(torch.float)
                     + x1.to(torch.float)
