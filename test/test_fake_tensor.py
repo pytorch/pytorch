@@ -1167,6 +1167,8 @@ class FakeTensorOperatorInvariants(TestCase):
             torch.ones(10, device='cuda')
             torch.zeros(10, device='cuda')
             torch.rand(10, device='cuda')
+            torch.tensor(3.14, device='cuda')
+            torch.tensor([[3.14, 2], [1, 2]], device='cuda')
 
     @skipIfRocm
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
