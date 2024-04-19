@@ -28,9 +28,9 @@ log = logging.getLogger(__name__)
 is_indirect = re.compile(r"indirect|tmp").search
 
 
-@dataclasses.dataclass(frozen=True)
 class Dep(abc.ABC):
     name: str
+    index: sympy.Expr
 
     @abc.abstractmethod
     def rename(self, renames: Dict[str, str]) -> "Dep":
@@ -52,17 +52,13 @@ class Dep(abc.ABC):
     def is_contiguous(self) -> bool:
         pass
 
-    @property
-    @abc.abstractmethod
-    def index(self) -> sympy.Expr:
-        pass
-
 
 @dataclasses.dataclass(frozen=True)
 class MemoryDep(Dep):
-    index: sympy.Expr = dataclasses.MISSING  # type: ignore[assignment]
-    var_names: Tuple[sympy.Symbol, ...]  # type: ignore[misc]
-    size: Tuple[sympy.Expr, ...]  # type: ignore[misc]
+    name: str
+    index: sympy.Expr
+    var_names: Tuple[sympy.Symbol, ...]
+    size: Tuple[sympy.Expr, ...]
 
     def __repr__(self):
         return f"MemoryDep({self.name!r}, {self.index}, {self.ranges})"
@@ -110,7 +106,9 @@ class MemoryDep(Dep):
         return any(is_indirect(v.name) for v in self.index.free_symbols)  # type: ignore[attr-defined]
 
 
+@dataclasses.dataclass(frozen=True)
 class StarDep(Dep):
+    name: str
     # depends on the entire buffer
     @property
     def index(self):
@@ -148,7 +146,10 @@ class StarDep(Dep):
 #
 # It is weak because if it turns out A's read is never used, we can still
 # eliminate it
+@dataclasses.dataclass(frozen=True)
 class WeakDep(Dep):
+    name: str
+
     @property
     def index(self):
         raise NotImplementedError("WeakDep does not have an index")
