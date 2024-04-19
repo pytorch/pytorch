@@ -483,10 +483,10 @@ static PyObject* set_autocast_enabled(
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
       {"set_autocast_enabled(c10::string_view device_type, bool enabled)",
-       "set_autocast_enabled(bool enabled)"});
+       "set_autocast_enabled(bool enabled)"}); // this signature is depracated.
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  // Set at::kCUDA as default value to prevent no BC-breaking changes.
+  // Set at::kCUDA as default value to prevent BC-breaking changes.
   at::DeviceType device_type = at::kCUDA;
   if (r.idx == 0) {
     device_type = at::Device(r.string(0)).type();
@@ -504,7 +504,7 @@ static PyObject* is_autocast_enabled(
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
       {"is_autocast_enabled(c10::string_view device_type)",
-       "is_autocast_enabled()"});
+       "is_autocast_enabled()"}); // this signature is depracated.
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.
