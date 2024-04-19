@@ -11,6 +11,8 @@ from .. import config
 from ..codecache import CudaKernelParamCache
 from ..triton_heuristics import grid as default_grid
 from ..virtualized import V
+from .aoti_hipify_utils import maybe_hipify_code_wrapper
+from .codegen_device_driver import cuda_kernel_driver, cuda_kernel_header
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import SymbolicCallArg
 
@@ -64,88 +66,12 @@ class CppWrapperCuda(CppWrapperCpu):
                 "#include <torch/csrc/inductor/aoti_runtime/utils_cuda.h>"
             )
         else:
-            self.header.splice(
-                """
-                #include <c10/cuda/CUDAGuard.h>
-                #include <c10/cuda/CUDAStream.h>
-                #include <ATen/cuda/EmptyTensor.h>
-                """
-            )
-
-        self.header.splice(
-            """
-            #define CUDA_DRIVER_CHECK(EXPR)                    \\
-            do {                                               \\
-                CUresult code = EXPR;                          \\
-                const char *msg;                               \\
-                cuGetErrorString(code, &msg);                  \\
-                if (code != CUDA_SUCCESS) {                    \\
-                    throw std::runtime_error(                  \\
-                        std::string("CUDA driver error: ") +   \\
-                        std::string(msg));                     \\
-                }                                              \\
-            } while (0);
-
-            namespace {
-
-            struct Grid {
-                Grid(uint32_t x, uint32_t y, uint32_t z)
-                  : grid_x(x), grid_y(y), grid_z(z) {}
-                uint32_t grid_x;
-                uint32_t grid_y;
-                uint32_t grid_z;
-
-                bool is_non_zero() {
-                    return grid_x > 0 && grid_y > 0 && grid_z > 0;
-                }
-            };
-
-            }  // anonymous namespace
-
-            static inline CUfunction loadKernel(
-                    std::string filePath,
-                    const std::string &funcName,
-                    uint32_t sharedMemBytes,
-                    const std::optional<std::string> &cubinDir = std::nullopt) {
-                if (cubinDir) {
-                    std::filesystem::path p1{*cubinDir};
-                    std::filesystem::path p2{filePath};
-                    filePath = (p1 / p2.filename()).string();
-                }
-
-                CUmodule mod;
-                CUfunction func;
-                CUDA_DRIVER_CHECK(cuModuleLoad(&mod, filePath.c_str()));
-                CUDA_DRIVER_CHECK(cuModuleGetFunction(&func, mod, funcName.c_str()));
-                if (sharedMemBytes > 0) {
-                    CUDA_DRIVER_CHECK(cuFuncSetAttribute(
-                        func,
-                        CU_FUNC_ATTRIBUTE_MAX_DYNAMIC_SHARED_SIZE_BYTES,
-                        sharedMemBytes
-                    ))
-                }
-                return func;
-            }
-
-            static inline void launchKernel(
-                    CUfunction func,
-                    uint32_t gridX,
-                    uint32_t gridY,
-                    uint32_t gridZ,
-                    uint32_t numWarps,
-                    uint32_t sharedMemBytes,
-                    void* args[],
-                    cudaStream_t stream) {
-                CUDA_DRIVER_CHECK(cuLaunchKernel(
-                    func, gridX, gridY, gridZ, 32*numWarps, 1, 1, sharedMemBytes, stream, args, nullptr
-                ));
-            }
-            """
-        )
+            self.header.splice(maybe_hipify_code_wrapper(cuda_kernel_header()))
+        self.header.splice(maybe_hipify_code_wrapper(cuda_kernel_driver()))
 
     def write_get_raw_stream(self, index, graph=None):
         name = f"stream{index}"
-        self.writeline(f"cudaStream_t {name};")
+        self.writeline(maybe_hipify_code_wrapper(f"cudaStream_t {name};"))
         self.writeline(
             f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_current_cuda_stream({index}, (void**)&{name}));"
         )
@@ -164,7 +90,9 @@ class CppWrapperCuda(CppWrapperCpu):
                 sorted(self.src_to_kernel.values()),
                 sorted([entry[0] for entry in self.user_defined_kernel_cache.values()]),
             ):
-                self.prefix.writeline(f"static CUfunction {kernel} = nullptr;")
+                self.prefix.writeline(
+                    maybe_hipify_code_wrapper(f"static CUfunction {kernel} = nullptr;")
+                )
             self.prefix.writeline("\n")
         return super().generate(is_inference)
 
@@ -214,13 +142,17 @@ class CppWrapperCuda(CppWrapperCpu):
                 self.writeline(f"auto {var_name} = c10::nullopt;")
             else:
                 if config.abi_compatible:
-                    self.writeline(f"CUdeviceptr {var_name};")
+                    self.writeline(
+                        maybe_hipify_code_wrapper(f"CUdeviceptr {var_name};")
+                    )
                     self.writeline(
                         f"AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr({arg}, reinterpret_cast<void**>(&{var_name})));"
                     )
                 else:
                     self.writeline(
-                        f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
+                        maybe_hipify_code_wrapper(
+                            f"CUdeviceptr {var_name} = reinterpret_cast<CUdeviceptr>({arg}.data_ptr());"
+                        )
                     )
             new_args.append(f"&{var_name}")
 
