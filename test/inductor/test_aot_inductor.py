@@ -354,7 +354,11 @@ class AOTInductorTestsTemplate:
                 self.check_model(Model(self.device), example_inputs)
 
     def test_deconv_freezing(self):
-        for dtype, groups in itertools.product([torch.bfloat16, torch.float], [2, 1]):
+        dtypes = [torch.float]
+        # TODO: if not _is_mkldnn_bf16_supported, for bf16 dtype, atol and rtol should be set larger
+        if torch.ops.mkldnn._is_mkldnn_bf16_supported():
+            dtypes.append(torch.bfloat16)
+        for dtype, groups in itertools.product(dtypes, [2, 1]):
             iC = 4
             oC = 2
 
