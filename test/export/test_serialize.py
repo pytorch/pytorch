@@ -28,7 +28,7 @@ from torch._export.serde.serialize import (
 from torch._higher_order_ops.torchbind import enable_torchbind_tracing
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.export import Dim, export, load, save
-from torch.fx.experimental.symbolic_shapes import is_concrete_int
+from torch.fx.experimental.symbolic_shapes import is_concrete_int, ValueRanges
 from torch.testing._internal.common_utils import (
     find_library_location,
     instantiate_parametrized_tests,
@@ -276,6 +276,29 @@ class TestSerialize(TestCase):
             name = output.as_tensor.name
             self.assertNotIn(name, seen)
             seen.add(name)
+
+    def test_rational_ranges(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x + x
+
+        ep = torch.export.export(
+            M(), (torch.randn(4),), dynamic_shapes=({0: Dim("temp")},)
+        )
+
+        range_constraints = list(ep.range_constraints.keys())
+        assert len(range_constraints) == 1
+        symint = range_constraints[0]
+
+        import sympy
+
+        upper_range = sympy.Rational(10, 3)
+        lower_range = sympy.Rational(10, 6)
+        ep.range_constraints[symint] = ValueRanges(lower=lower_range, upper=upper_range)
+
+        serialized = ExportedProgramSerializer().serialize(ep)
+        self.assertEqual(serialized.exported_program.range_constraints["s0"].min_val, 2)
+        self.assertEqual(serialized.exported_program.range_constraints["s0"].max_val, 3)
 
     def test_kwargs_default(self) -> None:
         """
