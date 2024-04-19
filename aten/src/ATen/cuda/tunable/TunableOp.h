@@ -141,9 +141,10 @@ class TunableOp {
       bool use_buffer_rotation = (rotating_size > 0);
       size_t param_size = params->GetSize(use_buffer_rotation);
       size_t param_count = (rotating_size / param_size) + 1;
+      constexpr size_t MB = 1024*1024;
       if (use_buffer_rotation) {
-        TUNABLE_LOG("Rotating buffer ", rotating_size/(1024*1024), " MiB. ",
-            "Needed Size: ", param_size/(1024*1024), " MiB. ",
+        TUNABLE_LOG("Rotating buffer ", rotating_size/MB, " MiB. ",
+            "Needed Size: ", param_size/MB, " MiB. ",
             "Needed number of param copies: ", param_count);
       }
       else {
