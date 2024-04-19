@@ -1346,7 +1346,7 @@ class WrapperCodeGen(CodeGen):
         self.lines.append(LineContext(ctx))
 
     def val_to_cpp_arg_str(self, type_, val) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def val_to_arg_str(self, s):
         from torch.utils._triton import dtype_to_string, has_triton_package
