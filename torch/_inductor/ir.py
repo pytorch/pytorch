@@ -3807,7 +3807,6 @@ class ExternKernel(InputsKernel):
         self.op_overload = op_overload
         self.collect_arg_kwarg_properties()
         self.unbacked_bindings = {}
-        assert V.graph.current_node is not None
         self.fx_node = V.graph.current_node
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
