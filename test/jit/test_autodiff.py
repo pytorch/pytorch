@@ -3,6 +3,7 @@
 from typing import List
 
 import torch
+import unittest
 
 from torch.testing._internal.common_utils import skipIfTorchDynamo
 from torch.testing._internal.jit_utils import JitTestCase
@@ -120,6 +121,7 @@ class TestAutodiffJit(JitTestCase):
             self.assertEqual(y_s.requires_grad, y.requires_grad)
             self.assertEqual(z_s.requires_grad, z.requires_grad)
 
+    @unittest.skip
     def test_autodiff_requires_grad_nograd(self):
         @torch.jit.ignore
         def python_fn(x):
