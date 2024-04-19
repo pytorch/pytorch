@@ -1531,8 +1531,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
     @make_test
     def test_numpy_dtype_call_in_function(x):
         dt = np.dtype("float")
-        other = np.full_like(x.numpy(), 2.4, dtype=dt)
-        return other + x
+        return np.full_like(x, 2.4, dtype=dt)
 
     @make_test
     def test_numpy_linalg(x):
