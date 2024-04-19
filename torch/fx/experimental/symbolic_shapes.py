@@ -276,10 +276,35 @@ def rebind_unbacked(shape_env, n: torch.fx.Node, result):
     has the old binding information) and the new result (which we can extract the
     new unbacked SymInts out from).
     """
+    from torch._dynamo.tensor_version_op import _tensor_version
+
     if bindings := n.meta.get("unbacked_bindings"):
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
+            # tensor_version ops get specialized after AOTAutograd, it's OK,
+            # we don't actually want to do asserts on them.  This is all a bit
+            # questionable though
+            if isinstance(u1, int) and n.target is _tensor_version:
+                log.info("rebind_unbacked: discard _tensor_version %s %s -> %s", raw_u0, path, u1)
+                continue
             raw_u1 = u1.node.expr
+            # Simplify SymBool binding
+            if (
+                isinstance(raw_u1, sympy.Piecewise) and
+                len(raw_u1.args) == 2 and
+                raw_u1.args[0][0] == 1 and
+                isinstance(eq := raw_u1.args[0][1], sympy.Eq) and
+                isinstance(new_raw_u1 := eq.lhs, sympy.Symbol) and
+                shape_env.var_to_range[new_raw_u1].issubset(ValueRanges(0, 1)) and
+                eq.rhs == 1 and
+                raw_u1.args[1] == (0, True)
+            ):
+                # This is what the pattern match above is testing
+                repacked = sympy_cast_symbool_to_symint_guardless(sympy.Eq(new_raw_u1, 1))
+                assert repacked == raw_u1, f"{repacked} != {raw_u1}"
+                # Cancel the to_int(to_bool(x)). This is sound because x in
+                # [0, 1]
+                raw_u1 = new_raw_u1
             assert isinstance(raw_u1, sympy.Symbol)
             # The old and new could be the same if you improperly hit the memo
             # while retracing.  Make sure you updated FakeTensorMode.epoch
@@ -1310,8 +1335,12 @@ def _eval_is_non_overlapping_and_dense(sizes, strides):
     return True
 
 
+def sympy_cast_symbool_to_symint_guardless(x: sympy.Expr) -> sympy.Expr:
+    return sympy.Piecewise((1, x), (0, True))
+
+
 def cast_symbool_to_symint_guardless(symbool: torch.SymBool) -> torch.SymInt:
-    int_sym = sympy.Piecewise((1, symbool.node.expr), (0, True))
+    int_sym = sympy_cast_symbool_to_symint_guardless(symbool.node.expr)
     return symbool.node.shape_env.create_symintnode(int_sym, hint=int(symbool.node.require_hint()) if has_hint(symbool) else None)
 
 SYMPY_INTERP = {
@@ -4775,3 +4804,11 @@ def _is_int(expr):
 # WARNING: This is legacy, DO NOT USE
 def _is_dim_dynamic(t, d):
     return hasattr(t, "_dynamo_dynamic_indices") and d in t._dynamo_dynamic_indices
+
+class PropagateUnbackedSymInts(torch.fx.Interpreter):
+    def run_node(self, n: torch.fx.Node):
+        from torch._guards import detect_fake_mode
+
+        result = super().run_node(n)
+        rebind_unbacked(detect_fake_mode().shape_env, n, result)
+        return result

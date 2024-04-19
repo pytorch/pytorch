@@ -3807,6 +3807,8 @@ class ExternKernel(InputsKernel):
         self.op_overload = op_overload
         self.collect_arg_kwarg_properties()
         self.unbacked_bindings = {}
+        assert V.graph.current_node is not None
+        self.fx_node = V.graph.current_node
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
         return set()
@@ -3938,9 +3940,9 @@ class ExternKernel(InputsKernel):
 
         unbacked_bindings = None
         if shape_env := V.fake_mode.shape_env:
-            rebind_unbacked(shape_env, V.graph.current_node, example_output)
+            rebind_unbacked(shape_env, V.current_node, example_output)
             unbacked_bindings = compute_unbacked_bindings(
-                shape_env, example_output, V.graph.current_node.meta.get("val")
+                shape_env, example_output, V.current_node.meta.get("val")
             )
 
         example_out_li = (

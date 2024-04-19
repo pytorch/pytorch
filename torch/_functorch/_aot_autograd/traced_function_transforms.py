@@ -25,7 +25,7 @@ from torch._guards import detect_fake_mode
 from torch._prims_common import CUDARngStateHelper
 from torch.fx.experimental.symbolic_shapes import (
     definitely_false,
-    rebind_unbacked,
+    PropagateUnbackedSymInts,
     sym_eq,
 )
 from torch.nn.utils import stateless
@@ -675,13 +675,6 @@ def aot_dispatch_subclass(
         plain_tensor_args=args_unwrapped,
         maybe_subclass_meta=subclass_meta,
     )
-
-
-class PropagateUnbackedSymInts(torch.fx.Interpreter):
-    def run_node(self, n: torch.fx.Node):
-        result = super().run_node(n)
-        rebind_unbacked(detect_fake_mode().shape_env, n, result)
-        return result
 
 
 def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
