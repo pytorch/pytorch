@@ -573,8 +573,6 @@ class profile(_KinetoProfile):
     Note: One can also pass any object satisfying the _ITraceObserver interface.
     """
 
-        with torch.profiler.profile(
-            ...
     def __init__(
         self,
         *,
