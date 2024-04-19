@@ -569,7 +569,7 @@ def compile_fx_inner(
                 assert manager is not None
 
                 def compiled_artifact(new_inputs):
-                    manager.set_to_running_backward()
+                    manager.set_to_running_backward()  # type: ignore[union-attr]
                     return compiled_graph_callable(new_inputs)
 
                 compiled_graph.current_callable = compiled_artifact
@@ -604,6 +604,7 @@ def compile_fx_inner(
     return compiled_graph
 
 
+@dynamo_utils.preserve_rng_state()
 def fx_codegen_and_compile(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
