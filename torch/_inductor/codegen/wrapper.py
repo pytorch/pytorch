@@ -1497,6 +1497,7 @@ class WrapperCodeGen(CodeGen):
             or name in V.graph.graph_inputs
             or name in V.graph.constants
             or name in V.graph.never_reuse_buffers
+            or name not in self.allocated
             or name in self.freed
         ):
             return False
