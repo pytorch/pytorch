@@ -223,7 +223,17 @@ if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
+# Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
 WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
+cleanup_workspace() {
+  echo "sudo may print the following warning message that can be ignored. The chown command will still run."
+  echo "    sudo: setrlimit(RLIMIT_STACK): Operation not permitted"
+  echo "For more details refer to https://github.com/sudo-project/sudo/issues/42"
+  sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace
+}
+# Disable shellcheck SC2064 as we want to parse the original owner immediately.
+# shellcheck disable=SC2064
+trap_add cleanup_workspace EXIT
 sudo chown -R jenkins /var/lib/jenkins/workspace
 git config --global --add safe.directory /var/lib/jenkins/workspace
 
@@ -261,7 +271,7 @@ else
       if [[ "$BUILD_ENVIRONMENT" != *py3.8* ]]; then
         # Install numpy-2.0 release candidate for builds
         # Which should be backward compatible with Numpy-1.X
-        python -mpip install --pre numpy==2.0.0b1
+        python -mpip install --pre numpy==2.0.0rc1
       fi
       WERROR=1 python setup.py bdist_wheel
     else
@@ -363,5 +373,3 @@ if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; 
 fi
 
 print_sccache_stats
-
-sudo chown -R "$WORKSPACE_ORIGINAL_OWNER_ID" /var/lib/jenkins/workspace

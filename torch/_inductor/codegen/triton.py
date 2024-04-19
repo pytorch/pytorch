@@ -305,6 +305,12 @@ class TritonPrinter(PythonPrinter):
             f"libdevice.floor({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
         )
 
+    def _print_Trunc(self, expr):
+        assert len(expr.args) == 1
+        return (
+            f"libdevice.trunc({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
+        )
+
     def _print_ceiling(self, expr):
         assert len(expr.args) == 1
         return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
@@ -1462,7 +1468,7 @@ class TritonKernel(Kernel):
         def add_range(i, expr):
             expr = sv.simplify(expr)
             if not sv.statically_known_multiple_of(remaining[i], expr):
-                raise CantSplit()
+                raise CantSplit
             # guard on the last item out
             remaining[i] = FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
@@ -1495,7 +1501,7 @@ class TritonKernel(Kernel):
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group]
                     ):
-                        raise CantSplit()
+                        raise CantSplit
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
                     return_getters.append(
@@ -3285,10 +3291,15 @@ class TritonScheduling(BaseScheduling):
 
         return node_schedule
 
-    def codegen_nodes(self, nodes: List[scheduler.SchedulerNode]):
+    def codegen_node(
+        self, node: Union[scheduler.FusedSchedulerNode, scheduler.SchedulerNode]
+    ):
         """
         Given a set of pre-fused nodes, generate a Triton kernel.
         """
+
+        nodes: List[scheduler.SchedulerNode] = node.get_nodes()  # type: ignore[assignment]
+
         _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
 
         node_schedule = self.generate_node_schedule(nodes, numel, rnumel)

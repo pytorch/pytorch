@@ -1,6 +1,7 @@
 import gzip
 import json
 import os
+import shutil
 import tempfile
 from abc import ABC, abstractmethod
 from enum import Enum
@@ -216,18 +217,11 @@ class _KinetoProfile:
             return self.profiler.export_chrome_trace(path)
 
     def export_stacks(self, path: str, metric: str = "self_cpu_time_total"):
-        """Save stack traces in a file in a format suitable for visualization.
+        """Save stack traces to a file
 
         Args:
             path (str): save stacks file to this location;
             metric (str): metric to use: "self_cpu_time_total" or "self_cuda_time_total"
-
-        .. note::
-            Example of using FlameGraph tool:
-
-            - git clone https://github.com/brendangregg/FlameGraph
-            - cd FlameGraph
-            - ./flamegraph.pl --title "CPU time" --countname "us." profiler.stacks > perf_viz.svg
         """
         assert self.profiler
         return self.profiler.export_stacks(path, metric)
@@ -743,6 +737,11 @@ class profile(_KinetoProfile):
             for action in action_list:
                 action()
 
+    def _stats(self) -> Optional[prof._ProfilerStats]:
+        if self.profiler is None:
+            return None
+        return self.profiler._stats
+
 
 class ExecutionTraceObserver(_ITraceObserver):
     """Execution Trace Observer
@@ -786,8 +785,33 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         Removes ET observer from record function callbacks.
         """
+
+        def _save_triton_kernels():
+            # Save the kernel paths for the generated kernels
+            from torch._inductor.codecache import PyCodeCache as PyCodeCache
+
+            kernel_files = [
+                v.__file__
+                for v in PyCodeCache.cache.values()
+                if getattr(v, "__file__", None) is not None
+            ]
+            work_dir, file_name = os.path.split(self._output_file_path)
+            resource_dir = os.path.join(
+                work_dir, os.path.splitext(file_name)[0] + "_resources"
+            )
+            if not os.path.exists(resource_dir):
+                os.mkdir(resource_dir)
+
+            for kernel_file in kernel_files:
+                if kernel_file is None:
+                    continue
+                path, name = os.path.split(kernel_file)
+                dst = os.path.join(resource_dir, name)
+                shutil.copyfile(kernel_file, dst)
+
         if self._registered:
             self.stop()
+            _save_triton_kernels()
             _remove_execution_trace_observer()
             self._registered = False
 

@@ -37,6 +37,10 @@
 
 namespace c10d {
 
+// Control whether to always use high priority streams
+static std::vector<std::string> TORCH_NCCL_HIGH_PRIORITY = {
+    "TORCH_NCCL_HIGH_PRIORITY"};
+
 // Control whether or not wait() is blocking or non-blocking.
 static std::vector<std::string> TORCH_NCCL_BLOCKING_WAIT = {
     "TORCH_NCCL_BLOCKING_WAIT",
@@ -95,12 +99,6 @@ static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
 // signal from other ranks, e.g. to dump the debugging information.
 static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
     "TORCH_NCCL_COORD_CHECK_MILSEC"};
-
-// Whether to abort the communicators when users call destroy_process_group().
-// If yes, communicators will be aborted when destroy_process_group is called,
-// but not in destructor.
-static std::vector<std::string> TORCH_NCCL_ABORT_IN_DESTROY_PG = {
-    "TORCH_NCCL_ABORT_IN_DESTROY_PG"};
 
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
@@ -430,6 +428,7 @@ class TORCH_API ProcessGroupNCCL : public Backend {
     std::shared_ptr<ProcessGroupNCCL> split_from;
     int64_t split_color{0};
     std::vector<uint64_t> global_ranks_in_group;
+    std::string group_name;
   };
 
   // If you wish to create multiple process groups, each with a potentially
@@ -1010,11 +1009,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // for the operation to complete.
   bool blockingWait_ = false;
 
-  // Whether to abort the communicators when users call destroy_process_group().
-  // If yes, communicators will be aborted when destroy_process_group is called,
-  // but not in destructor.
-  bool abortInDestroyProcessGroup_ = false;
-
   // Whether or not to hook the cache allocator to register all allocated
   // tensors
   bool useTensorRegisterAllocatorHook_ = false;
@@ -1067,10 +1061,22 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // initialized to be -1 to indicate no collective has been enqueued
   int64_t lastEnqueuedSeq_{-1};
 
+  // the name of the last collective enqueued into workMetaList_
+  std::string lastEnqueuedWorkName_;
+
+  // the sequential number of the last colletive started as the kernal
+  int64_t lastStartedSeq_{-1};
+
+  // the name of the last collective started as the kernal
+  std::string lastStartedWorkName_;
+
   // the sequential number of the last colletive completed marked by
   // the watchdog thread
   // initialized to be -1 to indicate no collective has been completed
   int64_t lastCompletedSeq_{-1};
+
+  // the name of the last collective completed
+  std::string lastCompletedWorkName_;
 
   std::exception_ptr watchDogException_ = nullptr;
 
