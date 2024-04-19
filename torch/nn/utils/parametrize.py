@@ -1,6 +1,8 @@
 import torch
+from torch.__future__ import get_swap_module_params_on_conversion
 from torch.nn.modules.container import ModuleList, ModuleDict, Module
 from torch.nn.parameter import Parameter
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch import Tensor
 
 import collections
@@ -64,6 +66,14 @@ def _register_parameter_or_buffer(module, name, X):
     else:
         module.register_buffer(name, X)
 
+def _maybe_set(dest: Tensor, src: Tensor) -> None:
+    should_swap = get_swap_module_params_on_conversion() or is_traceable_wrapper_subclass(dest)
+    if should_swap:
+        if isinstance(dest, Parameter) and not isinstance(src, Parameter):
+            src = Parameter(src, requires_grad=dest.requires_grad)
+        torch.utils.swap_tensors(dest, src)
+    else:
+        dest.set_(src)  # type: ignore[call-overload]
 
 class ParametrizationList(ModuleList):
     r"""A sequential container that holds and manages the original parameters or buffers of a parametrized :class:`torch.nn.Module`.
@@ -157,7 +167,7 @@ class ParametrizationList(ModuleList):
             # Set the original to original so that the user does not need to re-register the parameter
             # manually in the optimiser
             with torch.no_grad():
-                original.set_(new)  # type: ignore[call-overload]
+                _maybe_set(original, new)
             _register_parameter_or_buffer(self, "original", original)
         else:
             for i, originali in enumerate(new):
@@ -231,7 +241,7 @@ class ParametrizationList(ModuleList):
                         f"while `original` has dtype {self.original.dtype}"
                     )
                 # We know that the result is going to have the same dtype
-                self.original.set_(value)  # type: ignore[call-overload]
+                _maybe_set(self.original, value)
             else:
                 if not isinstance(value, collections.abc.Sequence):
                     raise ValueError(
@@ -255,7 +265,7 @@ class ParametrizationList(ModuleList):
                             f"Tensor {i} returned by `right_inverse` has dtype {tensor.dtype} "
                             f"while `original{i}` has dtype {original_i.dtype}"
                         )
-                    original_i.set_(tensor)
+                    _maybe_set(original_i, tensor)
 
     def forward(self) -> Tensor:
         if torch.jit.is_scripting():
@@ -645,18 +655,20 @@ def remove_parametrizations(
             # This way the user does not need to update the optimizer
             with torch.no_grad():
                 if type(original) is torch.Tensor:
-                    original.set_(t)
+                    _maybe_set(original, t)
                 else:
                     try:
-                        original.set_(t)
+                        _maybe_set(original, t)
                     except RuntimeError as e:
                         # TODO: Fix this for tensor subclasses that are parameters:
                         # RuntimeError: set_storage is not allowed on a Tensor created from .data or .detach().
                         raise RuntimeError("Calling remove_parametrizations() with leave_parametrized=True "
                                            "for a parameter that is an instance of a tensor subclass requires "
-                                           "set_() to be implemented correctly for the tensor subclass. Either "
-                                           "set leave_parametrized=False or provide a working implementation for "
-                                           "set_() in the tensor subclass.") from e
+                                           "set_() to be implemented correctly for the tensor subclass."
+                                           "Alternatively, one can opt into the swap_tensors path"
+                                           "Either set leave_parametrized=False or provide a working implementation"
+                                           "for set_() in the tensor subclass or set "
+                                           "torch.__future__.set_swap_module_params_on_conversion(True).") from e
     else:
         if leave_parametrized:
             # We cannot use no_grad because we need to know whether one or more

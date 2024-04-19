@@ -173,7 +173,6 @@ manual_torch_name_rule_map = {
     "torch.nn.Parameter": TorchInGraphFunctionVariable,
     "torch._nested_tensor_from_mask": SkipFunctionVariable,
     "torch._nested_from_padded": SkipFunctionVariable,
-    "torch.nested.nested_tensor_from_jagged": UserFunctionVariable,
     # symbol operators implemented in Python
     "torch.sym_not": TorchInGraphFunctionVariable,
     "torch.sym_float": TorchInGraphFunctionVariable,
@@ -3036,10 +3035,6 @@ def add_module_init_func(name: str, init_func: Callable[[], None]) -> None:
     """Register a module without eagerly importing it"""
     # If the module is already imported, eagerly run init
     assert "." not in name, f"Expected a root module name, but got {name}"
-    if name in sys.modules:
-        init_func()
-
-    # Module is not yet imported, delay processing until needed
     assert name not in _lazy_module_init
     _lazy_module_init[name].append(init_func)
 

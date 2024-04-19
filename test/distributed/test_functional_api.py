@@ -634,14 +634,14 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
     def test_all_to_all_single(self, compile: bool = True) -> None:
         group = dist.group.WORLD.group_name
 
-        t = torch.rand((self.world_size, 2), requires_grad=True)
+        t = torch.ones((self.world_size, 2), requires_grad=True)
 
         def my_func(t: torch.Tensor, world_size: int) -> torch.Tensor:
             sizes = [1] * world_size
-            t = t * 10
+            t = t * 2
             assert t.requires_grad
             out = ft_c.all_to_all_single_autograd(t, sizes, sizes, group)
-            out = out + 2
+            out = out + 0
             return out
 
         if compile:
@@ -650,11 +650,13 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             compiled = my_func
 
         out = compiled(t, self.world_size)
+        self.assertEqual(out.shape, t.shape)
+        self.assertEqual(out, torch.full_like(t, 2.0))
         self.assertIsNotNone(out.grad_fn)
         self.assertTrue(out.requires_grad)
         loss = out.sum()
         loss.backward()
-        self.assertIsNotNone(t.grad)
+        self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
     def test_all_to_all_single_inductor(self) -> None:
         group = dist.group.WORLD.group_name
@@ -750,6 +752,62 @@ class TestFunctionalAutograd(MultiThreadedTestCase):
             self.assertEqual(rs_tensor, torch.ones(input_size) * res_num)
             rs_tensor.sum().backward()
             self.assertEqual(input_tensor.grad, torch.full(output_size, fill_value=1.0))
+
+
+class TestFunctionalAutogradWithNCCL(MultiProcessTestCase):
+    def setUp(self):
+        super().setUp()
+        os.environ["WORLD_SIZE"] = str(self.world_size)
+        os.environ["BACKEND"] = dist.Backend.NCCL
+        self._spawn_processes()
+
+    @property
+    def device(self):
+        return torch.device(self.rank)
+
+    @property
+    def world_size(self):
+        return 2
+
+    @property
+    def process_group(self):
+        return dist.group.WORLD
+
+    def dist_init(self):
+        dist.init_process_group(
+            backend=BACKEND,
+            world_size=self.world_size,
+            rank=self.rank,
+            init_method=f"file://{self.file_name}",
+        )
+
+        # set device for nccl pg for collectives
+        if BACKEND == "nccl":
+            torch.cuda.set_device(self.rank)
+
+    def destroy_comms(self):
+        # Wait for all ranks to reach here before starting shutdown.
+        dist.barrier()
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @with_comms()
+    def test_all_to_all_single(self) -> None:
+        group = self.process_group.group_name
+
+        t = torch.ones((self.world_size, 2), requires_grad=True, device=self.device)
+
+        sizes = [1] * self.world_size
+        assert t.requires_grad
+        out = ft_c.all_to_all_single_autograd(t * 2, sizes, sizes, group) + 0
+
+        self.assertEqual(out.shape, t.shape)
+        self.assertEqual(out, torch.full_like(t, 2.0))
+        self.assertIsNotNone(out.grad_fn)
+        self.assertTrue(out.requires_grad)
+        loss = out.sum()
+        loss.backward()
+        self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
 
 if __name__ == "__main__":
