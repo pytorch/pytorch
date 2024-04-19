@@ -342,6 +342,8 @@ Attr get_onednn_conv_sum_attr(
   auto weight_is_cl = (weight_fmt == at::MemoryFormat::ChannelsLast || weight_fmt == at::MemoryFormat::ChannelsLast3d);
 
   bool propagate_channels_last = input_is_cl || weight_is_cl;
+  if (propagate_channels_last)
+    mem_fmt = get_cl_tag_by_ndim(ndim);
 
   Tensor out = at::empty(output_size, input_r.options().memory_format(mem_fmt));
   if (!onednn::binary_valid(out, accumu)) {
