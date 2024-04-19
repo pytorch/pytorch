@@ -270,7 +270,7 @@ class EtcdRendezvous:
         self._rendezvous_deadline = time.time() + self._timeout
         while True:
             if time.time() > self._rendezvous_deadline:
-                raise RendezvousTimeoutError()
+                raise RendezvousTimeoutError
 
             logger.info("Attempting to join next rendezvous")
             try:
@@ -340,17 +340,17 @@ class EtcdRendezvous:
             logger.info("Observed existing rendezvous state: %s", state)
 
         if state["status"] == "closed":
-            raise RendezvousClosedError()
+            raise RendezvousClosedError
 
         if state["status"] == "joinable":
             return self.join_phase(state["version"])
 
         if state["status"] == "final":
             self.handle_existing_rendezvous(state["version"])
-            raise EtcdRendezvousRetryImmediately()
+            raise EtcdRendezvousRetryImmediately
 
         self.try_wait_for_state_change(etcd_index=active_version.etcd_index + 1)
-        raise EtcdRendezvousRetryableFailure()
+        raise EtcdRendezvousRetryableFailure
 
     def join_phase(self, expected_version):
         """
@@ -632,7 +632,7 @@ class EtcdRendezvous:
             active_version, state = self.get_rdzv_state()
 
             if state["status"] != "final" or state["version"] != expected_version:
-                raise EtcdRendezvousRetryImmediately()
+                raise EtcdRendezvousRetryImmediately
 
             # Increment counter to signal an additional waiting worker.
             state["num_workers_waiting"] += 1
@@ -714,7 +714,7 @@ class EtcdRendezvous:
                 pass
 
             if time.time() > self._rendezvous_deadline:
-                raise RendezvousTimeoutError()
+                raise RendezvousTimeoutError
             active_version, state = self.get_rdzv_state()
 
     def handle_join_last_call(self, expected_version, deadline):
@@ -832,7 +832,7 @@ class EtcdRendezvous:
             pass
 
         if time.time() > self._rendezvous_deadline:
-            raise RendezvousTimeoutError()
+            raise RendezvousTimeoutError
 
         # Unfortunately, we have to do another fetch in order to get last etcd_index.
         return self.get_rdzv_state()

@@ -262,7 +262,7 @@ class PersistentCache(CacheBase):
         choices: List[ChoiceCaller],
         op: str,
         inputs: str,
-        benchmark: Optional[Callable[[Any], Dict[ChoiceCaller, float]]],
+        benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
     ) -> Dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
@@ -270,7 +270,7 @@ class PersistentCache(CacheBase):
 
             1. Check global_cache[op][inputs][choice][precision], return benchmark if cached.
             2. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
-            3. If benchmark is not None:
+            3.
                 a. `max_autotune_gemm=True`: benchmark the choice, update
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
@@ -301,15 +301,11 @@ class PersistentCache(CacheBase):
             return hit
 
         if config.max_autotune or config.max_autotune_gemm:
-            local_cache = self.get_local_cache() if config.autotune_local_cache else {}
+            local_cache = self.get_local_cache()
             # check local cache first since it is data specific to the current machine
-            if (
-                not check_cache(local_cache)
-                and not (
-                    use_global_cache()
-                    and check_cache(self.get_global_cache(), callback=log_stats)
-                )
-                and benchmark is not None
+            if not check_cache(local_cache) and not (
+                use_global_cache()
+                and check_cache(self.get_global_cache(), callback=log_stats)
             ):
                 try:
                     # re-benchmark everything to try to get consistent numbers from the same machine
@@ -450,7 +446,7 @@ def _reduce_tensor(t):
         # TODO: These tensors don't currently pickle, so we can't cache a
         # compiled graph containing them. Just fail now. If mkldnn tensors
         # get pickling support, we can remove this.
-        raise BypassFxGraphCache()
+        raise BypassFxGraphCache
 
     # Very large tensors could be expensive to copy to cpu and hash. Let's
     # at least report if we find slowness.
@@ -602,7 +598,7 @@ class FxGraphHashDetails:
             # Some configs options are callables, e.g., post_grad_custom_pre_pass,
             # and may not pickle.
             log.debug("Can't pickle inductor config: %s", e)
-            raise BypassFxGraphCache() from e
+            raise BypassFxGraphCache from e
 
     def debug_str(self) -> str:
         """
@@ -847,19 +843,19 @@ class FxGraphCache:
         """
         # Freezing can embed constants that wouldn't be static across runs.
         if config.freezing or config.aot_inductor.use_runtime_constant_folding:
-            raise BypassFxGraphCache()
+            raise BypassFxGraphCache
 
         # The treatment of guards in the caching implementation requires that
         # we have a shape env.
         if FxGraphCache._get_shape_env() is None:
             log.debug("fx graph cache no shape env")
-            raise BypassFxGraphCache()
+            raise BypassFxGraphCache
 
         # HigherOrderOperators should be handled on a case-by-case basis.
         # Currently, we just skip caching if we have any.
         for node in gm.graph.nodes:
             if isinstance(node.target, torch._ops.HigherOrderOperator):
-                raise BypassFxGraphCache()
+                raise BypassFxGraphCache
 
     @staticmethod
     def load(
@@ -962,7 +958,7 @@ class CompiledFxGraph:
 
 def cpp_compiler() -> str:
     if config.is_fbcode():
-        return build_paths.cc()
+        return build_paths.cc() if torch.version.hip is None else build_paths.clang()
     if isinstance(config.cpp.cxx, (list, tuple)):
         search = tuple(config.cpp.cxx)
     else:
@@ -994,7 +990,7 @@ def cpp_compiler_search(search: str) -> str:
             return cxx
         except (subprocess.SubprocessError, FileNotFoundError, ImportError):
             continue
-    raise exc.InvalidCxxCompiler()
+    raise exc.InvalidCxxCompiler
 
 
 def install_gcc_via_conda() -> str:
@@ -1373,18 +1369,23 @@ def homebrew_libomp() -> Tuple[bool, str]:
         return False, ""
 
 
+def _set_gpu_runtime_env() -> None:
+    if (
+        config.is_fbcode()
+        and torch.version.hip is None
+        and "CUDA_HOME" not in os.environ
+        and "CUDA_PATH" not in os.environ
+    ):
+        os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
+
+
 def get_include_and_linking_paths(
     include_pytorch: bool = False,
     vec_isa: VecISA = invalid_vec_isa,
     cuda: bool = False,
     aot_mode: bool = False,
 ) -> Tuple[List[str], str, str, str, str]:
-    if (
-        config.is_fbcode()
-        and "CUDA_HOME" not in os.environ
-        and "CUDA_PATH" not in os.environ
-    ):
-        os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
+    _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
     macros = vec_isa.build_macro() if vec_isa != invalid_vec_isa else ""
@@ -1416,7 +1417,7 @@ def get_include_and_linking_paths(
             libs += ["omp"]
             if aot_mode:
                 ipaths += [os.path.dirname(cpp_prefix_path())]
-                if cuda:
+                if cuda and torch.version.hip is None:
                     # This is a special treatment for Meta internal cuda-12 where all libs
                     # are in lib/cuda-12 and lib/cuda-12/stubs
                     for i, path in enumerate(lpaths):
@@ -1447,7 +1448,10 @@ def get_include_and_linking_paths(
 
         if cuda:
             if torch.version.hip is not None:
-                libs += ["c10_hip", "torch_hip"]
+                if config.is_fbcode():
+                    libs += ["amdhip64"]
+                else:
+                    libs += ["c10_hip", "torch_hip"]
                 macros += " -D __HIP_PLATFORM_AMD__"
             else:
                 if config.is_fbcode():
@@ -1513,16 +1517,27 @@ def get_include_and_linking_paths(
 
     # third party libs
     if config.is_fbcode():
-        ipaths.append(build_paths.sleef())
+        # Note that the order of include paths do matter, as a result
+        # we need to have several branches interleaved here
+        if torch.version.hip is None:
+            ipaths.append(build_paths.sleef())
         ipaths.append(build_paths.openmp())
         ipaths.append(build_paths.python())
-        ipaths.append(build_paths.cc_include())
-        ipaths.append(build_paths.libgcc())
-        ipaths.append(build_paths.libgcc_arch())
+        if torch.version.hip is not None:
+            ipaths.append(build_paths.clang_include())
+            ipaths.append(build_paths.gcc_include())
+            ipaths.append(build_paths.gcc_install_tools_include())
+        else:
+            ipaths.append(build_paths.cc_include())
+            ipaths.append(build_paths.libgcc())
+            ipaths.append(build_paths.libgcc_arch())
         ipaths.append(build_paths.libgcc_backward())
         ipaths.append(build_paths.glibc())
         ipaths.append(build_paths.linux_kernel())
-        ipaths.append(build_paths.cuda())
+        if torch.version.hip is not None:
+            ipaths.append(build_paths.rocm())
+        else:
+            ipaths.append(build_paths.cuda())
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
@@ -1530,7 +1545,8 @@ def get_include_and_linking_paths(
     static_link_libs = []
     if aot_mode and cuda and config.is_fbcode():
         # For Meta internal cuda-12, it is recommended to static link cudart
-        static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
+        if torch.version.hip is None:
+            static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
 
     lpaths_str = " ".join(["-L" + p for p in lpaths])
     libs_str = " ".join(static_link_libs + ["-l" + p for p in libs])
@@ -2749,7 +2765,7 @@ def _worker_compile_triton(
 
 class CodeCacheFuture:
     def result(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class TritonFuture(CodeCacheFuture):

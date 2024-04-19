@@ -94,7 +94,7 @@ class TritonTemplateKernel(TritonKernel):
         grid_fn,
         meta,
         call_sizes,
-        use_jit=False,
+        use_jit=True,
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
@@ -153,8 +153,8 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
-            "device": self.output_node.get_device().index,
-            "device_type": self.output_node.get_device().type,
+            "device": V.graph.scheduler.current_device.index,
+            "device_type": V.graph.scheduler.current_device.type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -554,7 +554,7 @@ class TritonTemplate(KernelTemplate):
         ), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
-            use_jit=False,
+            use_jit=True,
             **kernel_options,
         ) as kernel:
             try:
@@ -740,10 +740,6 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         assert self.bmreq is not None
         return self.bmreq.benchmark(*args, output_tensor=out)
 
-    def precompile(self):
-        assert self.bmreq is not None
-        self.bmreq.precompile()
-
     def __str__(self):
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
 
@@ -866,15 +862,6 @@ class ErrorFromChoice(RuntimeError):
 
 
 class AlgorithmSelectorCache(PersistentCache):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        # the autotuning will get occur in the scheduler, so there is
-        # no guarantee that the first lowering for a given key will also be the
-        # first to benchmark it. share a single precompilation function for all lowerings
-        # of a particular key
-        self.precompile_cache: Dict[str, Callable[[], None]] = {}
-
     def __call__(
         self,
         name,
@@ -894,7 +881,6 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
-
         if len(choices) == 0:
             raise RuntimeError(
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
@@ -910,8 +896,6 @@ class AlgorithmSelectorCache(PersistentCache):
         @functools.lru_cache(None)
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
-
-        inputs_key = repr([self.key_of(x) for x in input_nodes])
 
         def precompile(choices):
             if (
@@ -932,26 +916,6 @@ class AlgorithmSelectorCache(PersistentCache):
                 num_workers,
             )
 
-            # check local and global cache before precompiling
-            timings = self.lookup(
-                choices,
-                name,
-                inputs_key,
-                benchmark=None,
-            )
-
-            def no_op(*args, **kwargs):
-                return
-
-            if timings:
-                return no_op
-
-            precompile_key = (
-                f"{name}: {inputs_key} : {torch.get_float32_matmul_precision()}"
-            )
-            if precompile_func := self.precompile_cache.get(precompile_key):
-                return precompile_func
-
             executor = ThreadPoolExecutor(max_workers=num_workers)
             futures = executor.map(
                 lambda c: c.precompile(),
@@ -959,9 +923,7 @@ class AlgorithmSelectorCache(PersistentCache):
                 timeout=precompilation_timeout_seconds,
             )
 
-            @functools.lru_cache(None)
             def wait_on_futures():
-                counters["inductor"]["select_algorithm_precompile"] += 1
                 try:
                     iterator = iter(futures)
                     while True:
@@ -977,10 +939,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                 except StopIteration:
                     pass
-
                 executor.shutdown(wait=True)
-
-            self.precompile_cache[precompile_key] = wait_on_futures
 
             return wait_on_futures
 
@@ -1002,7 +961,7 @@ class AlgorithmSelectorCache(PersistentCache):
             timings = self.lookup(
                 choices,
                 name,
-                inputs_key,
+                repr([self.key_of(x) for x in input_nodes]),
                 autotune,
             )
             autotune_elapse = time.time() - autotune_start_ts
