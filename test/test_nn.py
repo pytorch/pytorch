@@ -1699,14 +1699,14 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             # Applying weight norm on one of them causes it to become a tensor
             l = torch.nn.utils.weight_norm(l, name=name)
             self.assertEqual(
-                sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights]),
+                sum(isinstance(p, torch.nn.Parameter) for p in l._flat_weights),
                 num_params - 1,
             )
 
             # Removing the weight norm reparametrization restores the Parameter
             l = torch.nn.utils.remove_weight_norm(l, name=name)
             self.assertEqual(
-                sum([isinstance(p, torch.nn.Parameter) for p in l._flat_weights]),
+                sum(isinstance(p, torch.nn.Parameter) for p in l._flat_weights),
                 num_params,
             )
 
@@ -6603,7 +6603,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         elif weight_layout == torch.sparse_coo:
             module.weight = nn.Parameter(module.weight.to_sparse_coo())
         else:
-            raise AssertionError()
+            raise AssertionError
 
         inp = torch.randn(4, requires_grad=True, device=device)
         res = module(inp)
