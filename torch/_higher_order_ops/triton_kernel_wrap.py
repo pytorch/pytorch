@@ -111,8 +111,8 @@ def generate_ttir(kernel, kwargs):
     """
     Uses Triton's internal code generation to create TTIR
     """
+    import sympy
     import triton
-    from sympy import Expr
     from triton.compiler.compiler import ASTSource
     from triton.runtime.autotuner import Autotuner
     from triton.runtime.jit import JITFunction
@@ -133,12 +133,12 @@ def generate_ttir(kernel, kwargs):
         raise ValueError("Incorrect number of arguments passed to kernel")
 
     # Replace all SymExprs with a regular value for TTIR generation
-    # Replace all FakeTensor with real tensors
+    # Replace all FakeTensor/TensorBox with real tensors
     # These replacements are needed for triton's type, key and config functions
     ordered_args: Dict[str, Any] = {}
     for name in kernel.arg_names:
         a = kwargs[name]
-        if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool, Expr)):
+        if isinstance(a, (torch.SymInt, torch.SymFloat, torch.SymBool, sympy.Expr)):
             ordered_args[name] = 2
         elif isinstance(a, (FakeTensor, torch._inductor.ir.TensorBox)):
             with torch._C._DisableTorchDispatch():

@@ -803,8 +803,8 @@ def forward(self, x_1, output_1):
         @torch.compile
         def f(x):
             for _ in range(4):
-                # The output of one mul2 kernel is the input to the next mul2 kernel,
-                # but at some point we should start re-using buffers not allocate new buffers.
+                # The output of one kernel is the input to the next kernel, but
+                # at some point we should re-use buffers not allocate new ones.
                 x = _mul2(x)
             return x + 1
 
