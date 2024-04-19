@@ -9,12 +9,12 @@
 #include <os/signpost.h>
 #include <os/log.h>
 
+#include <atomic>
+#include <ctime>
 #include <sstream>
 #include <string>
-#include <atomic>
 #include <unordered_map>
 #include <utility>
-#include <ctime>
 
 namespace at::mps {
 
@@ -296,7 +296,7 @@ public:
   // during runtime (instead of environment variables).
   // The "mode" could be either "interval", "event", or both "interval,event"
   // for interval-based and/or event-based signpost tracing.
-  void StartTrace(const string& mode, bool waitUntilCompleted);
+  void StartTrace(const std::string& mode, bool waitUntilCompleted);
   void StopTrace();
 
   // convenience functions to indicate whether signpost tracing or
