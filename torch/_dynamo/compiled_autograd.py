@@ -207,7 +207,10 @@ class AutogradCompilerInstance:
             "compiled_autograd_graph",
             payload_fn=lambda: graph.print_readable(print_output=False),
         )
-        return self.compiler_fn(graph)
+
+        # Fix for test_module_backward_hooks_eager
+        with torch._dynamo.trace_rules.dont_wrap_top_module():
+            return self.compiler_fn(graph)
 
     def reorder_accumulate_grad_nodes(self):
         """
