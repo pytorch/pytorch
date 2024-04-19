@@ -99,6 +99,10 @@ pattern_matcher = True
 post_grad_custom_pre_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 post_grad_custom_post_pass: Optional[Callable[[torch.fx.graph.Graph], None]] = None
 
+# Registers a custom joint graph pass.
+joint_custom_pre_pass: Optional[Callable[[torch.fx.Graph], None]] = None
+joint_custom_post_pass: Optional[Callable[[torch.fx.Graph], None]] = None
+
 # Registers a custom pregrad pass. Note that the pre-grad IR is 1.
 # non-functional, 2. non-normalized, and 3. prone to change. Ideally we should
 # use post-grad passes.
