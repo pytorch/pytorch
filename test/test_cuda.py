@@ -1340,9 +1340,9 @@ torch.cuda.synchronize()
         if add_kwargs is None:
             add_kwargs = {}
         fast_dtype = torch.bfloat16 if run_as_type == torch.bfloat16 else torch.float16
-        self.assertFalse(torch.is_autocast_enabled())
+        self.assertFalse(torch.is_autocast_enabled('cuda'))
         with torch.autocast('cuda', dtype=fast_dtype):
-            self.assertTrue(torch.is_autocast_enabled())
+            self.assertTrue(torch.is_autocast_enabled('cuda'))
 
             out_type = out_type if out_type is not None else run_as_type
             output = output_method = None
@@ -1385,7 +1385,7 @@ torch.cuda.synchronize()
             # as the C++-side autocasting, and should be bitwise accurate.
             output_to_compare = output if output is not None else output_method
             with torch.autocast('cuda', enabled=False):
-                self.assertFalse(torch.is_autocast_enabled())
+                self.assertFalse(torch.is_autocast_enabled('cuda'))
 
                 if module is not None and hasattr(module, op):
                     control = getattr(module, op)(*cast(args, run_as_type), **add_kwargs)
@@ -1394,8 +1394,8 @@ torch.cuda.synchronize()
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = compare(output_to_compare, control)
                 self.assertTrue(comparison, f"torch.{op} result did not match control")
-            self.assertTrue(torch.is_autocast_enabled())
-        self.assertFalse(torch.is_autocast_enabled())
+            self.assertTrue(torch.is_autocast_enabled('cuda'))
+        self.assertFalse(torch.is_autocast_enabled('cuda'))
 
     def args_maybe_kwargs(self, op_with_args):
         if len(op_with_args) == 2:
@@ -1543,14 +1543,14 @@ torch.cuda.synchronize()
             def forward(ctx, a, b):
                 self.assertTrue(a.dtype is torch.float32)
                 self.assertTrue(b.dtype is torch.float32)
-                self.assertTrue(torch.is_autocast_enabled())
+                self.assertTrue(torch.is_autocast_enabled('cuda'))
                 ctx.save_for_backward(a, b)
                 return a.mm(b)
 
             @staticmethod
             @torch.cuda.amp.custom_bwd
             def backward(ctx, grad):
-                self.assertTrue(torch.is_autocast_enabled())
+                self.assertTrue(torch.is_autocast_enabled('cuda'))
                 a, b = ctx.saved_tensors
                 a_grad, b_grad = grad.mm(b.t()), a.t().mm(grad)
                 self.assertTrue(a_grad.dtype is dtype and b_grad.dtype is dtype)
@@ -1577,14 +1577,14 @@ torch.cuda.synchronize()
                 b = container[1][0]
                 self.assertTrue(a.dtype is expect_type)
                 self.assertTrue(b.dtype is expect_type)
-                self.assertFalse(torch.is_autocast_enabled())
+                self.assertFalse(torch.is_autocast_enabled('cuda'))
                 ctx.save_for_backward(a, b)
                 return a.mm(b)
 
             @staticmethod
             @torch.cuda.amp.custom_bwd
             def backward(ctx, grad):
-                self.assertFalse(torch.is_autocast_enabled())
+                self.assertFalse(torch.is_autocast_enabled('cuda'))
                 a, b = ctx.saved_tensors
                 return grad.mm(b.t()), None, None
 

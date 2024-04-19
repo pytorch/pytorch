@@ -200,34 +200,15 @@ class autocast:
             return
         self.device = device_type
         self.custom_backend_name = torch._C._get_privateuse1_backend_name()
-        if self.device == "cuda":
-            self.fast_dtype = torch.get_autocast_gpu_dtype()
-        elif self.device == "cpu":
-            self.fast_dtype = torch.get_autocast_cpu_dtype()
-        elif self.device == "xpu":
-            self.fast_dtype = torch.xpu.get_autocast_xpu_dtype()  # type: ignore[attr-defined]
-        elif self.device == "ipu":
-            self.fast_dtype = torch.get_autocast_ipu_dtype()  # type: ignore[attr-defined]
-        elif self.device == "hpu":
-            self.fast_dtype = torch.hpu.get_autocast_hpu_dtype()  # type: ignore[attr-defined]
-        elif self.device == "xla":
-            self.fast_dtype = torch.get_autocast_xla_dtype()  # type: ignore[attr-defined]
-        elif self.device == self.custom_backend_name:
+        self.fast_dtype = torch.get_autocast_dtype(self.device)
+        if self.device == self.custom_backend_name:
             necessary_funcs = [
-                "is_autocast_enabled",
-                "set_autocast_enabled",
-                "get_autocast_dtype",
-                "set_autocast_dtype",
                 "get_amp_supported_dtype",
             ]
             message = f"Tried to use AMP with the `{self.custom_backend_name}` backend, but the backend has not "
             message += "registered a module or  the module miss some necessary funcs. The backend should register "
             message += "a module by `torch._register_device_module`, and the module must have these funcs: \n"
-            message += "`is_autocast_enabled() -> bool`, `set_autocast_enabled(bool) -> None`, "
-            message += "`get_autocast_dtype() -> torch.dtype`, `set_autocast_dtype(torch.dtype) "
-            message += (
-                "-> None` and `get_amp_supported_dtype() -> List[torch.dtype]`. \n"
-            )
+            message += "`get_amp_supported_dtype() -> List[torch.dtype]`. \n"
 
             assert hasattr(torch, self.custom_backend_name), message
             self.custom_device_mod = getattr(torch, self.custom_backend_name)
@@ -236,11 +217,6 @@ class autocast:
                     message + f"But the func `{func}` is missing. \n"
                 )
 
-            self.fast_dtype = self.custom_device_mod.get_autocast_dtype()
-        else:
-            raise RuntimeError(
-                f"User specified an unsupported autocast device_type '{self.device}'"
-            )
         self._cache_enabled = torch.is_autocast_cache_enabled()
         if (
             enabled
@@ -323,48 +299,11 @@ class autocast:
             return self
 
         self.prev_cache_enabled = torch.is_autocast_cache_enabled()
-        if self.device == "cpu":
-            self.prev = torch.is_autocast_cpu_enabled()
-            self.prev_fastdtype = torch.get_autocast_cpu_dtype()
-            torch.set_autocast_cpu_enabled(self._enabled)
-            torch.set_autocast_cpu_dtype(self.fast_dtype)  # type: ignore[arg-type]
-            torch.autocast_increment_nesting()
-        elif self.device == "xpu":
-            self.prev = torch.xpu.is_autocast_xpu_enabled()  # type: ignore[attr-defined]
-            self.prev_fastdtype = torch.xpu.get_autocast_xpu_dtype()  # type: ignore[attr-defined]
-            torch.xpu.set_autocast_xpu_enabled(self._enabled)  # type: ignore[attr-defined]
-            torch.xpu.set_autocast_xpu_dtype(self.fast_dtype)  # type: ignore[attr-defined]
-            torch.autocast_increment_nesting()
-        elif self.device == "ipu":
-            self.prev = torch.is_autocast_ipu_enabled()  # type: ignore[attr-defined]
-            self.prev_fastdtype = torch.get_autocast_ipu_dtype()  # type: ignore[attr-defined]
-            torch.set_autocast_ipu_enabled(self._enabled)  # type: ignore[attr-defined]
-            torch.set_autocast_ipu_dtype(self.fast_dtype)  # type: ignore[attr-defined]
-            torch.autocast_increment_nesting()
-        elif self.device == "hpu":
-            self.prev = torch.hpu.is_autocast_hpu_enabled()  # type: ignore[attr-defined]
-            self.prev_fastdtype = torch.hpu.get_autocast_hpu_dtype()  # type: ignore[attr-defined]
-            torch.hpu.set_autocast_hpu_enabled(self._enabled)  # type: ignore[attr-defined]
-            torch.hpu.set_autocast_hpu_dtype(self.fast_dtype)  # type: ignore[attr-defined]
-            torch.autocast_increment_nesting()
-        elif self.device == "xla":
-            self.prev = torch.is_autocast_xla_enabled()  # type: ignore[attr-defined]
-            self.prev_fastdtype = torch.get_autocast_xla_dtype()  # type: ignore[attr-defined]
-            torch.set_autocast_xla_enabled(self._enabled)  # type: ignore[attr-defined]
-            torch.set_autocast_xla_dtype(self.fast_dtype)  # type: ignore[attr-defined]
-            torch.autocast_increment_nesting()
-        elif self.device == self.custom_backend_name:
-            self.prev = self.custom_device_mod.is_autocast_enabled()
-            self.prev_fastdtype = self.custom_device_mod.get_autocast_dtype()
-            self.custom_device_mod.set_autocast_enabled(self._enabled)
-            self.custom_device_mod.set_autocast_dtype(self.fast_dtype)
-            torch.autocast_increment_nesting()
-        else:
-            self.prev = torch.is_autocast_enabled()
-            self.prev_fastdtype = torch.get_autocast_gpu_dtype()
-            torch.set_autocast_gpu_dtype(self.fast_dtype)  # type: ignore[arg-type]
-            torch.set_autocast_enabled(self._enabled)
-            torch.autocast_increment_nesting()
+        self.prev = torch.is_autocast_enabled(self.device)
+        self.prev_fastdtype = torch.get_autocast_dtype(self.device)
+        torch.set_autocast_enabled(self.device, self._enabled)
+        torch.set_autocast_dtype(self.device, self.fast_dtype)
+        torch.autocast_increment_nesting()
         torch.set_autocast_cache_enabled(self._cache_enabled)
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
@@ -372,41 +311,10 @@ class autocast:
             return
 
         # Drop the cache when we exit to a nesting level that's outside any instance of autocast.
-        if self.device == "cpu":
-            if torch.autocast_decrement_nesting() == 0:
-                torch.clear_autocast_cache()
-            torch.set_autocast_cpu_enabled(self.prev)
-            torch.set_autocast_cpu_dtype(self.prev_fastdtype)
-        elif self.device == "xpu":
-            if torch.autocast_decrement_nesting() == 0:
-                torch.clear_autocast_cache()
-            torch.xpu.set_autocast_xpu_enabled(self.prev)  # type: ignore[attr-defined]
-            torch.xpu.set_autocast_xpu_dtype(self.prev_fastdtype)  # type: ignore[attr-defined]
-        elif self.device == "ipu":
-            if torch.autocast_decrement_nesting() == 0:
-                torch.clear_autocast_cache()
-            torch.set_autocast_ipu_enabled(self.prev)  # type: ignore[attr-defined]
-            torch.set_autocast_ipu_dtype(self.prev_fastdtype)  # type: ignore[attr-defined]
-        elif self.device == "hpu":
-            if torch.autocast_decrement_nesting() == 0:
-                torch.clear_autocast_cache()
-            torch.hpu.set_autocast_hpu_enabled(self.prev)  # type: ignore[attr-defined]
-            torch.hpu.set_autocast_hpu_dtype(self.prev_fastdtype)  # type: ignore[attr-defined]
-        elif self.device == "xla":
-            if torch.autocast_decrement_nesting() == 0:
-                torch.clear_autocast_cache()
-            torch.set_autocast_xla_enabled(self.prev)  # type: ignore[attr-defined]
-            torch.set_autocast_xla_dtype(self.prev_fastdtype)  # type: ignore[attr-defined]
-        elif self.device == self.custom_backend_name:
-            if torch.autocast_decrement_nesting() == 0:
-                torch.clear_autocast_cache()
-            self.custom_device_mod.set_autocast_enabled(self.prev)
-            self.custom_device_mod.set_autocast_dtype(self.prev_fastdtype)
-        else:
-            if torch.autocast_decrement_nesting() == 0:
-                torch.clear_autocast_cache()
-            torch.set_autocast_enabled(self.prev)
-            torch.set_autocast_gpu_dtype(self.prev_fastdtype)
+        if torch.autocast_decrement_nesting() == 0:
+            torch.clear_autocast_cache()
+        torch.set_autocast_enabled(self.device, self.prev)
+        torch.set_autocast_dtype(self.device, self.prev_fastdtype)
         torch.set_autocast_cache_enabled(self.prev_cache_enabled)
         return False
 

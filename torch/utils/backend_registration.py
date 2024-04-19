@@ -32,20 +32,6 @@ def rename_privateuse1_backend(backend_name: str) -> None:
     (1) ``get_amp_supported_dtype() -> List[torch.dtype]``
         get the supported dtypes on your "foo" device in AMP, maybe the "foo" device supports one more dtype.
 
-    (2) ``is_autocast_enabled() -> bool``
-        check the AMP is enabled or not on your "foo" device.
-
-    (3) ``get_autocast_dtype() -> torch.dtype``
-        get the supported dtype on your "foo" device in AMP, which is set by ``set_autocast_dtype`` or the
-        default dtype, and the default dtype is ``torch.float16``.
-
-    (4) ``set_autocast_enabled(bool) -> None``
-        enable the AMP or not on your "foo" device.
-
-    (5) ``set_autocast_dtype(dtype) -> None``
-        set the supported dtype on your "foo" device in AMP, and the dtype be contained in the dtypes got
-        from ``get_amp_supported_dtype``.
-
     Note(random): If you want to support to set seed for your device, BackendModule needs to have the following API's:
 
     (1) ``_is_in_bad_fork() -> bool``

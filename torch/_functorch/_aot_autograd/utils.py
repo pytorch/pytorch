@@ -77,10 +77,10 @@ def normalize_as_list(x):
 
 def _get_autocast_states():
     return [
-        torch.is_autocast_enabled(),
-        torch.is_autocast_cpu_enabled(),
-        torch.get_autocast_gpu_dtype(),
-        torch.get_autocast_cpu_dtype(),
+        torch.is_autocast_enabled("cuda"),
+        torch.is_autocast_enabled("cpu"),
+        torch.get_autocast_dtype("cuda"),
+        torch.get_autocast_dtype("cpu"),
         torch.is_autocast_cache_enabled(),
     ]
 

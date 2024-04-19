@@ -191,7 +191,7 @@ mod = Repro()
 if __name__ == '__main__':
     from torch._dynamo.repro.after_dynamo import run_repro
     run_repro(mod, load_args, accuracy={check_accuracy!r}, command={command!r},
-        save_dir={save_dir!r}, autocast={torch.is_autocast_enabled()!r}, backend={compiler_name!r})
+        save_dir={save_dir!r}, autocast={torch.is_autocast_enabled('cuda')!r}, backend={compiler_name!r})
 """
     )
 

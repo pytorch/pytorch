@@ -53,7 +53,7 @@ def parallel_apply(
     streams = [torch.cuda.current_stream(x) for x in devices]
     lock = threading.Lock()
     results = {}
-    grad_enabled, autocast_enabled = torch.is_grad_enabled(), torch.is_autocast_enabled()
+    grad_enabled, autocast_enabled = torch.is_grad_enabled(), torch.is_autocast_enabled('cuda')
 
     def _worker(
         i: int,

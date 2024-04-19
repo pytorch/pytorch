@@ -82,7 +82,7 @@ def batch_norm(
     cudnn_enabled,
 ):
     if (
-        torch.is_autocast_enabled()
+        torch.is_autocast_enabled("cuda")
         and not symbolic_helper.args_have_same_dtype(
             [input, weight, bias, running_mean, running_var]
         )
