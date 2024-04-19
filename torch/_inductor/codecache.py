@@ -943,8 +943,9 @@ class CompiledFxGraph:
     ):
         self.current_callable = current_callable
         self.cache_key = graph.cache_key
-        with open(graph.cache_path) as f:
-            self.source_code = f.read()
+        if graph.cache_path:
+            with open(graph.cache_path) as f:
+                self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
         self.device_types = graph.device_types
         self.device_idxs = graph.device_idxs
