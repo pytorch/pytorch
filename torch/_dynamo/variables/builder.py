@@ -2050,8 +2050,7 @@ class SourcelessBuilder:
 
     @staticmethod
     def create(tx, value) -> VariableTracker:
-        value_type = type(value)
-        fast_handler = SourcelessBuilder._type_handlers.get(value_type)
+        fast_handler = SourcelessBuilder._type_handlers.get(type(value))
         if fast_handler:
             return fast_handler(tx, value)
 
@@ -2078,9 +2077,7 @@ class SourcelessBuilder:
             return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
-        unimplemented(
-            f"Unexpected type in sourceless builder {value_type.__module__}.{value_type.__qualname__}"
-        )
+        unimplemented(f"Unexpected type in sourceless builder {type(value)}")
 
     @staticmethod
     def wrap_constant_literal(value):
@@ -2111,7 +2108,6 @@ class SourcelessBuilder:
         )
         handlers[immutable_dict] = handlers[dict]
         handlers[immutable_list] = handlers[list]
-        handlers[types.ModuleType] = lambda tx, value: PythonModuleVariable(value)
 
         def passthrough(tx, value):
             return value

@@ -283,7 +283,7 @@ void test_aoti_double_buffering_with_tensor_constants() {
 } // namespace
 
 namespace torch {
-namespace aot_inductor {
+namespace inductor {
 
 TEST(AotInductorTest, BasicTestCpu) {
   test_aoti("cpu", false);
@@ -324,5 +324,5 @@ TEST(AotInductorTest, UpdateInactiveConstantsWithTensorConstantsCuda) {
 }
 #endif
 
-} // namespace aot_inductor
+} // namespace inductor
 } // namespace torch

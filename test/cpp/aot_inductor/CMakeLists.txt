@@ -1,5 +1,5 @@
 
-set(AOT_INDUCTOR_TEST_ROOT ${TORCH_ROOT}/test/cpp/aoti_inference)
+set(AOT_INDUCTOR_TEST_ROOT ${TORCH_ROOT}/test/cpp/aot_inductor)
 
 # Build custom TorchScript op for AOTInductor
 add_library(aoti_custom_class SHARED aoti_custom_class.cpp)
@@ -31,7 +31,7 @@ set(INDUCTOR_TEST_SRCS
   ${AOT_INDUCTOR_TEST_ROOT}/test.cpp
 )
 
-add_executable(test_aoti_inference
+add_executable(test_aot_inductor
   ${TORCH_ROOT}/test/cpp/common/main.cpp
   ${INDUCTOR_TEST_SRCS}
   data.pt
@@ -39,10 +39,10 @@ add_executable(test_aoti_inference
   script_model_cpu.pt
   script_model_cuda.pt
 )
-add_dependencies(test_aoti_inference aoti_custom_class aoti_script_model)
+add_dependencies(test_aot_inductor aoti_custom_class aoti_script_model)
 
 # TODO temporary until we can delete the old gtest polyfills.
-target_compile_definitions(test_aoti_inference PRIVATE USE_GTEST)
+target_compile_definitions(test_aot_inductor PRIVATE USE_GTEST)
 
 # Define a custom command to generate the library
 add_custom_command(
@@ -51,24 +51,24 @@ add_custom_command(
         DEPENDS ${AOT_INDUCTOR_TEST_ROOT}/test.py
 )
 
-target_link_libraries(test_aoti_inference PRIVATE
+target_link_libraries(test_aot_inductor PRIVATE
   torch
   gtest
   -Wl,--no-as-needed aoti_custom_class
 )
 
 if(USE_CUDA)
-  target_include_directories(test_aoti_inference PRIVATE ${ATen_CUDA_INCLUDE})
-  target_compile_definitions(test_aoti_inference PRIVATE USE_CUDA)
+  target_include_directories(test_aot_inductor PRIVATE ${ATen_CUDA_INCLUDE})
+  target_compile_definitions(test_aot_inductor PRIVATE USE_CUDA)
 endif()
-target_compile_definitions(test_aoti_inference PRIVATE
+target_compile_definitions(test_aot_inductor PRIVATE
     CMAKE_CURRENT_BINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
 )
 
 if(INSTALL_TEST)
-  install(TARGETS test_aoti_inference DESTINATION bin)
+  install(TARGETS test_aot_inductor DESTINATION bin)
   # Install PDB files for MSVC builds
   if(MSVC AND BUILD_SHARED_LIBS)
-    install(FILES $<TARGET_PDB_FILE:test_aoti_inference> DESTINATION bin OPTIONAL)
+    install(FILES $<TARGET_PDB_FILE:test_aot_inductor> DESTINATION bin OPTIONAL)
   endif()
 endif()
