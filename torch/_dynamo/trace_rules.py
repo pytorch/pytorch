@@ -3063,7 +3063,7 @@ def is_callable_disallowed(obj) -> bool:
 
 def is_forbidden(obj) -> bool:
     _maybe_init_lazy_module(obj)
-    return getattr(obj, "_dynamo_forbidden", False)
+    return inspect.getattr_static(obj, "_dynamo_forbidden", False)
 
 
 def is_builtin_callable(obj) -> bool:
