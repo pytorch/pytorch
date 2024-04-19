@@ -801,7 +801,7 @@ class CachingAutotuner(KernelInterface):
                 args,
                 {
                     "kernel_file": self.filename,
-                    "kernel_type": "triton",
+                    "kernel_backend": "triton",
                     "grid": grid_info,
                     "stream": stream,
                 },
@@ -979,10 +979,8 @@ def should_use_remote_autotune_cache():
 
     from triton.runtime.fb_memcache import MEMCACHE_VERSION
 
-    return torch._utils_internal.justknobs_check(
-        "pytorch/autotune_remote_cache:enable"
-    ) or MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
-        "pytorch/autotune_remote_cache:memcache_version"
+    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:autotune_memcache_version"
     )
 
 
