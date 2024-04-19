@@ -1040,6 +1040,7 @@ class NumpyNdarrayVariable(TensorVariable):
 
         from ..utils import numpy_attr_wrapper
         from .builder import wrap_fx_proxy
+        from .misc import NumpyDTypeVariable
 
         result = None
 
@@ -1086,6 +1087,8 @@ class NumpyNdarrayVariable(TensorVariable):
             if not has_free_symbols(r := example_ndarray.size):
                 return ConstantVariable.create(int(r))
             return insert_into_graph()
+        if name == "dtype":
+            return NumpyDTypeVariable(example_ndarray.dtype)
         elif name in ["base", "flags", "dtype"]:
             unimplemented(f"TODO: add support for ndarray.{name}")
         elif name in ["__version__"]:

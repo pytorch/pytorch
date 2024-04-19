@@ -1534,6 +1534,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         return np.full_like(x, 2.4, dtype=dt)
 
     @make_test
+    def test_numpy_dtype_attr(x):
+        return np.ones_like(x).dtype == x.dtype
+
+    @make_test
     def test_numpy_linalg(x):
         return np.linalg.norm(x.numpy(), axis=0)
 

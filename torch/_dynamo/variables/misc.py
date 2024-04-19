@@ -1097,6 +1097,11 @@ class NumpyTypeInfoVariable(ConstantLikeVariable):
 class NumpyDTypeVariable(ConstantLikeVariable):
     _error_prefix = "np.dtype[...]"
 
+    def __init__(self, value, **kwargs):
+        if isinstance(value, tnp.DType):
+            value = ConstantLikeVariable.np_dtype(value.name)
+        super().__init__(value, **kwargs)
+
     def as_proxy(self):
         """Similar to how numpy dtype descriptors (e.g. np.float32 ) are handled by NumpyVariable:
 
