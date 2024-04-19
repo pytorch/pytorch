@@ -46,7 +46,6 @@ def reconstruct_node_meta_data(module_vt, tx, num_nodes_need_update_metadata):
             # below logic to get a unique name for source_fn_stack is mimic from
             # the _Namespace.create_name() which is used to get a unique name for
             # the fx node.
-            breakpoint()
             if tx.output.current_tracer not in tx.tracer_to_used_names.keys():
                 # TODO(JackCaoG): use weakref here?
                 tx.tracer_to_used_names[tx.output.current_tracer] = {}
