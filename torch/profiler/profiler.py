@@ -13,7 +13,6 @@ from typing_extensions import Self
 
 import torch
 import torch.autograd.profiler as prof
-from torch._C import _get_privateuse1_backend_name
 from torch._C._profiler import (
     _add_execution_trace_observer,
     _disable_execution_trace_observer,
@@ -72,8 +71,10 @@ class _KinetoProfile:
 
     Args:
         activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
-            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
-            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``,
+            ``torch.profiler.ProfilerActivity.XPU``.
+            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
+            or (when available) ProfilerActivity.XPU.
         record_shapes (bool): save information about operator's input shapes.
         profile_memory (bool): track tensor memory allocation/deallocation (see ``export_memory_timeline``
             for more details).
@@ -126,9 +127,13 @@ class _KinetoProfile:
         self.profiler: Optional[prof.profile] = None
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
-        privateuse1_backend = _get_privateuse1_backend_name()
-        if privateuse1_backend != "privateuseone":
-            self.use_device = privateuse1_backend
+        if ProfilerActivity.CUDA in self.activities:
+            self.use_device = "cuda"
+        elif ProfilerActivity.XPU in self.activities:
+            self.use_device = "xpu"
+        else:
+            self.use_device = "privateuseone"
+
         # user-defined metadata to be amended to the trace
         self.preset_metadata: Dict[str, str] = dict()
 
@@ -144,7 +149,7 @@ class _KinetoProfile:
             use_cuda=(ProfilerActivity.CUDA in self.activities),
             use_cpu=(ProfilerActivity.CPU in self.activities),
             use_mtia=(ProfilerActivity.MTIA in self.activities),
-            use_device=None,
+            use_device=self.use_device,
             record_shapes=self.record_shapes,
             with_flops=self.with_flops,
             profile_memory=self.profile_memory,
@@ -444,8 +449,10 @@ class profile(_KinetoProfile):
 
     Args:
         activities (iterable): list of activity groups (CPU, CUDA) to use in profiling, supported values:
-            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``.
-            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA.
+            ``torch.profiler.ProfilerActivity.CPU``, ``torch.profiler.ProfilerActivity.CUDA``,
+            ``torch.profiler.ProfilerActivity.XPU``.
+            Default value: ProfilerActivity.CPU and (when available) ProfilerActivity.CUDA
+            or (when available) ProfilerActivity.XPU.
         schedule (Callable): callable that takes step (int) as a single parameter and returns
             ``ProfilerAction`` value that specifies the profiler action to perform at each step.
         on_trace_ready (Callable): callable that is called at each step when ``schedule``
