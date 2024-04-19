@@ -488,10 +488,12 @@ static PyObject* set_autocast_enabled(
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent BC-breaking changes.
   at::DeviceType device_type = at::kCUDA;
+  int enabled_id = 0;
   if (r.idx == 0) {
     device_type = at::Device(r.string(0)).type();
+    enabled_id = 1;
   }
-  auto enabled = r.toBool(1);
+  auto enabled = r.toBool(enabled_id);
   at::autocast::set_autocast_enabled(device_type, enabled);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
