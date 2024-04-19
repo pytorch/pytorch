@@ -638,6 +638,9 @@ class InstructionTranslatorBase(
     current_speculation: Optional[SpeculationEntry]
     dispatch_table: List[Any]
     exec_recorder: Optional[ExecutionRecorder]
+    tracer_to_used_names: dict[
+        torch._dynamo.output_graph.SubgraphTracer, dict[str, int]
+    ] = {}
 
     def mark_inconsistent_side_effects(self):
         """
@@ -2537,9 +2540,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         self.symbolic_result = None
         self.closure_cells = closure_cells
         self.nn_module_stack = parent.nn_module_stack.copy()
-        self.tracer_to_used_names: dict[
-            torch._dynamo.output_graph.SubgraphTracer, dict[str, int]
-        ] = {}
 
     @property
     def fake_mode(self):
