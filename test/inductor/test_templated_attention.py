@@ -224,6 +224,8 @@ class TestTemplatedSDPA(InductorTestCase):
         # x_ref      = ∑_i e^(scores[i])
         # x_compiled = ∑_i 2^(log2(e) * scores[i])
 
+        self.assertTrue(ref_lse.dtype == torch.float32)
+        self.assertTrue(compiled_lse.dtype == torch.float32)
         ref_lse = ref_lse * torch.log2(torch.tensor(torch.e))
 
         tolerance = Tolerances(atol=2e-2, rtol=2e-2)

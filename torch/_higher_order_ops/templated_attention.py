@@ -73,7 +73,7 @@ def math_attention(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None) + in_dim_buffers)
 
-    scores = score_mod(scores, b, h, m, n, *other_buffers)
+    scores = score_mod(scores, b, h, m, n, *other_buffers).to(torch.float32)
 
     # Logsumexp of the scores is needed for the backward pass
     # TODO For now lets just unconditionally return the logsumexp, we can optimize this later
@@ -82,7 +82,7 @@ def math_attention(
 
     scores = scores.softmax(dim=-1)
 
-    return scores @ value, logsumexp
+    return scores.to(query.dtype) @ value, logsumexp
 
 
 @templated_attention.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -215,5 +215,7 @@ def templated_attention_fake_tensor_mode(
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     with mode:
         batch_size, num_heads, seq_len_q, _ = query.shape
-        logsumexp = query.new_empty(batch_size, num_heads, seq_len_q)
+        logsumexp = query.new_empty(
+            batch_size, num_heads, seq_len_q, dtype=torch.float32
+        )
         return torch.empty_like(query, memory_format=torch.contiguous_format), logsumexp

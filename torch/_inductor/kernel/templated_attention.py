@@ -206,10 +206,10 @@ def templated_attention(*args, **kwargs):
         create_placeholder(name, dtype)
         for name, dtype in [
             ("score", query.get_dtype()),
-            ("b", torch.int64),
-            ("h", torch.int64),
-            ("m", torch.int64),
-            ("n", torch.int64),
+            ("b", torch.int32),
+            ("h", torch.int32),
+            ("m", torch.int32),
+            ("n", torch.int32),
         ]
     ]
     for node in subgraph.graph_module.graph.nodes:
@@ -263,7 +263,7 @@ def templated_attention(*args, **kwargs):
             logsumexp = empty_strided(
                 logsumexp_shape,
                 None,
-                dtype=query.get_dtype(),
+                dtype=torch.float32,  # The logsumexp is always stored in fp32 regardless of the input dtype
                 device=output_buffer.get_device(),
             )
             choices: List[Any] = []
