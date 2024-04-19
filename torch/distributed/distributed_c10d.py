@@ -1400,7 +1400,7 @@ def _get_split_source(pg):
 
     # If necessary, find a backend to split from by peeling process
     # group wrappers from our potentially wrapped process group.
-    while isinstance(split_from, _ProcessGroupWrapper):
+    while _GLOO_AVAILABLE and isinstance(split_from, _ProcessGroupWrapper):
         split_from = split_from.wrapped_pg
 
     return split_from
@@ -3795,6 +3795,8 @@ def _create_process_group_wrapper(
     world_size: int,
     timeout: timedelta = default_pg_timeout,
 ):
+    assert _GLOO_AVAILABLE, "ProcessGroupWrapper unsupported without GLOO backend."
+
     # (whc) this appears to be just for the gloo backend? if so, `default_pg_timeout` is appropriate...
 
     # Create a separate prefix store for the helper process group.
