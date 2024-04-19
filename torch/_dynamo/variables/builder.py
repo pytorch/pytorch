@@ -590,7 +590,6 @@ class VariableBuilder:
         elif is_numpy_type_info(value):
             self.install_guards(GuardBuilder.ID_MATCH)
             return NumpyTypeInfoVariable(value, source=self.source)
-            return NumpyVariable.build_info_variable(value)
         # NB: These can't be put in type_dispatch, they have to run later
         elif CollectiveFunctionRewriteVariable.can_rewrite(value):
             self.install_guards(GuardBuilder.FUNCTION_MATCH)
