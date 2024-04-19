@@ -771,15 +771,16 @@ def _process_dynamic_shapes(
 
     if isinstance(f, ExportedProgram):
         f = f.module()
-    signature = (
-        inspect.signature(f.forward)
-        if isinstance(f, torch.nn.Module)
-        else inspect.signature(f)
-    )
-    combined_args = signature.bind(*args, **kwargs).arguments
+    # signature = (
+    #     inspect.signature(f.forward)
+    #     if isinstance(f, torch.nn.Module)
+    #     else inspect.signature(f)
+    # )
+    # combined_args = signature.bind(*args, **kwargs).arguments
+    combined_args = args
 
     # This means user didn't specify dynamic shapes with argument names.
-    combined_args = combined_args if isinstance(dynamic_shapes, Mapping) else list(combined_args.values())  # type: ignore[assignment]
+    combined_args = combined_args if isinstance(dynamic_shapes, Mapping) else list(combined_args)  # type: ignore[assignment]
     for tensor, shape in tree_zip(combined_args, dynamic_shapes):
         update_symbols(tensor, shape)
 
