@@ -1158,10 +1158,22 @@ def _check_is_size(i, message=None):
     to infer the size from context, or if you should wrap-around or truncate).
     Only use this if the only valid value is an honest to goodness size.
     """
+    from torch.fx.experimental.sym_node import SymNode
+    import sympy
+    is_sym = isinstance(i, SymInt) and isinstance(i.node, SymNode) and isinstance(i.node.expr, sympy.Symbol)
+    if is_sym:
+        if i.node.expr in i.node.shape_env.check_is_size_called:
+            return
+
+
     # This is responsible for the expect_true
     _check(i >= 0, message)
     from torch.fx.experimental.symbolic_shapes import _advise_is_size
     _advise_is_size(i)
+
+    if is_sym:
+        i.node.shape_env.check_is_size_called.add(i.node.expr)
+
 
 def _check_index(cond, message=None):  # noqa: F811
     r"""Throws error containing an optional message if the specified condition
