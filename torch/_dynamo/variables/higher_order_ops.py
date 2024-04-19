@@ -1424,6 +1424,10 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
         # Norm_kwargs contains the score_function and we dont want to proxy this because
         # Proxying user defined functions is not supported.
         inp_args, _ = proxy_args_kwargs(proxied_args, {})
+
+        # Why is this here? Unlike other HOPs, the subgrpah's output for this hop is unrelated
+        # to what the overall HOP returns, we create the correct output proxy by calling the
+        # hop (self.value) with the example values.
         with torch._guards.TracingContext.try_get().fake_mode:
             example_args = pytree.tree_map_only(
                 torch.fx.Proxy, lambda a: a.node.meta["example_value"], inp_args

@@ -37,6 +37,7 @@ sdpa_template = TritonTemplate(
     # change of base out of the loop
     # ROWS_GUARANTEED_SAFE: Is it guaranteed that at least one value in each row
     # is not masked out? If so, we can skip an extra safety check
+    # OUTPUT_LOGSUMEXP: We only need to store the logsumexp if we require grad
 
     # Define Q Strides
     stride_qz = {{stride("Q", 0)}}
@@ -161,9 +162,10 @@ sdpa_template = TritonTemplate(
     {{store_output(("idx_z", "idx_h", "idx_m", "idx_d"), "acc")}}
 
     # TODO dont want to write this if we dont require grad
-    l_ptrs = LSE + off_hz * N_CTX + offs_m
-    lse = m_i + tl.math.log2(l_i)
-    tl.store(l_ptrs, lse)
+    if OUTPUT_LOGSUMEXP:
+        l_ptrs = LSE + off_hz * N_CTX + offs_m
+        lse = m_i + tl.math.log2(l_i)
+        tl.store(l_ptrs, lse)
  """,
 )
 
@@ -294,6 +296,7 @@ def templated_attention(*args, **kwargs):
                     # For now, we always assume the "sound" option
                     SCORE_MOD_IS_LINEAR=False,
                     ROWS_GUARANTEED_SAFE=False,
+                    OUTPUT_LOGSUMEXP=True,
                 )
             return (
                 autotune_select_algorithm(

@@ -75,8 +75,7 @@ def math_attention(
 
     scores = score_mod(scores, b, h, m, n, *other_buffers).to(torch.float32)
 
-    # Logsumexp of the scores is needed for the backward pass
-    # TODO For now lets just unconditionally return the logsumexp, we can optimize this later
+    # TODO Unconditionally return logsumexp for backwards
     # if any(t.requires_grad for t in (query, key, value)):
     logsumexp = scores.logsumexp(dim=-1)
 
