@@ -292,8 +292,16 @@ class CKTemplate(CUDATemplate):
 
                 using PassThrough = ck::tensor_operation::element_wise::PassThrough;
 
+                // see "composable_kernel/include/ck/utility/data_type.hpp"
+                using F8  = ck::f8_t;
                 using F16 = ck::half_t;
                 using F32 = float;
+                // using F64 = double;
+                // using BF16 = ck::bhalf_t;
+                // using BF8 = ck::bf8_t;
+                // using I32 = int32_t;
+                // using I8 = int8_t;
+                // using I4 = ck::int4_t;
 
                 #if DEBUG_LOG
                 static constexpr auto kDEBUG_LOG = 1;
