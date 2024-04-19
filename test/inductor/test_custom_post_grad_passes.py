@@ -127,8 +127,20 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             x1 = self.conv(x)
             return x1.relu()
 
-    def test_custom_joint_pass(self):
+    def test_custom_joint_pass_pre(self):
         with config.patch(joint_custom_pre_pass=change_cos_pass):
+
+            def g(x):
+                return x.sin().sin().sin()
+
+            def f(x):
+                return x.cos().cos().cos()
+
+            x = torch.randn(8, dtype=torch.float32)
+            torch.testing.assert_close(torch.compile(f)(x), g(x))
+
+    def test_custom_joint_pass_post(self):
+        with config.patch(joint_custom_post_pass=change_cos_pass):
 
             def g(x):
                 return x.sin().sin().sin()
