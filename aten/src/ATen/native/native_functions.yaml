@@ -1860,6 +1860,9 @@
 
 # To pass the check in `add_generated_native_functions`,
 # param `reserve` is set as a placeholder, just passing an empty tensor for it.
+# usage: 
+# auto reserve = torch::empty({0}, torch::device(torch::kCUDA));
+# at::native::cudnn_batch_norm_out(..., epsilon, output, save_mean, save_var, reserve);
 - func: cudnn_batch_norm.out(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, float exponential_average_factor, float epsilon, *, Tensor(a!) out, Tensor(b!) save_mean, Tensor(c!) save_var, Tensor(d!) reserve) -> (Tensor(a!), Tensor(b!), Tensor(c!), Tensor(d!))
   dispatch:
     CUDA: cudnn_batch_norm_out
