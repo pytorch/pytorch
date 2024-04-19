@@ -15517,6 +15517,7 @@
   # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
   variants: function
   dispatch:
+    CPU: _fused_adam_kernel_cpu_
     CUDA: _fused_adam_kernel_cuda_
   autogen: _fused_adam, _fused_adam.out
 
@@ -15526,6 +15527,7 @@
   device_check: NoCheck
   variants: function
   dispatch:
+    CPU: _fused_adam_kernel_cpu_
     CUDA: _fused_adam_kernel_cuda_
   autogen: _fused_adam.tensor_lr, _fused_adam.tensor_lr_out
 
@@ -15533,6 +15535,7 @@
   # Unlike "foreach" functions, lists of tensors should be guaranteed to be on the same device (for now).
   variants: function
   dispatch:
+    CPU: _fused_adamw_kernel_cpu_
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw, _fused_adamw.out
 
@@ -15542,6 +15545,7 @@
   device_check: NoCheck
   variants: function
   dispatch:
+    CPU: _fused_adamw_kernel_cpu_
     CUDA: _fused_adamw_kernel_cuda_
   autogen: _fused_adamw.tensor_lr, _fused_adamw.tensor_lr_out
 
