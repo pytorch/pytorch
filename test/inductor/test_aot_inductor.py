@@ -6,6 +6,7 @@ import tempfile
 import types
 import unittest
 from typing import Dict, Tuple
+from unittest import skip
 
 import torch
 import torch._inductor
@@ -396,6 +397,7 @@ class AOTInductorTestsTemplate:
         )
         self.check_model(Model(), example_inputs)
 
+    @skip("Test was marked as expected failure, but does not fail always anymore.")
     def test_dynamic_smem_above_default_limit(self):
         class Model(torch.nn.Module):
             def forward(self, x, y):
