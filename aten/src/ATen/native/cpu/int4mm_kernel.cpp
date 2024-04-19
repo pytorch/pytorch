@@ -280,7 +280,7 @@ inline void tinygemm_kernel(
         // when BLOCK_N = 32, handle each row at a time
         if constexpr (col == 0) {
           __m256i mask = _mm256_set1_epi32(0xF);
-          __m128i b4 = _mm_load_si128((__m128i*)(B + k * ldb));
+          __m128i b4 = _mm_loadu_si128((__m128i*)(B + k * ldb));
           if (k + PREFETCH_SIZE_K < K) {
             _mm_prefetch(B + (k + PREFETCH_SIZE_K) * ldb, _MM_HINT_T0);
           }
@@ -403,8 +403,7 @@ inline float convert_int4_to_float(uint8_t a, bool is_even) {
 
 // non-vectorized version
 template <int BLOCK_M, int BLOCK_N, typename T>
-inline
-std::enable_if_t<std::is_same_v<T, Half> || std::is_same_v<T, BFloat16>, void> tinygemm_kernel(
+inline void tinygemm_kernel(
     const T* RESTRICT A,
     const uint8_t* RESTRICT B,
     const T* RESTRICT ScaleAndZeros,
@@ -646,11 +645,13 @@ void int4pack_mm_kernel(
     int qGroupSize,
     const Tensor& qScaleAndZeros,
     int N, int K) {
- if (C.scalar_type() == kBFloat16) {
-   int4pack_mm_kernel_<BFloat16>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
- } else {
-   int4pack_mm_kernel_<Half>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
- }
+  if (C.scalar_type() == kBFloat16) {
+    int4pack_mm_kernel_<BFloat16>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
+  } else if (C.scalar_type() == kHalf) {
+    int4pack_mm_kernel_<Half>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
+  } else {
+    int4pack_mm_kernel_<float>(C, A, B, qGroupSize, qScaleAndZeros, N, K);
+  }
 }
 
 } // anonymous namespace

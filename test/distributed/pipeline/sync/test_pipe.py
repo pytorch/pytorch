@@ -231,7 +231,7 @@ def test_exception(setup_rpc):
 
     class Raise(nn.Module):
         def forward(self, *_):
-            raise ExpectedException()
+            raise ExpectedException
 
     model = nn.Sequential(Raise())
     model = Pipe(model, chunks=1)
@@ -265,7 +265,7 @@ def test_exception_early_stop_asap(setup_rpc):
 
     class Raise(nn.Module):
         def forward(self, x):
-            raise ExpectedException()
+            raise ExpectedException
 
     model = nn.Sequential(Pass(), Pass(), Counter(), Raise())
     model = Pipe(model, chunks=3)
