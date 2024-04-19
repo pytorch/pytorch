@@ -138,13 +138,17 @@ class OptimizedModule(torch.nn.Module):
     def _initialize(self):
         # Do this stuff in constructor to lower overhead slightly
 
-        if trace_rules.should_wrap_top_module():
+        if trace_rules.should_wrap_top_module() or (
+            isinstance(self._orig_mod.forward, types.MethodType)
+            and trace_rules.check(self._orig_mod.forward)
+        ):
+            # TODO(export-team) - the second part of the or condition is
+            # required for export tests. We should fix them and remove it.
             self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
         else:
             # Invoke hooks outside of dynamo then pickup the inner frame
-            # TODO(export-team) - This part is only run for export. Remove the
-            # if condition when export has made adjustments to account for
-            # wrapping top module.
+            # TODO(export-team/compiled-autograd) - This is because of test
+            # failures for export and compiled-autograd.
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
 
         if hasattr(self._orig_mod, "_initialize_hook"):
