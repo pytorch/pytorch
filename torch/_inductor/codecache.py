@@ -1098,7 +1098,7 @@ cdll.LoadLibrary("__lib_path__")
 
     @functools.lru_cache(None)
     def __bool__(self) -> bool:
-        from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppTorchOptions
+        from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
 
         if config.cpp.vec_isa_ok is not None:
             return config.cpp.vec_isa_ok
@@ -2085,7 +2085,7 @@ class CppCodeCache:
             "vec_isa": pick_vec_isa(),
         }
 
-        from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppTorchOptions
+        from torch._inductor.cpp_builder import CppBuilder, CppTorchOptions
 
         picked_vec_isa = pick_vec_isa()
         dummy_builder = CppBuilder("i", ["o"], CppTorchOptions(picked_vec_isa))
