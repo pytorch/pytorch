@@ -4663,26 +4663,14 @@ class UserDefinedTritonKernel(ExternKernel):
             arg for arg in kernel.arg_names if arg in kernel_args
         ]
 
-
         from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
 
-        def _to_real_values(v):
-            # Triton analysis pass wants concrete values like tensors or ints.
-            if isinstance(v, sympy.Expr):
-                return 2
-            elif isinstance(v, TensorBox):
-                return torch.empty(2, dtype=t.dtype)
-            return v
-
-        kwargs = {
-            k: _to_real_values(v)
-            for k, v in kernel_args.items()
-        }
         autotuned_kwargs = configs[0].kwargs if len(configs) > 0 else {}
-
         self.mutable_args = [
             kernel_args[key]
-            for key in identify_mutated_tensors(kernel, {**kwargs, **autotuned_kwargs})
+            for key in identify_mutated_tensors(
+                kernel, {**kernel_args, **autotuned_kwargs}
+            )
         ]
         mark_node_as_mutating(self, *self.mutable_args)
 
