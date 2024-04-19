@@ -60,7 +60,7 @@ def math_attention(
     """
     assert len(other_buffers) == 0, "Other buffers are not yet supported."
 
-    scores = query @ key.transpose(-2, -1)
+    scores = (query @ key.transpose(-2, -1)).to(dtype=torch.float32)
 
     b = torch.arange(0, scores.size(0), device=scores.device)
     h = torch.arange(0, scores.size(1), device=scores.device)
@@ -73,10 +73,9 @@ def math_attention(
     score_mod = torch.vmap(score_mod, in_dims=(0, None, 0, None, None) + in_dim_buffers)
     score_mod = torch.vmap(score_mod, in_dims=(0, 0, None, None, None) + in_dim_buffers)
 
-    scores = score_mod(scores, b, h, m, n, *other_buffers)
-
+    scores = score_mod(scores, b, h, m, n, *other_buffers).to(torch.float32)
     scores = scores.softmax(dim=-1)
-    return scores @ value
+    return scores.to(query.dtype) @ value
 
 
 @templated_attention.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -174,13 +173,11 @@ def templated_attention_functionalize(
 
     example_vals = [torch.zeros((), dtype=query.dtype)] + [
         torch.zeros((), dtype=torch.int) for _ in range(4)
-    ]
+    ] + list(other_buffers_unwrapped)
     with ctx.redispatch_to_next() as m:
         functional_score_mod = ctx.functionalize(score_mod)
         pre_dispatch = hasattr(ctx, "mode") and ctx.mode.pre_dispatch
-        mutates = _has_potential_branch_input_mutation(
-            functional_score_mod, example_vals, pre_dispatch
-        )
+        mutates = _has_potential_branch_input_mutation( functional_score_mod, example_vals, pre_dispatch)
         # The only care about mutations of existing buffers since we can't replay these.
         # However, we can just error if anything is detected
         if mutates:

@@ -41,6 +41,7 @@ from .utils import (
     Placeholder,
     sympy_dot,
     sympy_product,
+    sympy_index_symbol,
     unique,
 )
 from .virtualized import V
@@ -99,6 +100,7 @@ class TritonTemplateKernel(TritonKernel):
         suffix_args=0,
         epilogue_fn=identity,
         subgraphs=None,
+        captured_nodes = None,
         *,
         index_dtype,
     ):
@@ -108,6 +110,7 @@ class TritonTemplateKernel(TritonKernel):
             index_dtype=index_dtype,
         )
         self.input_nodes = input_nodes
+        self.captured_nodes = captured_nodes if captured_nodes is not None else []
         self.output_node = output_node
         self.named_input_nodes = {}
         self.defines = defines
@@ -278,17 +281,21 @@ class TritonTemplateKernel(TritonKernel):
         class PlaceholderSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
             self.name = "PlaceholderSubstitution"
 
-            def load(self, name: str, index: sympy.Expr):
+            def load(self2, name: str, index: sympy.Expr):
                 if name not in fixed_inputs:
-                    raise AssertionError(
-                        f"All loads should be coming from fixed inputs - {name}"
-                    )
+                    # breakpoint()
+                    var = self.args.input(name)
+                    return f"tl.load({var} + {index})"
+                    # return f"tl.load({name} + {index})"
+                    # raise AssertionError(
+                    #     f"All loads should be coming from fixed inputs - {name}"
+                    # )
                 return f"({fixed_inputs[name]})"
 
             # TODO Doesn't work yet
             def indirect_indexing(self, index_var, size, check):
-                return self._inner.indirect_indexing(index_var, size, False)
-                # return sympy_symbol(str(index_var))
+            #     return self._inner.indirect_indexing(index_var, size, False)
+                return sympy_index_symbol(str(index_var))
 
         # if self.modification_cache is None:
         with V.set_ops_handler(PlaceholderSubstitution(V.ops)):
@@ -517,6 +524,7 @@ class TritonTemplate(KernelTemplate):
         suffix_args=0,
         epilogue_fn=identity,
         subgraphs=None,
+        captured_nodes=None,
         **kwargs,
     ):
         assert self.template, "requires jinja2"
@@ -530,10 +538,10 @@ class TritonTemplate(KernelTemplate):
 
         numel = sympy_product(layout.size)
         buffers = itertools.chain(input_nodes, (fake_out,))
-        if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
-            raise NotImplementedError(
-                "64-bit indexing is not yet implemented for triton templates"
-            )
+        # if not TritonScheduling.can_use_32bit_indexing(numel, buffers):
+        #     raise NotImplementedError(
+        #         "64-bit indexing is not yet implemented for triton templates"
+        #     )
 
         kernel_options = dict(
             input_nodes=input_nodes,
@@ -580,7 +588,7 @@ class TritonTemplate(KernelTemplate):
             mod = PyCodeCache.load(code, extra)
             _, call_args, _ = kernel.args.python_argdefs()
 
-        expected_args = list(unique(x.get_name() for x in input_nodes))
+        expected_args = list(unique(x.get_name() for x in itertools.chain(input_nodes, captured_nodes)))
         expected_args.extend([fake_out.get_name()])
         assert list(call_args)[: len(expected_args)] == expected_args, (
             call_args,

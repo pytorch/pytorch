@@ -165,8 +165,8 @@ sdpa_template = TritonTemplate(
  """,
 )
 
-
-@register_lowering(torch.ops.higher_order.templated_attention)
+# TODO: We probably also need a layout constraint?
+@register_lowering(torch.ops.higher_order.templated_attention, type_promotion_kind=None)
 def templated_attention(*args, **kwargs):
     from torch._prims_common import make_contiguous_strides_for
     from ..ir import (
@@ -178,7 +178,7 @@ def templated_attention(*args, **kwargs):
         TensorBox,
     )
 
-    query, key, value, subgraph = args
+    query, key, value, subgraph, *other_buffers = args
 
     def create_placeholder(name: str, dtype: torch.dtype) -> InputBuffer:
         return TensorBox.create(
@@ -266,11 +266,11 @@ def templated_attention(*args, **kwargs):
                 (128, 128, 8, 2),
                 (64, 128, 4, 3),
             ]
-
             for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
                 sdpa_template.maybe_append_choice(
                     choices=choices,
-                    input_nodes=(query, key, value),
+                    input_nodes=[query, key, value],
+                    captured_nodes=list(other_buffers),
                     layout=layout,
                     subgraphs=subgraph_buffer,
                     num_stages=num_stages,
@@ -283,6 +283,6 @@ def templated_attention(*args, **kwargs):
                     ROWS_GUARANTEED_SAFE=False,
                 )
             return autotune_select_algorithm(
-                "sdpa", choices, [query, key, value], layout
+                "sdpa", choices, [query, key, value] + list(other_buffers), layout
             )
     raise ValueError("TemplatedAttention was passed a subgraph with no output node!")

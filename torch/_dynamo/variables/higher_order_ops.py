@@ -1333,7 +1333,7 @@ class TemplatedAttentionHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
         def create_scalar():
             return query.call_method(
-                tx, "new_empty", (SourcelessBuilder.create(tx, []),), {}
+                tx, "new_empty", (SourcelessBuilder.create(tx, []),), {"dtype": SourcelessBuilder.create(tx, torch.int32)}
             )
 
         bhmn = [create_scalar() for _ in range(4)]
