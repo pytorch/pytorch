@@ -695,7 +695,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
 #if defined BUILD_LITE_INTERPRETER || defined C10_MOBILE
           bool enabled = false;
 #else
-          bool enabled = at::autocast::is_enabled(at::kCUDA);
+          bool enabled = at::autocast::is_autocast_enabled(at::kCUDA);
 #endif
           push(stack, enabled);
         },
@@ -706,7 +706,7 @@ static const std::vector<OperatorGeneratorArgs> opGenArgs{
 #if defined BUILD_LITE_INTERPRETER || defined C10_MOBILE
           bool enabled = false;
 #else
-          bool enabled = at::autocast::is_enabled(at::kCPU);
+          bool enabled = at::autocast::is_autocast_enabled(at::kCPU);
 #endif
           push(stack, enabled);
         },

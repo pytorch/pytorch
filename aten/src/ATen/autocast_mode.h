@@ -10,8 +10,8 @@
 
 namespace at::autocast {
 
-TORCH_API bool is_enabled(at::DeviceType device_type);
-TORCH_API void set_enabled(at::DeviceType device_type, bool new_enabled);
+TORCH_API bool is_autocast_enabled(at::DeviceType device_type);
+TORCH_API void set_autocast_enabled(at::DeviceType device_type, bool new_enabled);
 TORCH_API at::ScalarType get_autocast_dtype(at::DeviceType device_type);
 TORCH_API void set_autocast_dtype(
     at::DeviceType device_type,
@@ -21,6 +21,27 @@ TORCH_API int increment_nesting();
 TORCH_API int decrement_nesting();
 TORCH_API bool is_autocast_cache_enabled();
 TORCH_API void set_autocast_cache_enabled(bool enabled);
+
+// deprecated CUDA-specific autocast APIs
+C10_DEPRECATED_MESSAGE("at::autocast::is_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(at::kCUDA) instead.")
+TORCH_API inline bool  is_enabled() {
+  return is_autocast_enabled(at::kCUDA);
+}
+
+C10_DEPRECATED_MESSAGE("at::autocast::set_enabled(new_enabled) is deprecated. Please use at::autocast::set_autocast_enabled(at::kCUDA, new_enabled) instead.")
+TORCH_API inline void  set_enabled(bool new_enabled) {
+  set_autocast_enabled(at::kCUDA, new_enabled);
+}
+
+C10_DEPRECATED_MESSAGE("at::autocast::get_autocast_gpu_dtype() is deprecated. Please use at::autocast::get_autocast_gpu_dtype(at::kCUDA) instead.")
+TORCH_API inline at::ScalarType get_autocast_gpu_dtype() {
+  return get_autocast_dtype(at::kCUDA);
+}
+
+C10_DEPRECATED_MESSAGE("at::autocast::set_autocast_gpu_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_gpu_dtype(at::kCUDA, dtype) instead.")
+TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
+  set_autocast_dtype(at::kCUDA, dtype);
+}
 
 namespace {
 inline bool is_autocast_eligible(

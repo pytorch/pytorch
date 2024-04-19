@@ -488,7 +488,7 @@ static PyObject* set_autocast_enabled(
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device_type = at::Device(r.string(0)).type();
   auto new_enabled = r.toBool(1);
-  at::autocast::set_enabled(device_type, new_enabled);
+  at::autocast::set_autocast_enabled(device_type, new_enabled);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -504,7 +504,7 @@ static PyObject* is_autocast_enabled(
   auto r = parser.parse(args, kwargs, parsed_args);
   auto device_type = at::Device(r.string(0)).type();
 
-  if (at::autocast::is_enabled(device_type)) {
+  if (at::autocast::is_autocast_enabled(device_type)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -548,13 +548,13 @@ static PyObject* get_autocast_dtype(
 
 static PyObject* is_any_autocast_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_enabled(at::kCPU) ||
-      at::autocast::is_enabled(at::kCUDA) ||
-      at::autocast::is_enabled(at::kXPU) ||
-      at::autocast::is_enabled(at::kIPU) ||
-      at::autocast::is_enabled(at::kXLA) ||
-      at::autocast::is_enabled(at::kHPU) ||
-      at::autocast::is_enabled(at::kPrivateUse1)) {
+  if (at::autocast::is_autocast_enabled(at::kCPU) ||
+      at::autocast::is_autocast_enabled(at::kCUDA) ||
+      at::autocast::is_autocast_enabled(at::kXPU) ||
+      at::autocast::is_autocast_enabled(at::kIPU) ||
+      at::autocast::is_autocast_enabled(at::kXLA) ||
+      at::autocast::is_autocast_enabled(at::kHPU) ||
+      at::autocast::is_autocast_enabled(at::kPrivateUse1)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;

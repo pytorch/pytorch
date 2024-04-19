@@ -521,8 +521,8 @@ void Autocast(const std::shared_ptr<Graph>& graph) {
   GRAPH_DUMP("\nBefore Autocast: ", graph);
   if (autocastEnabled()) {
     AutocastContext init = {
-        at::autocast::is_enabled(at::kCUDA),
-        at::autocast::is_enabled(at::kCPU),
+        at::autocast::is_autocast_enabled(at::kCUDA),
+        at::autocast::is_autocast_enabled(at::kCPU),
         at::autocast::get_autocast_dtype(at::kCUDA),
         at::autocast::get_autocast_dtype(at::kCPU)};
     handleBlock(graph->block(), init);
