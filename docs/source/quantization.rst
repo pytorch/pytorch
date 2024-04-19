@@ -829,7 +829,7 @@ Today, PyTorch supports the following backends for running quantized operators e
 
 Note for native CPU backends
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-We expose both `x86` and `qnnpack` with the same native pytorch quantized operators, so we need additional flag to distinguish between them. The corresponding implementation of  `x86` and `qnnpack` is chosen automatically based on the PyTorch build mode, though users have the option to override this by setting `torch.backends.quantization.engine` to `x86` or `qnnpack`.
+We expose both `x86` and `qnnpack` with the same native pytorch quantized operators, so we need additional flag to distinguish between them. The corresponding implementation of  `x86` and `qnnpack` is chosen automatically based on the PyTorch build mode, though users have the option to override this by setting `torch.backends.quantized.engine` to `x86` or `qnnpack`.
 
 When preparing a quantized model, it is necessary to ensure that qconfig
 and the engine used for quantized computations match the backend on which
