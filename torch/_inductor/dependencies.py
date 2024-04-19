@@ -109,6 +109,7 @@ class MemoryDep(Dep):
 @dataclasses.dataclass(frozen=True)
 class StarDep(Dep):
     name: str
+
     # depends on the entire buffer
     @property
     def index(self):
