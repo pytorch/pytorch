@@ -50,6 +50,9 @@ inputs:
       HF Auth token to avoid rate limits when downloading models or datasets from hub
     required: false
     default: ""
+  GITHUB_TOKEN:
+    description: GitHub token
+    required: true
 
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}

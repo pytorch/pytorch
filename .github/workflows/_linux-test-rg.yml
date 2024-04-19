@@ -84,3 +84,4 @@ jobs:
           s3-bucket: ${{ inputs.s3-bucket }}
           aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
