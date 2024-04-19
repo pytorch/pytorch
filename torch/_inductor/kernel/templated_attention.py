@@ -243,7 +243,7 @@ def templated_attention(*args, **kwargs):
                 "The output node for the templated attention subgraph must be a StorageBox, but got: ",
                 type(output_buffer),
             )
-            # Create the ComputedBuffere directly that will be inlined into the modfication block
+            # Create the ComputedBuffer directly that will be inlined into the modification block
             subgraph_buffer = ComputedBuffer(
                 name=None,
                 layout=FlexibleLayout(

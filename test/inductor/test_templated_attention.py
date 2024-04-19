@@ -12,7 +12,9 @@ from torch._higher_order_ops.templated_attention import (
     templated_attention as templated_attention_hop,
 )
 from torch._inductor.test_case import TestCase as InductorTestCase
+from torch._inductor.utils import run_and_get_code
 from torch.nn.attention._templated_attention import _compose, _templated_attention
+from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16
 from torch.utils._triton import has_triton
@@ -44,6 +46,10 @@ if common_utils.TEST_WITH_ROCM:
 
 def _identity_mod(score, b, h, m, n):
     return score
+
+
+def _causal_mod(score, b, h, token_q, token_kv):
+    return torch.where(token_q >= token_kv, score, float("-inf"))
 
 
 class TestTemplatedSDPA(InductorTestCase):
@@ -195,22 +201,22 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(score_mod)
 
     @supported_platform
-    def test_logsumexp_correctness(self):
-        score_mod = _identity_mod
-
+    @common_utils.parametrize("dtype", test_dtypes)
+    @common_utils.parametrize("score_mod", [_identity_mod, _causal_mod])
+    def test_logsumexp_correctness(self, dtype, score_mod):
         @torch.compile
         def sdpa_hop(q, k, v, score_mod):
             return templated_attention_hop(q, k, v, score_mod)
 
-        q = torch.randn(
-            (4, 8, 2048, 64), dtype=torch.float32, device="cuda", requires_grad=True
+        make_tensor = functools.partial(
+            torch.randn,
+            (4, 8, 2048, 64),
+            dtype=dtype,
+            device="cuda",
+            requires_grad=True,
         )
-        k = torch.randn(
-            (4, 8, 2048, 64), dtype=torch.float32, device="cuda", requires_grad=True
-        )
-        v = torch.randn(
-            (4, 8, 2048, 64), dtype=torch.float32, device="cuda", requires_grad=True
-        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
         ref_out, ref_lse = templated_attention_hop(
             q.to(torch.float64), k.to(torch.float64), v.to(torch.float64), score_mod
         )
@@ -241,6 +247,48 @@ class TestTemplatedSDPA(InductorTestCase):
             atol=tolerance.atol,
             rtol=tolerance.rtol,
         )
+
+    @supported_platform
+    def test_logsumexp_only_return(self):
+        make_tensor = functools.partial(
+            torch.randn,
+            (4, 8, 2048, 64),
+            dtype=torch.float32,
+            device="cuda",
+            requires_grad=True,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        @torch.compile
+        def func(q, k, v, score_mod):
+            _, lse = templated_attention_hop(q, k, v, score_mod)
+            lse_2 = lse * 2
+            return lse_2
+
+        _, code = run_and_get_code(func, q, k, v, _identity_mod)
+        # Ensure that two kernels are generated
+        FileCheck().check_count(".run(", 2, True).run(code[0])
+
+    @supported_platform
+    def test_logsumexp_is_not_fused(self):
+        make_tensor = functools.partial(
+            torch.randn,
+            (4, 8, 2048, 64),
+            dtype=torch.float32,
+            device="cuda",
+            requires_grad=True,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        @torch.compile
+        def func(q, k, v, score_mod):
+            out, lse = templated_attention_hop(q, k, v, score_mod)
+            lse_2 = lse * 2
+            return out, lse_2
+
+        _, code = run_and_get_code(func, q, k, v, _identity_mod)
+        # Ensure that two kernels are generated
+        FileCheck().check_count(".run(", 2, True).run(code[0])
 
 
 common_utils.instantiate_parametrized_tests(TestTemplatedSDPA)
