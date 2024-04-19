@@ -335,13 +335,19 @@ class PrepareModuleInput(ParallelStyle):
     ``input_layouts``, and perform layout redistribution according to the ``desired_input_layouts``.
 
     Keyword Args:
-        input_layouts (Union[Placement, Tuple[Placement]]):
+        input_layouts (Union[Placement, Tuple[Optional[Placement]]]):
             The DTensor layouts of input tensors for the nn.Module, this is used to convert the input tensors to
             DTensors. If some inputs are not torch.Tensor or no need to convert to DTensors, ``None`` need to be specified
-            as a placeholder.
-        desired_input_layouts (Union[Placement, Tuple[Placement]]):
+            as a placeholder. default: None.
+        desired_input_layouts (Union[Placement, Tuple[Optional[Placement]]]):
             The desired DTensor layout of input tensors for the nn.Module, this is used to ensure the inputs of the nn.Module
-            have the desired DTensor layouts. This argument needs to have the same length with ``input_layouts``.
+            have the desired DTensor layouts. This argument needs to have the same length with ``input_layouts``. default: None.
+        input_kwarg_layouts (Dict[str, Placement]):
+            The DTensor layouts of input kwargs for the nn.Module, this is used to convert the input kwarg tensors to DTensors.
+            default: None
+        desired_input_kwarg_layouts: (Dict[str, Placement]):
+            The desired DTensor layout of input kwargs for the nn.Module, this is used to ensure the inputs of the nn.Module
+            have the desired DTensor layouts. default: None.
         use_local_output (bool, optional):
             Whether to use local :class:`torch.Tensor` instead of :class:`DTensor` for the module inputs, default: False.
     Returns:
@@ -374,8 +380,8 @@ class PrepareModuleInput(ParallelStyle):
         *,
         input_layouts: Optional[Union[Placement, Tuple[Optional[Placement]]]] = None,
         desired_input_layouts: Optional[Union[Placement, Tuple[Optional[Placement]]]] = None,
-        input_kwarg_layouts: Optional[Dict[str, Optional[Placement]]] = None,
-        desired_input_kwarg_layouts: Optional[Dict[str, Optional[Placement]]] = None,
+        input_kwarg_layouts: Optional[Dict[str, Placement]] = None,
+        desired_input_kwarg_layouts: Optional[Dict[str, Placement]] = None,
         use_local_output: bool = False
     ):
         self.input_layouts = (input_layouts,) if isinstance(input_layouts, Placement) else input_layouts
@@ -427,13 +433,12 @@ class PrepareModuleInput(ParallelStyle):
             input_layout = None
             if kwarg_key in self.input_kwarg_layouts:
                 input_layout = self.input_kwarg_layouts[kwarg_key]
-                if input_layout is not None:
-                    assert isinstance(kwarg_val, torch.Tensor), f"input of key {kwarg_key} to the module should be a Tensor!"
-                    kwarg_val = DTensor.from_local(kwarg_val, device_mesh, (input_layout,), run_check=False)
+                assert isinstance(kwarg_val, torch.Tensor), f"input of key {kwarg_key} to the module should be a Tensor!"
+                kwarg_val = DTensor.from_local(kwarg_val, device_mesh, (input_layout,), run_check=False)
 
                 if kwarg_key in self.desired_input_kwarg_layouts:
                     desired_layout = self.desired_input_kwarg_layouts[kwarg_key]
-                    if desired_layout is not None and desired_layout != input_layout:
+                    if desired_layout != input_layout:
                         kwarg_val = kwarg_val.redistribute(placements=(desired_layout,))
 
                 prepared_kwarg_inputs[kwarg_key] = kwarg_val.to_local() if self.use_local_output else kwarg_val
