@@ -1035,7 +1035,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         precompile_fn = precompile(choices)
 
-        if return_multi_template:
+        if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
 
             def get_timings():
                 timings = do_autotuning(precompile_fn)
