@@ -3277,6 +3277,20 @@ class TestMPS(TestCaseMPS):
         helper((2, 8, 4, 5), 0.2)
         helper((2, 3, 4, 5), 1.0)  # value of 1 should be ignored internally
 
+    def test_addcdiv_transpose(self):
+        # Regression test for issue https://github.com/pytorch/pytorch/issues/118115
+        x = torch.rand(2, 3, device="cpu").t()
+        x_mps = x.detach().clone().to(device="mps")
+        y = torch.rand(2, 3, device="cpu").t()
+        y_mps = y.detach().clone().to(device="mps")
+        z = torch.rand_like(x)
+        z_mps = z.detach().clone().to(device="mps")
+
+        result_CPU = x.addcdiv_(y, z)
+        result_MPS = x_mps.addcdiv_(y_mps, z_mps)
+
+        self.assertEqual(result_CPU, result_MPS)
+
     def test_buffer_size_match(self):
         # this test shouldn't cause any crash
         size = 16

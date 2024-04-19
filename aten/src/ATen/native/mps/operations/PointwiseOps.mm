@@ -39,8 +39,8 @@ static void addc_mul_div_out_mps(const Tensor& self,
 
   @autoreleasepool {
     bool executeGatherOp =
-    (self.is_contiguous(MemoryFormat::Contiguous) || self.is_contiguous(MemoryFormat::ChannelsLast) ||
-     self.is_contiguous(MemoryFormat::ChannelsLast3d));
+        (self.is_contiguous(MemoryFormat::Contiguous) || self.is_contiguous(MemoryFormat::ChannelsLast) ||
+         self.is_contiguous(MemoryFormat::ChannelsLast3d));
 
     string key = op_name + getTensorsStringKey({self, tensor1, tensor2});
 
@@ -77,8 +77,8 @@ static void addc_mul_div_out_mps(const Tensor& self,
 
     // Inputs as placeholders
     Placeholder selfPlaceholder = Placeholder(cachedGraph->inputTensor, self, nil, executeGatherOp);
-    Placeholder tensor1Placeholder = Placeholder(cachedGraph->firstTensor, tensor1);
-    Placeholder tensor2Placeholder = Placeholder(cachedGraph->secondTensor, tensor2);
+    Placeholder tensor1Placeholder = Placeholder(cachedGraph->firstTensor, tensor1, nil, executeGatherOp);
+    Placeholder tensor2Placeholder = Placeholder(cachedGraph->secondTensor, tensor2, nil, executeGatherOp);
     Placeholder outputPlaceholder = Placeholder(cachedGraph->outputTensor, output, nil, executeGatherOp);
     MPSScalar value_scalar = getMPSScalar(value_opt, self.scalar_type());
 
