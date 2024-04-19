@@ -1,8 +1,13 @@
 import copy
-from dataclasses import dataclass, fields
+import dataclasses
 import logging
+import os
 import re
+import subprocess
+from dataclasses import dataclass, fields
 from typing import cast, Dict, List, Optional, Tuple
+
+from torch._inductor import config
 
 from ...config import cuda as inductor_cuda_config
 from ...ir import Buffer, CUDATemplateBuffer, FixedLayout, IRNode, Layout
@@ -707,6 +712,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         res = self._template_from_string(GEMM_TEMPLATE).render(**options)
         return res
 
+
 # template <typename ALayout,
 #           typename BLayout,
 #           typename CLayout,
@@ -786,8 +792,12 @@ class CKGemmOperation:
     m_xdl_per_wave: int
     n_xdl_per_wave: int
 
-    a_block_transfer_thread_cluster_lengths_ak0_m_ak1: Tuple[int, int, int]  # or sequence[int]?
-    a_block_transfer_thread_cluster_arrange_order: Tuple[int, int, int]  # or sequence[int]?
+    a_block_transfer_thread_cluster_lengths_ak0_m_ak1: Tuple[
+        int, int, int
+    ]  # or sequence[int]?
+    a_block_transfer_thread_cluster_arrange_order: Tuple[
+        int, int, int
+    ]  # or sequence[int]?
     a_block_transfer_src_access_order: Tuple[int, int, int]  # or sequence[int]?
 
     a_block_transfer_src_vector_dim: int
@@ -795,8 +805,12 @@ class CKGemmOperation:
     a_block_transfer_dst_scalar_per_vector_ak1: int
     a_block_lds_extra_m: bool
 
-    b_block_transfer_thread_cluster_lengths_bk0_n_bk1: Tuple[int, int, int]  # or sequence[int]?
-    b_block_transfer_thread_cluster_arrange_order: Tuple[int, int, int]  # or sequence[int]?
+    b_block_transfer_thread_cluster_lengths_bk0_n_bk1: Tuple[
+        int, int, int
+    ]  # or sequence[int]?
+    b_block_transfer_thread_cluster_arrange_order: Tuple[
+        int, int, int
+    ]  # or sequence[int]?
     b_block_transfer_src_access_order: Tuple[int, int, int]  # or sequence[int]?
 
     b_block_transfer_src_vector_dim: int
@@ -807,7 +821,9 @@ class CKGemmOperation:
     c_shuffle_m_xdl_per_wave_per_shuffle: int
     c_shuffle_n_xdl_per_wave_per_shuffle: int
 
-    c_shuffle_block_transfer_cluster_lengths_m_block_m_per_block_n_block_n_per_block: Tuple[int, int, int, int]
+    c_shuffle_block_transfer_cluster_lengths_m_block_m_per_block_n_block_n_per_block: (
+        Tuple[int, int, int, int]
+    )
     c_shuffle_block_transfer_scalar_per_vector_n_per_block: int
 
     block_gemm_pipeline_scheduler: Optional[str]
@@ -822,7 +838,8 @@ class CKGemmOperation:
 
     def key_name(self):
         # TBD; must be unique per instance. Intended to use as dict key
-        return f"{'_'.join(['K' + f.name.replace('_', '').lower() + 'V' + ('x'.join(map(str, iter(getattr(self, f.name)))) if isinstance(getattr(self, f.name), tuple) else str(getattr(self, f.name))) for f in fields(self)])}"
+        return f"{'_'.join(['K' + f.name.replace('_', '').lower() + 'V' + ('x'.join(map(str, iter(getattr(self, f.name)))) if isinstance(getattr(self, f.name), tuple) else str(getattr(self, f.name)).replace(':', '')) for f in fields(self)])}"
+
 
 class CKGemmTemplate(CKTemplate):
     gemm_template = r"""
@@ -869,16 +886,20 @@ class CKGemmTemplate(CKTemplate):
     } // extern C
     """
 
-    def __init__(self, 
-                 input_nodes: List[Buffer],
-                 layout: Layout,
-                 alpha: float,
-                 beta: float,
-                 input_reorder: Optional[List[int]] = None):
-        super().__init__("ck_gemm_template", 
-                         input_nodes=input_nodes, 
-                         layout=layout, 
-                         input_reorder=input_reorder)
+    def __init__(
+        self,
+        input_nodes: List[Buffer],
+        layout: Layout,
+        alpha: float,
+        beta: float,
+        input_reorder: Optional[List[int]] = None,
+    ):
+        super().__init__(
+            "ck_gemm_template",
+            input_nodes=input_nodes,
+            layout=layout,
+            input_reorder=input_reorder,
+        )
         self.alpha = alpha
         self.beta = beta
 
@@ -904,18 +925,19 @@ class CKGemmTemplate(CKTemplate):
 
                 using cudaStream_t = hipStream_t; 
 
-                static constexpr auto GemmSpecDefault = ck::tensor_operation::device::GemmSpecialization::Default;
-                static constexpr auto GemmSpecMNPadding = ck::tensor_operation::device::GemmSpecialization::MNPadding;
-                static constexpr auto Intrawave = ck::BlockGemmPipelineScheduler::Intrawave;
-                static constexpr auto BlockGemmPipelineVersionV1 = ck::BlockGemmPipelineVersion::v1;
-                static constexpr auto BlockGemmPipelineVersionV2 = ck::BlockGemmPipelineVersion::v2;
-                static constexpr auto BlockGemmPipelineVersionV3 = ck::BlockGemmPipelineVersion::v3;
+                using BlockGemmPipelineScheduler = ck::BlockGemmPipelineScheduler;
+                using GemmSpecialization = ck::tensor_operation::device::GemmSpecialization;
+                using BlockGemmPipelineVersion = ck::BlockGemmPipelineVersion;
             """
         )
         return res
 
     def filter_op(self, op: CKGemmOperation) -> Optional[CKGemmOperation]:
         # TBD return None if alignment or layout or dtype is invalid
+        if op.a_element_dtype != "F16" or op.b_element_dtype != "F16" or op.c_element_dtype != "F16":
+            return None
+        if op.a_layout != "Row" or op.b_layout != "Row" or op.c_layout != "Row":
+            return None
         return op
 
     def emit_ck_instance(self, op: CKGemmOperation):
@@ -933,18 +955,21 @@ class CKGemmTemplate(CKTemplate):
         for f in fields(op):
             field_value = getattr(op, f.name)
             if isinstance(field_value, tuple):
-                template_params.append(f"/* {f.name} */ S<{', '.join(map(str, iter(field_value)))}>")
+                template_params.append(
+                    f"/* {f.name} */ S<{', '.join(map(str, iter(field_value)))}>"
+                )
             else:
                 if field_value is not None:
                     template_params.append(f"/* {f.name} */ {field_value}")
         return self._template_from_string(template_definition).render(
             operation_name=op.name(),
-            template_params=(",\n" + 12 * " ").join(template_params)), self._template_from_string(template_type).render(operation_name=op.name())
+            template_params=(",\n" + 12 * " ").join(template_params),
+        ), self._template_from_string(template_type).render(operation_name=op.name())
 
     def render(self, kernel: CUDATemplateKernel, op: CKGemmOperation, **kwargs):
-        epilogue_nodes = kwargs.get('epilogue_nodes', None)
+        epilogue_nodes = kwargs.get("epilogue_nodes", None)
         assert epilogue_nodes is None or 0 == len(epilogue_nodes)
-        template_buffer_node = kwargs.get('template_buffer_node', None)
+        template_buffer_node = kwargs.get("template_buffer_node", None)
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
         instance_definition, instance_type = self.emit_ck_instance(op)
@@ -956,7 +981,12 @@ class CKGemmTemplate(CKTemplate):
             headers=self.header().getvalue(),
             globals=self.globals().getvalue(),
             instance_definition=instance_definition,
-            kernel_definition=kernel.def_kernel(inputs=[X, W, Bias], outputs=[Y], names_str="X, W, Bias, Y", input_reorder=self.input_reorder),
+            kernel_definition=kernel.def_kernel(
+                inputs=[X, W, Bias],
+                outputs=[Y],
+                names_str="X, W, Bias, Y",
+                input_reorder=self.input_reorder,
+            ),
             instance_type=instance_type,
             M=kernel.size(X, -2),
             K=kernel.size(X, -1),
@@ -973,54 +1003,142 @@ class CKGemmTemplate(CKTemplate):
         )
 
     def gen_ops(self):
-        res = []
+        op_instances = []
         # all string attributes must be either type aliases or global constants in C++
-        res.append(CKGemmOperation(a_layout="Row", 
-                                   b_layout="Row", 
-                                   c_layout="Row", 
-                                   a_element_dtype="F16", 
-                                   b_element_dtype="F16", 
-                                   c_element_dtype="F16",
-                                   a_compute_dtype="F16",
-                                   b_compute_dtype="F16", 
-                                   acc_dtype="F32", 
-                                   c_shuffle_dtype="F16", 
-                                   a_elementwise_op="PassThrough",
-                                   b_elementwise_op="PassThrough",
-                                   c_elementwise_op="PassThrough",
-                                   gemm_specialization="GemmSpecDefault",
-                                   block_size=256,
-                                   m_per_block=224,
-                                   n_per_block=256,
-                                   k_per_block=64,
-                                   a_k1=8,
-                                   b_k1=2,
-                                   m_per_xdl=16,
-                                   n_per_xdl=16,
-                                   m_xdl_per_wave=7,
-                                   n_xdl_per_wave=8,
-                                   a_block_transfer_thread_cluster_lengths_ak0_m_ak1=(8, 32, 1),
-                                   a_block_transfer_thread_cluster_arrange_order=(1, 0, 2),
-                                   a_block_transfer_src_access_order=(1, 0, 2),
-                                   a_block_transfer_src_vector_dim=2,
-                                   a_block_transfer_src_scalar_per_vector=8,
-                                   a_block_transfer_dst_scalar_per_vector_ak1=8,
-                                   a_block_lds_extra_m=0,
-                                   b_block_transfer_thread_cluster_lengths_bk0_n_bk1=(8, 32, 1),
-                                   b_block_transfer_thread_cluster_arrange_order=(0, 2, 1),
-                                   b_block_transfer_src_access_order=(0, 2, 1),
-                                   b_block_transfer_src_vector_dim=1,
-                                   b_block_transfer_src_scalar_per_vector=8,
-                                   b_block_transfer_dst_scalar_per_vector_bk1=2,
-                                   b_block_lds_extra_n=0,
-                                   c_shuffle_m_xdl_per_wave_per_shuffle=1,
-                                   c_shuffle_n_xdl_per_wave_per_shuffle=2,
-                                   c_shuffle_block_transfer_cluster_lengths_m_block_m_per_block_n_block_n_per_block=(1, 32, 1, 8),
-                                   c_shuffle_block_transfer_scalar_per_vector_n_per_block=8,
-                                   block_gemm_pipeline_scheduler="Intrawave",
-                                   block_gemm_pipeline_version="BlockGemmPipelineVersionV3",
-                                   ))
-        return res
+        # fallback: known working op instance for problem size M=2240 K=256 N=2048
+        default_instances = [CKGemmOperation(
+            a_layout="Row",
+            b_layout="Row",
+            c_layout="Row",
+            a_element_dtype="F16",
+            b_element_dtype="F16",
+            c_element_dtype="F16",
+            a_compute_dtype="F16",
+            b_compute_dtype="F16",
+            acc_dtype="F32",
+            c_shuffle_dtype="F16",
+            a_elementwise_op="PassThrough",
+            b_elementwise_op="PassThrough",
+            c_elementwise_op="PassThrough",
+            gemm_specialization="GemmSpecialization::Default",
+            block_size=256,
+            m_per_block=224,
+            n_per_block=256,
+            k_per_block=64,
+            a_k1=8,
+            b_k1=2,
+            m_per_xdl=16,
+            n_per_xdl=16,
+            m_xdl_per_wave=7,
+            n_xdl_per_wave=8,
+            a_block_transfer_thread_cluster_lengths_ak0_m_ak1=(8, 32, 1),
+            a_block_transfer_thread_cluster_arrange_order=(1, 0, 2),
+            a_block_transfer_src_access_order=(1, 0, 2),
+            a_block_transfer_src_vector_dim=2,
+            a_block_transfer_src_scalar_per_vector=8,
+            a_block_transfer_dst_scalar_per_vector_ak1=8,
+            a_block_lds_extra_m=0,
+            b_block_transfer_thread_cluster_lengths_bk0_n_bk1=(8, 32, 1),
+            b_block_transfer_thread_cluster_arrange_order=(0, 2, 1),
+            b_block_transfer_src_access_order=(0, 2, 1),
+            b_block_transfer_src_vector_dim=1,
+            b_block_transfer_src_scalar_per_vector=8,
+            b_block_transfer_dst_scalar_per_vector_bk1=2,
+            b_block_lds_extra_n=0,
+            c_shuffle_m_xdl_per_wave_per_shuffle=1,
+            c_shuffle_n_xdl_per_wave_per_shuffle=2,
+            c_shuffle_block_transfer_cluster_lengths_m_block_m_per_block_n_block_n_per_block=(1, 32, 1, 8),
+            c_shuffle_block_transfer_scalar_per_vector_n_per_block=8,
+            block_gemm_pipeline_scheduler="BlockGemmPipelineScheduler::Intrawave",
+            block_gemm_pipeline_version="BlockGemmPipelineVersion::v3")]
+
+        grep_result = subprocess.run(
+            [
+                "grep",
+                "-inR",
+                "DeviceGemm_Xdl_CShuffleV3",
+                os.path.join(config.rocm.ck_dir, "library"),
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+        def maybe_int(s):
+            try:
+                return int(s)
+            except ValueError:
+                return s
+
+        for line in grep_result.stdout.strip().split("\n"):
+            s_template_args = line.split("DeviceGemm_Xdl_CShuffleV3")[-1].strip("<>, ")
+            template_args = []
+            i_current = 0
+            while i_current < len(s_template_args):
+                if s_template_args[i_current] == " ":
+                    i_current += 1
+                    continue
+                elif s_template_args[i_current : i_current + 2] == "S<":
+                    i_next = s_template_args.find(">", i_current)
+                    template_args.append(
+                        tuple(
+                            map(int, s_template_args[i_current + 2 : i_next].split(","))
+                        )
+                    )
+                    i_current = i_next + 2
+                else:
+                    i_next = s_template_args.find(",", i_current)
+                    template_args.append(
+                        maybe_int(
+                            s_template_args[
+                                i_current : i_next if i_next != -1 else None
+                            ]
+                        )
+                    )
+                    if i_next != -1:
+                        i_current = i_next + 1
+                if i_next == -1:
+                    break
+            new_instance = CKGemmOperation(
+                *template_args,
+                *((None,) * (len(fields(CKGemmOperation)) - len(template_args))),
+            )
+            if new_instance.a_compute_dtype is None:
+                new_instance.a_compute_dtype = new_instance.c_element_dtype
+            if new_instance.b_compute_dtype is None:
+                new_instance.b_compute_dtype = new_instance.c_element_dtype
+
+            schedulers = [
+                "BlockGemmPipelineScheduler::Intrawave",
+                "BlockGemmPipelineScheduler::Interwave",
+            ]
+            gemm_specs = [
+                "GemmSpecialization::Default",
+                "GemmSpecialization::KPadding",
+                "GemmSpecialization::MNPadding",
+                "GemmSpecialization::MNKPadding",
+            ]
+            if new_instance.block_gemm_pipeline_scheduler == "BlkGemmPipeSched":
+                for scheduler in schedulers:
+                    for spec in gemm_specs:
+                        op_instances.append(
+                            dataclasses.replace(
+                                new_instance,
+                                block_gemm_pipeline_scheduler=scheduler,
+                                gemm_specialization=spec,
+                            )
+                        )
+            else:
+                for spec in gemm_specs:
+                    op_instances.append(
+                        dataclasses.replace(new_instance, gemm_specialization=spec)
+                    )
+
+        filtered_instances = list(filter(lambda op: self.filter_op(op), op_instances))
+        chosen_instances = filtered_instances[:config.cuda.cutlass_max_profiling_configs]
+        log.debug(f"generated {len(chosen_instances)} ck instances: {chosen_instances}")
+
+        # return chosen_instances
+        return default_instances
 
     @staticmethod
     def add_ck_gemm_choices(
