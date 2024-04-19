@@ -156,7 +156,7 @@ class CacheBase:
         try:
             import triton
 
-            triton_version = triton.__version__  # type: ignore[attr-defined]
+            triton_version = triton.__version__
         except ModuleNotFoundError:
             triton_version = None
 
@@ -262,7 +262,7 @@ class PersistentCache(CacheBase):
         choices: List[ChoiceCaller],
         op: str,
         inputs: str,
-        benchmark: Optional[Callable[[Any], Dict[ChoiceCaller, float]]],
+        benchmark: Callable[[Any], Dict[ChoiceCaller, float]],
     ) -> Dict[ChoiceCaller, float]:
         """
         Check to see if we have benchmarked the given choice callers. For each
@@ -270,7 +270,7 @@ class PersistentCache(CacheBase):
 
             1. Check global_cache[op][inputs][choice][precision], return benchmark if cached.
             2. Check local_cache[op][inputs][choice][precision], return benchmark if cached.
-            3. If benchmark is not None:
+            3.
                 a. `max_autotune_gemm=True`: benchmark the choice, update
                     local_cache[op][inputs][choice], and return the benchmark.
                 b. `max_autotune_gemm=False`: don't benchmark the choice, return nothing.
@@ -303,13 +303,9 @@ class PersistentCache(CacheBase):
         if config.max_autotune or config.max_autotune_gemm:
             local_cache = self.get_local_cache()
             # check local cache first since it is data specific to the current machine
-            if (
-                not check_cache(local_cache)
-                and not (
-                    use_global_cache()
-                    and check_cache(self.get_global_cache(), callback=log_stats)
-                )
-                and benchmark is not None
+            if not check_cache(local_cache) and not (
+                use_global_cache()
+                and check_cache(self.get_global_cache(), callback=log_stats)
             ):
                 try:
                     # re-benchmark everything to try to get consistent numbers from the same machine
@@ -1831,10 +1827,8 @@ class AotCodeCompiler:
                 if name not in graph.folded_constants
             )
             # TODO: Fix mmap weights with cuda
-            use_mmap_weights = (
-                not cuda and not config.is_fbcode() and consts_size > 2_000_000_000
-            )
-            if config.aot_inductor.force_mmap_weights and not cuda:
+            use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
+            if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
             compile_cmd = cpp_compile_command(
                 input=input_path,
