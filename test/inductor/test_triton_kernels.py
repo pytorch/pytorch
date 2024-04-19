@@ -813,11 +813,15 @@ def forward(self, x_1, output_1):
         compiled_out, (code,) = run_and_get_code(torch.compile(f), x)
         self.assertEqual(compiled_out, eager_out)
 
-        # Check that we're re-using any unused memory buffers.
+        # Check that we're allocating the minimal # of buffers.
         num_bufs_allocated = code.count(
             "empty_strided_cuda((10, ), (1, ), torch.float32)"
         )
         self.assertEqual(num_bufs_allocated, 2)
+
+        # Check we're re-using buffers if not allocating.
+        num_bufs_reused = code.count("# reuse")
+        self.assertEqual(num_bufs_reused, 3)
 
     @requires_cuda
     def test_triton_kernel_matmul_tracking(self):
@@ -1042,6 +1046,36 @@ def forward(self, x_1, output_1):
             self.assertTrue("equal_to_1=()" in sources[0])
         else:
             self.assertTrue("equal_to_1=(3,)" in sources[0])
+        self.assertEqual(compiled_out, eager_out)
+
+    @requires_cuda
+    @skipIfRocm
+    @common_utils.parametrize("dynamic", [False, True])
+    def test_triton_kernel_equal_to_1_float_arg(self, dynamic):
+        def f(x, y):
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+            scaling_factor = (n_elements**0) / 1.0
+            add_kernel_with_scaling[(n_elements,)](
+                x,
+                y,
+                out,
+                n_elements,
+                scaling_factor,
+                BLOCK_SIZE=16,
+            )
+            return out
+
+        x = torch.randn(2, device="cuda")
+        y = torch.randn(2, device="cuda")
+        eager_out = f(x, y)
+        compiled_out, sources = run_and_get_code(
+            torch.compile(f, dynamic=dynamic), x, y
+        )
+
+        # float 1.0 (both literal or symbolic)
+        # should not be added to equal_to_1
+        self.assertTrue("equal_to_1=()" in sources[0])
         self.assertEqual(compiled_out, eager_out)
 
     @requires_cuda

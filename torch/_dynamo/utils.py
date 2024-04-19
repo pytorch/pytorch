@@ -95,6 +95,7 @@ import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
+from torch._subclasses.meta_utils import is_sparse_compressed
 from torch._utils_internal import log_compilation_event
 
 from torch.nn.modules.lazy import LazyModuleMixin
@@ -774,6 +775,29 @@ def clone_input(x, *, dtype=None):
             # Access data_ptr() for a xla tensor will cause crash
             return torch_clone(x)
 
+        # Handle sparse storage (no stride).
+        if x.layout is torch.sparse_coo:
+            return torch.sparse_coo_tensor(
+                torch_clone(x._indices()),
+                torch_clone(x._values()),
+                x.shape,
+                is_coalesced=x.is_coalesced(),
+            )
+        elif is_sparse_compressed(x):
+            if x.layout in {torch.sparse_csr, torch.sparse_bsr}:
+                compressed_indices = x.crow_indices()
+                plain_indices = x.col_indices()
+            else:
+                compressed_indices = x.ccol_indices()
+                plain_indices = x.row_indices()
+            return torch.sparse_compressed_tensor(
+                torch_clone(compressed_indices),
+                torch_clone(plain_indices),
+                torch_clone(x.values()),
+                x.shape,
+                layout=x.layout,
+            )
+
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
         )
@@ -1117,6 +1141,16 @@ def enum_repr(value, local):
     scope = "L" if local else "G"
     local_name = f'{scope}["{name}"].{val}'
     return local_name
+
+
+def set_example_value(node, example_value):
+    # NB: example_value is a bit of a misnomer, because this is always a fake
+    # tensor of some sort.  Furthermore, these example values serve as the
+    # runtime state of Dynamo tracing, which means if metadata mutation
+    # occurs, the example_value gets directly updated (so you can't rely on
+    # this to accurately reflect what the state of the value was at the time
+    # the program was traced).
+    node.meta["example_value"] = example_value
 
 
 def _get_fake_tensor(vt):
@@ -1570,7 +1604,7 @@ class CompileProfiler:
 
         def recompilation_report():
             if len(gf):
-                max_recompiles = max([num_recompiles(code) for code in gf])
+                max_recompiles = max(num_recompiles(code) for code in gf)
                 recomp_table = tabulate(
                     summarized_gf,
                     headers=["Function", "Recompiles", "Recompile Reasons"],

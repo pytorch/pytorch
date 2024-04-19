@@ -32,6 +32,7 @@ class KernelSideTable:
     id_to_kernel: Dict[int, Any] = dict()
     kernel_to_id: Dict[Any, int] = dict()
     constant_args: Dict[int, Any] = dict()
+    mutable_params: Dict[int, Any] = dict()
     lock = threading.Lock()
 
     # Returns index on the table
@@ -65,12 +66,26 @@ class KernelSideTable:
         assert idx in self.constant_args
         return self.constant_args[idx]
 
+    # Memoizes mutable params
+    def add_mutable_params(self, args) -> int:
+        with self.lock:
+            idx = len(self.mutable_params)
+            self.mutable_params[idx] = args
+            return idx
+
+    # Returns the mutable args
+    def get_mutable_params(self, idx: int):
+        # No need to lock here as fetching from dict is atomic
+        assert idx in self.mutable_params
+        return self.mutable_params[idx]
+
     # Resets the table (only meant to be used in unit tests)
     # This is only safe assuming single threaded execution
     def reset_table(self) -> None:
         self.id_to_kernel = dict()
         self.kernel_to_id = dict()
         self.constant_args = dict()
+        self.mutable_params = dict()
 
 
 kernel_side_table = KernelSideTable()
@@ -600,6 +615,10 @@ def triton_kernel_wrapper_mutation_functionalize(
             kwargs=unwrapped_kwargs,
             tensors_to_clone=tensors_to_clone,
         )
+
+    # Remember mutable params because tensors_to_clone will get wiped
+    # during the reinplace post-grad pass.
+    kernel_side_table.add_mutable_params(tensors_to_clone)
 
     assert set(unwrapped_outputs.keys()).issubset(set(kwargs.keys()))
     for key, output_arg in unwrapped_outputs.items():

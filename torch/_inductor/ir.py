@@ -39,6 +39,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 from torch._dynamo.utils import identity
 from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
+from torch._inductor import metrics
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -63,6 +64,7 @@ from .ops_handler import OpCounterCSE
 from .utils import (
     argsort,
     cache_on_self,
+    ceildiv,
     convert_shape_to_inductor,
     convert_shape_to_symint,
     developer_warning,
@@ -191,6 +193,7 @@ def stride_order2fill_order(order):
     """
     Convert stride order to fill order
     For channel last format,
+
     stride order = [3, 0, 2, 1] and fill order = [1, 3, 2, 0]
     """
     lookup = {pos: idx for idx, pos in enumerate(order)}
@@ -1784,19 +1787,31 @@ def is_storage_and_layout(x):
 def is_contiguous_storage_and_layout(x):
     try:
         buffer, layout = as_storage_and_layout(x, freeze=False)
+        # pad the stride here so we will NOT claim an tensor as contiguous
+        # if a padding is gonna happen.
+        if layout.should_pad_strides():
+            layout.pad_strides()
         return layout.is_contiguous()
     except NotImplementedError:
         return False
 
 
-def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=None):
-    """Try to simplify x into a StorageBox and a Layout"""
+def as_storage_and_layout(
+    x, freeze=True, want_contiguous=False, stride_order=None, allow_padding=False
+):
+    """
+    Try to simplify x into a StorageBox and a Layout.
+
+    allow_padding only affect how we apply stride_order. When allow_padding
+    is True, we have the freedom to add padding when applying the stride_order.
+    """
     if isinstance(x, TensorBox):
         return as_storage_and_layout(
             x.data,
             freeze=freeze,
             want_contiguous=want_contiguous,
             stride_order=stride_order,
+            allow_padding=allow_padding,
         )
     if isinstance(x, StorageBox) and isinstance(x.data, Buffer):
         if freeze:
@@ -1804,7 +1819,9 @@ def as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=No
                 x.data.freeze_layout()
                 assert x.data.layout.is_contiguous()
             elif stride_order is not None:
-                x.data.freeze_layout_with_stride_order(stride_order)
+                x.data.freeze_layout_with_stride_order(
+                    stride_order, allow_padding=allow_padding
+                )
             else:
                 x.data.decide_layout()
         return x, x.data.layout
@@ -2235,7 +2252,7 @@ class View(GenericView):
                     size_old = size_old * modulus
                 V.graph.sizevars.guard_equals(size_new, size_old)
             else:
-                raise AssertionError()
+                raise AssertionError
 
         while stack_old:
             size_old = stack_old.pop()
@@ -2478,6 +2495,15 @@ def is_contiguous_strides_for_shape(stride, shape):
     )
 
 
+def get_align_for_dtype(dtype):
+    """
+    CUDA max memory transaction size is 128 bytes for a warp.
+    We pick `128 // dtype.itemsize` as alighment so GPU can do coalesced
+    memory access.
+    """
+    return 128 // dtype.itemsize
+
+
 @dataclasses.dataclass
 class Layout(IRNode):
     def __init__(
@@ -2516,12 +2542,13 @@ class Layout(IRNode):
     def is_contiguous(self):
         return is_contiguous_strides_for_shape(self.stride, self.size)
 
-    def is_channels_last_contiguous(self):
-        ndim = len(self.size)
-        if ndim not in [4, 5] or self.size[1] == 1:
+    @staticmethod
+    def is_channels_last_contiguous(shape, strides):
+        ndim = len(shape)
+        if ndim not in [4, 5] or shape[1] == 1:
             return False
         for left, right, size in zip(
-            self.stride, make_channels_last_strides_for(self.size), self.size  # type: ignore[arg-type]
+            strides, make_channels_last_strides_for(shape), shape  # type: ignore[arg-type]
         ):
             if size != 1 and left != right:
                 return False
@@ -2573,7 +2600,96 @@ class Layout(IRNode):
         order = [len(order)] + order
         return self.is_stride_ordered(order)
 
+    @staticmethod
+    def _pad_strides(in_strides, size, dtype):
+        """
+        The padding does not change stride order but makes sure all strides larger
+        than the threshold are multiple of align.
+        """
+        align = get_align_for_dtype(dtype)
+        if len(in_strides) == 0:
+            return in_strides
+
+        if not config.pad_channels_last and Layout.is_channels_last_contiguous(
+            size, in_strides
+        ):
+            return in_strides
+
+        current_fx_node = V.get_current_node()
+        if hasattr(current_fx_node, "meta") and current_fx_node.meta.get(
+            "dislike_padding", False
+        ):
+            return in_strides
+
+        # get_stride_order does not work with dynamic shape. Also we can not
+        # statically decide if a padding is needed or how much padding we should
+        # do for dynamic shape.
+        #
+        # Skip padding the strides for dynamic shape for now.
+        if not all(
+            isinstance(s, (int, sympy.Integer))
+            for s in itertools.chain(in_strides, size)
+        ):
+            return in_strides
+
+        stride_order = get_stride_order(in_strides)
+        fill_order = stride_order2fill_order(stride_order)
+
+        new_strides = [0 for _ in range(len(in_strides))]
+        # since we pad when the layout is flexible, we can decide the
+        # smallest stride to be 1.
+        new_strides[fill_order[0]] = 1
+
+        # Don't align a too small stride since that causes too much memory increase.
+        # Pad too small stride may also cause perf loss. We may result in many tiny data blocks
+        # with gaps in between. That causes less coalesced GPU memory access!
+        #
+        # Initially we pick 320 as the threshold since for alignement=16,
+        # that results in at most 5% memory cost.
+        #
+        # But later on we raise the threshold to 1024 to avoid interfere with persistent reduction.
+        # Let's say an inner reduction has a row size 513. Inductor will generate
+        # persistent reduction code.
+        # If we do padding, the strides are not contiguous any more. Inductor
+        # uses a much smaller threshold for persistent reduction in this case and
+        # generates potentially worse non-persistent reduction code.
+        #
+        # This change turns HF AllenaiLongformerBase amp training from a loss of 1.09x to a win of 1.05x.
+        # (baseline: 71.09ms, padding w/o this change: 77.38ms, padding with this change: 67.77ms)
+        align_stride_threshold = 1024
+        padded = False
+        for rank, idx in enumerate(fill_order[1:], start=1):
+            prev_idx = fill_order[rank - 1]
+            stride = new_strides[prev_idx] * size[prev_idx]
+
+            if stride > align_stride_threshold and stride % align != 0:
+                stride = ceildiv(stride, align) * align
+                padded = True
+            new_strides[idx] = stride
+
+        if not padded:
+            # Consider a tensor with shape [256, 1, 5, 5]
+            # Avoid strides like [25, 5, 5, 1] being padded to equivalent strides
+            # [25, 25, 5, 1].
+            return in_strides
+
+        metrics.num_comprehensive_padding += 1
+        return new_strides
+
+    def pad_strides(self):
+        assert isinstance(self, FlexibleLayout)
+        assert self._stride is not None
+        self._stride = self._pad_strides(self._stride, self.size, self.dtype)
+
+    def should_pad_strides(self):
+        return config.comprehensive_padding and isinstance(self, FlexibleLayout)
+
     def as_fixed(self):
+        if isinstance(self, FixedLayout):
+            return self
+
+        if self.should_pad_strides():
+            self.pad_strides()
         return FixedLayout(
             self.device,
             self.dtype,
@@ -2702,7 +2818,7 @@ class FlexibleLayout(Layout):
                 "stride_ordered_for_memory_format, unsuppored memory_format: %s",
                 memory_format,
             )
-            raise NotImplementedError()
+            raise NotImplementedError
 
     @staticmethod
     def same_ordered(sizes, stride):
@@ -2717,30 +2833,40 @@ class FlexibleLayout(Layout):
         fill_order = sorted(range(len(stride)), key=stride.__getitem__)
         return FlexibleLayout.fill_ordered(sizes, fill_order)
 
-    def as_stride_order(self, order):
+    def as_stride_order(self, order, allow_padding=False):
+        new_stride = self.stride_ordered(self.size, order)
+        if self.should_pad_strides() and allow_padding:
+            new_stride = self._pad_strides(new_stride, self.size, self.dtype)
+
         return FixedLayout(
             self.device,
             self.dtype,
             self.size,
-            self.stride_ordered(self.size, order),
+            new_stride,
             self.offset,
         )
 
     def as_fill_order(self, order):
+        new_stride = self.fill_ordered(self.size, order)
+        if self.should_pad_strides():
+            new_stride = self._pad_strides(new_stride, self.size, self.dtype)
         return FixedLayout(
             self.device,
             self.dtype,
             self.size,
-            self.fill_ordered(self.size, order),
+            new_stride,
             self.offset,
         )
 
     def as_same_order(self, stride):
+        new_stride = self.same_ordered(self.size, stride)
+        if self.should_pad_strides():
+            new_stride = self._pad_strides(new_stride, self.size, self.dtype)
         return FixedLayout(
             self.device,
             self.dtype,
             self.size,
-            self.same_ordered(self.size, stride),
+            new_stride,
             self.offset,
         )
 
@@ -2931,9 +3057,9 @@ class Buffer(IRNode):
         if not isinstance(self.layout, (MultiOutputLayout, NonOwningLayout)):
             self.layout = self.layout.as_fixed()
 
-    def freeze_layout_with_stride_order(self, order):
+    def freeze_layout_with_stride_order(self, order, allow_padding=False):
         assert isinstance(self.layout, FlexibleLayout)
-        self.layout = self.layout.as_stride_order(order)
+        self.layout = self.layout.as_stride_order(order, allow_padding=allow_padding)
 
     def freeze_layout_with_fill_order(self, order):
         assert isinstance(self.layout, FlexibleLayout)
@@ -3069,7 +3195,7 @@ class Buffer(IRNode):
             symbols_to_define.remove(s)
         assert (
             not symbols_to_define
-        ), f"unbacked symint {s} not written out, check comment above"
+        ), f"unbacked symint {symbols_to_define} not written out, check comment above"
 
     def realize(self):
         pass
@@ -3540,16 +3666,16 @@ class ChoiceCaller:
         return do_bench(lambda: algo(*args, out=out))
 
     def call_name(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def to_callable(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def hash_key(self) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def output_node(self) -> "TensorBox":
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def info_dict(self) -> Dict[str, Union[PrimitiveInfoType, List[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
@@ -3558,7 +3684,7 @@ class ChoiceCaller:
 
 class TritonTemplateCallerBase(ChoiceCaller):
     def get_make_kernel_render(self) -> Any:
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class MultiTemplateBuffer(TritonTemplateBuffer):
@@ -3724,13 +3850,26 @@ class ConcatKernel(NopKernel):
             x = inputs[i]
             if is_storage_and_layout(x):
                 layout = x.get_layout()
-                if (
-                    isinstance(layout, FixedLayout)
-                    and layout.is_channels_last_contiguous()
-                ):
+                if isinstance(
+                    layout, FixedLayout
+                ) and Layout.is_channels_last_contiguous(layout.size, layout.stride):
                     # use CL stride for the output
                     output_stride = make_channels_last_strides_for(new_size)
                     break
+        any_input_is_storage_and_layout = any(is_storage_and_layout(x) for x in inputs)
+        fx_node_args = V.graph.current_node.args[0]
+        assert V.graph.current_node.target in [aten.cat, aten.cat.default]
+        assert isinstance(fx_node_args, list)
+        # If any of the inputs has meta tensor and the meta tensor is in CL format, use CL format for the output
+        if any_input_is_storage_and_layout is False and any(
+            "val" in arg.meta
+            and (
+                arg.meta["val"].is_contiguous(memory_format=torch.channels_last)
+                or arg.meta["val"].is_contiguous(memory_format=torch.channels_last_3d)
+            )
+            for arg in fx_node_args
+        ):
+            output_stride = make_channels_last_strides_for(new_size)
 
         concat_kernel = ConcatKernel(
             name=None,
@@ -3747,7 +3886,9 @@ class ConcatKernel(NopKernel):
         for i in range(len(inputs)):
             input_buffer = cls.realize_into(
                 inputs[i],
-                SliceView.create(kernel, dim, offsets_start[i], offsets_end[i]),
+                SliceView.create(
+                    kernel, dim, offsets_start[i], offsets_end[i], clamp=False
+                ),
             )
             concat_kernel.inputs.append(input_buffer)
 
@@ -3906,7 +4047,7 @@ class ExternKernel(InputsKernel):
             wrapper.writeline(origin_str)
 
     def codegen(self, wrapper):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def get_kernel_name(self):
         return self.cpp_kernel_name if V.graph.cpp_wrapper else self.python_kernel_name
@@ -4011,7 +4152,30 @@ class ExternKernel(InputsKernel):
 
         # NOTE: Don't use extract_read_writes here as it fails when
         # make_loader() inlines the computation
-        x.unwrap_view().freeze_layout()
+        x_unwrap_view = x.unwrap_view()
+        x_unwrap_view_fx_node = V.graph.get_buffer(
+            x_unwrap_view.get_name()
+        ).get_origin_node()
+        # Prefer channels last format according to how the format is set from eager.
+        if (
+            x_unwrap_view_fx_node is not None
+            and "val" in x_unwrap_view_fx_node.meta
+            and isinstance(x_unwrap_view.layout, FlexibleLayout)
+            and (
+                x_unwrap_view_fx_node.meta["val"].is_contiguous(
+                    memory_format=torch.channels_last
+                )
+                or x_unwrap_view_fx_node.meta["val"].is_contiguous(
+                    memory_format=torch.channels_last_3d
+                )
+            )
+        ):
+            x_unwrap_view.freeze_layout_with_same_order(
+                make_channels_last_strides_for(x_unwrap_view.get_size())
+            )
+        else:
+            x_unwrap_view.freeze_layout()
+
         index_args, var_ranges = dependencies.index_vars_squeeze(
             x.get_size(), prefix="r"
         )
@@ -4030,7 +4194,7 @@ class ExternKernel(InputsKernel):
                 offset,
                 index,
             )
-            raise NotImplementedError()
+            raise NotImplementedError
 
         return ReinterpretView(
             data=x.data,
@@ -4083,7 +4247,7 @@ class ExternKernel(InputsKernel):
         return cls.copy_input(x)
 
     @classmethod
-    def require_stride_order(cls, x, order):
+    def require_stride_order(cls, x, order, allow_padding=False):
         if x.get_numel() == 0:  # Layout doesn't matter
             return x
 
@@ -4111,6 +4275,7 @@ class ExternKernel(InputsKernel):
                     )
                     if is_stride_order_storage_and_layout(x, order)
                     else order,
+                    allow_padding=allow_padding,
                 )
                 return x
             elif isinstance(
@@ -4139,11 +4304,17 @@ class ExternKernel(InputsKernel):
         ):
             try:
                 x.data = cls.convert_to_reinterpret_view(x.data)
-                return cls.require_stride_order(x, order)
+                return cls.require_stride_order(x, order, allow_padding=allow_padding)
             except NotImplementedError:
                 pass
         x = cls.copy_input(x)
-        as_storage_and_layout(x, freeze=True, want_contiguous=False, stride_order=order)
+        as_storage_and_layout(
+            x,
+            freeze=True,
+            want_contiguous=False,
+            stride_order=order,
+            allow_padding=allow_padding,
+        )
         assert is_stride_order_storage_and_layout(x, order)
         return x
 
@@ -4454,9 +4625,10 @@ class UserDefinedTritonKernel(ExternKernel):
         return set()
 
     def get_mutation_names(self):
-        return []
+        # return []
+        return [i.get_name() for i in self.mutable_args]
 
-    def __init__(self, *, kernel_idx, grid, kernel_args, tensors_to_clone):
+    def __init__(self, *, kernel_idx, grid, kernel_args):
         inputs = []
         kwargs = dict()
         constant_args = []
@@ -4489,15 +4661,19 @@ class UserDefinedTritonKernel(ExternKernel):
             arg for arg in kernel.arg_names if arg in kernel_args
         ]
 
+        from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
         mutable_args = [
             arg
             for key, arg in kernel_args.items()
-            if isinstance(arg, TensorBox) and key in tensors_to_clone
+            if isinstance(arg, TensorBox)
+            and key in kernel_side_table.get_mutable_params(kernel_idx)
         ]
         mark_node_as_mutating(self, *mutable_args)
+        self.mutable_args = mutable_args
 
     def get_inputs_that_alias_output(self):
-        return [i.get_name() for i in self.inputs]
+        return [i.get_name() for i in self.mutable_args]
 
 
 def mark_node_as_mutating(cur_buffer, *mutated_ops):
