@@ -265,7 +265,7 @@ class ListVariable(CommonListMethodsVariable):
         return list
 
     def __repr__(self):
-        return f"{self.__class__.__name__}(length={len(self.items)}"
+        return f"{self.__class__.__name__}(length={len(self.items)})"
 
     def reconstruct(self, codegen):
         codegen.foreach(self.items)
