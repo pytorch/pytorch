@@ -2137,7 +2137,7 @@ class GraphModule(torch.nn.Module):
             opt_result = opt_fn(a, b, arg)
             self.assertTrue(same(opt_result, eager_result))
             # TODO: guard is in the wrong place
-            # self.assertEqual(cnts.frame_count, 1)
+            self.assertEqual(cnts.frame_count, 1)
 
     def test_compare_constant_and_tensor(self):
         for op in [
