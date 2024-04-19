@@ -1896,38 +1896,6 @@ optim_db: List[OptimizerInfo] = [
             ),
             DecorateInfo(
                 skipIfTorchDynamo(
-                    "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
-                ),
-                "TestOptimRenewed",
-                "test_step_is_noop_for_zero_grads",
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
-                ),
-                "TestOptimRenewed",
-                "test_param_groups_weight_decay",
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
-                ),
-                "TestOptimRenewed",
-                "test_param_groups_lr",
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
-                    "Errors with list out of range, see https://github.com/pytorch/pytorch/issues/116061"
-                ),
-                "TestOptimRenewed",
-                "test_load_nontensor_step",
-                device_type="cpu",
-            ),
-            DecorateInfo(
-                skipIfTorchDynamo(
                     "fails, https://github.com/pytorch/pytorch/issues/117165"
                 ),
                 "TestOptimRenewed",
