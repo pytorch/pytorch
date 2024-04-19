@@ -29,7 +29,7 @@ from torch._dynamo.utils import (
 from torch._functorch import config as functorch_config
 from torch._functorch.aot_autograd import aot_export_module, make_boxed_func
 from torch._inductor.codecache import code_hash, CompiledFxGraph, FxGraphCache
-from torch._inductor.cudagraph_utils import BoxedDeviceIndex
+from torch._inductor.cudagraph_utils import BoxedDeviceIndex, get_placeholders
 
 from torch._inductor.debug import save_args_for_compile_fx_inner
 from torch._inductor.utils import BoxedBool, count_tangents
@@ -513,16 +513,7 @@ def compile_fx_inner(
             if isinstance(t, torch.Tensor)
         )
 
-        from torch._inductor.cudagraph_utils import check_for_mutation
-
-        has_mutation_str = check_for_mutation(gm, compiled_graph, num_fixed)
-        has_mutation = has_mutation_str is not None
-
-        if has_mutation:
-            compiled_graph.disabled_cudagraphs_reason = has_mutation_str
-
         cudagraph_tests = [
-            (not has_mutation, "mutated inputs"),
             (not has_incompatible_cudagraph_ops(gm), "incompatible ops"),
             (not complex_memory_overlap_inputs, "complex memory overlap"),
             (
@@ -557,6 +548,8 @@ def compile_fx_inner(
                 is_backward=is_backward,
                 is_inference=is_inference,
                 constants=tuple(compiled_graph.constants.values()),
+                placeholders=tuple(get_placeholders(gm.graph)),
+                mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
             )
         else:
             BoxedBool.disable(cudagraphs)
@@ -878,6 +871,8 @@ def cudagraphify(
     is_backward: bool,
     is_inference: bool,
     constants: Tuple[torch.Tensor, ...] = (),
+    placeholders: Tuple[torch.fx.Node, ...] = (),
+    mutated_input_idxs: Tuple[int, ...] = (),
 ):
     from torch._inductor.cudagraph_trees import (
         cudagraphify_impl as new_cudagraphify_impl,
@@ -892,6 +887,8 @@ def cudagraphify(
             is_backward=is_backward,
             is_inference=is_inference,
             constants=constants,
+            placeholders=placeholders,
+            mutated_input_idxs=mutated_input_idxs,
         )
     else:
         cudagraphify_fn = cudagraphify_impl
