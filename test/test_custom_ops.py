@@ -746,7 +746,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         )
 
     def test_supported_return_types_single_return(self):
-        for typ in torch._custom_op.impl.SUPPORTED_RETURN_TYPES:
+        for typ in torch._library.infer_schema.SUPPORTED_RETURN_TYPES:
             for example in self._generate_examples(typ):
                 try:
 
@@ -765,7 +765,7 @@ class TestCustomOp(CustomOpTestCaseBase):
                     custom_ops._destroy(f"{self.test_ns}::foo")
 
     def test_supported_return_types_multi_return(self):
-        for typ in torch._custom_op.impl.SUPPORTED_RETURN_TYPES:
+        for typ in torch._library.infer_schema.SUPPORTED_RETURN_TYPES:
             for example in self._generate_examples(typ):
                 try:
 
@@ -785,7 +785,7 @@ class TestCustomOp(CustomOpTestCaseBase):
                     custom_ops._destroy(f"{self.test_ns}::foo")
 
     def test_supported_param_types(self):
-        for typ in torch._custom_op.impl.SUPPORTED_PARAM_TYPES:
+        for typ in torch._library.infer_schema.SUPPORTED_PARAM_TYPES:
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor, y: typ) -> Tensor:
