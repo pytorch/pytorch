@@ -54,7 +54,7 @@ class ClosuresTest(TestCase):
             torch._lazy.add_step_closure(closure)
             torch._lazy.mark_step()
 
-            raise AssertionError()  # Should not reach here
+            raise AssertionError  # Should not reach here
         except RuntimeError as e:
             assert flag.is_set(), "Should have caught exception from closure"
 
@@ -79,7 +79,7 @@ class ClosuresTest(TestCase):
             torch._lazy.add_step_closure(closure2, run_async=True)
             torch._lazy.mark_step()
 
-            raise AssertionError()  # Should not reach here
+            raise AssertionError  # Should not reach here
         except RuntimeError as e:
             # Should have caught exception from closure1
             pass
