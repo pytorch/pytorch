@@ -3138,7 +3138,7 @@ THIRDPARTY_SKIPLIST = (
     "torch2trt",
     "tqdm",
     "tree",
-    "triton",
+    "triton.runtime.jit",
     "tvm",
     "xarray",
 )
