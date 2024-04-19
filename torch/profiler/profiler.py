@@ -559,6 +559,8 @@ class profile(_KinetoProfile):
 
     .. code-block:: python
 
+        with torch.profiler.profile(
+            ...
             execution_trace_observer=(
                 ExecutionTraceObserver().register_callback("./execution_trace.json")
             ),
