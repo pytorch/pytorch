@@ -353,6 +353,70 @@ def get_key_index_source(source, index):
     return f"list({source}.keys())[{index}]"
 
 
+@dataclasses.dataclass(frozen=True)
+class NNModuleAttrAccessorInfo:
+    present_in_generic_dict: bool = False
+    first_level_key: Optional[str] = None
+    second_level_key: Optional[str] = None
+
+
+def getattr_on_nn_module(
+    source,
+    base_guard_manager,
+    base_example_value,
+    example_value,
+    base_source_name,
+    source_name,
+):
+    attr_name = source.member
+    mod_dict = base_example_value.__dict__
+
+    if attr_name in mod_dict:
+        accessor_info = NNModuleAttrAccessorInfo(True, attr_name, None)
+    elif attr_name in mod_dict["_parameters"]:
+        accessor_info = NNModuleAttrAccessorInfo(True, "_parameters", attr_name)
+    elif attr_name in mod_dict["_buffers"]:
+        accessor_info = NNModuleAttrAccessorInfo(True, "_buffers", attr_name)
+    elif attr_name in mod_dict["_modules"]:
+        accessor_info = NNModuleAttrAccessorInfo(True, "_modules", attr_name)
+    else:
+        accessor_info = NNModuleAttrAccessorInfo(False, None, None)
+
+    def getitem_mgr(dict_mgr, key, dict_source, dict_value):
+        # TODO(anijain2305) - Benchmark another way where instead of traversing
+        # PyDict_Next, we use PyDict_GetItem. If the keys are sparsely guarded,
+        # PyDict_GetItem could be faster than iterating over the entire dict.
+        index = get_key_index(dict_value, key)
+        source_name = f"{dict_source}[{key!r}]"
+        return dict_mgr.get_value_manager(
+            index=index, source=source_name, example_value=dict_value[key]
+        )
+
+    if not accessor_info.present_in_generic_dict:
+        return base_guard_manager.getattr_manager(
+            attr=source.member, source=source_name, example_value=example_value
+        )
+    else:
+        # This will install a DictGuardManager
+        generic_dict_source = f"{base_source_name}.__dict__"
+        mod_generic_dict_manager = base_guard_manager.get_generic_dict_manager(
+            source=generic_dict_source, example_value=mod_dict
+        )
+
+        assert accessor_info.first_level_key
+        l1_key = accessor_info.first_level_key
+        l1_mgr = getitem_mgr(
+            mod_generic_dict_manager, l1_key, generic_dict_source, mod_dict
+        )
+
+        if accessor_info.second_level_key:
+            l1_source = f"{generic_dict_source}[{l1_key!r}]"
+            l2_key = accessor_info.second_level_key
+            l2_mgr = getitem_mgr(l1_mgr, l2_key, l1_source, mod_dict[l1_key])
+            return l2_mgr
+        return l1_mgr
+
+
 def getitem_on_dict_manager(
     source, base_guard_manager, base_example_value, example_value
 ):
@@ -569,6 +633,17 @@ class GuardBuilder(GuardBuilderBase):
             )
         elif istype(source, AttrSource):
             assert base_guard_manager  # to make mypy happy
+
+            if isinstance(base_example_value, torch.nn.Module):
+                return getattr_on_nn_module(
+                    source,
+                    base_guard_manager,
+                    base_example_value,
+                    example_value,
+                    base_source_name,
+                    source_name,
+                )
+
             return base_guard_manager.getattr_manager(
                 attr=source.member, source=source_name, example_value=example_value
             )
