@@ -372,8 +372,20 @@ class AOTInductorTestsTemplate:
 
             example_inputs = (torch.randn(1, iC, 3, 3, device=self.device).to(dtype),)
 
+            # TODO: when mkldnn not enabled, the tolerance needs to be set to a larger value here.
+            # Eager: channels first. Inductor: channels last
+            atol, rtol = (
+                (None, None)
+                if (
+                    torch.backends.mkldnn.is_available()
+                    and torch.backends.mkldnn.enabled
+                )
+                else (1e-2, 0.016)
+            )
             with config.patch({"freezing": True}):
-                self.check_model(Model(self.device), example_inputs)
+                self.check_model(
+                    Model(self.device), example_inputs, atol=atol, rtol=rtol
+                )
 
     def test_simple_split(self):
         class Model(torch.nn.Module):
