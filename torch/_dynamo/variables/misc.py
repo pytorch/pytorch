@@ -761,6 +761,11 @@ class NumpyVariable(VariableTracker):
     """
 
     constant_fold_functions = (tnp.issubdtype,)
+    constant_collection_functions = (
+        tnp.finfo,
+        tnp.iinfo,
+        tnp.dtype,
+    )
 
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
@@ -772,25 +777,36 @@ class NumpyVariable(VariableTracker):
         assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
         return fn in cls.constant_fold_functions
 
+    @classmethod
+    def produces_constant_collection(cls, fn):
+        mod = fn.__module__.split(".")
+        assert len(mod) >= 2 and mod[:2] == ["torch", "_numpy"]
+        return fn in cls.constant_collection_functions
+
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
         if not config.trace_numpy:
             unimplemented(f"numpy.{self.value}()")
 
-        import numpy as np
-
         from ..utils import numpy_to_tensor_wrapper
         from .tensor import NumpyNdarrayVariable
 
-        # lookup method name in tnp. Things like np.dtype(float) are not supported yet.
-        if self.value.__name__ == "dtype":
+        func = get_np_to_tnp_map().get(self.value)
+        if func is None:
             unimplemented(
-                f"numpy dtype function is not supported yet. Got type {type(self.value)}."
+                f"Can't find numpy function {self.value} in torch._numpy. "
+                " Please file an issue to request support for this function."
             )
-        elif self.value in (np.iinfo, np.finfo):
+
+        # We are dealing with a function that produces a const collection type (np.dtype, np.iinfo/np.finfo)
+        if self.produces_constant_collection(func):
+            if func is tnp.dtype:
+                collection_variable_typ = NumpyDTypeVariable
+            else:
+                collection_variable_typ = NumpyTypeInfoVariable
             try:
-                return NumpyTypeInfoVariable(
+                return collection_variable_typ(
                     self.value(
                         *[x.as_python_constant() for x in args],
                         **{k: v.as_python_constant() for k, v in kwargs.items()},
@@ -800,14 +816,18 @@ class NumpyVariable(VariableTracker):
                 unimplemented(
                     f"{self.value.__name__} with non-const args: {args} {kwargs}"
                 )
-        else:  # We are dealing with a callable.
-            func = get_np_to_tnp_map().get(self.value)
-            if func is None:
-                unimplemented(
-                    f"Can't find numpy function {self.value} in torch._numpy. "
-                    " Please file an issue to request support for this function."
-                )
-
+        # TODO Add all the functions that go from constants to constants to can_constant_fold_through
+        if self.can_constant_fold_through(func) and (
+            check_unspec_or_constant_args(args, kwargs)
+        ):
+            # constant fold
+            return variables.ConstantVariable.create(
+                self.as_python_constant()(
+                    *[x.as_python_constant() for x in args],
+                    **{k: v.as_python_constant() for k, v in kwargs.items()},
+                ),
+            )
+        else:  # We are dealing with a callable that produces a tensor
             if (
                 func.__module__ == "torch._numpy.random"
                 and config.use_numpy_random_stream
@@ -818,18 +838,6 @@ class NumpyVariable(VariableTracker):
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
 
-            if self.can_constant_fold_through(func) and (
-                check_unspec_or_constant_args(args, kwargs)
-            ):
-                # constant fold
-                return variables.ConstantVariable.create(
-                    self.as_python_constant()(
-                        *[x.as_python_constant() for x in args],
-                        **{k: v.as_python_constant() for k, v in kwargs.items()},
-                    ),
-                )
-
-            # TODO Add all the functions that go from constants to constants to can_constant_fold_through
             proxy = tx.output.create_proxy(
                 "call_function",
                 numpy_to_tensor_wrapper(func),
@@ -1016,9 +1024,10 @@ class ConstantLikeVariable(VariableTracker):
 
     _error_prefix = "ConstantLikeVariable"
     try:
-        from numpy import floating as np_floating
+        from numpy import dtype as np_dtype, floating as np_floating
     except ImportError:
         np_floating = type("invalid_type", (), {})
+        np_dtype = type("invalid_type", (), {})
 
     def __init__(self, value, **kwargs):
         super().__init__(**kwargs)
@@ -1057,6 +1066,8 @@ class ConstantLikeVariable(VariableTracker):
         result = getattr(self.value, name)
         if isinstance(result, self.np_floating):
             result = float(result)
+        if isinstance(result, self.np_dtype):
+            return NumpyDTypeVariable(result)
         if variables.ConstantVariable.is_literal(result):
             return variables.ConstantVariable.create(result)
         return GetAttrVariable(self, name)
@@ -1081,3 +1092,15 @@ class TorchVersionVariable(ConstantLikeVariable):
 
 class NumpyTypeInfoVariable(ConstantLikeVariable):
     _error_prefix = "np.iinfo/np.finfo"
+
+
+class NumpyDTypeVariable(ConstantLikeVariable):
+    _error_prefix = "np.dtype[...]"
+
+    def as_proxy(self):
+        """Similar to how numpy dtype descriptors (e.g. np.float32 ) are handled by NumpyVariable:
+
+        np.dtype() objects are serialized as strings, torch._numpy wrappers will normalize to the torch dtype.
+        This also handles unsupported things nicely (i.e. structured arrays and object arrays).
+        """
+        return self.value.type.__name__
