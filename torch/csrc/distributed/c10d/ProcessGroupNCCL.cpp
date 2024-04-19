@@ -1092,7 +1092,14 @@ void ProcessGroupNCCL::shutdown(c10::optional<std::string> reason) {
   LOG(INFO) << logPrefix()
             << "Launching ProcessGroupNCCL abort asynchrounously.";
   std::future<bool> fut = std::async(
-      std::launch::async, [this, &reason]() { return this->abort(reason); });
+      std::launch::async, [this, &reason]() {
+#ifdef ENABLE_NCCL_ERROR_CHECKING
+    if (ncclCommWatchdogThread_.joinable()) {
+      ncclCommWatchdogThread_.join();
+    }
+#endif
+    return this->abort(reason);
+  });
 
   waitForFutureOrTimeout(fut, options_->timeout, "ProcessGroup abort", true);
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL aborts successfully.";
