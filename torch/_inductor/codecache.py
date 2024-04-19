@@ -1259,13 +1259,11 @@ def valid_vec_isa_list() -> List[VecISA]:
     return isa_list
 
 
-# valid_vec_isa_list only need setup once.
-_valid_vec_isa_list = valid_vec_isa_list()
-
-
 def pick_vec_isa() -> VecISA:
     if config.is_fbcode():
         return VecAVX2()
+
+    _valid_vec_isa_list = valid_vec_isa_list()
 
     if not _valid_vec_isa_list:
         return invalid_vec_isa
@@ -2090,14 +2088,14 @@ class CppCodeCache:
         from torch._inductor.jit_builder.cpp_builder import CppBuilder, CppTorchOptions
 
         picked_vec_isa = pick_vec_isa()
-        isa_seed = CppBuilder("i", ["o"], CppTorchOptions(picked_vec_isa))
+        dummy_builder = CppBuilder("i", ["o"], CppTorchOptions(picked_vec_isa))
         # write function will calc source_code hash, the same source code with different
         # ISA level should be generate different hash.
-        # So we need get a command_line which contains isa related parameter as a hash seed.
-        # And then pass the seed to below write function as extra parameter to guarantee the
-        # source code hash contains ISA difference.
-        hash_seed = isa_seed.get_command_line()
-        key, input_path = write(source_code, "cpp", extra=hash_seed)
+        # So we need get a command_line which contains isa related parameter as a part of hash key.
+        # And then pass the command_line to below write function as extra parameter to
+        # guarantee the source code hash contains ISA difference.
+        dummy_cmd = dummy_builder.get_command_line()
+        key, input_path = write(source_code, "cpp", extra=dummy_cmd)
 
         if key not in cls.cache:
             from filelock import FileLock
