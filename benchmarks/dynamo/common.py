@@ -93,13 +93,19 @@ except ImportError:
     # ignore the error if torch_xla is not installed
     pass
 
+log = logging.getLogger(__name__)
+
 # Enable OpenVINO Backend for benchmarking
 try:
     import openvino.torch
-except ImportError:
+except ImportError as e:
+    log.exception(e)
+    print(
+        f"OpenVINO is not installed. "
+        f"To use openvino backend, install it using "
+        f"'pip install openvino'"
+    )
     pass
-
-log = logging.getLogger(__name__)
 
 # We are primarily interested in TF32
 torch.backends.cuda.matmul.allow_tf32 = True
