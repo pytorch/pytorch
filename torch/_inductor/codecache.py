@@ -1113,12 +1113,18 @@ cdll.LoadLibrary("__lib_path__")
         lock = FileLock(os.path.join(lock_dir, key + ".lock"), timeout=LOCK_TIMEOUT)
         with lock:
             output_dir = os.path.dirname(input_path)
+            buid_options = CppTorchOptions(chosen_isa=self, warning_all=False)
             x86_isa_help_builder = CppBuilder(
-                key, [input_path], CppTorchOptions(self), output_dir
+                key,
+                [input_path],
+                buid_options,
+                output_dir,
             )
             try:
                 # Check build result
                 status, target_file = x86_isa_help_builder.build()
+                if status:
+                    return False
                 subprocess.check_call(
                     [
                         sys.executable,

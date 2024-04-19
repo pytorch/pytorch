@@ -329,7 +329,7 @@ def _get_shared_cflag() -> List[str]:
     return SHARED_FLAG
 
 
-def get_cpp_options(cpp_compiler):
+def get_cpp_options(cpp_compiler, warning_all: bool = True):
     definations: List[str] = []
     include_dirs: List[str] = []
     cflags: List[str] = []
@@ -341,7 +341,7 @@ def get_cpp_options(cpp_compiler):
     cflags = (
         _get_shared_cflag()
         + _get_optimization_cflags()
-        + _get_warning_all_cflag()
+        + _get_warning_all_cflag(warning_all)
         + _get_cpp_std_cflag()
         + _get_linux_cpp_cflags(cpp_compiler)
     )
@@ -368,7 +368,7 @@ class CppOptions(BuildOptionsBase):
     1. This Options is good for assist modules build, such as x86_isa_help.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, warning_all: bool = True) -> None:
         super().__init__()
         self._compiler = _get_cpp_compiler()
 
@@ -668,8 +668,10 @@ class CppTorchOptions(CppOptions):
     5. MISC
     """
 
-    def __init__(self, chosen_isa: VecISA, aot_mode: bool = False) -> None:
-        super().__init__()
+    def __init__(
+        self, chosen_isa: VecISA, warning_all: bool = True, aot_mode: bool = False
+    ) -> None:
+        super().__init__(warning_all)
 
         self._aot_mode = aot_mode
 
