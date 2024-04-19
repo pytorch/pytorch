@@ -420,13 +420,18 @@ def _other_is_broadcasted_in_dim(match):
 
 def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
-        if not isinstance(other, torch.Tensor):
-            other = torch.scalar_tensor(other, dtype=inp.dtype, device=inp.device)
-        inp = torch.where(other >= 0, inp, -inp)
         if dtype is not None:
             inp = inp.to(dtype)
+
+        if isinstance(other, (int, float)):
+            sign = 1 if other >= 0 else -1
+        else:
+            one = torch.scalar_tensor(1, dtype=inp.dtype, device=inp.device)
+            sign = torch.where(other >= 0, one, -one)
+
+        inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
-        return (inp - max_) * other.abs()
+        return (inp - max_) * (sign * other)
 
     with V.fake_mode:
         match.replace_by_example(repl, [inp, other])
@@ -442,13 +447,18 @@ for reverse, to_dtype in itertools.product((False, True), repeat=2):
 
 def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
     def repl(inp, other):
-        if not isinstance(other, torch.Tensor):
-            other = torch.scalar_tensor(other, dtype=inp.dtype, device=inp.device)
-        inp = torch.where(other >= 0, inp, -inp)
         if dtype is not None:
             inp = inp.to(dtype)
+
+        if isinstance(other, (int, float)):
+            sign = 1 if other >= 0 else -1
+        else:
+            one = torch.scalar_tensor(1, dtype=inp.dtype, device=inp.device)
+            sign = torch.where(other >= 0, one, -one)
+
+        inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
-        return (inp - max_) / other.abs()
+        return (inp - max_) / (sign * other)
 
     with V.fake_mode:
         match.replace_by_example(repl, [inp, other])
