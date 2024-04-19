@@ -45,6 +45,11 @@ inputs:
     required: false
     type: string
     default: ""
+  default_branch:
+    description: Default branch
+    required: false
+    type: string
+    default: ""
   HUGGING_FACE_HUB_TOKEN:
     description: |
       HF Auth token to avoid rate limits when downloading models or datasets from hub
@@ -55,7 +60,7 @@ inputs:
     required: true
 
 env:
-  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  GIT_DEFAULT_BRANCH: ${{ inputs.default_branch }}
 
 runs:
   using: composite
@@ -102,6 +107,7 @@ runs:
       if: ${{ contains(inputs.build-environment, 'cuda') && !contains(matrix.config, 'nogpu') && steps.check_arc_runner.outputs.IN_ARC_RUNNER == 'false' }}
 
     - name: Lock NVIDIA A100 40GB Frequency
+      shell: bash
       run: |
         sudo nvidia-smi -pm 1
         sudo nvidia-smi -ac 1215,1410
