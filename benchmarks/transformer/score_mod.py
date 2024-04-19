@@ -6,9 +6,9 @@ from typing import Callable, List
 
 import numpy as np
 import torch
-import torch.utils.benchmark as benchmark
+import torch.nn.functional as F
 from tabulate import tabulate
-from torch.nn.attention._templated_attention import _compose, _templated_attention
+from torch.nn.attention._templated_attention import _templated_attention
 from tqdm import tqdm
 
 torch._dynamo.config.automatic_dynamic_shapes = False
@@ -16,15 +16,14 @@ torch._dynamo.config.automatic_dynamic_shapes = False
 torch._dynamo.config.cache_size_limit = 1000
 
 
+from triton.testing import do_bench
+
+
 def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) -> float:
     # warmup
     for _ in range(5):
         func(*args, **kwargs)
-    t0 = benchmark.Timer(
-        stmt="func(*args, **kwargs)",
-        globals={"args": args, "kwargs": kwargs, "func": func},
-    )
-    return t0.adaptive_autorange(min_run_time=0.1).median * 1e6
+    return do_bench(lambda: func(*args, **kwargs)) * 1e3
 
 
 @dataclass(frozen=True)
@@ -110,8 +109,11 @@ def run_single_experiment(config: ExperimentConfig) -> ExperimentResults:
         config.dtype,
         device,
     )
-    eager_sdpa = _templated_attention
-    compiled_sdpa = torch.compile(eager_sdpa)
+
+    def eager_sdpa(query, key, value, _):
+        return F.scaled_dot_product_attention(query, key, value)
+
+    compiled_sdpa = torch.compile(_templated_attention)
 
     score_mod = config.score_mod
 
@@ -190,6 +192,9 @@ def print_results(results: List[Experiment]):
 
 
 def generate_score_mods() -> List[Callable]:
+    def noop(score, b, h, m, n):
+        return score
+
     def causal_mask(score, b, h, token_q, token_kv):
         return torch.where(token_q >= token_kv, score, float("-inf"))
 
@@ -199,14 +204,7 @@ def generate_score_mods() -> List[Callable]:
     def head_bias(score, b, h, m, n):
         return score + 2 * h
 
-    def pathological(score, b, h, m, n):
-        def sin(score, b, h, m, n):
-            return torch.sin(score)
-
-        composed_mod = _compose(*(sin for _ in range(10)))
-        return composed_mod(score, b, h, m, n)
-
-    return [causal_mask, relative_bias, head_bias, pathological]
+    return [noop, causal_mask, relative_bias, head_bias]
 
 
 def generate_experiment_configs() -> List[ExperimentConfig]:
