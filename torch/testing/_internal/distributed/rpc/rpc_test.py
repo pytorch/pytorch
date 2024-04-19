@@ -4606,22 +4606,22 @@ class CudaRpcTest(RpcAgentTestFixture):
         function_events = p.function_events
         for event in function_events:
             if event.is_async:
-                self.assertEqual(0, event.device_time_total)
+                self.assertEqual(0, event.cuda_time_total)
                 self.assertEqual([], event.kernels)
-                self.assertEqual(0, event.device_time)
+                self.assertEqual(0, event.cuda_time)
             else:
                 if event.node_id == 1:
                     continue
                 self.assertTrue(event.node_id in [dst_cuda_0, dst_cuda_1])
                 if get_name(event) in EXPECTED_REMOTE_EVENTS:
-                    self.assertGreater(event.device_time_total, 0)
+                    self.assertGreater(event.cuda_time_total, 0)
                     self.assertEqual(1, len(event.kernels))
                     kernel = event.kernels[0]
                     if event.node_id == dst_cuda_0:
                         self.assertEqual(kernel.device, 0)
                     if event.node_id == dst_cuda_1:
                         self.assertEqual(kernel.device, 1)
-                    self.assertGreater(event.device_time, 0)
+                    self.assertGreater(event.cuda_time, 0)
 
         # Validate that EXPECTED_REMOTE_EVENTS is a subset of remotely profiled
         # events.
