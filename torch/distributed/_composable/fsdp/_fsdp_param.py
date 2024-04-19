@@ -484,7 +484,7 @@ class FSDPParam:
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
-                raise NotImplementedError()
+                raise NotImplementedError
             all_gather_input = _to_dtype_if_needed(
                 cast(torch.Tensor, self._sharded_post_forward_param_data),
                 self.param_dtype,

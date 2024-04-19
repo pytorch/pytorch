@@ -57,6 +57,7 @@ from tools.testing.discover_tests import (
     TESTS,
 )
 from tools.testing.do_target_determination_for_s3 import import_results
+from tools.testing.target_determination.gen_artifact import gen_ci_artifact
 
 from tools.testing.test_run import TestRun
 from tools.testing.test_selections import (
@@ -190,6 +191,8 @@ XPU_TEST = [
 RUN_PARALLEL_BLOCKLIST = [
     "test_cpp_extensions_jit",
     "test_cpp_extensions_open_device_registration",
+    "test_cpp_extensions_stream_and_event",
+    "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
     "test_mobile_optimizer",
     "test_multiprocessing",
@@ -215,7 +218,6 @@ CI_SERIAL_LIST = [
     "test_reductions",
     "test_cuda",
     "test_cuda_expandable_segments",
-    "test_indexing",
     "test_fx_backends",
     "test_linalg",
     "test_cpp_extensions_jit",
@@ -228,13 +230,10 @@ CI_SERIAL_LIST = [
     "nn/test_pooling",
     "nn/test_convolution",  # Doesn't respect set_per_process_memory_fraction, results in OOM for other tests in slow gradcheck
     "distributions/test_distributions",
-    "test_autograd",  # slow gradcheck runs a test that checks the cuda memory allocator
-    "test_prims",  # slow gradcheck runs a test that checks the cuda memory allocator
     "test_modules",  # failed test due to mismatched elements
     "functorch/test_vmap",  # OOM
     "test_fx",  # gets SIGKILL
     "test_dataloader",  # frequently hangs for ROCm
-    "test_serialization",  # test_serialization_2gb_file allocates a tensor of 2GB, and could cause OOM
     "test_schema_check",  # Cause CUDA illegal memory access https://github.com/pytorch/pytorch/issues/95749
     "functorch/test_memory_efficient_fusion",  # Cause CUDA OOM on ROCm
     "test_utils",  # OOM
@@ -245,10 +244,6 @@ CI_SERIAL_LIST = [
     "test_module_hooks",  # OOM
     "inductor/test_max_autotune",
     "inductor/test_cutlass_backend",  # slow due to many nvcc compilation steps
-    "inductor/test_torchinductor",  # OOM on test_large_block_sizes
-    "inductor/test_torchinductor_dynamic_shapes",  # OOM on test_large_block_sizes
-    "inductor/test_torchinductor_codegen_dynamic_shapes",  # OOM on test_large_block_sizes
-    "test_profiler",  # test_source_multithreaded is probably not compatible with parallelism
 ]
 # A subset of onnx tests that cannot run in parallel due to high memory usage.
 ONNX_SERIAL_LIST = [
@@ -1590,6 +1585,11 @@ def run_tests(
         ):
             pool.terminate()
 
+    keep_going_message = (
+        "\n\nTip: You can keep running tests even on failure by passing --keep-going to run_test.py.\n"
+        "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
+    )
+
     try:
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
@@ -1602,19 +1602,29 @@ def run_tests(
                 and not options.continue_through_error
                 and not RERUN_DISABLED_TESTS
             ):
-                raise RuntimeError(
-                    failure.message
-                    + "\n\nTip: You can keep running tests even on failure by "
-                    "passing --keep-going to run_test.py.\n"
-                    "If running on CI, add the 'keep-going' label to "
-                    "your PR and rerun your jobs."
-                )
+                raise RuntimeError(failure.message + keep_going_message)
+
+        # Run tests marked as serial first
+        for test in selected_tests_parallel:
+            options_clone = copy.deepcopy(options)
+            if can_run_in_pytest(test):
+                options_clone.pytest = True
+            options_clone.additional_unittest_args.extend(["-m", "serial"])
+            failure = run_test_module(test, test_directory, options_clone)
+            test_failed = handle_error_messages(failure)
+            if (
+                test_failed
+                and not options.continue_through_error
+                and not RERUN_DISABLED_TESTS
+            ):
+                raise RuntimeError(failure.message + keep_going_message)
 
         os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
+            options_clone.additional_unittest_args.extend(["-m", "not serial"])
             pool.apply_async(
                 run_test_module,
                 args=(test, test_directory, options_clone),
@@ -1714,7 +1724,10 @@ def main():
 
     test_batch = TestBatch("tests to run", include, False)
     test_batch_exclude = TestBatch("excluded", exclude, True)
+    if IS_CI:
+        gen_ci_artifact([x.to_json() for x in include], [x.to_json() for x in exclude])
 
+    print_to_stderr(f"Running parallel tests on {NUM_PROCS} processes")
     print_to_stderr(test_batch)
     print_to_stderr(test_batch_exclude)
 
