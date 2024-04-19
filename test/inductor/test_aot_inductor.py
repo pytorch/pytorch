@@ -2302,7 +2302,7 @@ class AOTInductorTestsTemplate:
             dynamic_shapes=dynamic_shapes,
         )
 
-    @skipIfRocm #USE_MEM_EFF_ATTENTION was not enabled for build.
+    @skipIfRocm  # USE_MEM_EFF_ATTENTION was not enabled for build.
     def test_scaled_dot_product_efficient_attention(self):
         if self.device != "cuda":
             raise unittest.SkipTest("requires CUDA")
@@ -2838,15 +2838,15 @@ if TEST_WITH_ROCM:
             "test_zero_grid_with_unbacked_symbols": fail_cuda(is_skip=True),
             "test_zero_grid_with_backed_symbols": fail_cuda(is_skip=True),
             "test_reuse_kernel_dynamic": fail_cuda(is_skip=True),
-            "test_duplicate_constant_folding" : fail_cuda(is_skip=True),
-            "test_cond_simple" : fail_cuda(is_skip=True),
-            "test_cond_nested" : fail_cuda(is_skip=True),
-            "test_cond_with_parameters" : fail_cuda(is_skip=True),
-            "test_cond_with_reinterpret_view_inputs_outputs" : fail_cuda(is_skip=True),
-            "test_cond_with_multiple_outputs" : fail_cuda(is_skip=True),
-            "test_cond_with_outer_code_before_after" : fail_cuda(is_skip=True),
-            "test_cond_use_buffers_from_outer_scope" : fail_cuda(is_skip=True),
-            "test_index_put_with_none_index" : fail_cuda(is_skip=True),
+            "test_duplicate_constant_folding": fail_cuda(is_skip=True),
+            "test_cond_simple": fail_cuda(is_skip=True),
+            "test_cond_nested": fail_cuda(is_skip=True),
+            "test_cond_with_parameters": fail_cuda(is_skip=True),
+            "test_cond_with_reinterpret_view_inputs_outputs": fail_cuda(is_skip=True),
+            "test_cond_with_multiple_outputs": fail_cuda(is_skip=True),
+            "test_cond_with_outer_code_before_after": fail_cuda(is_skip=True),
+            "test_cond_use_buffers_from_outer_scope": fail_cuda(is_skip=True),
+            "test_index_put_with_none_index": fail_cuda(is_skip=True),
         }
     )
 
