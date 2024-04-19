@@ -21,7 +21,7 @@ Use :func:`torch.library.custom_op` to create new custom ops.
 Extending custom ops (created from Python or C++)
 -------------------------------------------------
 
-Use the register methods, such as :func:`torch.library.register_kernel` and
+Use the register.* methods, such as :func:`torch.library.register_kernel` and
 func:`torch.library.register_fake`, to add implementations
 for any operators (they may have been created using :func:`torch.library.custom_op` or
 via PyTorch's C++ operator registration APIs).
