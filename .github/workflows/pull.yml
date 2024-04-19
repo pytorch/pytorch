@@ -41,7 +41,6 @@ jobs:
     with:
       build-environment: linux-jammy-py3.8-gcc11
       docker-image-name: pytorch-linux-jammy-py3.8-gcc11
-      timeout-minutes: 360
       test-matrix: |
         { include: [
           { config: "default", shard: 1, num_shards: 3, runner: "arc-lf-linux.2xlarge.avx512" },
@@ -64,6 +63,7 @@ jobs:
       build-environment: linux-jammy-py3.8-gcc11
       docker-image: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-py3_8-gcc11-build.outputs.test-matrix }}
+      timeout-minutes: 360
 
   linux-docs:
     name: linux-docs
