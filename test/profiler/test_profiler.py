@@ -650,6 +650,7 @@ class TestExecutionTrace(TestCase):
                 found_root_node = True
         assert found_root_node
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
     def test_execution_trace_nested_tensor(self):
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
