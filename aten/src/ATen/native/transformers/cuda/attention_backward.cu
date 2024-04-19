@@ -347,9 +347,6 @@ _efficient_attention_backward(
   }
 
   if (bias_requires_grad) {
-#ifdef USE_ROCM
-    TORCH_CHECK(false, "ROCM does not support gradents of bias in _efficient_attention_forward");
-#endif
     // force alignment for the last dim
     std::vector<int64_t> sz = bias->sizes().vec();
     int64_t lastDim = sz[sz.size() - 1];
@@ -381,7 +378,7 @@ _efficient_attention_backward(
   // ROCM Implementation
   TORCH_CHECK(!num_splits_key.has_value(),
               "ROCM does not support num_split_keys in _efficient_attention_forward");
-  TORCH_CHECK(!num_splits_key.window_size(),
+  TORCH_CHECK(!window_size.has_value(),
               "ROCM does not support window_size in _efficient_attention_forward");
   auto ret = aotriton::v2::flash::check_gpu(stream);
   if (hipSuccess != ret) {
@@ -390,12 +387,12 @@ _efficient_attention_backward(
   }
   const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
   bool is_causal;
-  if (sdp::CustomMaskType::CausalFromTopLeft == custom_mask_type) {
+  if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
     is_causal = true;
-  } else if (sdp::CustomMaskType::NoCustomMask == custom_mask_type) {
+  } else if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
     is_causal = false;
   } else {
-    TORCH_CHECK(false, "[_efficient_attention_forward] Unsupported mask type in AOTriton, for now");
+    TORCH_CHECK(false, "[_efficient_attention_backward] Unsupported mask type in AOTriton, for now");
   }
   at::Tensor q_t = query.permute({0,2,1,3});
   at::Tensor k_t = key.permute({0,2,1,3});
@@ -404,24 +401,31 @@ _efficient_attention_backward(
   at::Tensor dq_t = grad_q.permute({0,2,1,3});
   at::Tensor dk_t = grad_k.permute({0,2,1,3});
   at::Tensor dv_t = grad_v.permute({0,2,1,3});
+  at::Tensor db_t;
+  if (bias_requires_grad) {
+    db_t = grad_bias.permute({0,2,1,3});
+  }
   at::Tensor dout_t = grad_out.permute({0,2,1,3});
+  at::Tensor softmax_lse = logsumexp.view({B * nH, max_seqlen_q});
   at::Tensor delta = at::empty_like(softmax_lse).contiguous();
 
   hipError_t err;
   using aotriton::v2::flash::attn_bwd;
   using sdp::aotriton_adapter::mk_aotensor;
-  aotriton::TensorView<4> empty_bias(0, {0, 0, 0, 0}, {0, 0, 0, 0}, aotriton::DType::kFloat16);
+  using sdp::aotriton_adapter::cast_dtype;
+  aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, cast_dtype(query.dtype()));
   err = attn_bwd(mk_aotensor(q_t, "q"),
                  mk_aotensor(k_t, "k"),
                  mk_aotensor(v_t, "v"),
-                 bias.has_value() ? mk_aotensor(bias.value(), "bias"): empty_bias,
+                 bias.has_value() ? mk_aotensor(bias.value(), "bias") : empty_t4,
                  softmax_scale,
                  mk_aotensor(out_t, "out"),
                  mk_aotensor(dout_t, "dout"),
                  mk_aotensor(dq_t, "dq"),
                  mk_aotensor(dk_t, "dk"),
                  mk_aotensor(dv_t, "dv"),
-                 mk_aotensor<2>(logsumexp, "L"),
+                 bias_requires_grad ? mk_aotensor(db_t, "db") : empty_t4,
+                 mk_aotensor<2>(softmax_lse, "L"),
                  mk_aotensor<2>(delta, "delta"),
                  float(dropout_p),
                  rng_engine_inputs.seed_.val,

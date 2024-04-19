@@ -2349,7 +2349,7 @@ class TestSDPACudaOnly(NNTestCase):
         self.assertEqual(math_ref_test, math_ref_lp_test, atol=7e-3, rtol=7e-3)
         self.assertEqual(actual_test, math_ref_test, atol=5e-3, rtol=5e-3)
 
-    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Flash Attention was not built for this system")
+    @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Efficient Attention was not built for this system")
     @parametrize("contiguous_inputs", [True, False])
     @parametrize("is_causal", [True, False])
     def test_sdp_mem_efficient_grad_against_math(self, device, contiguous_inputs: bool, is_causal: bool):
@@ -2572,17 +2572,20 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Does not support SDPA")
     @unittest.skipIf(IS_JETSON, "causing sigkill on Jetson")
     @parametrize("batch_size", [1, 8])
-    @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048] if SM80OrLater else [4, 8, 64, 128, 256, 512])
-    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048] if SM80OrLater else [4, 8, 64, 128, 256, 512])
-    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128] if SM80OrLater else [8, 16, 32, 64])
+    @parametrize("seq_len_q", [4, 8, 64, 128, 256, 512, 1024, 2048] if SM80OrLater or TEST_WITH_ROCM else [4, 8, 64, 128, 256, 512])
+    @parametrize("seq_len_k", [4, 8, 64, 128, 256, 512, 1024, 2048] if SM80OrLater or TEST_WITH_ROCM else [4, 8, 64, 128, 256, 512])
+    @parametrize("head_dim", [8, 16, 32, 64, 72, 96, 128] if SM80OrLater or TEST_WITH_ROCM else [8, 16, 32, 64])
     @parametrize("is_causal", [False, True])
     @parametrize("dropout_p", [0.0, 0.22])
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
-                 SM80OrLater else [torch.float16, torch.float32])
+                 SM80OrLater else [torch.float16, torch.float32] if not TEST_WITH_ROCM
+                 else [torch.float16, torch.bfloat16])
     @parametrize("scale", [None, "l1"])
     def test_mem_efficient_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
                                                        head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
                                                        scale: str):
+        if TEST_WITH_ROCM and dropout_p != 0.0:
+            self.skipTest("dropout_p cannot be tested due to missing _fill_mem_eff_dropout_mask in ROCM, for now")
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
             rand_uniform = torch._fill_mem_eff_dropout_mask_(mask, p, seed, offset)
@@ -2686,6 +2689,10 @@ class TestSDPACudaOnly(NNTestCase):
                                                                  seq_len_k: int, head_dim: int, is_causal: bool,
                                                                  dropout_p: float, dtype: torch.dtype,
                                                                  scale: str):
+        if TEST_WITH_ROCM and dropout_p != 0.0:
+            self.skipTest("dropout_p cannot be tested due to missing _fill_mem_eff_dropout_mask in ROCM, for now")
+        if TEST_WITH_ROCM:
+            self.skipTest("attn_mask cannot be tested due to missing attn_mask gradients in ROCM, for now")
         def _get_mem_eff_drop_mask(batch_size, n_heads, q_len, kv_len, p, seed, offset, device=device):
             mask = torch.empty((batch_size, n_heads, q_len, kv_len), device=device, dtype=torch.float32)
             rand_uniform = torch._fill_mem_eff_dropout_mask_(mask, p, seed, offset)

@@ -1083,47 +1083,46 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
   constexpr int kAlignLSE = 1;
   res = at::empty({B, M, num_heads, Kv}, query.options());
   logsumexp = at::empty(
-      {seqstart_q.has_value() ? seqstart_q->size(0) - 1 : B,
-      num_heads,
-      ceil_div(max_seqlen_q, kAlignLSE) * kAlignLSE,
+      { B, num_heads, max_seqlen_q },
       query.options().dtype(at::ScalarType::Float));
+  at::Tensor softmax_lse = logsumexp.view({B * num_heads, max_seqlen_q});
   at::Tensor q_t = query.transpose(1, 2);
   at::Tensor k_t = key.transpose(1, 2);
   at::Tensor v_t = value.transpose(1, 2);
   at::Tensor output_t = res.transpose(1, 2);
   bool is_causal;
-  if (sdp::CustomMaskType::CausalFromTopLeft == custom_mask_type) {
+  if (static_cast<int64_t>(sdp::CustomMaskType::CausalFromTopLeft) == custom_mask_type) {
     is_causal = true;
-  } else if (sdp::CustomMaskType::NoCustomMask == custom_mask_type) {
+  } else if (static_cast<int64_t>(sdp::CustomMaskType::NoCustomMask) == custom_mask_type) {
     is_causal = false;
   } else {
-    TORCH_CHECK(false, "[_efficient_attention_forward] Unsupported mask type in AOTriton, for now");
+    TORCH_CHECK(false, "[_efficient_attention_forward] Unsupported mask type on ROCM, for now");
   }
+
+  const auto softmax_scale = sdp::calculate_scale(query, scale).as_float_unchecked();
 
   using aotriton::v2::flash::attn_fwd;
   using sdp::aotriton_adapter::mk_aotensor;
-  aotriton::TensorView<4> empty_bias(0, {0, 0, 0, 0}, {0, 0, 0, 0}, aotriton::DType::kFloat16);
+  aotriton::TensorView<4> empty_t4(0, {0, 0, 0, 0}, {0, 0, 0, 0}, aotriton::DType::kFloat16);
   at::Tensor softmax_fa_t = at::empty({ 0, 0, 0, 0 }, query.options());
   hipError_t err; // TODO: Error handling
   err = attn_fwd(mk_aotensor(q_t, "q"),
                  mk_aotensor(k_t, "k"),
                  mk_aotensor(v_t, "v"),
-                 bias.has_value() ? mk_aotensor(bias.value(), "bias"): empty_bias,
+                 bias.has_value() ? mk_aotensor(bias.value(), "bias"): empty_t4,
                  softmax_scale,
-                 mk_aotensor<2>(logsumexp, "M"),
+                 mk_aotensor<2>(softmax_lse, "M"),
                  mk_aotensor(output_t, "Out"),
                  dropout_p,
-                 seed_t.val,
-                 offset_t.val,
+                 use_dropout ? *seed_t.data_ptr<int64_t>() : 0,
+                 use_dropout ? *offset_t.data_ptr<int64_t>() : 0,
                  mk_aotensor(softmax_fa_t, "encoded_softmax"),
                  is_causal,
                  stream);
   if (!compute_logsumexp) {
     // Set the tensor to empty when compute_logsumexp is false
     logsumexp = at::empty(
-        {seqstart_q.has_value() ? seqstart_q->size(0) - 1 : B,
-         num_heads,
-         0},
+        { B * num_heads, max_seqlen_q, 0 },
         query.options().dtype(at::ScalarType::Float));
   }
 #else
