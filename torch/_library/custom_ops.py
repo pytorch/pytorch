@@ -413,7 +413,10 @@ class CustomOpDef:
 
     def _register_to_dispatcher(self) -> None:
         lib = self._lib
-        lib.define(f"{self._name}{self._schema}")
+        lib.define(
+            f"{self._name}{self._schema}",
+            tags=[_C.Tag.pt2_compliant_tag, _C.Tag.needs_fixed_stride_order],
+        )
         self._opoverload = _library.utils.lookup_op(self._qualname)
 
         def fake_impl(*args, **kwargs):
