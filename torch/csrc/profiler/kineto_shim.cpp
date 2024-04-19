@@ -25,8 +25,6 @@ const std::set<libkineto::ActivityType> kCpuTypes{
     libkineto::ActivityType::CUDA_RUNTIME,
     libkineto::ActivityType::CUDA_DRIVER,
     libkineto::ActivityType::PYTHON_FUNCTION,
-    libkineto::ActivityType::PRIVATEUSE1_RUNTIME,
-    libkineto::ActivityType::PRIVATEUSE1_DRIVER,
 };
 
 const std::set<libkineto::ActivityType> kCudaTypes = {
@@ -48,15 +46,6 @@ const std::set<libkineto::ActivityType> kXpuTypes = {
 const std::set<libkineto::ActivityType> kMtiaTypes = {
     libkineto::ActivityType::MTIA_CCP_EVENTS,
     libkineto::ActivityType::MTIA_RUNTIME,
-};
-const std::set<libkineto::ActivityType> kPrivateUse1Types = {
-    libkineto::ActivityType::GPU_MEMCPY,
-    libkineto::ActivityType::GPU_MEMSET,
-    libkineto::ActivityType::GPU_USER_ANNOTATION,
-    libkineto::ActivityType::CONCURRENT_KERNEL,
-    // PRIVATEUSE1_RUNTIME appears in both kCpuTypes and kPrivateUse1Types.
-    libkineto::ActivityType::PRIVATEUSE1_RUNTIME,
-    libkineto::ActivityType::PRIVATEUSE1_DRIVER,
 };
 } // namespace
 #endif // USE_KINETO
@@ -259,9 +248,6 @@ void prepareTrace(
   if (collectivesProfilerExists()) {
     k_activities.insert(libkineto::ActivityType::COLLECTIVE_COMM);
   }
-  if (activities.count(torch::autograd::profiler::ActivityType::PrivateUse1)) {
-    k_activities.insert(kPrivateUse1Types.begin(), kPrivateUse1Types.end());
-  }
 
   ExperimentalConfigWrapper configWrap(config);
 
@@ -350,18 +336,8 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::GPU_USER_ANNOTATION:
     case libkineto::ActivityType::CUDA_PROFILER_RANGE:
     // TODO: T151322015
-    case libkineto::ActivityType::MTIA_CCP_EVENTS: {
-      // PrivateUse1 kineto backend reuse above ActivityTypes,
-      // If PrivateUse1 backend enabled, this should return
-      // c10::DeviceType::PrivateUse1.
-      c10::DeviceType device_type = []() {
-        if (c10::get_privateuse1_backend() != "privateuseone") {
-          return c10::DeviceType::PrivateUse1;
-        }
-        return c10::DeviceType::CUDA;
-      }();
-      return device_type;
-    }
+    case libkineto::ActivityType::MTIA_CCP_EVENTS:
+      return c10::DeviceType::CUDA;
     case libkineto::ActivityType::CPU_OP:
     case libkineto::ActivityType::USER_ANNOTATION:
     case libkineto::ActivityType::EXTERNAL_CORRELATION:
@@ -371,8 +347,6 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::MTIA_RUNTIME:
     case libkineto::ActivityType::PYTHON_FUNCTION:
     case libkineto::ActivityType::CUDA_DRIVER:
-    case libkineto::ActivityType::PRIVATEUSE1_RUNTIME:
-    case libkineto::ActivityType::PRIVATEUSE1_DRIVER:
       return c10::DeviceType::CPU;
     default: {
       TORCH_WARN(
