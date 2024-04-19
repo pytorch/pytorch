@@ -330,7 +330,7 @@ class profile:
         if self.use_device and hasattr(torch, self.use_device):
             device_module = getattr(torch, self.use_device)
             if hasattr(device_module, "synchronize"):
-                privateuse1_module.synchronize()
+                device_module.synchronize()
 
 
         t0 = perf_counter_ns()
