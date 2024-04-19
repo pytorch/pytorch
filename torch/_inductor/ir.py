@@ -3880,10 +3880,10 @@ class ExternKernel(InputsKernel):
         cls, kernel, *args, **kwargs
     ) -> Tuple[
         Any,
-        List[IRNode],
         List[Any],
-        Callable[..., Any],
-        Dict[sympy.Symbol, pytree.KeyPath],
+        List[Any],
+        Callable[[Any, Any], Any],
+        Optional[Dict[sympy.Symbol, pytree.KeyPath]],
     ]:
         binded_args = {"args": args, "kwargs": kwargs}
 
@@ -3938,7 +3938,7 @@ class ExternKernel(InputsKernel):
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
-        unbacked_bindings = None
+        unbacked_bindings: Optional[Dict[sympy.Symbol, pytree.KeyPath]] = None
         if shape_env := V.fake_mode.shape_env:
             rebind_unbacked(shape_env, V.current_node, example_output)
             unbacked_bindings = compute_unbacked_bindings(
@@ -5486,10 +5486,15 @@ class MultiOutput(ExternKernel):
     #   the FallbackKernel inside, because that's where codegen happens
     #   even though this is backwards
     def codegen_unbacked_symbol_defs(self, wrapper):
-        if not self.inputs[0].unbacked_bindings:
+        if not hasattr(self.inputs[0], "unbacked_bindings"):
             return
 
-        for s, keypath in self.inputs[0].unbacked_bindings.items():
+        unbacked_bindings = self.inputs[0].unbacked_bindings
+
+        if not unbacked_bindings:
+            return
+
+        for s, keypath in unbacked_bindings.items():
             expr = self.get_name()
 
             def go(expr, keypath):
@@ -5520,11 +5525,10 @@ class MultiOutput(ExternKernel):
             )
 
     def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return (
-            self.inputs[0].unbacked_bindings.keys()
-            if self.inputs[0].unbacked_bindings
-            else set()
-        )
+        if unbacked_bindings := getattr(self.inputs[0], "unbacked_bindings", None):
+            return unbacked_bindings.keys()
+        else:
+            return set()
 
     def codegen(self, wrapper):
         wrapper.codegen_multi_output(

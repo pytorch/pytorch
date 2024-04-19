@@ -942,9 +942,9 @@ class WrapperCodeGen(CodeGen):
         (data,) = (t.codegen_reference() for t in node.inputs)
         if len(node.keypath) == 0:
             self.writeline(f"{node.sym} = {data}.item()")
-        elif len(node.keypath == 1) and isinstance(node.keypath[0], ConvertIntKey):
+        elif len(node.keypath) == 1 and isinstance(node.keypath[0], ConvertIntKey):
             self.writeline(f"{node.sym} = 1 if {data}.item() else 0")
-        elif len(node.keypath == 1) and isinstance(node.keypath[0], DivideByKey):
+        elif len(node.keypath) == 1 and isinstance(node.keypath[0], DivideByKey):
             self.writeline(f"{node.sym}_undivided = {data}.item()")
             self.writeline(
                 f"assert {node.sym}_undivided % {node.keypath[0].divisor} == 0, "
