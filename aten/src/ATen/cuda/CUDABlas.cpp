@@ -444,6 +444,7 @@ inline void bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES(Dtype)) {
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto workspace = allocator.allocate(workspaceSize);
+  TORCH_CHECK(workspace.get() != nullptr, "OOM trying to allocate workspace for cublaslt");
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
@@ -1321,6 +1322,7 @@ void gemm_and_bias(
 
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto workspace = allocator.allocate(workspaceSize);
+  TORCH_CHECK(workspace.get() != nullptr, "OOM trying to allocate workspace for cublaslt");
 
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
@@ -1506,6 +1508,7 @@ if (isFloat8Type(result_dtype)) {
   size_t workspaceSize = _getWorkspaceSize();
   auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
   auto workspace = allocator.allocate(workspaceSize);
+  TORCH_CHECK(workspace.get() != nullptr, "OOM trying to allocate workspace for cublaslt");
 
   CuBlasLtMatmulPreference preference;
   preference.setAttribute(CUBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, workspaceSize);
