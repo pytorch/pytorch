@@ -409,7 +409,7 @@ class AllToAllSingle : public torch::autograd::Function<AllToAllSingle> {
     const std::string& group_name = ctx->saved_data["group_name"].toStringRef();
 
     DCHECK(grad_out_list.size() == 1);
-    auto grad_out = grad_out_list[0].contiguous();
+    auto grad_out = grad_out_list[0];
 
     auto out =
         c10::Dispatcher::singleton()
@@ -434,7 +434,7 @@ at::Tensor all_to_all_single_autograd(
     const std::vector<int64_t>& input_split_sizes,
     const std::string& group_name) {
   return AllToAllSingle::apply(
-      input, output_split_sizes, input_split_sizes, group_name);
+      input, output_split_sizes, input_split_sizes, group_name)[0];
 }
 
 class ReduceScatterTensor

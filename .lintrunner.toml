@@ -1152,6 +1152,7 @@ exclude_patterns = [
     'test/test_proxy_tensor.py',
     'test/test_pruning_op.py',
     'test/test_public_bindings.py',
+    'test/test_python_dispatch.py',
     'test/test_quantization.py',
     'test/test_reductions.py',
     'test/test_scatter_gather_ops.py',

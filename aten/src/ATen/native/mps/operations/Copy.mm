@@ -48,10 +48,9 @@ static void copy_cast_mps(at::Tensor& dst,
 
   @autoreleasepool {
     const bool needs_conj = src.is_conj() != dst.is_conj();
-    string key = "copy_cast_mps" + getTensorsStringKey({src, dst}, true, /*exclude_shape*/ true) + ":" +
-        std::to_string(needs_conj);
+    string key = "copy_cast_mps" + getTensorsStringKey({src, dst}) + ":" + std::to_string(needs_conj);
     auto cachedGraph = LookUpOrCreateCachedGraph<CachedGraph>(key, [&](auto mpsGraph, auto newCachedGraph) {
-      MPSGraphTensor* inputTensor = mpsGraphUnrankedPlaceHolder(mpsGraph, srcDType);
+      auto inputTensor = mpsGraphRankedPlaceHolder(mpsGraph, src);
       auto outputTensor = inputTensor;
       if (isFloatingType(src.scalar_type()) && dstDType == MPSDataTypeUInt8) {
         outputTensor = [mpsGraph castTensor:inputTensor toType:MPSDataTypeInt32 name:@"cast"];

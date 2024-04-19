@@ -996,6 +996,12 @@ def _is_barrier_after_init() -> int:
     return int(os.getenv("TORCH_DIST_INIT_BARRIER", "0"))
 
 
+def _abort_in_destroy_pg() -> bool:
+    # Environment variable to control whether to abort the communicators when users call destroy_process_group()
+    env = os.getenv("TORCH_NCCL_ABORT_IN_DESTROY_PG", "0")
+    return env == "1" or env.lower() == "true"
+
+
 def _get_default_group() -> ProcessGroup:
     """Get the default process group created by init_process_group."""
     if not is_initialized():
@@ -1400,7 +1406,7 @@ def _get_split_source(pg):
 
     # If necessary, find a backend to split from by peeling process
     # group wrappers from our potentially wrapped process group.
-    while _GLOO_AVAILABLE and isinstance(split_from, _ProcessGroupWrapper):
+    while isinstance(split_from, _ProcessGroupWrapper):
         split_from = split_from.wrapped_pg
 
     return split_from
@@ -1416,7 +1422,7 @@ def _shutdown_backend(pg):
         backend = pg._get_backend(torch.device("cuda"))
     except RuntimeError:
         pass
-    if is_nccl_available() and isinstance(backend, ProcessGroupNCCL):
+    if isinstance(backend, ProcessGroupNCCL):
         # explictly call shutdown to ensure that NCCL resources are released
         backend._shutdown()
 
@@ -1695,10 +1701,11 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         pg._wait_for_pending_works()
 
     if group is None or group == GroupMember.WORLD:
-        # shutdown all backends in the order of pg names. shutting down in order because
-        # ncclCommAbort() was a 'collective' call in some versions of NCCL.
-        for pg_to_shutdown in sorted(_world.pg_names, key=lambda x: _world.pg_names[x], reverse=True):
-            _shutdown_backend(pg_to_shutdown)
+        if _abort_in_destroy_pg():
+            # shutdown all backends in the order of pg names. shutting down in order because
+            # ncclCommAbort() was a 'collective' call in some versions of NCCL.
+            for pg_to_shutdown in sorted(_world.pg_names, key=lambda x: _world.pg_names[x], reverse=True):
+                _shutdown_backend(pg_to_shutdown)
 
         _update_default_pg(None)
         _world.pg_map.clear()
@@ -1721,7 +1728,8 @@ def destroy_process_group(group: Optional[ProcessGroup] = None):
         # process group is in good state, we aren't dealing with failures.
         _world.group_count = 0
     else:
-        _shutdown_backend(pg)
+        if _abort_in_destroy_pg():
+            _shutdown_backend(pg)
         del _world.pg_map[pg]
         del _world.pg_names[pg]
         del _world.pg_group_ranks[pg]
@@ -3795,8 +3803,6 @@ def _create_process_group_wrapper(
     world_size: int,
     timeout: timedelta = default_pg_timeout,
 ):
-    assert _GLOO_AVAILABLE, "ProcessGroupWrapper unsupported without GLOO backend."
-
     # (whc) this appears to be just for the gloo backend? if so, `default_pg_timeout` is appropriate...
 
     # Create a separate prefix store for the helper process group.
