@@ -7,6 +7,7 @@ from torch._inductor.virtualized import V
 from .. import config as inductor_config
 from ..codegen.cuda.gemm_template import CUTLASSGemmTemplate
 from ..codegen.wrapper import WrapperCodeGen
+from ..ir import FlexibleLayout
 from ..lowering import register_lowering
 from ..select_algorithm import (
     autotune_select_algorithm,
@@ -126,7 +127,16 @@ aten_bias_addmm = ExternKernelChoice(bias_addmm, None)
 def tuned_mm(mat1, mat2, *, layout=None):
     m, n, k, layout, mat1, mat2 = mm_args(mat1, mat2, layout=layout)
 
-    choices = [aten_mm.bind((mat1, mat2), layout)] if use_aten_gemm_kernels() else []
+    aten_layout = layout
+    if not use_max_autotune():
+        aten_layout = FlexibleLayout(
+            device=layout.device, dtype=layout.dtype, size=layout.size
+        )
+
+    # options to tune from
+    choices = (
+        [aten_mm.bind((mat1, mat2), aten_layout)] if use_aten_gemm_kernels() else []
+    )
     static_shape, is_nonzero = _is_static_problem([mat1, mat2], layout)
     if is_nonzero and use_triton_template(layout):
         for config in mm_configs(m, n, k):
@@ -142,12 +152,12 @@ def tuned_mm(mat1, mat2, *, layout=None):
 
     if len(choices) == 0 and not use_aten_gemm_kernels():
         log.warning("No choices for GEMM, using ATen backend as fallback")
-        choices.append(aten_mm.bind((mat1, mat2), layout))
+        choices.append(aten_mm.bind((mat1, mat2), aten_layout))
     try:
         return autotune_select_algorithm("mm", choices, [mat1, mat2], layout)
     except NoValidChoicesError:
         log.warning("All choices for GEMM were invalid, using ATen backend as fallback")
-        return aten_mm.bind((mat1, mat2), layout).output_node()
+        return aten_mm.bind((mat1, mat2), aten_layout).output_node()
 
 
 def _is_static_problem(inputs_tensors, layout):
