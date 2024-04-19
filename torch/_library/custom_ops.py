@@ -341,7 +341,11 @@ class CustomOpDef:
         return fn
 
     def register_autograd(
-        self, setup_context_fn: Optional[Callable], backward_fn: Callable, /
+        self,
+        backward: Callable,
+        /,
+        *,
+        setup_context: Optional[Callable] = None,
     ) -> None:
         r"""Register a backward formula for this custom op.
 
@@ -388,7 +392,7 @@ class CustomOpDef:
             >>>     x, = ctx.saved_tensors
             >>>     return grad * x.cos()
             >>>
-            >>> numpy_sin.register_autograd(setup_context, backward)
+            >>> numpy_sin.register_autograd(backward, setup_context=setup_context)
             >>>
             >>> x = torch.randn(3, requires_grad=True)
             >>> y = numpy_sin(x)
@@ -404,8 +408,8 @@ class CustomOpDef:
                 f"a functional operator and register an autograd formula for that."
             )
 
-        self._backward_fn = backward_fn
-        self._setup_context_fn = setup_context_fn
+        self._backward_fn = backward
+        self._setup_context_fn = setup_context
 
     def _register_to_dispatcher(self) -> None:
         lib = self._lib
