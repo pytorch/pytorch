@@ -100,12 +100,6 @@ static std::vector<std::string> TORCH_NCCL_WAIT_TIMEOUT_DUMP_MILSEC = {
 static std::vector<std::string> TORCH_NCCL_COORD_CHECK_MILSEC = {
     "TORCH_NCCL_COORD_CHECK_MILSEC"};
 
-// Whether to abort the communicators when users call destroy_process_group().
-// If yes, communicators will be aborted when destroy_process_group is called,
-// but not in destructor.
-static std::vector<std::string> TORCH_NCCL_ABORT_IN_DESTROY_PG = {
-    "TORCH_NCCL_ABORT_IN_DESTROY_PG"};
-
 constexpr const char* NCCL_BACKEND_NAME = "nccl";
 
 constexpr const char* EXCEPTION_DUMP = "exception_dump";
@@ -1015,11 +1009,6 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // for the operation to complete.
   bool blockingWait_ = false;
 
-  // Whether to abort the communicators when users call destroy_process_group().
-  // If yes, communicators will be aborted when destroy_process_group is called,
-  // but not in destructor.
-  bool abortInDestroyProcessGroup_ = false;
-
   // Whether or not to hook the cache allocator to register all allocated
   // tensors
   bool useTensorRegisterAllocatorHook_ = false;
@@ -1072,10 +1061,22 @@ class TORCH_API ProcessGroupNCCL : public Backend {
   // initialized to be -1 to indicate no collective has been enqueued
   int64_t lastEnqueuedSeq_{-1};
 
+  // the name of the last collective enqueued into workMetaList_
+  std::string lastEnqueuedWorkName_;
+
+  // the sequential number of the last colletive started as the kernal
+  int64_t lastStartedSeq_{-1};
+
+  // the name of the last collective started as the kernal
+  std::string lastStartedWorkName_;
+
   // the sequential number of the last colletive completed marked by
   // the watchdog thread
   // initialized to be -1 to indicate no collective has been completed
   int64_t lastCompletedSeq_{-1};
+
+  // the name of the last collective completed
+  std::string lastCompletedWorkName_;
 
   std::exception_ptr watchDogException_ = nullptr;
 
