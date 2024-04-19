@@ -390,15 +390,45 @@ inline void tinygemm_kernel(
 }
 #endif
 
-inline float convert_int4_to_float(uint8_t a, bool is_even) {
+template<int BLOCK_N>
+inline float convert_int4_to_float(const uint8_t* b, int n) {
   static constexpr float lut[16] = {
     -8.0f, -7.0f, -6.0f, -5.0f,
     -4.0f, -3.0f, -2.0f, -1.0f,
     0.0f, 1.0f, 2.0f, 3.0f,
     4.0f, 5.0f, 6.0f, 7.0f
   };
-
-  int index = is_even ? (a & 0x0F) : (a >> 4);
+  int index;
+#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+  if constexpr (BLOCK_N == 64) {
+    const int nb = n/BLOCK_N;
+    n -= nb*BLOCK_N;
+    if (n < 32) {
+      auto val = b[nb * BLOCK_N / 2 + n];
+      index = val & 0x0f;
+    } else {
+      auto val = b[nb * BLOCK_N / 2 + (n - 32)];
+      index = val >> 4;
+    }
+  } else
+#elif defined(CPU_CAPABILITY_AVX2) && !defined(_MSC_VER)
+  if constexpr (BLOCK_N == 32) {
+    const int nb = n/BLOCK_N;
+    n -= nb*BLOCK_N;
+    if (n < 16) {
+      auto val = b[nb * BLOCK_N / 2 + n];
+      index = val & 0x0f;
+    } else {
+      auto val = b[nb * BLOCK_N / 2 + (n - 16)];
+      index = val >> 4;
+    }
+  } else
+#endif
+  {
+    const auto is_even = (n & 1) == 0;
+    auto val = b[n/2];
+    index = is_even ? (val & 0x0F) : (val >> 4);
+  }
   return lut[index];
 }
 
@@ -423,9 +453,7 @@ inline void tinygemm_kernel(
         const auto scale = static_cast<float>(ScaleAndZeros[kb * ldc * 2 + n * 2]);
         const auto zero = static_cast<float>(ScaleAndZeros[kb * ldc * 2 + n * 2 + 1]);
         const auto a_val = static_cast<float>(A[m * lda + k]);
-        uint8_t b_pack = B[k * ldb + n / 2];
-        // range [-8, 7]: B_val = (bf16(B_int4_val) * scale) + zero
-        float b_val = convert_int4_to_float(b_pack, n % 2 == 0);
+        float b_val = convert_int4_to_float<BLOCK_N>(B + k *ldb, n);
         b_val = b_val * scale + zero;
 
         c_val += a_val * b_val;
@@ -506,7 +534,7 @@ void weight_to_int4pack_kernel(
   auto weight_packed_data = reinterpret_cast<uint8_t*>(weight_packed.data_ptr());
   const auto weight_data = weight.data_ptr<int32_t>();
 
-  // 64 for avx512 and 64 for avx2/non-vectorized
+  // 64 for avx512 and 32 for avx2/non-vectorized
   constexpr int BLOCK_N = vec::Vectorized<float>::size() * 4;
   const int NB =  (N + BLOCK_N - 1) / BLOCK_N;
 
