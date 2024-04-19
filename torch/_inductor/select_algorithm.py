@@ -94,7 +94,7 @@ class TritonTemplateKernel(TritonKernel):
         grid_fn,
         meta,
         call_sizes,
-        use_jit=True,
+        use_jit=False,
         prefix_args=0,
         suffix_args=0,
         epilogue_fn=identity,
@@ -153,8 +153,8 @@ class TritonTemplateKernel(TritonKernel):
         argdefs, _, signature = self.args.python_argdefs()
         triton_meta = {
             "signature": signature_to_meta(signature, size_dtype=self.index_dtype),
-            "device": V.graph.scheduler.current_device.index,
-            "device_type": V.graph.scheduler.current_device.type,
+            "device": self.output_node.get_device().index,
+            "device_type": self.output_node.get_device().type,
             "constants": {},
         }
         triton_meta["configs"] = [config_of(signature)]
@@ -554,7 +554,7 @@ class TritonTemplate(KernelTemplate):
         ), TritonTemplateKernel(
             kernel_name=kernel_name,
             output_node=fake_out,
-            use_jit=True,
+            use_jit=False,
             **kernel_options,
         ) as kernel:
             try:
@@ -740,6 +740,10 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         assert self.bmreq is not None
         return self.bmreq.benchmark(*args, output_tensor=out)
 
+    def precompile(self):
+        assert self.bmreq is not None
+        self.bmreq.precompile()
+
     def __str__(self):
         return f"TritonTemplateCaller({self.bmreq.module_path}, {self.debug_extra})"
 
@@ -760,6 +764,7 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
                 layout=self.layout,
                 inputs=self.input_nodes,
                 make_kernel_render=self.make_kernel_render,
+                debug_extra=self.debug_extra,
             )
         )
 
@@ -880,6 +885,7 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # TODO(nmacchioni): remove once CI tests are fixed
         choices = [choice for choice in choices if choice is not None]
+
         if len(choices) == 0:
             raise RuntimeError(
                 "No choices to select, please consider adding ATEN into max_autotune_gemm_backends "
@@ -896,19 +902,38 @@ class AlgorithmSelectorCache(PersistentCache):
         def make_benchmark_fn():
             return self.make_benchmark_fn(choices, input_nodes, layout, input_gen_fns)
 
-        def precompile(choices):
+        def precompile(choices) -> Callable[[], None]:
+            def no_op(*args, **kwargs):
+                return
+
             if (
                 precompilation_timeout_seconds is None
                 or precompilation_timeout_seconds <= 0
             ):
-                return
+                return no_op
             num_workers = min(
                 config.compile_threads,
                 torch.get_num_threads(),
                 len(choices),
             )
             if num_workers <= 0:
-                return
+                return no_op
+
+            # TODO - debug issue
+            if torch.version.hip:
+                return no_op
+
+            # check local and global cache before precompiling
+            timings = self.lookup(
+                choices,
+                name,
+                repr([self.key_of(x) for x in input_nodes]),
+                benchmark=None,
+            )
+
+            if timings:
+                return no_op
+
             log.info(
                 "Multithreaded precompilation for %d choices using %d worker threads",
                 len(choices),
@@ -1094,6 +1119,8 @@ class AlgorithmSelectorCache(PersistentCache):
             return result
 
         def benchmark_in_current_process(choices):
+            from triton.runtime.autotuner import OutOfResources
+
             timings = {}
             for choice in choices:
                 try:
@@ -1113,6 +1140,9 @@ class AlgorithmSelectorCache(PersistentCache):
                         if "illegal memory access" in msg:
                             msg += "\n\nEither error in template or triton bug.\n"
                         raise ErrorFromChoice(msg, choice, debug_str())  # noqa: TRY200
+                except OutOfResources as e:
+                    log.warning(e)
+                    timing = float("inf")
                 except AssertionError as e:
                     raise AssertionError(  # noqa: TRY200
                         f"Incorrect result from choice {choice}\n\n{e}"

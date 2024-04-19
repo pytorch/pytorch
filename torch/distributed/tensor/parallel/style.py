@@ -383,6 +383,7 @@ class PrepareModuleInput(ParallelStyle):
             (desired_input_layouts,) if isinstance(desired_input_layouts, Placement) else desired_input_layouts
         self.use_local_output = use_local_output
         if self.input_layouts is not None:
+            assert self.desired_input_layouts is not None, "desired module inputs should not be None!"
             assert len(self.input_layouts) == len(self.desired_input_layouts), \
                 "input_layouts and desired_input_layouts should have same length!"
         self.with_kwargs = input_kwarg_layouts is not None
@@ -401,6 +402,7 @@ class PrepareModuleInput(ParallelStyle):
         if len(inputs) != len(self.input_layouts):
             raise ValueError("module inputs and input_layouts should have same length!")
 
+        assert self.desired_input_layouts is not None, "desired module inputs should not be None!"
         for inp, input_layout, desired_layout in zip(inputs, self.input_layouts, self.desired_input_layouts):
             if input_layout is not None:
                 if isinstance(inp, DTensor):
@@ -409,7 +411,8 @@ class PrepareModuleInput(ParallelStyle):
                     dt_inp = inp
                 else:
                     dt_inp = DTensor.from_local(inp, device_mesh, (input_layout,), run_check=False)
-                if input_layout != desired_layout:
+
+                if desired_layout is not None and input_layout != desired_layout:
                     dt_inp = dt_inp.redistribute(placements=(desired_layout,))
                 prepared_inputs.append(dt_inp.to_local() if self.use_local_output else dt_inp)
             else:
@@ -425,21 +428,26 @@ class PrepareModuleInput(ParallelStyle):
             if kwarg_key in self.input_kwarg_layouts:
                 input_layout = self.input_kwarg_layouts[kwarg_key]
                 if input_layout is not None:
+                    assert isinstance(kwarg_val, torch.Tensor), f"input of key {kwarg_key} to the module should be a Tensor!"
                     kwarg_val = DTensor.from_local(kwarg_val, device_mesh, (input_layout,), run_check=False)
 
-            if kwarg_key in self.desired_input_kwarg_layouts:
-                assert kwarg_key in self.input_kwarg_layouts, f"input_kwarg_layouts should have the key {kwarg_key}!"
-                desired_layout = self.desired_input_kwarg_layouts[kwarg_key]
-                if desired_layout is not None and desired_layout != input_layout:
-                    kwarg_val = kwarg_val.redistribute(placements=(desired_layout,))
+                if kwarg_key in self.desired_input_kwarg_layouts:
+                    desired_layout = self.desired_input_kwarg_layouts[kwarg_key]
+                    if desired_layout is not None and desired_layout != input_layout:
+                        kwarg_val = kwarg_val.redistribute(placements=(desired_layout,))
 
-            prepared_kwarg_inputs[kwarg_key] = kwarg_val.to_local() if self.use_local_output else kwarg_val
+                prepared_kwarg_inputs[kwarg_key] = kwarg_val.to_local() if self.use_local_output else kwarg_val
+            else:
+                prepared_kwarg_inputs[kwarg_key] = kwarg_val
 
         return (prepared_arg_inputs, prepared_kwarg_inputs)
 
     def _apply(self, module: nn.Module, device_mesh: DeviceMesh) -> nn.Module:
         if self.with_kwargs:
-            module.register_forward_pre_hook(lambda _, inputs, kwargs: self._prepare_input_kwarg_fn(inputs, kwargs, device_mesh), with_kwargs=True)  # type: ignore[misc]
+            module.register_forward_pre_hook(
+                lambda _, inputs, kwargs: self._prepare_input_kwarg_fn(inputs, kwargs, device_mesh),
+                with_kwargs=True
+            )  # type: ignore[misc]
         else:
             module.register_forward_pre_hook(lambda _, inputs: self._prepare_input_fn(inputs, device_mesh))  # type: ignore[misc, call-arg]
         return module
