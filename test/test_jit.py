@@ -459,6 +459,22 @@ class TestJit(JitTestCase):
 
             pkl_fn = pickle.dumps(fn, protocol=0)
 
+    def test_stuff(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.cos() + x.shape[0]
+
+        m = torch.jit.trace(M(), (torch.randn(2, 2),))
+        torch._C._jit_pass_replace_size_with_sym_size(m.graph)
+        inp = torch.randn(3, 2)
+        print(m.graph)
+
+        from torch.export import export
+        from torch.export import Dim
+        dim = Dim("x")
+        export(m, (torch.randn(3, 2),), dynamic_shapes=({0: dim},), strict=False)
+        print(m(inp) - M()(inp))
+
     def test_restore_device(self):
         class M(torch.jit.ScriptModule):
             def __init__(self, cpu_device_str):

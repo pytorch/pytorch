@@ -1004,6 +1004,7 @@ def _export(
             for k, v in fake_mode.shape_env.var_to_range.items()
             if free_unbacked_symbols(k)
         }
+        print("GRAPH", ep_non_strict.gm.graph)
         try:
             range_constraints = make_constraints(
                 fake_mode,
