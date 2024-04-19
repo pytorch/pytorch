@@ -6006,9 +6006,9 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
                 a, b_int4pack, q_group, b_scales_and_zeros
             )
 
-        b_int4pack, b_scales_and_zeros_bf16 = convert_weight_to_int4pack(b_b16)
+        b_int4pack, b_scales_and_zeros_bf16 = convert_weight_to_int4pack(b_bf16)
 
-        for dtype in [torch.bfloat16] + ([torch.float16, torch.float32] if self.device == "cpu" else []):
+        for dtype in [torch.bfloat16] + ([torch.float16, torch.float32] if device == "cpu" else []):
             a = a_bf16.to(dtype=dtype)
             b = b_bf16.to(dtype=dtype)
             b_scales_and_zeros = b_scales_and_zeros_bf16.to(dtype=dtype)
