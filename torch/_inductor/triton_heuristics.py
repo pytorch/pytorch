@@ -206,7 +206,13 @@ class CachingAutotuner(KernelInterface):
                     compiled_binary, launcher = self._precompile_config(
                         c, warm_cache_only_with_cc
                     )
-                except OutOfResources:
+                except OutOfResources as e:
+                    if len(self.configs) == 1:
+                        raise RuntimeError(
+                            f"Failed to compile triton config: {c}. "
+                            f"Report a fatal compilation error. "
+                            f"{e}"
+                        )
                     # Skip the config if we run out of resource
                     continue
                 self.launchers.append(launcher)
@@ -300,6 +306,13 @@ class CachingAutotuner(KernelInterface):
         """Ahead of time compile a given autotuner config."""
         compile_meta = copy.deepcopy(self.triton_meta)
         for k, v in cfg.kwargs.items():
+            if torch.version.hip is not None:
+                if k == "matrix_instr_nonkdim":
+                    compile_meta["matrix_instr_nonkdim"] = v
+                    continue
+                if k == "waves_per_eu":
+                    compile_meta["waves_per_eu"] = v
+                    continue
             compile_meta["constants"][self.fn.arg_names.index(k)] = v
         compile_meta["num_warps"] = cfg.num_warps
         compile_meta["num_stages"] = cfg.num_stages
@@ -340,6 +353,13 @@ class CachingAutotuner(KernelInterface):
                 "num_stages": compile_meta["num_stages"],
                 "debug": compile_meta["debug"],
             }
+            if torch.version.hip is not None:
+                if "waves_per_eu" in compile_meta:
+                    options["waves_per_eu"] = compile_meta["waves_per_eu"]
+                if "matrix_instr_nonkdim" in compile_meta:
+                    options["matrix_instr_nonkdim"] = compile_meta[
+                        "matrix_instr_nonkdim"
+                    ]
             compile_kwargs = {
                 "target": target,
                 "options": options,
@@ -787,7 +807,7 @@ class CachingAutotuner(KernelInterface):
                 args,
                 {
                     "kernel_file": self.filename,
-                    "kernel_type": "triton",
+                    "kernel_backend": "triton",
                     "grid": grid_info,
                     "stream": stream,
                 },
@@ -965,10 +985,8 @@ def should_use_remote_autotune_cache():
 
     from triton.runtime.fb_memcache import MEMCACHE_VERSION
 
-    return torch._utils_internal.justknobs_check(
-        "pytorch/autotune_remote_cache:enable"
-    ) or MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
-        "pytorch/autotune_remote_cache:memcache_version"
+    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:autotune_memcache_version"
     )
 
 

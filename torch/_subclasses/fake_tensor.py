@@ -397,6 +397,31 @@ class FakeTensor(torch.Tensor):
             return None
         return self._nonzero_memo
 
+    # This memorizes the unbacked SymInt representing the number of unique
+    # elements in this tensor.  This is helpful if you do something like
+    # calling torch.unique(x) multiple times and should
+    # give a consistent unbacked SymInt.  It needs to be invalidated in the
+    # same way constant is.
+    # TODO: Generalize this as needed, e.g., into a trie of memos
+    _unique_memo: Optional[torch.SymInt]
+    _unique_memo_vc: Optional[int]
+
+    @property
+    def unique_memo(self):
+        if self._unique_memo is None:
+            return None
+        # Version counter based tracking isn't 100% sound but it's close
+        # enough
+        if self._unique_memo_vc != self._version:
+            self._unique_memo = None
+            return None
+        return self._unique_memo
+
+    @unique_memo.setter
+    def unique_memo(self, value):
+        self._unique_memo = value
+        self._unique_memo_vc = self._version
+
     @property
     def device(self):
         if self.fake_mode.in_kernel_invocation:
@@ -471,6 +496,9 @@ class FakeTensor(torch.Tensor):
         self.constant = constant  # type: ignore[attr-defined]
         self._nonzero_memo = None  # type: ignore[attr-defined]
         self._nonzero_memo_vc = None  # type: ignore[attr-defined]
+        self._unique_memo = None  # type: ignore[attr-defined]
+        self._unique_memo_vc = None  # type: ignore[attr-defined]
+
         if FakeTensorConfig.debug:
             self._debug_trace = CapturedTraceback.extract()  # type: ignore[attr-defined]
         return self
@@ -832,6 +860,15 @@ class FakeTensorMode(TorchDispatchMode):
     def is_our_fake(self, t):
         return isinstance(t, FakeTensor) and t.fake_mode is self
 
+    # If we should avoid device init. This changes the behavior of various APIs:
+    # - We avoid constant-prop on Tensors with ops that move them to another device
+    # - We change the torch.tensor ctor contract to never materialize
+    #   tensors on device
+    #   (see NOTE: [torch.tensor, lift_fresh, and device movement])
+    @property
+    def avoid_device_init(self):
+        return not torch.cuda.is_available()
+
     @count
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         # FakeTensorMode should not be set when we're inside of it.
@@ -846,23 +883,36 @@ class FakeTensorMode(TorchDispatchMode):
 
     # No-op if FakeTensorMode is already in use
     def __enter__(self):
+        prev_only_lift_cpu_tensors = None
+        if self.avoid_device_init:
+            # See NOTE: [torch.tensor, lift_fresh, and device movement]
+            prev_only_lift_cpu_tensors = torch._C._only_lift_cpu_tensors()
+            torch._C._set_only_lift_cpu_tensors(True)
         maybe_prev_fake_mode = torch._C._unset_dispatch_mode(self._mode_key)
         if self is not maybe_prev_fake_mode:
-            self.enter_stack.append((True, maybe_prev_fake_mode))
+            self.enter_stack.append(
+                (True, maybe_prev_fake_mode, prev_only_lift_cpu_tensors)
+            )
             return super().__enter__()
         else:
             # no-op (still need to re-set the fake mode though since we unset it)
             torch._C._set_dispatch_mode(self)
-            self.enter_stack.append((False, None))
+            self.enter_stack.append((False, None, prev_only_lift_cpu_tensors))
         return self
 
     def __exit__(self, a, b, c):
-        live, maybe_prev_fake_mode = self.enter_stack.pop()
+        (
+            live,
+            maybe_prev_fake_mode,
+            maybe_prev_only_lift_cpu_tensors,
+        ) = self.enter_stack.pop()
         if live:
             out = super().__exit__(a, b, c)
             # Re-enable the previous fake mode, if there was one.
             if maybe_prev_fake_mode is not None:
                 torch._C._set_dispatch_mode(maybe_prev_fake_mode)
+            if maybe_prev_only_lift_cpu_tensors is not None:
+                torch._C._set_only_lift_cpu_tensors(maybe_prev_only_lift_cpu_tensors)
 
     @classmethod
     def cache_info(cls) -> DispatchCacheInfo:
@@ -1259,6 +1309,19 @@ class FakeTensorMode(TorchDispatchMode):
             if type(args[0]) is torch.Tensor:
                 return converter.from_real_tensor(self, args[0])
 
+        # If we are trying to avoid device init, then we need to avoid constant
+        # prop on constant tensors for ops that change devices.
+        avoiding_device_init = False
+        if self.avoid_device_init:
+            if (
+                func == torch.ops.aten._to_copy.default
+                and "device" in kwargs
+                and kwargs["device"] != "cpu"
+            ):
+                avoiding_device_init = True
+            if func == torch.ops.prims.device_put.default:
+                avoiding_device_init = True
+
         # Recompute flat_arg_fake_tensors here again in case some of the inputs
         # were real tensors and fakified in validate_and_convert_non_fake_tensors
         (flat_args, flat_arg_fake_tensors) = self.validate_and_convert_non_fake_tensors(
@@ -1283,6 +1346,7 @@ class FakeTensorMode(TorchDispatchMode):
             and all_constant
             and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
+            and not avoiding_device_init
         ):
             const_flat_args = [maybe_to_constant(a) for a in flat_args]
             const_args, const_kwargs = pytree.tree_unflatten(const_flat_args, args_spec)
