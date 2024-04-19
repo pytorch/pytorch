@@ -148,8 +148,8 @@ class MiniArrayRef final {
   /// The declaration here is extra complicated so that "arrayRef = {}"
   /// continues to select the move assignment operator.
   template <typename U>
-  typename std::enable_if<std::is_same<U, T>::value, MiniArrayRef<T>>::
-      type& operator=(std::initializer_list<U>) = delete;
+  typename std::enable_if<std::is_same<U, T>::value, MiniArrayRef<T>>::type&
+  operator=(std::initializer_list<U>) = delete;
 };
 
 using MiniIntArrayRef = MiniArrayRef<int64_t>;
