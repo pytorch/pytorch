@@ -546,6 +546,9 @@ class TestPoolingNNDeviceType(NNTestCase):
             with self.assertRaisesRegex(RuntimeError, error_msg):
                 fn(input2, output_size).sum().backward()
 
+    @skipIfTorchDynamo(
+        "Unsuitable for TorchDynamo, expected runtime assertion not triggered in meta kernel"
+    )
     @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_batch(self, device):
         mod = nn.FractionalMaxPool2d(3, output_ratio=(0.5, 0.5))
@@ -580,6 +583,9 @@ class TestPoolingNNDeviceType(NNTestCase):
         out = mod(inp)
         self.assertEqual(out, torch.empty((16, 0, 1, 1), device=device))
 
+    @skipIfTorchDynamo(
+        "Unsuitable for TorchDynamo, expected runtime assertion not triggered in meta kernel"
+    )
     @onlyNativeDeviceTypes
     def test_FractionalMaxPool2d_zero_samples(self, device):
         samples = torch.rand([0, 16, 2], device=device)

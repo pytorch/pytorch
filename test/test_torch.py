@@ -8406,6 +8406,7 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             self.assertIs(pinned, pinned.pin_memory())
             self.assertEqual(pinned.data_ptr(), pinned.pin_memory().data_ptr())
 
+    @skipIfTorchDynamo("Unsuitable for TorchDynamo, expected runtime assertion not triggered in meta kernel")
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(
                 RuntimeError,

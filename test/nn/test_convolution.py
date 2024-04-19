@@ -57,6 +57,7 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     skipIfNotMiopenSuggestNHWC,
     skipIfRocmVersionLessThan,
+    skipIfTorchDynamo,
     subtest,
     TEST_SCIPY,
     TEST_WITH_ROCM,
@@ -92,6 +93,9 @@ class TestConvolutionNN(NNTestCase):
         input = torch.randn((1, 1, 1, 1), dtype=torch.float)
         self.assertEqual(m(input).size(), (1, 1, 1, 1))
 
+    @skipIfTorchDynamo(
+        "Unsuitable for TorchDynamo, expected runtime assertion not triggered in meta kernel"
+    )
     def test_invalid_conv1d(self):
         for dtype in [
             torch.half,
@@ -2965,6 +2969,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     y_ = conv(x)
                     self.assertEqual(y, y_)
 
+    @skipIfTorchDynamo(
+        "Unsuitable for TorchDynamo, expected runtime assertion not triggered in meta kernel"
+    )
     @dtypes(torch.float, torch.cfloat)
     def test_conv_empty_channel(self, device, dtype):
         in_channels = 0

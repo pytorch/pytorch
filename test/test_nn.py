@@ -4570,6 +4570,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         input = torch.zeros(5)
         self.assertEqual((nn.BCELoss()(input, target) < 0).sum(), 0)
 
+    @skipIfTorchDynamo("Unsuitable for TorchDynamo, expected runtime assertion not triggered in meta kernel")
     def test_bce_with_logits_raises_if_target_and_input_are_different_size(self):
         target = torch.rand(5)
         input = torch.rand(5, 1)
@@ -4931,6 +4932,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         output = m(input)
         self.assertEqualTypeString(output, input)
 
+    @skipIfTorchDynamo("Unsuitable for TorchDynamo, expected runtime assertion not triggered in meta kernel")
     def test_batchnorm_raises_error_if_less_than_one_value_per_channel(self):
         x = torch.rand(10)[None, :, None]
         with self.assertRaises(ValueError):
@@ -7082,6 +7084,7 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         net = torch.nn.ConvTranspose2d(8, 16, kernel_size=3, padding=(3, 3))
         y = net(x)
 
+    @skipIfTorchDynamo("Unsuitable for TorchDynamo, expected runtime assertion not triggered in meta kernel")
     def test_fractional_max_pool2d_invalid_output_ratio(self):
         arg_1 = [2, 1]
         arg_2 = [0.5, 0.5, 0.6]
@@ -8258,11 +8261,13 @@ class TestNNDeviceType(NNTestCase):
                 inst_norm(t)
             self.assertIn("which is not used because affine=False", str(w[0].message))
 
+    @skipIfTorchDynamo("Unsuitable for TorchDynamo, expected runtime assertion not triggered in meta kernel")
     def test_instancenorm_raises_error_if_less_than_one_value_per_channel(self, device):
         x = torch.rand(10)[None, :, None]
         with self.assertRaises(ValueError):
             torch.nn.InstanceNorm1d(10)(x).to(device)
 
+    @skipIfTorchDynamo("Unsuitable for TorchDynamo, expected runtime assertion not triggered in meta kernel")
     def test_instancenorm_raises_error_for_single_spatial_element_during_training(self, device):
         BATCH_SIZE = 10
         NUM_CHANNELS = 3
