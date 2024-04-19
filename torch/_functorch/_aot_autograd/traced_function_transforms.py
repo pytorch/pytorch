@@ -698,6 +698,7 @@ def create_functional_call(mod, params_spec, params_len, store_orig_mod=False):
                         "ignore", "Anomaly Detection has been enabled."
                     )
                     with torch.autograd.detect_anomaly(check_nan=False):
+                        detect_fake_mode().epoch += 1
                         out = PropagateUnbackedSymInts(mod).run(
                             *args[params_len:], **kwargs
                         )

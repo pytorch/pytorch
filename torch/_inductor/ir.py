@@ -49,7 +49,9 @@ from torch._prims_common import (
 )
 from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import (
+    CallMethodKey,
     compute_unbacked_bindings,
+    DivideByKey,
     free_unbacked_symbols,
     rebind_unbacked,
     SymTypes,
@@ -3011,32 +3013,6 @@ class Buffer(IRNode):
         """
         return set()
 
-    def codegen_unbacked_symbol_defs(self, wrapper):
-        # NB: If it is possible for other ir node types to return unbacked
-        # symints, you need to make sure their codegen calls this method.
-        # Don't forget to update get_unbacked_symbol_defs too.
-        symbols_to_define = self.get_unbacked_symbol_defs()
-        for i, s in enumerate(self.get_size()):
-            if s in symbols_to_define:
-                wrapper.writeline(
-                    f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.size({i}){wrapper.ending}"
-                )
-                symbols_to_define.remove(s)
-        for i, s in enumerate(self.get_stride()):
-            if s in symbols_to_define:
-                wrapper.writeline(
-                    f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.stride({i}){wrapper.ending}"
-                )
-                symbols_to_define.remove(s)
-        if (s := self.get_offset()) in symbols_to_define:
-            wrapper.writeline(
-                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {self.get_name()}.storage_offset(){wrapper.ending}"
-            )
-            symbols_to_define.remove(s)
-        assert (
-            not symbols_to_define
-        ), f"unbacked symint {symbols_to_define} not written out, check comment above"
-
     def realize(self):
         pass
 
@@ -3800,6 +3776,9 @@ class ExternKernel(InputsKernel):
     ] = None
     arg_properties: Optional[List[Dict[str, Any]]] = None
     kwarg_properties: Optional[Dict[str, Dict[str, Any]]] = None
+    unbacked_bindings: Dict[sympy.Symbol, pytree.KeyPath] = dataclasses.field(
+        default_factory=dict
+    )
 
     def __init__(
         self,
@@ -3827,6 +3806,10 @@ class ExternKernel(InputsKernel):
         self.ordered_kwargs_for_cpp_kernel = ordered_kwargs_for_cpp_kernel
         self.op_overload = op_overload
         self.collect_arg_kwarg_properties()
+        self.unbacked_bindings = {}
+
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return set()
 
     def collect_arg_kwarg_properties(self):
         # if self.op_overload is torch._ops.OpOverload, we can use its schema to collect additional
@@ -3953,9 +3936,12 @@ class ExternKernel(InputsKernel):
         new_args, new_kwargs = unflatten_args(example_args, non_tensor_args)
         example_output = kernel(*new_args, **new_kwargs)
 
+        unbacked_bindings = None
         if shape_env := V.fake_mode.shape_env:
             rebind_unbacked(shape_env, V.graph.current_node, example_output)
-            unbacked_bindings = compute_unbacked_bindings(shape_env, example_output)
+            unbacked_bindings = compute_unbacked_bindings(
+                shape_env, example_output, V.graph.current_node.meta.get("val")
+            )
 
         example_out_li = (
             [example_output]
@@ -5085,9 +5071,6 @@ class FallbackKernel(ExternKernelAlloc):
         self.cpp_op_schema = get_cpp_op_schema(kernel)
         self.init_args_default_value(kernel._schema)
 
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        return self.unbacked_bindings.keys() if self.unbacked_bindings else set()
-
     def init_args_default_value(self, schema):
         self.args_default_value = [
             {
@@ -5453,6 +5436,8 @@ class ComplexView(FallbackKernel):
         tensor_args,
         nontensor_args,
         unflatten_args,
+        *,
+        unbacked_bindings=None,
     ):
         super().__init__(
             layout,
@@ -5460,6 +5445,7 @@ class ComplexView(FallbackKernel):
             tensor_args,
             nontensor_args,
             unflatten_args,
+            unbacked_bindings=unbacked_bindings,
         )
 
 
@@ -5489,6 +5475,54 @@ class MultiOutput(ExternKernel):
                 raise AssertionError("non supported index type: ", itype)
         else:
             return basename
+
+    # TODO: This is cursed
+    # Known bugs:
+    # - If you have truly multi output node with unbacked symints, will fail
+    #   (as we will generate defs at each MultiOutput and clobber each other)
+    # - We report that the def site is the MultiOutput, rather than
+    #   the FallbackKernel inside, because that's where codegen happens
+    #   even though this is backwards
+    def codegen_unbacked_symbol_defs(self, wrapper):
+        if not self.inputs[0].unbacked_bindings:
+            return
+
+        for s, keypath in self.inputs[0].unbacked_bindings.items():
+            expr = self.get_name()
+
+            def go(expr, keypath):
+                if keypath == ():
+                    return expr
+
+                if (
+                    len(keypath) >= 2
+                    and isinstance(keypath[0], CallMethodKey)
+                    and isinstance(keypath[1], pytree.SequenceKey)
+                ):
+                    return go(
+                        f"{expr}.{keypath[0].name}({keypath[1].idx})", keypath[2:]
+                    )
+                elif isinstance(keypath[0], CallMethodKey):
+                    expr = f"{expr}.{keypath[0].name}()"
+                elif isinstance(keypath[0], pytree.SequenceKey):
+                    expr = f"{expr}[{keypath[0].idx}]"
+                elif isinstance(keypath[0], DivideByKey):
+                    # TODO: need to assert divisibility
+                    # TODO: this is invalid C++ codegen
+                    expr = f"{expr}.__floordiv__({keypath[0].divisor})"
+                else:
+                    raise AssertionError(f"unrecognized keypath {keypath}")
+
+            wrapper.writeline(
+                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {go(expr, keypath)}{wrapper.ending}"
+            )
+
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        return (
+            self.inputs[0].unbacked_bindings.keys()
+            if self.inputs[0].unbacked_bindings
+            else set()
+        )
 
     def codegen(self, wrapper):
         wrapper.codegen_multi_output(
@@ -7370,6 +7404,8 @@ class EffectfulKernel(FallbackKernel):
         nontensor_args,
         unflatten_args,
         kwargs=None,
+        *,
+        unbacked_bindings=None,
     ):
         super().__init__(
             NoneLayout(layout.device),
@@ -7378,6 +7414,7 @@ class EffectfulKernel(FallbackKernel):
             nontensor_args,
             unflatten_args,
             kwargs=None,
+            unbacked_bindings=unbacked_bindings,
         )
 
         from torch._higher_order_ops.effects import get_effect_key

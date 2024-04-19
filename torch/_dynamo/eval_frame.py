@@ -776,7 +776,9 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
             # NB: intentionally do not use set_example_value
             arg.node.meta["example_value"] = self.current_node.meta["example_value"]
         if "unbacked_bindings" in self.current_node.meta:
-            arg.node.meta["unbacked_bindings"] = self.current_node.meta["unbacked_bindings"]
+            arg.node.meta["unbacked_bindings"] = self.current_node.meta[
+                "unbacked_bindings"
+            ]
         return arg
 
     def output(self, target, args, kwargs):
@@ -805,7 +807,9 @@ class FlattenInputOutputSignature(torch.fx.interpreter.Transformer):
                 "example_value"
             ]
         if "unbacked_bindings" in self.current_node.meta:
-            result_proxy.node.meta["unbacked_bindings"] = self.current_node.meta["unbacked_bindings"]
+            result_proxy.node.meta["unbacked_bindings"] = self.current_node.meta[
+                "unbacked_bindings"
+            ]
         if self.current_node.op != "output":
             result_proxy.node._rename(
                 getattr(self.current_node, "name", result_proxy.node.name)
@@ -1191,7 +1195,18 @@ def export(
                     else fake_mode
                 )
 
-                with ambient_fake_mode, enable_python_dispatcher():
+                # We reran fake tensor propagation, but we didn't do
+                # anything with the resulting unbacked SymInts.  Drop them
+                # from the pending list.
+                # NB: this is wrong if graph_captured_result has
+                # data-dependent output size!
+                ignore_fresh_unbacked = null_context()
+                if shape_env := ambient_fake_mode.shape_env:
+                    ignore_fresh_unbacked = shape_env.ignore_fresh_unbacked_symbols()
+
+                with (
+                    ambient_fake_mode
+                ), enable_python_dispatcher(), ignore_fresh_unbacked:
                     params_and_buffers = {
                         **named_parameters,
                         **named_buffers,
@@ -1209,14 +1224,6 @@ def export(
                     graph_captured_result = torch.func.functional_call(
                         graph, fake_params_buffers, fake_graph_inputs
                     )
-
-                    # We reran fake tensor propagation, but we didn't do
-                    # anything with the resulting unbacked SymInts.  Drop them
-                    # from the pending list.
-                    # NB: this is wrong if graph_captured_result has
-                    # data-dependent output size!
-                    if shape_env := ambient_fake_mode.shape_env:
-                        shape_env.pending_fresh_unbacked_symbols.clear()
 
                 return graph_captured_result
 

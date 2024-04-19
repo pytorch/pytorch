@@ -279,17 +279,12 @@ def rebind_unbacked(shape_env, n: torch.fx.Node, result):
     if bindings := n.meta.get("unbacked_bindings"):
         for raw_u0, path in bindings.items():
             u1 = pytree.key_get(result, path)
-            # We should never have bindings for raw bools; instead they should
-            # have been converted to ints via ConvertIntKey
-            assert type(u1) is not bool
-            if isinstance(u1, (int, float)):
-                raw_u1 = sympy.sympify(u1)
-            else:
-                raw_u1 = u1.node.expr
-            # If you manage to hit the memo, this could potentially be the
-            # same
-            if raw_u0 != raw_u1:
-                shape_env._rename_unbacked_to(raw_u0, raw_u1)
+            raw_u1 = u1.node.expr
+            assert isinstance(raw_u1, sympy.Symbol)
+            # The old and new could be the same if you improperly hit the memo
+            # while retracing.  Make sure you updated FakeTensorMode.epoch
+            assert raw_u0 != raw_u1, f"{raw_u0} possible memo disaster"
+            shape_env._rename_unbacked_to(raw_u0, raw_u1)
 
 def canonicalize_bool_expr(expr: SympyBoolean) -> SympyBoolean:
     r""" Canonicalize a boolean expression by transforming it into a lt / le
@@ -463,7 +458,7 @@ class DivideByKey:
         return o // self.divisor
 
 
-def compute_unbacked_bindings(shape_env, example_value):
+def compute_unbacked_bindings(shape_env, example_value, old_example_value=None):
     """
     After having run fake tensor propagation and producing example_value
     result, traverse example_value looking for freshly bound unbacked
@@ -473,6 +468,8 @@ def compute_unbacked_bindings(shape_env, example_value):
     function, you must call this on the tuple of tensor output, you
     cannot wait!)
     """
+    if shape_env._ignore_fresh_unbacked_symbols_tls():
+        return
     fs = shape_env.pending_fresh_unbacked_symbols
     pending = set(fs)
     if pending:
@@ -557,6 +554,24 @@ def compute_unbacked_bindings(shape_env, example_value):
                 else ""
             )
         )
+        # TODO: This is pretty fragile
+        # Normally, the equality test is supposed to be a no-op here, because
+        # you've already called rebind_unbacked first which takes all the old
+        # binding sites and discovers how they are newly bound.  But this does
+        # not always work.  For example, if the original FX node wasn't a
+        # binding site because you had a memo hit, but post translation you
+        # aren't a memo hit anymore, there's now a new binding site... but we
+        # know (because it's the same FX node) that the value is actually the
+        # same, they're just not obviously equal anymore.  So we just insert
+        # a runtime assert in this case.
+        #
+        # This is very fragile, because u0 == u1 assertion does not generate
+        # a replacement.  Here, I think it might be acceptable to do a
+        # replacement, so long as we replace the newer thing with the older
+        # thing.  Fix this if it becomes an issue.
+        if old_example_value is not None:
+            for keypath in symbol_to_path.values():
+                torch._check(pytree.key_get(old_example_value, keypath) == pytree.key_get(example_value, keypath))
         return symbol_to_path
 
 def definitely_true(a):
@@ -2184,6 +2199,7 @@ class ShapeEnv:
         # Maps from sympy ints to expressions representing them
         # Populated from equality guards (i.e. a.shape[0] == b.shape[0])
         self.replacements: Dict[sympy.Symbol, sympy.Expr] = {}
+        self.unbacked_renamings: Dict[sympy.Symbol, sympy.Symbol] = {}
         # Set holds a % b expressions that evaluate to 0.
         self.divisible: Set[sympy.Expr] = set()
         # Set that holds "size-like" symbols.  When we perform
@@ -2408,7 +2424,37 @@ class ShapeEnv:
     # Unlike set_replacement, this records a shapeenv event
     @record_shapeenv_event()
     def _rename_unbacked_to(self, orig_s: sympy.Expr, new_s: sympy.Expr):
+        if self._ignore_fresh_unbacked_symbols_tls():
+            return
+        dest = self.replacements.get(orig_s)
+        assert not free_unbacked_symbols(dest), f"{orig_s} -> {dest}"
         self._set_replacement(orig_s, new_s, "rename_unbacked_to")
+        self.unbacked_renamings[orig_s] = new_s
+        if dest is not None:
+            self._set_replacement(new_s, dest, "rename_unbacked_to_dest")
+
+    def _ignore_fresh_unbacked_symbols_tls(self):
+        return getattr(TLS, "ignore_fresh_unbacked_symbols", False)
+
+    @record_shapeenv_event()
+    def _ignore_fresh_unbacked_symbols_enter(self):
+        TLS.ignore_fresh_unbacked_symbols = True
+
+    @record_shapeenv_event()
+    def _ignore_fresh_unbacked_symbols_exit(self):
+        TLS.ignore_fresh_unbacked_symbols = False
+
+    @contextmanager
+    def ignore_fresh_unbacked_symbols(self):
+        """
+        Indicates that the newly allocated unbacked SymInts are being
+        discarded
+        """
+        self._ignore_fresh_unbacked_symbols_enter()
+        try:
+            yield
+        finally:
+            self._ignore_fresh_unbacked_symbols_exit()
 
     @record_shapeenv_event()
     def freeze(self):
@@ -2837,7 +2883,8 @@ class ShapeEnv:
         """
         symbol: sympy.Symbol = sympy.Symbol(f"f{next(self.unbacked_symfloat_counter)}")
         self.counter["create_unbacked_symbol"] += 1
-        self.pending_fresh_unbacked_symbols.append(symbol)
+        if not self._ignore_fresh_unbacked_symbols_tls():
+            self.pending_fresh_unbacked_symbols.append(symbol)
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges.unknown()
 
@@ -2853,7 +2900,8 @@ class ShapeEnv:
         """Create a symbolic integer without a hint value
         """
         symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
-        self.pending_fresh_unbacked_symbols.append(symbol)
+        if not self._ignore_fresh_unbacked_symbols_tls():
+            self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = self._default_unspecified_value_range()
@@ -2876,7 +2924,8 @@ class ShapeEnv:
         """Create a symbolic boolean without a hint value
         """
         symbol: sympy.Symbol = sympy.Symbol(f"u{next(self.unbacked_symint_counter)}", integer=True)
-        self.pending_fresh_unbacked_symbols.append(symbol)
+        if not self._ignore_fresh_unbacked_symbols_tls():
+            self.pending_fresh_unbacked_symbols.append(symbol)
         self.counter["create_unbacked_symbol"] += 1
         self.var_to_stack[symbol] = CapturedTraceback.extract(skip=1)
         vr = self.var_to_range[symbol] = ValueRanges(0, 1)
