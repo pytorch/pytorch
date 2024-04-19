@@ -45,11 +45,6 @@ inputs:
     required: false
     type: string
     default: ""
-  default_branch:
-    description: Default branch
-    required: false
-    type: string
-    default: ""
   HUGGING_FACE_HUB_TOKEN:
     description: |
       HF Auth token to avoid rate limits when downloading models or datasets from hub
@@ -59,8 +54,8 @@ inputs:
     description: GitHub token
     required: true
 
-env:
-  GIT_DEFAULT_BRANCH: ${{ inputs.default_branch }}
+#env:
+#  GIT_DEFAULT_BRANCH: ${{ inputs.default_branch }}
 
 runs:
   using: composite
@@ -135,6 +130,7 @@ runs:
 
     - name: Parse ref
       id: parse-ref
+      shell: bash
       run: .github/scripts/parse_ref.py
 
     - name: Get workflow job id
@@ -199,7 +195,7 @@ runs:
         PYTORCH_TEST_RERUN_DISABLED_TESTS: ${{ matrix.rerun_disabled_tests && '1' || '0' }}
         DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
         HUGGING_FACE_HUB_TOKEN: ${{ inputs.HUGGING_FACE_HUB_TOKEN }}
-
+      shell: bash
       run: |
         set -x
 
@@ -307,6 +303,7 @@ runs:
 
     - name: Collect backtraces from coredumps (if any)
       if: always()
+      shell: bash
       run: |
         # shellcheck disable=SC2156
         find . -iname "core.[1-9]*" -exec docker exec "${DOCKER_CONTAINER_ID}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
