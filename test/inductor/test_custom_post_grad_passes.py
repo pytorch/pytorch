@@ -121,6 +121,11 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             x1 = self.conv(x)
             return x1.relu()
 
+    def test_custom_joint_pass(self):
+        def f(x):
+            return x.cos().cos().cos()
+
+
     def test_custom_pre_pass(self):
         with config.patch(
             # leave custom pass only in post_grad_passes()
