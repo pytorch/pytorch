@@ -482,8 +482,8 @@ static PyObject* set_autocast_enabled(
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
-      {"set_autocast_enabled(c10::string_view device_type, bool new_enabled)",
-       "set_autocast_enabled(bool new_enabled)"});
+      {"set_autocast_enabled(c10::string_view device_type, bool enabled)",
+       "set_autocast_enabled(bool enabled)|deprecated"});
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   // Set at::kCUDA as default value to prevent no BC-breaking changes.
@@ -507,7 +507,7 @@ static PyObject* is_autocast_enabled(
        "is_autocast_enabled()"});
   ParsedArgs<1> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  // Set at::kCUDA as default value to prevent no BC-breaking changes.
+  // Set at::kCUDA as default value to prevent BC-breaking changes.
   at::DeviceType device_type = at::kCUDA;
   if (r.idx == 0) {
     device_type = at::Device(r.string(0)).type();
@@ -576,14 +576,14 @@ static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
       "enabled must be a bool (got ",
       Py_TYPE(arg)->tp_name,
       ")");
-  at::autocast::set_cpu_enabled(arg == Py_True);
+  at::autocast::set_autocast_enabled(at::kCPU, arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* is_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_cpu_enabled()) {
+  if (at::autocast::is_autocast_enabled(at::kCPU)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -598,14 +598,14 @@ static PyObject* set_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
       "enabled must be a bool (got ",
       Py_TYPE(arg)->tp_name,
       ")");
-  at::autocast::set_ipu_enabled(arg == Py_True);
+  at::autocast::set_autocast_enabled(at::kIPU, arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* is_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_ipu_enabled()) {
+  if (at::autocast::is_autocast_enabled(at::kIPU)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -620,14 +620,14 @@ static PyObject* set_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
       "enabled must be a bool (got ",
       Py_TYPE(arg)->tp_name,
       ")");
-  at::autocast::set_xla_enabled(arg == Py_True);
+  at::autocast::set_autocast_enabled(at::kXLA, arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* is_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  if (at::autocast::is_xla_enabled()) {
+  if (at::autocast::is_autocast_enabled(at::kXLA)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
@@ -643,7 +643,7 @@ static PyObject* set_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
       Py_TYPE(arg)->tp_name,
       ")");
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
-  at::autocast::set_autocast_gpu_dtype(targetType);
+  at::autocast::set_autocast_dtype(at::kCUDA, targetType);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -656,7 +656,7 @@ static PyObject* set_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
       Py_TYPE(arg)->tp_name,
       ")");
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
-  at::autocast::set_autocast_cpu_dtype(targetType);
+  at::autocast::set_autocast_dtype(at::kCPU, targetType);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -669,7 +669,7 @@ static PyObject* set_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
       Py_TYPE(arg)->tp_name,
       ")");
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
-  at::autocast::set_autocast_ipu_dtype(targetType);
+  at::autocast::set_autocast_dtype(at::kIPU, targetType);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -682,14 +682,14 @@ static PyObject* set_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
       Py_TYPE(arg)->tp_name,
       ")");
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
-  at::autocast::set_autocast_xla_dtype(targetType);
+  at::autocast::set_autocast_dtype(at::kXLA, targetType);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_gpu_dtype();
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kCUDA);
   auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
   Py_INCREF(dtype);
   return dtype;
@@ -698,7 +698,7 @@ static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* get_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_cpu_dtype();
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kCPU);
   auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
   Py_INCREF(dtype);
   return dtype;
@@ -707,7 +707,7 @@ static PyObject* get_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* get_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_ipu_dtype();
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kIPU);
   auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
   Py_INCREF(dtype);
   return dtype;
@@ -716,7 +716,7 @@ static PyObject* get_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* get_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
-  at::ScalarType current_dtype = at::autocast::get_autocast_xla_dtype();
+  at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kXLA);
   auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
   Py_INCREF(dtype);
   return dtype;
@@ -1298,4 +1298,3 @@ PyMethodDef* python_functions() {
 }
 
 } // namespace torch::autograd
- 
