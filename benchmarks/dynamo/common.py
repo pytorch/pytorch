@@ -93,6 +93,12 @@ except ImportError:
     # ignore the error if torch_xla is not installed
     pass
 
+# Enable OpenVINO Backend for benchmarking
+try:
+    import openvino.torch
+except ImportError:
+    pass
+
 log = logging.getLogger(__name__)
 
 # We are primarily interested in TF32
