@@ -499,9 +499,15 @@ def create_functionalized_fn(
                         and meta.input_info[i].mutations_hidden_from_autograd
                     ):
                         # Hidden from autograd = run under no_grad, **and** don't bump VC
-                        with torch.no_grad(), torch.autograd._unsafe_preserve_version_counter(
-                            inpt_old
-                        ):
+                        # (although if the tensor was created in inference mode, it has no VC)
+                        maybe_preserve_vc = nullcontext()
+                        if not inpt_old.is_inference():
+                            maybe_preserve_vc = (
+                                torch.autograd._unsafe_preserve_version_counter(
+                                    inpt_old
+                                )
+                            )
+                        with torch.no_grad(), maybe_preserve_vc:
                             inpt_old.copy_(inpt_new)
                     elif (
                         meta.input_info[i].mutates_data

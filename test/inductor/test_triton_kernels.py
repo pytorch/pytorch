@@ -1497,6 +1497,23 @@ class MutationTests(torch._inductor.test_case.TestCase):
             expected,
         )
 
+    @requires_cuda
+    @skipIfRocm
+    def test_triton_kernel_inference_mode(self):
+        def f(x, y, out):
+            n_elements = x.numel()
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+            add_kernel[grid](x, y, out, n_elements, BLOCK_SIZE=4)
+
+        with torch.inference_mode():
+            x = torch.ones(32, device="cuda")
+            y = torch.ones(32, device="cuda")
+            out_ref = torch.zeros_like(x)
+            out_test = torch.zeros_like(x)
+            f(x, y, out_ref)
+            torch.compile(f)(x, y, out_test)
+            self.assertEqual(out_ref, out_test)
+
     @make_mutation_test
     def test_cumsum():
         @triton.jit
