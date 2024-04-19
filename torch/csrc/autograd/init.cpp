@@ -474,8 +474,7 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   Py_RETURN_TRUE;
 }
 
-namespace torch {
-namespace autograd {
+namespace torch::autograd {
 
 static PyObject* set_autocast_enabled(
     PyObject* _unused,
@@ -1122,5 +1121,4 @@ PyMethodDef* python_functions() {
   return methods;
 }
 
-} // namespace autograd
-} // namespace torch
+} // namespace torch::autograd
