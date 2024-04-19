@@ -2165,6 +2165,7 @@ class ShapeEnv:
             "source_name_to_debug_name",
             "_prev_cache_key",
             "_version_counter",
+            "check_is_size_called",
         )
 
         # Mapping of the value of each to-be-compared field into the values that
