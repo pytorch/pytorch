@@ -332,19 +332,11 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            if op.op in (
-                numpy_nonzero._opoverload,
-                torch.ops._torch_testing.numpy_nms,
-            ):
-                ctx = self.assertRaisesRegex(optests.OpCheckError, "failed with")
-            else:
-                ctx = contextlib.nullcontext()
-            with ctx:
-                optests.opcheck(
-                    op.op,
-                    args,
-                    kwargs,
-                )
+            optests.opcheck(
+                op.op,
+                args,
+                kwargs,
+            )
 
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
@@ -2777,6 +2769,7 @@ optests.generate_opcheck_tests(
     additional_decorators={
         "test_pt2_compliant_tag_mini_op_test_no_abstract": [unittest.expectedFailure]
     },
+    test_utils=optests.generate_tests.DEPRECATED_DEFAULT_TEST_UTILS,
 )
 
 optests.generate_opcheck_tests(
@@ -2786,6 +2779,7 @@ optests.generate_opcheck_tests(
         os.path.dirname(__file__),
         "minioptest_failures_dict.json",
     ),
+    test_utils=optests.generate_tests.DEPRECATED_DEFAULT_TEST_UTILS,
 )
 
 
@@ -2878,7 +2872,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "MiniOpTest.test_aot_dispatch_static__test_delayed_error": {
+                "MiniOpTest.test_aot_dispatch_dynamic__test_delayed_error": {
                     "comment": "",
                     "status": "success",
                 }
@@ -2908,7 +2902,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "MiniOpTest.test_aot_dispatch_static__test_delayed_error_nopenopenope": {
+                "MiniOpTest.test_aot_dispatch_dynamic__test_delayed_error_nopenopenope": {
                     "comment": "",
                     "status": "xfail",
                 },
@@ -2939,7 +2933,6 @@ opcheck(op, args, kwargs, test_utils="test_schema")
                 "test_schema": "SUCCESS",
                 "test_autograd_registration": "SUCCESS",
                 "test_faketensor": "SUCCESS",
-                "test_aot_dispatch_static": "SUCCESS",
                 "test_aot_dispatch_dynamic": "SUCCESS",
             },
         )
@@ -2988,7 +2981,6 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             {
                 "test_autograd_registration": "SUCCESS",
                 "test_faketensor": "SUCCESS",
-                "test_aot_dispatch_static": "SUCCESS",
                 "test_aot_dispatch_dynamic": "SUCCESS",
             },
         )
