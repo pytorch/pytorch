@@ -2279,7 +2279,7 @@ class TritonKernel(SIMDKernel):
 
         return call_args, arg_types
 
-    def call_kernel(self, name: str, node: Optional[IRNode] = None):
+    def call_kernel(self, name: str, node: Optional[IRNode] = None, stream_id=0, kernel_IndentedBuffer=None):
         wrapper = V.graph.wrapper_code
         call_args, arg_types = self.get_call_args()
         grid: List[Any] = []
@@ -2288,6 +2288,7 @@ class TritonKernel(SIMDKernel):
 
         if self.args.workspace_arg is not None:
             ws = self.args.workspace_arg
+            # @Yueming TODO: check if we need to add multistream here
             wrapper.generate_workspace_allocation(
                 ws.nbytes, current_device, ws.zero_fill
             )
@@ -2303,6 +2304,8 @@ class TritonKernel(SIMDKernel):
             arg_types=arg_types,
             grid_fn=self._get_grid_fn(),
             triton_meta=self.triton_meta,
+            stream_id=stream_id,
+            kernel_IndentedBuffer=kernel_IndentedBuffer
         )
 
         if self.args.workspace_arg is not None:
@@ -2412,6 +2415,7 @@ class TritonScheduling(SIMDScheduling):
                 )
 
     def define_kernel(self, src_code, node_schedule, kernel):
+        # @TODO Yueming: fix this after rebase
         wrapper = V.graph.wrapper_code
         if src_code in wrapper.src_to_kernel:
             kernel_name = wrapper.src_to_kernel[src_code]
