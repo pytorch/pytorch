@@ -2269,7 +2269,6 @@ exclude_patterns = [
     "aten/src/ATen/Context.cpp",
     "aten/src/ATen/DLConvertor.cpp",
     "aten/src/ATen/core/Array.h",
-    "aten/src/ATen/native/ConvUtils.h",
     "aten/src/ATen/native/quantized/ConvUtils.h",
     "aten/src/ATen/native/sparse/SparseBlasImpl.cpp",  # triton implementation
     "aten/src/ATen/native/transformers/attention.cpp",
