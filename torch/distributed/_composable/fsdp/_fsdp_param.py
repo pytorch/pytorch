@@ -11,7 +11,7 @@ from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed._tensor import DTensor, Placement, Replicate, Shard
 from torch.distributed._tensor.device_mesh import _mesh_resources
 from torch.distributed._tensor.placement_types import DTensorSpec
-from ._fsdp_api import MixedPrecisionPolicy
+from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import (
     _chunk_with_empty,
     _from_local_no_grad,
@@ -144,11 +144,17 @@ class FSDPParam:
         post_forward_mesh_info: Optional[FSDPMeshInfo],
         device: torch.device,
         mp_policy: MixedPrecisionPolicy,
+        offload_policy: OffloadPolicy,
     ):
         self._module_info: ParamModuleInfo = module_info
         self.mesh_info = mesh_info
         self.post_forward_mesh_info = post_forward_mesh_info
         self.device = device
+        self.offload_to_cpu: bool = isinstance(offload_policy, CPUOffloadPolicy)
+        self.pin_memory = (
+            self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
+        )
+        self.grad_offload_event: Optional[torch.cuda.Event] = None
         self._init_sharded_param(param, device)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
@@ -222,6 +228,10 @@ class FSDPParam:
         self.padded_sharded_param_size = padded_sharded_param.size()
         if sharded_param.numel() > 0:
             padded_sharded_param[: sharded_param.size(0)].copy_(sharded_param)
+        if self.offload_to_cpu:
+            padded_sharded_param = padded_sharded_param.cpu()
+            if self.pin_memory:
+                padded_sharded_param = padded_sharded_param.pin_memory()
         self._sharded_param_data = padded_sharded_param.view(-1)
         self.sharded_param = nn.Parameter(
             self.to_sharded_dtensor(padded_sharded_param[: sharded_param.size(0)])
@@ -453,15 +463,24 @@ class FSDPParam:
         self._assert_in_states(ShardedState.SHARDED, ShardedState.SHARDED_POST_FORWARD)
         if self.sharded_state == ShardedState.SHARDED:
             if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
+                sharded_local_tensor = self._sharded_local_tensor
+                if self.offload_to_cpu:
+                    sharded_local_tensor = sharded_local_tensor.to(
+                        self.device, non_blocking=True
+                    )
                 (
                     all_gather_inputs,
                     self._extensions_data.all_gather_metadata,
-                ) = self._sharded_local_tensor.fsdp_pre_all_gather(self.mesh_info.mesh)
+                ) = sharded_local_tensor.fsdp_pre_all_gather(self.mesh_info.mesh)
                 self._extensions_data.all_gather_input_sizes = [
                     t.size() for t in all_gather_inputs
                 ]
                 return [t.view(-1) for t in all_gather_inputs]
             sharded_param_data = self._sharded_param_data
+            if self.offload_to_cpu:
+                sharded_param_data = sharded_param_data.to(
+                    self.device, non_blocking=True
+                )
             return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             if hasattr(self._sharded_local_tensor, "fsdp_pre_all_gather"):
