@@ -16,7 +16,8 @@ from torch.utils._triton import has_triton
 
 # Skip tests if Triton is not available
 supported_platform = skipUnless(
-    torch.cuda.is_available() and has_triton(), "Requires CUDA and Triton"
+    torch.cuda.is_available() and has_triton() and torch.version.hip is None,
+    "Requires CUDA and Triton",
 )
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
