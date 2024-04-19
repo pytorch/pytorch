@@ -3,7 +3,9 @@ Adapted from fsdp.py in https://github.com/pytorch/pytorch/pull/110609.
 """
 
 """
-CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+rm artifacts/* && CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
+
+rm artifacts/* && TORCH_LOGS="aot_graphs,recompiles,+dynamo,aot,inductor" TORCH_COMPILE_DEBUG=1 CUDA_VISIBLE_DEVICES=4,5 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
 CUDA_LAUNCH_BLOCKING=1 CUDA_VISIBLE_DEVICES=6,7 TORCH_LOGS_RANKS=0 TORCH_COMPILE_DEBUG=1 torchrun --standalone --nproc_per_node=2 test_dynamo_fsdp.py >artifacts/run_output.txt 2>&1
 
@@ -22,6 +24,7 @@ import logging
 import os
 import sys
 import traceback
+import gc
 
 import torch
 import torch._dynamo
@@ -37,6 +40,7 @@ from torch.distributed._tensor import init_device_mesh
 torch_log = logging.getLogger("torch")
 
 device_type = "cuda"
+backend = "aot_eager"
 
 # ======== REMOVE WHEN READY TO MERGE ========
 import argparse
@@ -95,7 +99,7 @@ import socket
 from datetime import datetime, timedelta
 
 # Keep a max of 100,000 alloc/free events in the recorded history
-# leading up to the snapshot.
+# leading up to the memory snapshot.
 MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT: int = 100000
 
 def start_record_memory_history() -> None:
@@ -103,7 +107,7 @@ def start_record_memory_history() -> None:
        print("CUDA unavailable. Not recording memory history")
        return
 
-   print("Starting snapshot record_memory_history")
+   print("Starting memory snapshot record_memory_history")
    torch.cuda.memory._record_memory_history(
        max_entries=MAX_NUM_OF_MEM_EVENTS_PER_SNAPSHOT
    )
@@ -113,7 +117,7 @@ def stop_record_memory_history() -> None:
        print("CUDA unavailable. Not recording memory history")
        return
 
-   print("Stopping snapshot record_memory_history")
+   print("Stopping memory snapshot record_memory_history")
    torch.cuda.memory._record_memory_history(enabled=None)
 
 def export_memory_snapshot(file_prefix) -> None:
@@ -122,7 +126,7 @@ def export_memory_snapshot(file_prefix) -> None:
        return
 
    try:
-       print(f"Saving snapshot to local file: artifacts/{file_prefix}.pickle")
+       print(f"Saving memory snapshot to local file: artifacts/{file_prefix}.pickle")
        torch.cuda.memory._dump_snapshot(f"artifacts/{file_prefix}.pickle")
    except Exception as e:
        print(f"Failed to capture memory snapshot {e}")
@@ -182,7 +186,7 @@ from torch.utils.checkpoint import checkpoint, _pt2_selective_checkpoint_context
 
 class ACConfigClass:
     mode: str = "selective"
-    selective_ac_option: str = "2"
+    selective_ac_option: str = "full" # "2"
 
 def checkpoint_wrapper(module, config):
     if config.mode == "selective" and config.selective_ac_option == "op":
@@ -260,12 +264,12 @@ def checkpoint_wrapper(module, config):
 test_case = "nested_fully_shard"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
-activation_checkpoint = True
+activation_checkpoint = False
 apply_fsdp = True
 
 def create_input(hidden_dim):
     torch.manual_seed(0)
-    inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=True)
+    inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
     return inp
 
 
@@ -276,9 +280,9 @@ def init():
     # nested_fully_shard + balanced -> works
     # nested_fully_shard + unbalanced -> works
     if balanced:
-        hidden_dim = 1234
+        hidden_dim = 12800
     else:
-        hidden_dim = 1235
+        hidden_dim = 12801
     if mixed_precision:
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16, reduce_dtype=torch.float32
@@ -287,13 +291,9 @@ def init():
     else:
         fsdp_config = {}
     if activation_checkpoint:
-        ac_config = ACConfigClass()
-        # ac_config.mode = "selective"
-        # ac_config.selective_ac_option = "op"
-        ac_config.mode = "full"
+        ac_config = ACConfigClass()  # use default in this class
         torch._dynamo.config._experimental_support_context_fn_in_torch_utils_checkpoint = True
     mesh = init_device_mesh("cuda", (world_size,))
-    backend = "inductor"
 
     torch.manual_seed(0)
     if test_case == "simple_mlp":
@@ -337,11 +337,12 @@ def init():
                     x = layer(x)
                 return x
 
-        model = TestModule(n_layers=3)
-        assert activation_checkpoint and apply_fsdp
+        model = TestModule(n_layers=10)
+        assert apply_fsdp
         assert mesh is not None
         for layer_id, mod in enumerate(model.layers):
-            mod = checkpoint_wrapper(mod, ac_config)
+            if activation_checkpoint:
+                mod = checkpoint_wrapper(mod, ac_config)
             fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
             model.layers[layer_id] = mod
         fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
@@ -429,6 +430,9 @@ def run(model, optim, n_iter, hidden_dim):
         loss.backward()
         torch_log.warning("END BACKWARD")
         optim.step()
+        del loss
+        del out
+        del inp
         torch.cuda.synchronize()
     print(f"losses: {losses}")
     return losses
@@ -442,7 +446,7 @@ def main_compiled(n_iter):
 
     def compiler_fn(gm):
         torch_log.warning("Compiling autograd?")
-        return torch.compile(gm, backend="inductor", fullgraph=True)
+        return torch.compile(gm, backend=backend, fullgraph=True)
 
     if apply_fsdp:
         torch._dynamo.config.trace_distributed = True
@@ -454,10 +458,14 @@ def main_compiled(n_iter):
     #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
     #     import time
     #     time.sleep(600)
-    model = torch.compile(model, backend="inductor", fullgraph=True)
+    model = torch.compile(model, backend=backend, fullgraph=True)
     with compiled_autograd.enable(compiler_fn):
         res = run(model, optim, n_iter, hidden_dim)
     print(f"res: {res}")
+    torch.distributed._composable_state._module_state_mapping = {}
+    del model
+    optim.zero_grad(set_to_none=True)
+    del optim
     return res
 
 
@@ -468,13 +476,17 @@ def main_eager(n_iter):
     print("done eager 1st run for eager!")
 
     res = run(model, optim, n_iter, hidden_dim)
+    torch.distributed._composable_state._module_state_mapping = {}
+    del model
+    optim.zero_grad(set_to_none=True)
+    del optim
     return res
 
 
 def execute_and_profile(callable, profiler_trace_path, memory_snapshot_file_prefix):
     from torch.profiler import profile, ProfilerActivity
-    if dist.get_rank() == 0:
-        start_record_memory_history()
+    # if dist.get_rank() == 0:
+    #     start_record_memory_history()
     with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA], record_shapes=True) as prof:
         ret = callable()
     if dist.get_rank() == 0:
@@ -484,8 +496,8 @@ def execute_and_profile(callable, profiler_trace_path, memory_snapshot_file_pref
         manifold_path = upload_trace_file(profiler_trace_path)
         if manifold_path:
             print_perfetto_ui_url(manifold_path)
-        export_memory_snapshot(memory_snapshot_file_prefix)
-        stop_record_memory_history()
+        # export_memory_snapshot(memory_snapshot_file_prefix)
+        # stop_record_memory_history()
     return ret
 
 
@@ -499,18 +511,28 @@ if __name__ == "__main__":
         dist.init_process_group(backend="gloo")
         # torch.set_device(device)
 
-    n_iter = 3
-    losses_compiled = execute_and_profile(
-        lambda: main_compiled(n_iter=n_iter),
-        "artifacts/compiled_trace.json",
-        "compiled_memory_snapshot",
-    )
-    print(f"losses_compiled: {losses_compiled}")
+    if dist.get_rank() == 0:
+        start_record_memory_history()
+    n_iter = 6
     losses_eager = execute_and_profile(
         lambda: main_eager(n_iter=n_iter),
         "artifacts/eager_trace.json",
         "eager_memory_snapshot",
     )
     print(f"losses_eager: {losses_eager}")
+    gc.collect()
+    gc.collect()
+    losses_compiled = execute_and_profile(
+        lambda: main_compiled(n_iter=n_iter),
+        "artifacts/compiled_trace.json",
+        "compiled_memory_snapshot",
+    )
+    print(f"losses_compiled: {losses_compiled}")
+    torch._dynamo.reset()
+    gc.collect()
+    gc.collect()
+    if dist.get_rank() == 0:
+        export_memory_snapshot("combined_memory_snapshot")
+        stop_record_memory_history()
     for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
         assert torch.allclose(torch.tensor(loss_compiled), torch.tensor(loss_eager), rtol=1e-3), f"{loss_compiled} vs {loss_eager}"
