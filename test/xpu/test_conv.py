@@ -238,6 +238,10 @@ class TestConvolutionNNDeviceType(NNTestCase):
 
     @dtypes(torch.float, torch.double, torch.half)
     def test_Conv3d_depthwise_naive_groups(self, device, dtype):
+        if dtype == torch.half and "xpu" in device:
+            self.skipTest(
+                "The accuracy issue of dtype fp16 would be fixed in oneDNN v3.4"
+            )
         for depth_multiplier in [1, 2]:
             m = nn.Conv3d(2, 2 * depth_multiplier, kernel_size=3, groups=2).to(
                 device, dtype
