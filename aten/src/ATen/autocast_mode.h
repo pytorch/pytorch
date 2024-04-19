@@ -22,28 +22,6 @@ TORCH_API int decrement_nesting();
 TORCH_API bool is_autocast_cache_enabled();
 TORCH_API void set_autocast_cache_enabled(bool enabled);
 
-// deprecated CPU-specific autocast APIs
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::is_cpu_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(at::kCPU) instead.")
-TORCH_API inline bool is_cpu_enabled() {
-  return is_autocast_enabled(at::kCPU);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::set_cpu_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(at::kCPU, enabled) instead.")
-TORCH_API inline void set_cpu_enabled(bool enabled) {
-  set_autocast_enabled(at::kCPU, enabled);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::get_autocast_cpu_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(at::kCPU) instead.")
-TORCH_API inline at::ScalarType get_autocast_cpu_dtype() {
-  return get_autocast_dtype(at::kCPU);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::set_autocast_cpu_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(at::kCPU, dtype) instead.")
-TORCH_API inline void set_autocast_cpu_dtype(at::ScalarType dtype) {
-  set_autocast_dtype(at::kCPU, dtype);
-}
-
 // deprecated CUDA-specific autocast APIs
 C10_DEPRECATED_MESSAGE(
     "at::autocast::is_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(at::kCUDA) instead.")
@@ -66,93 +44,56 @@ TORCH_API inline void set_autocast_gpu_dtype(at::ScalarType dtype) {
   set_autocast_dtype(at::kCUDA, dtype);
 }
 
+#define DECLARE_DEPRECATED_AUTOCAST_APIS(name, device_type)                                          \
+  C10_DEPRECATED_MESSAGE(                                                                            \
+      "at::autocast::is_" #name                                                                      \
+      "_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(" #device_type         \
+      ") instead.")                                                                                  \
+  TORCH_API inline bool is_##name##_enabled() {                                                      \
+    return is_autocast_enabled(device_type);                                                         \
+  }                                                                                                  \
+                                                                                                     \
+  C10_DEPRECATED_MESSAGE(                                                                            \
+      "at::autocast::set_" #name                                                                     \
+      "_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(" #device_type \
+      ", enabled) instead.")                                                                         \
+  TORCH_API inline void set_##name##_enabled(bool enabled) {                                         \
+    set_autocast_enabled(device_type, enabled);                                                      \
+  }                                                                                                  \
+                                                                                                     \
+  C10_DEPRECATED_MESSAGE(                                                                            \
+      "at::autocast::get_autocast_" #name                                                            \
+      "_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(" #device_type            \
+      ") instead.")                                                                                  \
+  TORCH_API inline at::ScalarType get_autocast_##name##_dtype() {                                    \
+    return get_autocast_dtype(device_type);                                                          \
+  }                                                                                                  \
+                                                                                                     \
+  C10_DEPRECATED_MESSAGE(                                                                            \
+      "at::autocast::set_autocast_" #name                                                            \
+      "_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(" #device_type       \
+      ", dtype) instead.")                                                                           \
+  TORCH_API inline void set_autocast_##name##_dtype(at::ScalarType dtype) {                          \
+    set_autocast_dtype(device_type, dtype);                                                          \
+  }
+
+// deprecated CPU-specific autocast APIs
+DECLARE_DEPRECATED_AUTOCAST_APIS(cpu, at::kCPU)
+
+// deprecated XPU-specific autocast APIs
+DECLARE_DEPRECATED_AUTOCAST_APIS(xpu, at::kXPU)
+
 // deprecated XLA-specific autocast APIs
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::is_xla_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(at::kXLA) instead.")
-TORCH_API inline bool is_xla_enabled() {
-  return is_autocast_enabled(at::kXLA);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::set_xla_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(at::kXLA, enabled) instead.")
-TORCH_API inline void set_xla_enabled(bool enabled) {
-  set_autocast_enabled(at::kXLA, enabled);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::get_autocast_xla_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(at::kXLA) instead.")
-TORCH_API inline at::ScalarType get_autocast_xla_dtype() {
-  return get_autocast_dtype(at::kXLA);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::set_autocast_xla_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(at::kXLA, dtype) instead.")
-TORCH_API inline void set_autocast_xla_dtype(at::ScalarType dtype) {
-  set_autocast_dtype(at::kXLA, dtype);
-}
+DECLARE_DEPRECATED_AUTOCAST_APIS(xla, at::kXLA)
 
 // deprecated HPU-specific autocast APIs
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::is_hpu_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(at::kHPU) instead.")
-TORCH_API inline bool is_hpu_enabled() {
-  return is_autocast_enabled(at::kHPU);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::set_hpu_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(at::kHPU, enabled) instead.")
-TORCH_API inline void set_hpu_enabled(bool enabled) {
-  set_autocast_enabled(at::kHPU, enabled);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::get_autocast_hpu_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(at::kHPU) instead.")
-TORCH_API inline at::ScalarType get_autocast_hpu_dtype() {
-  return get_autocast_dtype(at::kHPU);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::set_autocast_hpu_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(at::kHPU, dtype) instead.")
-TORCH_API inline void set_autocast_hpu_dtype(at::ScalarType dtype) {
-  set_autocast_dtype(at::kHPU, dtype);
-}
+DECLARE_DEPRECATED_AUTOCAST_APIS(hpu, at::kHPU)
 
 // deprecated IPU-specific autocast APIs
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::is_ipu_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(at::kIPU) instead.")
-TORCH_API inline bool is_ipu_enabled() {
-  return is_autocast_enabled(at::kIPU);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::set_ipu_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(at::kIPU, enabled) instead.")
-TORCH_API inline void set_ipu_enabled(bool enabled) {
-  set_autocast_enabled(at::kIPU, enabled);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::get_autocast_ipu_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(at::kIPU) instead.")
-TORCH_API inline at::ScalarType get_autocast_ipu_dtype() {
-  return get_autocast_dtype(at::kIPU);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::set_autocast_ipu_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(at::kIPU, dtype) instead.")
-TORCH_API inline void set_autocast_ipu_dtype(at::ScalarType dtype) {
-  set_autocast_dtype(at::kIPU, dtype);
-}
+DECLARE_DEPRECATED_AUTOCAST_APIS(ipu, at::kIPU)
 
 // deprecated PrivateUser1-specific autocast APIs
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::is_privateuseone_enabled() is deprecated. Please use at::autocast::is_autocast_enabled(at::kPrivateUse1) instead.")
-TORCH_API inline bool is_privateuseone_enabled() {
-  return is_autocast_enabled(at::kPrivateUse1);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::set_privateuseone_enabled(enabled) is deprecated. Please use at::autocast::set_autocast_enabled(at::kPrivateUse1, enabled) instead.")
-TORCH_API inline void set_privateuseone_enabled(bool enabled) {
-  set_autocast_enabled(at::kPrivateUse1, enabled);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::get_autocast_privateuseone_dtype() is deprecated. Please use at::autocast::get_autocast_dtype(at::kPrivateUse1) instead.")
-TORCH_API inline at::ScalarType get_autocast_privateuseone_dtype() {
-  return get_autocast_dtype(at::kPrivateUse1);
-}
-C10_DEPRECATED_MESSAGE(
-    "at::autocast::set_autocast_privateuseone_dtype(dtype) is deprecated. Please use at::autocast::set_autocast_dtype(at::kPrivateUse1, dtype) instead.")
-TORCH_API inline void set_autocast_privateuseone_dtype(at::ScalarType dtype) {
-  set_autocast_dtype(at::kPrivateUse1, dtype);
-}
+DECLARE_DEPRECATED_AUTOCAST_APIS(privateuseone, at::kPrivateUse1)
 
 namespace {
 inline bool is_autocast_eligible(
