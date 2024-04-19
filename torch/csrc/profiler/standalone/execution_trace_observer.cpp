@@ -86,7 +86,7 @@ inline std::string getValueShape(
   if (val.isTensor()) {
     auto& tensor = val.toTensor();
     if (tensor.defined() &&
-        !tensor.unsafeGetTensorImpl()->has_symbolic_sizes_strides()) {
+        tensor.unsafeGetTensorImpl()->does_not_have_symbolic_sizes_strides()) {
       return vectorToString(tensor.sizes().vec());
     }
   } else if (val.isTuple()) {
@@ -236,6 +236,8 @@ const ExecutionTraceObserver::ID root_id{1};
 
 struct FunctionCallContext : public ObserverContext {
   std::string name;
+  std::string kernel_backend;
+  std::string kernel_file;
   ExecutionTraceObserver::ID op_id{uninitialized_id};
   ExecutionTraceObserver::ID parent_id{uninitialized_id};
   ExecutionTraceObserver::ID fw_parent_id{uninitialized_id};
@@ -273,14 +275,24 @@ static void writeJsonNode(
     const std::string& outputs = "[]",
     const std::string& output_shapes = "[]",
     const std::string& output_types = "[]",
-    const std::string& operator_schema = "") {
+    const std::string& operator_schema = "",
+    const std::string& kernel_backend = "",
+    const std::string& kernel_file = "") {
   out << fmt::format(
       R"JSON(
     {{
       "id": {}, "name": "{}", "ctrl_deps": {},
       "inputs": {{"values": {}, "shapes": {}, "types": {}}},
       "outputs": {{"values": {}, "shapes": {}, "types": {}}},
-      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}}, {{"name": "fw_parent", "type": "uint64", "value": {}}}, {{"name": "seq_id", "type": "int64", "value": {}}}, {{"name": "scope", "type": "uint64", "value": {}}}, {{"name": "tid", "type": "uint64", "value": {}}}, {{"name": "fw_tid", "type": "uint64", "value": {}}}, {{"name": "op_schema", "type": "string", "value": "{}"}}]
+      "attrs": [{{"name": "rf_id", "type": "uint64", "value": {}}},
+                {{"name": "fw_parent", "type": "uint64", "value": {}}},
+                {{"name": "seq_id", "type": "int64", "value": {}}},
+                {{"name": "scope", "type": "uint64", "value": {}}},
+                {{"name": "tid", "type": "uint64", "value": {}}},
+                {{"name": "fw_tid", "type": "uint64", "value": {}}},
+                {{"name": "op_schema", "type": "string", "value": "{}"}},
+                {{"name": "kernel_backend", "type": "string", "value": "{}"}},
+                {{"name": "kernel_file", "type": "string", "value": "{}"}}]
     }})JSON",
       id,
       name,
@@ -297,7 +309,9 @@ static void writeJsonNode(
       scope,
       tid,
       fw_tid,
-      operator_schema);
+      operator_schema,
+      kernel_backend,
+      kernel_file);
 }
 
 inline std::string timeString(const std::time_t timepoint) {
@@ -326,7 +340,7 @@ static bool initExecutionTraceStart(ExecutionTraceObserver& ob) {
 
   ob.out << fmt::format(
       R"JSON({{
-  "schema": "1.0.2-chakra.0.0.4", "pid": {}, "time": "{}", "start_ts": {},
+  "schema": "1.0.3-chakra.0.0.4", "pid": {}, "time": "{}", "start_ts": {},
   "nodes": [)JSON",
       ob.pid,
       ob.record_time,
@@ -390,7 +404,7 @@ inline std::string convertIValue(
     size_t itemsize = 0;
     std::string device_str = "";
     // symbolic sizes/strides implies t->storage_offset() will fail
-    if (t->has_storage() && !t->has_symbolic_sizes_strides()) {
+    if (t->has_storage() && t->does_not_have_symbolic_sizes_strides()) {
       auto& t_storage = t->storage();
       storage_id = getObjectID(ob, t_storage.data());
       offset = t->storage_offset();
@@ -442,6 +456,44 @@ inline void appendValueInfo(
   shapes.push_back(getValueShape(val));
 }
 
+inline void handleKernelBackendInfo(
+    FunctionCallContext& fc,
+    const RecordFunction& fn) {
+  // triton kernel related information are in kwinputs
+  const auto& kwinputs = fn.kwinputs();
+  if (kwinputs.find("kernel_backend") != kwinputs.end()) {
+    fc.kernel_backend = kwinputs.at("kernel_backend").toStringRef();
+    if (fc.kernel_backend == "triton") {
+      fc.kernel_file = kwinputs.at("kernel_file").toStringRef();
+      TORCH_INTERNAL_ASSERT(
+          kwinputs.find("kernel_file") != kwinputs.end(),
+          "kernel file is missing in triton kernel");
+      // Remove the path of the file name
+      if (fc.kernel_file.find_last_of('/') != std::string::npos)
+        fc.kernel_file =
+            fc.kernel_file.substr(fc.kernel_file.find_last_of('/') + 1);
+
+      // get grid information
+      TORCH_INTERNAL_ASSERT(
+          kwinputs.find("grid") != kwinputs.end(),
+          "grid is missing in triton kernel");
+      fc.input_values.emplace_back(
+          "\"" + kwinputs.at("grid").toStringRef() + "\"");
+      fc.input_types.emplace_back("\"String\"");
+      fc.input_shapes.emplace_back("[]");
+
+      // get stream information
+      TORCH_INTERNAL_ASSERT(
+          kwinputs.find("stream") != kwinputs.end(),
+          "stream is missing in triton kernel");
+      fc.input_values.emplace_back(
+          std::to_string(kwinputs.at("stream").toInt()));
+      fc.input_types.emplace_back("\"Int\"");
+      fc.input_shapes.emplace_back("[]");
+    }
+  }
+}
+
 static void recordOperatorStart(
     ExecutionTraceObserver& ob,
     FunctionCallContext& fc,
@@ -491,6 +543,9 @@ static void recordOperatorStart(
       appendValueInfo(
           ob, inputs[i], fc.input_values, fc.input_types, fc.input_shapes);
     }
+
+    handleKernelBackendInfo(fc, fn);
+
     fc.parent_id = ob.op_stack[tid].top();
     // get parent id from the forward stack, this can be different for
     // autograd ops, which may execute on a different thread than the original
@@ -615,7 +670,9 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
           vectorToString(output_values),
           vectorToString(output_shapes),
           vectorToString(output_types),
-          op_schema_str);
+          op_schema_str,
+          fc.kernel_backend,
+          fc.kernel_file);
       ob->out << ",";
     } catch (const std::exception& e) {
       LOG(WARNING) << "Exception in execution trace observer: [" << fc.name

@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: mobile"]
 import copy
 import operator
-import sys
-import unittest
 
 import torch
 import torch._dynamo as torchdynamo
@@ -44,9 +42,6 @@ from torch.testing._internal.common_quantized import override_quantized_engine
 
 
 @skipIfNoQNNPACK
-@unittest.skipIf(
-    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-)
 class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
     def test_conv1d(self):
         quantizer = XNNPACKQuantizer()
@@ -990,9 +985,6 @@ class TestXNNPACKQuantizer(PT2EQuantizationTestCase):
 
 
 # TODO: express this using self._test_quantizer, add test for inception_v4
-@unittest.skipIf(
-    sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-)
 class TestXNNPACKQuantizerModels(PT2EQuantizationTestCase):
     @skip_if_no_torchvision
     @skipIfNoQNNPACK

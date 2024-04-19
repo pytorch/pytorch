@@ -1,9 +1,11 @@
 import dataclasses
 import inspect
 import sys
-from typing import Any, Callable, Tuple
+from typing import Any, Callable, Dict, Iterable, Tuple
 
 import torch
+import torch._utils_internal as _utils_internal
+from torch import _C
 
 
 @dataclasses.dataclass
@@ -53,7 +55,7 @@ def parse_namespace(qualname: str) -> Tuple[str, str]:
     return splits[0], splits[1]
 
 
-def lookup_op(qualname: str) -> torch._ops.OpOverloadPacket:
+def lookup_op(qualname: str) -> torch._ops.OpOverload:
     namespace, name = parse_namespace(qualname)
     if "." in name:
         name, overload = name.split(".")
@@ -78,24 +80,38 @@ def is_functional_schema(schema: Any) -> bool:
     - it has at least one return
     """
 
-    # Lazy import because not all PyTorch builds have torchgen
-    from torchgen.model import FunctionSchema, SchemaKind
+    def is_functional(schema):
+        if schema.is_mutable:
+            return False
+        rets = schema.returns
+        is_non_mutating_view = len(rets) > 0 and any(
+            r.alias_info is not None and not r.alias_info.is_write for r in rets
+        )
+        if is_non_mutating_view:
+            return False
+        if not schema.returns:
+            return False
+        return True
 
-    assert isinstance(schema, (str, FunctionSchema))
+    if isinstance(schema, torch._C.FunctionSchema):
+        return is_functional(schema)
+
+    # Lazy import because not all PyTorch builds have torchgen
+    from torchgen.model import FunctionSchema
+
     if isinstance(schema, str):
         schema = FunctionSchema.parse(schema)
+    assert isinstance(schema, FunctionSchema)
+    return is_functional(schema)
 
-    if schema.kind() != SchemaKind.functional:
-        return False
-    rets = schema.returns
-    is_non_mutating_view = len(rets) > 0 and any(
-        r.annotation is not None and not r.annotation.is_write for r in rets
+
+def is_tensorlist_like_type(typ: torch.Type):
+    return (
+        typ == _C.ListType(_C.TensorType.get())
+        or typ == _C.ListType(_C.OptionalType(_C.TensorType.get()))
+        or typ == _C.OptionalType(_C.ListType(_C.TensorType.get()))
+        or typ == _C.OptionalType(_C.ListType(_C.OptionalType(_C.TensorType.get())))
     )
-    if is_non_mutating_view:
-        return False
-    if not schema.returns:
-        return False
-    return True
 
 
 def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
@@ -136,7 +152,9 @@ def mutates_and_returns_first_arg(op: torch._ops.OpOverload):
     return True
 
 
-def zip_schema(schema, args, kwargs):
+def zip_schema(
+    schema: _C.FunctionSchema, args: Tuple[Any, ...], kwargs: Dict[str, Any]
+) -> Iterable[Tuple[_C.Argument, Any]]:
     """zips schema.arguments and (args, kwargs) together.
 
     Assumes that (args, kwargs) were the inputs to some torch._ops.OpOverload:
@@ -156,3 +174,28 @@ def zip_schema(schema, args, kwargs):
             continue
         yield info, args[i]
     return
+
+
+def can_generate_trivial_fake_impl(op: torch._ops.OpOverload) -> bool:
+    assert isinstance(op, torch._ops.OpOverload)
+    if is_builtin(op):
+        # We control the built-ins. These may (in rare cases)
+        # do input metadata mutation (which we have banned on custom ops)
+        return False
+    schema = op._schema
+    # It's suspicious if the op is not mutable but returns nothing, so we return False out of an abundance of caution
+    if not schema.is_mutable:
+        return False
+    if len(schema.returns) > 0:
+        return False
+    # If the op returns nothing, then it has a trivial fake impl.
+    return True
+
+
+def requires_set_python_module() -> bool:
+    """If an op was defined in C++ and extended from Python using the
+    torch.library APIs, returns if we require that there have been a
+    m.set_python_module("mylib.ops") call from C++ that associates
+    the C++ op with a python module.
+    """
+    return getattr(_utils_internal, "REQUIRES_SET_PYTHON_MODULE", True)

@@ -1,32 +1,34 @@
 # Owner(s): ["module: unknown"]
 
-from torch.testing._internal.common_utils import run_tests
-
 import copy
-import numpy as np
 import io
 import logging
 from itertools import product
+
+import numpy as np
 
 import torch
 import torch.ao.quantization as tq
 
 from torch import nn
 from torch.ao.pruning.sparsifier.utils import fqn_to_module
-
-from torch.testing._internal.common_utils import TestCase, skipIfTorchDynamo
 from torch.testing._internal.common_quantized import (
     override_cpu_allocator_for_qnnpack,
     override_qengines,
-    qengine_is_qnnpack,
     qengine_is_fbgemm,
     qengine_is_onednn,
+    qengine_is_qnnpack,
     qengine_is_x86,
 )
 
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+
 # TODO: Once more test files are created, move the contents to a ao folder.
 
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+
 
 class TestQuantizedSparseKernels(TestCase):
     @skipIfTorchDynamo("TorchDynamo fails here for unknown reasons")
@@ -84,29 +86,42 @@ class TestQuantizedSparseKernels(TestCase):
                     continue
                 if use_channelwise:
                     W_q = torch.quantize_per_channel(
-                        W_fp32, scales=W_scales, zero_points=W_zps, axis=0, dtype=torch.qint8
+                        W_fp32,
+                        scales=W_scales,
+                        zero_points=W_zps,
+                        axis=0,
+                        dtype=torch.qint8,
                     )
                 else:
                     W_q = torch.quantize_per_tensor(
-                        W_fp32, scale=W_scales[0], zero_point=W_zps[0], dtype=torch.qint8
+                        W_fp32,
+                        scale=W_scales[0],
+                        zero_point=W_zps[0],
+                        dtype=torch.qint8,
                     )
 
                 Y_scale = 1.1234
                 Y_zp = 5
                 W_prepack_dense = dense_prepack(W_q, float_bias)
-                W_prepack_sparse = sparse_prepack(W_q, float_bias, row_block_size, col_block_size)
+                W_prepack_sparse = sparse_prepack(
+                    W_q, float_bias, row_block_size, col_block_size
+                )
 
                 if dynamic_mode:
                     Y = sparse_qlinear_dynamic(X_fp32, W_prepack_sparse)
                     Y_ref = dense_qlinear_dynamic(X_fp32, W_prepack_dense)
 
-                    np.testing.assert_array_almost_equal(Y_ref.numpy(), Y.numpy(), decimal=decimal_val)
+                    np.testing.assert_array_almost_equal(
+                        Y_ref.numpy(), Y.numpy(), decimal=decimal_val
+                    )
                 else:
                     Y_q = sparse_qlinear(X_q, W_prepack_sparse, Y_scale, Y_zp)
                     Y_q_ref = dense_qlinear(X_q, W_prepack_dense, Y_scale, Y_zp)
 
                     np.testing.assert_array_almost_equal(
-                        Y_q_ref.int_repr().numpy(), Y_q.int_repr().numpy(), decimal=decimal_val
+                        Y_q_ref.int_repr().numpy(),
+                        Y_q.int_repr().numpy(),
+                        decimal=decimal_val,
                     )
 
 
@@ -235,6 +250,7 @@ def _sparse_layer_test_helper(
             Y_hat = sqmodel(X_q)
             test_class.assertEqual(Y_ref.dequantize(), Y_hat.dequantize())
 
+
 class SparseQuantizedModel(nn.Module):
     def __init__(self, in_channels, out_channels):
         super().__init__()
@@ -242,6 +258,7 @@ class SparseQuantizedModel(nn.Module):
 
     def forward(self, x):
         return self.linear(x)
+
 
 class TestQuantizedSparseLayers(TestCase):
     @override_qengines

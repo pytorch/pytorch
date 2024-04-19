@@ -166,7 +166,7 @@ class FSDPParamGroup:
         data_parallel_world_size *= self.mesh_info.shard_mesh_size
         if isinstance(self.mesh_info, HSDPMeshInfo):
             data_parallel_world_size *= self.mesh_info.replicate_mesh_size
-        if self._reduce_dtype == torch.float32:
+        if self._reduce_dtype in (torch.float32, torch.bfloat16):
             # Use NCCL's AVG op to divide after reduction since it is more
             # performant and fp32 has sufficient precision
             self._grad_divide_factors: Union[Tuple[None, None], Tuple[float, float]] = (
@@ -174,9 +174,10 @@ class FSDPParamGroup:
                 None,
             )
             return
-        # For N data parallel workers, each worker computes g_i, and they
-        # collectively reduce (g_1 + ... + g_N) / N. To avoid overflow and
-        # underflow, we divide by ~sqrt(N) before and after the reduction.
+        # Since fp16 has smaller dynamic range than fp32/bf16, we want to avoid
+        # overflow/underflow. For N data parallel workers, each worker computes
+        # g_i, and they collectively reduce (g_1 + ... + g_N) / N. To avoid
+        # overflow/underflow, we divide by ~sqrt(N) before/after the reduction.
         factor: int = 1
         while (
             data_parallel_world_size % factor == 0
@@ -187,6 +188,7 @@ class FSDPParamGroup:
         self._grad_divide_factors = (factor, data_parallel_world_size / factor)
 
     def lazy_init(self):
+        # Lazy init should be idempotent
         param_names_on_meta = [
             fsdp_param._param_fqn
             for fsdp_param in self.fsdp_params
@@ -243,7 +245,7 @@ class FSDPParamGroup:
             self._all_gather_result, self.fsdp_params, self._all_gather_process_group
         )
         for fsdp_param in self.fsdp_params:
-            fsdp_param.init_unsharded_param()  # no-op after 1st call
+            fsdp_param.init_unsharded_param()
         self._to_unsharded()
         all_gather_copy_out_event = torch.cuda.Event()
         all_gather_copy_out_event.record()
@@ -341,7 +343,6 @@ class FSDPParamGroup:
         if self._post_reduce_view_out_event is not None:
             torch.cuda.current_stream().wait_event(self._post_reduce_view_out_event)
             self._post_reduce_view_out_event = None
-        self._training_state = TrainingState.IDLE
         self._post_forward_indices.clear()
         self.all_forward_output_grad_fns.clear()
 
@@ -433,8 +434,13 @@ class FSDPParamGroup:
         return args, kwargs
 
     def _register_state_dict_hooks(self) -> None:
-        assert len(self._module_to_pre_save_state_dict_hook_handle) == 0
-        assert len(self._module_to_pre_load_state_dict_hook_handle) == 0
+        num_pre_save_hooks = len(self._module_to_pre_save_state_dict_hook_handle)
+        num_pre_load_hooks = len(self._module_to_pre_load_state_dict_hook_handle)
+        assert (
+            num_pre_save_hooks == num_pre_load_hooks
+        ), f"Pre-save: {num_pre_save_hooks} pre-load: {num_pre_load_hooks}"
+        if num_pre_save_hooks > 0:
+            return  # already registered
         modules_with_fsdp_params: Set[nn.Module] = {
             fsdp_param._module_info.module for fsdp_param in self.fsdp_params
         }
