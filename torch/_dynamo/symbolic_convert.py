@@ -638,9 +638,6 @@ class InstructionTranslatorBase(
     current_speculation: Optional[SpeculationEntry]
     dispatch_table: List[Any]
     exec_recorder: Optional[ExecutionRecorder]
-    tracer_to_used_names: Dict[
-        torch._dynamo.output_graph.SubgraphTracer, Dict[str, int]
-    ]
 
     def mark_inconsistent_side_effects(self):
         """
@@ -2025,6 +2022,9 @@ class InstructionTranslatorBase(
         self.f_builtins: Dict[str, Any] = f_builtins
         self.code_options: Dict[str, Any] = code_options
         self.f_code: types.CodeType = f_code
+        self.tracer_to_used_names: Dict[
+            torch._dynamo.output_graph.SubgraphTracer, Dict[str, int]
+        ] = {}
 
         # Execution record for replaying errors
         if config.replay_record_enabled:
