@@ -1345,7 +1345,7 @@ class WrapperCodeGen(CodeGen):
 
     def writelines(self, lines):
         for line in lines:
-            self.lines.append(line)
+            self.writeline(line)
 
     def enter_context(self, ctx):
         self.lines.append(LineContext(ctx))
