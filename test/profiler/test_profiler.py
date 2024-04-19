@@ -650,6 +650,7 @@ class TestExecutionTrace(TestCase):
                 found_root_node = True
         assert found_root_node
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/124500")
     def test_execution_trace_nested_tensor(self):
         fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
         fp.close()
@@ -664,9 +665,6 @@ class TestExecutionTrace(TestCase):
             for i in range(3):
                 values = torch.rand((8 + i, 4 + i))
                 offsets = torch.tensor([0, 2, 4, 6, 8 + i])
-                # Need to explicitly graph break due to:
-                # https://github.com/pytorch/pytorch/issues/124500
-                torch._dynamo.graph_break()
                 nt = torch.nested.nested_tensor_from_jagged(values, offsets)
                 fn(nt)
 
