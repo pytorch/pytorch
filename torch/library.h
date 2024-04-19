@@ -407,7 +407,7 @@ inline CppFunction dispatch(c10::DeviceType type, Func&& raw_f) {
 ///
 /// \ingroup torch-schema-overloads
 inline c10::FunctionSchema schema(const char* str, c10::AliasAnalysisKind k) {
-  c10::FunctionSchema s = torch::jit::parseSchema(str);
+  c10::FunctionSchema s = torch::jit::parseSchema(str, /*allow_typevars*/false);
   s.setAliasAnalysis(k);
   return s;
 }

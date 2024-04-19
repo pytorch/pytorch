@@ -1743,7 +1743,9 @@ void initJITBindings(PyObject* module) {
       },
       py::arg("input"),
       py::arg("parse_tensor_constants") = false);
-  m.def("parse_schema", parseSchema);
+  m.def("parse_schema", [](const char* schema) {
+    return parseSchema(schema, /*allow_typevars*/ false);
+  });
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
