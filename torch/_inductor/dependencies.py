@@ -54,15 +54,15 @@ class Dep(abc.ABC):
 
     @property
     @abc.abstractmethod
-    def index(self):
+    def index(self) -> sympy.Expr:
         pass
 
 
 @dataclasses.dataclass(frozen=True)
 class MemoryDep(Dep):
-    index: sympy.Expr  # type: ignore[assignment]
-    var_names: Tuple[sympy.Symbol, ...]
-    size: Tuple[sympy.Expr, ...]
+    index: sympy.Expr = dataclasses.MISSING  # type: ignore[assignment]
+    var_names: Tuple[sympy.Symbol, ...]  # type: ignore[misc]
+    size: Tuple[sympy.Expr, ...]  # type: ignore[misc]
 
     def __repr__(self):
         return f"MemoryDep({self.name!r}, {self.index}, {self.ranges})"
