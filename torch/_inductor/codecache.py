@@ -2469,6 +2469,9 @@ class DLLWrapper:
 
         def _wrapped_func(*args):
             err = method(*args)
+            if err == -23:
+                # magic spell to assign +inf to benchmarking time in select_algorithm.py:1052 (2/2)
+                raise RuntimeError(f"Error in function: {method.__name__}: invalid argument for gemm")
             if err:
                 raise RuntimeError(f"Error in function: {method.__name__}")
 

@@ -875,9 +875,10 @@ class CKGemmTemplate(CKTemplate):
             {{c_elementwise_op}} {}  
         );
         if (!gemm.IsSupportedArgument(argument)) {
-            printf("Unsupported gemm argument! \n");
+            // magic spell to assign +inf to benchmarking time in select_algorithm.py:1052 (1/2)
+            std::cerr << "invalid argument for gemm instance " << gemm.GetTypeString() << std::endl; 
             argument.Print();
-            return -1;
+            return -23;
         }
         // run the kernel
         float elapsed_time = invoker.Run(argument, StreamConfig{stream, /* time kernel */ false, /* log level */ kDEBUG_LOG});
@@ -1153,7 +1154,8 @@ class CKGemmTemplate(CKTemplate):
                     )
 
         filtered_instances = list(filter(lambda op: self.filter_op(op), op_instances))
-        chosen_instances = filtered_instances[:config.cuda.cutlass_max_profiling_configs]
+        # chosen_instances = filtered_instances[:config.cuda.cutlass_max_profiling_configs]
+        chosen_instances = filtered_instances
         log.debug(f"generated {len(chosen_instances)} ck instances: {chosen_instances}")
 
         return chosen_instances
