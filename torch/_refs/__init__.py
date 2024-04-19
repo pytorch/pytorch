@@ -6174,7 +6174,7 @@ def select_scatter(x: TensorLikeType, src: TensorLikeType, dim: int, index: int)
     if index < 0:
         index = index + x.shape[dim]
     mask = torch.arange(x.shape[dim], device=x.device).view(mask_shape) == index
-    src = aten.expand(torch.unsqueeze(src, dim), x.shape)
+    src = torch.unsqueeze(src, dim).expand(x.shape)
     return torch.where(mask, src, x)
 
 

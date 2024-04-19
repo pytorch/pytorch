@@ -1148,8 +1148,6 @@ aten::segment_reduce.out
 aten::select.int
 aten::select_copy.int
 aten::select_copy.int_out
-aten::select_scatter
-aten::select_scatter.out
 aten::set
 aten::set.out
 aten::set.source_Storage
