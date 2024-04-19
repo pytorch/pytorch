@@ -938,6 +938,25 @@ class CKGemmTemplate(CKTemplate):
             return None
         if op.a_layout != "Row" or op.b_layout != "Row" or op.c_layout != "Row":
             return None
+
+        X_meta, W_meta = map(lambda T: T.get_layout(), self.input_nodes)
+        M = X_meta.size[-2]
+        K = X_meta.size[-1]
+        N = W_meta.size[-1]
+
+        if M % op.m_per_block != 0:
+            return None
+        if N % op.n_per_block != 0:
+            return None
+        if K % op.k_per_block != 0:
+            return None
+        if K % op.a_block_transfer_src_scalar_per_vector != 0:
+            return None
+        if N % op.b_block_transfer_src_scalar_per_vector != 0:
+            return None
+        if N % op.c_shuffle_block_transfer_scalar_per_vector_n_per_block != 0:
+            return None
+
         return op
 
     def emit_ck_instance(self, op: CKGemmOperation):
@@ -1137,8 +1156,7 @@ class CKGemmTemplate(CKTemplate):
         chosen_instances = filtered_instances[:config.cuda.cutlass_max_profiling_configs]
         log.debug(f"generated {len(chosen_instances)} ck instances: {chosen_instances}")
 
-        # return chosen_instances
-        return default_instances
+        return chosen_instances
 
     @staticmethod
     def add_ck_gemm_choices(
