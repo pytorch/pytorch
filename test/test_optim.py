@@ -234,7 +234,9 @@ class TestOptimRenewed(TestCase):
             bias = Parameter(torch.randn((10), device=device, dtype=dtype))
             inpt = torch.randn(5, device=device, dtype=dtype)
 
-            optimizer = optim_cls([{"params": [weight]}, {"params": [bias], "lr": 0.01}])
+            # avoid endless recompiles by wrapping LR in a tensor if we're compiling
+            lr = torch.tensor(0.01) if torch._utils.is_compiling() else 0.01
+            optimizer = optim_cls([{"params": [weight]}, {"params": [bias], "lr": lr}])
             schedulers = [scheduler_c(optimizer) for scheduler_c in schedulers_c]
 
             def closure():
