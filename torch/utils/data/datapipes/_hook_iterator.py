@@ -34,8 +34,7 @@ def _strip_datapipe_from_name(name: str) -> str:
 def _generate_input_args_string(obj):
     """Generate a string for the input arguments of an object."""
     signature = inspect.signature(obj.__class__)
-    input_param_names = set()
-    input_param_names.update(signature.parameters.keys())
+    input_param_names = set(signature.parameters.keys())
     result = []
     for name, value in inspect.getmembers(obj):
         if name in input_param_names:
