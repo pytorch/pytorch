@@ -2125,7 +2125,7 @@ def gen_headers(
     )
 
     def gen_aten_interned_strings() -> Dict[str, str]:
-        attrs = set()  # All function argument names
+        attrs: Set[str] = set()  # All function argument names
         names = set()  # All ATen function names
         for func in native_functions:
             names.add(str(func.func.name.name))
