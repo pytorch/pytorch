@@ -146,7 +146,12 @@ else:
                 )
             return not_none(device_mesh.mesh_dim_names.index(mesh_dim_name))
 
-    _mesh_resources: _MeshEnv = _MeshEnv()
+    import threading
+    print("making _MeshEnv global var thread local")
+    thread_local = threading.local()
+    thread_local._mr = _MeshEnv()
+    _mesh_resources = thread_local._mr
+
 
     def _get_device_handle(device_type: str = "cuda"):
         """
