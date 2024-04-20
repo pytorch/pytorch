@@ -381,12 +381,12 @@ class CudaReproTests(TestCase):
         https://github.com/pytorch/torchdynamo/issues/1670
         """
         from torch._C import _cuda_getCurrentRawStream as get_cuda_stream
-        from torch._inductor.triton_heuristics import (
+        from torch._inductor.runtime import instance_descriptor
+        from torch._inductor.runtime.triton_heuristics import (
             CachingAutotuner,
             grid,
             HeuristicType,
         )
-        from torch._inductor.utils import instance_descriptor
 
         def autotune(configs, meta):
             def decorator(fn):

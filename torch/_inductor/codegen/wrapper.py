@@ -516,7 +516,7 @@ class WrapperCodeGen(CodeGen):
             """
             import triton
             import triton.language as tl
-            from torch._inductor.triton_heuristics import grid, split_scan_grid, start_graph, end_graph
+            from torch._inductor.runtime.triton_heuristics import grid, split_scan_grid, start_graph, end_graph
             {}
             """.format(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
