@@ -614,6 +614,46 @@ class TestOptimizer(TestCase):
                 ["pqr"],
             )
 
+    @skipIfNoXNNPACK
+    def test_optimize_for_mobile_without_conv_bias(self):
+        class BNTestModuleNoConvBias(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 20, 5, 1, bias=False)
+                self.bn = torch.nn.BatchNorm2d(num_features=20)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        bn_test_module = BNTestModuleNoConvBias()
+        bn_test_module(torch.rand(1, 1, 6, 6))
+        bn_test_module.eval()
+        bn_traced_module = torch.jit.trace(bn_test_module, torch.rand(1, 1, 6, 6))
+
+        bn_traced_module = optimize_for_mobile(bn_traced_module)
+        bn_input = torch.rand(1, 1, 6, 6)
+        torch.testing.assert_close(bn_traced_module(bn_input), bn_traced_module(bn_input), rtol=1e-2, atol=1e-3)
+
+        class BN3dTestModuleNoConvBias(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv3d(1, 20, 5, 1, bias=False)
+                self.bn = torch.nn.BatchNorm3d(num_features=20)
+
+            def forward(self, x):
+                x = self.conv(x)
+                x = self.bn(x)
+                return x
+
+        bn3d_test_module = BN3dTestModuleNoConvBias()
+        bn3d_test_module(torch.rand(1, 1, 6, 6, 6))
+        bn3d_test_module.eval()
+        bn3d_traced_module = torch.jit.trace(bn3d_test_module, torch.rand(1, 1, 6, 6, 6))
+        bn3d_traced_module = optimize_for_mobile(bn3d_traced_module)
+        bn3d_input = torch.rand(1, 1, 6, 6, 6)
+        torch.testing.assert_close(bn3d_traced_module(bn3d_input), bn3d_traced_module(bn3d_input), rtol=1e-2, atol=1e-3)
 
 if __name__ == '__main__':
     run_tests()

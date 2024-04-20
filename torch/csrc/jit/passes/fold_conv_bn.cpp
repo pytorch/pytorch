@@ -46,9 +46,7 @@ static bool hastensor(Module& m, const char* name) {
 void replaceConvBiasWithGetAttr(Module& module) {
   for (const auto& method : module.get_methods()) {
     auto graph = method.graph();
-    // Only looks for _convolution pattern.
-    // Thus assumes that tracing will have always gotten rid of aten::conv2d or
-    // aten::conv3d. If it did not, BN folding will fail.
+
     const PatternInfo& pattern_convolution = PatternInfo::parse_from_str(R"(
         graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
             %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
@@ -64,6 +62,33 @@ void replaceConvBiasWithGetAttr(Module& module) {
           %conv_out = aten::_convolution(%a, %w, %b, %stride, %padding, %dilation,
               %transposed, %output_padding, %groups, %benchmark, %deterministic, %cudnn_enabled)
           return (%conv_out) )");
+    const PatternInfo& conv2d_for_deprecated_conv =
+        PatternInfo::parse_from_str(R"(
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+          %deterministic:bool, %cudnn_enabled:bool):
+        %conv_out = aten::conv2d(%a, %w, %b, %stride, %padding, %dilation, %groups)
+        return (%conv_out) )");
+    const PatternInfo& conv2d = PatternInfo::parse_from_str(R"(
+      graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+          %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+          %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
+        %conv_out = aten::conv2d(%a, %w, %b, %stride, %padding, %dilation, %groups)
+        return (%conv_out) )");
+    const PatternInfo& conv3d_for_deprecated_conv =
+        PatternInfo::parse_from_str(R"(
+          graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+              %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+              %deterministic:bool, %cudnn_enabled:bool):
+            %conv_out = aten::conv3d(%a, %w, %b, %stride, %padding, %dilation, %groups)
+            return (%conv_out) )");
+    const PatternInfo& conv3d = PatternInfo::parse_from_str(R"(
+          graph(%a, %w, %b, %stride:int[], %padding:int[], %dilation:int[],
+              %transposed:bool, %output_padding:int[], %groups:int, %benchmark:bool,
+              %deterministic:bool, %cudnn_enabled:bool, %allow_tf32:bool):
+            %conv_out = aten::conv3d(%a, %w, %b, %stride, %padding, %dilation, %groups)
+            return (%conv_out) )");
+
     auto replace_pattern = [&](const PatternInfo& pattern_convolution) {
       const Graph& pattern_convolution_graph =
           *pattern_convolution.pattern_graph;
@@ -75,7 +100,7 @@ void replaceConvBiasWithGetAttr(Module& module) {
         // We come here only if the bias was not present in the module.
         // In that case, the corresponding graph will not have getAttr("bias")
         // Insert that in the graph.
-        // And change _convolution to take the new value.
+        // And change _convolution, conv2d, conv3d to take the new value.
         auto conv_node =
             match.values_map.at(convolution_vmap.at("conv_out"))->node();
         WithInsertPoint ins(conv_node);
@@ -87,6 +112,10 @@ void replaceConvBiasWithGetAttr(Module& module) {
     };
     replace_pattern(pattern_convolution);
     replace_pattern(pattern_convolution_deprecated);
+    replace_pattern(conv2d);
+    replace_pattern(conv2d_for_deprecated_conv);
+    replace_pattern(conv3d);
+    replace_pattern(conv3d_for_deprecated_conv);
   }
 }
 
