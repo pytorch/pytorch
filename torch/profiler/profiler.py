@@ -127,8 +127,10 @@ class _KinetoProfile:
         self.mem_tl: Optional[MemoryProfileTimeline] = None
         self.use_device = None
         privateuse1_backend = _get_privateuse1_backend_name()
-        if ProfilerActivity.PrivateUse1 in self.activities
-           and privateuse1_backend != "privateuseone":
+        if (
+            ProfilerActivity.PrivateUse1 in self.activities
+            and privateuse1_backend != "privateuseone"
+        ):
             self.use_device = privateuse1_backend
         # user-defined metadata to be amended to the trace
         self.preset_metadata: Dict[str, str] = dict()
