@@ -6083,6 +6083,15 @@ def meta_bucketize(self, boundaries, *, out_int32=False, right=False):
     ).contiguous()
 
 
+@register_meta([aten.histc])
+@out_wrapper()
+def meta_histc(input, bins=100, min=0, max=0):
+    torch._check(
+        input.is_floating_point(), lambda: f"input must be float, not {input.dtype}"
+    )
+    return torch.empty(bins, device=input.device, dtype=input.dtype)
+
+
 @register_meta(
     [aten._upsample_bilinear2d_aa.default, aten._upsample_bicubic2d_aa.default]
 )
