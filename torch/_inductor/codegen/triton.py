@@ -34,6 +34,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import preserve_rng_state
 
 from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
+from torch._inductor.runtime.triton_heuristics import AutotuneHint
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -43,27 +44,29 @@ from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path, PyCodeCache
 from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
-from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
+from ..ir import IRNode, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..runtime.hints import ReductionHint
+from ..runtime.runtime_utils import (
+    do_bench,
+    get_max_y_grid,
+    green_text,
+    next_power_of_2,
+    yellow_text,
+)
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
-from ..triton_heuristics import AutotuneHint
 from ..utils import (
     cache_on_self,
-    do_bench,
     get_dtype_size,
     get_fused_kernel_name,
     get_kernel_metadata,
-    get_max_y_grid,
-    green_text,
     is_welford_reduction,
-    next_power_of_2,
     Placeholder,
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
     sympy_subs,
     unique,
-    yellow_text,
 )
 from ..virtualized import _ops as ops, OpsHandler, ReductionType, StoreMode, V
 from ..wrapper_benchmark import get_kernel_category_by_source_code
@@ -120,11 +123,16 @@ def gen_common_triton_imports():
 
     imports.splice(
         """
-        from torch._inductor import triton_helpers, triton_heuristics
-        from torch._inductor.ir import ReductionHint, TileHint
-        from torch._inductor.triton_helpers import libdevice, math as tl_math
-        from torch._inductor.triton_heuristics import AutotuneHint
-        from torch._inductor.utils import instance_descriptor
+        from torch._inductor.runtime import (
+            AutotuneHint,
+            instance_descriptor,
+            libdevice,
+            ReductionHint,
+            TileHint,
+            tl_math,
+            triton_helpers,
+            triton_heuristics,
+        )
         """
     )
     return imports.getvalue()
@@ -2652,7 +2660,7 @@ class TritonKernel(Kernel):
             from torch._dynamo.testing import rand_strided
             {}
             import torch
-            from torch._inductor.triton_heuristics import grid, split_scan_grid
+            from torch._inductor.runtime.triton_heuristics import grid, split_scan_grid
         """.format(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
