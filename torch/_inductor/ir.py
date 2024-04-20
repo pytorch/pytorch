@@ -3634,9 +3634,34 @@ class TemplateBuffer(Buffer):
 
 
 class TritonTemplateBuffer(TemplateBuffer):
-    def __init__(self, layout, inputs, make_kernel_render, debug_extra=None):
+    def __init__(
+        self,
+        layout,
+        inputs,
+        make_kernel_render,
+        debug_extra=None,
+        mutated_inputs: Optional[Iterable[IRNode]] = None,
+    ):
+        """
+        NOTE:[TritonTemplates with multiple outputs]
+        We want the ability for TritonTemplates to output multiple tensors. Triton
+        kernels have no notion of outputs and this is done by creating tensors that
+        are then mutated by the kernel. Currenlty our STORE_OUTPUT codegen doesn't
+        support creating multinode outputs for triton templates.
+        We work around this by creating an extra input buffer during the lowering
+        and we mark them as mutated inputs.
+        """
         super().__init__(layout, inputs, make_kernel_render)
         self.debug_extra = debug_extra
+        self.mutated_inputs = mutated_inputs
+        if mutated_inputs is not None:
+            # Ensure that the mutated inputs are only allowed for certain nodes
+            allowed_set = {"templated_attention"}
+            current_node = str(V.graph.current_node)
+            assert (
+                current_node in allowed_set
+            ), f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
+            mark_node_as_mutating(self, *mutated_inputs)
 
     def __str__(self):
         out = f"TritonTemplateBuffer(layout={self.layout}, {self.debug_extra})"
@@ -4668,13 +4693,15 @@ class UserDefinedTritonKernel(ExternKernel):
         return [i.get_name() for i in self.inputs]
 
 
-def mark_node_as_mutating(cur_buffer, *mutated_ops):
+def mark_node_as_mutating(cur_buffer, *mutated_ops: IRNode):
     """
     Allows ops in mutated_ops to be marked as being mutated as well as
     indicates to the scheduler that these ops depend on cur_buffer.
     """
     for op in mutated_ops:
-        assert isinstance(op, IRNode), op
+        assert isinstance(
+            op, IRNode
+        ), f"{op} op is type {type(op)} and is not an IRNode"
         V.graph.mark_buffer_mutated(op.get_name())
         assert hasattr(op, "layout")
         MutationOutput(op.layout, op, cur_buffer)
