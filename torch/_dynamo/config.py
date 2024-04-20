@@ -289,6 +289,8 @@ optimize_ddp_lazy_compile = False
 
 # Whether to skip guarding on FSDP-managed modules
 skip_fsdp_guards = True
+# Whether to apply torch._dynamo.disable() to per-param FSDP hooks
+skip_fsdp_hooks = False
 
 # Make dynamo skip guarding on hooks on nn modules
 # Note: unsafe: if your model actually has hooks and you remove them, or doesn't and  you add them,
@@ -339,7 +341,7 @@ numpy_default_int = "int64"
 use_numpy_random_stream = False
 
 # Use C++ guard manager
-enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "0") == "1"
+enable_cpp_guard_manager = os.environ.get("TORCHDYNAMO_CPP_GUARD_MANAGER", "1") == "1"
 
 # Inline inbuilt nn modules
 inline_inbuilt_nn_modules = (

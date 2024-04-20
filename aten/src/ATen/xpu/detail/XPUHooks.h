@@ -18,6 +18,8 @@ struct XPUHooks : public at::XPUHooksInterface {
   c10::DeviceIndex getNumGPUs() const override;
   DeviceIndex current_device() const override;
   void deviceSynchronize(DeviceIndex device_index) const override;
+  Allocator* getPinnedMemoryAllocator() const override;
+  bool isPinnedPtr(const void* data) const override;
 };
 
 } // namespace at::xpu::detail

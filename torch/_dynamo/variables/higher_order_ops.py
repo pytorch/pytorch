@@ -21,6 +21,7 @@ from torch._guards import Source
 from torch._ops import HigherOrderOperator
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.utils import _pytree as pytree
+from .. import variables
 
 from ..exc import UncapturedHigherOrderOpError, unimplemented, Unsupported
 from ..source import AttrSource
@@ -87,14 +88,10 @@ def _make_inlined(tx, f):
     return inline_call
 
 
-def _call_function_and_unflatten_output(tx, fn, args, kwargs, ret_vt, ret_treespec):
+def _call_function_and_unflatten_output(
+    tx, fn, args, kwargs, flat_example_value, ret_treespec
+):
     from .builder import wrap_fx_proxy
-
-    flat_example_value = pytree.tree_map_only(
-        torch.fx.Proxy,
-        lambda a: a.node.meta["example_value"],
-        ret_vt.as_proxy(),
-    )
 
     # Store the invocation as a call
     flat_variable = wrap_fx_proxy(
@@ -730,8 +727,19 @@ class CondHigherOrderVariable(TorchHigherOrderOperatorVariable):
             true_shared + unique_true + unique_false,
         )
 
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            true_r.as_proxy(),
+        )
+
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.cond, p_args, {}, true_r, true_treespec
+            tx,
+            torch.ops.higher_order.cond,
+            p_args,
+            {},
+            flat_example_value,
+            true_treespec,
         )
 
 
@@ -884,8 +892,19 @@ class WhileLoopHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ),
         )
 
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.while_loop, p_args, {}, body_r, body_treespec
+            tx,
+            torch.ops.higher_order.while_loop,
+            p_args,
+            {},
+            flat_example_value,
+            body_treespec,
         )
 
 
@@ -949,6 +968,23 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             should_flatten_outputs=True,
         )
 
+        subgraph_example_value = [
+            proxy.node.meta["example_value"] for proxy in body_r.as_proxy()
+        ]
+
+        with tx.output.fake_mode:
+            # We need to expand the example output from map() so that it has
+            # the same first dimension as the mapped input.
+            # We also do a clone with contiguous_format. This is to be consistent with
+            # eager semantic of map, which stacks the outputs. The result is contiguous
+            # as a result of the stack operation.
+            map_example_out = [
+                t.expand(sample_shape[0], *t.size()).clone(
+                    memory_format=torch.contiguous_format
+                )
+                for t in subgraph_example_value
+            ]
+
         body_nn_modules = dict(tx.output.nn_modules)
 
         body_name = add_subgraph(
@@ -964,8 +1000,9 @@ class MapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             [args[1].as_proxy()],
             [arg.as_proxy() for arg in args[2:]] + list(body_lifted_freevars.keys()),
         )
+
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.map_impl, p_args, {}, body_r, body_spec
+            tx, torch.ops.higher_order.map_impl, p_args, {}, map_example_out, body_spec
         )
 
 
@@ -1093,8 +1130,14 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         if len(p_kwargs) > 0:
             unimplemented("kwargs should have been flattened into lifted args")
 
+        flat_example_value = pytree.tree_map_only(
+            torch.fx.Proxy,
+            lambda a: a.node.meta["example_value"],
+            body_r.as_proxy(),
+        )
+
         return _call_function_and_unflatten_output(
-            tx, self.value, tuple(p_args), p_kwargs, body_r, treespec
+            tx, self.value, tuple(p_args), p_kwargs, flat_example_value, treespec
         )
 
 
@@ -1137,8 +1180,6 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
     def call_function(
         self, tx, args: "List[VariableTracker]", kwargs: "Dict[str, VariableTracker]"
     ) -> "VariableTracker":
-        from .builder import wrap_fx_proxy
-
         callable = args[0]
 
         unpacked_sequence = args[1].unpack_var_sequence(tx)
@@ -1186,20 +1227,13 @@ class StrictModeHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ret_val.as_proxy(),
         )
 
-        # Store the invocation as a call
-        flat_variable = wrap_fx_proxy(
-            tx=tx,
-            proxy=tx.output.create_proxy(
-                "call_function",
-                torch.ops.higher_order.strict_mode,
-                args=tuple(p_args),
-                kwargs={},
-            ),
-            example_value=flat_example_value,
-        )
-
         return _call_function_and_unflatten_output(
-            tx, torch.ops.higher_order.strict_mode, p_args, {}, ret_val, ret_treespec
+            tx,
+            torch.ops.higher_order.strict_mode,
+            p_args,
+            {},
+            flat_example_value,
+            ret_treespec,
         )
 
 
@@ -1505,9 +1539,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         # bwd tracer a child of the fwd tracer, because backward may rely on
         # tensors/attrs created in the fwd tracer.
 
-        from .lists import BaseListVariable
-
-        if isinstance(fwd_out, BaseListVariable):
+        if isinstance(fwd_out, variables.BaseListVariable):
             bwd_args = [ctx, *fwd_out.items]
         else:
             bwd_args = [ctx, fwd_out]
@@ -1525,7 +1557,15 @@ class AutogradFunctionApplyVariable(VariableTracker):
         else:
             unimplemented("non-function or method")
 
-        with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode():
+        def is_strict_for(v: VariableTracker):
+            if isinstance(v, variables.TensorVariable):
+                # we can be more lax for stuff from forward
+                return v.proxy.tracer is not fwd_tracer
+            return True
+
+        with tx.output.subtracer(fwd_fn, fwd_tracer), tx.strict_translation_mode(
+            is_strict_for
+        ):
             (bwd_out, _), bwd_graph, bwd_freevars = speculate_subgraph(
                 tx,
                 bwd_fn,
