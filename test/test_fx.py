@@ -3593,17 +3593,17 @@ class TestFX(JitTestCase):
             self.assertEqual(nf.graph.process_outputs(bare_fx(*nf.graph.process_inputs(val))), orig_out)
 
             assert num_flat_args == 0 or "tree_flatten_spec" in nf.code
-            assert sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args
+            assert sum(i.op == 'placeholder' for i in nf.graph.nodes) == num_flat_args
 
             nf = symbolic_trace(nf)
             self.assertEqual(nf(val), orig_out)
             assert "tree_flatten_spec" not in nf.code
-            assert sum([i.op == 'placeholder' for i in nf.graph.nodes]) == 1
+            assert sum(i.op == 'placeholder' for i in nf.graph.nodes) == 1
 
             nf = symbolic_trace(nf, concrete_args={'x': inp})
             self.assertEqual(nf(val), orig_out)
             assert num_flat_args == 0 or "tree_flatten_spec" in nf.code
-            assert sum([i.op == 'placeholder' for i in nf.graph.nodes]) == num_flat_args
+            assert sum(i.op == 'placeholder' for i in nf.graph.nodes) == num_flat_args
 
             pickled = pickle.dumps(nf)
             nf = pickle.loads(pickled)

@@ -24,7 +24,8 @@ def main():
     parser.add_argument("--workers", type=int)
     parser.add_argument("--parent", type=int)
     args = parser.parse_args()
-    assert os.getppid() == args.parent
+    if os.getppid() != args.parent:
+        sys.exit(0)
     write_fd = typing.cast(Pipe, os.fdopen(os.dup(sys.stdout.fileno()), "wb"))
     read_fd = typing.cast(Pipe, os.fdopen(os.dup(sys.stdin.fileno()), "rb"))
 

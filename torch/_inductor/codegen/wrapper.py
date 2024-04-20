@@ -516,7 +516,7 @@ class WrapperCodeGen(CodeGen):
             """
             import triton
             import triton.language as tl
-            from torch._inductor.triton_heuristics import grid, split_scan_grid, start_graph, end_graph
+            from torch._inductor.runtime.triton_heuristics import grid, split_scan_grid, start_graph, end_graph
             {}
             """.format(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
@@ -1068,7 +1068,11 @@ class WrapperCodeGen(CodeGen):
                     )
                 else:
                     signature.append(SizeArg(key, arg))
-                    if arg is not None and V.graph.sizevars.statically_known_equals(arg, 1):  # type: ignore[arg-type]
+                    if isinstance(
+                        arg, (int, sympy.Integer)
+                    ) and V.graph.sizevars.statically_known_equals(
+                        arg, 1  # type: ignore[arg-type]
+                    ):
                         equal_to_1_arg_idx.append(idx)
         index_dtype = "tl.int32"
         triton_meta = {
@@ -1342,7 +1346,7 @@ class WrapperCodeGen(CodeGen):
         self.lines.append(LineContext(ctx))
 
     def val_to_cpp_arg_str(self, type_, val) -> str:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def val_to_arg_str(self, s):
         from torch.utils._triton import dtype_to_string, has_triton_package

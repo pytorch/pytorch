@@ -201,9 +201,18 @@ class CppWrapperCpu(WrapperCodeGen):
 
                 class RAIIPyObject {
                 public:
+                    RAIIPyObject() : obj_(nullptr) {}
                     RAIIPyObject(PyObject* obj) : obj_(obj) {}
                     ~RAIIPyObject() {
                         Py_XDECREF(obj_);
+                    }
+                    RAIIPyObject& operator=(const RAIIPyObject& other) {
+                        if (this != &other) {
+                            Py_XDECREF(obj_);
+                            obj_ = other.obj_;
+                            Py_XINCREF(obj_);
+                        }
+                        return *this;
                     }
                     operator PyObject*() {
                         return obj_;
@@ -512,6 +521,8 @@ class CppWrapperCpu(WrapperCodeGen):
                     else:
                         # Weights are promoted in the JIT mode
                         num_args = len(V.graph.graph_inputs) + len(V.graph.constants)
+                        # release GIL to support multiple instances inference (in different threads of the same process)
+                        self.prefix.splice("py::gil_scoped_release release;")
 
                     if config.abi_compatible:
                         self.prefix.splice(
@@ -1266,12 +1277,19 @@ class CppWrapperCpu(WrapperCodeGen):
     def generate_scatter_fallback(
         self, output, inputs, kernel, python_kernel_name, src_is_tensor, reduce, kwargs
     ):
+        # No stack allocation when there is a fallback op
+        self.allow_stack_allocation = False
+
         # TODO: needs updates to use C shim v2
         # TODO: support other overload for cpp wrapper and remove the below assertions
         if config.abi_compatible:
             # call the ABI shim function instead of the ATen one
             kernel = kernel.replace("at::", "aoti_torch_")
-        line = f"{kernel}({output}, {','.join(map(str, inputs))}"
+            inputs_wrapped = [f"convert_arrayref_tensor_to_tensor({x})" for x in inputs]
+            line = f"{kernel}(convert_arrayref_tensor_to_tensor({output}), {','.join(inputs_wrapped)}"
+        else:
+            line = f"{kernel}({output}, {','.join(map(str, inputs))}"
+
         if python_kernel_name == "aten.scatter_":
             if src_is_tensor:
                 if reduce:
@@ -1286,22 +1304,40 @@ class CppWrapperCpu(WrapperCodeGen):
         self.writeline(line)
 
     def generate_index_put_fallback(self, kernel, x, indices, values, accumulate):
+        # No stack allocation when there is a fallback op
+        self.allow_stack_allocation = False
+
         # TODO: needs updates to use C shim v2
         if config.abi_compatible:
             # See the comment in codegen_reinterpret_view about why having something like
             # RAIIAtenTensorHandle(tmp_tensor_handle_2) in a tmp array can cause the correponding
             # tensor prematurely deallocated, thus this std::vector().data() trick here.
             indices_str = (
-                f"std::vector<AtenTensorHandle>{{{', '.join(indices)}}}.data()"
+                "std::vector<AtenTensorHandle>{"
+                + (
+                    ", ".join(
+                        [f"convert_arrayref_tensor_to_tensor({ind})" for ind in indices]
+                    )
+                )
+                + "}.data()"
             )
-            args = [x, indices_str, str(len(indices)), values, accumulate]
+            args = [
+                f"convert_arrayref_tensor_to_tensor({x})",
+                indices_str,
+                str(len(indices)),
+                f"convert_arrayref_tensor_to_tensor({values})",
+                accumulate,
+            ]
+            args.insert(
+                0, f"convert_arrayref_tensor_to_tensor({x})"
+            )  # set x as the output tensor, this fallback mutates x.
         else:
             indices_str = (
                 f"{self.open_bracket}{', '.join(indices)}{self.closed_bracket}"
             )
             args = [x, indices_str, values, accumulate]
+            args.insert(0, x)  # set x as the output tensor, this fallback mutates
 
-        args.insert(0, x)  # set x as the output tensor, this fallback mutates x.
         self.writeline(self.wrap_kernel_call(kernel, args))
 
     def add_benchmark_harness(self, output):
@@ -2001,6 +2037,18 @@ class CppWrapperCpu(WrapperCodeGen):
                 output_args,
             )
 
+    def generate_scoped_gil_acquire(self, declarations_before_scope, lines_in_scope):
+        scoped_lines = IndentedBuffer()
+        for declaration in declarations_before_scope:
+            scoped_lines.writeline(declaration)
+
+        scoped_lines.writeline("{")
+        with scoped_lines.indent():
+            scoped_lines.writeline("py::gil_scoped_acquire acquire;")
+            scoped_lines.writelines(lines_in_scope.split("\n"))
+        scoped_lines.writelines("}")
+        return scoped_lines._lines
+
     def load_custom_op_wrapper(self):
         # TODO: need to support control flow
         if self.custom_op_wrapper_loaded:
@@ -2011,11 +2059,17 @@ RAIIPyObject codecache_module(PyImport_ImportModule("torch._inductor.codecache")
 if (codecache_module.get() == NULL) {
     throw std::runtime_error("Failed to load torch._inductor.codecache");
 }
-RAIIPyObject custom_op_wrapper(PyObject_GetAttrString(codecache_module, "custom_op_wrapper"));
+custom_op_wrapper = PyObject_GetAttrString(codecache_module, "custom_op_wrapper");
 if (custom_op_wrapper.get() == NULL) {
     throw std::runtime_error("Failed to load torch._inductor.codecache.custom_op_wrapper");
 }"""
-        self.writelines(lines.split("\n"))
+
+        declarations_before_scope = ["RAIIPyObject custom_op_wrapper;"]
+        scope_gil_acquire = self.generate_scoped_gil_acquire(
+            declarations_before_scope, lines
+        )
+        self.writelines(scope_gil_acquire)
+
         self.custom_op_wrapper_loaded = True
 
     def generate_py_arg(self, py_args_var, idx, raw_arg, arg_type):
@@ -2116,15 +2170,22 @@ if (py_{buf_name}.get() == NULL) {{
             if len(output_args) == 1:
                 # result is a single tensor
                 lines += f"""
-RAIIAtenTensorHandle {output_args[0]}(reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL)));"""
+{output_args[0]} = reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(py_{buf_name}.get(), NULL));"""
             else:
                 # result is a tuple of tensors
                 for idx, output_arg in enumerate(output_args):
                     lines += f"""
-RAIIAtenTensorHandle {output_arg}(
-    reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL)));"""
+{output_arg} =
+    reinterpret_cast<AtenTensorHandle>(PyCapsule_GetPointer(PyList_GET_ITEM(py_{buf_name}.get(), {idx}), NULL));"""
 
-            self.writelines(lines.split("\n"))
+            declarations_before_scope = [
+                f"RAIIAtenTensorHandle {output_arg};"
+                for idx, output_arg in enumerate(output_args)
+            ]
+            scope_gil_acquire = self.generate_scoped_gil_acquire(
+                declarations_before_scope, lines
+            )
+            self.writelines(scope_gil_acquire)
 
     def generate_extern_kernel_alloc_and_find_schema_if_needed_fbcode(
         self,

@@ -1,4 +1,3 @@
-import atexit
 import functools
 import itertools
 import logging
@@ -78,7 +77,6 @@ class SubprocPool:
         self.job_id_count = itertools.count()
 
         self.running = True
-        atexit.register(self.shutdown)
 
     def submit(self, job_fn: Callable[..., Any], *args):
         if args:
@@ -127,7 +125,7 @@ class SubprocPool:
                 self.running = False
                 self.write_pipe.write(_pack_msg(-1, -1))
                 self.write_pipe.close()
-            self.process.wait(300)
+            self.process.wait(10)
         except OSError as e:
             log.warning("Ignored OSError in pool shutdown:  %s", e)
         finally:
@@ -166,8 +164,11 @@ class SubprocMain:
     def _shutdown(self):
         with self.write_lock:
             self.running = False
-            self.write_pipe.write(_pack_msg(-1, -1))
-            self.write_pipe.close()
+            try:
+                self.write_pipe.write(_pack_msg(-1, -1))
+                self.write_pipe.close()
+            except BrokenPipeError:
+                pass  # parent process already shutdown
             self.read_pipe.close()
         self.pool.shutdown()
 
@@ -235,4 +236,4 @@ class TestException(RuntimeError):
 
 
 def raise_testexc():
-    raise TestException()
+    raise TestException
