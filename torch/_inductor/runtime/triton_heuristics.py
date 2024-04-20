@@ -17,13 +17,11 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import torch
 
-import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
-from torch._dynamo.utils import dynamo_timed, get_first_attr
 
 from torch._inductor import config
-from torch._inductor.coordinate_descent_tuner import CoordescTuner
 
+from .coordinate_descent_tuner import CoordescTuner
 from .hints import ReductionHint, TileHint
 from .runtime_utils import (
     cache_dir,
@@ -31,6 +29,8 @@ from .runtime_utils import (
     conditional_product,
     create_bandwidth_info_str,
     do_bench,
+    dynamo_timed,
+    get_first_attr,
     get_max_y_grid,
     get_num_bytes,
     next_power_of_2,
@@ -56,6 +56,13 @@ else:
     KernelInterface = object
     OutOfResources = object
     ASTSource = None
+
+try:
+    autograd_profiler = torch.autograd.profiler
+except AttributeError:  # Compile workers only have a mock version of torch
+
+    class autograd_profiler:  # type: ignore[no-redef]
+        _is_profiler_enabled = False
 
 
 _NUM_THREADS_PER_WARP = 32
