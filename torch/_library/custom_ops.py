@@ -224,8 +224,7 @@ class CustomOpDef:
                         # Checks the assumption that outputs cannot alias
                         # inputs or other outputs.
                         storages = set()
-                        for tensor in iter_tensors(args, kwargs):
-                            storages.add(id(tensor.untyped_storage()))
+                        storages.update(id(tensor.untyped_storage()) for tensor in iter_tensors(args, kwargs))
 
                         result = self._backend_fns[device_type](*args, **kwargs)
 

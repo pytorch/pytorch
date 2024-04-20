@@ -2133,8 +2133,7 @@ def gen_headers(
             # symbol without the underscore
             names.add(func.func.name.name.base)
 
-            for arg in func.func.schema_order_arguments():
-                attrs.add(arg.name)
+            attrs.update(arg.name for arg in func.func.schema_order_arguments())
 
         # These are keywords in C++, so aren't valid symbol names
         # https://en.cppreference.com/w/cpp/language/operator_alternative

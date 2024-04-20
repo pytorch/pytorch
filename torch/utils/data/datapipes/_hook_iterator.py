@@ -35,8 +35,7 @@ def _generate_input_args_string(obj):
     """Generate a string for the input arguments of an object."""
     signature = inspect.signature(obj.__class__)
     input_param_names = set()
-    for param_name in signature.parameters.keys():
-        input_param_names.add(param_name)
+    input_param_names.update(signature.parameters.keys())
     result = []
     for name, value in inspect.getmembers(obj):
         if name in input_param_names:

@@ -226,8 +226,7 @@ def _verify_options(
                 continue
             fqns = _get_fqns(model, name)
             assert len(fqns) == 1, "Submodule FQN should only have 1 instance"
-            for fqn in fqns:
-                submodule_prefixes.add(f"{fqn}.")
+            submodule_prefixes.update(f"{fqn}." for fqn in fqns)
 
     fsdp_modules = FSDP.fsdp_modules(model)
     state_dict_config: StateDictConfig
