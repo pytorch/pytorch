@@ -301,7 +301,7 @@ class PersistentCache(CacheBase):
             return hit
 
         if config.max_autotune or config.max_autotune_gemm:
-            local_cache = self.get_local_cache()
+            local_cache = self.get_local_cache() if config.autotune_local_cache else {}
             # check local cache first since it is data specific to the current machine
             if (
                 not check_cache(local_cache)
@@ -768,17 +768,21 @@ class FxGraphCache:
 
         # See _save_graph(); we don't store the callable in the cache entry so
         # recreate it here from the PyCodeCache disk cache.
+        artifact_path = get_path(graph.cache_key, "py")[2]
+        if not os.path.exists(artifact_path):
+            counters["inductor"]["fxgraph_lookup_write_file"] += 1
+            write_atomic(artifact_path, graph.source_code)
         try:
             graph.current_callable = PyCodeCache.load_by_key_path(
                 graph.cache_key,
-                graph.artifact_path,
+                artifact_path,
                 graph.cache_linemap,
                 graph.constants,
             ).call
         except OSError:
             # Not expected, but in case the PyCodeCache entry is removed from
             # underneath us, treat it as a cache miss and recompile.
-            log.error("Failed to load cached artifact: %s", graph.artifact_path)
+            log.error("Failed to load cached artifact: %s", artifact_path)
             return None
 
         # Now re-evaluate with the symints to add any guards to the current env.
@@ -914,7 +918,7 @@ class CompiledFxGraph:
 
     current_callable: Optional[Callable[..., Any]]
     cache_key: str
-    artifact_path: str
+    source_code: str = dataclasses.field(repr=False)  # Do not display source_code
     cache_linemap: Optional[List[Tuple[int, str]]]
     device_types: Set[str]
     device_idxs: Set[int]
@@ -943,7 +947,9 @@ class CompiledFxGraph:
     ):
         self.current_callable = current_callable
         self.cache_key = graph.cache_key
-        self.artifact_path = graph.cache_path
+        if graph.cache_path:
+            with open(graph.cache_path) as f:
+                self.source_code = f.read()
         self.cache_linemap = graph.cache_linemap
         self.device_types = graph.device_types
         self.device_idxs = graph.device_idxs
@@ -962,7 +968,7 @@ class CompiledFxGraph:
 
 def cpp_compiler() -> str:
     if config.is_fbcode():
-        return build_paths.cc()
+        return build_paths.cc() if torch.version.hip is None else build_paths.clang()
     if isinstance(config.cpp.cxx, (list, tuple)):
         search = tuple(config.cpp.cxx)
     else:
@@ -1373,18 +1379,23 @@ def homebrew_libomp() -> Tuple[bool, str]:
         return False, ""
 
 
+def _set_gpu_runtime_env() -> None:
+    if (
+        config.is_fbcode()
+        and torch.version.hip is None
+        and "CUDA_HOME" not in os.environ
+        and "CUDA_PATH" not in os.environ
+    ):
+        os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
+
+
 def get_include_and_linking_paths(
     include_pytorch: bool = False,
     vec_isa: VecISA = invalid_vec_isa,
     cuda: bool = False,
     aot_mode: bool = False,
 ) -> Tuple[List[str], str, str, str, str]:
-    if (
-        config.is_fbcode()
-        and "CUDA_HOME" not in os.environ
-        and "CUDA_PATH" not in os.environ
-    ):
-        os.environ["CUDA_HOME"] = os.path.dirname(build_paths.cuda())
+    _set_gpu_runtime_env()
     from torch.utils import cpp_extension
 
     macros = vec_isa.build_macro() if vec_isa != invalid_vec_isa else ""
@@ -1416,7 +1427,7 @@ def get_include_and_linking_paths(
             libs += ["omp"]
             if aot_mode:
                 ipaths += [os.path.dirname(cpp_prefix_path())]
-                if cuda:
+                if cuda and torch.version.hip is None:
                     # This is a special treatment for Meta internal cuda-12 where all libs
                     # are in lib/cuda-12 and lib/cuda-12/stubs
                     for i, path in enumerate(lpaths):
@@ -1447,7 +1458,10 @@ def get_include_and_linking_paths(
 
         if cuda:
             if torch.version.hip is not None:
-                libs += ["c10_hip", "torch_hip"]
+                if config.is_fbcode():
+                    libs += ["amdhip64"]
+                else:
+                    libs += ["c10_hip", "torch_hip"]
                 macros += " -D __HIP_PLATFORM_AMD__"
             else:
                 if config.is_fbcode():
@@ -1513,16 +1527,27 @@ def get_include_and_linking_paths(
 
     # third party libs
     if config.is_fbcode():
-        ipaths.append(build_paths.sleef())
+        # Note that the order of include paths do matter, as a result
+        # we need to have several branches interleaved here
+        if torch.version.hip is None:
+            ipaths.append(build_paths.sleef())
         ipaths.append(build_paths.openmp())
         ipaths.append(build_paths.python())
-        ipaths.append(build_paths.cc_include())
-        ipaths.append(build_paths.libgcc())
-        ipaths.append(build_paths.libgcc_arch())
+        if torch.version.hip is not None:
+            ipaths.append(build_paths.clang_include())
+            ipaths.append(build_paths.gcc_include())
+            ipaths.append(build_paths.gcc_install_tools_include())
+        else:
+            ipaths.append(build_paths.cc_include())
+            ipaths.append(build_paths.libgcc())
+            ipaths.append(build_paths.libgcc_arch())
         ipaths.append(build_paths.libgcc_backward())
         ipaths.append(build_paths.glibc())
         ipaths.append(build_paths.linux_kernel())
-        ipaths.append(build_paths.cuda())
+        if torch.version.hip is not None:
+            ipaths.append(build_paths.rocm())
+        else:
+            ipaths.append(build_paths.cuda())
         # We also need to bundle includes with absolute paths into a remote directory
         # (later on, we copy the include paths from cpp_extensions into our remote dir)
         ipaths.append("include")
@@ -1530,7 +1555,8 @@ def get_include_and_linking_paths(
     static_link_libs = []
     if aot_mode and cuda and config.is_fbcode():
         # For Meta internal cuda-12, it is recommended to static link cudart
-        static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
+        if torch.version.hip is None:
+            static_link_libs = ["-Wl,-Bstatic", "-lcudart_static", "-Wl,-Bdynamic"]
 
     lpaths_str = " ".join(["-L" + p for p in lpaths])
     libs_str = " ".join(static_link_libs + ["-l" + p for p in libs])
@@ -1811,10 +1837,8 @@ class AotCodeCompiler:
                 if name not in graph.folded_constants
             )
             # TODO: Fix mmap weights with cuda
-            use_mmap_weights = (
-                not cuda and not config.is_fbcode() and consts_size > 2_000_000_000
-            )
-            if config.aot_inductor.force_mmap_weights and not cuda:
+            use_mmap_weights = not config.is_fbcode() and consts_size > 2_000_000_000
+            if config.aot_inductor.force_mmap_weights:
                 use_mmap_weights = True
             compile_cmd = cpp_compile_command(
                 input=input_path,
