@@ -81,7 +81,7 @@ if ! which conda; then
     export USE_MKLDNN=0
   fi
 else
-  export CMAKE_PREFIX_PATH=/opt/conda
+  export CMAKE_PREFIX_PATH=/opt/conda/envs/py_$ANACONDA_PYTHON_VERSION
 
   # Workaround required for MKL library linkage
   # https://github.com/pytorch/pytorch/issues/119557

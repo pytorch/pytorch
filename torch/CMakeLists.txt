@@ -111,6 +111,7 @@ else()
     list(APPEND TORCH_PYTHON_COMPILE_OPTIONS
       -fno-strict-aliasing
       -Wno-strict-aliasing)
+    string(APPEND TORCH_PYTHON_LINK_FLAGS " -Wl,--no-undefined")
 endif()
 
 if(USE_ITT)
@@ -343,7 +344,7 @@ endif()
 
 target_compile_definitions(torch_python PRIVATE "-DTHP_BUILD_MAIN_LIB")
 
-target_link_libraries(torch_python PRIVATE torch_library ${TORCH_PYTHON_LINK_LIBRARIES})
+target_link_libraries(torch_python PRIVATE torch_library ${Python_LIBRARIES} ${TORCH_PYTHON_LINK_LIBRARIES})
 
 target_compile_definitions(torch_python PRIVATE ${TORCH_PYTHON_COMPILE_DEFINITIONS})
 

@@ -18,6 +18,7 @@ target_compile_options_if_supported(${PROJECT_NAME} "-Wmissing-prototypes")
 target_compile_options_if_supported(${PROJECT_NAME} "-Werror=missing-prototypes")
 target_link_libraries(${PROJECT_NAME} PRIVATE torch torch_python)
 target_link_libraries(${PROJECT_NAME} PRIVATE pybind::pybind11)
+target_link_libraries(${PROJECT_NAME} PRIVATE ${Python_LIBRARIES})
 
 set_target_properties(${PROJECT_NAME} PROPERTIES LIBRARY_OUTPUT_DIRECTORY
       ${CMAKE_BINARY_DIR}/functorch)
