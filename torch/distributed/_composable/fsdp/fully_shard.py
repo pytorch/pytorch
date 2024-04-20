@@ -4,11 +4,10 @@ import typing_extensions
 
 import torch
 import torch.nn as nn
-
 from torch.distributed._composable import contract
 from torch.distributed._tensor import DeviceMesh, DTensor
 
-from ._fsdp_api import MixedPrecisionPolicy
+from ._fsdp_api import MixedPrecisionPolicy, OffloadPolicy
 from ._fsdp_common import FSDPMeshInfo, HSDPMeshInfo
 from ._fsdp_init import (
     _get_device_from_mesh,
@@ -31,6 +30,7 @@ def fully_shard(
     mesh: Optional[DeviceMesh] = None,
     reshard_after_forward: Union[bool, int] = True,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
+    offload_policy: OffloadPolicy = OffloadPolicy(),
 ):
     """
     Shard module parameters across data parallel workers.
@@ -91,6 +91,9 @@ def fully_shard(
         mp_policy (MixedPrecisionPolicy): This controls the mixed precision
             policy, which offers parameter/reduction mixed precision for this
             module. See :class:`MixedPrecisionPolicy` for details.
+        offload_policy (OffloadPolicy): This controls the offloading policy,
+            which offers parameter/gradient/optimizer state offloading. See
+            :class:`OffloadPolicy` and its subclasses for details.
     """
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
         raise ValueError(
@@ -116,7 +119,13 @@ def fully_shard(
     _move_states_to_device(params, buffers, device)
     if params:
         state._fsdp_param_group = FSDPParamGroup(
-            params, module, mesh_info, post_forward_mesh_info, device, mp_policy
+            params,
+            module,
+            mesh_info,
+            post_forward_mesh_info,
+            device,
+            mp_policy,
+            offload_policy,
         )
 
     # for dynamo
@@ -280,22 +289,18 @@ class FSDP:
                 module_info = fsdp_param._module_info
                 new_param = getattr(module_info.module, module_info.param_name)
                 if new_param is not fsdp_param.sharded_param:
-                    if torch.__future__.get_swap_module_params_on_conversion():
-                        raise AssertionError(
-                            "Expects swap_tensors to preserve object but got "
-                            f"{new_param} instead of {fsdp_param.sharded_param}"
-                        )
-                    else:
-                        raise AssertionError(
-                            "Please set torch.__future__.set_swap_module_params_on_conversion(True) "
-                            "to use _apply methods with FSDP"
-                        )
+                    raise AssertionError(
+                        "Expects swap_tensors to preserve object but got "
+                        f"{new_param} instead of {fsdp_param.sharded_param}"
+                    )
                 local_tensor = new_param._local_tensor
                 padded_sharded_size = fsdp_param.padded_sharded_param_size
                 if local_tensor.size() != padded_sharded_size:
                     padded_local_tensor = local_tensor.new_zeros(padded_sharded_size)
                     padded_local_tensor[: local_tensor.size(0)].copy_(local_tensor)
                     local_tensor = padded_local_tensor
+                if fsdp_param.pin_memory and not local_tensor.is_pinned():
+                    local_tensor = local_tensor.cpu().pin_memory()
                 fsdp_param._sharded_param_data = local_tensor.view(-1)
                 assert isinstance(fsdp_param.sharded_param, DTensor)  # mypy
                 fsdp_param.sharded_param._local_tensor = local_tensor[
