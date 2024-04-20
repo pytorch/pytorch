@@ -32,6 +32,8 @@
 #include <torch/csrc/profiler/api.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/utils/tensor_dtypes.h>
+#include <torch/csrc/autograd/utils/python_arg_parsing.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 
 #include <functional>
 #include <memory>
@@ -1183,6 +1185,20 @@ PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
   END_HANDLE_TH_ERRORS
 }
 
+PyObject* THPFunction_set_stream_override(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPFunction*)self)->cdata.lock();
+  static PythonArgParser parser({
+    "set_stream_override()",
+    "set_stream_override(*, int64_t device_id, int64_t stream_id)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+  cdata->set_stream_override(c10::Stream::unpack3(c10::StreamId(r.toInt64(1)), c10::DeviceIndex(r.toInt64(0)), c10::DeviceType::CUDA));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
@@ -1747,6 +1763,7 @@ static struct PyMethodDef THPFunction_methods[] = {
     {(char*)"name", THPFunction_name, METH_NOARGS, nullptr},
     {(char*)"_sequence_nr", THPFunction_sequence_nr, METH_NOARGS, nullptr},
     {(char*)"_set_sequence_nr", THPFunction_set_sequence_nr, METH_O, nullptr},
+    {(char*)"_set_stream_override", castPyCFunctionWithKeywords(THPFunction_set_stream_override), METH_VARARGS | METH_KEYWORDS, nullptr},
     {(char*)"maybe_clear_saved_tensors",
      THPFunction_maybe_clear_saved_tensors,
      METH_NOARGS,

@@ -7,6 +7,7 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/pycfunction_helpers.h>
 
 namespace torch::autograd {
 
@@ -32,24 +33,27 @@ PyObject* CppFunction_pynew(
   return obj.release();
 }
 
-#define THP_FUNCTION_DEFAULT_METHODS                                           \
-  {(char*)"_register_hook_dict",                                               \
-   THPCppFunction_register_hook_dict,                                          \
-   METH_O,                                                                     \
-   nullptr},                                                                   \
-      {(char*)"register_hook", THPCppFunction_register_hook, METH_O, nullptr}, \
-      {(char*)"register_prehook",                                              \
-       THPCppFunction_register_prehook,                                        \
-       METH_O,                                                                 \
-       nullptr},                                                               \
-      {(char*)"name", THPCppFunction_name, METH_NOARGS, nullptr},              \
-      {(char*)"_sequence_nr",                                                  \
-       THPCppFunction_sequence_nr,                                             \
-       METH_NOARGS,                                                            \
-       nullptr},                                                               \
-  {                                                                            \
-    (char*)"_set_sequence_nr", THPCppFunction_set_sequence_nr, METH_O, nullptr \
-  }
+#define THP_FUNCTION_DEFAULT_METHODS                                                         \
+  {(char*)"_register_hook_dict",                                                             \
+   THPCppFunction_register_hook_dict,                                                        \
+   METH_O,                                                                                   \
+   nullptr},                                                                                 \
+      {(char*)"register_hook", THPCppFunction_register_hook, METH_O, nullptr},               \
+      {(char*)"register_prehook",                                                            \
+       THPCppFunction_register_prehook,                                                      \
+       METH_O,                                                                               \
+       nullptr},                                                                             \
+      {(char*)"name", THPCppFunction_name, METH_NOARGS, nullptr},                            \
+      {(char*)"_sequence_nr",                                                                \
+       THPCppFunction_sequence_nr,                                                           \
+       METH_NOARGS,                                                                          \
+       nullptr},                                                                             \
+  {                                                                                          \
+    (char*)"_set_sequence_nr", THPCppFunction_set_sequence_nr, METH_O, nullptr               \
+  },                                                                                         \
+  {                                                                                          \
+    (char*)"_set_stream_override", castPyCFunctionWithKeywords(THPCppFunction_set_stream_override), METH_VARARGS | METH_KEYWORDS, nullptr \
+  }                                                                                          \
 
 #define THP_FUNCTION_DEFAULT_PROPERTIES                                   \
   {(char*)"next_functions",                                               \

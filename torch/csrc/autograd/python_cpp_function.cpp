@@ -17,6 +17,7 @@
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
+#include <torch/csrc/autograd/utils/python_arg_parsing.h>
 
 using namespace torch::autograd;
 
@@ -208,6 +209,21 @@ PyObject* THPCppFunction_set_sequence_nr(
   HANDLE_TH_ERRORS
   auto& fn = *((THPCppFunction*)self)->cdata;
   fn.set_sequence_nr(THPUtils_unpackUInt64(sequence_nr));
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject* THPCppFunction_set_stream_override(PyObject* self, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS;
+  auto cdata = ((THPCppFunction*)self)->cdata;
+
+  static PythonArgParser parser({
+    "set_stream_override()",
+    "set_stream_override(*, int64_t device_id, int64_t stream_id)",
+  });
+  ParsedArgs<2> parsed_args;
+  auto r = parser.parse(self, args, kwargs, parsed_args);
+  cdata->set_stream_override(c10::Stream::unpack3(c10::StreamId(r.toInt64(1)), c10::DeviceIndex(r.toInt64(0)), c10::DeviceType::CUDA));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }

@@ -240,6 +240,9 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
    * they may have different streams.
    */
   c10::optional<c10::Stream> stream() {
+    if (stream_override_.has_value()) {
+      return stream_override_.value();
+    }
     auto opt_device_type = at::getAccelerator();
     if (!opt_device_type.has_value()) {
       return c10::nullopt;
@@ -587,6 +590,10 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
         std::string("apply_with_saved not implemented: ") + name());
   }
 
+  void set_stream_override(c10::Stream stream) {
+    stream_override_ = stream;
+  }
+
  protected:
   /// Performs the `Node`'s actual operation.
   virtual variable_list apply(variable_list&& inputs) = 0;
@@ -674,6 +681,7 @@ struct TORCH_API Node : std::enable_shared_from_this<Node> {
       retains_grad_hooks_;
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
   at::SmallVector<InputMetadata, 2> input_metadata_;
+  c10::optional<c10::Stream> stream_override_;
 };
 
 /// See Node::is_traceable() for definition.
