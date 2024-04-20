@@ -6,10 +6,10 @@ from typing import Any, List, Optional, TYPE_CHECKING
 import sympy
 
 from torch._inductor.codecache import get_cpp_wrapper_cubin_path_name
+from torch._inductor.runtime.triton_heuristics import grid as default_grid
 
 from .. import config
 from ..codecache import CudaKernelParamCache
-from ..triton_heuristics import grid as default_grid
 from ..virtualized import V
 from .cpp_wrapper_cpu import CppWrapperCpu
 from .wrapper import SymbolicCallArg

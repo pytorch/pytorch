@@ -34,6 +34,7 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import preserve_rng_state
 
 from torch._inductor.metrics import is_metric_table_enabled, log_kernel_metadata
+from torch._inductor.runtime.triton_heuristics import AutotuneHint
 from torch._prims_common import is_integer_dtype
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.value_ranges import ValueRanges
@@ -46,7 +47,6 @@ from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
-from ..triton_heuristics import AutotuneHint
 from ..utils import (
     cache_on_self,
     do_bench,
@@ -120,10 +120,14 @@ def gen_common_triton_imports():
 
     imports.splice(
         """
-        from torch._inductor import triton_helpers, triton_heuristics
+        from torch._inductor.runtime import (
+            triton_helpers,
+            triton_heuristics,
+            libdevice,
+            tl_math,
+            AutotuneHint,
+        )
         from torch._inductor.ir import ReductionHint, TileHint
-        from torch._inductor.triton_helpers import libdevice, math as tl_math
-        from torch._inductor.triton_heuristics import AutotuneHint
         from torch._inductor.utils import instance_descriptor
         """
     )
@@ -2652,7 +2656,7 @@ class TritonKernel(Kernel):
             from torch._dynamo.testing import rand_strided
             {}
             import torch
-            from torch._inductor.triton_heuristics import grid, split_scan_grid
+            from torch._inductor.runtime.triton_heuristics import grid, split_scan_grid
         """.format(
                 V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
             )
