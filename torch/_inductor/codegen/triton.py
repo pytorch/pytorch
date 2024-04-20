@@ -44,8 +44,9 @@ from ..._dynamo.utils import counters
 from .. import config, ir, scheduler
 from ..codecache import code_hash, get_path, PyCodeCache
 from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
-from ..ir import IRNode, ReductionHint, TritonTemplateBuffer
+from ..ir import IRNode, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
+from ..runtime.hints import ReductionHint
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_on_self,
@@ -121,14 +122,15 @@ def gen_common_triton_imports():
     imports.splice(
         """
         from torch._inductor.runtime import (
+            AutotuneHint,
+            instance_descriptor,
+            libdevice,
+            ReductionHint,
+            TileHint,
+            tl_math,
             triton_helpers,
             triton_heuristics,
-            libdevice,
-            tl_math,
-            AutotuneHint,
         )
-        from torch._inductor.ir import ReductionHint, TileHint
-        from torch._inductor.utils import instance_descriptor
         """
     )
     return imports.getvalue()

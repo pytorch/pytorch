@@ -25,7 +25,7 @@ from torch._inductor import config
 from torch._inductor.codecache import cache_dir, CudaKernelParamCache
 from torch._inductor.coordinate_descent_tuner import CoordescTuner
 
-from torch._inductor.ir import ReductionHint, TileHint
+from torch._inductor.runtime.hints import ReductionHint, TileHint
 from torch._inductor.utils import (
     ceildiv,
     conditional_product,
