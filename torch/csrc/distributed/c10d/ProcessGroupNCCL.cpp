@@ -732,8 +732,6 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   this->setGroupName(options_->group_name);
   logPrefix_ = createLogPrefix();
   blockingWait_ = getCvarBool(TORCH_NCCL_BLOCKING_WAIT, false);
-  abortInDestroyProcessGroup_ =
-      getCvarBool(TORCH_NCCL_ABORT_IN_DESTROY_PG, false);
   asyncErrorHandling_ = static_cast<ErrorHandlingMode>(
       getCvarInt(TORCH_NCCL_ASYNC_ERROR_HANDLING, 3 /*SkipCleanUp*/));
   desyncDebug_ = getCvarBool(TORCH_NCCL_DESYNC_DEBUG, false) ||
@@ -1109,17 +1107,13 @@ ProcessGroupNCCL::~ProcessGroupNCCL() {
   LOG(INFO) << logPrefix() << "ProcessGroupNCCL destructor entered.";
 
   if (!terminateProcessGroup_.load()) {
-    // Only if TORCH_NCCL_ABORT_IN_DESTROY_PG is enabled, terminateProcessGroup_
-    // will be set to true through destroy_process_group
-    if (abortInDestroyProcessGroup_) {
-      LOG(WARNING) << c10::str(
-          "WARNING: process group has NOT been destroyed before it is being destructed. ",
-          "On normal program exit, the application should call destroy_process_group to ",
-          "ensure that any pending NCCL data transfers have finished in this process. "
-          "In rare cases this process can exit before this point and block the progress of "
-          "another member of the process group. This constraint has always been present, "
-          " but this warning has only been added since PyTorch 2.3");
-    }
+    LOG(WARNING) << c10::str(
+        "WARNING: process group has NOT been destroyed before it is being destructed. ",
+        "On normal program exit, the application should call destroy_process_group to ",
+        "ensure that any pending NCCL data transfers have finished in this process. "
+        "In rare cases this process can exit before this point and block the progress of "
+        "another member of the process group. This constraint has always been present, "
+        " but this warning has only been added since PyTorch 2.4");
     // If user haven't explicitly destroy/shutdown process group, destructor
     // needs to do so
     shutdown();
@@ -1959,10 +1953,8 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
   // example: Using the batch_isend_irecv to send a tensor to a target process.
   // On the sender side, the corresponding underlying NCCL calls will look like
   //   ncclGroupStart() // This is in batch_isend_irecv
-  //   ncclGroupStart() // This is [Note 1]
   //   ncclCommInitRank() // Inside NCCLComm::create
   //   ncclSend()
-  //   ncclGroupEnd() // This is [Note 2]
   //   ncclGroupEnd() // This is in batch_isend_irecv
   // With this pattern, the nccl communicator will be created in the last
   // ncclGroupEnd which means when ncclSend is processed, the passed
@@ -1975,9 +1967,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     // comms have not been initiated yet, so can only check in blocking-way
     C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
   }
-
-  // [Note 1] Create the NCCL communicators for each GPU
-  C10D_NCCL_CHECK(ncclGroupStart(), c10::nullopt);
 
   // GPU world size and GPU rank
   int numRanks, rank;
@@ -2038,19 +2027,6 @@ std::shared_ptr<NCCLComm> ProcessGroupNCCL::getNCCLComm(
     std::lock_guard<std::mutex> lock(mutex_);
     inInitializationCommMap_.emplace(deviceKey, ncclComm);
   }
-
-  // [Note 2 ]
-#ifndef NCCL_HAS_COMM_NONBLOCKING
-  C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
-#else
-  if (nccl_use_nonblocking()) {
-    // If we use nonblocking mode, allow communicators to be
-    // uninitialized/ncclInProgress until the first communication
-    C10D_NCCL_CHECK_NONBLOCKING(ncclGroupEnd(), c10::nullopt);
-  } else {
-    C10D_NCCL_CHECK(ncclGroupEnd(), c10::nullopt);
-  }
-#endif
 
   NCCLTraceBuffer::get()->record_pg_ranks(
       std::make_tuple(pg_name_, pg_desc_), groupRanks());

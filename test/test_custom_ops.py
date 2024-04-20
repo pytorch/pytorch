@@ -332,19 +332,11 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            if op.op in (
-                numpy_nonzero._opoverload,
-                torch.ops._torch_testing.numpy_nms,
-            ):
-                ctx = self.assertRaisesRegex(optests.OpCheckError, "failed with")
-            else:
-                ctx = contextlib.nullcontext()
-            with ctx:
-                optests.opcheck(
-                    op.op,
-                    args,
-                    kwargs,
-                )
+            optests.opcheck(
+                op.op,
+                args,
+                kwargs,
+            )
 
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
@@ -746,7 +738,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         )
 
     def test_supported_return_types_single_return(self):
-        for typ in torch._custom_op.impl.SUPPORTED_RETURN_TYPES:
+        for typ in torch._library.infer_schema.SUPPORTED_RETURN_TYPES:
             for example in self._generate_examples(typ):
                 try:
 
@@ -765,7 +757,7 @@ class TestCustomOp(CustomOpTestCaseBase):
                     custom_ops._destroy(f"{self.test_ns}::foo")
 
     def test_supported_return_types_multi_return(self):
-        for typ in torch._custom_op.impl.SUPPORTED_RETURN_TYPES:
+        for typ in torch._library.infer_schema.SUPPORTED_RETURN_TYPES:
             for example in self._generate_examples(typ):
                 try:
 
@@ -785,7 +777,7 @@ class TestCustomOp(CustomOpTestCaseBase):
                     custom_ops._destroy(f"{self.test_ns}::foo")
 
     def test_supported_param_types(self):
-        for typ in torch._custom_op.impl.SUPPORTED_PARAM_TYPES:
+        for typ in torch._library.infer_schema.SUPPORTED_PARAM_TYPES:
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor, y: typ) -> Tensor:
@@ -2123,7 +2115,7 @@ class TestCustomOpAPI(TestCase):
 
         cpu_called = False
 
-        @add.register_impl("cpu")
+        @add.register_kernel("cpu")
         def _(x, y):
             nonlocal cpu_called
             cpu_called = True
@@ -2134,6 +2126,50 @@ class TestCustomOpAPI(TestCase):
         z = add(x, y)
         self.assertEqual(z, x + y)
         self.assertTrue(cpu_called)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_manual_schema(self):
+        @torch.library.custom_op(
+            "_torch_testing::add",
+            mutates_args=(),
+            schema="(Tensor x, float y) -> Tensor",
+        )
+        def add(x, y):
+            x_np = x.numpy(force=True)
+            out_np = x_np + y
+            return torch.from_numpy(out_np).to(x.device)
+
+        x = torch.randn(3)
+        y = 3.14
+        z = add(x, y)
+        self.assertEqual(z, x + y)
+
+        @torch.library.custom_op(
+            "_torch_testing::sin_",
+            mutates_args=["x"],
+            schema="(Tensor(a!) x) -> ()",
+        )
+        def sin_(x):
+            x_np = x.numpy()
+            np.sin(x_np, out=x_np)
+
+        x = torch.randn(3)
+        expected = x.sin()
+        sin_(x)
+        self.assertEqual(x, expected)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_manual_schema_error(self):
+        with self.assertRaisesRegex(ValueError, "the op mutates {'x'}"):
+
+            @torch.library.custom_op(
+                "_torch_testing::sin_",
+                mutates_args=(),
+                schema="(Tensor(a!) x) -> ()",
+            )
+            def sin_(x):
+                x_np = x.numpy()
+                np.sin(x_np, out=x_np)
 
     def test_supports_tensorlist(self):
         @torch._library.autograd.supports_tensorlist
@@ -2284,6 +2320,232 @@ class TestCustomOpAPI(TestCase):
             self.assertGreater(after, prev)
 
     @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_fake(self):
+        for mode in ["function", "qualname", "opoverload"]:
+
+            @torch.library.custom_op("_torch_testing::add", mutates_args=())
+            def add(x: Tensor, y: float) -> Tensor:
+                x_np = x.cpu().numpy()
+                out_np = x_np + y
+                return torch.from_numpy(out_np).to(x.device)
+
+            called = False
+
+            if mode == "function":
+                dec = torch.library.register_fake(add)
+            elif mode == "qualname":
+                dec = torch.library.register_fake("_torch_testing::add")
+            elif mode == "opoverload":
+                dec = torch.library.register_fake(torch.ops._torch_testing.add.default)
+
+            @dec
+            def _(x, y):
+                nonlocal called
+                called = True
+                return torch.empty_like(x)
+
+            with torch._subclasses.fake_tensor.FakeTensorMode():
+                x = torch.randn(3)
+                y = 3.14
+                z = add(x, y)
+                self.assertEqual(z.shape, x.shape)
+                self.assertTrue(called)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_kernel(self):
+        modes = ["function", "qualname", "opoverload"]
+        calls = ["decorator", "function"]
+        device_types_options = ["cpu", None]
+
+        for mode, call, device_types in itertools.product(
+            modes, calls, device_types_options
+        ):
+
+            @torch.library.custom_op(
+                "_torch_testing::add", mutates_args=(), device_types="cuda"
+            )
+            def add(x: Tensor, y: float) -> Tensor:
+                x_np = x.cpu().numpy()
+                out_np = x_np + y
+                return torch.from_numpy(out_np).to(x.device)
+
+            if mode == "function":
+                op = add
+            elif mode == "qualname":
+                op = "_torch_testing::add"
+            else:
+                assert mode == "opoverload"
+                op = torch.ops._torch_testing.add.default
+
+            called = False
+
+            if call == "decorator":
+
+                @torch.library.register_kernel(op, device_types)
+                def _(x, y):
+                    nonlocal called
+                    called = True
+                    x_np = x.numpy()
+                    out_np = x_np + y
+                    return torch.from_numpy(out_np)
+
+            else:
+                assert call == "function"
+
+                def add_cpu(x, y):
+                    nonlocal called
+                    called = True
+                    x_np = x.numpy()
+                    out_np = x_np + y
+                    return torch.from_numpy(out_np)
+
+                torch.library.register_kernel(op, device_types, add_cpu)
+
+            x = torch.randn(3)
+            y = 3.14
+            z = add(x, y)
+            self.assertEqual(z, x + y)
+            self.assertTrue(called)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_kernel_low_level(self):
+        modes = ["qualname", "opoverload"]
+        calls = ["decorator", "function"]
+        device_types_options = [("cpu", "cuda"), "cpu", None]
+
+        for mode, call, device_types in itertools.product(
+            modes, calls, device_types_options
+        ):
+            with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+                lib.define("add9(Tensor x, float y) -> Tensor")
+
+                if mode == "qualname":
+                    op = "_torch_testing::add9"
+                else:
+                    assert mode == "opoverload"
+                    op = torch.ops._torch_testing.add9.default
+
+                called = False
+
+                if call == "decorator":
+
+                    @torch.library.register_kernel(op, device_types, lib=lib)
+                    def _(x, y):
+                        nonlocal called
+                        called = True
+                        x_np = x.numpy()
+                        out_np = x_np + y
+                        return torch.from_numpy(out_np)
+
+                else:
+                    assert call == "function"
+
+                    def add_cpu(x, y):
+                        nonlocal called
+                        called = True
+                        x_np = x.numpy()
+                        out_np = x_np + y
+                        return torch.from_numpy(out_np)
+
+                    torch.library.register_kernel(op, device_types, add_cpu, lib=lib)
+
+                x = torch.randn(3)
+                y = 3.14
+                z = torch.ops._torch_testing.add9.default(x, y)
+                self.assertEqual(z, x + y)
+                self.assertTrue(called)
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_autograd(self):
+        for mode in ["function", "qualname", "opoverload"]:
+
+            @torch.library.custom_op("mylib::numpy_sin", mutates_args=())
+            def numpy_sin(x: Tensor) -> Tensor:
+                x_np = x.cpu().numpy()
+                y_np = np.sin(x_np)
+                return torch.from_numpy(y_np).to(device=x.device)
+
+            def setup_context(ctx, inputs, output) -> Tensor:
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            called = False
+
+            def backward(ctx, grad):
+                nonlocal called
+                called = True
+                (x,) = ctx.saved_tensors
+                return grad * x.cos()
+
+            if mode == "function":
+                torch.library.register_autograd(
+                    numpy_sin, backward, setup_context=setup_context
+                )
+            elif mode == "qualname":
+                torch.library.register_autograd(
+                    "mylib::numpy_sin", backward, setup_context=setup_context
+                )
+            elif mode == "opoverload":
+                torch.library.register_autograd(
+                    torch.ops.mylib.numpy_sin.default,
+                    backward,
+                    setup_context=setup_context,
+                )
+
+            x = torch.randn(3, requires_grad=True)
+            y = numpy_sin(x)
+            (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
+            self.assertTrue(called)
+            self.assertEqual(grad_x, x.cos())
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_library_register_autograd_low_level(self):
+        for mode in ["qualname", "opoverload"]:
+            with torch.library._scoped_library("_torch_testing", "FRAGMENT") as lib:
+                lib.define("sin5(Tensor x) -> Tensor")
+
+                def numpy_sin(x: Tensor) -> Tensor:
+                    x_np = x.cpu().detach().numpy()
+                    y_np = np.sin(x_np)
+                    return torch.from_numpy(y_np).to(device=x.device)
+
+                def setup_context(ctx, inputs, output) -> Tensor:
+                    (x,) = inputs
+                    ctx.save_for_backward(x)
+
+                called = False
+
+                def backward(ctx, grad):
+                    nonlocal called
+                    called = True
+                    (x,) = ctx.saved_tensors
+                    return grad * x.cos()
+
+                lib.impl("sin5", numpy_sin, "CPU")
+
+                called = False
+
+                if mode == "qualname":
+                    torch.library.register_autograd(
+                        "_torch_testing::sin5",
+                        backward,
+                        setup_context=setup_context,
+                        lib=lib,
+                    )
+                elif mode == "opoverload":
+                    torch.library.register_autograd(
+                        torch.ops._torch_testing.sin5.default,
+                        backward,
+                        setup_context=setup_context,
+                        lib=lib,
+                    )
+                x = torch.randn(3, requires_grad=True)
+                y = torch.ops._torch_testing.sin5(x)
+                (grad_x,) = torch.autograd.grad(y, x, torch.ones_like(y))
+                self.assertTrue(called)
+                self.assertEqual(grad_x, x.cos())
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
     def test_fake(self):
         @torch.library.custom_op("_torch_testing::add", mutates_args=())
         def add(x: Tensor, y: float) -> Tensor:
@@ -2420,7 +2682,7 @@ Please use `add.register_fake` to add an fake impl.""",
             out_np = np.sin(x_np)
             return torch.from_numpy(out_np)
 
-        @f.register_impl("cuda")
+        @f.register_kernel("cuda")
         def _(x: Tensor) -> Tensor:
             nonlocal cuda_call_count
             cuda_call_count += 1
@@ -2457,30 +2719,6 @@ Please use `add.register_fake` to add an fake impl.""",
         x = x.cuda()
         y = f(x)
         self.assertEqual(y, x.sin())
-
-    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
-    def test_overloading(self):
-        called_f = 0
-        called_f1 = 0
-
-        @torch.library.custom_op("_torch_testing::f", mutates_args=())
-        def f(x: Tensor) -> Tensor:
-            nonlocal called_f
-            called_f += 1
-            return x.clone()
-
-        x = torch.randn(2, 3)
-        torch.ops._torch_testing.f(x)
-        self.assertEqual(called_f, 1)
-
-        @torch.library.custom_op("_torch_testing::f.overload", mutates_args=())
-        def f1(x: Tensor, y: Tensor) -> Tensor:
-            nonlocal called_f1
-            called_f1 += 1
-            return x.clone()
-
-        torch.ops._torch_testing.f(x, x)
-        self.assertEqual(called_f1, 1)
 
     def test_disallows_output_aliasing(self):
         @torch.library.custom_op("_torch_testing::f", mutates_args=())
@@ -2531,6 +2769,7 @@ optests.generate_opcheck_tests(
     additional_decorators={
         "test_pt2_compliant_tag_mini_op_test_no_abstract": [unittest.expectedFailure]
     },
+    test_utils=optests.generate_tests.DEPRECATED_DEFAULT_TEST_UTILS,
 )
 
 optests.generate_opcheck_tests(
@@ -2540,6 +2779,7 @@ optests.generate_opcheck_tests(
         os.path.dirname(__file__),
         "minioptest_failures_dict.json",
     ),
+    test_utils=optests.generate_tests.DEPRECATED_DEFAULT_TEST_UTILS,
 )
 
 
@@ -2632,7 +2872,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "MiniOpTest.test_aot_dispatch_static__test_delayed_error": {
+                "MiniOpTest.test_aot_dispatch_dynamic__test_delayed_error": {
                     "comment": "",
                     "status": "success",
                 }
@@ -2662,7 +2902,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "MiniOpTest.test_aot_dispatch_static__test_delayed_error_nopenopenope": {
+                "MiniOpTest.test_aot_dispatch_dynamic__test_delayed_error_nopenopenope": {
                     "comment": "",
                     "status": "xfail",
                 },
@@ -2693,7 +2933,6 @@ opcheck(op, args, kwargs, test_utils="test_schema")
                 "test_schema": "SUCCESS",
                 "test_autograd_registration": "SUCCESS",
                 "test_faketensor": "SUCCESS",
-                "test_aot_dispatch_static": "SUCCESS",
                 "test_aot_dispatch_dynamic": "SUCCESS",
             },
         )
@@ -2742,7 +2981,6 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             {
                 "test_autograd_registration": "SUCCESS",
                 "test_faketensor": "SUCCESS",
-                "test_aot_dispatch_static": "SUCCESS",
                 "test_aot_dispatch_dynamic": "SUCCESS",
             },
         )
