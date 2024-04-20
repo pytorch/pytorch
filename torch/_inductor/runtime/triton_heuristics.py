@@ -20,14 +20,13 @@ import torch
 import torch.autograd.profiler as autograd_profiler
 from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
 from torch._dynamo.utils import dynamo_timed, get_first_attr
-from torch.utils._triton import has_triton_package
 
-from . import config
-from .codecache import cache_dir, CudaKernelParamCache
+from torch._inductor import config
+
 from .coordinate_descent_tuner import CoordescTuner
-
-from .ir import ReductionHint, TileHint
-from .utils import (
+from .hints import ReductionHint, TileHint
+from .runtime_utils import (
+    cache_dir,
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
@@ -38,11 +37,12 @@ from .utils import (
     triton_config_to_hashable,
 )
 
-
-log = logging.getLogger(__name__)
-
-if has_triton_package():
+try:
     import triton
+except ImportError:
+    triton = None
+
+if triton is not None:
     from triton import Config
     from triton.runtime.autotuner import OutOfResources
     from triton.runtime.jit import KernelInterface
@@ -53,13 +53,13 @@ if has_triton_package():
         ASTSource = None
 else:
     Config = object
-    triton = None
     KernelInterface = object
     OutOfResources = object
     ASTSource = None
 
 
 _NUM_THREADS_PER_WARP = 32
+log = logging.getLogger(__name__)
 
 
 class HeuristicType(Enum):
@@ -614,7 +614,7 @@ class CachingAutotuner(KernelInterface):
         return do_bench(kernel_call, rep=40, fast_flush=True)
 
     def clone_args(self, *args, **kwargs) -> Tuple[List[Any], Dict[str, Any]]:
-        from .compile_fx import clone_preserve_strides
+        from ..compile_fx import clone_preserve_strides
 
         # clone inplace buffers to avoid autotune contaminating them if
         # the kernel does in-place stores. avoid cloning other buffers because
@@ -698,6 +698,8 @@ class CachingAutotuner(KernelInterface):
             # User defined triton kernels will have arbitrary kwarg names
             "meta": launcher.config.kwargs,
         }
+
+        from torch._inductor.codecache import CudaKernelParamCache
 
         if torch.version.hip is None:
             CudaKernelParamCache.set(key, params, launcher.bin.asm["cubin"])
