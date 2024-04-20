@@ -977,19 +977,20 @@ def trace(
     export_example_inputs = process_trace_inputs_for_export(example_inputs)
     traced_func = _trace_impl(func, example_inputs, optimize, check_trace, check_inputs, check_tolerance, strict, _force_outplace, _module_class, _compilation_unit, example_kwarg_inputs, _store_inputs)
 
-    class WrapperMod(torch.nn.Module):
-        def __init__(self, fn):
-            super().__init__()
-            self.fn = fn
-        def forward(self, *args, **kwargs):
-            return self.fn(*args, **kwargs)
-
     if isinstance(traced_func, torch._C.ScriptModule):
-        traced_mod = traced_func
-    else:
-        traced_mod = WrapperMod(traced_func)
+        try:
+            exported = torch.export.export(traced_func, export_example_inputs, example_kwarg_inputs, strict=False).module()
+        except Exception as e:
+            raise RuntimeError(f"Failed to export {func} with error message:\n{e}")
 
-    return torch.export.export(traced_mod, export_example_inputs, example_kwarg_inputs, strict=False).module()
+        result_exported = exported(*export_example_inputs, **example_kwarg_inputs)
+        result_traced = traced_func(*export_example_inputs, **example_kwarg_inputs)
+        if not torch.allclose(result_exported, result_traced):
+            raise RuntimeError("Accuracy error")
+    else:
+        raise RuntimeError("Export doesn't work on ScriptFunction/ScriptMethod")
+
+    return traced_func
 
 _trace_module_map: Optional[Dict[Any, Any]] = None
 
