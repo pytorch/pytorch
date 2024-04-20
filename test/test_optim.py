@@ -22,11 +22,18 @@ from torch.testing._internal.common_optimizers import (
     optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS, TEST_WITH_ROCM, onlyNativeDeviceTypes)
-from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase, TEST_WITH_TORCHDYNAMO
 from torch.testing._internal.common_cuda import _create_scaling_case
 from torch.testing._internal.common_dtype import floating_types_and
 
 FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
+
+def with_inductor_if_compiling(fn):
+    """ For peak memory tests, use inductor instead of eager backend """
+    if TEST_WITH_TORCHDYNAMO:
+        return torch.compile(fn, dynamic=False)
+    else:
+        return fn
 
 
 def rosenbrock(tensor):
@@ -794,6 +801,7 @@ class TestOptimRenewed(TestCase):
 
     @onlyCUDA
     @optims([optim for optim in optim_db if "foreach" in optim.supported_impls], dtypes=[torch.float32])
+    @with_inductor_if_compiling
     def test_peak_memory_foreach(self, device, dtype, optim_info):
         nparams = 10
         optim_inputs = optim_info.optim_inputs_func(device=device)
@@ -826,7 +834,9 @@ class TestOptimRenewed(TestCase):
             st_max_mem, mt_max_mem = max_mems
             intermediate_size = nparams * param.nelement() * param.element_size()
             nintermediates = 1  # we expect a budget of 1 intermediate most of the time
-            if kwargs.get('capturable') or optim_cls.__name__ in ["Adadelta", "ASGD", "RAdam"]:
+
+            # Check the param group directly to handle if the compiler set capturable
+            if kwargs.get("capturable", False) or optim_cls.__name__ in ["Adadelta", "ASGD", "RAdam"]:
                 # with capturable in Adam(W), we have 2 extra intermediates for the bias_corrections
                 # with Adadelta, we have 2 extra for (acc_delta + eps) and (square_avg + eps)
                 # ASGD allocates axs, 2x mus, 2x etas, and grads at the same time
