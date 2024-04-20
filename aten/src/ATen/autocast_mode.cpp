@@ -45,6 +45,11 @@ std::mutex cached_casts_mutex;
 // it calls clear_cache() to ensure cached Tensors don't leak outside the autocasting region.
 thread_local int nesting = 0;
 
+// The order of this array MUST exactly match the definition order of DeviceType
+// in c10/core/DeviceType.h.
+static_assert(
+    at::COMPILE_TIME_MAX_DEVICE_TYPES == 21,
+    "The definition of the default autocast data type per device backend doesn't match with the definition of the device type.");
 thread_local std::array<at::ScalarType, at::COMPILE_TIME_MAX_DEVICE_TYPES>
     autocast_dtype = {
         at::kBFloat16, // CPU
