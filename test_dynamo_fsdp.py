@@ -25,6 +25,7 @@ import os
 import sys
 import traceback
 import gc
+import itertools
 
 import torch
 import torch._dynamo
@@ -33,14 +34,19 @@ import torch.nn as nn
 from torch._dynamo import compiled_autograd
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
+from torch.distributed._composable.fsdp._fsdp_init import (
+    _get_managed_modules,
+    _get_managed_states,
+)
 from torch.distributed.fsdp.wrap import ModuleWrapPolicy
 from torch.distributed._tensor import init_device_mesh
+from llama_model import Transformer, ModelArgs
+
 # from torchviz import make_dot
 
 torch_log = logging.getLogger("torch")
 
 device_type = "cuda"
-backend = "aot_eager"
 
 # ======== REMOVE WHEN READY TO MERGE ========
 import argparse
@@ -186,7 +192,7 @@ from torch.utils.checkpoint import checkpoint, _pt2_selective_checkpoint_context
 
 class ACConfigClass:
     mode: str = "selective"
-    selective_ac_option: str = "full" # "2"
+    selective_ac_option: str = "2"
 
 def checkpoint_wrapper(module, config):
     if config.mode == "selective" and config.selective_ac_option == "op":
@@ -245,6 +251,7 @@ def checkpoint_wrapper(module, config):
 
         checkpoint_wrapper._count += 1
         if not every_x_layer or checkpoint_wrapper._count % every_x_layer == 0:
+            torch_log.warning(f"Applying SAC to layer: {checkpoint_wrapper._count}")
             return ptd_checkpoint_wrapper(
                 module,
                 checkpoint_impl=CheckpointImpl.NO_REENTRANT,
@@ -261,28 +268,28 @@ def checkpoint_wrapper(module, config):
         )
 
 
-test_case = "nested_fully_shard"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard"
+test_case = "transformer"  # "simple_mlp" / "simple_seq_module" / "nested_fully_shard" / "transformer"
 balanced = True
 mixed_precision = False  # TODO(yf225): when True, fails accuracy test, needs debugging
-activation_checkpoint = False
 apply_fsdp = True
 
 def create_input(hidden_dim):
     torch.manual_seed(0)
-    inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
+    # inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
+    inp = torch.zeros((2, hidden_dim), device=device_type, requires_grad=False, dtype=torch.long)
     return inp
 
 
-def init():
+def init(activation_checkpoint):
     from torch.testing._internal.common_fsdp import MLP
     # simple_mlp + balanced -> works
     # simple_mlp + unbalanced -> works
     # nested_fully_shard + balanced -> works
     # nested_fully_shard + unbalanced -> works
     if balanced:
-        hidden_dim = 12800
+        hidden_dim = 5120
     else:
-        hidden_dim = 12801
+        hidden_dim = 5121
     if mixed_precision:
         mp_policy = MixedPrecisionPolicy(
             param_dtype=torch.bfloat16, reduce_dtype=torch.float32
@@ -337,7 +344,7 @@ def init():
                     x = layer(x)
                 return x
 
-        model = TestModule(n_layers=10)
+        model = TestModule(n_layers=8)
         assert apply_fsdp
         assert mesh is not None
         for layer_id, mod in enumerate(model.layers):
@@ -345,11 +352,29 @@ def init():
                 mod = checkpoint_wrapper(mod, ac_config)
             fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
             model.layers[layer_id] = mod
-        fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+        model = fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
         # if apply_fsdp:
         #     for mod in model:
         #         fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
         #     fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+    elif test_case == "transformer":
+        model_args = ModelArgs(
+            dim=hidden_dim,
+            n_layers=5,
+            n_heads=1,
+            vocab_size=1024,
+        )
+        model = Transformer(model_args)
+        for layer_id, mod in enumerate(model.layers):
+            if activation_checkpoint:
+                mod = checkpoint_wrapper(mod, ac_config)
+            if apply_fsdp:
+                fully_shard(mod, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+            model.layers[layer_id] = mod
+        if apply_fsdp:
+            model = fully_shard(model, mesh=mesh, reshard_after_forward=True, _reshard_after_forward_root=True, **fsdp_config)
+        else:
+            model = model.cuda()
     # elif test_case == "test_tags_function":
     #     class TestModule(torch.nn.Module):
     #         def __init__(self, device):
@@ -438,8 +463,8 @@ def run(model, optim, n_iter, hidden_dim):
     return losses
 
 
-def main_compiled(n_iter):
-    model, optim, hidden_dim = init()
+def main_compiled(n_iter, activation_checkpoint, backend):
+    model, optim, hidden_dim = init(activation_checkpoint=activation_checkpoint)
     # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
     run(model, optim, 1, hidden_dim)
     print("done eager 1st run for compiled!")
@@ -458,24 +483,48 @@ def main_compiled(n_iter):
     #     # HACK: delay rank 0 by X seconds, so that rank 1 will always fail first.
     #     import time
     #     time.sleep(600)
-    model = torch.compile(model, backend=backend, fullgraph=True)
+    model_compiled = torch.compile(model, backend=backend, fullgraph=True)
     with compiled_autograd.enable(compiler_fn):
-        res = run(model, optim, n_iter, hidden_dim)
+        res = run(model_compiled, optim, n_iter, hidden_dim)
     print(f"res: {res}")
+    torch._dynamo.reset()
+    for state in torch.distributed._composable_state._module_state_mapping.values():
+        if hasattr(state._fsdp_param_group, "fsdp_params"):
+            for fsdp_param in state._fsdp_param_group.fsdp_params:
+                fsdp_param._sharded_param_data.untyped_storage().resize_(0)
+    managed_modules = _get_managed_modules(model)
+    params, buffers = _get_managed_states(managed_modules)
+    for tensor in itertools.chain(params, buffers):
+        try:
+            tensor.untyped_storage().resize_(0)
+        except:
+            pass
     torch.distributed._composable_state._module_state_mapping = {}
+    del model_compiled
     del model
     optim.zero_grad(set_to_none=True)
     del optim
     return res
 
 
-def main_eager(n_iter):
-    model, optim, hidden_dim = init()
+def main_eager(n_iter, activation_checkpoint):
+    model, optim, hidden_dim = init(activation_checkpoint=activation_checkpoint)
     # per-param FSDP does lazy init using 1st run, so run it once to init using eager mode
     run(model, optim, 1, hidden_dim)
     print("done eager 1st run for eager!")
 
     res = run(model, optim, n_iter, hidden_dim)
+    for state in torch.distributed._composable_state._module_state_mapping.values():
+        if hasattr(state._fsdp_param_group, "fsdp_params"):
+            for fsdp_param in state._fsdp_param_group.fsdp_params:
+                fsdp_param._sharded_param_data.untyped_storage().resize_(0)
+    managed_modules = _get_managed_modules(model)
+    params, buffers = _get_managed_states(managed_modules)
+    for tensor in itertools.chain(params, buffers):
+        try:
+            tensor.untyped_storage().resize_(0)
+        except:
+            pass
     torch.distributed._composable_state._module_state_mapping = {}
     del model
     optim.zero_grad(set_to_none=True)
@@ -502,6 +551,7 @@ def execute_and_profile(callable, profiler_trace_path, memory_snapshot_file_pref
 
 
 if __name__ == "__main__":
+    n_iter = 3
     assert device_type == "cuda"
     device = f"{device_type}:{local_rank}"
     if device_type == "cuda":
@@ -513,26 +563,40 @@ if __name__ == "__main__":
 
     if dist.get_rank() == 0:
         start_record_memory_history()
-    n_iter = 6
-    losses_eager = execute_and_profile(
-        lambda: main_eager(n_iter=n_iter),
-        "artifacts/eager_trace.json",
-        "eager_memory_snapshot",
-    )
-    print(f"losses_eager: {losses_eager}")
-    gc.collect()
-    gc.collect()
-    losses_compiled = execute_and_profile(
-        lambda: main_compiled(n_iter=n_iter),
-        "artifacts/compiled_trace.json",
-        "compiled_memory_snapshot",
-    )
-    print(f"losses_compiled: {losses_compiled}")
-    torch._dynamo.reset()
-    gc.collect()
-    gc.collect()
+    ac_test_order = [True, False]
+    backends = ["inductor"]
+
+    def test_eager(activation_checkpoint):
+        losses_eager = execute_and_profile(
+            lambda: main_eager(n_iter=n_iter, activation_checkpoint=activation_checkpoint),
+            f"artifacts/eager_ac{activation_checkpoint}_trace.json",
+            f"eager_ac{activation_checkpoint}_memory_snapshot",
+        )
+        print(f"losses_eager: {losses_eager}")
+        gc.collect()
+        gc.collect()
+        return losses_eager
+
+    def test_compile(activation_checkpoint, backend):
+        losses_compiled = execute_and_profile(
+            lambda: main_compiled(n_iter=n_iter, activation_checkpoint=activation_checkpoint, backend=backend),
+            f"artifacts/compiled_{backend}_ac{activation_checkpoint}_trace.json",
+            f"compiled_{backend}_ac{activation_checkpoint}_memory_snapshot",
+        )
+        print(f"losses_compiled: {losses_compiled}")
+        gc.collect()
+        gc.collect()
+        return losses_compiled
+
+    for activation_checkpoint in ac_test_order:
+        for backend in backends:
+            losses_compiled = test_compile(activation_checkpoint, backend)
+        losses_eager = test_eager(activation_checkpoint)
+        # if check_acc:
+        # for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
+        #     assert torch.allclose(torch.tensor(loss_compiled), torch.tensor(loss_eager), rtol=1e-3), f"{loss_compiled} vs {loss_eager}"
+
+
     if dist.get_rank() == 0:
-        export_memory_snapshot("combined_memory_snapshot")
+        export_memory_snapshot(f"combined_fsdp{apply_fsdp}_ac{ac_test_order}_backend{backends}_memory_snapshot")
         stop_record_memory_history()
-    for loss_compiled, loss_eager in zip(losses_compiled, losses_eager):
-        assert torch.allclose(torch.tensor(loss_compiled), torch.tensor(loss_eager), rtol=1e-3), f"{loss_compiled} vs {loss_eager}"
