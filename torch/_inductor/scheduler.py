@@ -2288,8 +2288,7 @@ class Scheduler:
         Populate node.last_usage recursively (also for the nodes within a FusedSchedulerNode)
         """
 
-        future_used_buffers = set()
-        future_used_buffers.update(V.graph.get_output_names())
+        future_used_buffers = set(V.graph.get_output_names())
 
         for node in reversed(self.nodes):
             node.set_last_usage(future_used_buffers, self.mutation_real_name)
