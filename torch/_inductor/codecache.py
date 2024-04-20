@@ -63,7 +63,8 @@ from torch._inductor.compile_worker.subproc_pool import (
     SubprocPool,
 )
 from torch._inductor.compile_worker.watchdog import _async_compile_initializer
-from torch._inductor.utils import cache_dir, clear_on_fresh_inductor_cache, is_linux
+from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.utils import clear_on_fresh_inductor_cache, is_linux
 from torch._subclasses.fake_tensor import (
     extract_tensor_metadata,
     FakeTensor,
