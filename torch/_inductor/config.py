@@ -783,10 +783,19 @@ class cuda:
     # Minimum value of M*N*K to consider the CUTLASS backend for GEMM ops.
     cutlass_backend_min_gemm_size: int = 1
 
-    # If set to True, it will ensure that only GEMM ops capable of
-    # epilogue fusion via CUTLASS Epilogue Visitor Trees ( EVT )
-    # are enabled for the CUTLASS backend.
-    cutlass_only_evt_capable_ops: bool = False
+    # enable generation of inline standalone runner in CUDA CPP generated code
+    # which allows to compile the generated code into a standalone executable.
+    generate_test_runner: bool = (
+        os.environ.get("INDUCTOR_CUDA_BACKEND_GENERATE_TEST_RUNNER_CODE", "1") == "1"
+    )
+
+    # Keep only Cutlass op configs which contain this regular expression pattern
+    # Set this to "warpspecialized_cooperative_epi_tma" to enable only SM90 TMA Cutlass Kernels for large GEMMs
+    cutlass_op_whitelist_regex: Optional[str] = None
+
+    # Filter Cutlass configs which contain this regular expression pattern
+    # Set this to "pingpong" to avoid nondeterministic numerical issues
+    cutlass_op_blacklist_regex: Optional[str] = "pingpong"
 
 
 # create a directory containing lots of debug information

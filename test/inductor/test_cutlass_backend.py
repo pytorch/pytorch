@@ -44,6 +44,12 @@ def _get_path_without_sccache() -> str:
 @instantiate_parametrized_tests
 class TestCutlassBackend(TestCase):
     def setUp(self):
+        # The new inductor cache refresh mechanism
+        # introduced with https://github.com/pytorch/pytorch/pull/122661
+        # interacts badly with persistent subprocesses during
+        # autotuning. So we need to disable automatic cache refresh
+        # before calling setUp() on the parent class.
+        os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
         super().setUp()
         torch.random.manual_seed(1234)
 
@@ -199,11 +205,10 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": False,
+                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 4,
-                "cuda.cutlass_only_evt_capable_ops": True,
                 "cuda.version": "12.2",  # required to enable the Kernels we need
             }
         ):
@@ -359,7 +364,7 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": False,
+                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
@@ -369,7 +374,6 @@ class TestCutlassBackend(TestCase):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, a, bias)
             torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
 
-    # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
@@ -411,6 +415,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 4,
+                "cuda.cutlass_op_whitelist_regex": "",
+                "cuda.cutlass_op_blacklist_regex": "pingpong",  # Pingpong Kernels can lead to numerical issues
             }
         ):
             # No broadcast
@@ -451,7 +457,7 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": False,
+                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
@@ -492,7 +498,7 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": False,
+                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
