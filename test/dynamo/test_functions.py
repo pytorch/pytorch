@@ -629,7 +629,7 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
 
     @make_test
     def test_get_autocast_gpu_dtype(x):
-        dtype = torch.get_autocast_dtype('cuda')
+        dtype = torch.get_autocast_gpu_dtype()
         return x.type(dtype)
 
     @make_test

@@ -2730,7 +2730,7 @@ def batch_norm(
     symbolic_helper.check_training_mode(training, "batch_norm")
 
     if (
-        torch.is_autocast_enabled("cuda")
+        torch.is_autocast_enabled()
         and not symbolic_helper.args_have_same_dtype(
             [input, weight, bias, running_mean, running_var]
         )
