@@ -3,6 +3,7 @@ import logging
 from typing import Any, List
 
 import torch
+from .. import config
 from ..lowering import empty_strided, lowerings, register_lowering
 from ..select_algorithm import autotune_select_algorithm, TritonTemplate
 
@@ -114,12 +115,14 @@ sdpa_template = TritonTemplate(
         qk = tl.zeros([BLOCK_M, BLOCK_N], dtype=tl.float32)
         qk = tl.dot(q, k.to(MATMUL_PRECISION), acc=qk)
         # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
+        m = offs_m[:, None]
+        n = start_n + offs_n[None, :]
         {{ modification(
             score="qk",
             b="off_hz // H",
             h="off_hz % H",
-            m="offs_m[:, None]",
-            n="start_n + offs_n[None, :]",
+            m="m",
+            n="n",
             out="qk"
         ) | indent_except_first(2) }}
         # TODO: In the case that score_mod is linear, this can be LICMed
@@ -168,6 +171,7 @@ sdpa_template = TritonTemplate(
         tl.store(l_ptrs, lse)
  """,
 )
+
 
 # TODO: We probably also need a layout constraint?
 @register_lowering(torch.ops.higher_order.templated_attention, type_promotion_kind=None)
@@ -272,12 +276,15 @@ def templated_attention(*args, **kwargs):
             configs: List[Any] = []
             if query.get_dtype() == torch.float32:
                 configs.append((64, 64, 4, 3))
-            configs += [
-                (128, 64, 4, 3),
-                (128, 128, 4, 3),
-                (128, 128, 8, 2),
-                (64, 128, 4, 3),
-            ]
+            else:
+                configs.append((128, 64, 4, 3))
+            if config.max_autotune:
+                configs += [
+                    (128, 64, 4, 3),
+                    (128, 128, 4, 3),
+                    (128, 128, 8, 2),
+                    (64, 128, 4, 3),
+                ]
             for BLOCK_M, BLOCK_N, num_warps, num_stages in configs:
                 sdpa_template.maybe_append_choice(
                     choices=choices,

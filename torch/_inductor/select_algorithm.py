@@ -40,8 +40,8 @@ from .utils import (
     get_dtype_size,
     Placeholder,
     sympy_dot,
-    sympy_product,
     sympy_index_symbol,
+    sympy_product,
     unique,
 )
 from .virtualized import V
@@ -276,23 +276,22 @@ class TritonTemplateKernel(TritonKernel):
         potential multiple modifications
         """
 
+        def add_input(name):
+            return self.args.input(name)
+
         class PlaceholderSubstitution(V.WrapperHandler):  # type: ignore[name-defined]
             self.name = "PlaceholderSubstitution"
 
-            def load(self2, name: str, index: sympy.Expr):
+            def load(self, name: str, index: sympy.Expr):
                 if name not in fixed_inputs:
-                    # breakpoint()
-                    var = self.args.input(name)
+                    # If it's not a fixed input, it's a load from a captured
+                    # tensor
+                    var = add_input(name)
                     return f"tl.load({var} + {index})"
-                    # return f"tl.load({name} + {index})"
-                    # raise AssertionError(
-                    #     f"All loads should be coming from fixed inputs - {name}"
-                    # )
+
                 return f"({fixed_inputs[name]})"
 
-            # TODO Doesn't work yet
             def indirect_indexing(self, index_var, size, check):
-            #     return self._inner.indirect_indexing(index_var, size, False)
                 return sympy_index_symbol(str(index_var))
 
         # if self.modification_cache is None:
@@ -610,7 +609,9 @@ class TritonTemplate(KernelTemplate):
         expected_input_args = list(unique(x.get_name() for x in input_nodes))
         expected_output_args = [fake_out.get_name()]
         expected_args = expected_input_args + expected_output_args
-        call_args_expected = list(call_args[:len(expected_input_args)]) + list(call_args[-len(expected_output_args):])
+        call_args_expected = list(call_args[: len(expected_input_args)]) + list(
+            call_args[-len(expected_output_args) :]
+        )
         assert call_args_expected == expected_args, (
             call_args,
             expected_args,
