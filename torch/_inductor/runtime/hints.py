@@ -1,6 +1,15 @@
 import collections
 from dataclasses import fields
-from enum import Enum
+from enum import auto, Enum
+
+
+# NOTE: if these fail asserts submit a PR to increase them
+TRITON_MAX_BLOCK = {
+    "X": 2048,
+    "Y": 1024,
+    "Z": 1024,
+    "R": 4096 * 16,  # * 16 is multi-kernel only
+}
 
 
 class ReductionHint(Enum):
@@ -58,3 +67,25 @@ else:
         ["divisible_by_16", "equal_to_1", "ids_of_folded_args", "divisible_by_8"],
         defaults=[tuple(), tuple(), tuple(), tuple()],
     )
+
+
+_NUM_THREADS_PER_WARP = 32
+
+
+class HeuristicType(Enum):
+    PERSISTENT_REDUCTION = auto()
+    POINTWISE = auto()
+    REDUCTION = auto()
+    SPLIT_SCAN = auto()
+    TEMPLATE = auto()
+    USER_AUTOTUNE = auto()
+
+
+class AutotuneHint(Enum):
+    ELEMENTS_PER_WARP_32 = 0
+
+    # Triton codegen tries to codegen set of AutotuneHints.
+    # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
+    # which isn't valid python.
+    # Enum.__str__ will just return "AutotuneHint.ELEMENTS_PER_WARP_32".
+    __repr__ = Enum.__str__
