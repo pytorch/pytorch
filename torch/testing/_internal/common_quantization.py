@@ -838,10 +838,8 @@ class QuantizationTestCase(TestCase):
                     (exp_type_end_b is act_type_end_b)
                 self.assertTrue(
                     types_match,
-                    'Type mismatch at {}: expected {}, got {}'.format(
-                        k,
-                        (exp_type_start_a, exp_type_end_a, exp_type_start_b, exp_type_end_b),
-                        (act_type_start_a, act_type_end_a, act_type_start_b, act_type_end_b))
+                    f'Type mismatch at {k}: expected {(exp_type_start_a, exp_type_end_a, exp_type_start_b, exp_type_end_b)}, '
+                    f'got {(act_type_start_a, act_type_end_a, act_type_start_b, act_type_end_b)}'
                 )
 
         def assert_ns_compare_dict_valid(
