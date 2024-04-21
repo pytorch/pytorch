@@ -49,6 +49,12 @@ def _get_path_without_sccache() -> str:
 @instantiate_parametrized_tests
 class TestCutlassBackend(TestCase):
     def setUp(self):
+        # The new inductor cache refresh mechanism
+        # introduced with https://github.com/pytorch/pytorch/pull/122661
+        # interacts badly with persistent subprocesses during
+        # autotuning. So we need to disable automatic cache refresh
+        # before calling setUp() on the parent class.
+        os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
         super().setUp()
         torch.random.manual_seed(1234)
 
@@ -101,9 +107,6 @@ class TestCutlassBackend(TestCase):
                     for cc in passed_choice_callers
                 ), "Cutlass Kernels should have been filtered, GEMM size is too small"
             torch.testing.assert_close(Y_compiled, Y)
-
-    def _create_buffer(self, name, shape):
-        return Buffer(name, FixedLayout(torch.device("cuda:0"), torch.float32, shape))
 
     def cuda_test_compile_standalone_runner(
         self, src, name=None, do_compile=True, do_run=True, log=sys.stderr
@@ -309,7 +312,7 @@ class TestCutlassBackend(TestCase):
             args.extend(more_inputs)
             conf_patch = {
                 "max_autotune": True,
-                "autotune_in_subproc": False,
+                "autotune_in_subproc": True,
                 "benchmark_fusion": False,
                 "cuda.cutlass_backend_min_gemm_size": 1,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
@@ -1014,7 +1017,7 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": False,
+                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
@@ -1067,7 +1070,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 4,
-                "cuda.cutlass_op_whitelist_regex": "warpspecialized_cooperative_epi_tma",
+                "cuda.cutlass_op_whitelist_regex": "",
                 "cuda.cutlass_op_blacklist_regex": "pingpong",  # Pingpong Kernels can lead to numerical issues
             }
         ):
@@ -1109,7 +1112,7 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": False,
+                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,
@@ -1150,7 +1153,7 @@ class TestCutlassBackend(TestCase):
         with config.patch(
             {
                 "max_autotune": True,
-                "autotune_in_subproc": False,
+                "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 2,

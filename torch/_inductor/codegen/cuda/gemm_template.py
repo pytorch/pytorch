@@ -330,8 +330,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
             A_size.insert(0, 1)
         while len(B_size) < len(A_size):
             B_size.insert(0, 1)
-        if A_layout.dtype != B_layout.dtype:
-            return False
         K = max(A_size[-1], B_size[-2])
         M = A_size[-2]
         N = B_size[-1]
@@ -346,8 +344,6 @@ class CUTLASSGemmTemplate(CUTLASSTemplate):
         if len(layouts) == 3:
             C_layout = layouts[2]
             C_size = [int(i) for i in C_layout.size]
-            if A_layout.dtype != C_layout.dtype:
-                return False
             while len(C_size) < len(A_size):
                 C_size.insert(0, 1)
             # check batch dims
