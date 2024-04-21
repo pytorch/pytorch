@@ -1169,7 +1169,7 @@ def main():
     install_requires += extra_install_requires
 
     extras_require = {
-        "optree": ["optree>=0.9.1"],
+        "optree": ["optree>=0.11.0"],
         "opt-einsum": ["opt-einsum>=3.3"],
     }
 
@@ -1386,22 +1386,10 @@ def main():
                 "include/tensorpipe/transport/uv/*.h",
             ]
         )
-    if get_cmake_cache_vars()["USE_KINETO"]:
-        torch_package_data.extend(
-            [
-                "include/kineto/*.h",
-            ]
-        )
     torchgen_package_data = [
-        # Recursive glob doesn't work in setup.py,
-        # https://github.com/pypa/setuptools/issues/1806
-        # To make this robust we should replace it with some code that
-        # returns a list of everything under packaged/
-        "packaged/ATen/*",
-        "packaged/ATen/native/*",
-        "packaged/ATen/templates/*",
-        "packaged/autograd/*",
-        "packaged/autograd/templates/*",
+        "packaged/**/*.cpp",
+        "packaged/**/*.h",
+        "packaged/**/*.yaml",
     ]
     setup(
         name=package_name,

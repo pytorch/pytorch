@@ -18,4 +18,4 @@ fsspec
 setuptools ; python_version >= "3.12"
 packaging
 wheel
-optree>=0.9.1
+optree>=0.11.0
