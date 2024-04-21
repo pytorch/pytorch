@@ -12,7 +12,6 @@ import os.path
 import re
 import threading
 import time
-from enum import auto, Enum
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import torch
@@ -22,9 +21,14 @@ from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
 from torch._dynamo.utils import dynamo_timed, get_first_attr
 
 from torch._inductor import config
-
 from .coordinate_descent_tuner import CoordescTuner
-from .hints import ReductionHint, TileHint
+from .hints import (
+    _NUM_THREADS_PER_WARP,
+    AutotuneHint,
+    HeuristicType,
+    ReductionHint,
+    TileHint,
+)
 from .runtime_utils import (
     cache_dir,
     ceildiv,
@@ -58,27 +62,7 @@ else:
     ASTSource = None
 
 
-_NUM_THREADS_PER_WARP = 32
 log = logging.getLogger(__name__)
-
-
-class HeuristicType(Enum):
-    PERSISTENT_REDUCTION = auto()
-    POINTWISE = auto()
-    REDUCTION = auto()
-    SPLIT_SCAN = auto()
-    TEMPLATE = auto()
-    USER_AUTOTUNE = auto()
-
-
-class AutotuneHint(Enum):
-    ELEMENTS_PER_WARP_32 = 0
-
-    # Triton codegen tries to codegen set of AutotuneHints.
-    # Enum.__repr__ looks like "<AutotuneHint.ELEMENTS_PER_WARP_32: 0>""
-    # which isn't valid python.
-    # Enum.__str__ will just return "AutotuneHint.ELEMENTS_PER_WARP_32".
-    __repr__ = Enum.__str__
 
 
 def autotune_hints_to_configs(
