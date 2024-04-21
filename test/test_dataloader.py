@@ -1617,8 +1617,7 @@ except RuntimeError as e:
         dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
         dataloader = self._get_data_loader(dataset, batch_size=batch_size, num_workers=num_workers)
         seeds = set()
-        for batch in dataloader:
-            seeds.add(batch[0])
+        seeds.update(batch[0] for batch in dataloader)
         self.assertEqual(len(seeds), num_workers)
 
     def test_worker_seed_reproducibility(self):
@@ -2135,8 +2134,7 @@ except RuntimeError as e:
                         elif exit_method == 'worker_kill':
                             if isinstance(loader_p.exception, RuntimeError):
                                 if 'DataLoader worker (pid' not in str(loader_p.exception):
-                                    fail('loader process did not raise expected exception, but had {}'.format(
-                                        loader_p.exception))
+                                    fail(f'loader process did not raise expected exception, but had {loader_p.exception}')
                             elif isinstance(loader_p.exception, ConnectionRefusedError):
                                 # Sometimes, when the worker is being killed and is freeing its
                                 # resources, the unpickling in loader process will be met an
