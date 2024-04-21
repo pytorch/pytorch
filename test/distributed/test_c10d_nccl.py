@@ -462,7 +462,7 @@ class ProcessGroupNCCLTest(MultiProcessTestCase):
             # this triggers cudaFree
             torch.cuda.empty_cache()
             work.wait()
-        torch.cuda.synchronize(local_device)
+        torch.cuda.synchronize(device=local_device)
 
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
@@ -2947,7 +2947,7 @@ class DistributedDataParallelTest(
         loss.backward()
         optimizer.step()
 
-        torch.cuda.synchronize()
+        torch.cuda.synchronize(device=device_id)
 
 
 class WorkHookTest(MultiProcessTestCase):
@@ -4550,7 +4550,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
 
             dist.batch_isend_irecv(ops).pop().wait()
 
-        torch.cuda.synchronize()
+        torch.cuda.synchronize(device=self.local_device)
 
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
@@ -4643,7 +4643,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                     tensor *= 2
                     dist.send(tensor, 0)
 
-        torch.cuda.synchronize()
+        torch.cuda.synchronize(device=self.local_device)
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
             time.sleep(1)
@@ -4702,7 +4702,7 @@ class NCCLTraceTest(NCCLTraceTestBase):
                 dist.reduce_scatter_tensor(output_tensors[i], input_tensors[i])
         self.assertEqual(output_tensors, input_tensors[self.rank] * self.world_size)
 
-        torch.cuda.synchronize()
+        torch.cuda.synchronize(device=self.rank)
 
         if timing_enabled:
             # wait for watchdog thread to process the queue of works
@@ -4809,7 +4809,7 @@ class NCCLTraceTestDumpOnTimeout(NCCLTraceTestDumpOnTimeoutBase):
                 pg.allreduce(a).wait()
 
             # rank 0 will crash before it passes the sync, but rank1 will exit quickly and cleanly
-            torch.cuda.synchronize()
+            torch.cuda.synchronize(device=device)
 
 
 instantiate_parametrized_tests(ProcessGroupNCCLTest)
@@ -4861,7 +4861,7 @@ class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
                 pg.allreduce(a).wait()
 
             # rank 0 will get stuck, timeout and then signal a timeout to all ranks.
-            torch.cuda.synchronize()
+            torch.cuda.synchronize(device=device)
 
             if self.rank == 1:
                 # Force rank 1 to idle so that it will eventually timeout as well after
