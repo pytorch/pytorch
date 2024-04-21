@@ -206,7 +206,13 @@ class CachingAutotuner(KernelInterface):
                     compiled_binary, launcher = self._precompile_config(
                         c, warm_cache_only_with_cc
                     )
-                except OutOfResources:
+                except OutOfResources as e:
+                    if len(self.configs) == 1:
+                        raise RuntimeError(
+                            f"Failed to compile triton config: {c}. "
+                            f"Report a fatal compilation error. "
+                            f"{e}"
+                        )
                     # Skip the config if we run out of resource
                     continue
                 self.launchers.append(launcher)
@@ -979,10 +985,8 @@ def should_use_remote_autotune_cache():
 
     from triton.runtime.fb_memcache import MEMCACHE_VERSION
 
-    return torch._utils_internal.justknobs_check(
-        "pytorch/autotune_remote_cache:enable"
-    ) or MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
-        "pytorch/autotune_remote_cache:memcache_version"
+    return MEMCACHE_VERSION >= torch._utils_internal.justknobs_getval_int(
+        "pytorch/remote_cache:autotune_memcache_version"
     )
 
 
