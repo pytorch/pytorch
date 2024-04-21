@@ -1129,13 +1129,13 @@ class WrapperCodeGen(CodeGen):
         compile_wrapper = IndentedBuffer()
         compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
-        from .triton import gen_common_triton_imports
+        from .triton import gen_common_triton_imports, TritonKernel
 
         compile_wrapper.splice(gen_common_triton_imports())
 
         inductor_meta = {
             "kernel_name": name,
-            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
+            **TritonKernel.inductor_meta_common(),
         }
 
         configs = [
@@ -1264,7 +1264,7 @@ class WrapperCodeGen(CodeGen):
         self.wrapper_call.writeline("start_graph()")
 
     def generate_end_graph(self):
-        self.wrapper_call.writeline("end_graph()")
+        self.wrapper_call.writeline(f"end_graph({config.profile_bandwidth_output!r})")
 
     def generate_reset_kernel_saved_flags(self):
         self.wrapper_call.splice(
