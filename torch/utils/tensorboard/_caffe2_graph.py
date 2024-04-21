@@ -320,7 +320,7 @@ def _tf_device(device_option):
         return "/cpu:*"
     if device_option.device_type == caffe2_pb2.CUDA:
         return f"/gpu:{device_option.device_id}"
-    raise Exception("Unhandled device", device_option)
+    raise Exception("Unhandled device", device_option)  # noqa: TRY002
 
 
 def _add_tf_shape(attr_dict, ints):

@@ -495,7 +495,7 @@ class TestBenchmarkRequest(BenchmarkRequest):
         self, *input_tensors: torch.Tensor, output_tensor: Optional[torch.Tensor] = None
     ) -> float:
         if self.value is None:
-            raise Exception("Failed to run")
+            raise Exception("Failed to run")  # noqa: TRY002
         return self.value
 
 

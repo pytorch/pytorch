@@ -217,7 +217,7 @@ def run_query(query):
     if request.status_code == 200:
         return request.json()
     else:
-        raise Exception(
+        raise Exception(  # noqa: TRY002
             f"Query failed to run by returning code of {request.status_code}. {request.json()}"
         )
 
@@ -262,7 +262,7 @@ def github_data(pr_number):
         if len(_ERRORS) < _MAX_ERROR_LEN:
             return [], "None", ()
         else:
-            raise Exception(
+            raise Exception(  # noqa: TRY002
                 f"Got {_MAX_ERROR_LEN} errors: {_ERRORS}, please check if"
                 " there is something wrong"
             )
