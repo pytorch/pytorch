@@ -271,16 +271,13 @@ def augment_many_model_functions_with_bundled_inputs(
         if hasattr(model, "_generate_bundled_inputs_for_" + function_name):
             if input_list is not None:
                 raise Exception(
-                    "inputs[{name}] is not None, but _generate_bundled_inputs_for_{name} is already defined".format(
-                        name=function_name
-                    )
+                    f"inputs[{function_name}] is not None, but _generate_bundled_inputs_for_{function_name} is already defined"
                 )
             # Model author already defined _generate_bundled_inputs_for_<function_name>.
         elif input_list is None or len(input_list) == 0:
             raise Exception(
-                "inputs for {name} must be specified if _generate_bundled_inputs_for_{name} is not already defined".format(
-                    name=function_name,
-                )
+                f"inputs for {function_name} must be specified if "
+                f"_generate_bundled_inputs_for_{function_name} is not already defined"
             )
         else:
             # Iterate over the inputs and args in each input.

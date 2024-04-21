@@ -167,11 +167,9 @@ def refresh_model_names():
         del all_models_family[key]
 
     chosen_models = set()
-    for value in docs_models_family.values():
-        chosen_models.add(value[0])
+    chosen_models.update(value[0] for value in docs_models_family.values())
 
-    for key, value in all_models_family.items():
-        chosen_models.add(value[0])
+    chosen_models.update(value[0] for key, value in all_models_family.items())
 
     filename = "timm_models_list.txt"
     if os.path.exists("benchmarks"):
