@@ -354,7 +354,7 @@ def trace(data):
             elif e['action'] == 'oom':
                 size = e['size']
                 free = e['device_free']
-                out.write(f'raise OutOfMemoryError() # {Bytes(size)} requested, {Bytes(free)} free in CUDA\n')
+                out.write(f'raise OutOfMemoryError # {Bytes(size)} requested, {Bytes(free)} free in CUDA\n')
             else:
                 out.write(f'{e}\n')
         out.write(f"TOTAL MEM: {Bytes(count)}")
