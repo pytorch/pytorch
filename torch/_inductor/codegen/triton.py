@@ -46,7 +46,7 @@ from ..codecache import code_hash, get_path, PyCodeCache
 from ..dependencies import Dep, MemoryDep, StarDep, WeakDep
 from ..ir import IRNode, TritonTemplateBuffer
 from ..optimize_indexing import indexing_dtype_strength_reduction
-from ..runtime.hints import ReductionHint
+from ..runtime.hints import ReductionHint, TRITON_MAX_BLOCK
 from ..runtime.runtime_utils import (
     do_bench,
     get_max_y_grid,
@@ -252,7 +252,7 @@ class BlockPtrOptions:
                 and not V.graph.sizevars.statically_known_equals(self.strides[i], 0)  # type: ignore[arg-type]
                 and not V.graph.sizevars.statically_known_multiple_of(
                     self.shape[i],
-                    config.triton.max_block[self.block_shape[i][0]],  # type: ignore[arg-type]
+                    TRITON_MAX_BLOCK[self.block_shape[i][0]],  # type: ignore[arg-type]
                 )
                 and not (V.kernel.no_x_dim and self.block_shape[i] == "XBLOCK")
             ):
@@ -1771,9 +1771,9 @@ class TritonKernel(Kernel):
                 continue
             # Masks are superfluous if numel is a multiple of BLOCK
             # (We use the fact that BLOCK is required by triton to be a power of 2)
-            if tree.prefix.upper() not in config.triton.max_block:
+            if tree.prefix.upper() not in TRITON_MAX_BLOCK:
                 continue
-            max_block = config.triton.max_block[tree.prefix.upper()]
+            max_block = TRITON_MAX_BLOCK[tree.prefix.upper()]
             # Optional optimization: if block divides numel exactly, we will
             # never need to do a masked load to handle stragglers at the end.
             # It's faster to avoid masking at all.  But it is sound to always
@@ -2732,6 +2732,42 @@ class TritonKernel(Kernel):
             return "reduction"
         return "pointwise"
 
+    @staticmethod
+    def inductor_meta_common():
+        inductor_meta = {
+            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
+            "are_deterministic_algorithms_enabled": torch.are_deterministic_algorithms_enabled(),
+            "assert_indirect_indexing": config.assert_indirect_indexing,
+            "autotune_local_cache": config.autotune_local_cache,
+            "autotune_pointwise": config.triton.autotune_pointwise,
+            "autotune_remote_cache": config.autotune_remote_cache,
+            "dynamic_scale_rblock": config.dynamic_scale_rblock,
+            "max_autotune": config.max_autotune,
+            "max_autotune_pointwise": config.max_autotune_pointwise,
+            "min_split_scan_rblock": config.triton.min_split_scan_rblock,
+            "spill_threshold": config.triton.spill_threshold,
+            "store_cubin": config.triton.store_cubin,
+        }
+        if torch.version.hip is not None:
+            inductor_meta["is_hip"] = True
+        if config.is_fbcode():
+            inductor_meta["is_fbcode"] = True
+        if config.profile_bandwidth:
+            inductor_meta["profile_bandwidth"] = config.profile_bandwidth
+            inductor_meta["profile_bandwidth_regex"] = config.profile_bandwidth_regex
+            inductor_meta["profile_bandwidth_output"] = config.profile_bandwidth_output
+        if config.coordinate_descent_tuning:
+            inductor_meta[
+                "coordinate_descent_tuning"
+            ] = config.coordinate_descent_tuning
+            inductor_meta[
+                "coordinate_descent_search_radius"
+            ] = config.coordinate_descent_search_radius
+            inductor_meta[
+                "coordinate_descent_check_all_directions"
+            ] = config.coordinate_descent_check_all_directions
+        return inductor_meta
+
     def codegen_kernel(self, name=None):
         code = IndentedBuffer()
 
@@ -2807,8 +2843,9 @@ class TritonKernel(Kernel):
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "no_x_dim": self.no_x_dim,
-            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
+            **self.inductor_meta_common(),
         }
+
         num_gb = None
         if config.benchmark_kernel or config.profile_bandwidth:
             num_gb = self.estimate_kernel_num_bytes() / 1e9
