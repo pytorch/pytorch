@@ -596,7 +596,9 @@ class OutputGraph:
         )
         global_state["grad_enabled"] = (torch.set_grad_enabled, torch.is_grad_enabled())
 
-        def autocast_specific_backend(device_type: str, func: Callable):
+        def autocast_specific_backend(
+            device_type: str, func: Callable[[str, Any], None]
+        ):
             def decorator(value):
                 return func(device_type, value)
 
