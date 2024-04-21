@@ -1768,7 +1768,11 @@ class Scheduler:
         If config.benchmark_fusion is False, always return True.
         Otherwise, return True if fusion can brings speedup.
         """
-        if not config.benchmark_fusion:
+
+        is_multi_template = node1.is_template() and isinstance(
+            node1.get_template_node(), ir.MultiTemplateBuffer
+        )
+        if not config.benchmark_fusion and not is_multi_template:
             return True
 
         if (
@@ -1834,12 +1838,18 @@ class Scheduler:
             min_ms_fused = float("inf")
             ms_fused_choice = None
 
+            triton_choices = 0
+
             for choice, unfused_time in choice_timings.items():
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
 
                 if unfused_time >= ms1 + ms2:
                     continue
+
+                triton_choices += 1
+                if triton_choices > config.max_epilogue_benchmarked_choices:
+                    break
 
                 # TODO - parallel compile triton templates
                 # TODO - should prune/skip choices that are not within certain % of best choice
@@ -2494,18 +2504,9 @@ class Scheduler:
 
         self.flush()
 
-    def is_unaligned_buffer(self, buf_name):
-        if buf_name in V.graph.graph_inputs:
-            return not config.assume_aligned_inputs
-        if buf_name in V.graph.constants:
-            # all constants are assumed to be aligned
-            return False
+    def get_buffer_layout(self, buf_name: str) -> ir.Layout:
         node = self.name_to_node[buf_name]
-        layout = node.node.get_layout()
-        if isinstance(layout, ir.NonOwningLayout):
-            return not layout.maybe_guard_aligned()
-        else:
-            return False
+        return node.node.get_layout()
 
 
 class BaseScheduling:
