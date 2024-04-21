@@ -1375,8 +1375,7 @@ def forward(self, getitem, const):
 
         cond_gm = backend.graphs[0]
         name_set = set()
-        for name, _ in cond_gm.named_modules():
-            name_set.add(name)
+        name_set.update(name for name, _ in cond_gm.named_modules())
         self.assertEqual(
             name_set,
             {
@@ -1735,8 +1734,7 @@ def forward(self):
         self.assertEqual(result, x + y + x)
         wrap_gm = backend.graphs[0]
         names = set()
-        for mod_name, _ in wrap_gm.named_modules():
-            names.add(mod_name)
+        names.update(mod_name for mod_name, _ in wrap_gm.named_modules())
         self.assertEqual(
             names,
             {

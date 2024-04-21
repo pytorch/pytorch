@@ -1617,8 +1617,7 @@ except RuntimeError as e:
         dataset = SynchronizedSeedDataset(num_workers, batch_size, num_workers)
         dataloader = self._get_data_loader(dataset, batch_size=batch_size, num_workers=num_workers)
         seeds = set()
-        for batch in dataloader:
-            seeds.add(batch[0])
+        seeds.update(batch[0] for batch in dataloader)
         self.assertEqual(len(seeds), num_workers)
 
     def test_worker_seed_reproducibility(self):

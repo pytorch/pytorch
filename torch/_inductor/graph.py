@@ -635,8 +635,7 @@ class GraphLowering(torch.fx.Interpreter):
         # - sebotnet33ts_256
         for n in self.module.graph.nodes:
             if n in output_set:
-                for child in n.users:
-                    output_set.add(child)
+                output_set.update(n.users)
 
         return output_set
 
