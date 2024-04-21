@@ -302,7 +302,7 @@ class autocast:
         self.prev = torch.is_autocast_enabled(self.device)
         self.prev_fastdtype = torch.get_autocast_dtype(self.device)
         torch.set_autocast_enabled(self.device, self._enabled)
-        torch.set_autocast_dtype(self.device, self.fast_dtype) # type: ignore[arg-type]
+        torch.set_autocast_dtype(self.device, self.fast_dtype)  # type: ignore[arg-type]
         torch.autocast_increment_nesting()
         torch.set_autocast_cache_enabled(self._cache_enabled)
 
