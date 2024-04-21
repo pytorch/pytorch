@@ -1,0 +1,11 @@
+{
+    "DummyData": {
+        "data_class": "DummyData",
+        "configurations": {
+            "max_val": 1024,
+            "sample_count": 1024,
+            "sample_length": 1024,
+            "sparsity_percentage": 20
+        }
+    }
+}
