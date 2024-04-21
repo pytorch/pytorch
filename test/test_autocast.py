@@ -4,14 +4,20 @@ import collections
 import unittest
 
 import torch
-from torch.testing._internal.common_utils import TestCase, run_tests, IS_WINDOWS, skipIfTorchDynamo
 from torch.testing._internal.autocast_test_lists import AutocastCPUTestLists
+from torch.testing._internal.common_utils import (
+    IS_WINDOWS,
+    run_tests,
+    skipIfTorchDynamo,
+    TestCase,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
+
 
 class TestAutocastCPU(TestCase):
     def setUp(self):
         super().setUp()
-        self.autocast_lists = AutocastCPUTestLists(torch.device('cpu'))
+        self.autocast_lists = AutocastCPUTestLists(torch.device("cpu"))
 
     def tearDown(self):
         del self.autocast_lists
@@ -49,18 +55,23 @@ class TestAutocastCPU(TestCase):
             if module is not None and hasattr(module, op):
                 output = getattr(module, op)(*args, **add_kwargs)
                 if isinstance(output, torch.Tensor):
-                    self.assertTrue(out_type == output.dtype,
-                                    f"autocast for torch.{op} produced {output.dtype}, should produce {out_type}")
+                    self.assertTrue(
+                        out_type == output.dtype,
+                        f"autocast for torch.{op} produced {output.dtype}, should produce {out_type}",
+                    )
             # Try Tensor.* variant:
             if hasattr(torch.Tensor, op):
                 output_method = getattr(args[0], op)(*args[1:], **add_kwargs)
                 if isinstance(output_method, torch.Tensor):
-                    self.assertTrue(out_type == output_method.dtype,
-                                    "autocast for torch.{} produced {}, should produce torch.{}"
-                                    .format(op, output_method.dtype, out_type))
+                    self.assertTrue(
+                        out_type == output_method.dtype,
+                        f"autocast for torch.{op} produced {output_method.dtype}, should produce torch.{out_type}",
+                    )
 
-            self.assertTrue((output is not None) or (output_method is not None),
-                            f"{op} not found as an attribute on either Tensor or the requested module {module}")
+            self.assertTrue(
+                (output is not None) or (output_method is not None),
+                f"{op} not found as an attribute on either Tensor or the requested module {module}",
+            )
 
             # Accounts for ops that return Tensors, iterables, and other non-Tensors.
             # For example, lstm_cell returns a tuple and equal returns bool.
@@ -76,7 +87,9 @@ class TestAutocastCPU(TestCase):
             if (output is not None) and (output_method is not None):
                 self.assertTrue(type(output) == type(output_method))
                 comparison = compare(output, output_method)
-                self.assertTrue(comparison, f"torch.{op} result did not match Tensor.{op} result")
+                self.assertTrue(
+                    comparison, f"torch.{op} result did not match Tensor.{op} result"
+                )
 
             # Compare numerics to Python-side "autocasting" that (we expect) does the same thing
             # as the C++-side autocasting, and should be bitwise accurate.
@@ -85,9 +98,13 @@ class TestAutocastCPU(TestCase):
                 self.assertFalse(torch.is_autocast_cpu_enabled())
 
                 if module is not None and hasattr(module, op):
-                    control = getattr(module, op)(*cast(args, run_as_type), **add_kwargs)
+                    control = getattr(module, op)(
+                        *cast(args, run_as_type), **add_kwargs
+                    )
                 else:
-                    control = getattr(args[0].to(run_as_type), op)(*cast(args[1:], run_as_type), **add_kwargs)
+                    control = getattr(args[0].to(run_as_type), op)(
+                        *cast(args[1:], run_as_type), **add_kwargs
+                    )
                 self.assertTrue(type(output_to_compare) == type(control))
                 comparison = compare(output_to_compare, control)
                 self.assertTrue(comparison, f"torch.{op} result did not match control")
@@ -102,22 +119,51 @@ class TestAutocastCPU(TestCase):
 
     @skipIfTorchDynamo()
     def test_autocast_torch_expect_builtin_promote(self):
-        for op, args1, args2, out_type in self.autocast_lists.torch_expect_builtin_promote:
+        for (
+            op,
+            args1,
+            args2,
+            out_type,
+        ) in self.autocast_lists.torch_expect_builtin_promote:
             self._run_autocast_outofplace(op, args1, torch.float32, out_type=out_type)
-            self._run_autocast_outofplace(op, args2, torch.float32, out_type=out_type, amp_dtype=torch.float16)
+            self._run_autocast_outofplace(
+                op, args2, torch.float32, out_type=out_type, amp_dtype=torch.float16
+            )
 
     @skipIfTorchDynamo()
     def test_autocast_methods_expect_builtin_promote(self):
-        for op, args1, args2, out_type in self.autocast_lists.methods_expect_builtin_promote:
-            self._run_autocast_outofplace(op, args1, torch.float32, module=None, out_type=out_type)
-            self._run_autocast_outofplace(op, args2, torch.float32, module=None, out_type=out_type, amp_dtype=torch.float16)
+        for (
+            op,
+            args1,
+            args2,
+            out_type,
+        ) in self.autocast_lists.methods_expect_builtin_promote:
+            self._run_autocast_outofplace(
+                op, args1, torch.float32, module=None, out_type=out_type
+            )
+            self._run_autocast_outofplace(
+                op,
+                args2,
+                torch.float32,
+                module=None,
+                out_type=out_type,
+                amp_dtype=torch.float16,
+            )
 
     @skipIfTorchDynamo()
     def test_autocast_torch_16(self):
         for op_with_args in self.autocast_lists.torch_16:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
-            self._run_autocast_outofplace(op, args, torch.bfloat16, add_kwargs=maybe_kwargs)
-            self._run_autocast_outofplace(op, args, torch.float16, add_kwargs=maybe_kwargs, amp_dtype=torch.float16)
+            self._run_autocast_outofplace(
+                op, args, torch.bfloat16, add_kwargs=maybe_kwargs
+            )
+            self._run_autocast_outofplace(
+                op,
+                args,
+                torch.float16,
+                add_kwargs=maybe_kwargs,
+                amp_dtype=torch.float16,
+            )
 
     @skipIfTorchDynamo()
     def test_autocast_nn_16(self):
@@ -139,8 +185,16 @@ class TestAutocastCPU(TestCase):
     def test_autocast_torch_fp32(self):
         for op_with_args in self.autocast_lists.torch_fp32:
             op, args, maybe_kwargs = self.args_maybe_kwargs(op_with_args)
-            self._run_autocast_outofplace(op, args, torch.float32, add_kwargs=maybe_kwargs)
-            self._run_autocast_outofplace(op, args, torch.float32, add_kwargs=maybe_kwargs, amp_dtype=torch.float16)
+            self._run_autocast_outofplace(
+                op, args, torch.float32, add_kwargs=maybe_kwargs
+            )
+            self._run_autocast_outofplace(
+                op,
+                args,
+                torch.float32,
+                add_kwargs=maybe_kwargs,
+                amp_dtype=torch.float16,
+            )
 
     @skipIfTorchDynamo()
     def test_autocast_nn_fp32(self):
@@ -162,11 +216,16 @@ class TestAutocastCPU(TestCase):
     def test_autocast_torch_need_autocast_promote(self):
         for op, args1, args2 in self.autocast_lists.torch_need_autocast_promote:
             self._run_autocast_outofplace(op, args1, torch.float32)
-            self._run_autocast_outofplace(op, args2, torch.float32, amp_dtype=torch.float16)
+            self._run_autocast_outofplace(
+                op, args2, torch.float32, amp_dtype=torch.float16
+            )
 
     @unittest.skipIf(IS_WINDOWS, "Limit support for bf16 path")
     def test_autocast_rnn(self):
-        if torch.backends.mkldnn.is_available() and torch.ops.mkldnn._is_mkldnn_bf16_supported():
+        if (
+            torch.backends.mkldnn.is_available()
+            and torch.ops.mkldnn._is_mkldnn_bf16_supported()
+        ):
             x = torch.randn(1, 2, 1)
             hx = torch.randn(2, 2, 1)
             cx = torch.randn(2, 2, 1)
@@ -182,8 +241,9 @@ class TestAutocastCPU(TestCase):
                 m(x, (hx, cx))
 
     def test_autocast_disabled_with_fp32_dtype(self):
-        with torch.autocast(device_type='cpu', dtype=torch.float32, enabled=False):
+        with torch.autocast(device_type="cpu", dtype=torch.float32, enabled=False):
             _ = torch.ones(10)
+
 
 class CustomLinear(torch.autograd.Function):
     @staticmethod
@@ -194,13 +254,13 @@ class CustomLinear(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         x, w_t = ctx.saved_tensors
-        with torch.autocast(device_type='cuda'):
+        with torch.autocast(device_type="cuda"):
             dL_dX = torch.matmul(grad_output, w_t)
             dL_dW = torch.matmul(x.transpose(0, 1), grad_output).transpose(0, 1)
         return dL_dX, dL_dW
 
-class WeightDTypeCastCounterMode(TorchDispatchMode):
 
+class WeightDTypeCastCounterMode(TorchDispatchMode):
     def __init__(self, weight):
         super().__init__()
         self.dtype_cast_counter = 0
@@ -208,9 +268,9 @@ class WeightDTypeCastCounterMode(TorchDispatchMode):
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if (
-            func is torch.ops.aten._to_copy.default and
-            args[0] is self.weight and
-            kwargs['dtype'] is torch.float16
+            func is torch.ops.aten._to_copy.default
+            and args[0] is self.weight
+            and kwargs["dtype"] is torch.float16
         ):
             self.dtype_cast_counter += 1
         return func(*args, **kwargs)
@@ -223,6 +283,7 @@ class WeightDTypeCastCounterMode(TorchDispatchMode):
     def __exit__(self, exc_type, exc_val, exc_tb):
         torch.clear_autocast_cache = self.old_clear_cache
         return super().__exit__(exc_type, exc_val, exc_tb)
+
 
 @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
 class TestAutocastGPU(TestCase):
@@ -238,7 +299,7 @@ class TestAutocastGPU(TestCase):
         weight = torch.nn.Parameter(torch.randn(4, 3).cuda())
 
         with WeightDTypeCastCounterMode(weight) as mode:
-            with torch.autocast(device_type='cuda'):
+            with torch.autocast(device_type="cuda"):
                 output = CustomLinear.apply(data, weight)
                 s = output.sum()
             s.backward()
@@ -246,7 +307,6 @@ class TestAutocastGPU(TestCase):
         self.assertEqual(mode.dtype_cast_counter, 1)
 
     def test_cache_disabled(self):
-
         data = torch.randn(2, 3).cuda()
         weight = torch.nn.Parameter(torch.randn(4, 3).cuda())
 
@@ -255,7 +315,7 @@ class TestAutocastGPU(TestCase):
             torch._C._add_cached_tensor(weight)
 
             with WeightDTypeCastCounterMode(weight) as mode:
-                with torch.autocast(device_type='cuda'):
+                with torch.autocast(device_type="cuda"):
                     output = CustomLinear.apply(data, weight)
                     s = output.sum()
                 s.backward()
@@ -275,12 +335,12 @@ class TestTorchAutocast(TestCase):
         self.assertEqual(cpu_fast_dtype, torch.bfloat16)
 
     def test_invalid_device(self):
-        dev = 'not a real device'
-        msg = f'unsupported autocast device_type \'{dev}\''
+        dev = "not a real device"
+        msg = f"unsupported autocast device_type '{dev}'"
         with self.assertRaisesRegex(RuntimeError, msg):
             with torch.autocast(device_type=dev):
                 _ = torch.tensor(1)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     run_tests()
