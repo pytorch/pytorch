@@ -20,9 +20,11 @@ from torch.testing import FileCheck
 
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
     IS_CI,
     IS_LINUX,
     IS_WINDOWS,
+    parametrize,
     skipIfRocm,
     TEST_CUDA_GRAPH,
     TEST_WITH_ASAN,
@@ -48,6 +50,13 @@ requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
 from io import StringIO
+
+
+def get_compile_fn(backend):
+    if backend == "cudagraphs":
+        return functools.partial(torch.compile, backend="cudagraphs")
+    else:
+        return functools.partial(torch.compile, mode="reduce-overhead")
 
 
 class capture_stderr(list):
@@ -244,15 +253,16 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 opt = torch.compile(model.forward, mode="reduce-overhead")(x, y, z)
 
             FileCheck().check(
-                "skipping cudagraphs due to mutaton on input. Found from"
+                "skipping cudagraphs due to mutation on input. Found from"
             ).check("torch.logical_xor").run(captured_output[0])
 
         @requires_multigpu()
-        def test_multiple_devices_msg(self):
-            @torch.compile()
+        @parametrize("backend", ("inductor", "cudagraphs"))
+        def test_multiple_devices_msg(self, backend):
             def foo(x, y):
                 return (x + 1, y + 2)
 
+            foo = get_compile_fn(backend)(foo)
             with capture_stderr() as captured_output:
                 foo(torch.ones([10], device="cuda"), torch.ones([20]))
 
@@ -269,11 +279,27 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 captured_output[0]
             )
 
-        def test_mutation(self):
-            @torch.compile()
+        @torch._inductor.config.patch("triton.cudagraph_skip_dynamic_graphs", True)
+        def test_skip_symbolic(self):
+            @torch.compile(dynamic=True)
+            def foo(x, y):
+                return x + y
+
+            with capture_stderr() as captured_output:
+                foo(torch.rand([10], device="cuda"), torch.rand([10], device="cuda"))
+
+            FileCheck().check(
+                "skipping cudagraphs due to graph with symbolic shapes inputs"
+            ).check("x + y").run(captured_output[0])
+
+        @parametrize("backend", ("inductor", "cudagraphs"))
+        @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
+        def test_mutation_on_inp(self, backend):
             def foo(x):
                 x.add_(2)
                 return x
+
+            foo = get_compile_fn(backend)(foo)
 
             def inp():
                 return torch.ones([10], device="cuda")
@@ -281,13 +307,14 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with capture_stderr() as captured_output:
                 foo(inp())
 
-            FileCheck().check("skipping cudagraphs due to mutaton on input.").check(
+            FileCheck().check("skipping cudagraphs due to mutation on input.").check(
                 ".add_(2)"
             ).run(captured_output[0])
 
             # mutation on inp doesnt hit cudagraphs
-            self.assertIsNone(self.get_manager())
+            self.assertEqual(len(self.get_manager().roots), 0)
 
+            # mutation on parameters/buffers hits cudagraphs
             class Mod(torch.nn.Module):
                 def __init__(self):
                     super().__init__()
@@ -297,10 +324,10 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                     self.buf.add_(x)
                     return self.buf + x
 
-            @torch.compile()
             def foo(mod, x):
                 return mod(x)
 
+            foo = get_compile_fn(backend)(foo)
             mod = Mod()
             mod2 = Mod()
 
@@ -309,6 +336,102 @@ if HAS_CUDA and not TEST_WITH_ASAN:
                 self.assertEqual(mod.buf, mod2.buf)
 
             self.assertIsNotNone(self.get_manager())
+
+        @parametrize("backend", ("inductor", "cudagraphs"))
+        @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
+        def test_mutation_cudagraph_managed_tensors(self, backend):
+            def foo(x):
+                return x + 1
+
+            def mut(x):
+                x.add_(2)
+                return x
+
+            def non_mut(x):
+                return x.add(2)
+
+            mut = get_compile_fn(backend)(mut)
+            foo = get_compile_fn(backend)(foo)
+
+            with capture_stderr() as captured_output:
+                for i in range(3):
+                    torch.compiler.cudagraph_mark_step_begin()
+                    inp = torch.rand([4], device="cuda")
+
+                    tmp = foo(inp)
+                    mut_out = mut(tmp)
+                    self.assertEqual(mut_out, non_mut(foo(inp)))
+            FileCheck().check_count(
+                "skipping cudagraphs due to mutation on input.", 0, exactly=True
+            ).run(captured_output[0])
+
+            torch.compiler.cudagraph_mark_step_begin()
+            inp = torch.rand([4], device="cuda")
+            tmp = foo(inp)
+            mut_inp = tmp.clone()
+            # in this case, what previously a mutated cudagraph managed tensor is no longer,
+            # now its an input from eager we should fallback to inductor without cudagraphs
+            with capture_stderr() as captured_output:
+                mut(mut_inp)
+            FileCheck().check("skipping cudagraphs due to mutation on input.").check(
+                "x.add_(2)"
+            ).run(captured_output[0])
+            self.assertEqual(mut_inp, non_mut(foo(inp)))
+
+        @parametrize("backend", ("inductor", "cudagraphs"))
+        @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
+        def test_mutation_cudagraph_managed_tensor_warn(self, backend):
+            def foo(x):
+                return x.add_(1)
+
+            def fee(y, z):
+                return z.add(3)
+
+            def inp():
+                return torch.rand([4], device="cuda")
+
+            foo = get_compile_fn(backend)(foo)
+            fee = get_compile_fn(backend)(fee)
+
+            with capture_stderr() as captured_output:
+                for _ in range(3):
+                    torch.compiler.cudagraph_mark_step_begin()
+                    fee(inp(), foo(inp()))
+            FileCheck().check_count(
+                "skipping cudagraphs due to mutation on input.", 1, exactly=True
+            ).run(captured_output[0])
+
+        @parametrize("backend", ("inductor", "cudagraphs"))
+        @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
+        def test_mutation_cudagraph_managed_tensor_warn_only_once(self, backend):
+            def foo(x):
+                return x + 1
+
+            def mut(x):
+                x.add_(2)
+                return x
+
+            def inp():
+                return torch.rand([4], device="cuda")
+
+            mut = get_compile_fn(backend)(mut)
+            foo = get_compile_fn(backend)(foo)
+
+            with capture_stderr() as captured_output:
+                # Should warn for current_node=None
+                mut(inp())
+
+                for i in range(3):
+                    torch.compiler.cudagraph_mark_step_begin()
+                    tmp = foo(inp())
+                    mut(tmp)  # should not warn
+
+                mut_inp = tmp.clone()
+                mut(mut_inp)  # should not warn since mut has warned
+
+            FileCheck().check_count(
+                "skipping cudagraphs due to mutation on input.", 1, exactly=True
+            ).run(captured_output[0])
 
         def test_function_compiled_multiple_times(self):
             def foo(x):
@@ -431,13 +554,15 @@ if HAS_CUDA and not TEST_WITH_ASAN:
 
             self.assertFalse(self.get_manager().running_forwards_with_pending_backwards)
 
-        def test_forward_backward_not_called(self):
-            @torch.compile(mode="reduce-overhead")
+        @parametrize("backend", ("inductor", "cudagraphs"))
+        def test_forward_backward_not_called(self, backend):
             def foo(x, y):
                 x_out = x * x * x
                 torch._dynamo.graph_break()
                 y_out = y * y * y
                 return x_out, y_out
+
+            foo = get_compile_fn(backend)(foo)
 
             for _ in range(3):
                 inps = [
@@ -1471,6 +1596,7 @@ if HAS_CUDA and not TEST_WITH_ASAN:
             with self.assertRaisesRegex(Exception, "custom error msg"):
                 device = x.untyped_storage()
 
+    instantiate_parametrized_tests(CudaGraphTreeTests)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
