@@ -321,7 +321,7 @@ class _CommitDataCache:
         return self.data[commit]
 
     def read_from_disk(self):
-        with open(self.path, "r") as f:
+        with open(self.path) as f:
             data = json.load(f)
             data = {commit: dict_to_features(dct) for commit, dct in data.items()}
         return data
