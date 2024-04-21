@@ -14,7 +14,7 @@ def reorder_kwargs(user_kwargs: Dict[str, Any], spec: TreeSpec) -> Dict[str, Any
     # Make sure that the spec is actually shaped like (args, kwargs)
     assert spec.type is tuple
     assert spec.num_children == 2
-    kwargs_spec = spec.children_specs[1]
+    kwargs_spec = spec.child(1)
     assert kwargs_spec.type is dict
 
     if set(user_kwargs) != set(kwargs_spec.entries()):
