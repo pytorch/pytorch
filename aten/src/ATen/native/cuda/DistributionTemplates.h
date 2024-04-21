@@ -618,7 +618,7 @@ void bernoulli_tensor_cuda_kernel(
       };
   // The template argument `4` below indicates that we want to operate on four
   // element at each time. See NOTE [ CUDA_tensor_applyN helpers ] for details.
-  at::cuda::CUDA_tensor_apply2<scalar_t, prob_t, 4, decltype(functor),
+  at::cuda::CUDA_tensor_apply2<scalar_t, const prob_t, 4, decltype(functor),
                                /*max_threads_per_block=*/512,
                                /*min_blocks_per_sm==*/2>(ret, p, functor);
 }

@@ -1,33 +1,20 @@
 # mypy: ignore-errors
 
 import functools
-
 import inspect
+import logging
 import operator
+import textwrap
 import types
 from typing import Dict, List
-
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-
-from ..bytecode_transformation import create_call_method
-from ..current_scope_id import current_scope_id
-from ..external_utils import call_hook_from_backward_state
-
-try:
-    import numpy as np
-except ModuleNotFoundError:
-    np = None
-
 
 import sympy
 
 import torch._numpy as tnp
-
 import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
 from torch._subclasses.meta_utils import is_sparse_any
-
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
     GuardOnDataDependentSymNode,
@@ -35,11 +22,13 @@ from torch.fx.experimental.symbolic_shapes import (
     is_symbolic,
     SymTypes,
 )
-
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
-
+from ..bytecode_transformation import create_call_method
+from ..current_scope_id import current_scope_id
 from ..exc import unimplemented, UserError, UserErrorType
+from ..external_utils import call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import (
@@ -51,11 +40,19 @@ from ..utils import (
     object_has_getattribute,
     product,
     proxy_args_kwargs,
+    set_example_value,
     tensortype_to_dtype,
 )
 from .base import _is_top_level_scope, VariableTracker
 from .constant import ConstantVariable
 from .lists import SizeVariable
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
+log = logging.getLogger(__name__)
 
 # Ops that allow tensor <op> tensor
 supported_tensor_comparison_ops = {
@@ -226,7 +223,7 @@ class TensorVariable(VariableTracker):
                 return SourcelessBuilder.create(tx, example_value)
 
         if not (self.source and self.source.subguards_allowed()):
-            raise NotImplementedError()
+            raise NotImplementedError
 
         # For local source, we associate the real value. We use this real value
         # for implementing getattr fallthrough on the variable tracker base class.
@@ -242,23 +239,23 @@ class TensorVariable(VariableTracker):
             # Which is incorrect, and violates the invariant that all sources should be eval()-able against the scope.
             _input_associated_real_value = eval(self.source.name(), scope)
         except Exception as exc:
-            raise NotImplementedError() from exc
+            raise NotImplementedError from exc
 
         if _input_associated_real_value is None:
-            raise NotImplementedError()
+            raise NotImplementedError
 
         if object_has_getattribute(_input_associated_real_value):
-            raise NotImplementedError()
+            raise NotImplementedError
 
         if get_custom_getattr(_input_associated_real_value):
-            raise NotImplementedError()
+            raise NotImplementedError
 
         real_value = getattr(_input_associated_real_value, name)
         if callable(real_value):
             # Callables have more nuanced handling, and we should let the existing system delegate here.
             # Raising was past behavior and so should always be sound to fall back.
             # Note - at a certain point we may want to handle
-            raise NotImplementedError()
+            raise NotImplementedError
 
         from ..guards import GuardBuilder
         from .builder import VariableBuilder
@@ -321,9 +318,8 @@ class TensorVariable(VariableTracker):
     def var_getattr(self, tx, name):
         from . import UserDefinedClassVariable
 
-        if tx.strict_checks_enabled:
-            if name in self._strict_mode_banned_ops():
-                unimplemented(f"Illegal getattr invocation {name} in strict mode")
+        if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
+            unimplemented(f"Illegal getattr invocation {name} in strict mode")
 
         if name == "__class__":
             return UserDefinedClassVariable(self.python_type())
@@ -396,7 +392,7 @@ class TensorVariable(VariableTracker):
             result = self.dynamic_getattr(tx, name)
 
         if result is None:
-            raise NotImplementedError()
+            raise NotImplementedError
         return result
 
     def has_unpack_var_sequence(self, tx):
@@ -435,9 +431,8 @@ class TensorVariable(VariableTracker):
         args: "List[VariableTracker]",
         kwargs: "Dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        if tx.strict_checks_enabled:
-            if name in self._strict_mode_banned_ops():
-                unimplemented(f"Illegal method invocation {name} in strict mode")
+        if self.is_strict_mode(tx) and name in self._strict_mode_banned_ops():
+            unimplemented(f"Illegal method invocation {name} in strict mode")
 
         """
         Dispatch to a method-specific handler defined below.  If the
@@ -683,7 +678,23 @@ class TensorVariable(VariableTracker):
 
     def method_item(self, *args, **kwargs):
         if not config.capture_scalar_outputs:
+            self._warn_capture_scalar_outputs()
             unimplemented("Tensor.item")
+
+    @staticmethod
+    @functools.lru_cache(None)
+    def _warn_capture_scalar_outputs():
+        log.warning(
+            textwrap.dedent(
+                """\
+                    Graph break from `Tensor.item()`, consider setting:
+                        torch._dynamo.config.capture_scalar_outputs = True
+                    or:
+                        env TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1
+                    to include these operations in the captured graph.
+                """
+            )
+        )
 
     def method___len__(self):
         from ..symbolic_convert import InstructionTranslator
@@ -953,7 +964,7 @@ class SymNodeVariable(VariableTracker):
             assert proxy.node.meta["example_value"] == sym_num
         if sym_num is None:
             sym_num = get_fake_value(proxy.node, tx)
-        proxy.node.meta["example_value"] = sym_num
+        set_example_value(proxy.node, sym_num)
 
         if isinstance(sym_num, (sympy.Integer, int, bool)):
             sym_num = int(sym_num) if isinstance(sym_num, sympy.Integer) else sym_num
@@ -1080,7 +1091,7 @@ class NumpyNdarrayVariable(TensorVariable):
         elif name in ["__version__"]:
             unimplemented("delegate np.__version__ to NumPy")
         if result is None:
-            raise NotImplementedError()
+            raise NotImplementedError
         return result
 
     @staticmethod
