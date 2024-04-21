@@ -132,6 +132,7 @@ class UnpackedDualTensor(tuple):
     See :func:`unpack_dual` for more details.
     """
 
+    __slots__ = ()
     __match_args__ = ("primal", "tangent")
 
     def __new__(
