@@ -395,9 +395,8 @@ def compose_parametrize_fns(old_parametrize_fn, new_parametrize_fn):
                 redundant_params = set(old_param_kwargs.keys()).intersection(new_param_kwargs.keys())
                 if redundant_params:
                     raise RuntimeError('Parametrization over the same parameter by multiple parametrization '
-                                       'decorators is not supported. For test "{}", the following parameters '
-                                       'are handled multiple times: {}'.format(
-                                           test.__name__, redundant_params))
+                                       f'decorators is not supported. For test "{test.__name__}", the following parameters '
+                                       f'are handled multiple times: {redundant_params}')
                 full_param_kwargs = {**old_param_kwargs, **new_param_kwargs}
                 merged_test_name = '{}{}{}'.format(new_test_name,
                                                    '_' if old_test_name != '' and new_test_name != '' else '',
@@ -2175,30 +2174,20 @@ class CudaMemoryLeakCheck:
                 #   statistics or a leak too small to trigger the allocation of an
                 #   additional block of memory by the CUDA driver
                 msg = ("CUDA caching allocator reports a memory leak not "
-                       "verified by the driver API in {}! "
-                       "Caching allocator allocated memory was {} and is now reported as {} "
-                       "on device {}. "
-                       "CUDA driver allocated memory was {} and is now {}.").format(
-                    self.name,
-                    self.caching_allocator_befores[i],
-                    caching_allocator_mem_allocated,
-                    i,
-                    self.driver_befores[i],
-                    driver_mem_allocated)
+                       f"verified by the driver API in {self.name}! "
+                       f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
+                       f"and is now reported as {caching_allocator_mem_allocated} "
+                       f"on device {i}. "
+                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")
                 warnings.warn(msg)
             elif caching_allocator_discrepancy and driver_discrepancy:
                 # A caching allocator discrepancy validated by the driver API is a
                 #   failure (except on ROCm, see below)
-                msg = ("CUDA driver API confirmed a leak in {}! "
-                       "Caching allocator allocated memory was {} and is now reported as {} "
-                       "on device {}. "
-                       "CUDA driver allocated memory was {} and is now {}.").format(
-                    self.name,
-                    self.caching_allocator_befores[i],
-                    caching_allocator_mem_allocated,
-                    i,
-                    self.driver_befores[i],
-                    driver_mem_allocated)
+                msg = (f"CUDA driver API confirmed a leak in {self.name}! "
+                       f"Caching allocator allocated memory was {self.caching_allocator_befores[i]} "
+                       f"and is now reported as {caching_allocator_mem_allocated} "
+                       f"on device {i}. "
+                       f"CUDA driver allocated memory was {self.driver_befores[i]} and is now {driver_mem_allocated}.")
 
                 raise RuntimeError(msg)
 

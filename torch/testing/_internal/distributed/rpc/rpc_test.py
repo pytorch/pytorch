@@ -3162,9 +3162,8 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         )
         self.assertEqual(
             rref2.__str__(),
-            "UserRRef(RRefId = {0}(created_on={1}, local_id=1), ForkId = {0}(created_on={1}, local_id=2))".format(
-                id_class, self.rank
-            ),
+            f"UserRRef(RRefId = {id_class}(created_on={self.rank}, local_id=1), "
+            f"ForkId = {id_class}(created_on={self.rank}, local_id=2))",
         )
 
     @dist_init

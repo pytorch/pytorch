@@ -4696,9 +4696,7 @@ Done""",
         )  # make it us which is profiler default
         print("Total time based on python measurements: ", _format_time(total_time_us))
         print(
-            "CPU time measurement python side overhead: {:.2f}%".format(
-                (total_time_us / prof.self_cpu_time_total - 1.0) * 100.0
-            )
+            f"CPU time measurement python side overhead: {(total_time_us / prof.self_cpu_time_total - 1.0) * 100.0:.2f}%"
         )
 
         if sys.platform != "win32":

@@ -1359,8 +1359,7 @@ torch.cuda.synchronize()
                 output_method = getattr(args[0], op)(*args[1:], **add_kwargs)
                 if isinstance(output_method, torch.Tensor):
                     self.assertTrue(out_type == output_method.dtype,
-                                    "autocast for torch.{} produced {}, should produce torch.{}"
-                                    .format(op, output_method.dtype, out_type))
+                                    f"autocast for torch.{op} produced {output_method.dtype}, should produce torch.{out_type}")
 
             self.assertTrue((output is not None) or (output_method is not None),
                             f"{op} not found as an attribute on either Tensor or the requested module {module}")

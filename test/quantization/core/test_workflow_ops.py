@@ -924,18 +924,13 @@ class TestFakeQuantizeOps(TestCase):
 
                 self.assertTrue(
                     torch.allclose(dX_expected, dX_actual, rtol=tolerance, atol=tolerance),
-                    "Expected dX={} to match X.grad={}, X={}, s={}, z={}, dout={}, n_bits={}".format(
-                        dX_expected, dX_actual, X_curr, scale_curr, zero_point_curr, dout, n_bits))
+                    f"Expected dX={dX_expected} to match X.grad={dX_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}")  # noqa: B950
                 self.assertTrue(
                     torch.allclose(dScale_expected * grad_factor, dScale_actual, rtol=tolerance, atol=tolerance),
-                    "Expected dScale={} to match scale.grad={}, X={}, s={}, z={}, dout={}, n_bits={}".format(
-                        dScale_expected * grad_factor, dScale_actual,
-                        X_curr, scale_curr, zero_point_curr, dout, n_bits))
+                    f"Expected dScale={dScale_expected * grad_factor} to match scale.grad={dScale_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}")  # noqa: B950
                 self.assertTrue(
                     torch.allclose(dZeroPoint_expected * grad_factor, dZeroPoint_actual, rtol=tolerance, atol=tolerance),
-                    "Expected dZeroPoint={} to match zero_point.grad={}, X={}, s={}, z={}, dout={}, n_bits={}".format(
-                        dZeroPoint_expected * grad_factor, dZeroPoint_actual,
-                        X_curr, scale_curr, zero_point_curr, dout, n_bits))
+                    f"Expected dZeroPoint={dZeroPoint_expected * grad_factor} to match zero_point.grad={dZeroPoint_actual}, X={X_curr}, s={scale_curr}, z={zero_point_curr}, dout={dout}, n_bits={n_bits}")  # noqa: B950
                 X_curr.grad.data.zero_()
                 scale_curr.grad.data.zero_()
                 zero_point_curr.grad.data.zero_()
