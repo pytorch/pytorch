@@ -22,6 +22,16 @@ SIDE_EFFECTS: Dict[torch._ops.OpOverload, _EffectType] = {
 }
 
 
+def _register_effectful_op(op: torch._ops.OpOverload, effect: _EffectType):
+    assert isinstance(op, torch._ops.OpOverload) and not has_aliasing(op)
+    if op in SIDE_EFFECTS and SIDE_EFFECTS[op] != effect:
+        raise RuntimeError(
+            f"Already registered effect type {SIDE_EFFECTS[op]} to op {op}, "
+            f"trying to register a different effect type {effect}."
+        )
+    SIDE_EFFECTS[op] = effect
+
+
 class WithEffects(HigherOrderOperator):
     """
     with_effects(token, op, args, kwargs) -> (new_token, op_results)
@@ -67,6 +77,11 @@ def has_aliasing(op: torch._ops.OpOverload):
 
 
 def has_effects(op, args, kwargs) -> bool:
+    # Skip over the profiler's RecordFunction as they should not show up in the graph
+    _skip_ops = {torch.ops.profiler._record_function_exit._RecordFunction}
+    if op in _skip_ops:
+        return False
+
     return (
         isinstance(op, torch._ops.OpOverload)
         and not has_aliasing(op)
@@ -170,7 +185,9 @@ def handle_effects(
     key = get_effect_key(op, args, kwargs)
     assert key is not None
     if key not in tokens:
-        assert allow_token_discovery, f"Could not find a token for effect {key}"
+        assert (
+            allow_token_discovery
+        ), f"Could not find a token for effect {key} which came from the function {op}"
         tokens[key] = torch.tensor([])
     token = tokens[key]
 

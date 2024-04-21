@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import torch
 from torch._dynamo import disable
-from torch._dynamo.utils import counters, defake
+from torch._dynamo.utils import counters, defake, flatten_graph_inputs
 from torch._functorch.aot_autograd import aot_module_simplified
 from torch.utils._python_dispatch import _disable_current_modes
 
@@ -16,6 +16,13 @@ log = logging.getLogger(__name__)
 
 def aot_autograd(**kwargs):
     def compiler_fn(gm: torch.fx.GraphModule, example_inputs):
+        if any(isinstance(x, (list, tuple, dict)) for x in example_inputs):
+            return flatten_graph_inputs(
+                gm,
+                example_inputs,
+                compiler_fn,
+            )
+
         # Hack to get around circular import problems with aot_eager_decomp_partition
         if callable(kwargs.get("decompositions")):
             kwargs["decompositions"] = kwargs["decompositions"]()

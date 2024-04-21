@@ -16,6 +16,7 @@ from tools.testing.target_determination.heuristics.interface import (
     HeuristicInterface as HeuristicInterface,
     TestPrioritizations as TestPrioritizations,
 )
+from tools.testing.target_determination.heuristics.llm import LLM
 from tools.testing.target_determination.heuristics.mentioned_in_pr import MentionedInPR
 
 from tools.testing.target_determination.heuristics.previously_failed_in_pr import (
@@ -33,4 +34,5 @@ HEURISTICS: List[HeuristicInterface] = [
     CorrelatedWithHistoricalFailures(),
     HistorialEditedFiles(),
     Profiling(),
+    LLM(),
 ]

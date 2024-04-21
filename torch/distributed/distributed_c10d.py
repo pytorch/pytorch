@@ -13,7 +13,7 @@ import time
 import warnings
 from collections import namedtuple
 from datetime import timedelta
-from typing import Any, Callable, Dict, Optional, Tuple, Union, List
+from typing import Any, Callable, Dict, Optional, Tuple, Union, List, TYPE_CHECKING
 
 import torch
 from torch._C._distributed_c10d import (
@@ -336,7 +336,7 @@ class BackendConfig:
             }
 
         logger.info(
-            f"Using backend config: {self.device_backend_map}"  # noqa: G004
+            "Using backend config: %s", self.device_backend_map
         )
 
     def __repr__(self):
@@ -689,8 +689,8 @@ def _get_pg_default_device(group: Optional[ProcessGroup] = None) -> torch.device
         _world.pg_default_device[group] = devices[0]
 
     logger.info(
-        f"Using device {_world.pg_default_device[group]} for object "  # noqa: G004
-        "collectives."
+        "Using device %s for object "
+        "collectives.", _world.pg_default_device[group]
     )
     return _world.pg_default_device[group]
 
@@ -706,7 +706,7 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
     """
     store_key = f"{STORE_BASED_BARRIER_PREFIX}:{group_name}"
     store.add(store_key, 1)
-    logger.info("Added key: %s to store for rank: %s", store_key, rank)
+    logger.debug("Added key: %s to store for rank: %s", store_key, rank)
 
     # Now wait for all workers to check in with the store.
     world_size = rendezvous_count
@@ -730,17 +730,17 @@ def _store_based_barrier(rank, store, group_name, rendezvous_count, timeout, log
         except RuntimeError as e:
             worker_count = store.add(store_key, 0)
             # Print status periodically to keep track.
-            logger.info(
+            logger.debug(
                 "Waiting in store based barrier to initialize process group for "
-                "rank: %s, key: %s (world_size=%s, num_workers_joined=%s, timeout=%s)",
-                rank, store_key, world_size, worker_count, timeout
+                "rank: %s, key: %s (world_size=%s, num_workers_joined=%s, timeout=%s error=%s)",
+                rank, store_key, world_size, worker_count, timeout, e
             )
 
             if timedelta(seconds=(time.time() - start)) > timeout:
                 raise DistStoreError(  # noqa: TRY200
                     "Timed out initializing process group in store based barrier on "
-                    "rank {}, for key: {} (world_size={}, num_workers_joined={}, timeout={})".format(
-                        rank, store_key, world_size, worker_count, timeout
+                    "rank {}, for key: {} (world_size={}, num_workers_joined={}, timeout={} error={})".format(
+                        rank, store_key, world_size, worker_count, timeout, e
                     )
                 )
 
@@ -1009,7 +1009,10 @@ def _get_default_group() -> ProcessGroup:
             "Default process group has not been initialized, "
             "please make sure to call init_process_group."
         )
-    return not_none(GroupMember.WORLD)
+    if TYPE_CHECKING:
+        return not_none(GroupMember.WORLD)
+    else:
+        return GroupMember.WORLD
 
 
 def _get_default_store() -> Store:
@@ -1352,7 +1355,7 @@ def init_process_group(
         # these barriers may be unnecessary, as proven by a green CI after
         # removal. An environment variable `TORCH_DIST_INIT_BARRIER` has been
         # added which enables this barrier only when set to 1.
-        logger.info(
+        logger.debug(
             "Performing barrier after ProcessGroup initialization since "
             "TORCH_DIST_INIT_BARRIER = 1"
         )
@@ -1530,6 +1533,7 @@ def _new_process_group_helper(
                 pg_options.split_from = split_from
                 pg_options.split_color = _process_group_color(global_ranks_in_group)
             pg_options.global_ranks_in_group = global_ranks_in_group
+            pg_options.group_name = group_name
             backend_class = ProcessGroupNCCL(
                 backend_prefix_store, group_rank, group_size, pg_options)
             backend_type = ProcessGroup.BackendType.NCCL
@@ -2261,7 +2265,7 @@ def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
     warnings.warn(
         "torch.distributed.all_reduce_coalesced will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#collective-functions"
+        "https://pytorch.org/docs/main/distributed.html#collective-functions"
     )
     if isinstance(tensors, torch.Tensor):
         tensors = [tensors]
@@ -2346,7 +2350,7 @@ def _object_to_tensor(obj, device, group):
         backend = get_backend(group)
         if backend == Backend.NCCL:
             hash = torch._C._distributed_c10d._hash_tensors([byte_tensor])
-            logger.warning(f"_object_to_tensor size: {byte_tensor.numel()} hash value: {hash}")  # noqa: G004
+            logger.warning("_object_to_tensor size: %s hash value: %s", byte_tensor.numel(), hash)
     local_size = torch.LongTensor([byte_tensor.numel()]).to(device)
     return byte_tensor, local_size
 
@@ -2356,7 +2360,7 @@ def _tensor_to_object(tensor, tensor_size, group):
         backend = get_backend(group)
         if backend == Backend.NCCL:
             hash = torch._C._distributed_c10d._hash_tensors([tensor])
-            logger.warning(f"_tensor_to_object size: {tensor.numel()} hash value: {hash}")  # noqa: G004
+            logger.warning("_tensor_to_object size: %s hash value: %s", tensor.numel(), hash)
     tensor = tensor.cpu()
     buf = tensor.numpy().tobytes()[:tensor_size]
     return _unpickler(io.BytesIO(buf)).load()
@@ -3033,7 +3037,7 @@ def all_gather_coalesced(
     warnings.warn(
         "torch.distributed.all_gather_coalesced will be deprecated. If you must "
         "use it, please revisit our documentation later at "
-        "https://pytorch.org/docs/master/distributed.html#collective-functions"
+        "https://pytorch.org/docs/main/distributed.html#collective-functions"
     )
     # We only check basic compatibility with C++ params here, C++ code will
     # do shape and type checking.
@@ -4050,7 +4054,7 @@ def new_subgroups(
         >>> tensor = torch.ones(1, device=rank) * rank
         >>> dist.all_reduce(tensor, group=cur_subgroup)
         >>> tensor
-        tensor([8])     # Assume 8 is the number of CUDA devices per machine.
+        tensor([28])  # Assume 8 CUDA devices per machine.  28 is sum(range(8)).
         >>> # Cleanup.
         >>> for subgroup in subgroups:
         >>>     dist.destroy_process_group(subgroup)

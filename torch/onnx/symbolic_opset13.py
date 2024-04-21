@@ -21,15 +21,6 @@ from torch.onnx._internal import _beartype, jit_utils, registration
 _onnx_symbolic = functools.partial(registration.onnx_symbolic, opset=13)
 
 
-def _apply_params(*args, **kwargs):
-    """Returns a decorator that calls the decorated (higher-order) function with the given parameters."""
-
-    def _apply(fn):
-        return fn(*args, **kwargs)
-
-    return _apply
-
-
 @_onnx_symbolic("aten::softmax")
 @symbolic_helper.parse_args("v", "i", "none")
 @_beartype.beartype
@@ -412,7 +403,7 @@ def fake_quantize_per_tensor_affine(
 def _reduce_op_symbolic(onnx_op_name):
     @_beartype.beartype
     def symbolic(g, self, dim=None, keepdim=None):
-        self = opset9._maybe_cast_reduce_op_input(g, self)
+        self = symbolic_helper._maybe_cast_reduce_op_input(g, self)
         if dim is None:
             # all-reduce path
             return symbolic_helper._handle_reduce_dim_none(g, self, onnx_op_name)
@@ -425,13 +416,13 @@ def _reduce_op_symbolic(onnx_op_name):
 
 @_onnx_symbolic(
     "aten::sum",
-    decorate=[_apply_params("ReduceSum", "sum")],
+    decorate=[symbolic_helper._apply_params("ReduceSum", "sum")],
 )
 @_beartype.beartype
 def _reduce_with_dtype(onnx_op, name):
     symbolic = _reduce_op_symbolic(onnx_op)
 
-    @opset9.overload_by_arg_count
+    @symbolic_helper._overload_by_arg_count
     @_beartype.beartype
     def reduce(g, *args, **kwargs):
         @symbolic_helper.parse_args("v", "none")

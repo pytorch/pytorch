@@ -50,12 +50,14 @@ class TestHelperModules:
             self.post_op = post_op
             self.bn = torch.nn.BatchNorm2d(6)
             self.with_bn = with_bn
+            self.maxpool = torch.nn.MaxPool2d((3, 3))
 
         def forward(self, x):
             x = self.conv(x)
             if self.with_bn:
                 x = self.bn(x)
             x = self.post_op(x)
+            x = self.maxpool(x)
             return x
 
     class Conv2dAddModule(torch.nn.Module):
@@ -251,10 +253,13 @@ class TestHelperModules:
             return self.linear(x)
 
     class LinearUnaryModule(torch.nn.Module):
-        def __init__(self, use_bias, postop, inplace_postop) -> None:
+        def __init__(self, use_bias, postop, inplace_postop=False, post_op_algo='none') -> None:
             super().__init__()
             self.linear = nn.Linear(4, 4, bias=use_bias)
-            self.postop = postop(inplace=inplace_postop)
+            if postop == nn.GELU:
+                self.postop = postop(approximate=post_op_algo)
+            else:
+                self.postop = postop(inplace=inplace_postop)
 
         def forward(self, x):
             return self.postop(self.linear(x))
@@ -284,21 +289,42 @@ class TestHelperModules:
                 return tmp + self.bn2(self.conv2(tmp))
 
     class SelfAttnLikeModule(torch.nn.Module):
-        def __init__(self, input_dim) -> None:
+        def __init__(
+            self,
+            input_dim,
+            transpose_for_score=False,
+            num_attention_heads=None,
+            attention_head_size=None,
+        ) -> None:
             super().__init__()
             self.input_dim = input_dim
             self.q_proj = nn.Linear(input_dim, input_dim, bias=False)
             self.k_proj = nn.Linear(input_dim, input_dim, bias=False)
             self.v_proj = nn.Linear(input_dim, input_dim, bias=False)
             self.softmax = nn.Softmax(dim=-1)
+            self.transpose_for_score = transpose_for_score
+            if self.transpose_for_score:
+                assert num_attention_heads is not None
+                assert attention_head_size is not None
+                self.num_attention_heads = num_attention_heads
+                self.attention_head_size = attention_head_size
+
+        def transpose_for_scores(self, x: torch.Tensor) -> torch.Tensor:
+            new_x_shape = x.size()[:-1] + (self.num_attention_heads, self.attention_head_size)
+            x = x.view(new_x_shape)
+            return x.permute(0, 2, 1, 3)
 
         def forward(self, x):
             q = self.q_proj(x)
             k = self.k_proj(x)
             v = self.v_proj(x)
-            scores = torch.bmm(q, k.transpose(1, 2)) / (self.input_dim ** 0.5)
+            if self.transpose_for_score:
+                q = self.transpose_for_scores(q)
+                k = self.transpose_for_scores(k)
+                v = self.transpose_for_scores(v)
+            scores = torch.matmul(q, k.transpose(-1, -2)) / (self.input_dim ** 0.5)
             attention = self.softmax(scores)
-            weighted = torch.bmm(attention, v)
+            weighted = torch.matmul(attention, v)
             return weighted
 
 class X86InductorQuantTestCase(QuantizationTestCase):
@@ -387,7 +413,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
             "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
             "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
-            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default]
+            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default],
+            "swish": [torch.nn.SiLU(inplace=False), torch.ops.aten.silu.default],
+            "swish_inplace": [torch.nn.SiLU(inplace=True), torch.ops.aten.silu_.default],
         }
         use_bias_list = [True, False]
         with override_quantized_engine("x86"), torch.no_grad():
@@ -399,8 +427,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
                 node_occurrence = {
                     # one for input and weight of the conv
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
                     # note: quantize op for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
@@ -1010,6 +1038,44 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                     node_list,
                 )
 
+    @skipIfNoX86
+    def test_linear_unary_gelu(self):
+        """
+        Test pattern of linear with unary post ops (e.g. gelu) with X86InductorQuantizer.
+        """
+        use_bias_list = [True, False]
+        postop = nn.GELU
+        post_op_algorithm = ['none', 'tanh']
+        cases = itertools.product(use_bias_list, post_op_algorithm)
+        with override_quantized_engine("x86"), torch.no_grad():
+            for use_bias, post_op_algo in cases:
+                m = TestHelperModules.LinearUnaryModule(use_bias=use_bias, postop=postop, post_op_algo=post_op_algo).eval()
+                example_inputs = (torch.randn(2, 4),)
+                quantizer = X86InductorQuantizer().set_global(
+                    xiq.get_default_x86_inductor_quantization_config()
+                )
+                node_occurrence = {
+                    # one for input and weight of the conv, one for output for the gelu
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+                    # quantize_per_channel for weights are const propagated
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+                }
+                node_list = [
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                    torch.ops.aten.linear.default,
+                    torch.ops.aten.gelu.default,
+                ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                )
+
     @skipIfTorchDynamo("very slow")
     @skipIfNoX86
     def test_qat_conv2d(self):
@@ -1063,7 +1129,9 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
             "relu6": [torch.nn.ReLU6(inplace=False), torch.ops.aten.hardtanh.default],
             "relu6_inplace": [torch.nn.ReLU6(inplace=True), torch.ops.aten.hardtanh_.default],
             "hardswish": [torch.nn.Hardswish(inplace=False), torch.ops.aten.hardswish.default],
-            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default]
+            "hardswish_inplace": [torch.nn.Hardswish(inplace=True), torch.ops.aten.hardswish_.default],
+            "swish": [torch.nn.SiLU(inplace=False), torch.ops.aten.silu.default],
+            "swish_inplace": [torch.nn.SiLU(inplace=True), torch.ops.aten.silu_.default],
         }
 
         with override_quantized_engine("x86"):
@@ -1075,8 +1143,8 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 )
                 node_occurrence = {
                     # one for input and weight of the conv, one for output for the relu
-                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
-                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 2,
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 3,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
                     # note: quantize op for weights are const propagated
                     torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
                     torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
@@ -1299,3 +1367,170 @@ class TestQuantizePT2EX86Inductor(X86InductorQuantTestCase):
                 node_list,
                 is_qat=True,
             )
+
+    @skipIfNoX86
+    def test_filter_conv2d_recipe(self):
+        """
+        Test removing conv2d from default recipe of X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.Conv2dUnaryModule(torch.nn.ReLU(inplace=False)).eval()
+            example_inputs = (torch.randn(2, 3, 16, 16),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config()
+            )
+            quantizer.set_module_type_qconfig(torch.nn.Conv2d, None)
+            node_occurrence = {
+                # one for input and weight of the conv
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
+                # note: quantize op for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
+            }
+            node_list = [
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.relu.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+            )
+
+    @skipIfNoX86
+    def test_filter_linear_recipe(self):
+        """
+        Test removing linear from default recipe of X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.LinearUnaryModule(
+                use_bias=True,
+                postop=nn.ReLU,
+            ).eval()
+            example_inputs = (torch.randn(2, 4),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config()
+            )
+            quantizer.set_function_type_qconfig(torch.nn.functional.linear, None)
+            node_occurrence = {
+                # one for input and weight of the conv
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 0,
+                # note: quantize op for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 0,
+            }
+            node_list = [
+                torch.ops.aten.linear.default,
+                torch.ops.aten.relu.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+            )
+
+    @skipIfNoX86
+    def test_filter_maxpool2d_recipe(self):
+        """
+        Test removing maxpool2d from default recipe of X86InductorQuantizer.
+        """
+        with override_quantized_engine("x86"), torch.no_grad():
+            m = TestHelperModules.Conv2dUnaryModule(torch.nn.ReLU(inplace=False)).eval()
+            example_inputs = (torch.randn(2, 3, 16, 16),)
+            quantizer = X86InductorQuantizer().set_global(
+                xiq.get_default_x86_inductor_quantization_config()
+            )
+            quantizer.set_function_type_qconfig(torch.nn.functional.max_pool2d, None)
+            node_occurrence = {
+                # one for input and weight of the conv
+                torch.ops.quantized_decomposed.quantize_per_tensor.default: 1,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default: 1,
+                # note: quantize op for weights are const propagated
+                torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                torch.ops.quantized_decomposed.dequantize_per_channel.default: 1,
+            }
+            node_list = [
+                torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                torch.ops.aten.conv2d.default,
+                torch.ops.aten.relu.default,
+                torch.ops.aten.max_pool2d.default,
+            ]
+            self._test_quantizer(
+                m,
+                example_inputs,
+                quantizer,
+                node_occurrence,
+                node_list,
+            )
+
+    @skipIfNoX86
+    def test_attention_block(self):
+        """
+        Test pattern of Attention like Block with X86InductorQuantizer.
+        """
+        for annotate_matmul in [False, True]:
+            with override_quantized_engine("x86"), torch.no_grad():
+                m = TestHelperModules.SelfAttnLikeModule(
+                    input_dim=64 * 16,
+                    transpose_for_score=True,
+                    num_attention_heads=16,
+                    attention_head_size=64,
+                ).eval()
+                example_inputs = (torch.randn(2, 384, 1024),)
+
+                m(*example_inputs)
+
+                quantizer = X86InductorQuantizer().set_global(
+                    xiq.get_default_x86_inductor_quantization_config()
+                )
+
+                if annotate_matmul:
+                    quantizer.set_function_type_qconfig(torch.matmul, quantizer.get_global_quantization_config())
+
+                node_occurrence = {
+                    torch.ops.quantized_decomposed.quantize_per_tensor.default: 5 if annotate_matmul else 1,
+                    torch.ops.quantized_decomposed.dequantize_per_tensor.default: 7 if annotate_matmul else 3,
+                    # quantize_per_channel for weights are const propagated
+                    torch.ops.quantized_decomposed.quantize_per_channel.default: 0,
+                    torch.ops.quantized_decomposed.dequantize_per_channel.default: 3,
+                }
+                if annotate_matmul:
+                    node_list = [
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                        torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                        torch.ops.aten.linear.default,
+                        torch.ops.aten.view.default,
+                        torch.ops.aten.permute.default,
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                        torch.ops.aten.matmul.default,
+                        torch.ops.aten.div.Tensor,
+                        torch.ops.aten.softmax.int,
+                    ]
+                else:
+                    node_list = [
+                        torch.ops.quantized_decomposed.quantize_per_tensor.default,
+                        torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+                        torch.ops.quantized_decomposed.dequantize_per_channel.default,
+                        torch.ops.aten.linear.default,
+                        torch.ops.aten.view.default,
+                        torch.ops.aten.permute.default,
+                        torch.ops.aten.matmul.default,
+                        torch.ops.aten.div.Tensor,
+                        torch.ops.aten.softmax.int,
+                    ]
+                self._test_quantizer(
+                    m,
+                    example_inputs,
+                    quantizer,
+                    node_occurrence,
+                    node_list,
+                )

@@ -68,20 +68,10 @@ The following types define the planner interface used during checkpoint:
 
 We provide a filesystem based storage layer:
 
-.. autoclass:: torch.distributed.checkpoint.filesystem.FileSystemReader
+.. autoclass:: torch.distributed.checkpoint.FileSystemReader
   :members:
 
-.. autoclass:: torch.distributed.checkpoint.filesystem.FileSystemWriter
-  :members:
-
-Additionally, we provide the following abstractions for working with Fsspec storage.
-
-.. automodule:: torch.distributed.checkpoint.fsspec
-
-.. autoclass:: torch.distributed.checkpoint.fsspec.FsspecReader
-  :members:
-
-.. autoclass:: torch.distributed.checkpoint.fsspec.FsspecWriter
+.. autoclass:: torch.distributed.checkpoint.FileSystemWriter
   :members:
 
 We provide default implementations of `LoadPlanner` and `SavePlanner` that
@@ -134,3 +124,8 @@ The following classes can also be utilized for online loading and resharding of 
 
 .. autoclass:: torch.distributed.checkpoint.format_utils.DynamicMetaLoadPlanner
    :members:
+
+The following experimental interfaces are provided for improved observability in production environments:
+
+.. py:module:: torch.distributed.checkpoint.logger
+.. py:module:: torch.distributed.checkpoint.logging_handlers

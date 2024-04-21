@@ -53,7 +53,6 @@ from common_utils import (
 )
 import types
 import os
-import sys
 from collections import namedtuple
 import contextlib
 
@@ -2156,7 +2155,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
 
     @unittest.skipIf(IS_WINDOWS,
                      reason="Windows not yet supported for torch.compile")
-    @unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
     def test_is_contiguous(self):
         def foo(x):
             if x.is_contiguous():
@@ -3677,7 +3675,6 @@ class TestVmapOperatorsOpInfo(TestCase):
         # masked index as input which is not supported
         xfail('index_put', ''),
         xfail('isin'),
-        xfail('lu_unpack'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('masked_select'),
@@ -5049,7 +5046,6 @@ class TestRandomness(TestCase):
             self._assert_all_slices_unique(output)
 
 
-    @xfailIfTorchDynamo
     def test_jacfwd_with_random(self):
         # checks on behavior are above, this just checks that jacfwd respects
         # the randomness param

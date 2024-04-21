@@ -2643,20 +2643,20 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_lengthchecks_cuda(self):
-        target_lengths = [30, 25, 20]
-        input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (3, 29), dtype=torch.long, device='cuda')
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
-        with self.assertRaises(RuntimeError):
-            torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
+            for input_lengths in [[50, 50, 50], [-1, -1, -1]]:
+                targets = torch.randint(1, 15, (3, 29), dtype=torch.long, device='cuda')
+                log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
+                with self.assertRaises(RuntimeError):
+                    torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
     def test_CTCLoss_lengthchecks_cpu(self):
-        target_lengths = [30, 25, 20]
-        input_lengths = [50, 50, 50]
-        targets = torch.randint(1, 15, (3, 29), dtype=torch.int)
-        log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
-        with self.assertRaises(RuntimeError):
-            torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        for target_lengths in [[30, 25, 20], [-1, -1, -1]]:
+            for input_lengths in [[50, 50, 50], [-1, -1, -1]]:
+                targets = torch.randint(1, 15, (3, 29), dtype=torch.int)
+                log_probs = torch.randn(50, 3, 15, dtype=torch.float).log_softmax(2)
+                with self.assertRaises(RuntimeError):
+                    torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_long_targets(self):
@@ -2697,6 +2697,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
             res_gpu = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
         res_cpu = torch.nn.functional.ctc_loss(inp.cpu(), target, input_lengths, target_lengths, reduction='none')
         self.assertEqual(res_cpu, res_gpu, atol=1e-3, rtol=0)
+
+    def test_CTCLoss_zero_lengths(self):
+        devices = ['cpu']
+        devices += ['cuda'] if TEST_CUDA else []
+        N = 3
+        S = 2
+        C = 200
+        T = 1
+        target = torch.randint(low=1, high=C, size=(N, S), dtype=torch.int)
+        input_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
+        target_lengths = torch.full(size=(N,), fill_value=0, dtype=torch.int)
+        for device in devices:
+            inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+            res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
+            self.assertTrue((res == 0).all().item())
+            res.sum().backward()
+            self.assertTrue((inp.grad == 0).all().item())
+        target_lengths = torch.full(size=(N,), fill_value=1, dtype=torch.int)
+        for device in devices:
+            inp = torch.randn(T, N, C, dtype=torch.float, device=device).log_softmax(2).requires_grad_()
+            res = torch.nn.functional.ctc_loss(inp, target, input_lengths, target_lengths, reduction='none')
+            self.assertTrue((res == torch.inf).all().item())
+            res.sum().backward()
+            self.assertTrue((inp.grad == 0).all().item())
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_CTCLoss_zero_infinity(self):
@@ -9755,6 +9779,23 @@ class TestNNDeviceType(NNTestCase):
         del x
         self.assertTrue(torch.allclose(out, out_ref))
 
+    @onlyCUDA
+    @dtypes(torch.half)
+    @largeTensorTest('40GB')
+    def test_replicatepad_64bit_indexing(self, device, dtype):
+        conv = torch.nn.Conv1d(128, 128, 3, 1, 1, padding_mode="replicate", device=device, dtype=dtype)
+        x = torch.randn(size=(256 * 448 * 2, 128, 96), dtype=dtype, device=device)
+        y = conv(x)
+        torch.mean(y).backward()
+
+    @onlyCUDA
+    @dtypes(torch.half)
+    @largeTensorTest('40GB')
+    def test_upsamplingnearest2d_backward_64bit_indexing(self, device, dtype):
+        x = torch.randn(size=(36, 128, 512, 512), device=device, dtype=dtype).requires_grad_()
+        y = F.interpolate(x, scale_factor=2, mode="nearest")
+        y.backward(torch.randn_like(y))
+
     def _slow_masked_softmax(self, input, mask):
         exp = torch.exp(input)
         exp = exp * mask
@@ -12583,7 +12624,7 @@ if __name__ == '__main__':
 
     # reference issue: https://github.com/pytorch/pytorch/issues/111484
     @onlyCUDA
-    @largeTensorTest("41GB" if TEST_WITH_ROCM else "30GB", "cuda")
+    @largeTensorTest("42GB", "cuda")
     def test_softmax_forward_64bit_indexing(self, device):
         batch_size = 70
         seq_len = 2048

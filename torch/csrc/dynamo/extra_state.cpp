@@ -3,6 +3,7 @@
 #include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/cpython_defs.h>
 #include <torch/csrc/dynamo/debug_macros.h>
+#include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/utils/python_compat.h>
 
 #if IS_PYTHON_3_12_PLUS
@@ -14,7 +15,7 @@ Py_ssize_t extra_index = -1;
 
 CacheEntry* ExtraState::get_first_entry() {
   if (this->cache_entry_list.empty()) {
-    return NULL;
+    return nullptr;
   }
   return &this->cache_entry_list.front();
 }
@@ -37,28 +38,28 @@ void ExtraState::invalidate(CacheEntry* cache_entry) {
 }
 
 CacheEntry* extract_cache_entry(ExtraState* extra_state) {
-  if (extra_state == NULL || extra_state == SKIP_CODE) {
-    return NULL;
+  if (extra_state == nullptr || extra_state == SKIP_CODE) {
+    return nullptr;
   }
   return extra_state->get_first_entry();
 }
 
 FrameState* extract_frame_state(ExtraState* extra_state) {
-  if (extra_state == NULL || extra_state == SKIP_CODE) {
-    return NULL;
+  if (extra_state == nullptr || extra_state == SKIP_CODE) {
+    return nullptr;
   }
   return (FrameState*)extra_state->frame_state.ptr();
 }
 
 ExtraState* get_extra_state(PyCodeObject* code) {
-  ExtraState* extra = NULL;
+  ExtraState* extra = nullptr;
   _PyCode_GetExtra((PyObject*)code, extra_index, (void**)&extra);
   return extra;
 }
 
 void destroy_extra_state(void* obj) {
   ExtraState* extra = (ExtraState*)obj;
-  if (extra != NULL && extra != SKIP_CODE) {
+  if (extra != nullptr && extra != SKIP_CODE) {
     delete extra;
   }
 }
@@ -66,45 +67,57 @@ void destroy_extra_state(void* obj) {
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state) {
   ExtraState* old_extra_state = get_extra_state(code);
   CHECK(
-      old_extra_state == NULL || old_extra_state == SKIP_CODE ||
+      old_extra_state == nullptr || old_extra_state == SKIP_CODE ||
       old_extra_state != extra_state);
   _PyCode_SetExtra((PyObject*)code, extra_index, extra_state);
 }
 
 ExtraState* init_and_set_extra_state(PyCodeObject* code) {
   // Invariant - Extra state should not have been set before, therefore it
-  // should be NULL.
-  CHECK(get_extra_state(code) == NULL);
+  // should be nullptr.
+  CHECK(get_extra_state(code) == nullptr);
   ExtraState* extra_state = new ExtraState();
   NULL_CHECK(extra_state);
   set_extra_state(code, extra_state);
   return extra_state;
 }
 
-PyObject* lookup(ExtraState* extra_state, PyObject* f_locals) {
+PyObject* lookup(
+    ExtraState* extra_state,
+    PyObject* f_locals,
+    const PyObject* backend) {
   size_t index = 0;
   CacheEntry* found = nullptr;
   py::handle locals(f_locals);
   for (CacheEntry& cache_entry : extra_state->cache_entry_list) {
-    py::object valid = py::none();
-    try {
-      valid = cache_entry.check_fn(locals);
-    } catch (py::error_already_set& e) {
-      if (guard_error_hook) {
-        py::handle guard_error_hook_handle(guard_error_hook);
-        guard_error_hook_handle(
-            cache_entry.check_fn,
-            cache_entry.code,
-            locals,
-            index,
-            index == extra_state->cache_entry_list.size() - 1);
+    // Check backend. Py_False means run only mode.
+    bool valid = backend == Py_False || cache_entry.backend == backend;
+    if (valid) {
+      try {
+        // TODO(anijain2305) - Clean this up when enable_cpp_guard_manager is
+        // True by default
+        if (cache_entry.root_mgr != nullptr) {
+          valid = run_root_guard_manager(cache_entry.root_mgr, f_locals);
+        } else {
+          valid = cache_entry.check_fn(locals).cast<bool>();
+        }
+      } catch (py::error_already_set& e) {
+        if (guard_error_hook) {
+          py::handle guard_error_hook_handle(guard_error_hook);
+          guard_error_hook_handle(
+              cache_entry.check_fn,
+              cache_entry.code,
+              locals,
+              index,
+              index == extra_state->cache_entry_list.size() - 1);
+        }
+        // this function is called from C, so we cannot repropagate
+        // the exception
+        e.restore();
+        return nullptr;
       }
-      // this function is called from C, so we cannot repropagate
-      // the exception
-      e.restore();
-      return NULL;
     }
-    if (valid.cast<bool>()) {
+    if (valid) {
       found = &cache_entry;
       break;
     }
@@ -119,8 +132,9 @@ PyObject* lookup(ExtraState* extra_state, PyObject* f_locals) {
 
 CacheEntry* create_cache_entry(
     ExtraState* extra_state,
-    PyObject* guarded_code) {
-  extra_state->cache_entry_list.emplace_front(guarded_code);
+    PyObject* guarded_code,
+    PyObject* backend) {
+  extra_state->cache_entry_list.emplace_front(guarded_code, backend);
   auto new_iter = extra_state->cache_entry_list.begin();
   new_iter->_owner = extra_state;
   new_iter->_owner_loc = new_iter;
