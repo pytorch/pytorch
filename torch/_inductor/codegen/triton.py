@@ -2729,6 +2729,42 @@ class TritonKernel(Kernel):
             return "reduction"
         return "pointwise"
 
+    @staticmethod
+    def inductor_meta_common():
+        inductor_meta = {
+            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
+            "are_deterministic_algorithms_enabled": torch.are_deterministic_algorithms_enabled(),
+            "assert_indirect_indexing": config.assert_indirect_indexing,
+            "autotune_local_cache": config.autotune_local_cache,
+            "autotune_pointwise": config.triton.autotune_pointwise,
+            "autotune_remote_cache": config.autotune_remote_cache,
+            "dynamic_scale_rblock": config.dynamic_scale_rblock,
+            "max_autotune": config.max_autotune,
+            "max_autotune_pointwise": config.max_autotune_pointwise,
+            "min_split_scan_rblock": config.triton.min_split_scan_rblock,
+            "spill_threshold": config.triton.spill_threshold,
+            "store_cubin": config.triton.store_cubin,
+        }
+        if torch.version.hip is not None:
+            inductor_meta["is_hip"] = True
+        if config.is_fbcode():
+            inductor_meta["is_fbcode"] = True
+        if config.profile_bandwidth:
+            inductor_meta["profile_bandwidth"] = config.profile_bandwidth
+            inductor_meta["profile_bandwidth_regex"] = config.profile_bandwidth_regex
+            inductor_meta["profile_bandwidth_output"] = config.profile_bandwidth_output
+        if config.coordinate_descent_tuning:
+            inductor_meta[
+                "coordinate_descent_tuning"
+            ] = config.coordinate_descent_tuning
+            inductor_meta[
+                "coordinate_descent_search_radius"
+            ] = config.coordinate_descent_search_radius
+            inductor_meta[
+                "coordinate_descent_check_all_directions"
+            ] = config.coordinate_descent_check_all_directions
+        return inductor_meta
+
     def codegen_kernel(self, name=None):
         code = IndentedBuffer()
 
@@ -2804,37 +2840,8 @@ class TritonKernel(Kernel):
             "kernel_name": str(Placeholder.DESCRIPTIVE_NAME),
             "mutated_arg_names": mutated_args,
             "no_x_dim": self.no_x_dim,
-            "backend_hash": torch.utils._triton.triton_hash_with_backend(),
-            "are_deterministic_algorithms_enabled": torch.are_deterministic_algorithms_enabled(),
-            "assert_indirect_indexing": config.assert_indirect_indexing,
-            "autotune_local_cache": config.autotune_local_cache,
-            "autotune_pointwise": config.triton.autotune_pointwise,
-            "autotune_remote_cache": config.autotune_remote_cache,
-            "dynamic_scale_rblock": config.dynamic_scale_rblock,
-            "max_autotune": config.max_autotune,
-            "max_autotune_pointwise": config.max_autotune_pointwise,
-            "min_split_scan_rblock": config.triton.min_split_scan_rblock,
-            "spill_threshold": config.triton.spill_threshold,
-            "store_cubin": config.triton.store_cubin,
+            **self.inductor_meta_common(),
         }
-        if torch.version.hip is not None:
-            inductor_meta["is_hip"] = True
-        if config.is_fbcode():
-            inductor_meta["is_fbcode"] = True
-        if config.profile_bandwidth:
-            inductor_meta["profile_bandwidth"] = config.profile_bandwidth
-            inductor_meta["profile_bandwidth_regex"] = config.profile_bandwidth_regex
-            inductor_meta["profile_bandwidth_output"] = config.profile_bandwidth_output
-        if config.coordinate_descent_tuning:
-            inductor_meta[
-                "coordinate_descent_tuning"
-            ] = config.coordinate_descent_tuning
-            inductor_meta[
-                "coordinate_descent_search_radius"
-            ] = config.coordinate_descent_search_radius
-            inductor_meta[
-                "coordinate_descent_check_all_directions"
-            ] = config.coordinate_descent_check_all_directions
 
         num_gb = None
         if config.benchmark_kernel or config.profile_bandwidth:
