@@ -195,6 +195,10 @@ class TimmRunner(BenchmarkRunner):
         return set()
 
     @property
+    def get_output_amp_train_process_func(self):
+        return {}
+
+    @property
     def skip_accuracy_check_as_eager_non_deterministic(self):
         if self.args.accuracy and self.args.training:
             return SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS
