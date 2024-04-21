@@ -21,7 +21,7 @@ from torch._dynamo.device_interface import DeviceGuard, get_interface_for_device
 from torch._dynamo.utils import dynamo_timed, get_first_attr
 
 from torch._inductor import config
-from torch._inductor.coordinate_descent_tuner import CoordescTuner
+from .coordinate_descent_tuner import CoordescTuner
 from .hints import (
     _NUM_THREADS_PER_WARP,
     AutotuneHint,
@@ -29,7 +29,6 @@ from .hints import (
     ReductionHint,
     TileHint,
 )
-
 from .runtime_utils import (
     cache_dir,
     ceildiv,
