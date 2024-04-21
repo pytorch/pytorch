@@ -306,6 +306,9 @@ case "$image" in
     DB=yes
     VISION=yes
     CONDA_CMAKE=yes
+    # snadampal: skipping sccache due to the following issue
+    # https://github.com/pytorch/pytorch/issues/121559
+    SKIP_SCCACHE_INSTALL=yes
     ;;
   *)
     # Catch-all for builds that are not hardcoded.
@@ -399,6 +402,7 @@ DOCKER_BUILDKIT=1 docker build \
        --build-arg "EXECUTORCH=${EXECUTORCH}" \
        --build-arg "BASEKIT_VERSION=${BASEKIT_VERSION}" \
        --build-arg "ACL=${ACL:-}" \
+       --build-arg "SKIP_SCCACHE_INSTALL=${SKIP_SCCACHE_INSTALL:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
        -t "$tmp_tag" \
        "$@" \

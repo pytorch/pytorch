@@ -169,9 +169,11 @@ RUN rm install_acl.sh
 ENV INSTALLED_ACL ${ACL}
 
 # Install ccache/sccache (do this last, so we get priority in PATH)
+ARG SKIP_SCCACHE_INSTALL
 COPY ./common/install_cache.sh install_cache.sh
 ENV PATH /opt/cache/bin:$PATH
-RUN bash ./install_cache.sh && rm install_cache.sh
+RUN if [ -z "${SKIP_SCCACHE_INSTALL}" ]; then bash ./install_cache.sh; fi
+RUN rm install_cache.sh
 
 # Add jni.h for java host build
 COPY ./common/install_jni.sh install_jni.sh
