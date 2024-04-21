@@ -6,10 +6,10 @@ namespace caffe2 {
 namespace internal {
 at::Tensor index_with_uint8_handling(
     const at::Tensor& self,
-    const torch::List<c10::optional<at::Tensor>>& indices) {
+    const torch::List<std::optional<at::Tensor>>& indices) {
   // Support BC only for the simplest case of mask indexing
   if (indices.size() == 1) {
-    c10::optional<at::Tensor> first = indices[0];
+    std::optional<at::Tensor> first = indices[0];
     if (first.has_value()
         && first->scalar_type() == at::kByte) {
       TORCH_WARN(

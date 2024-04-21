@@ -118,7 +118,7 @@ struct CastReturnType {
 };
 
 template <typename T>
-struct CastReturnType<T, typename std::enable_if<IsSingletonType<T>::value>::type> {
+struct CastReturnType<T, std::enable_if_t<IsSingletonType<T>::value>> {
   using type = SingletonTypePtr<T>;
 };
 
@@ -128,7 +128,7 @@ struct CastConstReturnType {
 };
 
 template <typename T>
-struct CastConstReturnType<T, typename std::enable_if<IsSingletonType<T>::value>::type> {
+struct CastConstReturnType<T, std::enable_if_t<IsSingletonType<T>::value>> {
   using type = SingletonTypePtr<const T>;
 };
 
@@ -156,7 +156,7 @@ struct TORCH_API Type {
   Type(Type&&) noexcept = default;
   Type& operator=(Type&&) noexcept = default;
 
-  virtual std::string annotation_str_impl(TypePrinter /*printer*/) const {
+  virtual std::string annotation_str_impl(const TypePrinter& /*printer*/) const {
     return str();
   }
   // a == b
@@ -177,7 +177,7 @@ struct TORCH_API Type {
     /* implicit */ SingletonOrSharedTypePtr(std::shared_ptr<T> x)
         : repr_(std::move(x)) {}
 
-    template <typename U, std::enable_if_t<std::is_convertible<U*, T*>::value, bool> = true>
+    template <typename U, std::enable_if_t<std::is_convertible_v<U*, T*>, bool> = true>
     /* implicit */ SingletonOrSharedTypePtr(std::shared_ptr<U> x)
         : repr_(std::move(x)) {}
 
@@ -187,7 +187,7 @@ struct TORCH_API Type {
     /* implicit */ SingletonOrSharedTypePtr(SingletonTypePtr<T> p)
         : repr_(p) {}
 
-    template <typename U, std::enable_if_t<std::is_convertible<U*, T*>::value, bool> = true>
+    template <typename U, std::enable_if_t<std::is_convertible_v<U*, T*>, bool> = true>
     /* implicit */ SingletonOrSharedTypePtr(SingletonTypePtr<U> p)
         : repr_(SingletonTypePtr<T>(p.get())) {}
 
@@ -205,10 +205,10 @@ struct TORCH_API Type {
     // Case 3: Otherwise, T is not a SharedType. (debug-check this
     // assumption!) Use a singleton pointer.
 
-    template <typename U = T, std::enable_if_t<std::is_base_of<SharedType, U>::value, bool> = true>
+    template <typename U = T, std::enable_if_t<std::is_base_of_v<SharedType, U>, bool> = true>
     /* implicit */ SingletonOrSharedTypePtr(T* p) : SingletonOrSharedTypePtr(static_cast<typename detail::as_shared_type<U>::type>(p)->shared_from_this()) {}
 
-    template <typename U = T, std::enable_if_t<std::is_same<Type, U>::value, bool> = true>
+    template <typename U = T, std::enable_if_t<std::is_same_v<Type, U>, bool> = true>
     /* implicit */ SingletonOrSharedTypePtr(T* p) {
       if (auto* shared_p = dynamic_cast<typename detail::as_shared_type<U>::type>(p)) {
         repr_ = Repr(shared_p->shared_from_this());
@@ -217,7 +217,7 @@ struct TORCH_API Type {
       }
     }
 
-    template <typename U = T, std::enable_if_t<!std::is_same<Type, U>::value && !std::is_base_of<SharedType, U>::value, bool> = true>
+    template <typename U = T, std::enable_if_t<!std::is_same_v<Type, U> && !std::is_base_of_v<SharedType, U>, bool> = true>
     /* implicit */ SingletonOrSharedTypePtr(T* p)
         : repr_(p) {
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(dynamic_cast<typename detail::as_shared_type<U>::type>(p) == nullptr);
@@ -244,7 +244,7 @@ struct TORCH_API Type {
       return repr_.isNonNull();
     }
 
-    template <typename U = T, std::enable_if_t<!std::is_same<std::remove_const_t<U>, void>::value, bool> = true>
+    template <typename U = T, std::enable_if_t<!std::is_same_v<std::remove_const_t<U>, void>, bool> = true>
     U& operator*() const {
       return *get();
     }
@@ -409,37 +409,37 @@ struct TORCH_API Type {
   // Compatibility shims to accommodate existing code that passes shared_ptrs
   // around. Ideally, we would just delete this, but it should be harmless.
   template <typename T>
-  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+  std::enable_if_t<std::is_base_of_v<Type, T>, bool>
   isSubtypeOf(const std::shared_ptr<T>& rhs) const {
     return isSubtypeOf(*rhs);
   }
 
   template <typename T>
-  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+  std::enable_if_t<std::is_base_of_v<Type, T>, bool>
   isSubtypeOf(const SingletonOrSharedTypePtr<T>& rhs) const {
     return isSubtypeOf(*rhs);
   }
 
   template <typename T>
-  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+  std::enable_if_t<std::is_base_of_v<Type, T>, bool>
   isSubtypeOf(SingletonTypePtr<T> rhs) const {
     return isSubtypeOf(*rhs);
   }
 
   template <typename T>
-  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+  std::enable_if_t<std::is_base_of_v<Type, T>, bool>
   isSubtypeOfExt(const SingletonOrSharedTypePtr<T>& rhs, std::ostream* why_not) const {
     return isSubtypeOfExt(*rhs, why_not);
   }
 
   template <typename T>
-  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+  std::enable_if_t<std::is_base_of_v<Type, T>, bool>
   isSubtypeOfExt(const std::shared_ptr<T>& rhs, std::ostream* why_not) const {
     return isSubtypeOfExt(*rhs, why_not);
   }
 
   template <typename T>
-  typename std::enable_if<std::is_base_of<Type, T>::value, bool>::type
+  std::enable_if_t<std::is_base_of_v<Type, T>, bool>
   isSubtypeOfExt(SingletonTypePtr<T> rhs, std::ostream* why_not) const {
     return isSubtypeOfExt(*rhs, why_not);
   }
@@ -453,14 +453,14 @@ struct TORCH_API Type {
   //
   // Takes a custom printer that users can pass in to customize the output of
   // this method.
-  std::string annotation_str(TypePrinter printer) const {
+  std::string annotation_str(const TypePrinter& printer) const {
     if (printer) {
       // the printer can return nullopt to fall through to the default impl
       if (auto renamed = printer(*this)) {
         return *renamed;
       }
     }
-    return annotation_str_impl(std::move(printer));
+    return annotation_str_impl(printer);
   }
   std::string annotation_str() const {
     // Overload instead of define a default value for `printer` to help
@@ -583,6 +583,7 @@ struct TORCH_API Type {
   // per-type constructor, you only need to override this if the
   // containedTypes() is not empty
   virtual TypePtr createWithContained(
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
       std::vector<TypePtr> /*contained_types*/) const {
     AT_ERROR(
         "type with contained types did not overload createWithContained: ",

@@ -433,10 +433,18 @@ aten::_native_multi_head_attention.out
 aten::_neg_view
 aten::_neg_view_copy
 aten::_neg_view_copy.out
+aten::_nested_compute_contiguous_strides_offsets
 aten::_nested_from_padded
 aten::_nested_from_padded.out
 aten::_nested_from_padded_and_nested_example
 aten::_nested_from_padded_and_nested_example.out
+aten::_nested_get_jagged_dummy
+aten::_nested_get_lengths
+aten::_nested_get_offsets
+aten::_nested_get_ragged_idx
+aten::_nested_get_values
+aten::_nested_get_values_copy
+aten::_nested_get_values_copy.out
 aten::_nested_select_backward
 aten::_nested_sum_backward
 aten::_nested_tensor_from_mask
@@ -454,6 +462,9 @@ aten::_nested_tensor_strides.out
 aten::_nested_view_from_buffer
 aten::_nested_view_from_buffer_copy
 aten::_nested_view_from_buffer_copy.out
+aten::_nested_view_from_jagged
+aten::_nested_view_from_jagged_copy
+aten::_nested_view_from_jagged_copy.out
 aten::_new_zeros_with_same_feature_meta
 aten::_new_zeros_with_same_feature_meta.out
 aten::_nnpack_spatial_convolution
@@ -495,6 +506,7 @@ aten::_sparse_addmm.out
 aten::_sparse_broadcast_to
 aten::_sparse_broadcast_to_copy
 aten::_sparse_broadcast_to_copy.out
+aten::_sparse_compressed_tensor_with_dims
 aten::_sparse_coo_tensor_with_dims
 aten::_sparse_coo_tensor_with_dims.out
 aten::_sparse_coo_tensor_with_dims_and_tensors
@@ -511,7 +523,9 @@ aten::_sparse_mask_projection
 aten::_sparse_mask_projection.out
 aten::_sparse_mm_reduce_impl
 aten::_sparse_mm_reduce_impl_backward
+aten::_sparse_semi_structured_addmm
 aten::_sparse_semi_structured_linear
+aten::_sparse_semi_structured_mm
 aten::_sparse_softmax
 aten::_sparse_softmax.out
 aten::_sparse_softmax_backward_data
@@ -1104,8 +1118,6 @@ aten::replication_pad3d_backward.grad_input
 aten::resize
 aten::resize.out
 aten::resize_
-aten::resize_as
-aten::resize_as.out
 aten::resize_as_
 aten::resize_as_sparse
 aten::resize_as_sparse.out

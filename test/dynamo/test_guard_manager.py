@@ -6,6 +6,7 @@ import torch
 import torch._dynamo
 import torch._dynamo.test_case
 from torch._C._dynamo import guards
+from torch._dynamo.convert_frame import GlobalStateGuard
 from torch.testing._internal.common_utils import set_default_dtype
 
 RootGuardManager = guards.RootGuardManager
@@ -66,14 +67,41 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(guard(None))
         with set_default_dtype(torch.double):
             self.assertFalse(guard(None))
+            self.assertExpectedInline(
+                str(guard.check_verbose(None)),
+                """\
+GuardDebugInfo(
+result=0,
+verbose_code_parts=['GLOBAL_STATE changed: default_dtype '],
+num_guards_executed=0)
+""",
+            )
         self.assertTrue(guard(None))
+        self.assertTrue(guard.check_verbose(None).result)
         _orig = torch.are_deterministic_algorithms_enabled()
         try:
             torch.use_deterministic_algorithms(not _orig)
             self.assertFalse(guard(None))
+            self.assertExpectedInline(
+                str(guard.check_verbose(None)),
+                """\
+GuardDebugInfo(
+result=0,
+verbose_code_parts=['GLOBAL_STATE changed: deterministic_algorithms '],
+num_guards_executed=0)
+""",
+            )
         finally:
             torch.use_deterministic_algorithms(_orig)
         self.assertTrue(guard(None))
+        self.assertTrue(guard.check_verbose(None).result)
+
+    def test_global_state_reason(self):
+        with torch.enable_grad():
+            guards = GlobalStateGuard()
+        with torch.no_grad():
+            self.assertIs(guards.check(), False)
+            self.assertEqual(guards.reason(), "grad_mode ")
 
     def test_python_lambda_leaf_guard(self):
         const_guard = guards.LAMBDA_GUARD(
@@ -242,8 +270,8 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         self.assertFalse(guard({}))
 
     def test_dynamic_indices_guard(self):
-        guard1 = guards.DYNAMIC_INDICES(False, set(), ["x.size(0) == y.size(0)"])
-        guard2 = guards.DYNAMIC_INDICES(True, set({0, 1}), ["x.size(0) == y.size(0)"])
+        guard1 = guards.DYNAMIC_INDICES(set(), ["x.size(0) == y.size(0)"])
+        guard2 = guards.DYNAMIC_INDICES(set({0, 1}), ["x.size(0) == y.size(0)"])
 
         x = torch.randn(4)
         self.assertTrue(guard1(x))
@@ -336,7 +364,7 @@ class GuardManagerTests(torch._dynamo.test_case.TestCase):
         x = torch.rand(3, 4)
         weakref_x = weakref.ref(x)
 
-        guard = guards.WEAKREF_ALIVE(["weakref_x is not None"])
+        guard = guards.NOT_NONE(["weakref_x is not None"])
         self.assertTrue(guard(weakref_x()))
         del x
         self.assertFalse(guard(weakref_x()))

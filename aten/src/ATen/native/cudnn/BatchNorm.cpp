@@ -2,7 +2,12 @@
 #include <ATen/Config.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/cuda/CUDAConfig.h>
+
+#ifdef __HIP_PLATFORM_AMD__
+#include <ATen/native/cudnn/hip/BatchNorm.h>
+#else
 #include <ATen/native/cudnn/BatchNorm.h>
+#endif
 
 #if !AT_CUDNN_ENABLED()
 
@@ -212,14 +217,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         &one,
         &zero,
         idesc.desc(),
-        input->data_ptr(),
+        input->const_data_ptr(),
         nullptr, // z descriptor for BN-Add-Relu
         nullptr, // z for BN-Add-ReLU
         idesc.desc(),
         output->data_ptr(),
         wdesc.desc(),
-        weight->data_ptr(),
-        bias->data_ptr(),
+        weight->const_data_ptr(),
+        bias->const_data_ptr(),
         exponential_average_factor,
         at::maybe_data_ptr(running_mean),
         at::maybe_data_ptr(running_var),
@@ -242,14 +247,14 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> cudnn_batch_norm(
         &one,
         &zero,
         idesc.desc(),
-        input->data_ptr(),
+        input->const_data_ptr(),
         idesc.desc(),
         output->data_ptr(),
         wdesc.desc(),
-        weight->data_ptr(),
-        bias->data_ptr(),
-        running_mean->data_ptr(),
-        running_var->data_ptr(),
+        weight->const_data_ptr(),
+        bias->const_data_ptr(),
+        running_mean->const_data_ptr(),
+        running_var->const_data_ptr(),
         epsilon));
   }
 
@@ -362,23 +367,23 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
       &one,
       &zero,
       idesc.desc(),
-      input->data_ptr(),
+      input->const_data_ptr(),
       nullptr,
       nullptr,
       odesc.desc(),
-      grad_output->data_ptr(),
+      grad_output->const_data_ptr(),
       nullptr,
       nullptr,
       idesc.desc(),
       grad_input_t.data_ptr(),
       wdesc.desc(),
-      weight->data_ptr(),
+      weight->const_data_ptr(),
       nullptr,
       grad_weight_t.data_ptr(),
       grad_bias_t.data_ptr(),
       epsilon,
-      save_mean->data_ptr(),
-      save_var->data_ptr(),
+      save_mean->const_data_ptr(),
+      save_var->const_data_ptr(),
       nullptr,
       workspace.data_ptr(),
       workspace_size,

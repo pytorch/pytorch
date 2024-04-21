@@ -1,6 +1,18 @@
 import triton
 import triton.language as tl
 
+# In the latest triton, math functions were shuffled around into different modules:
+# https://github.com/openai/triton/pull/3172
+if hasattr(tl.extra, "cuda") and hasattr(tl.extra.cuda, "libdevice"):
+    libdevice = tl.extra.cuda.libdevice
+    math = tl.math
+elif hasattr(tl.extra, "intel") and hasattr(tl.extra.intel, "libdevice"):
+    libdevice = tl.extra.intel.libdevice
+    math = tl.math
+else:
+    libdevice = tl.math
+    math = tl
+
 
 @triton.jit
 def promote_to_tensor(x):
@@ -223,7 +235,6 @@ def exclusive_scan_decoupled_lookback(
     block_value,
     index,
     combine_fn,
-    init,
     DTYPE_VALUE_AS_UINT: tl.constexpr,
     DTYPE_PACK: tl.constexpr,
 ):
@@ -235,12 +246,13 @@ def exclusive_scan_decoupled_lookback(
     block_value: Scalar value for this block
     index: Scalar index of this block relative to the current scan
     combine_fn: Function ``(value, value) -> value`` which is scanned over
-    init: Scalar value equal to the identiy of combine_fn
     DTYPE_VALUE_AS_UINT: A tl.uint{n} type equal in size to ``block_value``
     DTYPE_PACK: Unsigned type twice the width of block_value
 
-    NOTE: This function is limited to values which are 32-bits or less.
+    NOTE: This function is limited to values which are 32-bits or less because
+    we need to pack (value, flag) into a single unsigned int.
     """
+    # Publish block sum so subsequent blocks don't get stuck waiting for us
     DTYPE_VALUE = block_value.dtype
     pack = pack_value_flag(
         block_value,
@@ -248,9 +260,12 @@ def exclusive_scan_decoupled_lookback(
         DTYPE_VALUE_AS_UINT,
         DTYPE_PACK,
     )
-    tl.atomic_xchg(scratch_base + index, pack, sem="relaxed")
+    if index > 0:
+        tl.atomic_xchg(scratch_base + index, pack, sem="relaxed")
 
-    exclusive_prefix = init
+    # Calculate exclusive prefix scan
+    exclusive_prefix = tl.zeros([], DTYPE_VALUE)
+    prefix_valid = False
     test_target = index - 1
     while test_target >= 0:
         # tl.atomic_load
@@ -260,7 +275,11 @@ def exclusive_scan_decoupled_lookback(
             flag = unpack_flag(pack, DTYPE_VALUE_AS_UINT)
 
         value = unpack_value(pack, DTYPE_VALUE, DTYPE_VALUE_AS_UINT)
-        exclusive_prefix = combine_fn(value, exclusive_prefix)
+        if prefix_valid:
+            exclusive_prefix = combine_fn(value, exclusive_prefix)
+        else:
+            exclusive_prefix = value
+            prefix_valid = True
 
         if flag == 2:
             test_target = -1
@@ -268,7 +287,10 @@ def exclusive_scan_decoupled_lookback(
             test_target = test_target - 1
 
     # Make inclusive block sum visible to other blocks
-    inclusive_prefix = combine_fn(exclusive_prefix, block_value)
+    if prefix_valid:
+        inclusive_prefix = combine_fn(exclusive_prefix, block_value)
+    else:
+        inclusive_prefix = block_value
     pack = pack_value_flag(
         inclusive_prefix,
         tl.full([], 2, DTYPE_VALUE_AS_UINT),
@@ -280,9 +302,7 @@ def exclusive_scan_decoupled_lookback(
 
 
 @triton.jit
-def exclusive_scan_decoupled_lookback_64(
-    scratch_base, block_value, index, combine_fn, init
-):
+def exclusive_scan_decoupled_lookback_64(scratch_base, block_value, index, combine_fn):
     """Compute exclusive scan of a scalar value between blocks
 
     Ref: https://research.nvidia.com/publication/2016-03_single-pass-parallel-prefix-scan-decoupled-look-back
@@ -293,13 +313,17 @@ def exclusive_scan_decoupled_lookback_64(
     combine_fn: Function ``(value, value) -> value`` which is scanned over
     init: Scalar value equal to the identiy of combine_fn
     """
-    block_value_u64 = block_value.to(tl.uint64, bitcast=True)
-    tl.store(scratch_base + 3 * index + 1, block_value_u64)
-    tl.debug_barrier()
-    flag_one = tl.full([], 1, tl.uint64)
-    tl.atomic_xchg(scratch_base + 3 * index + 0, flag_one, sem="release")
+    # Publish block sum so subsequent blocks don't get stuck waiting for us
+    if index > 0:
+        block_value_u64 = block_value.to(tl.uint64, bitcast=True)
+        tl.store(scratch_base + 3 * index + 1, block_value_u64)
+        tl.debug_barrier()
+        flag_one = tl.full([], 1, tl.uint64)
+        tl.atomic_xchg(scratch_base + 3 * index + 0, flag_one, sem="release")
 
-    exclusive_prefix = init
+    # Calculate exclusive prefix scan
+    exclusive_prefix = tl.zeros([], block_value.dtype)
+    prefix_valid = False
     test_target = index - 1
     while test_target >= 0:
         flag = tl.full([], 0, tl.uint64)
@@ -308,7 +332,11 @@ def exclusive_scan_decoupled_lookback_64(
 
         value_u64 = tl.load(scratch_base + 3 * test_target + flag.to(tl.int32))
         value = value_u64.to(block_value.dtype, bitcast=True)
-        exclusive_prefix = combine_fn(value, exclusive_prefix)
+        if prefix_valid:
+            exclusive_prefix = combine_fn(value, exclusive_prefix)
+        else:
+            exclusive_prefix = value
+            prefix_valid = True
 
         if flag == 2:
             test_target = -1
@@ -316,7 +344,10 @@ def exclusive_scan_decoupled_lookback_64(
             test_target = test_target - 1
 
     # Make inclusive block sum visible to other blocks
-    inclusive_prefix = combine_fn(exclusive_prefix, block_value)
+    if prefix_valid:
+        inclusive_prefix = combine_fn(exclusive_prefix, block_value)
+    else:
+        inclusive_prefix = block_value
     inclusive_prefix_u64 = inclusive_prefix.to(tl.uint64, bitcast=True)
     tl.store(scratch_base + 3 * index + 2, inclusive_prefix_u64)
     tl.debug_barrier()
@@ -329,7 +360,7 @@ def exclusive_scan_decoupled_lookback_64(
 @triton.jit
 def frexp(x):
     # TODO(isuruf): use inline_asm_elementwise here
-    y = tl.math.ilogb(x) + 1
+    y = libdevice.ilogb(x) + 1
     exponent = tl.where(x == 0, 0, y)
-    mantissa = tl.where(x == 0, 0, tl.math.ldexp(x, -y))
+    mantissa = tl.where(x == 0, 0, libdevice.ldexp(x, -y))
     return mantissa, exponent

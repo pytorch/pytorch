@@ -1,7 +1,5 @@
 # Owner(s): ["oncall: quantization"]
 from typing import List, Tuple
-import sys
-import unittest
 
 import torch
 from torch._export import (
@@ -63,7 +61,6 @@ from torch.testing._internal.common_utils import (
 
 
 @skipIfNoQNNPACK
-@unittest.skipIf(sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+")
 class TestQuantizePT2E(PT2EQuantizationTestCase):
     def test_simple_quantizer(self):
         # TODO: use OP_TO_ANNOTATOR
@@ -498,7 +495,14 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
             m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
         )
 
-    def test_fixed_qparams_qspec(self):
+    def test_fixed_qparams_qspec_ptq(self):
+        self._test_fixed_qparams_qspec(is_qat=False)
+
+    # TODO: refactor and move this to test_quantize_pt2_qat.py
+    def test_fixed_qparams_qspec_qat(self):
+        self._test_fixed_qparams_qspec(is_qat=True)
+
+    def _test_fixed_qparams_qspec(self, is_qat: bool):
         class M(torch.nn.Module):
             def forward(self, x):
                 return torch.sigmoid(x)
@@ -534,7 +538,7 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = M().eval()
         example_inputs = (torch.randn(1, 3, 5, 5),)
 
-        m = self._quantize(m, BackendAQuantizer(), example_inputs)
+        m = self._quantize(m, BackendAQuantizer(), example_inputs, is_qat)
         fixed_scale = 1.0 / 256.0
         fixed_zero_point = 0
         for n in m.graph.nodes:
@@ -569,6 +573,98 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
                 torch.ops.quantized_decomposed.dequantize_per_tensor.default
             ),
             ns.call_function(torch.ops.aten.sigmoid.default),
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ),
+        ]
+        self.checkGraphModuleNodes(
+            m, expected_node_list=node_list, expected_node_occurrence=node_occurrence
+        )
+
+    def test_fixed_qparams_qspec_observer_dedup(self):
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for node in model.graph.nodes:
+                    if (
+                        node.op == "call_function"
+                        and node.target == torch.ops.aten.sigmoid.default
+                    ):
+                        input_act = node.args[0]
+                        assert isinstance(input_act, Node)
+                        act_qspec = FixedQParamsQuantizationSpec(
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=torch.per_tensor_affine,
+                            scale=1.0 / 256.0,
+                            zero_point=0,
+                        )
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act: act_qspec,
+                            },
+                            output_qspec=act_qspec,
+                            _annotated=True,
+                        )
+                    elif (
+                            node.op == "call_function"
+                            and node.target == torch.ops.aten.add.Tensor
+                    ):
+                        input_act0 = node.args[0]
+                        assert isinstance(input_act, Node)
+                        input_act1 = node.args[1]
+                        assert isinstance(input_act, Node)
+                        act_qspec = QuantizationSpec(
+                            observer_or_fake_quant_ctr=observer.default_observer,
+                            dtype=torch.uint8,
+                            quant_min=0,
+                            quant_max=255,
+                            qscheme=torch.per_tensor_affine,
+                        )
+                        node.meta["quantization_annotation"] = QuantizationAnnotation(
+                            input_qspec_map={
+                                input_act0: act_qspec,
+                                input_act1: act_qspec,
+                            },
+                            output_qspec=act_qspec,
+                            _annotated=True,
+                        )
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.sigmoid(x) + y
+
+            def example_inputs(self):
+                return (torch.randn(1, 3, 5, 5), torch.randn(1, 3, 5, 5),)
+
+        m = M().eval()
+        example_inputs = m.example_inputs()
+        m = self._quantize(m, BackendAQuantizer(), example_inputs, is_qat=False)
+
+        node_occurrence = {
+            # two for input of the first conv, one for output for the first conv
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ): 4,
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ): 4,
+        }
+        node_list = [
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ),
+            ns.call_function(torch.ops.aten.sigmoid.default),
+            ns.call_function(
+                torch.ops.quantized_decomposed.quantize_per_tensor.default
+            ),
+            ns.call_function(
+                torch.ops.quantized_decomposed.dequantize_per_tensor.default
+            ),
+            ns.call_function(torch.ops.aten.add.Tensor),
             ns.call_function(
                 torch.ops.quantized_decomposed.quantize_per_tensor.default
             ),
@@ -1325,6 +1421,53 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         }
         self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
 
+    def test_composable_quantizer_transform_for_annotation(self):
+        class TestQuantizer1(Quantizer):
+            def transform_for_annotation(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for n in model.graph.nodes:
+                    if n.target == torch.ops.aten.add.Tensor:
+                        n.target = torch.ops.aten.mul.Tensor
+                return model
+
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                return model
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class TestQuantizer2(Quantizer):
+            def transform_for_annotation(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                for n in model.graph.nodes:
+                    if n.target == torch.ops.aten.sub.Tensor:
+                        n.target = torch.ops.aten.div.Tensor
+                return model
+
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                return model
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        class M(torch.nn.Module):
+            def forward(self, x, y, z):
+                return x + y - z
+
+        m = M().eval()
+        quantizer = ComposableQuantizer(
+            [TestQuantizer1(), TestQuantizer2()]
+        )
+        example_inputs = (torch.randn(1, 2, 3, 3), torch.randn(1, 2, 3, 3), torch.randn(1, 2, 3, 3))
+        m = capture_pre_autograd_graph(m, example_inputs)
+        m = prepare_pt2e(m, quantizer)
+        m(*example_inputs)
+        node_occurrence = {
+            ns.call_function(torch.ops.aten.add.Tensor): 0,
+            ns.call_function(torch.ops.aten.sub.Tensor): 0,
+            ns.call_function(torch.ops.aten.mul.Tensor): 1,
+            ns.call_function(torch.ops.aten.div.Tensor): 1,
+        }
+        self.checkGraphModuleNodes(m, expected_node_occurrence=node_occurrence)
+
     def test_embedding_quantizer(self):
         m_eager = TestHelperModules.EmbeddingModule().eval()
         indices = torch.tensor(
@@ -1941,3 +2084,49 @@ class TestQuantizePT2E(PT2EQuantizationTestCase):
         m = M().eval()
         example_inputs = (torch.randn(5, 5),)
         _ = dynamic_quantize_pt2e(m, example_inputs)
+
+    def test_conv_transpose_bn_relu(self):
+        class BackendAQuantizer(Quantizer):
+            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
+                int8_qspec = QuantizationSpec(
+                    dtype=torch.int8,
+                    quant_min=-128,
+                    quant_max=127,
+                    qscheme=torch.per_tensor_symmetric,
+                    is_dynamic=False,
+                    observer_or_fake_quant_ctr=observer.default_weight_observer,
+                )
+                quantization_config = QuantizationConfig(
+                    input_activation=int8_qspec,
+                    weight=int8_qspec,
+                    bias=None,
+                    output_activation=int8_qspec,
+                )
+                # conv_transpose + bn is fused automatically in PTQ (not configurable)
+                # so we just need to annotate conv_transpose + relu for conv_transpose + bn + relu
+                # pattern
+                OP_TO_ANNOTATOR["conv_transpose_relu"](model, quantization_config)
+
+            def validate(self, model: torch.fx.GraphModule) -> None:
+                pass
+
+        example_inputs = (torch.randn(1, 3, 5, 5),)
+        node_occurrence = {
+            # two for input of the first conv, one for output for the first conv
+            torch.ops.quantized_decomposed.quantize_per_tensor.default: 2,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default: 3,
+        }
+        node_list = [
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.quantized_decomposed.dequantize_per_tensor.default,
+            torch.ops.aten.conv_transpose2d.input,
+            torch.ops.aten.relu.default,
+            torch.ops.quantized_decomposed.quantize_per_tensor.default,
+        ]
+        self._test_quantizer(
+            TestHelperModules.ConvTWithBNRelu(relu=True, bn=True),
+            example_inputs,
+            BackendAQuantizer(),
+            node_occurrence,
+            node_list,
+        )

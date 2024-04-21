@@ -16,7 +16,6 @@ import logging
 import os
 import sys
 import textwrap
-import threading
 import traceback
 import types
 import warnings
@@ -33,7 +32,6 @@ import torch.utils.checkpoint
 from torch import _guards
 from torch._subclasses import fake_tensor
 from torch._utils_internal import log_export_usage
-from torch.export import Constraint
 from torch.export.dynamic_shapes import _process_dynamic_shapes
 from torch.fx.experimental.proxy_tensor import make_fx, maybe_disable_fake_tensor_mode
 from torch.fx.experimental.symbolic_shapes import (
@@ -78,80 +76,17 @@ class Unset(Enum):
     token = 0
 
 
-unset = Unset.token
-
-guarded_backend_cache = threading.local()
 cached_backends: Dict[int, CompilerFn] = {}
 
-
-def check_current_backend(backend_obj_id: int):
-    """
-    Called from guards to check if we need to recompile due to a backend change
-    """
-    # TODO(jansel): we should move guarded_backend_cache to C++
-    try:
-        if guarded_backend_cache.skip_backend_check_for_run_only_mode:
-            return True
-    except AttributeError:
-        # Go slightly faster next time
-        guarded_backend_cache.skip_backend_check_for_run_only_mode = False
-    try:
-        current_backend = guarded_backend_cache.current_backend
-    except AttributeError:
-        current_backend = None
-    return (
-        # Avoid the dict lookup in case of exact same object
-        id(current_backend) == backend_obj_id
-        or current_backend == cached_backends.get(backend_obj_id, None)
-    )
+unset = Unset.token
 
 
 def _reset_guarded_backend_cache():
     global cached_backends
-    guarded_backend_cache.skip_backend_check_for_run_only_mode = False
-    guarded_backend_cache.current_backend = None
     for backend in cached_backends.values():
         if hasattr(backend, "reset"):
             backend.reset()
     cached_backends.clear()
-
-
-def backend_cache_manager(callback: DynamoCallback):
-    # callback is False for RunOnlyContext. RunOnlyContext is used
-    # as a way to re-use the previous compiled cache.
-    # We therefore skip the check and re-use whatever code that's already cached.
-    # Note: the cache that's actually used depends on the caching policy.
-    if callback is False:
-
-        def change():
-            try:
-                prev_skip = guarded_backend_cache.skip_backend_check_for_run_only_mode
-            except AttributeError:
-                prev_skip = False
-            guarded_backend_cache.skip_backend_check_for_run_only_mode = True
-
-            def revert():
-                guarded_backend_cache.skip_backend_check_for_run_only_mode = prev_skip
-
-            return revert
-
-    else:
-        backend = innermost_fn(callback)
-
-        def change():
-            cached_backends.setdefault(id(backend), backend)
-            try:
-                prev_backend = guarded_backend_cache.current_backend
-            except AttributeError:
-                prev_backend = None
-            guarded_backend_cache.current_backend = backend
-
-            def revert():
-                guarded_backend_cache.current_backend = prev_backend
-
-            return revert
-
-    return change
 
 
 DONT_WRAP_FILES = {
@@ -181,6 +116,17 @@ class OptimizedModule(torch.nn.Module):
 
     _torchdynamo_orig_callable: Callable[..., Any]
     get_compiler_config: Callable[[], Any]
+
+    _opt_mod_attributes = {
+        "_orig_mod",
+        "dynamo_ctx",
+        "_torchdynamo_orig_callable",
+        "get_compiler_config",
+        "forward",
+        "_forward",
+        "__dict__",
+        "named_children_walk",
+    }
 
     def __init__(self, mod: torch.nn.Module, dynamo_ctx):
         super().__init__()
@@ -220,6 +166,15 @@ class OptimizedModule(torch.nn.Module):
         if name == "_orig_mod":
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
+
+    def __setattr__(self, name, val):
+        # Allow patching over class attributes
+        if hasattr(type(self), name):
+            return super().__setattr__(name, val)
+
+        if name in OptimizedModule._opt_mod_attributes:
+            return super().__setattr__(name, val)
+        return setattr(self._orig_mod, name, val)
 
     def _call_lazy_check(self, *args, **kwargs):
         if hasattr(self._orig_mod, "_initialize_hook"):
@@ -307,8 +262,12 @@ class _TorchDynamoContext:
         self.export = export
         self.compiler_config = compiler_config
         self.cleanup_fns: List[Callable[[], Any]] = []
-        self.enter_exit_hooks = [backend_cache_manager(self.callback)]
+        self.enter_exit_hooks = []
         patch_fn()
+
+        # Save the backends so that we can reset them during torch._dynamo.reset
+        backend = innermost_fn(callback)
+        cached_backends.setdefault(id(backend), backend)
 
         if dynamic is not None:
             self.enter_exit_hooks.append(make_set_enable_dynamic(dynamic))
@@ -589,8 +548,8 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
 
 
 def check_if_dynamo_supported():
-    if sys.version_info >= (3, 12):
-        raise RuntimeError("Python 3.12+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 13):
+        raise RuntimeError("Python 3.13+ not yet supported for torch.compile")
 
 
 def is_dynamo_supported():
@@ -673,6 +632,9 @@ def optimize(
             dynamic=dynamic,
             hooks=hooks,
         )
+    # The backend function is stashed in the callable returned by
+    # _optimize_catch_errors in the field _torchdynamo_orig_callable. This can
+    # be used by eval_frame.c to insert a guard on the backend.
     return _optimize_catch_errors(
         convert_frame.convert_frame(backend, hooks=hooks),
         hooks,
@@ -728,20 +690,6 @@ def explain(f, *extra_args, **extra_kwargs):
         opt_f(*args, **kwargs)
 
         graph_count = len(graphs)
-
-        # For the explanation summary, dedupe reasons by the innermost stack frame and dedupe by it.
-        deduped_reasons = {}
-        for reason in break_reasons:
-            innermost_frame = reason.user_stack[-1]
-            # __repr__ uniquely identifies a FrameSummary so we can use it for deduping
-            deduped_reasons[repr(innermost_frame)] = reason
-
-        formatted_list = ""
-        for idx, break_reason in enumerate(deduped_reasons.values()):
-            formatted_stack = "".join(traceback.format_list(break_reason.user_stack))
-            msg = f"{idx + 1}. Reason: {break_reason.reason}\n   User Stack: {formatted_stack}\n"
-            formatted_list += msg
-
         graph_break_count = graph_count - 1
         compile_time = compile_times(repr="str")
 
@@ -876,32 +824,31 @@ class ExportResult(NamedTuple):
 
 def check_signature_rewritable(graph):
     input_errors = []
-    for node in graph.graph.nodes:
-        if node.op == "placeholder":
-            assert hasattr(node, "_dynamo_source")
-            source = node._dynamo_source
-            user_stacks = graph._source_to_user_stacks.get(source)
-            if user_stacks is None:
+    for node in graph.graph.find_nodes(op="placeholder"):
+        assert hasattr(node, "_dynamo_source")
+        source = node._dynamo_source
+        user_stacks = graph._source_to_user_stacks.get(source)
+        if user_stacks is None:
+            continue
+        assert len(user_stacks) > 0
+        # In some cases we may not have a useful stack.  Look for a
+        # useful stack
+        stack = None
+        for s in user_stacks:
+            if len(s) == 0:
                 continue
-            assert len(user_stacks) > 0
-            # In some cases we may not have a useful stack.  Look for a
-            # useful stack
-            stack = None
-            for s in user_stacks:
-                if len(s) == 0:
-                    continue
-                stack = s
-                break
-            if stack is None:
-                msg = f"{source.name()}, a closed over free variable"
-            else:
-                tb = "".join(traceback.format_list(stack))
-                extra = ""
-                if len(user_stacks) > 1:
-                    extra = f"(elided {len(user_stacks)-1} more accesses)"
-                msg = f"{source.name()}, accessed at:\n{tb}{extra}"
-            # TODO: option to print ALL of the stack traces at once
-            input_errors.append(msg)
+            stack = s
+            break
+        if stack is None:
+            msg = f"{source.name()}, a closed over free variable"
+        else:
+            tb = "".join(traceback.format_list(stack))
+            extra = ""
+            if len(user_stacks) > 1:
+                extra = f"(elided {len(user_stacks)-1} more accesses)"
+            msg = f"{source.name()}, accessed at:\n{tb}{extra}"
+        # TODO: option to print ALL of the stack traces at once
+        input_errors.append(msg)
 
     if input_errors:
         raise UserError(
@@ -1107,7 +1054,6 @@ def export(
         Dict[torch._ops.OpOverload, Callable[..., Any]]
     ] = None,
     tracing_mode: str = "symbolic",
-    constraints: Optional[List[Constraint]] = None,
     dynamic_shapes: Optional[Union[Dict[str, Any], Tuple[Any], List[Any]]] = None,
     assume_static_by_default: bool = False,
     same_signature: bool = True,
@@ -1135,15 +1081,6 @@ def export(
         Required if aten_graph or tracing_mode is specified. Default is None.
 
         tracing_mode (str): If "symbolic", turn on dynamic shapes support. Default is "symbolic".
-
-        constraints: [DEPRECATED: use ``dynamic_shapes`` instead, see below]
-         An optional list of constraints on the dynamic arguments
-         that specify their possible range of shapes. By default, shapes of
-         input torch.Tensors are assumed to be static. If an input torch.Tensor
-         is expected to have dynamic shapes, please use :func:`dynamic_dim`
-         to define :class:`Constraint` objects that specify the dynamics and the possible
-         range of shapes. See :func:`dynamic_dim` docstring for examples on
-         how to use it.
 
         dynamic_shapes:
          An optional argument where the type should either be:
@@ -1185,18 +1122,7 @@ def export(
     _assume_static_by_default = assume_static_by_default
 
     def inner(*args, **kwargs):
-        nonlocal constraints
-        if constraints is not None:
-            if _log_export_usage:
-                warnings.warn(
-                    "Using `constraints` to specify dynamic shapes for export is DEPRECATED "
-                    "and will not be supported in the future. "
-                    "Please use `dynamic_shapes` instead (see docs on `torch.export.export`).",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-        else:
-            constraints = _process_dynamic_shapes(_f, args, kwargs, dynamic_shapes)
+        constraints = _process_dynamic_shapes(_f, args, kwargs, dynamic_shapes)
         f = _f
         assume_static_by_default = _assume_static_by_default
         check_if_dynamo_supported()
@@ -1399,10 +1325,8 @@ def export(
                     )
 
             assert graph is not None
-            for node in graph.graph.nodes:
-                if node.op == "get_attr" and isinstance(
-                    getattr(graph, node.target), torch.Tensor
-                ):
+            for node in graph.graph.find_nodes(op="get_attr"):
+                if isinstance(getattr(graph, node.target), torch.Tensor):
                     node.meta["val"] = fake_mode.from_tensor(
                         getattr(graph, node.target), static_shapes=True
                     )
