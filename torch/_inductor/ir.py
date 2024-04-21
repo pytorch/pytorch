@@ -4638,6 +4638,9 @@ class UserDefinedTritonKernel(ExternKernel):
         return set()
 
     def get_mutation_names(self):
+        # NB: Inductor only allows a node to mutate 0 or 1 buffers.
+        # To get around that, we create MutationOutputs which marks their
+        # assigned input as mutable, thus, adhering to Inductor's constraint.
         return []
 
     def __init__(self, *, kernel_idx, grid, kernel_args):
@@ -4667,18 +4670,25 @@ class UserDefinedTritonKernel(ExternKernel):
         self.kernel_idx = kernel_idx
         self.grid = grid
 
-        kernel, _ = self.get_kernel_and_configs()
+        kernel, configs = self.get_kernel_and_configs()
         # If we are autotuning, not all arguments will be passed
         self.ordered_kwargs_for_cpp_kernel = [
             arg for arg in kernel.arg_names if arg in kernel_args
         ]
 
-        mark_node_as_mutating(
-            self, *[a for a in kernel_args.values() if isinstance(a, TensorBox)]
-        )
+        from torch._higher_order_ops.triton_kernel_wrap import identify_mutated_tensors
+
+        autotuned_kwargs = configs[0].kwargs if len(configs) > 0 else {}
+        self.mutable_args = [
+            kernel_args[key]
+            for key in identify_mutated_tensors(
+                kernel, {**kernel_args, **autotuned_kwargs}
+            )
+        ]
+        mark_node_as_mutating(self, *self.mutable_args)
 
     def get_inputs_that_alias_output(self):
-        return [i.get_name() for i in self.inputs]
+        return [i.get_name() for i in self.mutable_args]
 
 
 def mark_node_as_mutating(cur_buffer, *mutated_ops: IRNode):
