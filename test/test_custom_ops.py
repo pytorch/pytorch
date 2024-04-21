@@ -332,19 +332,11 @@ class TestCustomOpTesting(CustomOpTestCaseBase):
         ):
             args = [sample_input.input] + list(sample_input.args)
             kwargs = sample_input.kwargs
-            if op.op in (
-                numpy_nonzero._opoverload,
-                torch.ops._torch_testing.numpy_nms,
-            ):
-                ctx = self.assertRaisesRegex(optests.OpCheckError, "failed with")
-            else:
-                ctx = contextlib.nullcontext()
-            with ctx:
-                optests.opcheck(
-                    op.op,
-                    args,
-                    kwargs,
-                )
+            optests.opcheck(
+                op.op,
+                args,
+                kwargs,
+            )
 
     def test_opcheck_fails_basic(self, device):
         @custom_op(f"{self.test_ns}::foo")
@@ -746,7 +738,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         )
 
     def test_supported_return_types_single_return(self):
-        for typ in torch._custom_op.impl.SUPPORTED_RETURN_TYPES:
+        for typ in torch._library.infer_schema.SUPPORTED_RETURN_TYPES:
             for example in self._generate_examples(typ):
                 try:
 
@@ -765,7 +757,7 @@ class TestCustomOp(CustomOpTestCaseBase):
                     custom_ops._destroy(f"{self.test_ns}::foo")
 
     def test_supported_return_types_multi_return(self):
-        for typ in torch._custom_op.impl.SUPPORTED_RETURN_TYPES:
+        for typ in torch._library.infer_schema.SUPPORTED_RETURN_TYPES:
             for example in self._generate_examples(typ):
                 try:
 
@@ -785,7 +777,7 @@ class TestCustomOp(CustomOpTestCaseBase):
                     custom_ops._destroy(f"{self.test_ns}::foo")
 
     def test_supported_param_types(self):
-        for typ in torch._custom_op.impl.SUPPORTED_PARAM_TYPES:
+        for typ in torch._library.infer_schema.SUPPORTED_PARAM_TYPES:
 
             @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
             def foo(x: Tensor, y: typ) -> Tensor:
@@ -2486,14 +2478,18 @@ class TestCustomOpAPI(TestCase):
                 return grad * x.cos()
 
             if mode == "function":
-                torch.library.register_autograd(numpy_sin, setup_context, backward)
+                torch.library.register_autograd(
+                    numpy_sin, backward, setup_context=setup_context
+                )
             elif mode == "qualname":
                 torch.library.register_autograd(
-                    "mylib::numpy_sin", setup_context, backward
+                    "mylib::numpy_sin", backward, setup_context=setup_context
                 )
             elif mode == "opoverload":
                 torch.library.register_autograd(
-                    torch.ops.mylib.numpy_sin.default, setup_context, backward
+                    torch.ops.mylib.numpy_sin.default,
+                    backward,
+                    setup_context=setup_context,
                 )
 
             x = torch.randn(3, requires_grad=True)
@@ -2531,13 +2527,16 @@ class TestCustomOpAPI(TestCase):
 
                 if mode == "qualname":
                     torch.library.register_autograd(
-                        "_torch_testing::sin5", setup_context, backward, lib=lib
+                        "_torch_testing::sin5",
+                        backward,
+                        setup_context=setup_context,
+                        lib=lib,
                     )
                 elif mode == "opoverload":
                     torch.library.register_autograd(
                         torch.ops._torch_testing.sin5.default,
-                        setup_context,
                         backward,
+                        setup_context=setup_context,
                         lib=lib,
                     )
                 x = torch.randn(3, requires_grad=True)
@@ -2770,6 +2769,7 @@ optests.generate_opcheck_tests(
     additional_decorators={
         "test_pt2_compliant_tag_mini_op_test_no_abstract": [unittest.expectedFailure]
     },
+    test_utils=optests.generate_tests.DEPRECATED_DEFAULT_TEST_UTILS,
 )
 
 optests.generate_opcheck_tests(
@@ -2779,6 +2779,7 @@ optests.generate_opcheck_tests(
         os.path.dirname(__file__),
         "minioptest_failures_dict.json",
     ),
+    test_utils=optests.generate_tests.DEPRECATED_DEFAULT_TEST_UTILS,
 )
 
 
@@ -2871,7 +2872,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "MiniOpTest.test_aot_dispatch_static__test_delayed_error": {
+                "MiniOpTest.test_aot_dispatch_dynamic__test_delayed_error": {
                     "comment": "",
                     "status": "success",
                 }
@@ -2901,7 +2902,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
 
         failures = {
             "mini_op_test::incorrect_schema": {
-                "MiniOpTest.test_aot_dispatch_static__test_delayed_error_nopenopenope": {
+                "MiniOpTest.test_aot_dispatch_dynamic__test_delayed_error_nopenopenope": {
                     "comment": "",
                     "status": "xfail",
                 },
@@ -2932,7 +2933,6 @@ opcheck(op, args, kwargs, test_utils="test_schema")
                 "test_schema": "SUCCESS",
                 "test_autograd_registration": "SUCCESS",
                 "test_faketensor": "SUCCESS",
-                "test_aot_dispatch_static": "SUCCESS",
                 "test_aot_dispatch_dynamic": "SUCCESS",
             },
         )
@@ -2981,7 +2981,6 @@ opcheck(op, args, kwargs, test_utils="test_schema")
             {
                 "test_autograd_registration": "SUCCESS",
                 "test_faketensor": "SUCCESS",
-                "test_aot_dispatch_static": "SUCCESS",
                 "test_aot_dispatch_dynamic": "SUCCESS",
             },
         )
