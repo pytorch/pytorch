@@ -36,7 +36,7 @@ from torch._inductor.utils import BoxedBool, count_tangents
 from torch._logging import trace_structured
 from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
-from torch._utils_internal import compiletime_sl_profile_meta
+from torch._utils_internal import compiletime_strobelight_meta
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 
@@ -569,7 +569,7 @@ def compile_fx_inner(
                 assert manager is not None
 
                 def compiled_artifact(new_inputs):
-                    manager.set_to_running_backward()
+                    manager.set_to_running_backward()  # type: ignore[union-attr]
                     return compiled_graph_callable(new_inputs)
 
                 compiled_graph.current_callable = compiled_artifact
@@ -604,6 +604,7 @@ def compile_fx_inner(
     return compiled_graph
 
 
+@dynamo_utils.preserve_rng_state()
 def fx_codegen_and_compile(
     gm: torch.fx.GraphModule,
     example_inputs: List[torch.Tensor],
@@ -1348,7 +1349,7 @@ def compile_fx(
             graph, joint_inputs, **kwargs, compiler="inductor"
         )
 
-    @compiletime_sl_profile_meta(phase_name="bw_compiler")
+    @compiletime_strobelight_meta(phase_name="bw_compiler")
     @dynamo_utils.dynamo_timed
     @dynamo_utils.maybe_cprofile
     def bw_compiler(model: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):
