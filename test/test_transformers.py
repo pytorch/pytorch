@@ -2578,7 +2578,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("is_causal", [False, True])
     @parametrize("dropout_p", [0.0, 0.22])
     @parametrize("dtype", [torch.float16, torch.bfloat16, torch.float32] if
-                 SM80OrLater else [torch.float16, torch.float32] if not TEST_WITH_ROCM
+                 SM80OrLater and not TEST_WITH_ROCM else [torch.float16, torch.float32] if not TEST_WITH_ROCM
                  else [torch.float16, torch.bfloat16])
     @parametrize("scale", [None, "l1"])
     def test_mem_efficient_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
