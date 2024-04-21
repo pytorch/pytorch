@@ -1,0 +1,322 @@
+ir_version: 4
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    output: "onnx::Reshape_3"
+    name: "Constant_6"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\377\377\377\377\377\377\377\377"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Reshape_1"
+    input: "onnx::Reshape_3"
+    output: "onnx::Shape_4"
+    name: "Reshape_7"
+    op_type: "Reshape"
+  }
+  node {
+    output: "onnx::Reshape_5"
+    name: "Constant_8"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\377\377\377\377\377\377\377\377"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Reshape_0"
+    input: "onnx::Reshape_5"
+    output: "onnx::Shape_6"
+    name: "Reshape_9"
+    op_type: "Reshape"
+  }
+  node {
+    output: "onnx::Reshape_7"
+    name: "Constant_10"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\377\377\377\377\377\377\377\377"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Reshape_2"
+    input: "onnx::Reshape_7"
+    output: "onnx::Shape_8"
+    name: "Reshape_11"
+    op_type: "Reshape"
+  }
+  node {
+    input: "onnx::Shape_4"
+    output: "onnx::Concat_9"
+    name: "Shape_12"
+    op_type: "Shape"
+  }
+  node {
+    input: "onnx::Shape_6"
+    output: "onnx::Concat_10"
+    name: "Shape_13"
+    op_type: "Shape"
+  }
+  node {
+    input: "onnx::Shape_8"
+    output: "onnx::Concat_11"
+    name: "Shape_14"
+    op_type: "Shape"
+  }
+  node {
+    input: "onnx::Concat_9"
+    input: "onnx::Concat_10"
+    input: "onnx::Concat_11"
+    output: "onnx::Expand_12"
+    name: "Concat_15"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    output: "onnx::Concat_13"
+    name: "Constant_16"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Concat_9"
+    input: "onnx::Concat_13"
+    input: "onnx::Concat_13"
+    output: "onnx::Reshape_14"
+    name: "Concat_17"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "onnx::Shape_4"
+    input: "onnx::Reshape_14"
+    output: "onnx::Expand_15"
+    name: "Reshape_18"
+    op_type: "Reshape"
+  }
+  node {
+    input: "onnx::Expand_15"
+    input: "onnx::Expand_12"
+    output: "16"
+    name: "Expand_19"
+    op_type: "Expand"
+  }
+  node {
+    output: "onnx::Concat_17"
+    name: "Constant_20"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Concat_17"
+    input: "onnx::Concat_10"
+    input: "onnx::Concat_17"
+    output: "onnx::Reshape_18"
+    name: "Concat_21"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "onnx::Shape_6"
+    input: "onnx::Reshape_18"
+    output: "onnx::Expand_19"
+    name: "Reshape_22"
+    op_type: "Reshape"
+  }
+  node {
+    input: "onnx::Expand_19"
+    input: "onnx::Expand_12"
+    output: "20"
+    name: "Expand_23"
+    op_type: "Expand"
+  }
+  node {
+    output: "onnx::Concat_21"
+    name: "Constant_24"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        dims: 1
+        data_type: 7
+        raw_data: "\001\000\000\000\000\000\000\000"
+      }
+      type: TENSOR
+    }
+  }
+  node {
+    input: "onnx::Concat_21"
+    input: "onnx::Concat_21"
+    input: "onnx::Concat_11"
+    output: "onnx::Reshape_22"
+    name: "Concat_25"
+    op_type: "Concat"
+    attribute {
+      name: "axis"
+      i: 0
+      type: INT
+    }
+  }
+  node {
+    input: "onnx::Shape_8"
+    input: "onnx::Reshape_22"
+    output: "onnx::Expand_23"
+    name: "Reshape_26"
+    op_type: "Reshape"
+  }
+  node {
+    input: "onnx::Expand_23"
+    input: "onnx::Expand_12"
+    output: "24"
+    name: "Expand_27"
+    op_type: "Expand"
+  }
+  name: "main_graph"
+  input {
+    name: "onnx::Reshape_0"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 3
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "onnx::Reshape_1"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "onnx::Reshape_2"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "20"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "16"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "24"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_value: 3
+          }
+          dim {
+            dim_value: 5
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 9
+}
