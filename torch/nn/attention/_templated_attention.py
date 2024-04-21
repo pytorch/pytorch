@@ -1,6 +1,6 @@
 """This module implements the user facing API for templated attention in PyTorch."""
 import functools
-from typing import Callable
+from typing import Callable, Tuple
 
 import torch
 from torch._higher_order_ops.templated_attention import (
@@ -31,7 +31,7 @@ def _templated_attention(
     key: torch.Tensor,
     value: torch.Tensor,
     score_mod: _score_mod_signature,
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
@@ -86,4 +86,7 @@ def _templated_attention(
         raise ValueError(
             "NYI: The target sequence length (L) of the query tensor must match the source sequence length (S) of the key tensor."
         )
-    return templated_attention_hop(query, key, value, score_mod)
+    out, _ = templated_attention_hop(query, key, value, score_mod)
+
+    # Drop the logsumexp value since this is only needed for backwards
+    return out
