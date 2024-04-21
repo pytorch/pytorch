@@ -32,6 +32,7 @@ from torch.testing._internal.common_utils import TestCase, freeze_rng_state, run
 from torch.testing._internal.common_cuda import TEST_CUDNN, TEST_MULTIGPU, \
     _create_scaling_case, _get_torch_cuda_version
 from torch.testing._internal.autocast_test_lists import AutocastTestLists
+from torch.testing._internal.common_optimizers import (optim_db, optims, _get_optim_inputs_including_global_cliquey_kwargs)
 from torch.utils.viz._cycles import observe_tensor_cycles
 
 # load_tests from common_utils is used to automatically filter tests for
@@ -2925,14 +2926,20 @@ exit(2)
                 self._test_graphed_optimizer(3, 2, optimizer_ctor, kwargs)
 
     @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
-    def test_graph_optims_with_explicitly_capturable_param_groups(self):
-        # mimicking `_test_graphed_optimizer` maladroitly to pass two param_groups to optimizer.__init__
-        n_warmup, n_replay = 3, 2
-        for optimizer, second_param_group_capturable in product((torch.optim.Adam, torch.optim.AdamW,
+    @optims(
+        [optim for optim in optim_db if optim.optim_cls in [torch.optim.Adam, torch.optim.AdamW,
                                                                  torch.optim.ASGD, torch.optim.Adamax,
                                                                  torch.optim.NAdam, torch.optim.RAdam,
                                                                  torch.optim.Adadelta, torch.optim.RMSprop,
-                                                                 torch.optim.Rprop), (True, False)):
+                                                                 torch.optim.Rprop]],
+        dtypes=[torch.float32]
+    )
+    def test_graph_optims_with_explicitly_capturable_param_groups(self, dtype, optim_info):
+        # mimicking `_test_graphed_optimizer` maladroitly to pass two param_groups to optimizer.__init__
+        n_warmup, n_replay = 3, 2
+        device = torch.cuda.current_device()
+        optim_cls = optim_info.optim_cls
+        for second_param_group_capturable in [True, False]:
             ref_p1, param1 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             ref_p2, param2 = (torch.nn.Parameter(torch.ones(1, device="cuda")) for _ in range(2))
             grads1, grads2 = ([torch.randn_like(param1) for _ in range(n_warmup + n_replay)] for _ in range(2))
@@ -2941,8 +2948,8 @@ exit(2)
                 {"params": [param1], "capturable": True},
                 {"params": [param2], "capturable": second_param_group_capturable},
             ]
-            opt = optimizer(params)
-            opt_ = optimizer([
+            opt = optim_cls(params)
+            opt_ = optim_cls([
                 {"params": [ref_p1], "capturable": False},
                 {"params": [ref_p2], "capturable": False},
             ])
