@@ -217,7 +217,7 @@ def _split_helper_int(tensor, indices_or_sections, axis, strict=False):
     l, n = tensor.shape[axis], indices_or_sections
 
     if n <= 0:
-        raise ValueError()
+        raise ValueError
 
     if l % n == 0:
         num, sz = n, l // n
