@@ -764,10 +764,24 @@ class MetaConverter:
                 return base.as_strided(sizes, strides, storage_offset)
 
             from torch._dynamo.source import EphemeralSource
-            from torch.fx.experimental.symbolic_shapes import sym_eq
+            from torch.fx.experimental.symbolic_shapes import (
+                StatelessSymbolicContext,
+                sym_eq,
+            )
 
             def symint_visitor_fn(s):
-                if shape_env is None:
+                nonlocal symbolic_context
+                from torch.fx.experimental.symbolic_shapes import DimDynamic
+
+                all_static_sizes = (
+                    symbolic_context is not None
+                    and isinstance(symbolic_context, StatelessSymbolicContext)
+                    and all(
+                        x is DimDynamic.STATIC for x in symbolic_context.dynamic_sizes
+                    )
+                )
+                # Can't just rely on shape env being None - dynamo always initializes it
+                if all_static_sizes or shape_env is None:
                     return s
 
                 # NB: The symbol here is expected to be simplified out because we a priori

@@ -1,5 +1,7 @@
 import argparse
+
 import torch
+
 
 class Module(torch.nn.Module):
     def __init__(self):
@@ -10,13 +12,15 @@ class Module(torch.nn.Module):
         y = self.conv(x)
         return y
 
+
 def run_model(level):
     m = Module().eval()
     d = torch.rand(1, 1, 112, 112)
     with torch.backends.mkldnn.verbose(level):
         m(d)
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--verbose-level", default=0, type=int)
     args = parser.parse_args()

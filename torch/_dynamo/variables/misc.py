@@ -1,10 +1,10 @@
 # mypy: ignore-errors
-
 import collections
 import dataclasses
 import functools
 import inspect
 import itertools
+import re
 import sys
 import types
 from typing import Dict, List
@@ -22,6 +22,7 @@ from ..utils import (
     identity,
     is_tensor_base_attr_getter,
     proxy_args_kwargs,
+    set_example_value,
 )
 from .base import VariableTracker
 from .functions import NestedUserFunctionVariable, UserFunctionVariable
@@ -501,7 +502,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             ),
             {},
         )
-        proxy.node.meta["example_value"] = out.value
+        set_example_value(proxy.node, out.value)
 
         return out
 
@@ -592,13 +593,13 @@ class GetAttrVariable(VariableTracker):
 
     def const_getattr(self, tx, name):
         if not isinstance(self.obj, variables.NNModuleVariable):
-            raise NotImplementedError()
+            raise NotImplementedError
         step1 = tx.output.get_submodule(self.obj.module_key)
         if self.name not in step1.__dict__:
-            raise NotImplementedError()
+            raise NotImplementedError
         step2 = inspect.getattr_static(step1, self.name)
         if name not in step2.__dict__:
-            raise NotImplementedError()
+            raise NotImplementedError
         return inspect.getattr_static(step2, name)
 
     def reconstruct(self, codegen):
@@ -777,8 +778,9 @@ class NumpyVariable(VariableTracker):
         if not config.trace_numpy:
             unimplemented(f"numpy.{self.value}()")
 
-        from ..utils import numpy_to_tensor_wrapper
+        import numpy as np
 
+        from ..utils import numpy_to_tensor_wrapper
         from .tensor import NumpyNdarrayVariable
 
         # lookup method name in tnp. Things like np.dtype(float) are not supported yet.
@@ -786,6 +788,18 @@ class NumpyVariable(VariableTracker):
             unimplemented(
                 f"numpy dtype function is not supported yet. Got type {type(self.value)}."
             )
+        elif self.value in (np.iinfo, np.finfo):
+            try:
+                return NumpyTypeInfoVariable(
+                    self.value(
+                        *[x.as_python_constant() for x in args],
+                        **{k: v.as_python_constant() for k, v in kwargs.items()},
+                    )
+                )
+            except NotImplementedError:
+                unimplemented(
+                    f"{self.value.__name__} with non-const args: {args} {kwargs}"
+                )
         else:  # We are dealing with a callable.
             func = get_np_to_tnp_map().get(self.value)
             if func is None:
@@ -995,3 +1009,75 @@ class StopIterationVariable(VariableTracker):
         codegen.load_import_from("builtins", "StopIteration")
         codegen.foreach(self.args)
         codegen.call_function(len(self.args), True)
+
+
+class ConstantLikeVariable(VariableTracker):
+    """self.value is a compile-time constant, but not a literal"""
+
+    _error_prefix = "ConstantLikeVariable"
+    try:
+        from numpy import floating as np_floating
+    except ImportError:
+        np_floating = type("invalid_type", (), {})
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def python_type(self):
+        return type(self.value)
+
+    def as_python_constant(self):
+        return self.value
+
+    def call_method(
+        self,
+        tx,
+        name,
+        args: List[VariableTracker],
+        kwargs: Dict[str, VariableTracker],
+    ) -> VariableTracker:
+        try:
+            # we only support constant propagation for methods
+            cargs = [x.as_python_constant() for x in args]
+            ckwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+        except NotImplementedError:
+            unimplemented(f"{self._error_prefix}.{name}(*{args}, **{kwargs})")
+
+        result = getattr(self.value, name)(*cargs, **ckwargs)
+
+        if variables.ConstantVariable.is_literal(result):
+            return variables.ConstantVariable.create(result)
+        if isinstance(result, re.Match):
+            return ConstantRegexMatchVariable(result)
+
+        unimplemented(f"{self._error_prefix}.{name}() -> {result}")
+
+    def var_getattr(self, tx, name: str) -> VariableTracker:
+        result = getattr(self.value, name)
+        if isinstance(result, self.np_floating):
+            result = float(result)
+        if variables.ConstantVariable.is_literal(result):
+            return variables.ConstantVariable.create(result)
+        return GetAttrVariable(self, name)
+
+
+class RegexPatternVariable(ConstantLikeVariable):
+    _error_prefix = "re.Pattern"
+
+
+class ConstantRegexMatchVariable(ConstantLikeVariable):
+    _error_prefix = "re.Match"
+
+
+class TorchVersionVariable(ConstantLikeVariable):
+    _error_prefix = "torch.__version__"
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("value", torch.__version__)
+        assert kwargs["value"] is torch.__version__
+        super().__init__(**kwargs)
+
+
+class NumpyTypeInfoVariable(ConstantLikeVariable):
+    _error_prefix = "np.iinfo/np.finfo"
