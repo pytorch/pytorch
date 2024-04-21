@@ -100,7 +100,6 @@ class TritonTemplateKernel(TritonKernel):
         suffix_args=0,
         epilogue_fn=identity,
         subgraphs=None,
-        captured_nodes = None,
         *,
         index_dtype,
     ):
@@ -110,7 +109,6 @@ class TritonTemplateKernel(TritonKernel):
             index_dtype=index_dtype,
         )
         self.input_nodes = input_nodes
-        self.captured_nodes = captured_nodes if captured_nodes is not None else []
         self.output_node = output_node
         self.named_input_nodes = {}
         self.defines = defines
@@ -525,7 +523,6 @@ class TritonTemplate(KernelTemplate):
         epilogue_fn=identity,
         subgraphs=None,
         mutated_inputs=None,
-        captured_nodes=None,
         **kwargs,
     ):
         """This function generates a TritonTemplateCaller
@@ -605,9 +602,11 @@ class TritonTemplate(KernelTemplate):
             mod = PyCodeCache.load(code, extra)
             _, call_args, _ = kernel.args.python_argdefs()
 
-        expected_args = list(unique(x.get_name() for x in itertools.chain(input_nodes, captured_nodes)))
-        expected_args.extend([fake_out.get_name()])
-        assert list(call_args)[: len(expected_args)] == expected_args, (
+        expected_input_args = list(unique(x.get_name() for x in input_nodes))
+        expected_output_args = [fake_out.get_name()]
+        expected_args = expected_input_args + expected_output_args
+        call_args_expected = list(call_args[:len(expected_input_args)]) + list(call_args[-len(expected_output_args):])
+        assert call_args_expected == expected_args, (
             call_args,
             expected_args,
         )

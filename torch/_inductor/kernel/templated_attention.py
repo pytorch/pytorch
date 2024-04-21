@@ -282,7 +282,6 @@ def templated_attention(*args, **kwargs):
                 sdpa_template.maybe_append_choice(
                     choices=choices,
                     input_nodes=(query, key, value, logsumexp),
-                    captured_nodes=list(other_buffers),
                     layout=layout,
                     subgraphs=subgraph_buffer,
                     mutated_inputs=[
@@ -300,7 +299,7 @@ def templated_attention(*args, **kwargs):
                 )
             return (
                 autotune_select_algorithm(
-                    "sdpa", choices, [query, key, value, logsumexp] + list(other_buffers), layout
+                    "sdpa", choices, [query, key, value, logsumexp], layout
                 ),
                 logsumexp,
             )
