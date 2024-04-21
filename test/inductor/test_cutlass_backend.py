@@ -209,7 +209,6 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 4,
-                "cuda.cutlass_only_evt_capable_ops": True,
                 "cuda.version": "12.2",  # required to enable the Kernels we need
             }
         ):
@@ -375,7 +374,6 @@ class TestCutlassBackend(TestCase):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, a, bias)
             torch.testing.assert_close(Y_compiled, Y, atol=1e-1, rtol=1e-1)
 
-    # TODO: Enable dynamic test cases when dynamic support is added.
     @unittest.skipIf(not SM75OrLater, "need sm_75")
     @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
     @parametrize("dynamic", (False,))
@@ -417,6 +415,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
                 "cuda.cutlass_dir": _CUTLASS_DIR,
                 "cuda.cutlass_max_profiling_configs": 4,
+                "cuda.cutlass_op_whitelist_regex": "",
+                "cuda.cutlass_op_blacklist_regex": "pingpong",  # Pingpong Kernels can lead to numerical issues
             }
         ):
             # No broadcast
