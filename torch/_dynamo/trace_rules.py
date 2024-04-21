@@ -3233,17 +3233,19 @@ if torch.distributed.is_available():
 
 @functools.lru_cache(None)
 def get_legacy_mod_inlinelist():
-    inlinelist = set()
-    for m in LEGACY_MOD_INLINELIST:
-        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+    inlinelist = {
+        _module_dir(torch) + m[len("torch.") :].replace(".", "/")
+        for m in LEGACY_MOD_INLINELIST
+    }
     return inlinelist
 
 
 @functools.lru_cache(None)
 def get_mod_inlinelist():
-    inlinelist = set()
-    for m in MOD_INLINELIST:
-        inlinelist.add(_module_dir(torch) + m[len("torch.") :].replace(".", "/"))
+    inlinelist = {
+        _module_dir(torch) + m[len("torch.") :].replace(".", "/")
+        for m in MOD_INLINELIST
+    }
     return inlinelist
 
 
