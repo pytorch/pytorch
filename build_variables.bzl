@@ -746,6 +746,7 @@ torch_cpp_srcs = [
     "torch/csrc/api/src/optim/serialize.cpp",
     "torch/csrc/api/src/optim/sgd.cpp",
     "torch/csrc/api/src/optim/schedulers/lr_scheduler.cpp",
+    "torch/csrc/api/src/optim/schedulers/reduce_on_plateau_scheduler.cpp",
     "torch/csrc/api/src/optim/schedulers/step_lr.cpp",
     "torch/csrc/api/src/serialize/input-archive.cpp",
     "torch/csrc/api/src/serialize/output-archive.cpp",
@@ -1165,6 +1166,7 @@ aten_native_source_codegen_list = [
     "aten/src/ATen/native/cpu/SpmmReduceKernel.cpp",
     "aten/src/ATen/native/cpu/SparseFactories.cpp",
     "aten/src/ATen/native/quantized/cpu/kernels/QuantizedOpKernels.cpp",
+    "aten/src/ATen/native/cpu/FusedAdamKernel.cpp",
 ]
 
 # This aten native source file list will not go through aten codegen process
@@ -1399,6 +1401,7 @@ aten_native_source_non_codegen_list = [
     "aten/src/ATen/native/xnnpack/OpContext.cpp",
     "aten/src/ATen/native/xnnpack/RegisterOpContextClass.cpp",
     "aten/src/ATen/native/xnnpack/Shim.cpp",
+    "aten/src/ATen/native/FusedAdam.cpp",
     # Files not in native, but depends on native symbols
     # "aten/src/ATen/TensorIndexing.cpp",
     "aten/src/ATen/TensorIterator.cpp",

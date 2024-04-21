@@ -10,6 +10,7 @@ import tempfile
 import traceback
 import textwrap
 import unittest
+import warnings
 from typing import Any, List, Dict
 import torch
 import torch.nn as nn
@@ -471,10 +472,40 @@ class TestCheckpoint(TestCase):
         self.assertTrue(isinstance(device_states[0], torch.Tensor))
         self.assertTrue(isinstance(device_states[1], torch.Tensor))
 
-    def test_infer_device_state_recursive(self):
+    def test_infer_device_state_recursive_meta(self):
         inp = {'foo' : torch.rand(10, device="meta")}
         device_type = _infer_device_type(inp)
         self.assertEqual("meta", device_type)
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    def test_infer_device_state_recursive_multi_cuda(self):
+        # Check that no warning is issued for either cuda:0, cuda:1 or
+        # cuda:0, cuda:0 cases since they are both the same device type
+        inp = {'foo' : torch.rand(10, device="cuda:0"), 'bar': [torch.rand(10, device="cuda:1")]}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            device_type = _infer_device_type(inp)
+            self.assertEqual("cuda", device_type)
+        inp = {'foo' : torch.rand(10, device="cuda:0"), 'bar': [torch.rand(10, device="cuda:0")]}
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            device_type = _infer_device_type(inp)
+            self.assertEqual("cuda", device_type)
+        # Check that a warning is issued for cuda:0, meta and that it includes
+        # device type information
+        inp = {'foo' : torch.rand(10, device="cuda:0"), 'bar': [torch.rand(10, device="meta")]}
+        with warnings.catch_warnings(record=True) as w:
+            device_type = _infer_device_type(inp)
+            self.assertEqual("cuda", device_type)
+        self.assertEqual(len(w), 1)
+        warning_msg = str(w[-1].message)
+        self.assertTrue(
+            "Tensor arguments, excluding CPU tensors, are detected on at least two types of devices"
+            in warning_msg
+        )
+        self.assertTrue("Device types: [\'cuda\', \'meta\']" in warning_msg)
+        self.assertTrue("first device type: cuda" in warning_msg)
+
 
 class TestDataLoaderUtils(TestCase):
     MAX_TIMEOUT_IN_SECOND = 300
@@ -1050,7 +1081,7 @@ class TestTraceback(TestCase):
         source = '''\
 def f(x):
     def g(x):
-        raise RuntimeError()  # HEYA
+        raise RuntimeError  # HEYA
 
     x = x * 3
     return g(x) + 1
@@ -1068,7 +1099,7 @@ def f(x):
 
     def test_format_traceback_short(self):
         try:
-            raise RuntimeError()
+            raise RuntimeError
         except RuntimeError as e:
             self.assertRegex(format_traceback_short(e.__traceback__), r'.*test_utils.py:\d+ in test_format_traceback_short')
 
