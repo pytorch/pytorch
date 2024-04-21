@@ -1468,7 +1468,7 @@ class TritonKernel(Kernel):
         def add_range(i, expr):
             expr = sv.simplify(expr)
             if not sv.statically_known_multiple_of(remaining[i], expr):
-                raise CantSplit()
+                raise CantSplit
             # guard on the last item out
             remaining[i] = FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
@@ -1501,7 +1501,7 @@ class TritonKernel(Kernel):
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group]
                     ):
-                        raise CantSplit()
+                        raise CantSplit
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
                     return_getters.append(
@@ -3398,6 +3398,29 @@ class TritonScheduling(BaseScheduling):
             return "tl.int32"
         return "tl.int64"
 
+    def has_non_contiguous_pw_in_reduction_kernel(self, node_schedule, numel, rnumel):
+        pointwise_nodes = list(
+            filter(
+                lambda n: n not in (EnableReduction, DisableReduction)
+                and not n.is_reduction()
+                and n.group[1][0] == numel * rnumel,
+                node_schedule,
+            )
+        )
+        for node in pointwise_nodes:
+            # An index can be an integer when loading a random seed.
+            if not all(
+                not isinstance(dep, MemoryDep)
+                or dep.is_contiguous()
+                or isinstance(dep.index, (sympy.Integer, int))
+                or dep.stride1_for_last_dim()
+                for dep in itertools.chain(
+                    node.read_writes.reads, node.read_writes.writes
+                )
+            ):
+                return True
+        return False
+
     def get_kernel_args(self, node_schedule, numel, reduction_numel):
         reductions = list(
             filter(
@@ -3411,6 +3434,14 @@ class TritonScheduling(BaseScheduling):
             if hints.count(hints[0]) == len(hints):
                 reduction_hint_val = hints[0]
             else:
+                reduction_hint_val = ReductionHint.DEFAULT
+
+            if (
+                reduction_hint_val == ReductionHint.INNER
+                and self.has_non_contiguous_pw_in_reduction_kernel(
+                    node_schedule, numel, reduction_numel
+                )
+            ):
                 reduction_hint_val = ReductionHint.DEFAULT
         else:
             reduction_hint_val = ReductionHint.DEFAULT
@@ -3456,9 +3487,11 @@ class TritonScheduling(BaseScheduling):
         from torch._inductor.codegen.triton_split_scan import TritonSplitScanKernel
 
         tiled_groups = self.select_tiling(node_schedule, numel, reduction_numel)
-        reduction_hint_val, mutations, index_dtype = self.get_kernel_args(
-            node_schedule, numel, reduction_numel
-        )
+        (
+            reduction_hint_val,
+            mutations,
+            index_dtype,
+        ) = self.get_kernel_args(node_schedule, numel, reduction_numel)
 
         is_split_scan = any(
             isinstance(node, BaseSchedulerNode) and node.is_split_scan()
@@ -3932,7 +3965,17 @@ class TritonScheduling(BaseScheduling):
         wrapped_jit_function = mod.triton_
 
         # call once to trigger the compilation
-        call(wrapped_jit_function.clone_args(*args)[0])
+        try:
+            call(wrapped_jit_function.clone_args(*args)[0])
+        except Exception as e:
+            log.debug(
+                "Exception (%s) in compiling fused nodes %s",
+                e,
+                {n.get_name() for n in nodes},
+            )
+            ms = float("inf")
+            store_cache()
+            return ms, mod.__file__
 
         launchers = wrapped_jit_function.launchers
         assert len(launchers) == 1
