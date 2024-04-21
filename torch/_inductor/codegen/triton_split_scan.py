@@ -2,7 +2,8 @@ import functools
 
 from typing import Optional, Set
 
-from torch._inductor import config, ir
+import torch._inductor.runtime.hints
+from torch._inductor import config
 
 from torch._inductor.codegen.triton import (
     IterationRangesRoot,
@@ -36,7 +37,7 @@ class TritonSplitScanKernel(TritonKernel):
         *groups,
         index_dtype: str,
         mutations: Optional[Set[str]] = None,
-        reduction_hint=ir.ReductionHint.DEFAULT,
+        reduction_hint=torch._inductor.runtime.hints.ReductionHint.DEFAULT,
         min_elem_per_thread=0,
     ):
         super().__init__(
