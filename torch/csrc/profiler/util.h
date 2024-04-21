@@ -27,7 +27,7 @@
       if (torch::profiler::impl::softAssertRaises()) { \
         TORCH_INTERNAL_ASSERT(cond, __VA_ARGS__);      \
       } else {                                         \
-        TORCH_WARN(__VA_ARGS__);                       \
+        TORCH_WARN_ONCE(__VA_ARGS__);                  \
       }                                                \
       return false;                                    \
     }                                                  \
