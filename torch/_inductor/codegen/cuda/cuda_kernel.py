@@ -189,6 +189,21 @@ class CUDATemplateKernel(CUDAKernel):
             return "void"
         return DTYPE_TO_CPP.get(node.get_layout().dtype)
 
+    def cutlass_dtype(self, node: IRNode, default_dtype="void") -> Optional[str]:
+        if node is None:
+            return default_dtype
+        from torch._inductor.codegen.cuda.cuda_template import CUTLASSTemplate
+
+        return CUTLASSTemplate._DTYPE_TO_CUTLASS[node.get_layout().dtype]
+
+    def max_valid_index(self, node: IRNode, default=-1):
+        if node is None:
+            return default
+        max_valid_offset = 0
+        for i in range(len(node.get_size())):
+            max_valid_offset += (node.get_size()[i] - 1) * node.get_stride()[i]
+        return max_valid_offset
+
     def offset(self, node: IRNode) -> str:
         """
         Generates code which represents offset of a given node.
