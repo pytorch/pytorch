@@ -3,7 +3,7 @@ import itertools
 import logging
 from typing import Callable, Optional
 
-from torch._inductor.runtime.runtime_utils import red_text, triton_config_to_hashable
+from .runtime_utils import red_text, triton_config_to_hashable
 
 try:
     import triton
