@@ -52,7 +52,7 @@ void _segment_reduce_lengths_cpu_kernel1(
   AT_DISPATCH_FLOATING_TYPES_AND2(
       kBFloat16, kHalf, data.scalar_type(), "_segment_reduce_cpu", [&]() {
         auto* output_data = output.data_ptr<scalar_t>();
-        const auto* values_data = data.data_ptr<scalar_t>();
+        const auto* values_data = data.const_data_ptr<scalar_t>();
         for (const auto outer_idx : c10::irange(outer_offset)) {
           int64_t segment_start, segment_length;
           int64_t segment_end = is_offsets_like ?
@@ -145,7 +145,7 @@ Tensor _segment_reduce_lengths_cpu_kernel(
   auto output = at::empty(output_shape, data.options());
 
   AT_DISPATCH_INDEX_TYPES(lengths.scalar_type(), "_segment_reduce_lengths_cpu_kernel1", [&]() {
-    const auto* lengths_data = lengths.data_ptr<index_t>();
+    const auto* lengths_data = lengths.const_data_ptr<index_t>();
     _segment_reduce_lengths_cpu_kernel1(
         reduction, data, lengths_data, axis, initial, output, segment_count, lengths_stride_axis);
   });
@@ -171,7 +171,7 @@ Tensor _segment_reduce_offsets_cpu_kernel(
   auto output = at::empty(output_shape, data.options());
 
   AT_DISPATCH_INDEX_TYPES(offsets.scalar_type(), "_segment_reduce_offsets_cpu_kernel1", [&]() {
-    const auto* offsets_data = offsets.data_ptr<index_t>();
+    const auto* offsets_data = offsets.const_data_ptr<index_t>();
     _segment_reduce_lengths_cpu_kernel1<index_t, /*is_offsets_like=*/true>(
         reduction, data, offsets_data, axis, initial, output, segment_count, offsets_stride_axis);
   });
@@ -211,10 +211,10 @@ void _segment_reduce_cpu_lengths_backward_kernel1(
       data_contig.scalar_type(),
       "_segment_reduce_cpu",
       [&]() {
-        auto* output_data = output_contig.data_ptr<scalar_t>();
-        auto* grad_data = grad_contig.data_ptr<scalar_t>();
+        auto* output_data = output_contig.const_data_ptr<scalar_t>();
+        auto* grad_data = grad_contig.const_data_ptr<scalar_t>();
         auto* grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
-        const auto* values_data = data_contig.data_ptr<scalar_t>();
+        const auto* values_data = data_contig.const_data_ptr<scalar_t>();
         // Used to calculate exclusive prod
         scalar_t initial_prod_value;
         if (reduction == ReductionType::PROD) {
@@ -331,7 +331,7 @@ Tensor _segment_reduce_cpu_lengths_backward_kernel(
 
   AT_DISPATCH_INDEX_TYPES(
       lengths_contig.scalar_type(), "_segment_reduce_cpu_lengths_backward_kernel1", [&] {
-        const auto* lengths_data = lengths_contig.data_ptr<index_t>();
+        const auto* lengths_data = lengths_contig.const_data_ptr<index_t>();
         _segment_reduce_cpu_lengths_backward_kernel1(
             grad_contig,
             output_contig,
@@ -364,7 +364,7 @@ Tensor _segment_reduce_cpu_offsets_backward_kernel(
 
   AT_DISPATCH_INDEX_TYPES(
       offsets_contig.scalar_type(), "_segment_reduce_cpu_offsets_backward_kernel1", [&] {
-        const auto* offsets_data = offsets_contig.data_ptr<index_t>();
+        const auto* offsets_data = offsets_contig.const_data_ptr<index_t>();
         _segment_reduce_cpu_lengths_backward_kernel1<index_t, /*is_offsets_like=*/true>(
             grad_contig,
             output_contig,

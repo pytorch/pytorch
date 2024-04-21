@@ -81,7 +81,7 @@ ideep::tensor& itensor_from_mkldnn(const MKLDNNTensor& mkldnn_tensor) {
   return mklimpl->unsafe_opaque_handle()->get_target();
 }
 
-ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
+ideep::tensor itensor_view_from_dense(const Tensor& tensor, bool from_const_data_ptr) {
   TORCH_CHECK(
       tensor.device().is_cpu(),
       "itensor_view_from_dense expects CPU tensor input");
@@ -92,31 +92,41 @@ ideep::tensor itensor_view_from_dense(const Tensor& tensor) {
     return {{tensor.sizes().vec(),
             ideep::tensor::data_type::f32,
             tensor.strides().vec()},
-            tensor.template data_ptr<float>()};
+            from_const_data_ptr ?
+              const_cast<float*>(tensor.template const_data_ptr<float>()) :
+              tensor.template data_ptr<float>()};
   }
   else if (tensor.scalar_type() == ScalarType::BFloat16) {
     return {{tensor.sizes().vec(),
             ideep::tensor::data_type::bf16,
             tensor.strides().vec()},
-            tensor.template data_ptr<BFloat16>()};
+            from_const_data_ptr ?
+              const_cast<BFloat16*>(tensor.template const_data_ptr<BFloat16>()) :
+              tensor.template data_ptr<BFloat16>()};
   }
   else if (tensor.scalar_type() == ScalarType::Half) {
     return {{tensor.sizes().vec(),
             ideep::tensor::data_type::f16,
             tensor.strides().vec()},
-            tensor.template data_ptr<Half>()};
+            from_const_data_ptr ?
+              const_cast<Half*>(tensor.template const_data_ptr<Half>()) :
+              tensor.template data_ptr<Half>()};
   }
   else if (tensor.scalar_type() == ScalarType::Byte) {
     return {{tensor.sizes().vec(),
             ideep::tensor::data_type::u8,
             tensor.strides().vec()},
-            tensor.data_ptr()};
+            from_const_data_ptr ?
+              const_cast<void*>(tensor.const_data_ptr()) :
+              tensor.data_ptr()};
   }
   else if (tensor.scalar_type() == ScalarType::Char) {
     return {{tensor.sizes().vec(),
             ideep::tensor::data_type::s8,
             tensor.strides().vec()},
-            tensor.data_ptr()};
+            from_const_data_ptr ?
+              const_cast<void*>(tensor.const_data_ptr()) :
+              tensor.data_ptr()};
   }
   else {
     TORCH_CHECK(false, "itensor_view_from_dense expects float/bfloat16/half/int8 tensor input");
@@ -145,11 +155,11 @@ ideep::tensor itensor_view_from_dense(
 // tensor is just a view of the storage of the aten dense tensor, so
 // caller needs to make sure the aten dense tensor's lifetime is
 // longer than the ideep tensor.
-ideep::tensor itensor_from_tensor(const Tensor& tensor) {
+ideep::tensor itensor_from_tensor(const Tensor& tensor, bool from_const_data_ptr) {
   if (tensor.is_mkldnn()) {
     return itensor_from_mkldnn(tensor);
   } else {
-    return itensor_view_from_dense(tensor);
+    return itensor_view_from_dense(tensor, from_const_data_ptr);
   }
 }
 

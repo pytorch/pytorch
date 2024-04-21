@@ -30,7 +30,7 @@ static void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const
     using Vec = Vectorized<scalar_t>;
     scalar_t* output_data = output.data_ptr<scalar_t>();
     scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
-    scalar_t* input_data = input.data_ptr<scalar_t>();
+    const scalar_t* input_data = input.const_data_ptr<scalar_t>();
     parallel_for(0, input.numel(), 1, [&] (int64_t begin, int64_t end) {
       int64_t size = end - begin;
       int64_t d = 0;
@@ -65,7 +65,7 @@ static void log_sigmoid_cpu_kernel(TensorBase &output, TensorBase &buffer, const
       using Vec = Vectorized<scalar_t>;
       scalar_t* output_data = output.data_ptr<scalar_t>();
       scalar_t* buffer_data = buffer.data_ptr<scalar_t>();
-      scalar_t* input_data = input.data_ptr<scalar_t>();
+      const scalar_t* input_data = input.const_data_ptr<scalar_t>();
       parallel_for(0, input.numel(), 1, [&] (int64_t begin, int64_t end) {
         int64_t size = end - begin;
         int64_t d = 0;
