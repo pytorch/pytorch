@@ -578,6 +578,8 @@ static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
       "enabled must be a bool (got ",
       Py_TYPE(arg)->tp_name,
       ")");
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_cpu_enabled(enabled) is deprecated. Please use torch.set_autocast_enabled('cpu', enabled) instead.")
   at::autocast::set_autocast_enabled(at::kCPU, arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -585,6 +587,8 @@ static PyObject* set_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* is_autocast_cpu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
+  TORCH_WARN_DEPRECATION(
+      "torch.is_autocast_cpu_enabled() is deprecated. Please use torch.is_autocast_enabled('cpu') instead.")
   if (at::autocast::is_autocast_enabled(at::kCPU)) {
     Py_RETURN_TRUE;
   } else {
@@ -600,6 +604,8 @@ static PyObject* set_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
       "enabled must be a bool (got ",
       Py_TYPE(arg)->tp_name,
       ")");
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_ipu_enabled(enabled) is deprecated. Please use torch.set_autocast_enabled('ipu', enabled) instead.")
   at::autocast::set_autocast_enabled(at::kIPU, arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -607,6 +613,8 @@ static PyObject* set_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* is_autocast_ipu_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
+  TORCH_WARN_DEPRECATION(
+      "torch.is_autocast_ipu_enabled() is deprecated. Please use torch.is_autocast_enabled('ipu') instead.")
   if (at::autocast::is_autocast_enabled(at::kIPU)) {
     Py_RETURN_TRUE;
   } else {
@@ -622,6 +630,8 @@ static PyObject* set_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
       "enabled must be a bool (got ",
       Py_TYPE(arg)->tp_name,
       ")");
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_xla_enabled(enabled) is deprecated. Please use torch.set_autocast_enabled('xla', enabled) instead.")
   at::autocast::set_autocast_enabled(at::kXLA, arg == Py_True);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -629,6 +639,8 @@ static PyObject* set_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
 
 static PyObject* is_autocast_xla_enabled(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
+  TORCH_WARN_DEPRECATION(
+      "torch.is_autocast_xla_enabled() is deprecated. Please use torch.is_autocast_enabled('xla') instead.")
   if (at::autocast::is_autocast_enabled(at::kXLA)) {
     Py_RETURN_TRUE;
   } else {
@@ -644,6 +656,8 @@ static PyObject* set_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
       "dtype must be a torch.dtype (got ",
       Py_TYPE(arg)->tp_name,
       ")");
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_gpu_dtype(dtype) is deprecated. Please use torch.set_autocast_dtype('cuda', dtype) instead.")
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
   at::autocast::set_autocast_dtype(at::kCUDA, targetType);
   Py_RETURN_NONE;
@@ -657,6 +671,8 @@ static PyObject* set_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
       "dtype must be a torch.dtype (got ",
       Py_TYPE(arg)->tp_name,
       ")");
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_cpu_dtype(dtype) is deprecated. Please use torch.set_autocast_dtype('cpu', dtype) instead.")
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
   at::autocast::set_autocast_dtype(at::kCPU, targetType);
   Py_RETURN_NONE;
@@ -670,6 +686,8 @@ static PyObject* set_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
       "dtype must be a torch.dtype (got ",
       Py_TYPE(arg)->tp_name,
       ")");
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_ipu_dtype(dtype) is deprecated. Please use torch.set_autocast_dtype('ipu', dtype) instead.")
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
   at::autocast::set_autocast_dtype(at::kIPU, targetType);
   Py_RETURN_NONE;
@@ -683,6 +701,8 @@ static PyObject* set_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
       "dtype must be a torch.dtype (got ",
       Py_TYPE(arg)->tp_name,
       ")");
+  TORCH_WARN_DEPRECATION(
+      "torch.set_autocast_xla_dtype(dtype) is deprecated. Please use torch.set_autocast_dtype('xla', dtype) instead.")
   at::ScalarType targetType = reinterpret_cast<THPDtype*>(arg)->scalar_type;
   at::autocast::set_autocast_dtype(at::kXLA, targetType);
   Py_RETURN_NONE;
@@ -691,6 +711,8 @@ static PyObject* set_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
+  TORCH_WARN_DEPRECATION(
+      "torch.get_autocast_gpu_dtype() is deprecated. Please use torch.get_autocast_dtype('cuda') instead.")
   at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kCUDA);
   auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
   Py_INCREF(dtype);
@@ -700,6 +722,8 @@ static PyObject* get_autocast_gpu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* get_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
+  TORCH_WARN_DEPRECATION(
+      "torch.get_autocast_cpu_dtype() is deprecated. Please use torch.get_autocast_dtype('cpu') instead.")
   at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kCPU);
   auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
   Py_INCREF(dtype);
@@ -709,6 +733,8 @@ static PyObject* get_autocast_cpu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* get_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
+  TORCH_WARN_DEPRECATION(
+      "torch.get_autocast_ipu_dtype() is deprecated. Please use torch.get_autocast_dtype('ipu') instead.")
   at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kIPU);
   auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
   Py_INCREF(dtype);
@@ -718,6 +744,8 @@ static PyObject* get_autocast_ipu_dtype(PyObject* _unused, PyObject* arg) {
 
 static PyObject* get_autocast_xla_dtype(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
+  TORCH_WARN_DEPRECATION(
+      "torch.get_autocast_xla_dtype() is deprecated. Please use torch.get_autocast_dtype('xla') instead.")
   at::ScalarType current_dtype = at::autocast::get_autocast_dtype(at::kXLA);
   auto dtype = (PyObject*)torch::getTHPDtype(current_dtype);
   Py_INCREF(dtype);
