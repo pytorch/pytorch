@@ -35,8 +35,8 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_methods_invocations import op_db
 from torch.testing._internal.common_modules import module_db, modules
 from torch.testing._internal.common_utils import parametrize, instantiate_parametrized_tests
-from torch.testing._internal.control_flow_opinfo_db import control_flow_opinfo_db
 from torch.testing._internal.optests import _test_aot_autograd_forwards_backwards_helper, aot_autograd_check
+from torch.testing._internal.hop_db import hop_db
 from torch._higher_order_ops.out_dtype import out_dtype
 from functorch import (
     grad, vjp, vmap, jacrev,
@@ -49,6 +49,7 @@ from functorch.compile import (
     nop, default_partition, default_decompositions,
     memory_efficient_fusion, get_aot_compilation_context, make_boxed_compiler
 )
+from functorch.experimental import control_flow
 from torch._decomp import decomposition_table
 
 from torch.testing._internal.common_device_type import ops
@@ -267,14 +268,14 @@ class TestAOTAutograd(AOTTestCase):
         inp_: Union[Callable, List[Any]],
         *,
         test_mutation: bool = False,
-        only_keep_inference_mutations: bool = False,
+        keep_inp_mutations: bool = False,
         decompositions: Optional[Dict] = None,
         dynamic: bool = False,
         # Only active when inp_ is Callable.
         # TODO: probably consolidate all tests to make inp a Callable.
         make_inputs_subclasses: bool = False,
     ):
-        for keep_input_mutations in [True] if only_keep_inference_mutations else [True, False]:
+        for keep_input_mutations in [True] if keep_inp_mutations else [True, False]:
             # Some tests pass in a callable for inp, to generate the inputs
             # (useful if we want to generate complicated aliasing inputs)
             if isinstance(inp_, Callable):
@@ -467,9 +468,9 @@ def forward(self, primals_1):
                 a.set_(b)
             return a * b
         inp = [torch.ones(3, 3, requires_grad=True)]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
         inp = [torch.ones(3, 3, requires_grad=False)]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
 
     def test_set__steals_view_chain(self):
         def f(a, b):
@@ -482,19 +483,19 @@ def forward(self, primals_1):
             a_.view(-1).mul_(2)
             return a_ * b_slice
         inp = [torch.ones(3, 3, requires_grad=False), torch.zeros(3, 9, requires_grad=False)]
-        self.verify_aot_autograd(f, inp)
+        self.verify_aot_autograd(f, inp, keep_inp_mutations=True)
 
     def test_set__and_data_mutation_good(self):
         def f(a, b):
             # The data mutation happens *after* the set_(). This is ok (see the graph below)
             with torch.no_grad():
                 a.set_(b)
-            b.mul_(2)
+                b.mul_(2)
             return a + b
         inp = [torch.ones(3, 3, requires_grad=True), torch.ones(3, 3, requires_grad=True)]
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
         inp = [torch.ones(3, 3, requires_grad=False), torch.zeros(3, 3, requires_grad=False)]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
         # Important things to note:
         # - "return a.set_(b)" desugars into "return b"
         # - Both a and b are recorded as experiencing mutations,
@@ -504,10 +505,11 @@ def forward(self, primals_1):
         # - the runtime epilogue for b is "b.copy_(mul)"
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, primals_1, primals_2):
-    clone = torch.ops.aten.clone.default(primals_2);  primals_2 = None
-    mul = torch.ops.aten.mul.Tensor(clone, 2);  clone = None
+    mul = torch.ops.aten.mul.Tensor(primals_2, 2)
     add = torch.ops.aten.add.Tensor(mul, mul)
-    return [mul, mul, add]""")
+    set_ = torch.ops.aten.set_.source_Tensor(primals_1, mul);  primals_1 = None
+    copy_ = torch.ops.aten.copy_.default(primals_2, mul);  primals_2 = mul = None
+    return [add]""")
 
     # This is a (hopefully) extremely rare case that is difficult to handle,
     # so we ban it.
@@ -519,13 +521,25 @@ def forward(self, primals_1, primals_2):
             # will be tracked as graph input mutations.
             with torch.no_grad():
                 a.set_(tmp)
-            # BAD: a_view is now detached from every graph input,
-            # so we won't recognize that this caused an input mutation!
-            a_view.mul_(2)
+                # BAD: a_view is now detached from every graph input,
+                # so we won't recognize that this caused an input mutation!
+                a_view.mul_(2)
             return a + tmp
         inp = [torch.ones(3, 3, requires_grad=True)]
         with self.assertRaisesRegex(RuntimeError, "cannot mutate tensors with frozen storage"):
-            self.verify_aot_autograd(f, inp, test_mutation=True)
+            self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
+
+    def test_set__not_allowed(self):
+        def f(a, b):
+            with torch.no_grad():
+                a.set_(b)
+            # Mutating a will change a's grad_fn, which requires us to replay the mutation outside of the graph.
+            # We currently ban this today, when the input also received a set_() input mutation.
+            a.mul_(2)
+            return a + b
+        inp = [torch.ones(3, 3, requires_grad=True), torch.ones(3, 3, requires_grad=True)]
+        with self.assertRaisesRegex(AssertionError, "prevented us from including it in the graph"):
+            fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
 
     def test_input_mutation_set__nop(self):
         def f(a):
@@ -536,9 +550,9 @@ def forward(self, primals_1, primals_2):
                 a.set_(a_old)
             return a + b.reshape(3, 3)
         inp = [torch.ones(3, 3, requires_grad=True)]
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
         inp = [torch.ones(3, 3, requires_grad=False)]
-        self.verify_aot_autograd(f, inp, test_mutation=True)
+        self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
         # Things to note:
         # - There are no set_() calls in the graph (we functionalize a.set_(b) into "b")
         # - There is only **1** graph output. We properly realized that the two set_() calls
@@ -678,7 +692,7 @@ def forward(self, primals_1, primals_2, primals_3):
         ]
 
         fw_graph = self.verify_aot_autograd(
-            f, inp, test_mutation=True, only_keep_inference_mutations=True
+            f, inp, test_mutation=True, keep_inp_mutations=True
         )
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, arg0_1, arg1_1):
@@ -731,13 +745,33 @@ def forward(self, arg0_1, arg1_1):
         # by the time it becomes a graph input. Good to test both cases.
         self.verify_aot_autograd(f, inp, test_mutation=True)
 
+    def test_input_mutation_hidden_from_autograd_aliasing(self):
+        def f(a):
+            a_alias = a.view(-1)
+            with torch.no_grad():
+                a_alias.mul_(2)
+            return a + 1
+        inp = [torch.ones(4, requires_grad=True)]
+        # The important bit: we detected that the input mutation is safe
+        # to include **inside** the graph, since it was under no_grad
+        # (so all we need to do is use mark_dirty() on the input to bump the VC)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
+        self.assertExpectedInline(fw_graph.code.strip(), """\
+def forward(self, primals_1):
+    view = torch.ops.aten.view.default(primals_1, [-1])
+    mul = torch.ops.aten.mul.Tensor(view, 2);  view = None
+    view_1 = torch.ops.aten.view.default(mul, [4]);  mul = None
+    add = torch.ops.aten.add.Tensor(view_1, 1)
+    copy_ = torch.ops.aten.copy_.default(primals_1, view_1);  primals_1 = view_1 = None
+    return [add]""")
+
     def test_input_mutation_requires_grad_no_grad(self):
         def f(a):
             with torch.no_grad():
                 a.mul_(2)
             return a + 3
         inp = [torch.ones(4, requires_grad=True)]
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, only_keep_inference_mutations=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
         # Even though the input requires_grad, we expect the keep the input mutation in the graph
         # (Even though this is a training graph!)
         self.assertExpectedInline(fw_graph.code.strip(), """\
@@ -754,7 +788,7 @@ def forward(self, primals_1):
                 return a + 3
         inp = [torch.ones(4, requires_grad=True)]
         # Even though the input requires_grad, we expect the keep the input mutation in the graph
-        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, only_keep_inference_mutations=True)
+        fw_graph = self.verify_aot_autograd(f, inp, test_mutation=True, keep_inp_mutations=True)
 
         self.assertExpectedInline(fw_graph.code.strip(), """\
 def forward(self, arg0_1):
@@ -3040,9 +3074,6 @@ def forward(self, arg0_1, arg1_1):
         gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_2 = torch._C._set_grad_enabled(False)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
@@ -3072,6 +3103,106 @@ def forward(self, arg0_1):
 
     @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
     @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported")
+    def test_aot_export_predispatch_map_1(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                def true_fn(x, r):
+                    y = x.sin()
+                    y.add_(5)
+                    return y.cos() + r.sum()
+
+                def false_fn(x, r):
+                    z = x.cos()
+
+                    def f(x, y):
+                        a = x.cos()
+                        a.add_(5)
+                        return a + y
+
+                    return z + control_flow.map(f, z, r).sum() + control_flow.map(f, z, r).sum()
+
+                a = torch.cond(x.shape[0] > 4, true_fn, false_fn, [x, y])
+                return (a + 3, a + 4)
+        inps = [torch.randn(2, 2), torch.ones(2)]
+        gm, _ = aot_export_module(M(), inps, trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    true_graph_0 = self.true_graph_0
+    false_graph_0 = self.false_graph_0
+    conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1, arg1_1]);  true_graph_0 = false_graph_0 = arg0_1 = arg1_1 = None
+    getitem = conditional[0];  conditional = None
+    add = torch.ops.aten.add.Tensor(getitem, 3)
+    add_1 = torch.ops.aten.add.Tensor(getitem, 4);  getitem = None
+    return (add, add_1)""")  # noqa: B950
+        self.assertExpectedInline(str(gm.true_graph_0.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    sin = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(sin, 5);  sin = None
+    cos = torch.ops.aten.cos.default(add);  add = None
+    sum_1 = torch.ops.aten.sum.default(arg1_1);  arg1_1 = None
+    add_1 = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add_1,)""")
+        self.assertExpectedInline(str(gm.false_graph_0.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    select = torch.ops.aten.select.int(cos, 0, 0)
+    body_graph_0 = self.body_graph_0
+    map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = None
+    getitem = map_impl[0];  map_impl = None
+    sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  sum_1 = None
+    select_1 = torch.ops.aten.select.int(cos, 0, 0)
+    body_graph_1 = self.body_graph_1
+    map_impl_1 = torch.ops.higher_order.map_impl(body_graph_1, [cos], [arg1_1]);  body_graph_1 = cos = arg1_1 = None
+    getitem_1 = map_impl_1[0];  map_impl_1 = None
+    sum_2 = torch.ops.aten.sum.default(getitem_1);  getitem_1 = None
+    add_1 = torch.ops.aten.add.Tensor(add, sum_2);  add = sum_2 = None
+    return (add_1,)""")
+        self.assertExpectedInline(str(gm.false_graph_0.body_graph_0.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(cos, 5);  cos = None
+    add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
+    return (add_1,)""")
+
+    def test_aot_export_predispatch_map_2(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x, y):
+                z = x.cos()
+
+                def f(x, y):
+                    a = x.cos()
+                    a.add_(5)
+                    return a + y
+
+                return (z + control_flow.map(f, z, y).sum(),)
+
+        inps = [torch.randn(2, 2), torch.ones(2)]
+        gm, _ = aot_export_module(M(), inps, trace_joint=False, pre_dispatch=True)
+        self.assertExpectedInline(str(gm.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    body_graph_0 = self.body_graph_0
+    map_impl = torch.ops.higher_order.map_impl(body_graph_0, [cos], [arg1_1]);  body_graph_0 = arg1_1 = None
+    getitem = map_impl[0];  map_impl = None
+    sum_1 = torch.ops.aten.sum.default(getitem);  getitem = None
+    add = torch.ops.aten.add.Tensor(cos, sum_1);  cos = sum_1 = None
+    return (add,)""")  # noqa: B950
+        self.assertExpectedInline(str(gm.body_graph_0.code).strip(), """\
+def forward(self, arg0_1, arg1_1):
+    cos = torch.ops.aten.cos.default(arg0_1);  arg0_1 = None
+    add = torch.ops.aten.add.Tensor(cos, 5);  cos = None
+    add_1 = torch.ops.aten.add.Tensor(add, arg1_1);  add = arg1_1 = None
+    return [add_1]""")
+
+    @unittest.skipIf(IS_WINDOWS, "Windows isn't supported for this case")
+    @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "TorchDynamo is not supported")
     def test_aot_export_predispatch_with_cond(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -3096,9 +3227,6 @@ def forward(self, arg0_1):
         gm, _ = aot_export_module(M(), [inp], trace_joint=False, pre_dispatch=True)
         self.assertExpectedInline(str(gm.code).strip(), """\
 def forward(self, arg0_1):
-    _set_grad_enabled = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_1 = torch._C._set_grad_enabled(False)
-    _set_grad_enabled_2 = torch._C._set_grad_enabled(False)
     true_graph_0 = self.true_graph_0
     false_graph_0 = self.false_graph_0
     conditional = torch.ops.higher_order.cond(False, true_graph_0, false_graph_0, [arg0_1]);  true_graph_0 = false_graph_0 = arg0_1 = None
@@ -3195,6 +3323,8 @@ def forward(self, arg0_1):
         # Some important characteristics of the exported graph below:
         # 8 arguments: 2 params from conv, 2 params from batchnorm, 2 buffers from 1 batchnorm, 1 user input
         # 9 outputs: 3 mutated buffers (from batchnorm), 2 user outputs and 4 gradients (since there were 4 parameters)
+        for node in fx_g.graph.nodes:
+            node.meta.pop("stack_trace", None)
         self.assertExpectedInline(fx_g.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
@@ -3252,6 +3382,8 @@ class <lambda>(torch.nn.Module):
         # Also check the inference graph
         # Main important thing here is that there are 5 total outputs: 3 total mutated buffers (from batchnorm), 2 user outputs.
         fx_g_inference, signature_inference = aot_export_module(mod, [inp], trace_joint=False)
+        for node in fx_g_inference.graph.nodes:
+            node.meta.pop("stack_trace", None)
         self.assertExpectedInline(fx_g_inference.print_readable(print_output=False), """\
 class <lambda>(torch.nn.Module):
     def forward(self, arg0_1: "f32[3, 1, 1, 1]", arg1_1: "f32[3]", arg2_1: "f32[3]", arg3_1: "f32[3]", arg4_1: "f32[3]", arg5_1: "f32[3]", arg6_1: "i64[]", arg7_1: "f32[1, 1, 3, 3]"):
@@ -4612,12 +4744,12 @@ def _test_aot_autograd_module_helper(self, device, dtype, training, module_info,
 
 
 class TestEagerFusionOpInfo(AOTTestCase):
-    @ops(op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_exhaustive', aot_autograd_failures)
     def test_aot_autograd_exhaustive(self, device, dtype, op):
         _test_aot_autograd_helper(self, device, dtype, op)
 
-    @ops(op_db + control_flow_opinfo_db, allowed_dtypes=(torch.float,))
+    @ops(op_db + hop_db, allowed_dtypes=(torch.float,))
     @patch("functorch.compile.config.debug_assert", True)
     @skipOps('TestEagerFusionOpInfo', 'test_aot_autograd_symbolic_exhaustive',
              aot_autograd_failures | symbolic_aot_autograd_failures)

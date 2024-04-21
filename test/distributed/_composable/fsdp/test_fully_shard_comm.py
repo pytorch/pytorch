@@ -14,7 +14,7 @@ from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed._composable.fsdp._fsdp_collectives import (
     foreach_all_gather,
     foreach_all_gather_copy_out,
-    foreach_reduce_scatter,
+    foreach_reduce,
 )
 from torch.distributed._composable.fsdp._fsdp_common import FSDPMeshInfo, TrainingState
 from torch.distributed._composable.fsdp._fsdp_init import (
@@ -219,7 +219,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
         unsharded_grads = [torch.ones_like(param) * self.rank for param in orig_params]
         group = fsdp_param_group.mesh_info.shard_process_group
         self.assertEqual(group.size(), self.world_size)
-        view_out_event = foreach_reduce_scatter(
+        all_reduce_stream = torch.cuda.Stream()
+        view_out_event = foreach_reduce(
             fsdp_params,
             unsharded_grads,
             group,
@@ -228,6 +229,8 @@ class TestFullyShardCollectiveOps(FSDPTestMultiThread):
             reduce_dtype=reduce_scatter_dtype,
             device=self.device,
             divide_factors=fsdp_param_group._grad_divide_factors,
+            all_reduce_group=None,
+            all_reduce_stream=all_reduce_stream,
         )
         torch.cuda.current_stream().wait_event(view_out_event)
 

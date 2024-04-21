@@ -66,6 +66,8 @@ CUSPARSE_SPMM_COMPLEX128_SUPPORTED = (
     IS_WINDOWS and torch.version.cuda and version.parse(torch.version.cuda) > version.parse("11.2")
 ) or (not IS_WINDOWS and not TEST_WITH_ROCM)
 
+HIPSPARSE_SPMM_COMPLEX128_SUPPORTED = torch.version.hip and version.parse(torch.version.hip.split("-")[0]) >= version.parse("6.0")
+
 def all_sparse_layouts(test_name='layout', include_strided=False):
     return parametrize(test_name, [
         subtest(torch.strided, name='Strided'),
@@ -4428,6 +4430,33 @@ class TestSparseMeta(TestCase):
                 self.assertEqual(f_values.shape, (*values.shape[:batch_dim], nnz, *values.shape[batch_dim + 1:]))
                 self.assertEqual(f_values.dtype, values.dtype)
                 self.assertEqual(f_values.device, values.device)
+
+    @all_sparse_layouts('layout', include_strided=False)
+    @parametrize("dtype", [torch.float64])
+    def test_zeros_like_fake(self, dtype, layout):
+        from torch._subclasses.fake_tensor import FakeTensorMode, FakeTensor
+        from torch.utils._mode_utils import no_dispatch
+        fake_mode = FakeTensorMode()
+        index_dtype = torch.int64
+        device = 'cpu'
+        for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            f = FakeTensor.from_tensor(t, fake_mode)
+            expected = torch.zeros_like(t)
+            with no_dispatch():
+                result = torch.zeros_like(f, device=f.fake_device)
+            self.assertEqual(result, expected)
+
+    @all_sparse_layouts('layout', include_strided=False)
+    @parametrize("dtype", [torch.float64])
+    def test_sum_meta(self, dtype, layout):
+        device = 'cpu'
+        index_dtype = torch.int64
+        for t in self.generate_simple_inputs(layout, device=device, dtype=dtype, index_dtype=index_dtype):
+            m = t.to(device='meta')
+            r = torch.sum(m)
+            self.assertEqual(r.layout, torch.strided)
+            self.assertTrue(r.is_meta)
+            self.assertEqual(r.shape, ())
 
 
 class _SparseDataset(torch.utils.data.Dataset):

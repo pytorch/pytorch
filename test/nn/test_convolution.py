@@ -843,6 +843,30 @@ class TestConvolutionNN(NNTestCase):
         for s, k, g, d in product(strides, kernel_sizes, groups, dilates):
             _test_conv2d(s, k, g, d)
 
+    def test_permute_conv2d_issue_120211(self):
+        def reproducer(radius: int):
+            image = torch.rand(1, 1024, 1024, 3)
+            image = image.permute(0, 3, 1, 2)
+            kernel_x = torch.zeros([3, 1, 1, radius * 2 + 1], device=image.device)
+            image = torch.nn.functional.conv2d(image, kernel_x, groups=image.shape[-3])
+
+        for i in range(0, 128):
+            # This should not fail
+            reproducer(radius=i)
+
+    def test_conv3d_issue_120406(self):
+        # This should not fail
+        F.conv3d(torch.ones(2, 3, 8, 9, 26), torch.ones(3, 1, 1, 1, 17), groups=3)
+
+    def test_conv1d_issue_120547(self):
+        weight = torch.ones([16, 1, 32])
+        bias = torch.ones([16])
+        stride, padding, dilation, groups = (1, 16, 1, 16)
+        input = torch.rand((1, 1, 16))
+        input = input.transpose(1, 2)
+        # This should not fail
+        F.conv1d(input, weight, bias, stride, padding, dilation, groups)
+
 
 class TestConvolutionNNDeviceType(NNTestCase):
     def run_conv_double_back_test(self, kern, stride, padding, chan_in, chan_out, batch_size,
@@ -1976,6 +2000,25 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(grad1, grad2, atol=5e-2, rtol=5e-3)
 
     @onlyCUDA
+    @skipCUDAIfRocm
+    @largeTensorTest('20GB', 'cpu')
+    @largeTensorTest('60GB', 'cuda')
+    def test_conv_large_batch_1(self, device):
+        in_channels = 514
+        dim = 2048
+        out_channels = 1
+        kernel_size = 3
+        stride = 1
+        padding = 1
+
+        input_tensor = torch.ones(1, in_channels, dim, dim).cuda().half()
+        model = nn.Conv2d(in_channels, out_channels, kernel_size, stride, padding).cuda().half()
+        output = model(input_tensor)
+        model_cpu = model.cpu().float()
+        output_cpu = model(input_tensor.float().cpu())
+        self.assertEqual(output.cpu().float(), output_cpu, atol=1e-3, rtol=1e-3)
+
+    @onlyCUDA
     @skipCUDAIfNoCudnn
     def test_contig_wrong_stride_cudnn(self, device):
         # x has to have batch_size 1 to test contiguous checks
@@ -1989,6 +2032,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         F.conv2d(x, torch.randn(1, 16, 1, 1, device=device))
 
     @onlyCUDA
+    @tf32_on_and_off(0.005)
     def test_Conv2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.Conv2d(3, 3, kernel_size=1)
@@ -2008,6 +2052,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(conv_cpu.weight.grad.data, conv_cuda.weight.grad.data, atol=1e-5, rtol=0, exact_device=False)
 
     @onlyCUDA
+    @tf32_on_and_off(0.005)
     def test_ConvTranspose2d_size_1_kernel(self, device):
         x_cpu = torch.randn(2, 3, 5, 5)
         conv_cpu = torch.nn.ConvTranspose2d(3, 3, kernel_size=1)

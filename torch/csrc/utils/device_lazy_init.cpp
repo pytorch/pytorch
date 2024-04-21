@@ -1,3 +1,4 @@
+#include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 
 #include <torch/csrc/Exceptions.h>
@@ -21,10 +22,24 @@ void device_lazy_init(at::DeviceType device_type) {
     return;
   }
 
+  auto maybe_mode = c10::impl::TorchDispatchModeTLS::get_mode(
+      c10::impl::TorchDispatchModeKey::FAKE);
+  if (maybe_mode) {
+    return;
+  }
+
   std::string module_name = "torch." + at::DeviceTypeName(device_type, true);
   auto module = THPObjectPtr(PyImport_ImportModule(module_name.c_str()));
   if (!module) {
     throw python_error();
+  }
+
+  if (device_type == at::DeviceType::PrivateUse1) {
+    auto has_lazy_init_method =
+        PyObject_HasAttrString(module.get(), "_lazy_init") == 1;
+    if (!has_lazy_init_method) {
+      return;
+    }
   }
 
   auto res = THPObjectPtr(PyObject_CallMethod(module.get(), "_lazy_init", ""));

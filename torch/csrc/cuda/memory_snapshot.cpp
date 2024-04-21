@@ -215,11 +215,15 @@ std::string _memory_snapshot_pickled() {
   const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
     auto segmentDict = new_dict();
     segmentDict.insert(device_s, segmentInfo.device);
-    segmentDict.insert(address_s, segmentInfo.address);
-    segmentDict.insert(total_size_s, segmentInfo.total_size);
-    segmentDict.insert(allocated_size_s, segmentInfo.allocated_size);
-    segmentDict.insert(active_size_s, segmentInfo.active_size);
-    segmentDict.insert(requested_size_s, segmentInfo.requested_size);
+    segmentDict.insert(address_s, static_cast<int64_t>(segmentInfo.address));
+    segmentDict.insert(
+        total_size_s, static_cast<int64_t>(segmentInfo.total_size));
+    segmentDict.insert(
+        allocated_size_s, static_cast<int64_t>(segmentInfo.allocated_size));
+    segmentDict.insert(
+        active_size_s, static_cast<int64_t>(segmentInfo.active_size));
+    segmentDict.insert(
+        requested_size_s, static_cast<int64_t>(segmentInfo.requested_size));
     segmentDict.insert(stream_s, int64_t(segmentInfo.stream));
     segmentDict.insert(
         segment_type_s, (segmentInfo.is_large ? large_s : small_s));
@@ -234,9 +238,10 @@ std::string _memory_snapshot_pickled() {
     auto blocks = new_list();
     for (const auto& blockInfo : segmentInfo.blocks) {
       auto blockDict = new_dict();
-      blockDict.insert(address_s, address);
-      blockDict.insert(size_s, blockInfo.size);
-      blockDict.insert(requested_size_s, blockInfo.requested_size);
+      blockDict.insert(address_s, static_cast<int64_t>(address));
+      blockDict.insert(size_s, static_cast<int64_t>(blockInfo.size));
+      blockDict.insert(
+          requested_size_s, static_cast<int64_t>(blockInfo.requested_size));
       blockDict.insert(
           state_s,
           (blockInfo.allocated
@@ -303,7 +308,8 @@ std::string _memory_snapshot_pickled() {
       auto trace_entry = new_dict();
       trace_entry.insert(action_s, action_to_str(te.action_));
       trace_entry.insert(
-          TraceEntry::OOM == te.action_ ? device_free_s : addr_s, te.addr_);
+          TraceEntry::OOM == te.action_ ? device_free_s : addr_s,
+          static_cast<int64_t>(te.addr_));
       trace_entry.insert(size_s, (int64_t)te.size_);
       trace_entry.insert(stream_s, int64_t(te.stream_));
       if (te.context_) {

@@ -236,6 +236,23 @@
   - Lint
   - pull
 
+- name: XPU ATen
+  patterns:
+  - aten/src/ATen/xpu/**
+  - c10/xpu/**
+  - torch/csrc/xpu/**
+  - torch/xpu/**
+  - test/xpu/**
+  - third_party/xpu.txt
+  approved_by:
+  - EikanWang
+  - jgong5
+  - gujinghui
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
 - name: Distributions
   patterns:
   - torch/distributions/**
@@ -357,6 +374,7 @@
 
 - name: CPU inductor
   patterns:
+  - torch/_inductor/mkldnn_lowerings.py
   - torch/_inductor/fx_passes/mkldnn_fusion.py
   - torch/_inductor/fx_passes/quantization.py
   - torch/_inductor/codegen/cpp.py

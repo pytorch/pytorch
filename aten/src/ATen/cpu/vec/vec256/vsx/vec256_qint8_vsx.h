@@ -91,7 +91,7 @@ struct Vectorized<c10::qint8> {
           vec_vsx_ld(offset0, reinterpret_cast<const vint8*>(ptr)),
           vec_vsx_ld(offset16, reinterpret_cast<const vint8*>(ptr))};
     }
-    __at_align__ value_type tmp_values[size()];
+    __at_align__ value_type tmp_values[size()] = {};
     std::memcpy(tmp_values, ptr, std::min(count, size()) * sizeof(value_type));
     return {vec_vsx_ld(offset0, tmp_values), vec_vsx_ld(offset16, tmp_values)};
   }
