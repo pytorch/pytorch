@@ -5045,6 +5045,52 @@ class FallbackKernel(ExternKernelAlloc):
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
             handle_aliasing_and_mutation(info, arg)
 
+    def codegen_unbacked_symbol_defs(self, wrapper):
+        if not hasattr(self, "unbacked_bindings"):
+            return
+
+        unbacked_bindings = self.unbacked_bindings
+
+        if not unbacked_bindings:
+            return
+
+        for s, keypath in unbacked_bindings.items():
+            expr = self.get_name()
+            assert expr != "None"
+
+            def go(expr, keypath):
+                if keypath == ():
+                    return expr
+
+                if (
+                    len(keypath) >= 2
+                    and isinstance(keypath[0], CallMethodKey)
+                    and isinstance(keypath[1], pytree.SequenceKey)
+                ):
+                    return go(
+                        f"{expr}.{keypath[0].name}({keypath[1].idx})", keypath[2:]
+                    )
+                elif isinstance(keypath[0], CallMethodKey):
+                    return go(f"{expr}.{keypath[0].name}()", keypath[1:])
+                elif isinstance(keypath[0], pytree.SequenceKey):
+                    return go(f"{expr}[{keypath[0].idx}]", keypath[1:])
+                elif isinstance(keypath[0], DivideByKey):
+                    # TODO: need to assert divisibility
+                    # TODO: this is invalid C++ codegen
+                    return go(f"{expr}.__floordiv__({keypath[0].divisor})", keypath[1:])
+                else:
+                    raise AssertionError(f"unrecognized keypath {keypath}")
+
+            wrapper.writeline(
+                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {go(expr, keypath)}{wrapper.ending}"
+            )
+
+    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
+        if unbacked_bindings := getattr(self, "unbacked_bindings", None):
+            return unbacked_bindings.keys()
+        else:
+            return set()
+
     def set_cpp_kernel(self, kernel):
         from .codegen.wrapper import get_cpp_op_schema
 
@@ -5334,6 +5380,8 @@ class FallbackKernel(ExternKernelAlloc):
             if isinstance(self.layout, Layout):
                 self.codegen_size_asserts(wrapper)
 
+        self.codegen_unbacked_symbol_defs(wrapper)
+
     @staticmethod
     def tensor_to_layout(output: torch.Tensor):
         return FixedLayout(
@@ -5477,64 +5525,11 @@ class MultiOutput(ExternKernel):
         else:
             return basename
 
-    # TODO: This is cursed
-    # Known bugs:
-    # - If you have truly multi output node with unbacked symints, will fail
-    #   (as we will generate defs at each MultiOutput and clobber each other)
-    # - We report that the def site is the MultiOutput, rather than
-    #   the FallbackKernel inside, because that's where codegen happens
-    #   even though this is backwards
-    def codegen_unbacked_symbol_defs(self, wrapper):
-        if not hasattr(self.inputs[0], "unbacked_bindings"):
-            return
-
-        unbacked_bindings = self.inputs[0].unbacked_bindings
-
-        if not unbacked_bindings:
-            return
-
-        for s, keypath in unbacked_bindings.items():
-            expr = self.get_name()
-
-            def go(expr, keypath):
-                if keypath == ():
-                    return expr
-
-                if (
-                    len(keypath) >= 2
-                    and isinstance(keypath[0], CallMethodKey)
-                    and isinstance(keypath[1], pytree.SequenceKey)
-                ):
-                    return go(
-                        f"{expr}.{keypath[0].name}({keypath[1].idx})", keypath[2:]
-                    )
-                elif isinstance(keypath[0], CallMethodKey):
-                    expr = f"{expr}.{keypath[0].name}()"
-                elif isinstance(keypath[0], pytree.SequenceKey):
-                    expr = f"{expr}[{keypath[0].idx}]"
-                elif isinstance(keypath[0], DivideByKey):
-                    # TODO: need to assert divisibility
-                    # TODO: this is invalid C++ codegen
-                    expr = f"{expr}.__floordiv__({keypath[0].divisor})"
-                else:
-                    raise AssertionError(f"unrecognized keypath {keypath}")
-
-            wrapper.writeline(
-                f"{wrapper.codegen_unbacked_symbol_decl(s)} = {go(expr, keypath)}{wrapper.ending}"
-            )
-
-    def get_unbacked_symbol_defs(self) -> Set[sympy.Symbol]:
-        if unbacked_bindings := getattr(self.inputs[0], "unbacked_bindings", None):
-            return unbacked_bindings.keys()
-        else:
-            return set()
-
     def codegen(self, wrapper):
         wrapper.codegen_multi_output(
             self.get_name(),
             self.codegen_list_tuple_access(self.inputs[0].get_name(), self.indices),
         )
-        self.codegen_unbacked_symbol_defs(wrapper)
 
     def __init__(self, layout, input, indices: List[Tuple[Any, ...]]):
         super().__init__(None, layout, [input], ())
