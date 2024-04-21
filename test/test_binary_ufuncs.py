@@ -3,7 +3,6 @@
 import torch
 import numpy as np
 
-import sys
 import itertools
 from itertools import chain
 from itertools import product
@@ -3886,18 +3885,20 @@ class TestBinaryUfuncs(TestCase):
             test_x((2, 3), 1, [1.0, 2.0, 3.0, 4.0], device)
 
     @skipIf(not TEST_SCIPY, "Scipy required for the test.")
-    # This is failing on Python 3.12. https://github.com/pytorch/pytorch/issues/119462
-    @skipIf(
-        sys.version_info >= (3, 12), "Failing on Python 3.12"
-    )
     def test_cumulative_trapezoid(self, device):
 
         import scipy.integrate
 
         if hasattr(scipy.integrate, "cumulative_trapezoid"):
-            scipy_cumulative_trapezoid = scipy.integrate.cumulative_trapezoid
+            _scipy_cumulative_trapezoid = scipy.integrate.cumulative_trapezoid
         else:  # Older version of SciPy uses a different name
-            scipy_cumulative_trapezoid = scipy.integrate.cumtrapz
+            _scipy_cumulative_trapezoid = scipy.integrate.cumtrapz
+
+        def scipy_cumulative_trapezoid(y, x=None, dx=1.0, axis=-1, initial=None):
+            if y.shape[axis] == 0:
+                return np.empty_like(y)
+            else:
+                return _scipy_cumulative_trapezoid(y, x, dx, axis, initial)
 
         def test_dx(sizes, dim, dx, device):
             t = torch.randn(sizes, device=device)

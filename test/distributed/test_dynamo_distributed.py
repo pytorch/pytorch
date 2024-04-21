@@ -292,6 +292,33 @@ class TestFakeDistributedSingleProc(torch._dynamo.test_case.TestCase):
         opt_model(torch.randn(20, 512))
 
 
+    @patch.object(config, "optimize_ddp", True)
+    def test_call_method_forward(self):
+        class Model(nn.Module):
+            def __init__(self,):
+                super().__init__()
+                layers = []
+                for l in range(2):
+                    layer = nn.ModuleList([nn.LayerNorm(96), nn.MultiheadAttention(embed_dim=96, num_heads=4, batch_first=True)])
+                    layers.append(layer)
+                self.layers = nn.ModuleList(layers)
+
+            def forward(self, x: torch.Tensor) -> torch.Tensor:
+                # x: [Batch, Freq, Time, Feature]
+                B, F, T, H = x.shape
+                for m in self.layers:
+                    x = x.reshape(B * F, T, H)
+                    x = m[0](x)
+                    x, attn = m[1].forward(x, x, x)
+                    x = x.reshape(B, F, T, H)
+                return x
+
+        model = Model()
+        model = FakeDDP(model)
+        opt_model = torch.compile(model)
+        opt_model(torch.randn(2, 129, 100, 96))
+
+
 # Are these tests failing?  Check and see if TestFakeDistributedSingleProc has a
 # single process version; if it's just a problem in the Dynamo distributed
 # optimizer, you should be able to repro it single process!

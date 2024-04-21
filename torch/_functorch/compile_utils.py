@@ -88,10 +88,9 @@ def strip_overloads(gm):
 
 
 def get_placeholders(graph):
-    return list(filter(lambda x: x.op == 'placeholder', graph.nodes))
+    return graph.find_nodes(op="placeholder")
 
 def get_outputs(graph):
-    for node in graph.nodes:
-        if node.op == 'output':
-            return pytree.tree_leaves(node.args[0])
+    for node in graph.find_nodes(op="output"):
+        return pytree.tree_leaves(node.args[0])
     raise AssertionError("No output node found")

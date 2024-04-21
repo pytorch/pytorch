@@ -20,7 +20,7 @@ from torch.ao.quantization.quantizer import QuantizationAnnotation
 
 __all__ = [
     "fold_bn_weights_into_conv_node",
-    "get_aten_graph_module",
+    "_get_aten_graph_module_for_pattern",
     "remove_tensor_overload_for_qdq_ops",
 ]
 
@@ -166,24 +166,24 @@ def _is_supported_batch_norm_for_training(node: Node):
     ]
     return node.target in supported_ops
 
-# TODO: rename this to _is_conv_node
-def _is_conv(n: Node):
+# TODO: move this to torch/ao/quantization/utils.py
+def _is_conv_node(n: Node):
     """
-    Return whether the node refers to an aten conv op.
+    Return whether the node refers to an aten conv or conv transpose op.
     """
     return n.op == "call_function" and n.target in [
         torch.ops.aten.conv1d.default,
         torch.ops.aten.conv2d.default,
     ]
 
-# TODO: rename this to _is_conv_transpose_node
-def _is_conv_transpose(n: Node):
+def _is_conv_transpose_node(n: Node):
     """
     Return whether the node refers to an aten conv_transpose op.
     """
     return n.op == "call_function" and n.target in [
         torch.ops.aten.conv_transpose1d,
         torch.ops.aten.conv_transpose2d,
+        torch.ops.aten.conv_transpose2d.input,
     ]
 
 def _is_bn_node(n: Node):
@@ -199,7 +199,7 @@ def fold_bn_weights_into_conv_node(
     # conv args: input, weight, bias, stride, padding, dilation, ...
     conv_w = _get_tensor_constant_from_node(conv_weight_node, m)
     conv_b = _get_tensor_constant_from_node(conv_bias_node, m)
-    transpose = _is_conv_transpose(conv_node)
+    transpose = _is_conv_transpose_node(conv_node)
 
     # eval bn args: input, weight, bias, running mean, running var, momentum, eps
     # train bn args: input, weight, bias, running mean, running var, training, momentum, eps
@@ -270,7 +270,7 @@ def _fuse_conv_bn_(m: GraphModule) -> None:
             continue
         bn_node = n
         n = bn_node.args[0]
-        if not _is_conv(n):
+        if not (_is_conv_node(n) or _is_conv_transpose_node(n)):
             continue
         conv_node = n
         conv_weight_node = conv_node.args[1]
@@ -292,7 +292,7 @@ def _get_node_name_to_scope(model: GraphModule) -> Dict[str, Tuple[str, type]]:
         node_name_to_scope[n.name] = current_scope
     return node_name_to_scope
 
-def get_aten_graph_module(
+def _get_aten_graph_module_for_pattern(
     pattern: Callable,
     example_inputs: Tuple[Any, ...],
     is_cuda: bool = False,
@@ -310,6 +310,16 @@ def get_aten_graph_module(
     )
     aten_pattern.graph.eliminate_dead_code()
     aten_pattern.recompile()
+
+    # ep.module() adds copy_ nodes for the mutated inputs.
+    # For patterns, it doesn't matter
+    for node in aten_pattern.graph.nodes:
+        if node.op == "call_function" and node.target == torch.ops.aten.copy_.default and len(node.users) == 0:
+            aten_pattern.graph.erase_node(node)
+
+    aten_pattern.graph.eliminate_dead_code()
+    aten_pattern.recompile()
+
     return aten_pattern
 
 def remove_tensor_overload_for_qdq_ops(match_pattern: GraphModule) -> None:
@@ -370,8 +380,8 @@ def _replace_literals_with_new_placeholders(
         return x - 3
 
     example_inputs = (torch.randn(1, 3, 3, 3),)
-    pattern_gm = get_aten_graph_module(pattern, example_inputs)
-    replacement_gm = get_aten_graph_module(pattern, example_inptus)
+    pattern_gm = _get_aten_graph_module_for_pattern(pattern, example_inputs)
+    replacement_gm = _get_aten_graph_module_for_pattern(pattern, example_inptus)
 
     # 2. Before calling replace literals we'll see the following graph:
     def pattern(self, x):
@@ -456,8 +466,8 @@ def _replace_literals_with_existing_placeholders(
         -128,
         127,
     )
-    pattern_gm = get_aten_graph_module(pattern, example_inputs)
-    replacement_gm = get_aten_graph_module(pattern, example_inptus)
+    pattern_gm = _get_aten_graph_module_for_pattern(pattern, example_inputs)
+    replacement_gm = _get_aten_graph_module_for_pattern(pattern, example_inptus)
 
     # 2. Before calling replace literals we'll see the following graph:
     def pattern(self, x_i8, scale, zero_point, quant_min, quant_max):

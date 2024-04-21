@@ -7,6 +7,7 @@
 #include <c10/util/irange.h>
 #include <cstddef>
 #include <cstdint>
+#include <type_traits>
 
 namespace at {
 
@@ -131,7 +132,7 @@ public:
   }
 
   // if index_t is not int64_t, we want to have an int64_t constructor
-  template <typename source_index_t, class = typename std::enable_if<std::is_same<source_index_t, int64_t>::value>::type>
+  template <typename source_index_t, class = std::enable_if_t<std::is_same_v<source_index_t, int64_t>>>
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   C10_HOST GenericPackedTensorAccessorBase(
       PtrType data_,
@@ -184,7 +185,7 @@ public:
       : GenericPackedTensorAccessorBase<T, N, PtrTraits, index_t>(data_, sizes_, strides_) {}
 
   // if index_t is not int64_t, we want to have an int64_t constructor
-  template <typename source_index_t, class = typename std::enable_if<std::is_same<source_index_t, int64_t>::value>::type>
+  template <typename source_index_t, class = std::enable_if_t<std::is_same_v<source_index_t, int64_t>>>
   C10_HOST GenericPackedTensorAccessor(
       PtrType data_,
       const source_index_t* sizes_,
@@ -231,7 +232,7 @@ public:
       : GenericPackedTensorAccessorBase<T, 1, PtrTraits, index_t>(data_, sizes_, strides_) {}
 
   // if index_t is not int64_t, we want to have an int64_t constructor
-  template <typename source_index_t, class = typename std::enable_if<std::is_same<source_index_t, int64_t>::value>::type>
+  template <typename source_index_t, class = std::enable_if_t<std::is_same_v<source_index_t, int64_t>>>
   C10_HOST GenericPackedTensorAccessor(
       PtrType data_,
       const source_index_t* sizes_,

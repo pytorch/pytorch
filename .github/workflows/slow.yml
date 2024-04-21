@@ -21,9 +21,17 @@ concurrency:
 permissions: read-all
 
 jobs:
+  llm-td:
+    name: before-test
+    uses: ./.github/workflows/llm_td_retrieval.yml
+    permissions:
+      id-token: write
+      contents: read
+
   target-determination:
     name: before-test
     uses: ./.github/workflows/target_determination.yml
+    needs: llm-td
     permissions:
       id-token: write
       contents: read
@@ -37,10 +45,12 @@ jobs:
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.g5.4xlarge.nvidia.gpu" },
         ]}
 
   linux-focal-cuda12_1-py3-gcc9-slow-gradcheck-test:
@@ -128,7 +138,7 @@ jobs:
 
   linux-jammy-py3_10-clang15-asan-build:
     name: linux-jammy-py3.10-clang15-asan
-    uses: ./.github/workflows/_linux-build.yml
+    uses: ./.github/workflows/_linux-build-rg.yml
     with:
       build-environment: linux-jammy-py3.10-clang15-asan
       docker-image-name: pytorch-linux-jammy-py3-clang15-asan

@@ -2,7 +2,6 @@ import dataclasses
 from typing import Dict, Iterable, Optional
 
 import torch
-from torch._inductor.codecache import CompiledFxGraph
 
 
 def get_mutating_use_stack_trace(placeholder_node: torch.fx.Node) -> Optional[str]:
@@ -41,7 +40,7 @@ def get_mutation_stack_trace(
 
 
 def check_for_mutation(
-    gm: torch.fx.GraphModule, compiled_graph: CompiledFxGraph, num_fixed: int
+    gm: torch.fx.GraphModule, compiled_graph, num_fixed: int
 ) -> Optional[str]:
     default_msg = format_default_skip_message("mutated inputs")
 

@@ -10,7 +10,9 @@ import random
 import sys
 import threading
 import types
-from typing import Dict, List
+import warnings
+
+from typing import Dict, Generic, List
 
 from ..bytecode_transformation import create_call_function
 
@@ -50,6 +52,13 @@ from ..utils import (
 from .base import MutableLocal, VariableTracker
 from .ctx_manager import GenericContextWrappingVariable, NullContextVariable
 from .dicts import DefaultDictVariable
+
+
+def is_standard_setattr(val):
+    return val in (
+        object.__setattr__,
+        torch.nn.Module.__setattr__,
+    )
 
 
 class UserDefinedVariable(VariableTracker):
@@ -117,8 +126,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 return trace_rules.lookup(func)(func)
         elif isinstance(obj, classmethod):
             return variables.UserMethodVariable(obj.__func__, self, source=source)
-        elif source and inspect.ismemberdescriptor(obj):
-            return VariableBuilder(tx, source)(obj.__get__(self.value))
+        elif source:
+            # __mro__ is a member in < 3.12, an attribute in >= 3.12
+            if inspect.ismemberdescriptor(obj) or (
+                sys.version_info >= (3, 12) and name == "__mro__"
+            ):
+                return VariableBuilder(tx, source)(obj.__get__(self.value))
 
         # Special handling of collections.OrderedDict.fromkeys()
         # Wrap it as GetAttrVariable(collections.OrderedDict, "fromkeys") to make it consistent with
@@ -292,6 +305,8 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.functions.FunctoolsPartialVariable(
                 fn, args=rest_args, keywords=kwargs
             )
+        elif self.value is warnings.catch_warnings and not args:
+            return variables.CatchWarningsCtxManagerVariable.create(tx, kwargs)
         elif (
             issubclass(type(self.value), type)
             and hasattr(
@@ -329,7 +344,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         field_var = kwargs[field_name]
                     else:
                         assert field_name in field_defaults
-                        field_var = SourcelessBuilder()(tx, field_defaults[field_name])
+                        field_var = SourcelessBuilder.create(
+                            tx, field_defaults[field_name]
+                        )
                     var_tracker_kwargs[field_name] = field_var
 
             for name, value in var_tracker_kwargs.items():
@@ -339,7 +356,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             assert all(x is not None for x in items)
             return variables.NamedTupleVariable(items, self.value)
         elif (
-            inspect.getattr_static(self.value, "__new__", None) in (object.__new__,)
+            self.is_standard_new()
             and SideEffects.cls_supports_mutation_side_effects(self.value)
             and self.source
         ):
@@ -417,10 +434,28 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
         return super().call_function(tx, args, kwargs)
 
+    def is_standard_new(self):
+        """Check for __new__ being overridden"""
+        new_fn = inspect.getattr_static(self.value, "__new__", None)
+        if isinstance(new_fn, staticmethod):
+            new_fn = new_fn.__func__
+        return new_fn in (object.__new__, Generic.__new__)
+
+    def call_hasattr(self, tx, name: str) -> "VariableTracker":
+        if self.source:
+            source = AttrSource(self.source, name)
+            install_guard(source.make_guard(GuardBuilder.HASATTR))
+            return variables.ConstantVariable(hasattr(self.value, name))
+        return super().call_hasattr(tx, name)
+
     def const_getattr(self, tx, name):
         if name == "__name__":
             return self.value.__name__
         return super().const_getattr(tx, name)
+
+
+class NO_SUCH_SUBOBJ:
+    pass
 
 
 class UserDefinedObjectVariable(UserDefinedVariable):
@@ -520,6 +555,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             if method is object.__init__:
                 return ConstantVariable.create(None)
 
+            if is_standard_setattr(method):
+                return self.method_setattr_standard(tx, *args, **kwargs)
+
             # [NOTE] OrderedDict, dict subtypes must always have source
             # We cannot instantiate such subtypes in-graph due to builtin __new__
             if method is collections.OrderedDict.keys:
@@ -583,6 +621,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
+    def method_setattr_standard(self, tx, name, value):
+        try:
+            name = name.as_python_constant()
+        except NotImplementedError:
+            unimplemented(f"non-const setattr name: {name}")
+        if not tx.output.side_effects.is_attribute_mutation(self):
+            unimplemented(f"setattr({self}, {name}, ...)")
+
+        tx.output.side_effects.store_attr(self, name, value)
+        return variables.ConstantVariable(None)
+
+    def needs_slow_setattr(self):
+        return not is_standard_setattr(
+            inspect.getattr_static(self.value, "__setattr__", None)
+        )
+
     def unpack_var_sequence(self, tx):
         if (
             self.source
@@ -599,6 +653,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 for k in range(len(self.value))
             ]
         return super().unpack_var_sequence(tx)
+
+    def next_variable(self, tx):
+        return self.call_method(tx, "__next__", [], {})
 
     def is_supported_random(self):
         try:
@@ -650,6 +707,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 return variables.TorchCtxManagerClassVariable(
                     obj.__class__
                 ).call_function(tx, [var], kwargs)
+
+            if self.source is None:
+                unimplemented(
+                    "Sourceless UserDefinedObjectVariable method not supported"
+                )
+            func_src = AttrSource(self.source, "__func__")
+            func_var = VariableBuilder(tx, func_src)(func)
+            obj_src = AttrSource(self.source, "__self__")
+            obj_var = VariableBuilder(tx, obj_src)(obj)
+            return func_var.call_function(tx, [obj_var] + args, kwargs)
         elif (
             istype(self.value, functools.partial)
             and trace_rules.lookup(self.value.func)
@@ -722,8 +789,8 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self._check_for_getattribute()
         getattr_fn = self._check_for_getattr()
 
-        class NO_SUCH_SUBOBJ:
-            pass
+        if tx.output.side_effects.has_pending_mutation_of_attr(self, name):
+            return tx.output.side_effects.load_attr(self, name)
 
         try:
             subobj = self._getattr_static(name)
@@ -805,6 +872,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             )
         ):
             if source:
+                install_guard(source.make_guard(GuardBuilder.HASATTR))
                 return VariableBuilder(tx, source)(subobj)
             elif ConstantVariable.is_literal(subobj):
                 return ConstantVariable.create(subobj)
