@@ -6,8 +6,8 @@ from collections import defaultdict
 from typing import Dict, List, Optional
 
 import torch
+from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.backends.debugging import boxed_nop
-from torch._inductor.cudagraph_trees import cudagraphify_impl
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     check_multiple_devices_or_any_cpu_nodes,
@@ -20,8 +20,8 @@ from torch._inductor.utils import (
     num_fw_fixed_arguments,
     output_node,
 )
+
 from torch.multiprocessing.reductions import StorageWeakRef
-from .common import aot_autograd
 from .registry import register_backend
 
 perf_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
@@ -113,6 +113,8 @@ def get_stack_traces(gm) -> List[Optional[str]]:
 
 
 def cudagraphs(dynamo_model, dynamo_inputs):
+    from torch._inductor.cudagraph_trees import cudagraphify_impl
+
     do_cudagraphs = BoxedBool(True)
     boxed_device_index = BoxedDeviceIndex(None)
 

@@ -1545,6 +1545,8 @@ def hardtanh(input: Tensor, min_val: float = -1., max_val: float = 1., inplace: 
     """
     if has_torch_function_unary(input):
         return handle_torch_function(hardtanh, (input,), input, min_val=min_val, max_val=max_val, inplace=inplace)
+    if min_val > max_val:
+        raise ValueError("min_val cannot be greater than max_val")
     if inplace:
         result = torch._C._nn.hardtanh_(input, min_val, max_val)
     else:
@@ -2572,6 +2574,21 @@ def layer_norm(
         )
     return torch.layer_norm(input, normalized_shape, weight, bias, eps, torch.backends.cudnn.enabled)
 
+def rms_norm(
+    input: Tensor,
+    normalized_shape: List[int],
+    weight: Optional[Tensor] = None,
+    eps: Optional[float] = None,
+) -> Tensor:
+    r"""Apply Root Mean Square Layer Normalization.
+
+    See :class:`~torch.nn.RMSNorm` for details.
+    """
+    if has_torch_function_variadic(input, weight):
+        return handle_torch_function(
+            rms_norm, (input, weight), input, normalized_shape, weight=weight, eps=eps
+        )
+    return torch.rms_norm(input, normalized_shape, weight, eps)
 
 def group_norm(
     input: Tensor, num_groups: int, weight: Optional[Tensor] = None, bias: Optional[Tensor] = None, eps: float = 1e-5
@@ -4680,6 +4697,8 @@ def triplet_margin_loss(
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
+    if margin <= 0:
+        raise ValueError(f"margin must be greater than 0, got {margin}")
     return torch.triplet_margin_loss(anchor, positive, negative, margin, p, eps, swap, reduction_enum)
 
 
@@ -4719,6 +4738,10 @@ def triplet_margin_with_distance_loss(
     # Check validity of reduction mode
     if reduction not in ("mean", "sum", "none"):
         raise ValueError(f"{reduction} is not a valid value for reduction")
+
+    # Check validity of margin
+    if margin <= 0:
+        raise ValueError(f"margin must be greater than 0, got {margin}")
 
     # Check dimensions
     a_dim = anchor.ndim
@@ -5403,7 +5426,7 @@ def multi_head_attention_forward(
         assert bias_v is None
 
     #
-    # reshape q, k, v for multihead attention and make em batch first
+    # reshape q, k, v for multihead attention and make them batch first
     #
     q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:

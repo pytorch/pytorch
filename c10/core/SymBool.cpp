@@ -81,7 +81,7 @@ bool SymBool::expect_true(const char* file, int64_t line) const {
 }
 
 bool SymBool::has_hint() const {
-  if (auto ma = maybe_as_bool()) {
+  if (maybe_as_bool()) {
     return true;
   }
   return toSymNodeImpl()->has_hint();

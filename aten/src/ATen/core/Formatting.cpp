@@ -160,7 +160,7 @@ static void __printIndent(std::ostream &stream, int64_t indent)
 
 static void printScale(std::ostream & stream, double scale) {
   FormatGuard guard(stream);
-  stream << defaultfloat << scale << " *" << std::endl;
+  stream << defaultfloat << scale << " *" << '\n';
 }
 static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t linesize, int64_t indent)
 {
@@ -178,7 +178,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
     }
     if(nColumnPerLine < self.size(1)) {
       if(firstColumn != 0) {
-        stream << std::endl;
+        stream << '\n';
       }
       stream << "Columns " << firstColumn+1 << " to " << lastColumn+1;
       __printIndent(stream, indent);
@@ -193,7 +193,7 @@ static void __printMatrix(std::ostream& stream, const Tensor& self, int64_t line
       for (const auto c : c10::irange(firstColumn, lastColumn+1)) {
         stream << std::setw(sz) << row_ptr[c]/scale;
         if(c == lastColumn) {
-          stream << std::endl;
+          stream << '\n';
           if(l != self.size(0)-1) {
             if(scale != 1) {
               __printIndent(stream, indent);
@@ -239,7 +239,7 @@ static void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
     if(start) {
       start = false;
     } else {
-      stream << std::endl;
+      stream << '\n';
     }
     stream << "(";
     Tensor tensor = self;
@@ -247,7 +247,7 @@ static void __printTensor(std::ostream& stream, Tensor& self, int64_t linesize)
       tensor = tensor.select(0, counter[i]);
       stream << counter[i]+1 << ",";
     }
-    stream << ".,.) = " << std::endl;
+    stream << ".,.) = " << '\n';
     __printMatrix(stream, tensor, linesize, 1);
   }
 }
@@ -279,7 +279,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       tensor = tensor_.to(kCPU, kDouble).contiguous();
     }
     if(tensor.ndimension() == 0) {
-      stream << defaultfloat << tensor.data_ptr<double>()[0] << std::endl;
+      stream << defaultfloat << tensor.data_ptr<double>()[0] << '\n';
       stream << "[ " << tensor_.toString() << "{}";
     } else if(tensor.ndimension() == 1) {
       if (tensor.numel() > 0) {
@@ -289,7 +289,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
         }
         double* tensor_p = tensor.data_ptr<double>();
         for (const auto i : c10::irange(tensor.size(0))) {
-          stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
+          stream << std::setw(sz) << tensor_p[i]/scale << '\n';
         }
       }
       stream << "[ " << tensor_.toString() << "{" << tensor.size(0) << "}";
@@ -329,7 +329,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
     if (tensor.getIntrusivePtr()->autograd_meta()) {
       auto& fw_grad = tensor._fw_grad(/* level */ 0);
       if (fw_grad.defined()) {
-        stream << ", tangent:" << std::endl << fw_grad;
+        stream << ", tangent:" << '\n' << fw_grad;
       }
     }
     stream << " ]";

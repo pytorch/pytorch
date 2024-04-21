@@ -279,16 +279,9 @@ def _verify_state_dict(
     optim_state_dict: OptimizerStateType,
     info: _StateDictInfo,
 ) -> None:
-    # FSDP root must exist otherwise FSDP state_dict will be incorrect.
-    has_fsdp_root = False
     for module in info.fsdp_modules:
         fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
         assert fsdp_state is not None, "Expected a fsdp_state with a fsdp module."
-        if fsdp_state._is_root:
-            has_fsdp_root = True
-            break
-    if info.fsdp_modules and not has_fsdp_root:
-        raise RuntimeError("The model has FSDP modules but no FSDP root module exists.")
 
     # Verify if the model_state_dict and optim_state_dict are valid. This API
     # should give the users an explicit error message to debug or report.
