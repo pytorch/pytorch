@@ -399,7 +399,7 @@ class TestAutograd(TestCase):
         @staticmethod
         @once_differentiable
         def backward(ctx, input):
-            raise Exception("Simulate error on backward pass")
+            raise Exception("Simulate error on backward pass")  # noqa: TRY002
 
     def test_custom_function_exception(self):
         t1 = torch.rand((3, 3), requires_grad=True)
