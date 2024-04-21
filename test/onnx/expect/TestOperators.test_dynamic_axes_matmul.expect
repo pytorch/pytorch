@@ -1,0 +1,73 @@
+ir_version: 7
+producer_name: "pytorch"
+producer_version: "CURRENT_VERSION"
+graph {
+  node {
+    input: "input_1"
+    input: "input_2"
+    output: "2"
+    name: "MatMul_0"
+    op_type: "MatMul"
+  }
+  name: "main_graph"
+  input {
+    name: "input_1"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_param: "input_1_dim_1"
+          }
+          dim {
+            dim_value: 4
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "input_2"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 4
+          }
+          dim {
+            dim_param: "input_2_dim_2"
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "2"
+    type {
+      tensor_type {
+        elem_type: 1
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_param: "input_1_dim_1"
+          }
+          dim {
+            dim_param: "input_2_dim_2"
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 12
+}

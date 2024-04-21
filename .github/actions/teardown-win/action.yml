@@ -1,0 +1,58 @@
+name: Teardown Windows
+
+description: Set up Docker workspace on linux
+
+inputs:
+  extra-delete-dir:
+    description: If set, cleaning up the workspace will delete this too
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Wait until all sessions have drained
+      shell: powershell
+      if: always()
+      run: |
+        .github\scripts\wait_for_ssh_to_drain.ps1
+
+    - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
+      shell: powershell
+      if: always()
+      run: |
+        .github\scripts\kill_active_ssh_sessions.ps1
+
+    - name: Clean up leftover processes on non-ephemeral Windows runner
+      uses: pytorch/test-infra/.github/actions/cleanup-runner@main
+
+    # Cleaning up Windows workspace sometimes fails flakily with device or resource busy
+    # error, meaning one or more processes haven't stopped completely yet. So trying to
+    # retry this step several time similar to how checkout-pytorch GHA does
+    - name: Cleanup workspace
+      if: always()
+      uses: nick-fields/retry@v2.8.2
+      env:
+        EXTRA_DELETE_DIR: ${{ inputs.extra-delete-dir }}
+      with:
+        shell: bash
+        timeout_minutes: 5
+        max_attempts: 3
+        retry_wait_seconds: 90
+        command: |
+          set +e
+          set -x
+
+          if [ -n "${EXTRA_DELETE_DIR}" ]; then
+            # It's ok to fail to clean up the extra directory on Windows as it only contains
+            # the build artifacts and doesn't take up much space, i.e. /c/5053411580/build-results
+            rm -rf "${EXTRA_DELETE_DIR}" || true
+          fi
+
+          rm -rf ./*
+
+    - name: Print all processes locking the runner workspace
+      continue-on-error: true
+      shell: powershell
+      run: |
+        handle C:\actions-runner\_work\
