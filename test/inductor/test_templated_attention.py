@@ -221,6 +221,19 @@ class TestTemplatedSDPA(InductorTestCase):
         self.run_test(bias_mod, dtype)
 
     @supported_platform
+    @common_utils.parametrize("dtype", test_dtypes_fast)
+    def test_dependent_causal_bidirectional(self, dtype):
+        num_bidirectional = torch.randint(0, S, (B,), device="cuda", dtype=torch.int32)
+
+        def bias_mod(score, b, h, q, kv):
+            causal_attention = q >= kv
+            cur_num_bidirectional = index(num_bidirectional, (b,))
+            bidirectional_attention_on_video = (q <= cur_num_bidirectional) & (kv <= cur_num_bidirectional)
+            return torch.where(bidirectional_attention_on_video | causal_attention, score, -float("inf"))
+
+        self.run_test(bias_mod, dtype)
+
+    @supported_platform
     @expectedFailure  # Triton bug?
     @common_utils.parametrize("dtype", test_dtypes)
     def test_njt_causal(self, dtype):
