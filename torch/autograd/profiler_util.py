@@ -456,6 +456,7 @@ class FunctionEvent(FormattedTimesMixin):
         node_id=-1,
         device_type=DeviceType.CPU,
         device_index=0,
+        device_resource_id=None,
         is_legacy=False,
         flops=None,
         trace_name=None,
@@ -485,6 +486,9 @@ class FunctionEvent(FormattedTimesMixin):
         self.sequence_nr: int = sequence_nr
         self.device_type: DeviceType = device_type
         self.device_index: int = device_index
+        self.device_resource_id: int = (
+            thread if device_resource_id is None else device_resource_id
+        )
         self.is_legacy: bool = is_legacy
         self.flops: Optional[int] = flops
 
@@ -777,18 +781,19 @@ class MemRecordsAcc:
 
     def __init__(self, mem_records):
         self._mem_records = mem_records
-        self._start_uses: List[int] = []
+        self._start_nses: List[int] = []
         self._indices: List[int] = []
         if len(mem_records) > 0:
-            tmp = sorted([(r[0].start_us(), i) for i, r in enumerate(mem_records)])
-            self._start_uses, self._indices = zip(*tmp)  # type: ignore[assignment]
+            tmp = sorted([(r[0].start_ns(), i) for i, r in enumerate(mem_records)])
+            self._start_nses, self._indices = zip(*tmp)  # type: ignore[assignment]
 
     def in_interval(self, start_us, end_us):
         r"""
         Return all records in the given interval
+        To maintain backward compatibility, convert us to ns in function
         """
-        start_idx = bisect.bisect_left(self._start_uses, start_us)
-        end_idx = bisect.bisect_right(self._start_uses, end_us)
+        start_idx = bisect.bisect_left(self._start_nses, start_us * 1000)
+        end_idx = bisect.bisect_right(self._start_nses, end_us * 1000)
         for i in range(start_idx, end_idx):
             yield self._mem_records[self._indices[i]]
 

@@ -101,7 +101,6 @@ class FSDPParam:
     param_dtype: Optional[torch.dtype]
     reduce_dtype: Optional[torch.dtype]
     _orig_size: torch.Size  # ND
-    _contiguous_orig_stride: Tuple[int, ...]
     sharded_size: torch.Size  # ND
     contiguous_sharded_stride: Tuple[int, ...]
     padded_sharded_param_size: torch.Size  # ND
@@ -184,12 +183,14 @@ class FSDPParam:
             param_data = cast(DTensor, param)._local_tensor
         else:
             self._global_mesh = self.mesh_info.mesh
-            self._global_placements = (Shard(0),)
+            if isinstance(self.mesh_info, HSDPMeshInfo):
+                self._global_placements = (Replicate(), Shard(0))
+            else:
+                self._global_placements = (Shard(0),)
             self._global_size = param.size()
             self._global_stride = param.stride()
             param_data = param
         self._orig_size = param_data.size()
-        self._contiguous_orig_stride = make_contiguous_strides_for(self._orig_size)
         shard_rank = self.mesh_info.shard_mesh_rank
         shard_world_size = self.mesh_info.shard_mesh_size
         chunks = _chunk_with_empty(param_data, shard_world_size, dim=0)
@@ -255,7 +256,7 @@ class FSDPParam:
         unsharded_param = torch.as_strided(
             self.all_gather_output,
             self._orig_size,
-            self._contiguous_orig_stride,
+            make_contiguous_strides_for(self._orig_size),
             storage_offset=0,
         )
         if self.is_dtensor:
@@ -393,7 +394,13 @@ class FSDPParam:
         if self.is_dtensor:
             if isinstance(grad, AsyncCollectiveTensor):
                 grad = grad.wait()
-            grad = cast(DTensor, grad)._local_tensor
+            assert isinstance(grad, DTensor), f"{type(grad)}"
+            if any(pl.is_partial() for pl in grad.placements):
+                placements = [
+                    Replicate() if pl.is_partial() else pl for pl in grad.placements
+                ]
+                grad = grad.redistribute(placements=placements)
+            grad = grad._local_tensor
         return grad
 
     def _assert_in_states(self, *states: ShardedState) -> None:

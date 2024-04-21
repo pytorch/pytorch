@@ -1,28 +1,38 @@
 # Owner(s): ["module: inductor"]
 import functools
 import pickle
-import tempfile
 import unittest
-from unittest.mock import patch
+from typing import List
+from unittest import mock
 
 import torch
-from torch._dynamo.test_case import run_tests, TestCase
 from torch._dynamo.utils import counters
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
     AsyncCompile,
+    cuda_compile_command,
+    CUDACodeCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
+    PyCodeCache,
     TensorMetadata,
     TensorMetadataAndValues,
 )
+from torch._inductor.test_case import run_tests, TestCase
+from torch._inductor.utils import cache_dir, fresh_inductor_cache
 from torch.testing._internal.common_cuda import SM80OrLater
 from torch.testing._internal.common_device_type import largeTensorTest
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    skipIfRocm,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_MULTIGPU
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_CUDA,
+    HAS_GPU,
+    HAS_MULTIGPU,
+)
 from torch.utils._triton import has_triton
 
 HAS_TRITON = has_triton()
@@ -80,22 +90,6 @@ class MyModelConv2d(torch.nn.Module):
 
 @instantiate_parametrized_tests
 class TestFxGraphCache(TestCase):
-    @classmethod
-    def setUpClass(cls):
-        # Reroute all cache disk activity to a clean temporary directory to
-        # ensure isolation (and initial cache misses). Deliberately create the
-        # temp dir in setUpClass, however, so that individual test runs reuse
-        # the same location. We don't expect different tests to reuse cache
-        # entries, so preserving the temp dir provides that additional testing.
-        cls.tmpdir = tempfile.TemporaryDirectory()
-        cls.cache_dir_patch = patch("torch._inductor.codecache.cache_dir")
-        cls.cache_dir_patch.start().return_value = cls.tmpdir.name
-
-    @classmethod
-    def tearDownClass(cls):
-        cls.cache_dir_patch.stop()
-        cls.tmpdir.cleanup()
-
     def setUp(self):
         super().setUp()
         counters.clear()
@@ -266,6 +260,36 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(res1, res2)
 
     @config.patch({"fx_graph_cache": True})
+    @parametrize("device", (GPU_TYPE, "cpu"))
+    def test_constant_handling(self, device):
+        """
+        Test that different constants are recognized correctly.
+        """
+        if device == GPU_TYPE and not HAS_GPU:
+            raise unittest.SkipTest(f"requires {GPU_TYPE}")
+
+        def fn1(x):
+            return x + torch.tensor(list(range(0, 12)), device=device)
+
+        def fn2(x):
+            return x + torch.tensor(list(range(1, 13)), device=device)
+
+        a = torch.rand(12, device=device)
+
+        compiled_fn1 = torch.compile(fn1)
+        compiled_fn2 = torch.compile(fn2)
+
+        # A call to fn1 should miss in the cache.
+        self.assertEqual(fn1(a), compiled_fn1(a))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 1)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+        # A call to fn2 should also miss (the constant is different)
+        self.assertEqual(fn2(a), compiled_fn2(a))
+        self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 2)
+        self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+
+    @config.patch({"fx_graph_cache": True})
     def test_generated_kernel_count(self):
         """
         Test that we bump the generated_kernel_count metric on a cache hit.
@@ -331,12 +355,9 @@ class TestFxGraphCache(TestCase):
 class TestFxGraphCacheHashing(TestCase):
     def test_tensor_constants(self):
         """
-        Test the handling of small vs. large tensor constants.
+        Test the hashing of tensor constants.
         """
         data = FxGraphCachePickler.dumps(torch.tensor(list(range(9))))
-        self.assertIsInstance(pickle.loads(data), TensorMetadata)
-
-        data = FxGraphCachePickler.dumps(torch.tensor(list(range(8))))
         self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
 
     def test_hash_fake_tensors(self):
@@ -504,6 +525,57 @@ class TestFxGraphCacheHashing(TestCase):
             FxGraphCachePickler.dumps(details1),
             FxGraphCachePickler.dumps(details3),
         )
+
+    @skipIfRocm
+    @unittest.skipIf(not HAS_CUDA, "Requires CUDA")
+    @unittest.skipIf(config.is_fbcode(), "fbcode requires different CUTLASS path setup")
+    def test_cuda_compile_command(self):
+        cmd_no_extra_args: str = cuda_compile_command(
+            ["abc.cu", "def.cu"], "output", "so"
+        )
+        assert "nvcc " in cmd_no_extra_args, cmd_no_extra_args
+        assert "abc.cu" in cmd_no_extra_args, cmd_no_extra_args
+        assert "def.cu" in cmd_no_extra_args, cmd_no_extra_args
+        assert "output" in cmd_no_extra_args, cmd_no_extra_args
+        cmd_extra_args: str = cuda_compile_command(
+            ["abc.cu", "def.cu"], "output", "so", ["-Wwhatever", "-nothing"]
+        )
+        assert "nvcc " in cmd_extra_args, cmd_extra_args
+        assert " -Wwhatever" in cmd_extra_args, cmd_extra_args
+        assert " -nothing" in cmd_extra_args, cmd_extra_args
+        assert "abc.cu" in cmd_extra_args, cmd_extra_args
+        assert "def.cu" in cmd_extra_args, cmd_extra_args
+        assert "output " in cmd_extra_args, cmd_extra_args
+        with mock.patch("subprocess.check_output") as check_output_mock:
+            CUDACodeCache.compile("test123.cu", "so", ["-Wsomething"])
+            check_output_mock.assert_called()
+            cmd_parts: List[str] = check_output_mock.call_args[0][0]
+            assert cmd_parts[0] == "nvcc", cmd_parts
+            assert "-Wsomething" in cmd_parts, cmd_parts
+            assert "-DNDEBUG" in cmd_parts, cmd_parts
+
+
+class TestUtils(TestCase):
+    def test_fresh_inductor_cache(self):
+        def fn(x, y):
+            return x + y
+
+        a = torch.rand(10)
+        b = torch.rand(10)
+
+        with fresh_inductor_cache():
+            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
+            res1 = torch.compile(fn)(a, b)
+            cache_dir1 = cache_dir()
+
+        torch._dynamo.reset()
+        with fresh_inductor_cache():
+            self.assertEqual(len(PyCodeCache.cache.keys()), 0)
+            res2 = torch.compile(fn)(a, b)
+            cache_dir2 = cache_dir()
+
+        self.assertEqual(res1, res2)
+        self.assertNotEqual(cache_dir1, cache_dir2)
 
 
 if __name__ == "__main__":

@@ -36,12 +36,15 @@ quantization.
 """
 
 
-def _may_generate_pattern_with_dtype_convert(pattern, dtype=Arg(), dtype_convert=True):
+def _may_generate_pattern_with_dtype_convert(
+    pattern, dtype=Arg(), dtype_convert=True, users=1
+):
     if dtype_convert:
         return CallFunction(
             prims.convert_element_type.default,
             pattern,
             dtype,
+            _users=users,
         )
     else:
         return pattern
@@ -73,6 +76,14 @@ def _generate_linear_t_pattern(
         KeywordArg("permute_axes"),
     )
     return t_pattern
+
+
+def _unary_fusion_pattern(unary_fusion, call_fn, users, is_bf16):
+    # only insert to_dtype if is_bf16 is True
+    computation_call = _may_generate_pattern_with_dtype_convert(
+        call_fn, dtype=KeywordArg("to_float"), dtype_convert=is_bf16, users=users
+    )
+    return unary_fusion(computation_call)
 
 
 """
@@ -150,7 +161,7 @@ def get_dequantize_qconv_pt2e_pattern(users=1):
     )
 
 
-def get_qlinear_pt2e_pattern(x_scale_zp_are_tensors):
+def get_qlinear_pt2e_pattern(x_scale_zp_are_tensors, users=1):
     qlinear_op = (
         torch.ops.onednn.qlinear_pointwise.tensor
         if x_scale_zp_are_tensors
@@ -171,6 +182,7 @@ def get_qlinear_pt2e_pattern(x_scale_zp_are_tensors):
         KeywordArg("postop_name"),
         KeywordArg("postop_args"),
         KeywordArg("postop_algorithm"),
+        _users=users,
     )
 
 
@@ -209,39 +221,16 @@ def generate_pattern_with_binary(
 
 def generate_pattern_with_unary(computation_call, unary_post_op):
     if unary_post_op is not None:
-        if unary_post_op == aten.hardtanh.default:
-            return CallFunction(
-                aten.clamp_max,
-                CallFunction(aten.clamp_min, computation_call, KeywordArg("min_value")),
-                KeywordArg("max_value"),
-            )
-        if unary_post_op == aten.hardswish.default:
-            return CallFunction(
-                aten.div,
-                CallFunction(
-                    aten.mul,
-                    computation_call,
-                    CallFunction(
-                        aten.clamp_max,
-                        CallFunction(
-                            aten.clamp_min,
-                            CallFunction(aten.add, computation_call, 3),
-                            0,
-                        ),
-                        6,
-                    ),
-                ),
-                6,
-            )
-        else:
-            return CallFunction(
-                unary_post_op,
-                computation_call,
-            )
+        return CallFunction(
+            unary_post_op,
+            computation_call,
+        )
     return computation_call
 
 
-def generate_pattern_with_output_quant(computation_call, dtype=torch.float32):
+def generate_pattern_with_output_quant(
+    computation_call, has_to_fp32_before_quant=False
+):
     """
     quantize output:
         output = round(output * o_inv_scale)
@@ -250,7 +239,6 @@ def generate_pattern_with_output_quant(computation_call, dtype=torch.float32):
         output = clamp_max(output, 127)
         output = output.to(uint8)
     """
-    assert dtype in [torch.float32, torch.bfloat16]
     quantized_op_output_pattern_pt2e = CallFunction(
         prims.convert_element_type.default,
         CallFunction(
@@ -266,7 +254,7 @@ def generate_pattern_with_output_quant(computation_call, dtype=torch.float32):
                             _may_generate_pattern_with_dtype_convert(
                                 computation_call,
                                 KeywordArg("autocast_output_quant_dtype"),
-                                dtype == torch.bfloat16,
+                                has_to_fp32_before_quant,
                             ),
                             KeywordArg("o_inv_scale"),
                         ),
@@ -605,6 +593,14 @@ def _register_quantized_conv_binary_lowering(
 
 
 def _register_quantization_unary_fusion():
+    from .mkldnn_fusion import (
+        _gelu_fusion_1 as _gelu_fusion_erf,
+        _gelu_fusion_2 as _gelu_fusion_tanh,
+        _hardswish_fusion,
+        _hardtanh_fusion,
+        _silu_fusion,
+    )
+
     class UnaryAttr:
         def __init__(self, op_name: str, scalars_attr=None, algorithm_attr=None):
             self.op_name = op_name
@@ -616,28 +612,44 @@ def _register_quantization_unary_fusion():
         # Priority 1 to match: QConv2d Unary pattern with int8 output
         # If a pattern1 is a sub-set of pattern2, we should try to match pattern2 firstly.
         # For example: pattern1 is qconv_fp32 -> relu, pattern2 is qconv_fp32 -> relu -> quant
+        is_bf16 = original_pattern_output_dtype == torch.bfloat16
         conv_unary_replace_patterns = {
             UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
                 get_dequantize_qconv_pt2e_pattern(1),
-                dtype=original_pattern_output_dtype,
+                has_to_fp32_before_quant=is_bf16,
             ),
             UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
                 generate_pattern_with_unary(
                     get_dequantize_qconv_pt2e_pattern(1), aten.relu.default
                 ),
-                dtype=original_pattern_output_dtype,
+                has_to_fp32_before_quant=is_bf16,
             ),
             UnaryAttr("hardtanh", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(
-                    get_dequantize_qconv_pt2e_pattern(1), aten.hardtanh.default
+                _unary_fusion_pattern(
+                    _hardtanh_fusion,
+                    get_dequantize_qconv_pt2e_pattern(1),
+                    1,
+                    is_bf16,
                 ),
-                dtype=original_pattern_output_dtype,
+                has_to_fp32_before_quant=False,
             ),
             UnaryAttr("hardswish", [], ""): generate_pattern_with_output_quant(
-                generate_pattern_with_unary(
-                    get_dequantize_qconv_pt2e_pattern(2), aten.hardswish.default
+                _unary_fusion_pattern(
+                    _hardswish_fusion,
+                    get_dequantize_qconv_pt2e_pattern(1 if is_bf16 else 2),
+                    2,
+                    is_bf16,
                 ),
-                dtype=original_pattern_output_dtype,
+                has_to_fp32_before_quant=False,
+            ),
+            UnaryAttr("swish", [], ""): generate_pattern_with_output_quant(
+                _unary_fusion_pattern(
+                    _silu_fusion,
+                    get_dequantize_qconv_pt2e_pattern(1 if is_bf16 else 2),
+                    2,
+                    is_bf16,
+                ),
+                has_to_fp32_before_quant=False,
             ),
         }
 
@@ -657,11 +669,23 @@ def _register_quantization_unary_fusion():
             UnaryAttr("relu", [], ""): generate_pattern_with_unary(
                 get_dequantize_qconv_pt2e_pattern(1), aten.relu.default
             ),
-            UnaryAttr("hardtanh", [], ""): generate_pattern_with_unary(
-                get_dequantize_qconv_pt2e_pattern(1), aten.hardtanh.default
+            UnaryAttr("hardtanh", [], ""): _unary_fusion_pattern(
+                _hardtanh_fusion,
+                get_dequantize_qconv_pt2e_pattern(1),
+                1,
+                is_bf16,
             ),
-            UnaryAttr("hardswish", [], ""): generate_pattern_with_unary(
-                get_dequantize_qconv_pt2e_pattern(2), aten.hardswish.default
+            UnaryAttr("hardswish", [], ""): _unary_fusion_pattern(
+                _hardswish_fusion,
+                get_dequantize_qconv_pt2e_pattern(1 if is_bf16 else 2),
+                2,
+                is_bf16,
+            ),
+            UnaryAttr("swish", [], ""): _unary_fusion_pattern(
+                _silu_fusion,
+                get_dequantize_qconv_pt2e_pattern(1 if is_bf16 else 2),
+                2,
+                is_bf16,
             ),
         }
 
@@ -683,11 +707,33 @@ def _register_quantization_unary_fusion():
             linear_unary_replace_patterns = {
                 UnaryAttr("none", [], ""): generate_pattern_with_output_quant(
                     qlinear_pattern,
-                    dtype=original_pattern_output_dtype,
+                    has_to_fp32_before_quant=is_bf16,
                 ),
                 UnaryAttr("relu", [], ""): generate_pattern_with_output_quant(
                     generate_pattern_with_unary(qlinear_pattern, aten.relu.default),
-                    dtype=original_pattern_output_dtype,
+                    has_to_fp32_before_quant=is_bf16,
+                ),
+                UnaryAttr("gelu", [], "none"): generate_pattern_with_output_quant(
+                    _unary_fusion_pattern(
+                        _gelu_fusion_erf,
+                        get_qlinear_pt2e_pattern(
+                            x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                        ),
+                        2,
+                        is_bf16,
+                    ),
+                    has_to_fp32_before_quant=False,
+                ),
+                UnaryAttr("gelu", [], "tanh"): generate_pattern_with_output_quant(
+                    _unary_fusion_pattern(
+                        _gelu_fusion_tanh,
+                        get_qlinear_pt2e_pattern(
+                            x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                        ),
+                        4,
+                        is_bf16,
+                    ),
+                    has_to_fp32_before_quant=False,
                 ),
             }
 
@@ -705,6 +751,22 @@ def _register_quantization_unary_fusion():
             linear_unary_replace_float_out_patterns = {
                 UnaryAttr("relu", [], ""): generate_pattern_with_unary(
                     qlinear_pattern, aten.relu.default
+                ),
+                UnaryAttr("gelu", [], "none"): _unary_fusion_pattern(
+                    _gelu_fusion_erf,
+                    get_qlinear_pt2e_pattern(
+                        x_scale_zp_are_tensors, 1 if is_bf16 else 2
+                    ),
+                    2,
+                    is_bf16,
+                ),
+                UnaryAttr("gelu", [], "tanh"): _unary_fusion_pattern(
+                    _gelu_fusion_tanh,
+                    get_qlinear_pt2e_pattern(
+                        x_scale_zp_are_tensors, 1 if is_bf16 else 4
+                    ),
+                    4,
+                    is_bf16,
                 ),
             }
 
@@ -747,9 +809,7 @@ def _register_quantization_binary_fusion():
                     dequantize_accum_pattern,
                     int8_mixed_bf16_with_inplace_add,
                 ),
-                dtype=torch.bfloat16
-                if int8_mixed_bf16_with_inplace_add
-                else torch.float32,
+                has_to_fp32_before_quant=int8_mixed_bf16_with_inplace_add,
             ),
             BinaryUnaryAttr(
                 "sum", 1.0, "relu", [], ""
@@ -763,9 +823,7 @@ def _register_quantization_binary_fusion():
                     ),
                     aten.relu.default,
                 ),
-                dtype=torch.bfloat16
-                if int8_mixed_bf16_with_inplace_add
-                else torch.float32,
+                has_to_fp32_before_quant=int8_mixed_bf16_with_inplace_add,
             ),
         }
 
@@ -1046,12 +1104,139 @@ def _register_quantization_reshape():
     )
 
 
+def _is_valid_woq_optimization_pattern():
+    def fn(match):
+        assert all(k in match.kwargs for k in ("x", "weight", "scales"))
+        x = match.kwargs["x"].meta["val"]
+        weight = match.kwargs["weight"].meta["val"]
+        scales = match.kwargs["scales"].meta["val"]
+        return (
+            # For now, we only support woq mm kernels
+            # with x.type=bfloat16 and w.type=int8
+            x.dtype == torch.bfloat16
+            and weight.dtype == torch.int8
+            and scales.dtype == torch.bfloat16
+            # _weight_int8pack_mm kernel only supports cpu now
+            # TODO: add cuda kernel support instead of calling mul+sum
+            and x.device.type == "cpu"
+            and x.device == weight.device
+            and x.device == scales.device
+        )
+
+    return fn
+
+
+def _register_woq_lowering(pattern, computation_woq, computation_reshape):
+    @register_lowering_pattern(
+        pattern,
+        extra_check=_is_valid_woq_optimization_pattern(),
+    )
+    def woq(match: Match, *args, **kwargs):
+        x = kwargs["x"]
+        weight = kwargs["weight"]
+        scales = kwargs["scales"]
+        counters["inductor"]["woq_matcher_count"] += 1
+        counters["inductor"]["woq_matcher_nodes"] += len(match.nodes)
+        out_features = weight.get_size()[0]
+        origin_x_size = x.get_size()
+        x_shape = [-1, origin_x_size[-1]]
+        out_shape = origin_x_size[:-1] + [
+            out_features,
+        ]
+        func1 = L[computation_reshape](x, x_shape)
+        func2 = L[computation_woq](func1, weight, scales)
+        return L[computation_reshape](func2, out_shape)
+
+    return woq
+
+
+def _register_woq_mm_int8_pattern1():
+    # F.linear(x, weight.to(dtype=x.dtype)) * scales
+    # case of dispatching to mm, with x reshape
+    _woq_pattern = CallFunction(
+        aten.mul.Tensor,
+        CallFunction(
+            aten.reshape.default,
+            CallFunction(
+                aten.mm.default,
+                CallFunction(aten.reshape.default, KeywordArg("x"), Arg()),
+                CallFunction(
+                    aten.permute.default,
+                    CallFunction(
+                        prims.convert_element_type.default, KeywordArg("weight"), Arg()
+                    ),
+                    Arg(),
+                ),
+            ),
+            Arg(),
+        ),
+        KeywordArg("scales"),
+    )
+    _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
+
+
+def _register_woq_mm_int8_pattern2():
+    # F.linear(x, weight.to(dtype=x.dtype)) * scales
+    # case of dispatching to mm, w/o x reshape
+    _woq_pattern = CallFunction(
+        aten.mul.Tensor,
+        CallFunction(
+            aten.reshape.default,
+            CallFunction(
+                aten.mm.default,
+                KeywordArg("x"),
+                CallFunction(
+                    aten.permute.default,
+                    CallFunction(
+                        prims.convert_element_type.default, KeywordArg("weight"), Arg()
+                    ),
+                    Arg(),
+                ),
+            ),
+            Arg(),
+        ),
+        KeywordArg("scales"),
+    )
+    _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
+
+
+def _register_woq_mm_int8_pattern3():
+    # F.linear(x, weight.to(dtype=x.dtype)) * scales
+    # case of dispatching to bmm
+    _woq_pattern = CallFunction(
+        aten.mul.Tensor,
+        CallFunction(
+            aten.bmm.default,
+            CallFunction(aten.expand.default, KeywordArg("x"), Arg()),
+            CallFunction(
+                aten.expand.default,
+                CallFunction(
+                    aten.permute.default,
+                    CallFunction(
+                        prims.convert_element_type.default, KeywordArg("weight"), Arg()
+                    ),
+                    Arg(),
+                ),
+                Arg(),
+            ),
+        ),
+        KeywordArg("scales"),
+    )
+    _register_woq_lowering(_woq_pattern, aten._weight_int8pack_mm.default, aten.reshape)
+
+
 def _register_quantization_lowerings():
     _register_quantization_unary_fusion()
     _register_quantization_binary_fusion()
     _register_quantization_maxpool2d()
     _register_quantization_cat()
     _register_quantization_reshape()
+
+
+def _register_woq_lowerings():
+    _register_woq_mm_int8_pattern1()
+    _register_woq_mm_int8_pattern2()
+    _register_woq_mm_int8_pattern3()
 
 
 def _is_valid_dequant_promotion_pattern(dtype=torch.float32):

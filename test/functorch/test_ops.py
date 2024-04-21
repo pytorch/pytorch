@@ -837,7 +837,6 @@ class TestOperators(TestCase):
         xfail("sparse.sampled_addmm"),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail("sparse.mm", "reduce"),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail("svd_lowrank"),  # calls random op
-        xfail("take"),  # vmap: inplace into a regular tensor
         xfail("to"),  # rank 4 tensor for channels_last
         xfail("view_as_complex"),  # RuntimeError: Tensor must have a last dimension with stride 1
         # got a batched tensor as input while the running_mean or running_var,
@@ -1117,7 +1116,6 @@ class TestOperators(TestCase):
     @skipOps('TestOperators', 'test_vmapjvpall_has_batch_rule', vmapjvpall_fail.union({
         skip('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('cdouble'),  # RuntimeError: required rank 4 tensor to use channels_last format
-        xfail('lu'),
         xfail('cumprod'),
         xfail('masked_fill'),
         xfail('fill'),
@@ -1126,11 +1124,9 @@ class TestOperators(TestCase):
         xfail('put'),
         xfail('take'),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
-        xfail('linalg.lu_factor', ''),
         xfail('nn.functional.dropout2d', ''),
         xfail('pca_lowrank', ''),
         xfail('svd_lowrank', ''),
-        xfail('linalg.lu_factor_ex', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('special.log_ndtr', ''),
         xfail('fft.ihfft2'),  # conj_physical fallback
@@ -1144,11 +1140,9 @@ class TestOperators(TestCase):
         xfail('scatter_reduce', "mean"),  # aten::scatter_reduce.two hit the vmap fallback
         xfail('scatter_reduce', "amin"),  # aten::scatter_reduce.two hit the vmap fallback
         xfail('scatter_reduce', "amax"),  # aten::scatter_reduce.two hit the vmap fallback
-        xfail('lu_unpack'),
         xfail('nn.functional.glu'),
         xfail('nn.functional.bilinear'),  # trilinear doesn't have batching rule
         xfail('linalg.lu', ''),
-        xfail('linalg.lu_solve', ''),
         xfail('nn.functional.dropout3d', ''),
         xfail('as_strided_scatter', ''),
         xfail('masked.cumprod', ''),
@@ -1190,9 +1184,6 @@ class TestOperators(TestCase):
         xfail('narrow'),  # Batching rule not implemented for `narrow.Tensor` (and view op)
         xfail('special.log_ndtr'),
         xfail('linalg.householder_product'),
-        xfail('lu'),
-        xfail('lu_solve'),
-        xfail('lu_unpack'),
         xfail('masked_fill'),
         xfail('masked_scatter'),
         xfail('masked_select'),
@@ -1220,13 +1211,11 @@ class TestOperators(TestCase):
         xfail('nn.functional.rrelu'),
         xfail('nn.functional.embedding_bag'),
         xfail('nn.functional.fractional_max_pool2d'),
-        xfail('linalg.lu_factor', ''),
         xfail('nn.functional.feature_alpha_dropout', 'with_train'),
         xfail('pca_lowrank', ''),
         xfail('nn.functional.dropout2d', ''),
         xfail('nn.functional.feature_alpha_dropout', 'without_train'),
         xfail('svd_lowrank', ''),
-        xfail('linalg.lu_factor_ex', ''),
 
         xfail('nn.functional.max_unpool2d', ''),
         xfail('nn.functional.multi_margin_loss', ''),
@@ -1240,7 +1229,6 @@ class TestOperators(TestCase):
         xfail('nn.functional.max_unpool1d', 'grad'),
         xfail('nn.functional.max_unpool2d', 'grad'),
         xfail('linalg.lu', ''),
-        xfail('linalg.lu_solve', ''),
         xfail('cdouble', ''),
         xfail('cfloat', ''),
         xfail('chalf', ''),
@@ -1582,7 +1570,6 @@ class TestOperators(TestCase):
         xfail('sparse.sampled_addmm'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('sparse.mm', 'reduce'),  # RuntimeError: Sparse CSR tensors do not have strides
         xfail('svd_lowrank'),  # calls random op
-        xfail('take'),  # vmap: inplace into regular tensor
         xfail('to'),  # RuntimeError: required rank 4 tensor to use channels_last format
         xfail('to_sparse'),  # Forward AD not implemented and no decomposition
         xfail('view_as_complex'),  # RuntimeError: Tensor must have a last dimension with stride 1

@@ -1,27 +1,43 @@
 # Owner(s): ["module: optimizer"]
 import functools
+import itertools
 import math
 import tempfile
 from typing import Any, Dict, Tuple
 import unittest
 from copy import deepcopy
+from unittest.mock import patch
+
+from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 import torch
 from torch.optim import Optimizer, SGD
 from torch.optim.optimizer import register_optimizer_step_pre_hook, register_optimizer_step_post_hook
-from optim.test_optim import TestOptim, TestDifferentiableOptimizer  # noqa: F401
+from optim.test_optim import TestDifferentiableOptimizer  # noqa: F401
 from optim.test_lrscheduler import TestLRScheduler  # noqa: F401
 from optim.test_swa_utils import TestSWAUtils  # noqa: F401
 from torch.nn import Parameter
 from torch.testing._internal.common_cuda import TEST_MULTIGPU
 from torch.testing._internal.common_optimizers import (
-    optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs)
+    optim_db, optims, OptimizerErrorEnum, _get_optim_inputs_including_global_cliquey_kwargs, TensorTracker)
 from torch.testing._internal.common_device_type import (
-    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS)
+    instantiate_device_type_tests, largeTensorTest, onlyCPU, onlyCUDA, skipMPS, TEST_WITH_ROCM)
 from torch.testing._internal.common_utils import markDynamoStrictTest, parametrize, run_tests, TestCase
 
 
 FP16_REDUCED_PRECISION = {'atol': 1e-5, 'rtol': 1e-4}
+
+
+def rosenbrock(tensor):
+    assert tensor.size() == torch.Size([2]), f"Requires tensor with 2 scalars but got {tensor.size()}"
+    x, y = tensor
+    return (1 - x) ** 2 + 100 * (y - x**2) ** 2
+
+
+def drosenbrock(tensor):
+    assert tensor.size() == torch.Size([2]), f"Requires tensor with 2 scalars but got {tensor.size()}"
+    x, y = tensor
+    return torch.stack((-400 * x * (y - x**2) - 2 * (1 - x), 200 * (y - x**2)))
 
 
 @markDynamoStrictTest
@@ -63,11 +79,13 @@ class TestOptimRenewed(TestCase):
 
 
     @parametrize("contiguous", [True, False])
+    @parametrize("with_lrsched", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_forloop_goes_right_direction(self, device, dtype, optim_info, contiguous):
+    def test_forloop_goes_right_direction(self, device, dtype, optim_info, contiguous, with_lrsched):
         optim_cls = optim_info.optim_cls
         optim_inputs = optim_info.optim_inputs_func(device=device)
-        for optim_input in optim_inputs:
+        schedulers_constructors = optim_info.scheduler_inputs if with_lrsched else [None]
+        for optim_input, schedulers_constructor in itertools.product(optim_inputs, schedulers_constructors):
             if "foreach" in optim_info.supported_impls:
                 optim_input.kwargs["foreach"] = False  # force forloop
             if contiguous:
@@ -79,6 +97,7 @@ class TestOptimRenewed(TestCase):
             input = torch.randn(5, device=device, dtype=dtype)
 
             optimizer = optim_cls([weight, bias], **optim_input.kwargs)
+            schedulers = [s(optimizer) for s in (schedulers_constructor if schedulers_constructor else [])]
 
             def closure():
                 optimizer.zero_grad()
@@ -93,7 +112,12 @@ class TestOptimRenewed(TestCase):
 
             initial_value = closure().item()
             for _ in range(20):
-                optimizer.step(closure)
+                loss = optimizer.step(closure)
+                for scheduler in schedulers:
+                    if isinstance(scheduler, ReduceLROnPlateau):
+                        scheduler.step(loss)
+                    else:
+                        scheduler.step()
 
             if optim_input.kwargs.get("maximize", False):
                 self.assertGreater(closure().item(), initial_value)
@@ -103,22 +127,26 @@ class TestOptimRenewed(TestCase):
 
     @onlyCUDA
     @unittest.skipIf(not TEST_MULTIGPU, "only one GPU detected")
+    @parametrize("with_lrsched", [True, False])
     @optims(optim_db, dtypes=[torch.float32])
-    def test_forloop_goes_right_direction_multigpu(self, device, dtype, optim_info):
+    def test_forloop_goes_right_direction_multigpu(self, device, dtype, optim_info, with_lrsched):
         optim_cls = optim_info.optim_cls
         optim_inputs = optim_info.optim_inputs_func(device=device)
-        for optim_input in optim_inputs:
+        schedulers_constructors = optim_info.scheduler_inputs if with_lrsched else [None]
+        for optim_input, schedulers_constructor in itertools.product(optim_inputs, schedulers_constructors):
             if "foreach" in optim_info.supported_impls:
                 optim_input.kwargs["foreach"] = False  # force forloop
 
             weight = Parameter(torch.randn((10, 5), device="cuda:0", dtype=dtype))
             bias = Parameter(torch.randn((10), device="cuda:1", dtype=dtype))
-            input = torch.randn(5, device="cuda:0", dtype=dtype)
+            inpt = torch.randn(5, device="cuda:0", dtype=dtype)
+
             optimizer = optim_cls([weight, bias], **optim_input.kwargs)
+            schedulers = [s(optimizer) for s in (schedulers_constructor if schedulers_constructor else [])]
 
             def closure():
                 optimizer.zero_grad()
-                loss = (weight.mv(input).cuda(1) + bias).pow(2).sum()
+                loss = (weight.mv(inpt).cuda(1) + bias).pow(2).sum()
                 loss.backward()
                 if optim_info.only_supports_sparse_grads:
                     # For this test, we naively convert the Tensor layout, which we know does
@@ -129,7 +157,12 @@ class TestOptimRenewed(TestCase):
 
             initial_value = closure().item()
             for _ in range(20):
-                optimizer.step(closure)
+                loss = optimizer.step(closure)
+                for scheduler in schedulers:
+                    if isinstance(scheduler, ReduceLROnPlateau):
+                        scheduler.step(loss)
+                    else:
+                        scheduler.step()
 
             if optim_input.kwargs.get("maximize", False):
                 self.assertGreater(closure().item(), initial_value)
@@ -137,8 +170,216 @@ class TestOptimRenewed(TestCase):
                 self.assertLess(closure().item(), initial_value)
 
 
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_param_group_with_lrscheduler_goes_right_direction(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        for schedulers_c in optim_info.scheduler_inputs:
+            weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+            bias = Parameter(torch.randn((10), device=device, dtype=dtype))
+            inpt = torch.randn(5, device=device, dtype=dtype)
+
+            optimizer = optim_cls([{"params": [weight]}, {"params": [bias], "lr": 0.01}])
+            schedulers = [scheduler_c(optimizer) for scheduler_c in schedulers_c]
+
+            def closure():
+                optimizer.zero_grad()
+                loss = (weight.mv(inpt) + bias).pow(2).sum()
+                loss.backward()
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
+                    weight.grad = weight.grad.to_sparse()
+                    bias.grad = bias.grad.to_sparse()
+                return loss
+
+            initial_value = closure().item()
+            for _ in range(20):
+                loss = optimizer.step(closure)
+                for scheduler in schedulers:
+                    if isinstance(scheduler, ReduceLROnPlateau):
+                        scheduler.step(loss)
+                    else:
+                        scheduler.step()
+
+            self.assertLess(closure().item(), initial_value)
+
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_tensor_lr(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(device, dtype, optim_info, skip=("differentiable",))
+        for optim_input in all_optim_inputs:
+            weight = Parameter(torch.randn((10, 5), device=device, dtype=dtype))
+            weight_c = weight.clone().detach().requires_grad_(True)
+            bias = Parameter(torch.randn((10), device=device, dtype=dtype))
+            bias_c = bias.clone().detach().requires_grad_(True)
+            inpt = torch.randn(5, device=device, dtype=dtype)
+
+            kwargs = optim_input.kwargs
+            if "lr" in kwargs:
+                del kwargs["lr"]
+
+            kwargs["lr"] = 1.0 if optim_info.step_requires_closure else 1e-3
+            optimizer_r = optim_cls([weight, bias], **kwargs)
+
+            try:
+                kwargs["lr"] = torch.tensor(kwargs["lr"])
+                optimizer = optim_cls([weight_c, bias_c], **kwargs)
+            except ValueError as e:
+                self.assertRegex(str(e), ".*lr as a Tensor is not supported.*")
+                continue
+
+            def closure(optim, w, b, i):
+                optim.zero_grad()
+                loss = (w.mv(i) + b).pow(2).sum()
+                loss.backward()
+                if optim_info.only_supports_sparse_grads:
+                    # For this test, we naively convert the Tensor layout, which we know does
+                    # NOT represent the expected use case for optims like SparseAdam!
+                    w.grad = w.grad.to_sparse()
+                    b.grad = b.grad.to_sparse()
+                return loss
+
+            for _ in range(5):
+                if optim_info.step_requires_closure:
+                    optimizer_r.step(functools.partial(closure, optimizer_r, weight, bias, inpt))
+                    optimizer.step(functools.partial(closure, optimizer, weight_c, bias_c, inpt))
+                else:
+                    closure(optimizer_r, weight, bias, inpt)
+                    closure(optimizer, weight_c, bias_c, inpt)
+
+                self.assertEqual(weight, weight_c)
+                self.assertEqual(bias, bias_c)
+
+
+    @parametrize("with_lrsched", [True, False])
+    @optims([o for o in optim_db if o.supports_sparse or o.only_supports_sparse_grads], dtypes=[torch.float64])
+    def test_rosenbrock_sparse(self, device, dtype, optim_info, with_lrsched):
+        optim_cls = optim_info.optim_cls
+
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        # Fused impls do not support sparse gradients
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable", "fused"))
+        kwarg_updates, schedulers_constructors = optim_info.metadata_for_sparse
+
+        if with_lrsched and len(schedulers_constructors) == 0:
+            return
+
+        supported_inputs = []
+        if len(kwarg_updates) != 0:
+            seen = set()
+            for i in all_optim_inputs:
+                for k in kwarg_updates:
+                    if k in i.kwargs:
+                        del i.kwargs[k]
+                hashable_kwargs = tuple(sorted(i.kwargs.items()))
+                if len(i.kwargs) > 0 and hashable_kwargs not in seen:
+                    supported_inputs.append(i)
+                    seen.add(hashable_kwargs)
+                    if "lr" in kwarg_updates:
+                        i.kwargs["lr"] = kwarg_updates["lr"]
+        else:
+            supported_inputs = all_optim_inputs
+
+        for optim_input in supported_inputs:
+            kwargs = optim_input.kwargs
+            multi_tensor = kwargs.get("foreach", False)
+
+            # For rosenbrock tests, it is mandated that the param is a tensor with 2 numbers
+            if multi_tensor:
+                params_t = [torch.tensor([1.5, 1.5]), torch.tensor([1.5, 1.5], dtype=dtype)]
+            else:
+                params_t = [torch.tensor([1.5, 1.5])]
+
+            params = [Parameter(param_t) for param_t in params_t]
+            optimizer = optim_cls(params, **kwargs)
+            schedulers = [s(optimizer) for s in (schedulers_constructors if with_lrsched else [])]
+
+            if not optim_info.only_supports_sparse_grads:
+                params_c = [Parameter(param_t.clone()) for param_t in params_t]
+                optimizer_c = optim_cls(params_c, **kwargs)
+                schedulers_c = [s(optimizer_c) for s in (schedulers_constructors if with_lrsched else [])]
+
+            solution = torch.tensor([1, 1])
+            with torch.no_grad():
+                initial_dist = sum([param.dist(solution) for param in params])
+
+            def get_grad(param, sparse_grad, w):
+                grad = drosenbrock(param)
+                # NB: We torture test the optimizer by returning an
+                # uncoalesced sparse tensor
+
+                # Depending on w, provide only the x or y gradient
+                if sparse_grad:
+                    if w:
+                        i = torch.tensor([[0, 0]], dtype=torch.int64)
+                        x = grad[0]
+                        v = torch.tensor([x / 4.0, x - x / 4.0])
+                    else:
+                        i = torch.tensor([[1, 1]], dtype=torch.int64)
+                        y = grad[1]
+                        v = torch.tensor([y - y / 4.0, y / 4.0])
+                    grad_out = torch.sparse_coo_tensor(i, v, (2,), dtype=v.dtype)
+                else:
+                    if w:
+                        grad_out = torch.tensor([grad[0], 0], dtype=param.dtype)
+                    else:
+                        grad_out = torch.tensor([0, grad[1]], dtype=param.dtype)
+                return grad_out
+
+            def eval(params, sparse_grad, w):
+                optimizer.zero_grad()
+                if multi_tensor:
+                    loss = sum(rosenbrock(param) for param in params)
+                else:
+                    loss = rosenbrock(params[0])
+                loss.backward()
+
+                grads_out = [get_grad(param, sparse_grad, w) for param in params]
+                with torch.no_grad():
+                    params[0].grad = grads_out[0]
+                    if multi_tensor:
+                        params[1].grad = grads_out[1].to(dtype=dtype)
+                return loss
+
+            for i in range(1800):
+                # Do cyclic coordinate descent
+                w = i % 2
+                optimizer.step(functools.partial(eval, params, True, w))
+                for scheduler in schedulers:
+                    if isinstance(scheduler, ReduceLROnPlateau):
+                        scheduler.step(rosenbrock(params[0]))
+                    else:
+                        scheduler.step()
+                if not optim_info.only_supports_sparse_grads:
+                    optimizer_c.step(functools.partial(eval, params_c, False, w))
+                    for scheduler in schedulers_c:
+                        if isinstance(scheduler, ReduceLROnPlateau):
+                            scheduler.step(rosenbrock(params_c[0]))
+                        else:
+                            scheduler.step()
+                    # Tolerance is increased due to floating point error from different
+                    # code path for dense case: x v.s. x - x / 4.0 + x / 4.0
+                    self.assertEqual(params, params_c, atol=5e-6, rtol=5e-6)
+
+            if not kwargs.get("maximize", False):
+                self.assertLessEqual(
+                    sum([param.dist(solution) for param in params]),
+                    initial_dist
+                )
+            else:
+                self.assertGreaterEqual(
+                    sum([rosenbrock(param) for param in params]),
+                    sum([rosenbrock(param_t) for param_t in params_t]),
+                )
+
+
     @skipMPS
-    @optims(optim_db, dtypes=[torch.complex64])
+    @optims([o for o in optim_db if o.supports_complex], dtypes=[torch.complex64])
     def test_complex(self, device, dtype, optim_info):
         optim_cls = optim_info.optim_cls
         # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
@@ -209,6 +450,89 @@ class TestOptimRenewed(TestCase):
             self.assertEqual(complex_steps, real_steps)
 
 
+    @skipMPS
+    @optims([o for o in optim_db if o.supports_complex], dtypes=[torch.complex64])
+    def test_complex_2d(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        # Skip differentiable testing for now, see https://github.com/pytorch/pytorch/issues/116490
+        # Also skip fused, since our fused kernels do not support complex
+        all_optim_inputs = _get_optim_inputs_including_global_cliquey_kwargs(
+            device, dtype, optim_info, skip=("differentiable", "fused"))
+        for optim_input in all_optim_inputs:
+            if optim_info.step_requires_closure:
+                # Why? The way we implement complex is by turning complex params into view_as_real
+                # alternatives. For example, an size (M,N) tensor will become (M,N,2). In this test,
+                # we break apart a tensor into its real and imaginary parts, which would be 2x(M,N).
+                # For other pointwise optimizers, this distinction is trivial, but for LBFGS where
+                # there are reductions across all parameters (and all the grads get flattened into
+                # one long Tensor), this ordering matters. Why? Reductions (like sum) are NOT
+                # commutative, i.e., a + b + c != a + c + b in computers. Thus, we add a seed here
+                # to control the discrepancy that will happen with LBFGS. Note that in test_complex
+                # above, there is no need for a seed nor for increased tolerance, because results
+                # should be bitwise equivalent.
+                torch.manual_seed(2024)
+
+            a1 = torch.randn(2, device=device, dtype=dtype, requires_grad=True)
+            a1_real = a1.real.clone().detach()
+            a1_imag = a1.imag.clone().detach()
+            a1_real.requires_grad_()
+            a1_imag.requires_grad_()
+            optim1 = optim_cls([a1], **optim_input.kwargs)
+            optim2 = optim_cls([a1_real, a1_imag], **optim_input.kwargs)
+
+            a1_reals = TensorTracker()
+            a1_imags = TensorTracker()
+            a1_grad_reals = TensorTracker()
+            a1_grad_imags = TensorTracker()
+            losses = TensorTracker()
+
+            def closure1():
+                optim1.zero_grad()
+                loss = rosenbrock(a1).abs()
+                loss.backward()
+
+                # Track clones to best test accuracy
+                a1_reals.add(a1.real)
+                a1_imags.add(a1.imag)
+                a1_grad_reals.add(a1.grad.real)
+                a1_grad_imags.add(a1.grad.imag)
+
+                losses.add(loss)
+
+                return loss
+
+            def closure2():
+                optim2.zero_grad()
+                a1_reals.pop_check_set(a1_real, self)
+                a1_imags.pop_check_set(a1_imag, self)
+                a2 = torch.complex(a1_real, a1_imag)
+                loss = rosenbrock(a2).abs()
+                losses.pop_check_set(loss, self)
+                loss.backward()
+                a1_grad_reals.pop_check_set(a1_real.grad, self)
+                a1_grad_imags.pop_check_set(a1_imag.grad, self)
+                return loss
+
+
+            for _ in range(3):
+                if optim_info.step_requires_closure:
+                    # LBFGS, for example, requires closure and calls it internally
+                    optim1.step(closure1)
+                    optim2.step(closure2)
+                else:
+                    closure1()
+                    closure2()
+                    optim1.step()
+                    optim2.step()
+
+                self.assertEqual(a1.real, a1_real)
+                self.assertEqual(a1.imag, a1_imag)
+
+            self.assertTrue(a1_reals.all_popped())
+            self.assertTrue(a1_imags.all_popped())
+            self.assertTrue(a1_grad_reals.all_popped())
+            self.assertTrue(a1_grad_imags.all_popped())
+            self.assertTrue(losses.all_popped())
 
 
     def _test_derived_optimizers(self, device, dtype, optim_info, flag, reduced_precision=False, assert_step_dtype=None):
@@ -465,7 +789,15 @@ class TestOptimRenewed(TestCase):
                 # RMSprop uses avg and grads
                 nintermediates = 2
 
-            self.assertLessEqual(mt_max_mem, st_max_mem + intermediate_size * nintermediates)
+            expected_max_mem = st_max_mem + intermediate_size * nintermediates
+            # hipcc currently can't generate efficient code for the small buffer optimization
+            # code path (see Note [small buffer optimization] for details), thus we always
+            # dynamically allocate the tensor metadata for ROCM. Adjusting the expected max
+            # memory usage to account for this.
+            if TEST_WITH_ROCM:
+                expected_max_mem *= 1.02
+
+            self.assertLessEqual(mt_max_mem, expected_max_mem)
 
 
     @onlyCUDA
@@ -485,6 +817,28 @@ class TestOptimRenewed(TestCase):
             params[0].grad = torch.zeros_like(params[0])
             optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
             optimizer.step()
+
+
+    @onlyCUDA
+    @optims([optim for optim in optim_db if "fused" in optim.supported_impls], dtypes=[torch.float32])
+    def test_fused_does_not_step_if_foundinf(self, device, dtype, optim_info):
+        optim_cls = optim_info.optim_cls
+        optim_inputs = optim_info.optim_inputs_func(device=device)
+        num_params = 5
+        for optim_input in optim_inputs:
+            for no_grad_scale in (False, True):
+                params = [torch.ones((1,), device=device, dtype=dtype) for _ in range(num_params)]
+                params_c = [param.clone().detach() for param in params]
+                for p in params:
+                    p.grad = torch.ones_like(p)
+                optimizer = optim_cls(params, fused=True, **optim_input.kwargs)
+                optimizer.grad_scale = None if no_grad_scale else torch.ones((1,), dtype=dtype, device=device)
+                optimizer.found_inf = torch.ones((), dtype=dtype, device=device)
+                optimizer.step()
+                for p in params:
+                    if "step" in optimizer.state[p]:
+                        self.assertEqual(torch.zeros((), dtype=dtype, device=device), optimizer.state[p]["step"])
+                self.assertEqual(params, params_c)
 
 
     @onlyCUDA
@@ -1202,6 +1556,61 @@ class TestOptimRenewed(TestCase):
             res1 = optim_inf.step(closure)
             res2 = optim_neg_inf.step(closure)
             self.assertEqual(type(res1), type(res2))
+
+
+    @onlyCUDA
+    @optims([o for o in optim_db if "foreach" in o.supported_impls], dtypes=[torch.float32])
+    def test_defaults_changed_to_foreach(self, device, dtype, optim_info):
+        # Test that the default implementations for optimizers are changed to foreach
+        optim_cls = optim_info.optim_cls
+        model = torch.nn.Linear(5, 5)
+        model.to(dtype=dtype, device=device)
+        inpt = torch.rand(2, 5, dtype=dtype, device=device)
+
+        import inspect
+        module = inspect.getmodule(optim_cls)
+
+        for optim_input in optim_info.optim_inputs_func(device=device):
+            optim = optim_cls(model.parameters(), **optim_input.kwargs)
+            optim.zero_grad()
+            output = model(inpt)
+            loss = output.sum()
+            loss.backward()
+            with patch.object(
+                module, f"_multi_tensor_{optim_cls.__name__.lower()}"
+            ) as mocked_foreach_impl:
+                optim.step()
+                self.assertTrue(mocked_foreach_impl.called)
+
+    @optims(optim_db, dtypes=[torch.float32])
+    def test_non_empty_state(self, device, dtype, optim_info):
+        # There are internal tests that check that the state is not empty
+        optim_cls = optim_info.optim_cls
+        model = torch.nn.Linear(5, 5)
+        model.to(dtype=dtype, device=device)
+        inpt = torch.rand(2, 5, dtype=dtype, device=device)
+
+        for optim_input in optim_info.optim_inputs_func(device=device):
+            optim = optim_cls(model.parameters(), **optim_input.kwargs)
+            optim.zero_grad()
+            output = model(inpt)
+            loss = output.sum()
+            loss.backward()
+
+            if optim_info.only_supports_sparse_grads:
+                for param in model.parameters():
+                    if param.grad is not None:
+                        param.grad = param.grad.to_sparse()
+
+            if optim_info.step_requires_closure:
+                optim.step(lambda: 1.0)
+            else:
+                optim.step()
+
+            for state in optim.state.values():
+                self.assertGreater(len(state), 0)
+
+
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)
