@@ -1607,7 +1607,11 @@ class TestOptimRenewed(TestCase):
 
             # Make some state
             for _ in range(3):
-                optimizer.step(closure)
+                if optim_info.step_requires_closure:
+                    optimizer.step(closure)
+                else:
+                    closure()
+                    optimizer.step()
 
             self.assertEqual(getPublicAttrs(optimizer), getPublicAttrs(deepcopy(optimizer)))
 

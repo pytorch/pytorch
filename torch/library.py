@@ -9,7 +9,7 @@ import re
 import contextlib
 import sys
 import warnings
-from torch._library.custom_ops import custom_op, _maybe_get_opdef
+from torch._library.custom_ops import custom_op, _maybe_get_opdef, device_types_t
 import torch._library as _library
 
 
@@ -424,6 +424,65 @@ def impl_abstract(qualname, func=None, *, lib=None, _stacklevel=1):
 _op_identifier = Union[str, "torch._ops.OpOverload", "torch._library.custom_ops.CustomOpDef"]
 
 
+def register_kernel(
+        op: _op_identifier,
+        device_types: device_types_t,
+        func: Optional[Callable] = None,
+        /,
+        *,
+        lib: Optional[Library] = None):
+    """Register an implementation for a device type for this operator.
+
+    Some valid device_types are: "cpu", "cuda", "xla", "mps", "ipu", "xpu".
+    This API may be used as a decorator.
+
+    Args:
+        fn (Callable): The function to register as the implementation for
+            the given device types.
+        device_types (None | str | Sequence[str]): The device_types to register an impl to.
+            If None, we will register to all device types -- please only use
+            this option if your implementation is truly device-type-agnostic.
+
+    Examples::
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> import torch
+        >>> from torch import Tensor
+        >>> from torch.library import custom_op
+        >>> import numpy as np
+        >>>
+        >>> # Create a custom op that works on cpu
+        >>> @custom_op("mylib::numpy_sin", mutates_args=(), device_types="cpu")
+        >>> def numpy_sin(x: Tensor) -> Tensor:
+        >>>     x_np = x.numpy()
+        >>>     y_np = np.sin(x_np)
+        >>>     return torch.from_numpy(y_np)
+        >>>
+        >>> # Add implementations for the cuda device
+        >>> @torch.library.register_kernel("mylib::numpy_sin", "cuda")
+        >>> def _(x):
+        >>>     x_np = x.cpu().numpy()
+        >>>     y_np = np.sin(x_np)
+        >>>     return torch.from_numpy(y_np).to(device=x.device)
+        >>>
+        >>> x_cpu = torch.randn(3)
+        >>> x_cuda = x_cpu.cuda()
+        >>> assert torch.allclose(numpy_sin(x_cpu), x_cpu.sin())
+        >>> assert torch.allclose(numpy_sin(x_cuda), x_cuda.sin())
+
+    """
+
+    if not isinstance(op, (str, torch._ops.OpOverload, torch._library.custom_ops.CustomOpDef)):
+        raise ValueError("register_kernel(op): got unexpected type for op: {type(op)}")
+    if isinstance(op, torch._ops.OpOverload):
+        op = op._name
+    opdef = _maybe_get_opdef(op)
+    if opdef is not None:
+        return opdef.register_kernel(device_types, func)
+    assert isinstance(op, str)
+    if device_types is None:
+        device_types = "CompositeExplicitAutograd"
+    return impl(op, device_types, func, lib=lib)
+
 
 def register_fake(
         op: _op_identifier,
@@ -543,7 +602,7 @@ def register_fake(
         return register(func)
 
 
-def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], backward_fn: Callable, /, *, lib=None) -> None:
+def register_autograd(op: _op_identifier, backward: Callable, /, *, setup_context: Optional[Callable] = None, lib=None) -> None:
     r"""Register a backward formula for this custom op.
 
     In order for an operator to work with autograd, you need to register
@@ -589,7 +648,7 @@ def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], 
         >>>     x, = ctx.saved_tensors
         >>>     return grad * x.cos()
         >>>
-        >>> torch.library.register_autograd("mylib::numpy_sin", setup_context, backward)
+        >>> torch.library.register_autograd("mylib::numpy_sin", backward, setup_context=setup_context)
         >>>
         >>> x = torch.randn(3, requires_grad=True)
         >>> y = numpy_sin(x)
@@ -603,7 +662,7 @@ def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], 
         op = op._name
     opdef = _maybe_get_opdef(op)
     if opdef is not None:
-        opdef.register_autograd(setup_context_fn, backward_fn)
+        opdef.register_autograd(backward, setup_context=setup_context)
         return
 
     assert isinstance(op, str)
@@ -617,7 +676,7 @@ def register_autograd(op: _op_identifier, setup_context_fn: Optional[Callable], 
             f"a functional operator and register an autograd formula for that."
         )
 
-    info = _library.autograd.Info(setup_context_fn, backward_fn)
+    info = _library.autograd.Info(backward, setup_context)
     autograd_kernel = _library.autograd.make_autograd_impl(op, info)
     namespace, opname = torch._library.utils.parse_namespace(qualname)
     if lib is None:
