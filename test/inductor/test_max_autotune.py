@@ -273,8 +273,8 @@ class TestMaxAutotune(TestCase):
 
         with config.patch(
             {
-                "use_autotune_local_cache": False,
-                "use_autotune_remote_cache": True,
+                "autotune_local_cache": False,
+                "autotune_remote_cache": True,
             }
         ), patch.dict(os.environ), patch(cache_module, MyCache, create=True):
             os.environ.pop("TRITON_CACHE_MANAGER", None)

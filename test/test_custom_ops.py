@@ -688,20 +688,6 @@ class TestCustomOp(CustomOpTestCaseBase):
 
             infer_schema(foo)
 
-        with self.assertRaisesRegex(ValueError, "default value"):
-
-            def foo(x: Optional[Tensor] = None):
-                raise NotImplementedError()
-
-            infer_schema(foo)
-
-        with self.assertRaisesRegex(ValueError, "default value"):
-
-            def foo(x: Optional[Tensor] = None):
-                raise NotImplementedError()
-
-            infer_schema(foo)
-
         with self.assertRaisesRegex(ValueError, "unsupported"):
 
             def foo(x: Tensor) -> Tuple[Tensor, ...]:
@@ -2151,6 +2137,25 @@ class TestCustomOpAPI(TestCase):
         self.assertEqual(z, x + y)
         self.assertTrue(cpu_called)
 
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_default_values(self):
+        defaults = []
+
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def f(
+            x: Tensor,
+            a: Optional[int] = None,
+            b: float = 3.14,
+            c: bool = True,
+            d: int = 3,
+        ) -> Tensor:
+            defaults.extend([a, b, c, d])
+            return x.clone()
+
+        x = torch.randn(3)
+        f(x)
+        self.assertEqual(defaults, [None, 3.14, True, 3])
+
     def test_mutated_error(self):
         with self.assertRaisesRegex(
             ValueError, r".*{'y'} in mutates_args were not found"
@@ -2387,6 +2392,30 @@ Please use `add.register_fake` to add an fake impl.""",
         x = x.cuda()
         y = f(x)
         self.assertEqual(y, x.sin())
+
+    @skipIfTorchDynamo("Expected to fail due to no FakeTensor support; not a bug")
+    def test_overloading(self):
+        called_f = 0
+        called_f1 = 0
+
+        @torch.library.custom_op("_torch_testing::f", mutates_args=())
+        def f(x: Tensor) -> Tensor:
+            nonlocal called_f
+            called_f += 1
+            return x.clone()
+
+        x = torch.randn(2, 3)
+        torch.ops._torch_testing.f(x)
+        self.assertEqual(called_f, 1)
+
+        @torch.library.custom_op("_torch_testing::f.overload", mutates_args=())
+        def f1(x: Tensor, y: Tensor) -> Tensor:
+            nonlocal called_f1
+            called_f1 += 1
+            return x.clone()
+
+        torch.ops._torch_testing.f(x, x)
+        self.assertEqual(called_f1, 1)
 
     def test_disallows_output_aliasing(self):
         @torch.library.custom_op("_torch_testing::f", mutates_args=())

@@ -1,8 +1,9 @@
+# mypy: ignore-errors
+
 # noqa: F401, E501
 # This is an auto-generated file. Please do not modify it by hand.
 # To re-generate, run:
-# cd ~/pytorch && python
-# torchgen/fuse_attention_patterns/gen_attention_patterns.py
+# cd ~/pytorch && python torchgen/fuse/gen_patterns.py
 
 import torch
 import torch._inductor
@@ -78,7 +79,7 @@ exp_default = CallFunction(aten.exp.default, sub_Tensor, _users=2)
 sum_dim_IntList = CallFunction(aten.sum.dim_IntList, exp_default, Ignored(), True)
 div_Tensor = CallFunction(aten.div.Tensor, exp_default, sum_dim_IntList)
 clone_default = CallFunction(aten.clone.default, div_Tensor)
-_sfdp_pattern_13_inference = CallFunction(aten.bmm.default, clone_default, KeywordArg('value'))
+_sfdp_pattern_13_inference = CallFunction(aten.bmm.default, clone_default, KeywordArg('value'), _users=0)
 
 
 rand_default = CallFunction(aten.rand.default, Ignored(), dtype=Ignored(), device=Ignored(), pin_memory=False)
@@ -137,4 +138,4 @@ sum_dim_IntList = CallFunction(aten.sum.dim_IntList, exp_default, Ignored(), Tru
 div_Tensor = CallFunction(aten.div.Tensor, exp_default, sum_dim_IntList)
 convert_element_type_default_1 = CallFunction(prims.convert_element_type.default, div_Tensor, Ignored())
 clone_default = CallFunction(aten.clone.default, convert_element_type_default_1)
-_sfdp_pattern_13_half_inference = CallFunction(aten.bmm.default, clone_default, KeywordArg('value'))
+_sfdp_pattern_13_half_inference = CallFunction(aten.bmm.default, clone_default, KeywordArg('value'), _users=0)
