@@ -1056,7 +1056,6 @@ class TestExport(TestCase):
         ):
             _ = export(foo, inputs, dynamic_shapes=((dx, 9), (dy, 4), (3, 3)))
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703911
     def test_dim_1_2(self):
         class Foo(torch.nn.Module):
             def forward(self, x):
@@ -1074,7 +1073,6 @@ class TestExport(TestCase):
         self.assertEqual(vr.lower, 1)
         self.assertEqual(vr.upper, 2)
 
-    @testing.expectedFailurePreDispatchRunDecomp  # T183703911
     def test_derived_dim_1_2(self):
         class Bar(torch.nn.Module):
             def forward(self, x, y):
