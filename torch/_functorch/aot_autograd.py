@@ -399,6 +399,22 @@ AOT_COUNTER = itertools.count()
 # So the signature of the graph input would look something like
 # (*tokens, *params_buffers, *user_inputs), and the signature of the graph
 # output would look something like (*tokens, *outputs).
+#
+# However, Inductor does not want the concept of tokens in the final generated
+# code's input and output. Since changing the graph signature inside of inductor
+# is difficult, after generating the forward graph, we will run a pass to
+# remove the tokens from the inputgenerate the following graph for Inductor, where
+# the tokens are created and sunk within the graph, rather than as inputs and
+# outputs:
+#
+# def gm(self, reader):
+#    token0 = torch.ops.prims._make_token()
+#    token1, frame = with_token(ordered_effect_op, (reader,), token0)
+#    frame = frame * 2
+#    token2, frame2 = with_token(ordered_effect_op, (reader,), token1)
+#    frame2 = frame2 * 2
+#    sink_token = torch.ops.prims._sink_tokens([token2])
+#    return frame, frame2
 
 #
 #
@@ -632,9 +648,6 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False.""")
             assert isinstance(compiled_fn, torch.fx.GraphModule)
             return compiled_fn, fw_metadata
 
-        if not hasattr(compiled_fn, "_boxed_call"):
-            compiled_fn = make_boxed_func(compiled_fn)
-
         return compiled_fn
 
 
@@ -864,16 +877,15 @@ def aot_module_simplified(
 
     if hasattr(mod, "graph"):
         # Non dynamo entrypoints can get to here...
-        for i, node in enumerate(mod.graph.nodes):
-            if node.op == "placeholder":
-                if hasattr(node, "_dynamo_source"):
-                    # ... but not here!
-                    if aot_autograd_arg_pos_to_source is None:
-                        aot_autograd_arg_pos_to_source = []
-                    source = node._dynamo_source
-                    assert source not in seen_sources, source
-                    seen_sources.add(source)
-                    aot_autograd_arg_pos_to_source.append(source)
+        for node in mod.graph.find_nodes(op="placeholder"):
+            if hasattr(node, "_dynamo_source"):
+                # ... but not here!
+                if aot_autograd_arg_pos_to_source is None:
+                    aot_autograd_arg_pos_to_source = []
+                source = node._dynamo_source
+                assert source not in seen_sources, source
+                seen_sources.add(source)
+                aot_autograd_arg_pos_to_source.append(source)
 
     if aot_autograd_arg_pos_to_source is not None:
         assert len(full_args) == len(aot_autograd_arg_pos_to_source)
@@ -910,7 +922,7 @@ def aot_module_simplified(
     # the boxed calling convention, but aot_module_simplified somehow
     # historically returned a function that was not the boxed calling
     # convention.  This should get fixed...
-    def forward(*runtime_args):
+    def forward(*runtime_args: Tuple[Any]):
         full_args = []
         full_args.extend(params_flat)
         full_args.extend(runtime_args)

@@ -1675,8 +1675,8 @@ struct _guarded_unsigned_long_unique_dummy final {
   _guarded_unsigned_long_unique_dummy(int64_t){};
 };
 using _guarded_unsigned_long = std::conditional_t<
-    std::is_same<unsigned long, uint32_t>::value ||
-        std::is_same<unsigned long, uint64_t>::value,
+    std::is_same_v<unsigned long, uint32_t> ||
+        std::is_same_v<unsigned long, uint64_t>,
     _guarded_unsigned_long_unique_dummy,
     unsigned long>;
 
@@ -1936,9 +1936,9 @@ template <
     typename... Args,
     typename Indices = std::make_index_sequence<sizeof...(Args)>,
     std::enable_if_t<
-        !std::disjunction<
+        !std::disjunction_v<
             std::is_lvalue_reference<Args>...,
-            std::negation<std::is_constructible<IValue, Args>>...>::value,
+            std::negation<std::is_constructible<IValue, Args>>...>,
         std::nullptr_t> = nullptr>
 std::tuple<Args...> generic_to(const IValue& ivalue, _fake_type<std::tuple<Args...>>) {
   const auto& vals = ivalue.toTupleRef().elements();
@@ -2116,9 +2116,9 @@ inline IValue::IValue(c10::intrusive_ptr<ivalue::Tuple> v)
 template <
     typename... Args,
     std::enable_if_t<
-        !std::disjunction<
+        !std::disjunction_v<
             std::is_lvalue_reference<Args>...,
-            std::negation<std::is_constructible<IValue, Args>>...>::value,
+            std::negation<std::is_constructible<IValue, Args>>...>,
         std::nullptr_t>>
 inline IValue::IValue(const std::tuple<Args...>& t)
     : IValue(c10::guts::apply(c10::ivalue::Tuple::create<const Args&...>, t)) {
@@ -2127,9 +2127,9 @@ inline IValue::IValue(const std::tuple<Args...>& t)
 template <
     typename... Args,
     std::enable_if_t<
-        !std::disjunction<
+        !std::disjunction_v<
             std::is_lvalue_reference<Args>...,
-            std::negation<std::is_constructible<IValue, Args>>...>::value,
+            std::negation<std::is_constructible<IValue, Args>>...>,
         std::nullptr_t>>
 inline IValue::IValue(std::tuple<Args...>&& t)
     : IValue(c10::guts::apply(c10::ivalue::Tuple::create<Args&&...>, std::move(t))) {
@@ -2197,7 +2197,7 @@ inline IValue::IValue(std::vector<T>&& v) : IValue() {
     *this = IValue(impl::toList<c10::SymInt>(c10::List<c10::SymInt>()));
     auto list = to<c10::List<c10::SymInt>>();
     list.reserve(v.size());
-    for (auto& e : v) {
+    for (auto&& e : std::move(v)) {
       list.push_back(std::move(e));
     }
   }
@@ -2220,7 +2220,7 @@ inline IValue::IValue(std::vector<T>&& v) : IValue(c10::List<T>()) {
       list.push_back(e);
     }
   } else {
-    for (auto& e : v) {
+    for (auto&& e : std::move(v)) {
       list.push_back(std::move(e));
     }
   }
@@ -2313,7 +2313,7 @@ inline IValue IValue::make_capsule(
 
 template <
     typename T,
-    std::enable_if_t<std::is_base_of<torch::CustomClassHolder, T>::value, int>>
+    std::enable_if_t<std::is_base_of_v<torch::CustomClassHolder, T>, int>>
 IValue::IValue(c10::intrusive_ptr<T> custom_class) : tag(Tag::Object) {
   auto classType = []() {
     try {

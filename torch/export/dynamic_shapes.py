@@ -90,6 +90,23 @@ class _Dim(type):
         return _DerivedDim(cls._derived_name(fn), (int,), {"root": cls, "fn": fn})
 
 
+class _StaticDim(_Dim):
+    """
+    Meta class for static :func:`Dim` types.
+
+    This class is only for setting and checking static dim constraints,
+    and the user should never interact with it.
+    """
+
+    @property
+    def min(self):
+        return self.value  # type: ignore[attr-defined]
+
+    @property
+    def max(self):
+        return self.value  # type: ignore[attr-defined]
+
+
 class _DerivedDim(_Dim):
     """
     Metaclass for derived :func:`Dim` types.
@@ -113,10 +130,11 @@ class _DerivedDim(_Dim):
         from sympy import Integer
 
         _min_symint = self.fn(Integer(self.root.min))  # type: ignore[attr-defined]
-        assert _min_symint >= 2, (
-            f"Expected derived min value of {self.__name__} to be >= 2. "
-            f"Please specify an appropriate min value for {self.root.__name__} "  # type: ignore[attr-defined]
-            f"(currently {self.root.min})."  # type: ignore[attr-defined]
+        root = self.root  # type: ignore[attr-defined]
+        assert _min_symint >= 0, (
+            f"Expected derived min value of {self.__name__} to be >= 0. "
+            f"Please specify an appropriate min value for {root.__name__} "
+            f"(currently {root.min})."
         )
         return int(_min_symint)
 
@@ -127,10 +145,11 @@ class _DerivedDim(_Dim):
         from sympy import Integer
 
         _max_symint = self.fn(Integer(self.root.max))  # type: ignore[attr-defined]
+        root = self.root  # type: ignore[attr-defined]
         assert _max_symint <= sys.maxsize - 1, (
             f"Expected derived max value of {self.__name__} to be <= {sys.maxsize - 1}. "
-            f"Please specify an appropriate max value for {self.root.__name__} "  # type: ignore[attr-defined]
-            f"(currently {self.root.max})."  # type: ignore[attr-defined]
+            f"Please specify an appropriate max value for {root.__name__} "
+            f"(currently {root.max})."
         )
         return int(_max_symint)
 
@@ -160,7 +179,7 @@ def Dim(name: str, *, min: Optional[int] = None, max: Optional[int] = None):
     Returns:
         A type that can be used in dynamic shape specifications for tensors.
     """
-    _min = 2 if min is None else builtins.max(min, 2)
+    _min = 0 if min is None else min
     _max = sys.maxsize - 1 if max is None else builtins.min(max, sys.maxsize - 1)
     assert _max > _min, f"Cannot create Dim with inconsistent min={min}, max={max}"
     dim = _Dim(name, (int,), {"min": _min, "max": _max})
@@ -236,7 +255,7 @@ class _Constraint(_ConstraintTarget, metaclass=_ConstraintFactory):
     shared: Optional[_ConstraintTarget] = None
     debug_name: Optional[str] = None
 
-    def _clone_with_range(self, lower=2, upper=math.inf):
+    def _clone_with_range(self, lower=0, upper=math.inf):
         # Import sympy locally
         from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
         from torch.utils._sympy.value_ranges import ValueRanges
@@ -478,7 +497,7 @@ def dynamic_dim(t: torch.Tensor, index: int, debug_name: Optional[str] = None):
         id(t),
         index,
         StrictMinMaxConstraint(
-            vr=ValueRanges(lower=2, upper=sympy.oo), warn_only=False
+            vr=ValueRanges(lower=0, upper=sympy.oo), warn_only=False
         ),
         debug_name=debug_name,
     )
@@ -672,9 +691,19 @@ def _process_dynamic_shapes(
                 # NOTE(avik): since we have not processed all inputs yet, we may replace this
                 # with a root that does represent an input shape dimension later (see below)
                 derived_constraints_with_phantom_root.append(constraint)
+        elif isinstance(dim, _StaticDim):
+            constraint = _create_constraint(
+                weakref.ref(tensor),
+                id(tensor),
+                i,
+                StrictMinMaxConstraint(
+                    vr=ValueRanges(lower=dim.value, upper=dim.value), warn_only=False  # type: ignore[attr-defined]
+                ),
+                debug_name=dim.__name__,
+            )
         else:
             constraint = dynamic_dim(tensor, i, debug_name=dim.__name__)
-            if dim.min != 2:
+            if dim.min != 0:
                 constraint = constraint >= dim.min
             if dim.max != sys.maxsize - 1:
                 constraint = constraint <= dim.max
@@ -698,9 +727,14 @@ def _process_dynamic_shapes(
             bounds[dim.__name__] = (dim.min, dim.max)
 
     def update_symbols(tensor, shape):
+        def _create_static_dim(tensor, i, value):
+            return _StaticDim(str(value), (int,), {"value": value})
+
         if isinstance(shape, dict):
             for i, dim in shape.items():
-                if isinstance(dim, _Dim):
+                if isinstance(dim, (int, _Dim)):
+                    if isinstance(dim, int):
+                        dim = _create_static_dim(tensor, i, dim)
                     check_same_bounds(dim)
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
@@ -713,7 +747,9 @@ def _process_dynamic_shapes(
                         )
         elif isinstance(shape, (tuple, list)):
             for i, dim in enumerate(shape):
-                if isinstance(dim, _Dim):
+                if isinstance(dim, (int, _Dim)):
+                    if isinstance(dim, int):
+                        dim = _create_static_dim(tensor, i, dim)
                     check_same_bounds(dim)
                     constraint = to_constraint(dim, tensor, i)
                     symbols[dim.__name__].append(constraint)
@@ -828,6 +864,9 @@ def _process_constraints(
     multi_range_constraints: Dict[InputDim, List[ValueRanges]] = defaultdict(list)
     for constraint in input_shape_constraints:
         for node in tensor_id_to_nodes[constraint["t_id"]]:
+            # skip static shape constraints
+            if constraint["min"] == constraint["max"]:
+                continue
             node_dim = InputDim(node, constraint["dim"])
 
             # Accumulate range constraints

@@ -60,6 +60,7 @@ linear_pointwise_ops = [
 
 pointwise_ops = [
     # please keep the entries below alphabetically sorted
+    aten._conj.default,
     aten.abs.default,
     aten.abs.out,
     aten.abs_.default,
@@ -526,6 +527,7 @@ for op in pointwise_ops:
 
 # TODO: add all for_each ops
 for_each_ops = [
+    aten._foreach_abs.default,
     aten._foreach_abs_.default,
     aten._foreach_addcdiv_.Scalar,
     aten._foreach_addcdiv_.ScalarList,
@@ -534,6 +536,8 @@ for_each_ops = [
     aten._foreach_addcmul_.Scalar,
     aten._foreach_addcmul_.ScalarList,
     aten._foreach_addcmul_.Tensor,
+    aten._foreach_clamp_max_.Scalar,
+    aten._foreach_clamp_min_.Scalar,
     aten._foreach_div_.List,
     aten._foreach_div_.ScalarList,
     aten._foreach_lerp_.Scalar,
@@ -547,6 +551,7 @@ for_each_ops = [
     aten._foreach_neg.default,
     aten._foreach_neg_.default,
     aten._foreach_reciprocal_.default,
+    aten._foreach_sub.List,
     aten._foreach_sub_.Scalar,
     aten._foreach_sqrt.default,
     aten._foreach_sqrt_.default,

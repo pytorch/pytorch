@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 import torch
 import functools
 from torch.testing import make_tensor
@@ -29,65 +27,50 @@ import torch._custom_ops as custom_ops
 def to_numpy(tensor):
     return tensor.cpu().numpy()
 
-@custom_ops.custom_op('_torch_testing::numpy_cube')
+@torch.library.custom_op("_torch_testing::numpy_cube", mutates_args=())
 def numpy_cube(x: Tensor) -> Tuple[Tensor, Tensor]:
-    raise NotImplementedError()
-
-@custom_ops.impl('_torch_testing::numpy_cube')
-def numpy_cube_impl(x):
     x_np = to_numpy(x)
     dx = torch.tensor(3 * x_np ** 2, device=x.device)
     return torch.tensor(x_np ** 3, device=x.device), dx
 
-@custom_ops.impl_abstract('_torch_testing::numpy_cube')
-def numpy_cube_abstract(x):
+@numpy_cube.register_fake
+def _(x):
     return x.clone(), x.clone()
 
-@custom_ops.impl_save_for_backward('_torch_testing::numpy_cube')
-def numpy_cube_save_for_backward(inputs, output):
-    return (inputs.x, output[1])
+def numpy_cube_setup_context(ctx, inputs, output):
+    x, = inputs
+    cube, dx = output
+    ctx.save_for_backward(x, dx)
 
-@custom_ops.impl_backward('_torch_testing::numpy_cube')
-def numpy_cube_backward(ctx, saved, grad_out, grad_dx):
-    x, dx = saved
-    grad_x = torch.ops._torch_testing.numpy_mul(grad_out, dx) + 6 * torch.ops._torch_testing.numpy_mul(grad_dx, x)
-    return {'x': grad_x}
+def numpy_cube_backward(ctx, grad_out, grad_dx):
+    x, dx = ctx.saved_tensors
+    grad_x = numpy_mul(grad_out, dx) + 6 * numpy_mul(grad_dx, x)
+    return grad_x
 
-@custom_ops.custom_op('_torch_testing::numpy_mul')
+numpy_cube.register_autograd(numpy_cube_setup_context, numpy_cube_backward)
+
+@torch.library.custom_op("_torch_testing::numpy_mul", mutates_args=())
 def numpy_mul(x: Tensor, y: Tensor) -> Tensor:
-    raise NotImplementedError()
-
-@custom_ops.impl('_torch_testing::numpy_mul')
-def numpy_mul_impl(x, y):
     return torch.tensor(to_numpy(x) * to_numpy(y), device=x.device)
 
-@custom_ops.impl_abstract('_torch_testing::numpy_mul')
-def numpy_mul_abstract(x, y):
+@numpy_mul.register_fake
+def _(x, y):
     assert x.device == y.device
     return (x * y).contiguous()
 
-@custom_ops.impl_save_for_backward('_torch_testing::numpy_mul')
-def numpy_mul_save_for_backward(inputs, output):
-    saved = {}
-    saved['x_requires_grad'] = inputs.x.requires_grad
-    saved['y_requires_grad'] = inputs.y.requires_grad
-    # Optimization: only save what is necessary
-    saved['y'] = inputs.y if inputs.x.requires_grad else None
-    saved['x'] = inputs.x if inputs.y.requires_grad else None
-    return saved
+def numpy_mul_setup_context(ctx, inputs, output):
+    ctx.save_for_backward(*inputs)
 
-@custom_ops.impl_backward('_torch_testing::numpy_mul')
-def numpy_mul_backward(ctx, saved, grad_out):
-    grad_x = grad_out * saved['y'] if saved['x_requires_grad'] else None
-    grad_y = grad_out * saved['x'] if saved['x_requires_grad'] else None
-    return {'y': grad_y, 'x': grad_x}
+def numpy_mul_backward(ctx, grad_out):
+    x, y = ctx.saved_tensors
+    grad_x = grad_out * y if ctx.needs_input_grad[0] else None
+    grad_y = grad_out * x if ctx.needs_input_grad[1] else None
+    return grad_x, grad_y
 
-@custom_ops.custom_op('_torch_testing::numpy_sort')
+numpy_mul.register_autograd(numpy_mul_setup_context, numpy_mul_backward)
+
+@torch.library.custom_op("_torch_testing::numpy_sort", mutates_args=())
 def numpy_sort(x: Tensor, dim: int) -> Tuple[Tensor, Tensor, Tensor]:
-    raise NotImplementedError()
-
-@custom_ops.impl("_torch_testing::numpy_sort")
-def numpy_sort_impl(x, dim):
     device = x.device
     x = to_numpy(x)
     ind = np.argsort(x, axis=dim)
@@ -99,69 +82,60 @@ def numpy_sort_impl(x, dim):
         torch.tensor(ind_inv, device=device),
     )
 
-@custom_ops.impl_abstract('_torch_testing::numpy_sort')
-def numpy_sort_abstract(x, dim):
+@numpy_sort.register_fake
+def _(x, dim):
     return torch.empty_like(x), torch.empty_like(x, dtype=torch.long), torch.empty_like(x, dtype=torch.long)
 
-@custom_ops.impl_save_for_backward('_torch_testing::numpy_sort')
-def numpy_sort_save_for_backward(inputs, output):
+def numpy_sort_setup_context(ctx, inputs, output):
     out, ind, ind_inv = output
-    return [inputs.dim, ind, ind_inv]
+    ctx.dim = inputs[1]
+    ctx.save_for_backward(ind, ind_inv)
+    ctx.mark_non_differentiable(ind, ind_inv)
 
-@custom_ops.impl_backward('_torch_testing::numpy_sort', output_differentiability=[True, False, False])
-def numpy_sort_backward(ctx, saved, grad_out, grad_ind, grad_ind_inv):
-    dim, ind, ind_inv = saved
-    return {'x': torch.ops._torch_testing.numpy_take(grad_out, ind_inv, ind, dim)}
+def numpy_sort_backward(ctx, grad_out, grad_ind, grad_ind_inv):
+    ind, ind_inv = ctx.saved_tensors
+    return numpy_take(grad_out, ind_inv, ind, ctx.dim), None
 
-@custom_ops.custom_op('_torch_testing::numpy_take')
+numpy_sort.register_autograd(numpy_sort_setup_context, numpy_sort_backward)
+
+
+@torch.library.custom_op("_torch_testing::numpy_take", mutates_args=())
 def numpy_take(x: Tensor, ind: Tensor, ind_inv: Tensor, dim: int) -> Tensor:
-    raise NotImplementedError()
-
-@custom_ops.impl("_torch_testing::numpy_take")
-def numpy_take_impl(x, ind, ind_inv, dim):
     device = x.device
     x = to_numpy(x)
     ind = to_numpy(ind)
     return torch.tensor(np.take_along_axis(x, ind, dim), device=device)
 
-@custom_ops.impl_abstract('_torch_testing::numpy_take')
-def numpy_take_abstract(x, ind, ind_inv, dim):
+@numpy_take.register_fake
+def _(x, ind, ind_inv, dim):
     assert x.device == ind.device
     assert x.device == ind_inv.device
     assert ind.dtype == torch.long
     assert ind_inv.dtype == torch.long
     return torch.empty_like(x)
 
-@custom_ops.impl_save_for_backward('_torch_testing::numpy_take')
-def numpy_take_save_for_backward(inputs, output):
-    return {
-        'dim': inputs.dim,
-        'ind': inputs.ind,
-        'ind_inv': inputs.ind_inv,
-    }
+def numpy_take_setup_context(ctx, inputs, output):
+    x, ind, ind_inv, dim = inputs
+    ctx.dim = dim
+    ctx.save_for_backward(ind, ind_inv)
 
-@custom_ops.impl_backward('_torch_testing::numpy_take')
-def numpy_take_backward(ctx, saved, grad_out):
-    return {
-        'x': torch.ops._torch_testing.numpy_take(grad_out, saved['ind_inv'], saved['ind'], saved['dim']),
-        'ind': None,
-        'ind_inv': None,
-    }
+def numpy_take_backward(ctx, grad_out):
+    ind, ind_inv = ctx.saved_tensors
+    grad_x = numpy_take(grad_out, ind_inv, ind, ctx.dim)
+    return grad_x, None, None, None
 
-@custom_ops.custom_op('_torch_testing::numpy_nonzero')
+numpy_take.register_autograd(numpy_take_setup_context, numpy_take_backward)
+
+@torch.library.custom_op("_torch_testing::numpy_nonzero", mutates_args=())
 def numpy_nonzero(x: Tensor) -> Tensor:
-    raise NotImplementedError()
-
-@custom_ops.impl('_torch_testing::numpy_nonzero')
-def numpy_nonzero_impl(x):
     x_np = to_numpy(x)
     res = np.stack(np.nonzero(x_np), axis=1)
     if res.shape[0] <= 1:
         raise RuntimeError("not supported")
     return torch.tensor(res, device=x.device)
 
-@custom_ops.impl_abstract('_torch_testing::numpy_nonzero')
-def numpy_nonzero_abstract(x):
+@numpy_nonzero.register_fake
+def _(x):
     ctx = torch._custom_op.impl.get_ctx()
     i0 = ctx.create_unbacked_symint()
     shape = [i0, x.dim()]
@@ -195,7 +169,7 @@ def numpy_view_copy_save_for_backward(inputs, output) -> Tensor:
     return inputs.x.shape
 
 @custom_ops.impl_backward('_torch_testing::numpy_view_copy')
-def numpy_view_copy_backward(ctx, x_shape, grad_out) -> Tensor:
+def numpy_view_copy_backward(ctx, x_shape, grad_out) -> Dict[str, Tensor]:
     return {'x': torch.ops._torch_testing.numpy_view_copy(grad_out, x_shape)}
 
 def sample_inputs_numpy_view_copy(opinfo, device, dtype, requires_grad, **kwargs):
@@ -241,7 +215,6 @@ def sample_inputs_numpy_cat(opinfo, device, dtype, requires_grad, **kwargs):
     r1 = make_arg(4, 3, 4, low=0.9, high=2)
     r2 = make_arg(5, 3, 4, low=0.9, high=2)
     yield SampleInput([r0, r1, r2], args=(0,))
-
 @custom_ops.custom_op('_torch_testing::numpy_split_copy')
 def numpy_split_copy(x: Tensor, sections: Sequence[int], dim: int) -> List[Tensor]:
     raise NotImplementedError()
@@ -372,35 +345,35 @@ def sample_inputs_numpy_nms(opinfo, device, dtype, requires_grad, **kwargs):
 custom_op_db = [
     OpInfo(
         'NumpyCubeCustomOp',
-        op=torch.ops._torch_testing.numpy_cube,
+        op=numpy_cube._opoverload,
         sample_inputs_func=sample_inputs_numpy_cube,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
     OpInfo(
         'NumpyMulCustomOp',
-        op=torch.ops._torch_testing.numpy_mul,
+        op=numpy_mul._opoverload,
         sample_inputs_func=sample_inputs_numpy_mul,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
     OpInfo(
         'NumpySortCustomOp',
-        op=torch.ops._torch_testing.numpy_sort,
+        op=numpy_sort._opoverload,
         sample_inputs_func=sample_inputs_numpy_sort,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
     OpInfo(
         'NumpyTakeCustomOp',
-        op=torch.ops._torch_testing.numpy_take,
+        op=numpy_take._opoverload,
         sample_inputs_func=sample_inputs_numpy_take,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_out=False,
     ),
     OpInfo(
         'NumpyNonzeroCustomOp',
-        op=torch.ops._torch_testing.numpy_nonzero,
+        op=numpy_nonzero._opoverload,
         sample_inputs_func=sample_inputs_numpy_nonzero,
         dtypes=all_types_and(torch.bool, torch.half),
         supports_autograd=False,
