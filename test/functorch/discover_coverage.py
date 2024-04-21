@@ -732,12 +732,12 @@ class Operator:
 
     def any_opinfo_attr(self, attr):
         if not self.has_opinfo():
-            raise RuntimeError()
+            raise RuntimeError
         return any(getattr(opinfo, attr) for opinfo in self.opinfos)
 
     def all_opinfo_attr(self, attr):
         if not self.has_opinfo():
-            raise RuntimeError()
+            raise RuntimeError
         return all(getattr(opinfo, attr) for opinfo in self.opinfos)
 
     def supports_vjp(self):
@@ -870,7 +870,7 @@ class OperatorSet:
             elif n.startswith(torch_dot):
                 names_sanitized.append(n[len(torch_dot) :])
             else:
-                raise AssertionError()
+                raise AssertionError
         return cls.from_names(names_sanitized)
 
     def query(self, operator_method, filter=(Support.NO, Support.YES, Support.UNKNOWN)):

@@ -6,27 +6,27 @@ class _StreamBase(ABC):
 
     @abstractmethod
     def wait_event(self, event):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abstractmethod
     def wait_stream(self, stream):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abstractmethod
     def record_event(self, event=None):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abstractmethod
     def query(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abstractmethod
     def synchronize(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abstractmethod
     def __eq__(self, stream):
-        raise NotImplementedError()
+        raise NotImplementedError
 
 
 class _EventBase(ABC):
@@ -34,12 +34,12 @@ class _EventBase(ABC):
 
     @abstractmethod
     def wait(self, stream=None):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abstractmethod
     def query(self):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     @abstractmethod
     def synchronize(self):
-        raise NotImplementedError()
+        raise NotImplementedError
