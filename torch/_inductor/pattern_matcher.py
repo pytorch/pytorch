@@ -218,7 +218,7 @@ class PatternExpr:
     def _match(
         self, node: torch.fx.Node, ctx: MatchContext
     ) -> Union[Match, FailedMatch]:
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def match(self, node: torch.fx.Node) -> Union[Match, FailedMatch]:
         try:
@@ -361,7 +361,7 @@ class _TargetExpr(PatternExpr):
         return isinstance(self.users, Multiple) or self.users > 1
 
     def find_anchor_nodes(self, ctx: MatchContext, searched):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def _match_fns(self, node: torch.fx.Node):
         return (
@@ -803,7 +803,7 @@ class PatternEntry:
     extra_check: Callable[[Match], bool]
 
     def apply(self, match: Match, graph: torch.fx.Graph, node: torch.fx.Node):
-        raise NotImplementedError()
+        raise NotImplementedError
 
     def register(self, pass_dicts, target=None, prepend=False):
         if target is None:
@@ -1293,6 +1293,9 @@ def gen_register_replacement(
     scalar_workaround=(),
     exclusive_arg_names=(),
 ):
+    # Make sure the example_inputs is materialized.
+    example_inputs = tuple(example_inputs)
+
     if "PYTORCH_GEN_PATTERNS" in os.environ:
         pat = _serialize_pattern(
             unique_name, search_fn, example_inputs, trace_fn, scalar_workaround
@@ -1308,6 +1311,14 @@ def gen_register_replacement(
                 unique_name,
             )
         pat = getattr(m, unique_name)
+
+    for arg in pytree.tree_iter(example_inputs):
+        if torch._subclasses.fake_tensor.is_fake(arg) and arg.constant is not None:
+            # This can be a problem - small fake tensors (e.g. `tensor(2)`) will
+            # hold onto their original constant value - and by stashing it here
+            # will cause a memory leak if the constant value is on GPU.
+            # Since this is just an optimization we can clear it out.
+            arg.constant = None
 
     _known_precompiled_patterns.append(
         (search_fn, example_inputs, trace_fn, scalar_workaround, pat)
@@ -1507,7 +1518,7 @@ class PatternMatcherPass:
 
 
 def _not_implemented(*args, **kwargs) -> NoReturn:
-    raise NotImplementedError()
+    raise NotImplementedError
 
 
 def fx_to_pattern(
